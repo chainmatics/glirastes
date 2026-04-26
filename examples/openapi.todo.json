@@ -1,0 +1,49 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Todo API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/tasks/{id}/convert-to-personal": {
+      "post": {
+        "operationId": "tasks.convertToPersonal",
+        "summary": "Convert a group task to a personal task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-ai": {
+          "enabled": true,
+          "toolName": "convert_to_personal_task",
+          "description": "Converts a group task into a personal task.",
+          "allowedRoles": [
+            "gruppenleiter",
+            "admin"
+          ],
+          "needsApproval": true,
+          "uiActionOnSuccess": {
+            "type": "task-updated",
+            "taskId": "$id"
+          }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "operationId": "tasks.list",
+        "summary": "List tasks",
+        "x-ai": {
+          "enabled": false
+        }
+      }
+    }
+  }
+}

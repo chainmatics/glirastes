@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible problem in glirastes
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more detail you
+        provide, the faster we can investigate.
+  - type: input
+    id: version
+    attributes:
+      label: glirastes version
+      description: Output of `bun pm ls glirastes` or the version from your package.json
+      placeholder: "0.1.4"
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime / framework
+      description: Bun + Next.js? Node + NestJS? Provide versions.
+      placeholder: "Bun 1.1.34, Next.js 15.0.3"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: A link to a tiny repo or a minimal code snippet that reproduces the issue.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include stack traces, error messages, or screenshots.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Anything else we should know.

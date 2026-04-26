@@ -1,0 +1,227 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" fill="none" width="900" height="300" role="img" aria-label="Glirastes SDK">
+  <style>
+    .bg-glow {
+      filter: blur(80px);
+      opacity: 0.15;
+      animation: flowMove 12s ease-in-out infinite alternate;
+    }
+
+    .bg-glow-2 {
+      filter: blur(100px);
+      opacity: 0.1;
+      animation: flowMove 18s ease-in-out infinite alternate-reverse;
+    }
+
+    @keyframes flowMove {
+      0% { transform: translate(-10%, -10%) scale(1); }
+      100% { transform: translate(10%, 10%) scale(1.1); }
+    }
+
+    .orbit-particle {
+      offset-path: ellipse(260px 70px at 450px 148px);
+      offset-rotate: 0deg;
+      animation: orbit 7s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+      will-change: offset-distance;
+    }
+
+    @keyframes orbit {
+      0% { offset-distance: 0%; }
+      100% { offset-distance: 100%; }
+    }
+
+    .particle-glow {
+      animation: particlePulse 7s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+    }
+
+    @keyframes particlePulse {
+      0%, 100% { opacity: 0.9; r: 4; }
+      25% { opacity: 1; r: 5; }
+      50% { opacity: 0.9; r: 4; }
+      75% { opacity: 1; r: 5; }
+    }
+
+    .particle-halo {
+      offset-path: ellipse(260px 70px at 450px 148px);
+      offset-rotate: 0deg;
+      animation: orbit 7s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+    }
+
+    .neural-node {
+      animation: nodeFlash 4s infinite;
+      fill: #6366f1;
+    }
+
+    @keyframes nodeFlash {
+      0%, 100% { opacity: 0.3; filter: blur(0px); r: 2.2; }
+      20% { opacity: 1; filter: blur(1.5px); r: 3.2; fill: #a5b4fc; }
+      40%, 80% { opacity: 0.3; filter: blur(0px); r: 2.2; fill: #6366f1; }
+    }
+
+    .neural-line {
+      stroke-dasharray: 25;
+      stroke-dashoffset: 25;
+      animation: lineFlow 4s infinite;
+      stroke: #818cf8;
+      opacity: 0.15;
+    }
+
+    @keyframes lineFlow {
+      0%, 10% { stroke-dashoffset: 25; opacity: 0.15; }
+      30% { stroke-dashoffset: 0; opacity: 0.5; }
+      50%, 100% { stroke-dashoffset: -25; opacity: 0.15; }
+    }
+
+    .n-1 { animation-delay: 0s; }
+    .l-1 { animation-delay: 0.2s; }
+    .n-2 { animation-delay: 0.5s; }
+    .l-2 { animation-delay: 0.7s; }
+    .n-3 { animation-delay: 1s; }
+    .l-3 { animation-delay: 1.2s; }
+    .n-4 { animation-delay: 1.5s; }
+    .n-5 { animation-delay: 1.8s; }
+
+    .ui-icon {
+      animation: uiBreath 6s ease-in-out infinite;
+      animation-delay: -3s;
+      transform-origin: 710px 138px;
+      transform-box: fill-box;
+    }
+
+    @keyframes uiBreath {
+      0%, 100% { opacity: 0.7; }
+      50% { opacity: 1; }
+    }
+
+    .orbit-ring {
+      animation: ringPulse 6s ease-in-out infinite;
+    }
+
+    @keyframes ringPulse {
+      0%, 100% { opacity: 0.08; }
+      50% { opacity: 0.15; }
+    }
+
+    .label-ai, .label-ui {
+      animation: labelReveal 1.5s ease-out both;
+    }
+
+    .label-ai { animation-delay: 0.3s; }
+    .label-ui { animation-delay: 0.5s; }
+
+    @keyframes labelReveal {
+      0% { opacity: 0; transform: translateY(4px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    .title-main {
+      animation: titleIn 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+    }
+
+    .title-sub {
+      animation: titleIn 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.25s both;
+    }
+
+    @keyframes titleIn {
+      0% { opacity: 0; transform: translateY(12px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    .tag-pill { animation: pillReveal 0.8s ease-out both; }
+    .tag-pill:nth-child(1) { animation-delay: 0.6s; }
+    .tag-pill:nth-child(2) { animation-delay: 0.7s; }
+    .tag-pill:nth-child(3) { animation-delay: 0.8s; }
+    .tag-pill:nth-child(4) { animation-delay: 0.9s; }
+    .tag-pill:nth-child(5) { animation-delay: 1s; }
+
+    @keyframes pillReveal {
+      0% { opacity: 0; transform: translateY(6px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    .dot-grid { opacity: 0.03; }
+  </style>
+
+  <defs>
+    <radialGradient id="neuralFlow1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#4f46e5" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#4f46e5" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="neuralFlow2" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+
+    <radialGradient id="particleGlow">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#6366f1" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+
+    <pattern id="dots" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="12" cy="12" r="0.6" fill="#ffffff"/>
+    </pattern>
+  </defs>
+
+  <rect width="900" height="300" fill="#050505"/>
+  <circle class="bg-glow" cx="200" cy="150" r="150" fill="url(#neuralFlow1)"/>
+  <circle class="bg-glow-2" cx="700" cy="100" r="180" fill="url(#neuralFlow2)"/>
+  <rect class="dot-grid" width="900" height="300" fill="url(#dots)"/>
+
+  <ellipse class="orbit-ring" cx="450" cy="148" rx="260" ry="70" stroke="url(#accent)" stroke-width="0.8" opacity="0.1" fill="none"/>
+
+  <g class="neural-engine" transform="translate(155, 110)">
+    <line class="neural-line l-1" x1="18" y1="0" x2="38" y2="15" stroke-width="0.8"/>
+    <line class="neural-line l-2" x1="38" y1="15" x2="18" y2="45" stroke-width="0.8"/>
+    <line class="neural-line l-3" x1="18" y1="45" x2="-2" y2="15" stroke-width="0.8"/>
+    <line class="neural-line l-1" x1="-2" y1="15" x2="18" y2="0" stroke-width="0.8"/>
+    <line class="neural-line l-2" x1="18" y1="0" x2="18" y2="45" stroke-width="0.5"/>
+    <line class="neural-line l-3" x1="-2" y1="15" x2="38" y2="15" stroke-width="0.5"/>
+
+    <circle class="neural-node n-1" cx="18" cy="0" r="2.2"/>
+    <circle class="neural-node n-2" cx="38" cy="15" r="2.2"/>
+    <circle class="neural-node n-3" cx="18" cy="45" r="2.2"/>
+    <circle class="neural-node n-4" cx="-2" cy="15" r="2.2"/>
+    <circle class="neural-node n-5" cx="18" cy="22" r="3.2"/>
+  </g>
+
+  <text class="label-ai" x="173" y="172" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="700" fill="#6366f1" letter-spacing="2.5" opacity="0">
+    AI
+  </text>
+
+  <g class="ui-icon" transform="translate(688, 108)">
+    <rect x="8" y="-4" width="30" height="22" rx="3" ry="3" fill="none" stroke="#a78bfa" stroke-width="0.8" opacity="0.2"/>
+    <rect x="4" y="4" width="30" height="22" rx="3" ry="3" fill="none" stroke="#a78bfa" stroke-width="1" opacity="0.4"/>
+    <rect x="0" y="12" width="30" height="22" rx="3" ry="3" fill="none" stroke="#c4b5fd" stroke-width="1.2" opacity="0.8"/>
+    <line x1="5" y1="19" x2="18" y2="19" stroke="#c4b5fd" stroke-width="1" opacity="0.5" stroke-linecap="round"/>
+    <line x1="5" y1="24" x2="13" y2="24" stroke="#c4b5fd" stroke-width="1" opacity="0.35" stroke-linecap="round"/>
+  </g>
+
+  <text class="label-ui" x="718" y="168" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="700" fill="#a78bfa" letter-spacing="2.5" opacity="0">
+    UI
+  </text>
+
+  <circle class="particle-halo" r="14" fill="url(#particleGlow)"/>
+  <circle class="orbit-particle particle-glow" r="4" fill="#c7d2fe"/>
+
+  <text class="title-main" x="450" y="143" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="38" font-weight="600" fill="#f0f0f5" letter-spacing="-0.5" opacity="0">
+    Glirastes SDK
+  </text>
+
+  <text class="title-sub" x="450" y="170" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#71717a" letter-spacing="0.2" opacity="0">
+    Define once. Execute anywhere. Bridge AI to UI.
+  </text>
+
+  <g transform="translate(450, 212)">
+    <g class="tag-pill" opacity="0"><rect x="-196" y="-10" width="72" height="20" rx="10" fill="none" stroke="#3178c6" stroke-opacity="0.2"/><text x="-160" y="4" text-anchor="middle" font-family="monospace" font-size="9.5" fill="#3178c6">TypeScript</text></g>
+    <g class="tag-pill" opacity="0"><rect x="-112" y="-10" width="48" height="20" rx="10" fill="none" stroke="#818cf8" stroke-opacity="0.2"/><text x="-88" y="4" text-anchor="middle" font-family="monospace" font-size="9.5" fill="#818cf8">Zod</text></g>
+    <g class="tag-pill" opacity="0"><rect x="-52" y="-10" width="56" height="20" rx="10" fill="none" stroke="#61dafb" stroke-opacity="0.2"/><text x="-24" y="4" text-anchor="middle" font-family="monospace" font-size="9.5" fill="#61dafb">React</text></g>
+    <g class="tag-pill" opacity="0"><rect x="16" y="-10" width="56" height="20" rx="10" fill="none" stroke="#a78bfa" stroke-opacity="0.2"/><text x="44" y="4" text-anchor="middle" font-family="monospace" font-size="9.5" fill="#a78bfa">AI SDK</text></g>
+    <g class="tag-pill" opacity="0"><rect x="84" y="-10" width="48" height="20" rx="10" fill="none" stroke="#f472b6" stroke-opacity="0.2"/><text x="108" y="4" text-anchor="middle" font-family="monospace" font-size="9.5" fill="#f472b6">Bun</text></g>
+  </g>
+</svg>

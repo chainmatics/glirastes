@@ -1,0 +1,187 @@
+{
+  "name": "glirastes",
+  "version": "0.2.0",
+  "description": "Official Chainmatics SDK for building AI-powered chat, tools, and agent systems. Part of the Glirastes platform.",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Chainmatics",
+    "email": "info@chainmatics.net",
+    "url": "https://chainmatics.de"
+  },
+  "homepage": "https://chainmatics.de",
+  "bugs": {
+    "url": "https://github.com/chainmatics/glirastes/issues",
+    "email": "info@chainmatics.net"
+  },
+  "keywords": [
+    "chainmatics",
+    "glirastes",
+    "ai",
+    "sdk",
+    "chatbot",
+    "agent",
+    "llm",
+    "tools",
+    "nextjs",
+    "nestjs",
+    "react"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chainmatics/glirastes.git"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": [
+    "**/*.css",
+    "dist/react/components/ai-chat-panel.js"
+  ],
+  "bin": {
+    "glirastes": "dist/cli/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "default": "./dist/server/index.js"
+    },
+    "./server/nextjs": {
+      "types": "./dist/server/adapters/nextjs/index.d.ts",
+      "default": "./dist/server/adapters/nextjs/index.js"
+    },
+    "./server/nestjs": {
+      "types": "./dist/server/adapters/nestjs/index.d.ts",
+      "default": "./dist/server/adapters/nestjs/index.js"
+    },
+    "./server/testing": {
+      "types": "./dist/server/testing/index.d.ts",
+      "default": "./dist/server/testing/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "default": "./dist/react/index.js"
+    },
+    "./react/vercel": {
+      "types": "./dist/react/transports/vercel/index.d.ts",
+      "default": "./dist/react/transports/vercel/index.js"
+    },
+    "./react/langgraph": {
+      "types": "./dist/react/transports/langgraph/index.d.ts",
+      "default": "./dist/react/transports/langgraph/index.js"
+    },
+    "./react/styles.css": "./dist/react/styles.css",
+    "./codegen": {
+      "types": "./dist/codegen/index.d.ts",
+      "default": "./dist/codegen/index.js"
+    },
+    "./openapi": {
+      "types": "./dist/openapi/index.d.ts",
+      "default": "./dist/openapi/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp src/react/styles.css dist/react/styles.css",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.24.1",
+    "snowball-stemmers": "^0.6.0",
+    "wavesurfer.js": "^7.12.1",
+    "react-markdown": "^10.1.0",
+    "ai": "^6.0.0",
+    "@ai-sdk/react": "^3.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^19",
+    "@nestjs/common": "^11",
+    "@nestjs/core": "^11",
+    "@nestjs/config": "^4",
+    "@nestjs/swagger": "^8",
+    "next": "^15",
+    "express": "^5",
+    "ws": "^8",
+    "class-transformer": ">=0.5 <1",
+    "class-validator": ">=0.14 <1",
+    "reflect-metadata": ">=0.2 <1",
+    "vitest": ">=2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "@nestjs/common": {
+      "optional": true
+    },
+    "@nestjs/core": {
+      "optional": true
+    },
+    "@nestjs/config": {
+      "optional": true
+    },
+    "@nestjs/swagger": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "ws": {
+      "optional": true
+    },
+    "class-transformer": {
+      "optional": true
+    },
+    "class-validator": {
+      "optional": true
+    },
+    "reflect-metadata": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/express": "^5.0.0",
+    "@types/ws": "^8.5.0",
+    "@types/snowball-stemmers": "^0.6.0",
+    "ai": "^6.0.105",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@ai-sdk/react": "^3.0.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/swagger": "^8.0.0",
+    "next": "^15.0.0",
+    "express": "^5.0.0",
+    "ws": "^8.0.0",
+    "class-validator": "^0.14.0",
+    "class-transformer": "^0.5.0",
+    "reflect-metadata": "^0.2.0"
+  }
+}

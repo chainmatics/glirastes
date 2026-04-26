@@ -1,0 +1,276 @@
+import { writeFile, mkdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { findFiles, toImportPath, toRelativeImportPath, readFileSafe, isDirAiIgnored, extractBalancedBlocks } from './fs-utils.js';
+import type {
+  GenerateOptions,
+  ScanResult,
+  DiscoveredFile,
+  ExtractedActionId,
+} from './types.js';
+import { resolveDefaults } from './types.js';
+
+/**
+ * Scan for UI tool files (ai-ui-tool.ts) in the components directory.
+ */
+export async function scanUiTools(
+  options: GenerateOptions,
+): Promise<ScanResult> {
+  const opts = resolveDefaults(options);
+  const componentsDir = join(opts.rootDir, opts.componentsDir);
+  const files = await findFiles(componentsDir, opts.uiToolFileName);
+
+  const discovered: DiscoveredFile[] = [];
+
+  for (const absolutePath of files) {
+    const content = await readFileSafe(absolutePath);
+    if (content.includes('@ai-ignore')) continue;
+    if (await isDirAiIgnored(dirname(absolutePath))) continue;
+
+    const hasExport = /export\s+const\s+aiUiTools\s*[=:]/m.test(content);
+    if (!hasExport) continue;
+
+    // Use relative import when output dir is outside src/ (monorepo layout)
+    const outputDir = join(opts.rootDir, opts.outputDir);
+    const importPath = absolutePath.startsWith(join(opts.rootDir, 'src'))
+      ? toImportPath(absolutePath, opts.rootDir)
+      : toRelativeImportPath(absolutePath, outputDir);
+    discovered.push({
+      absolutePath,
+      relativePath: absolutePath.replace(opts.rootDir + '/', ''),
+      importPath,
+      exportType: 'array',
+    });
+  }
+
+  let toolCount = 0;
+  for (const file of discovered) {
+    const content = await readFileSafe(file.absolutePath);
+    const matches = content.match(/define(?:Ai)?UiTool\(/g);
+    toolCount += matches?.length ?? 0;
+  }
+
+  return { files: discovered, toolCount };
+}
+
+/**
+ * Extract actionIds from UI tool files using regex parsing.
+ */
+export async function extractActionIds(
+  options: GenerateOptions,
+): Promise<ExtractedActionId[]> {
+  const scan = await scanUiTools(options);
+  const actionIds: ExtractedActionId[] = [];
+
+  for (const file of scan.files) {
+    const content = await readFileSafe(file.absolutePath);
+
+    // Match defineUiTool or defineAiUiTool blocks (brace-balanced)
+    const blocks = extractBalancedBlocks(
+      content,
+      /define(?:Ai)?UiTool\(\s*/,
+    );
+
+    for (const block of blocks) {
+
+      // Extract toolName
+      const toolNameMatch = block.match(
+        /toolName\s*:\s*['"`]([^'"`]+)['"`]/,
+      );
+      if (!toolNameMatch) continue;
+      const toolName = toolNameMatch[1];
+
+      // Extract all actionIds from uiAction templates (supports compound arrays)
+      const actionIdMatches = block.matchAll(
+        /actionId\s*:\s*['"`]([^'"`]+)['"`]/g,
+      );
+
+      // Extract inputSchema keys as fallback payload keys (shared across all actions)
+      const fallbackPayloadKeys: string[] = [];
+      const schemaMatch = block.match(
+        /inputSchema\s*:\s*z\.object\(\s*\{([^}]*)\}/,
+      );
+      if (schemaMatch) {
+        const schemaContent = schemaMatch[1];
+        const keyMatches = schemaContent.matchAll(
+          /(\w+)\s*:/g,
+        );
+        for (const km of keyMatches) {
+          fallbackPayloadKeys.push(km[1]);
+        }
+      }
+
+      let hasActionId = false;
+      for (const actionIdMatch of actionIdMatches) {
+        hasActionId = true;
+        const actionId = actionIdMatch[1];
+
+        // Extract payload keys from the nearest payload block (best-effort)
+        const payloadKeys: string[] = [];
+        const payloadMatch = block.match(
+          /payload\s*:\s*\{([^}]*)\}/,
+        );
+        if (payloadMatch) {
+          const payloadContent = payloadMatch[1];
+          const keyMatches = payloadContent.matchAll(
+            /(\w+)\s*:/g,
+          );
+          for (const km of keyMatches) {
+            payloadKeys.push(km[1]);
+          }
+        }
+
+        actionIds.push({
+          actionId,
+          toolName,
+          payloadKeys: payloadKeys.length > 0 ? payloadKeys : fallbackPayloadKeys,
+          sourceFile: file.relativePath,
+        });
+      }
+
+      if (!hasActionId) continue;
+    }
+  }
+
+  return actionIds;
+}
+
+/**
+ * Generate the UI tools registry file.
+ */
+export async function generateUiRegistry(
+  options: GenerateOptions,
+): Promise<{ outputPath: string; toolCount: number }> {
+  const opts = resolveDefaults(options);
+  const scan = await scanUiTools(options);
+
+  const imports: string[] = [];
+  const spreadParts: string[] = [];
+
+  scan.files.forEach((file, index) => {
+    const alias = `uiTools${index}`;
+    imports.push(
+      `import { aiUiTools as ${alias} } from '${file.importPath}';`,
+    );
+    spreadParts.push(`...${alias}`);
+  });
+
+  const code = `/* eslint-disable */
+/**
+ * AUTO-GENERATED FILE — do not edit manually.
+ * Generated by glirastes
+ *
+ * Sources: ${scan.files.length} ai-ui-tool.ts files
+ * Tools: ${scan.toolCount}
+ */
+
+${imports.join('\n')}
+import { uiToolsToRegistry } from 'glirastes/server';
+
+const uiTools = [${spreadParts.join(', ')}] as const;
+
+export { uiTools };
+export const uiToolRegistry = uiToolsToRegistry(uiTools);
+`;
+
+  const outputPath = join(
+    opts.rootDir,
+    opts.outputDir,
+    'ui.generated.ts',
+  );
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, code, 'utf-8');
+
+  if (!opts.quiet) {
+    console.log(
+      `✓ Generated ${outputPath} (${scan.toolCount} UI tools from ${scan.files.length} files)`,
+    );
+  }
+
+  return { outputPath, toolCount: scan.toolCount };
+}
+
+/**
+ * Generate the action ID registry file.
+ * Merges duplicate actionIds from multiple tools and unions their payloadKeys.
+ */
+export async function generateActionIdRegistry(
+  options: GenerateOptions,
+): Promise<{ outputPath: string; actionIdCount: number }> {
+  const opts = resolveDefaults(options);
+  const actionIds = await extractActionIds(options);
+
+  // Merge by actionId
+  const merged = new Map<
+    string,
+    { tools: Array<{ toolName: string; sourceFile: string }>; payloadKeys: Set<string> }
+  >();
+
+  for (const entry of actionIds) {
+    const existing = merged.get(entry.actionId);
+    if (existing) {
+      existing.tools.push({
+        toolName: entry.toolName,
+        sourceFile: entry.sourceFile,
+      });
+      for (const key of entry.payloadKeys) {
+        existing.payloadKeys.add(key);
+      }
+    } else {
+      merged.set(entry.actionId, {
+        tools: [
+          { toolName: entry.toolName, sourceFile: entry.sourceFile },
+        ],
+        payloadKeys: new Set(entry.payloadKeys),
+      });
+    }
+  }
+
+  // Generate code
+  const entries: string[] = [];
+  for (const [actionId, data] of merged) {
+    const toolsStr = data.tools
+      .map(
+        (t) =>
+          `{ toolName: '${t.toolName}', sourceFile: '${t.sourceFile}' }`,
+      )
+      .join(', ');
+    const keysStr = Array.from(data.payloadKeys)
+      .map((k) => `'${k}'`)
+      .join(', ');
+
+    entries.push(
+      `  '${actionId}': {\n    tools: [${toolsStr}],\n    payloadKeys: [${keysStr}] as const,\n  }`,
+    );
+  }
+
+  const code = `/* eslint-disable */
+/**
+ * AUTO-GENERATED FILE — do not edit manually.
+ * Generated by glirastes
+ *
+ * Action IDs: ${merged.size}
+ */
+
+export const REQUIRED_ACTION_IDS = {
+${entries.join(',\n')}
+} as const;
+
+export type ActionId = keyof typeof REQUIRED_ACTION_IDS;
+`;
+
+  const outputPath = join(
+    opts.rootDir,
+    opts.outputDir,
+    'action-ids.generated.ts',
+  );
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, code, 'utf-8');
+
+  if (!opts.quiet) {
+    console.log(
+      `✓ Generated ${outputPath} (${merged.size} action IDs)`,
+    );
+  }
+
+  return { outputPath, actionIdCount: merged.size };
+}

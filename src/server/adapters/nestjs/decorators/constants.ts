@@ -1,0 +1,4 @@
+export const AI_MODULE_METADATA = Symbol('AI_MODULE_METADATA');
+export const AI_TOOL_METADATA = Symbol('AI_TOOL_METADATA');
+export const AI_TOOL_METHODS_METADATA = Symbol('AI_TOOL_METHODS_METADATA');
+export const AI_PARAM_METADATA = Symbol('AI_PARAM_METADATA');

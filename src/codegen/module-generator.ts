@@ -1,0 +1,449 @@
+import { writeFile, mkdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { readFileSafe, extractBalancedBlocks } from './fs-utils.js';
+import { scanEndpointTools } from './endpoint-scanner.js';
+import { scanUiTools } from './ui-scanner.js';
+import { scanNestControllers } from './nestjs-scanner.js';
+import type { GenerateOptions, ExtractedToolMeta } from './types.js';
+import { resolveDefaults } from './types.js';
+
+/**
+ * Extract tool metadata (toolName, module, sharedWith) from a source file using regex.
+ */
+async function extractToolMeta(
+  absolutePath: string,
+  relativePath: string,
+): Promise<ExtractedToolMeta[]> {
+  const content = await readFileSafe(absolutePath);
+  const tools: ExtractedToolMeta[] = [];
+
+  // Match define*Tool blocks (brace-balanced)
+  const blocks = extractBalancedBlocks(
+    content,
+    /define(?:Ai)?(?:Endpoint|Ui)Tool\(\s*/,
+  );
+
+  for (const block of blocks) {
+
+    const toolNameMatch = block.match(
+      /toolName\s*:\s*['"`]([^'"`]+)['"`]/,
+    );
+    if (!toolNameMatch) continue;
+
+    const moduleMatch = block.match(
+      /module\s*:\s*['"`]([^'"`]+)['"`]/,
+    );
+
+    // Extract sharedWith array
+    const sharedWithMatch = block.match(
+      /sharedWith\s*:\s*\[([^\]]*)\]/,
+    );
+    let sharedWith: string[] | undefined;
+    if (sharedWithMatch) {
+      sharedWith = sharedWithMatch[1]
+        .match(/['"`]([^'"`]+)['"`]/g)
+        ?.map((s) => s.replace(/['"`]/g, ''));
+    }
+
+    tools.push({
+      toolName: toolNameMatch[1],
+      module: moduleMatch?.[1],
+      sharedWith,
+      sourceFile: relativePath,
+    });
+  }
+
+  return tools;
+}
+
+/**
+ * Generate the modules registry file.
+ *
+ * Groups all tools by their module (including sharedWith expansion),
+ * and generates a mapping from module → toolNames[].
+ */
+export async function generateModuleRegistry(
+  options: GenerateOptions,
+  moduleMetaImportPath?: string,
+): Promise<{ outputPath: string; moduleCount: number }> {
+  const opts = resolveDefaults(options);
+
+  // Scan all tool files (ai-tool.ts + ai-ui-tool.ts)
+  const endpointScan = await scanEndpointTools(options);
+  const uiScan = await scanUiTools(options);
+
+  // Extract metadata from standalone tool files
+  const allToolMeta: ExtractedToolMeta[] = [];
+
+  for (const file of [...endpointScan.files, ...uiScan.files]) {
+    const meta = await extractToolMeta(file.absolutePath, file.relativePath);
+    allToolMeta.push(...meta);
+  }
+
+  // Also include NestJS @AiTool decorated controllers
+  if (opts.nestjsDirs.length > 0) {
+    const nestScan = await scanNestControllers(opts.nestjsDirs, opts.nestjsApiPrefix);
+    for (const tool of nestScan.tools) {
+      if (tool.module) {
+        allToolMeta.push({
+          toolName: tool.name,
+          module: tool.module,
+          sharedWith: undefined,
+          sourceFile: tool.controllerFile,
+        });
+      }
+    }
+  }
+
+  // Group by module (with sharedWith expansion)
+  const moduleTools = new Map<string, Set<string>>();
+
+  for (const tool of allToolMeta) {
+    if (!tool.module) continue;
+
+    // Primary module
+    if (!moduleTools.has(tool.module)) {
+      moduleTools.set(tool.module, new Set());
+    }
+    moduleTools.get(tool.module)!.add(tool.toolName);
+
+    // Shared modules
+    if (tool.sharedWith) {
+      for (const sharedModule of tool.sharedWith) {
+        if (!moduleTools.has(sharedModule)) {
+          moduleTools.set(sharedModule, new Set());
+        }
+        moduleTools.get(sharedModule)!.add(tool.toolName);
+      }
+    }
+  }
+
+  // Sort modules and tools for deterministic output
+  const sortedModules = Array.from(moduleTools.keys()).sort();
+
+  // Generate toolsByModule mapping
+  const toolsByModuleEntries: string[] = [];
+  for (const module of sortedModules) {
+    const tools = Array.from(moduleTools.get(module)!).sort();
+    const toolsStr = tools.map((t) => `'${t}'`).join(', ');
+    toolsByModuleEntries.push(`  '${module}': [${toolsStr}]`);
+  }
+
+  // Generate module type union
+  const moduleTypeUnion = sortedModules.map((m) => `'${m}'`).join(' | ');
+
+  // Optional module meta integration
+  const metaImport = moduleMetaImportPath
+    ? `import { moduleMeta } from '${moduleMetaImportPath}';\n`
+    : '';
+  const metaExport = moduleMetaImportPath
+    ? `\nexport { moduleMeta };\n`
+    : '';
+
+  // Generate CLASSIFICATION_PROMPT + intent modules when module meta is available
+  let classificationPromptCode = '';
+  let intentModulesCode = '';
+  const metaContent = moduleMetaImportPath
+    ? await readModuleMeta(opts.rootDir, moduleMetaImportPath)
+    : null;
+
+  if (metaContent) {
+    classificationPromptCode = generateClassificationPrompt(
+      sortedModules,
+      metaContent,
+    );
+    intentModulesCode = generateIntentModules(
+      sortedModules,
+      metaContent,
+      moduleTools,
+    );
+  }
+
+  const code = `/* eslint-disable */
+/**
+ * AUTO-GENERATED FILE — do not edit manually.
+ * Generated by glirastes
+ *
+ * Modules: ${sortedModules.length}
+ * Total tool assignments: ${allToolMeta.length}
+ */
+
+import { z } from 'zod';
+import type { IntentModule, ModuleMeta } from 'glirastes';
+import { EXECUTION_DEFAULTS } from 'glirastes';
+${metaImport}export type IntentType = ${moduleTypeUnion || 'string'};
+
+export const IntentSchema = z.object({
+  intent: z.enum([${sortedModules.map((m) => `'${m}'`).join(', ')}, 'ambiguous']),
+  confidence: z.number().min(0).max(1),
+});
+
+export type IntentClassification = z.infer<typeof IntentSchema>;
+
+export const toolsByModule: Record<IntentType, readonly string[]> = {
+${toolsByModuleEntries.join(',\n')}
+};
+
+export const moduleTypes: readonly IntentType[] = [${sortedModules.map((m) => `'${m}'`).join(', ')}] as const;
+
+${generateRelatedModules(sortedModules, moduleTools)}
+/**
+ * Build an IntentModule by merging module meta execution config
+ * with EXECUTION_DEFAULTS and auto-collected toolNames.
+ */
+export function buildIntentModule(
+  type: IntentType,
+  toolNames: readonly string[],
+  meta: ModuleMeta,
+): IntentModule {
+  const exec = { ...EXECUTION_DEFAULTS, ...meta.execution };
+  return {
+    type,
+    toolNames: [...toolNames],
+    systemPromptAddition: meta.systemPrompt,
+    maxSteps: exec.maxSteps,
+    contextWindow: exec.contextWindow,
+    modelTier: exec.modelTier,
+    meta,
+  };
+}
+${intentModulesCode}${classificationPromptCode}${metaExport}`;
+
+  const outputPath = join(opts.rootDir, opts.outputDir, 'modules.generated.ts');
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, code, 'utf-8');
+
+  if (!opts.quiet) {
+    console.log(
+      `✓ Generated ${outputPath} (${sortedModules.length} modules)`,
+    );
+  }
+
+  return { outputPath, moduleCount: sortedModules.length };
+}
+
+interface ModuleMetaInfo {
+  hint: string;
+  examples: string[];
+  execution?: {
+    maxSteps?: number;
+    contextWindow?: number;
+    modelTier?: string;
+  };
+  systemPrompt?: string;
+}
+
+/**
+ * Attempt to read and parse module metadata from a source file.
+ * Returns a map of module → { hint, examples, execution?, systemPrompt? } extracted via regex.
+ */
+async function readModuleMeta(
+  rootDir: string,
+  metaImportPath: string,
+): Promise<Map<string, ModuleMetaInfo> | null> {
+  // Resolve import path to absolute path
+  const resolved = metaImportPath
+    .replace(/^@\//, 'src/')
+    .replace(/^\.\//, '');
+  const candidates = [
+    join(rootDir, resolved + '.ts'),
+    join(rootDir, resolved + '/index.ts'),
+    join(rootDir, resolved),
+  ];
+
+  let content = '';
+  for (const candidate of candidates) {
+    content = await readFileSafe(candidate);
+    if (content) break;
+  }
+  if (!content) return null;
+
+  const result = new Map<string, ModuleMetaInfo>();
+
+  // Match module entries like: task_query: { classification: { hint: '...', examples: [...] }, execution: {...}, systemPrompt: `...` }
+  const moduleBlocks = content.matchAll(
+    /(\w+)\s*:\s*\{[\s\S]*?classification\s*:\s*\{([\s\S]*?)\}[\s\S]*?(?:execution|systemPrompt)/g,
+  );
+
+  for (const match of moduleBlocks) {
+    const moduleName = match[1];
+    const classBlock = match[2];
+
+    const hintMatch = classBlock.match(
+      /hint\s*:\s*['"`]([^'"`]+)['"`]/,
+    );
+    const examplesMatch = classBlock.match(
+      /examples\s*:\s*\[([\s\S]*?)\]/,
+    );
+
+    const hint = hintMatch?.[1] ?? '';
+    const examples: string[] = [];
+
+    if (examplesMatch) {
+      const exampleStrings = examplesMatch[1].matchAll(
+        /['"`]([^'"`]+)['"`]/g,
+      );
+      for (const ex of exampleStrings) {
+        examples.push(ex[1]);
+      }
+    }
+
+    // Extract execution config from the full match
+    const fullBlock = match[0];
+    const execMatch = fullBlock.match(
+      /execution\s*:\s*\{([\s\S]*?)\}/,
+    );
+    let execution: ModuleMetaInfo['execution'];
+    if (execMatch) {
+      const execBlock = execMatch[1];
+      const maxStepsMatch = execBlock.match(/maxSteps\s*:\s*(\d+)/);
+      const contextWindowMatch = execBlock.match(/contextWindow\s*:\s*(\d+)/);
+      const modelTierMatch = execBlock.match(/modelTier\s*:\s*['"`]([^'"`]+)['"`]/);
+
+      if (maxStepsMatch || contextWindowMatch || modelTierMatch) {
+        execution = {};
+        if (maxStepsMatch) execution.maxSteps = parseInt(maxStepsMatch[1], 10);
+        if (contextWindowMatch) execution.contextWindow = parseInt(contextWindowMatch[1], 10);
+        if (modelTierMatch) execution.modelTier = modelTierMatch[1];
+      }
+    }
+
+    // Extract systemPrompt
+    const sysPromptMatch = fullBlock.match(
+      /systemPrompt\s*:\s*(?:`([\s\S]*?)`|'([^']*)'|"([^"]*)")/,
+    );
+    const systemPrompt = sysPromptMatch
+      ? (sysPromptMatch[1] ?? sysPromptMatch[2] ?? sysPromptMatch[3])?.trim()
+      : undefined;
+
+    if (hint || examples.length > 0) {
+      result.set(moduleName, { hint, examples, execution, systemPrompt });
+    }
+  }
+
+  return result.size > 0 ? result : null;
+}
+
+/**
+ * Generate intentModules record + getModuleForIntent / getAllModules helpers.
+ * Only emitted when module meta is available (has execution/systemPrompt data).
+ */
+function generateIntentModules(
+  modules: string[],
+  meta: Map<string, ModuleMetaInfo>,
+  moduleTools: Map<string, Set<string>>,
+): string {
+  const entries: string[] = [];
+  for (const mod of modules) {
+    const info = meta.get(mod);
+    const tools = moduleTools.get(mod);
+    if (!tools) continue;
+
+    // Build meta object literal
+    const hint = info?.hint ?? '';
+    const examples = info?.examples ?? [];
+    const exStr = examples.map((e) => `'${e.replace(/'/g, "\\'")}'`).join(', ');
+
+    // Execution overrides (only non-default values)
+    let execStr = '';
+    if (info?.execution) {
+      const parts: string[] = [];
+      if (info.execution.maxSteps !== undefined) parts.push(`maxSteps: ${info.execution.maxSteps}`);
+      if (info.execution.contextWindow !== undefined) parts.push(`contextWindow: ${info.execution.contextWindow}`);
+      if (info.execution.modelTier !== undefined) parts.push(`modelTier: '${info.execution.modelTier}'`);
+      if (parts.length > 0) execStr = `    execution: { ${parts.join(', ')} },\n`;
+    }
+
+    const sysPrompt = info?.systemPrompt
+      ? `    systemPrompt: \`${info.systemPrompt.replace(/`/g, '\\`')}\`,\n`
+      : '';
+
+    entries.push(`  '${mod}': buildIntentModule('${mod}', toolsByModule['${mod}'], {
+    classification: { hint: '${hint.replace(/'/g, "\\'")}', examples: [${exStr}] },
+${execStr}${sysPrompt}  })`);
+  }
+
+  if (entries.length === 0) return '';
+
+  return `
+export const intentModules: Record<IntentType, IntentModule> = {
+${entries.join(',\n')}
+};
+
+export function getModuleForIntent(intent: IntentType): IntentModule | undefined {
+  return intentModules[intent];
+}
+
+export function getAllModules(): IntentModule[] {
+  return Object.values(intentModules);
+}
+`;
+}
+
+/**
+ * Generate the CLASSIFICATION_PROMPT constant from module metadata.
+ */
+function generateClassificationPrompt(
+  modules: string[],
+  meta: Map<string, ModuleMetaInfo>,
+): string {
+  const moduleDescriptions: string[] = [];
+
+  for (const mod of modules) {
+    const info = meta.get(mod);
+    if (!info) {
+      moduleDescriptions.push(`- ${mod}: (no classification metadata)`);
+      continue;
+    }
+
+    const examplesStr = info.examples.length > 0
+      ? `\n  Examples: ${info.examples.map((e) => `"${e}"`).join(', ')}`
+      : '';
+    moduleDescriptions.push(`- ${mod}: ${info.hint}${examplesStr}`);
+  }
+
+  const prompt = `Classify the user request into ONE of these categories:\\n\\n${moduleDescriptions.join('\\n\\n')}\\n\\n- ambiguous: Unclear, multiple areas, or small talk\\n\\nRespond with high confidence (0.8-1.0) when clear, lower (0.4-0.7) when uncertain.`;
+
+  return `\nexport const CLASSIFICATION_PROMPT = \`${prompt}\`;\n`;
+}
+
+/**
+ * Generate relatedModules — derived from tool overlap between modules.
+ * Two modules are related when they share at least one tool (via sharedWith).
+ */
+function generateRelatedModules(
+  modules: string[],
+  moduleTools: Map<string, Set<string>>,
+): string {
+  const entries: string[] = [];
+  for (const modA of modules) {
+    const toolsA = moduleTools.get(modA);
+    if (!toolsA) continue;
+    const related: string[] = [];
+    for (const modB of modules) {
+      if (modA === modB) continue;
+      const toolsB = moduleTools.get(modB);
+      if (!toolsB) continue;
+      for (const tool of toolsA) {
+        if (toolsB.has(tool)) {
+          related.push(modB);
+          break;
+        }
+      }
+    }
+    if (related.length > 0) {
+      entries.push(`  '${modA}': [${related.map((r) => `'${r}'`).join(', ')}]`);
+    }
+  }
+
+  if (entries.length === 0) return '';
+
+  return `/**
+ * Derived from tool overlap — two modules are related when they share tools.
+ * Used by the pipeline router for medium-confidence tool expansion.
+ */
+export const relatedModules: Record<string, string[]> = {
+${entries.join(',\n')}
+};
+`;
+}

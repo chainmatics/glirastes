@@ -1,0 +1,65 @@
+{
+  "gate": [
+    {
+      "name": "basic role filtering",
+      "input": { "tools": ["read-orders", "delete-user", "get-invoices"], "userRoles": ["viewer"] },
+      "expectedShape": { "allowed": "string[]", "denied": "string[]" }
+    },
+    {
+      "name": "admin bypasses gate",
+      "input": { "tools": ["read-orders", "delete-user", "get-invoices"], "userRoles": ["admin"] },
+      "expectedShape": { "allowed": "string[]", "denied": "string[]" }
+    },
+    {
+      "name": "empty tools list",
+      "input": { "tools": [], "userRoles": ["viewer"] },
+      "expectedShape": { "allowed": "string[]", "denied": "string[]" }
+    }
+  ],
+  "primus": [
+    {
+      "name": "order intent classification",
+      "input": { "message": "Show me my recent orders", "modules": ["orders", "billing"] },
+      "expectedShape": { "moduleId": "string", "confidence": "number" }
+    },
+    {
+      "name": "billing intent classification",
+      "input": { "message": "What is my current invoice total?", "modules": ["orders", "billing"] },
+      "expectedShape": { "moduleId": "string", "confidence": "number" }
+    },
+    {
+      "name": "ambiguous intent classification",
+      "input": { "message": "Hello", "modules": ["orders", "billing", "support"] },
+      "expectedShape": { "moduleId": "string", "confidence": "number" }
+    }
+  ],
+  "config": [
+    {
+      "name": "fetch gate config",
+      "input": { "modules": ["gate"] },
+      "expectedShape": { "roles": "array?" }
+    },
+    {
+      "name": "fetch primus config",
+      "input": { "modules": ["primus"] },
+      "expectedShape": { "models": "array?" }
+    }
+  ],
+  "aegis": [
+    {
+      "name": "PII detection and rehydration",
+      "input": { "text": "Contact john@example.com at +49 170 1234567", "locales": ["de", "en"] },
+      "expectedShape": { "entities": "array", "anonymized": "string", "mappingToken": "string?" }
+    },
+    {
+      "name": "no PII in clean text",
+      "input": { "text": "The weather is nice today", "locales": ["en"] },
+      "expectedShape": { "entities": "array", "anonymized": "string", "mappingToken": "string?" }
+    },
+    {
+      "name": "multi-locale PII detection",
+      "input": { "text": "Mein Name ist Hans Mueller, erreichbar unter hans@firma.de", "locales": ["de"] },
+      "expectedShape": { "entities": "array", "anonymized": "string", "mappingToken": "string?" }
+    }
+  ]
+}
