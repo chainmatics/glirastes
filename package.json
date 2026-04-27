@@ -177,7 +177,7 @@
     "@nestjs/core": "^11.0.0",
     "@nestjs/config": "^4.0.0",
     "@nestjs/swagger": "^8.0.0",
-    "next": "^15.0.0",
+    "next": "^16.2.4",
     "express": "^5.0.0",
     "ws": "^8.0.0",
     "class-validator": "^0.14.0",
