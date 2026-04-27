@@ -22,10 +22,17 @@
     "agent",
     "llm",
     "tools",
+    "tool-calling",
+    "vercel-ai-sdk",
+    "streaming",
+    "rbac",
     "nextjs",
     "nestjs",
     "react"
   ],
+  "engines": {
+    "node": ">=20"
+  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"

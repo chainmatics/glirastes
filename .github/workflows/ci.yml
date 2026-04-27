@@ -73,3 +73,22 @@ jobs:
 
       - name: Build
         run: bun run build
+
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      # Surface high/critical advisories on production deps. Non-blocking on
+      # transient registry hiccups; tighten to required-status once stable.
+      - name: npm audit (production deps, high+)
+        run: npm audit --omit=dev --audit-level=high

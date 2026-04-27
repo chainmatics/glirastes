@@ -8,3 +8,11 @@ dist
 .worktrees/
 .claude/
 .codex/
+
+# Build/sourcemap leftovers that occasionally land next to TS sources.
+src/**/*.js.map
+src/openapi/index.d.ts
+
+# Local stub packages directory used by parity tooling — never commit.
+packages/
+coverage/

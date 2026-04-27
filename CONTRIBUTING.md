@@ -43,14 +43,15 @@ We use the [Developer Certificate of Origin](https://developercertificate.org/)
 rather than a CLA. By contributing, you certify that you have the right to
 submit your work under the project license (Apache-2.0).
 
-Sign your commits:
+Sign-off is **encouraged but not enforced** in CI today. If you want to
+sign-off your commits — or for substantial contributions where provenance
+matters — append a `Signed-off-by` trailer:
 
 ```bash
 git commit -s -m "feat(server): add streaming support"
 ```
 
-This appends a `Signed-off-by: Your Name <you@example.com>` line. We may
-require this on all commits in PRs.
+This adds a `Signed-off-by: Your Name <you@example.com>` line.
 
 ## Code Style
 
