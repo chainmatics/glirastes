@@ -176,7 +176,7 @@
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/config": "^4.0.0",
-    "@nestjs/swagger": "^8.0.0",
+    "@nestjs/swagger": "^11.4.1",
     "next": "^15.0.0",
     "express": "^5.0.0",
     "ws": "^8.0.0",
