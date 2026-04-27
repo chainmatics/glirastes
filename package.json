@@ -89,7 +89,10 @@
   },
   "files": [
     "dist",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/react/styles.css dist/react/styles.css",
