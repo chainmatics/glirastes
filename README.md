@@ -83,7 +83,9 @@ Building an AI feature means wiring together **tool definitions**, **API calls**
 
 <br/>
 
-## Quick Start ([Next.js](https://nextjs.org/) + [Vercel AI SDK](https://sdk.vercel.ai/))
+## Quick Start ([Next.js](https://nextjs.org/) or [NestJS](https://nestjs.com/))
+
+Pick your stack — both come up in the same four steps.
 
 ### 1. Install
 
@@ -105,9 +107,17 @@ npm install glirastes
 > npm install wavesurfer.js
 > ```
 
-### 2. Define a tool next to your API route
+### 2. Define a tool
 
-Co-locate the tool definition with the `route.ts` it exposes. The SDK uses the declared `method` + `path` to call your own API when the LLM picks this tool — you never write a `fetch` yourself.
+The SDK uses the declared `method` + `path` (or the route the decorator already exposes) to call your own API when the LLM picks this tool — you never write a `fetch` yourself.
+
+<table>
+<tr>
+<th>Next.js — co-located <code>ai-tool.ts</code></th>
+<th>NestJS — decorators on your controller</th>
+</tr>
+<tr>
+<td valign="top">
 
 ```ts
 // app/api/tasks/ai-tool.ts
@@ -126,7 +136,33 @@ export const listTasks = defineEndpointTool({
 });
 ```
 
-### 3. Drop a chat widget into `app/layout.tsx`
+</td>
+<td valign="top">
+
+```ts
+// tasks.controller.ts
+import { Controller, Get, Query } from '@nestjs/common';
+import { AiModule, AiTool } from 'glirastes/server/nestjs';
+
+@Controller('tasks')
+@AiModule('task_management')
+export class TaskController {
+  @Get()
+  @AiTool({
+    toolName: 'list_tasks',
+    description: 'List tasks with an optional status filter.',
+  })
+  list(@Query('status') status?: 'open' | 'done') {
+    return this.taskService.list(status);
+  }
+}
+```
+
+</td>
+</tr>
+</table>
+
+### 3. Drop a chat widget into your frontend
 
 ```tsx
 'use client';
@@ -142,7 +178,15 @@ export default function RootLayout({ children }) {
 }
 ```
 
-### 4. Wire up `app/api/chat/route.ts`
+### 4. Wire up the chat handler
+
+<table>
+<tr>
+<th>Next.js — <code>app/api/chat/route.ts</code></th>
+<th>NestJS — register controllers in <code>AiChatModule</code></th>
+</tr>
+<tr>
+<td valign="top">
 
 ```ts
 import { createAiChatHandler } from 'glirastes/server/nextjs';
@@ -154,7 +198,25 @@ export const POST = createAiChatHandler({
 });
 ```
 
-Done. AI chat is live, streaming, and your `list_tasks` tool is callable. Add more tools the same way — one `ai-tool.ts` per route, import them all in `app/api/chat/route.ts`.
+</td>
+<td valign="top">
+
+```ts
+import { scanNestJsControllers } from 'glirastes/server/nestjs';
+import { endpointToolsToRegistry } from 'glirastes/server';
+import { TaskController } from './tasks/tasks.controller';
+
+const definitions = scanNestJsControllers([TaskController]);
+const registry = endpointToolsToRegistry(definitions);
+
+// Pass `registry` to createAiChatHandler in your chat route.
+```
+
+</td>
+</tr>
+</table>
+
+Done. AI chat is live, streaming, and your `list_tasks` tool is callable. Add more tools the same way — pick the style that matches your stack. See [NestJS with decorators](#nestjs-with-decorators) below for DTOs, `@AiParam`, and multi-controller scanning.
 
 <br/>
 
