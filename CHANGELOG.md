@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-27
+
+### Changed
+
+- README hero image now uses a relative path (`.github/hero.gif`) so it
+  renders directly from the repository instead of a hard-coded
+  `raw.githubusercontent.com` URL.
+- Refreshed `.github/hero.gif` with an updated, smaller animation.
+
 ## [0.2.0] - 2026-04-27
 
 ### Added
@@ -35,5 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/chainmatics/glirastes/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/chainmatics/glirastes/releases/tag/v0.2.0
