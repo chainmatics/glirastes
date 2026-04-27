@@ -90,6 +90,20 @@ Building an AI feature means wiring together **tool definitions**, **API calls**
 npm install glirastes
 ```
 
+> **Requirements:** Node.js `>=20`, React `^18 || ^19` (for the chat UI).
+>
+> **Peer dependencies for the React chat UI** (only install what you use):
+> ```bash
+> # Required for VercelAiChat / LangGraphAiChat:
+> npm install react react-dom ai @ai-sdk/react
+>
+> # Optional — enables Markdown rendering in messages (falls back to plain text):
+> npm install react-markdown
+>
+> # Optional — enables waveform visualization for voice input:
+> npm install wavesurfer.js
+> ```
+
 ### 2. Define a tool next to your API route
 
 Co-locate the tool definition with the `route.ts` it exposes. The SDK uses the declared `method` + `path` to call your own API when the LLM picks this tool — you never write a `fetch` yourself.
@@ -617,6 +631,8 @@ import { VoiceInputButton } from 'glirastes/react';
 ```
 
 The voice button streams audio to your backend, which proxies it to a speech-to-text provider (Deepgram, etc.). The API key never leaves the server.
+
+> Install `wavesurfer.js` (`npm install wavesurfer.js`) to get the live waveform visualization during recording. Without it the button still works — it just falls back to a static recording indicator.
 
 <br/>
 
