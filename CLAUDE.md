@@ -26,7 +26,7 @@ There is no linter or formatter configured — TypeScript strict mode is the onl
 
 ## Publishing
 
-**NEVER publish locally.** Do not run `scripts/publish.sh`, `npm publish`, or `bun publish`. Publishing is handled exclusively by `.github/workflows/publish.yml`, which publishes to the **public npm registry** as `glirastes`.
+**NEVER publish locally.** Do not run `npm publish` or `bun publish`. Publishing is handled exclusively by `.github/workflows/publish.yml`, which publishes to the **public npm registry** as `glirastes` with npm provenance.
 
 The workflow triggers on:
 1. A pushed git tag matching `v*` (e.g. `git tag v0.2.0 && git push origin v0.2.0`)
@@ -50,9 +50,9 @@ src/
 ├── index.ts                  — Root barrel (re-exports types)
 ├── types/                    — Types, Zod schemas, definition helpers
 ├── server/
-│   ├── index.ts              — Barrel: server-core + pro + pii-shield
+│   ├── index.ts              — Barrel: server-core + pro + pii-shield + lancer
 │   ├── core/                 — Tool→AI SDK conversion, RBAC, transport adapters
-│   ├── pro/                  — Pro pipeline: Lancer-delegated RBAC, guardrails
+│   ├── pipeline.ts           — Pro pipeline orchestration
 │   ├── lancer/               — Thin HTTP client for Glirastes platform API
 │   ├── pii-shield/           — PII detection, anonymization, pseudonymization
 │   ├── adapters/
@@ -60,7 +60,11 @@ src/
 │   │   └── nestjs/           — @AiModule/@AiTool decorators, NestJS scanning
 │   └── testing/              — createAiTestSuite() for testing without LLM calls
 ├── react/                    — Chat UI components, hooks, provider
-│   └── ui/                   — UiActionBus, useAiClientAction() hook
+│   ├── transports/
+│   │   ├── vercel/           — Vercel AI SDK transport
+│   │   └── langgraph/        — LangGraph transport
+│   ├── ui.ts                 — UiActionBus, useAiClientAction() hook
+│   └── styles.css            — Default chat panel styles
 ├── codegen/                  — Filesystem scanner, registry code generation
 ├── openapi/                  — OpenAPI spec → endpoint tool definitions
 └── cli/                      — `glirastes init | generate | validate | coverage | scaffold`
@@ -68,16 +72,16 @@ src/
 
 ## Subpath Exports
 
-Consumers import via subpath exports:
+Consumers import via subpath exports (must match `package.json#exports`):
 - `glirastes` — types (root re-export)
-- `glirastes/server` — server-core + pro + pii-shield
+- `glirastes/server` — server-core + pro + pii-shield + lancer
 - `glirastes/server/nextjs` — Next.js adapter
 - `glirastes/server/nestjs` — NestJS adapter
-- `glirastes/server/lancer` — Lancer client
 - `glirastes/server/testing` — Test suite
 - `glirastes/react` — Chat UI components
-- `glirastes/react/core` — Core hooks (no Vercel AI dep)
-- `glirastes/react/template` — Pre-styled template
+- `glirastes/react/vercel` — Vercel AI SDK transport
+- `glirastes/react/langgraph` — LangGraph transport
+- `glirastes/react/styles.css` — Default styles
 - `glirastes/codegen` — Code generation
 - `glirastes/openapi` — OpenAPI generation
 

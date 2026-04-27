@@ -7,9 +7,7 @@
       "dependencies": {
         "@ai-sdk/react": "^3.0.0",
         "ai": "^6.0.0",
-        "react-markdown": "^10.1.0",
         "snowball-stemmers": "^0.6.0",
-        "wavesurfer.js": "^7.12.1",
         "zod": "^3.24.1",
       },
       "devDependencies": {
@@ -29,9 +27,11 @@
         "next": "^15.0.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
+        "react-markdown": "^10.1.0",
         "reflect-metadata": "^0.2.0",
         "typescript": "^5.7.3",
         "vitest": "^4.0.18",
+        "wavesurfer.js": "^7.12.1",
         "ws": "^8.0.0",
       },
       "peerDependencies": {
@@ -45,8 +45,10 @@
         "next": "^15",
         "react": "^18 || ^19",
         "react-dom": "^19",
+        "react-markdown": ">=9 <11",
         "reflect-metadata": ">=0.2 <1",
         "vitest": ">=2.0.0",
+        "wavesurfer.js": "^7",
         "ws": "^8",
       },
       "optionalPeers": [
@@ -60,8 +62,10 @@
         "next",
         "react",
         "react-dom",
+        "react-markdown",
         "reflect-metadata",
         "vitest",
+        "wavesurfer.js",
         "ws",
       ],
     },
