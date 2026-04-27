@@ -102,14 +102,14 @@
   "dependencies": {
     "zod": "^3.24.1",
     "snowball-stemmers": "^0.6.0",
-    "wavesurfer.js": "^7.12.1",
-    "react-markdown": "^10.1.0",
     "ai": "^6.0.0",
     "@ai-sdk/react": "^3.0.0"
   },
   "peerDependencies": {
     "react": "^18 || ^19",
     "react-dom": "^19",
+    "react-markdown": ">=9 <11",
+    "wavesurfer.js": "^7",
     "@nestjs/common": "^11",
     "@nestjs/core": "^11",
     "@nestjs/config": "^4",
@@ -127,6 +127,12 @@
       "optional": true
     },
     "react-dom": {
+      "optional": true
+    },
+    "react-markdown": {
+      "optional": true
+    },
+    "wavesurfer.js": {
       "optional": true
     },
     "@nestjs/common": {
@@ -174,6 +180,8 @@
     "@types/snowball-stemmers": "^0.6.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "wavesurfer.js": "^7.12.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/config": "^4.0.0",

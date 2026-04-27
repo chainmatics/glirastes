@@ -1,8 +1,30 @@
-import ReactMarkdown from 'react-markdown';
+import { Suspense, lazy } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
 import type { MessageBubbleProps, TextPart } from '../types.js';
+
+// Lazy-load react-markdown — keeps it out of the synchronous import graph so
+// server-only consumers don't pay for it, and gracefully degrades to raw text
+// when the optional peer dep isn't installed.
+type MarkdownModule = typeof import('react-markdown');
+
+const ReactMarkdown = lazy<MarkdownModule['default']>(async () => {
+  try {
+    const mod = await import('react-markdown');
+    return { default: mod.default };
+  } catch {
+    if (typeof console !== 'undefined') {
+      console.warn(
+        '[MessageBubble] react-markdown is not installed — falling back to plain text. Install it with: npm install react-markdown',
+      );
+    }
+    const Fallback: MarkdownModule['default'] = (({ children }) => (
+      <>{typeof children === 'string' ? children : ''}</>
+    )) as MarkdownModule['default'];
+    return { default: Fallback };
+  }
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -173,7 +195,9 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
   return (
     <div className={className} data-component="markdown">
-      <ReactMarkdown>{content}</ReactMarkdown>
+      <Suspense fallback={<>{content}</>}>
+        <ReactMarkdown>{content}</ReactMarkdown>
+      </Suspense>
     </div>
   );
 }
