@@ -20,7 +20,8 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/glirastes"><img src="https://img.shields.io/npm/v/glirastes?style=flat-square&labelColor=0a0a0a&color=6366f1" alt="npm version"/></a>
   <a href="#"><img src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white&labelColor=0a0a0a" alt="TypeScript"/></a>
-  <a href="#"><img src="https://img.shields.io/badge/AI_SDK-compatible-8b5cf6?style=flat-square&labelColor=0a0a0a" alt="AI SDK"/></a>
+  <a href="https://sdk.vercel.ai/"><img src="https://img.shields.io/badge/Vercel_AI_SDK-compatible-8b5cf6?style=flat-square&labelColor=0a0a0a" alt="Vercel AI SDK"/></a>
+  <a href="https://langchain-ai.github.io/langgraph/"><img src="https://img.shields.io/badge/LangGraph-compatible-1c3c3c?style=flat-square&labelColor=0a0a0a" alt="LangGraph"/></a>
 </p>
 
 <br/>
@@ -31,7 +32,7 @@
 
 ## What is this?
 
-**glirastes** is a TypeScript SDK for building AI-powered chat and tool systems. You describe what the AI can do with a handful of declarative tool definitions, and the SDK turns them into [AI SDK](https://sdk.vercel.ai/)-compatible tools that call your APIs, stream responses to the client, and trigger UI updates — all type-safe, all in one place.
+**glirastes** is a TypeScript SDK for building AI-powered chat and tool systems. You describe what the AI can do with a handful of declarative tool definitions, and the SDK turns them into [Vercel AI SDK](https://sdk.vercel.ai/)-compatible tools that call your APIs, stream responses to the client, and trigger UI updates — all type-safe, all in one place. If your backend already runs [LangGraph](https://langchain-ai.github.io/langgraph/) instead, the same chat UI works against it via the LangGraph transport — no migration required.
 
 It ships as a single npm package with subpath exports:
 
@@ -89,6 +90,20 @@ Building an AI feature means wiring together **tool definitions**, **API calls**
 ```bash
 npm install glirastes
 ```
+
+> **Requirements:** Node.js `>=20`, React `^19` (for the chat UI — `react-dom` is pinned to `^19`).
+>
+> **Peer dependencies for the React chat UI** (only install what you use):
+> ```bash
+> # Required for VercelAiChat / LangGraphAiChat:
+> npm install react react-dom ai @ai-sdk/react
+>
+> # Optional — enables Markdown rendering in messages (falls back to plain text):
+> npm install react-markdown
+>
+> # Optional — enables waveform visualization for voice input:
+> npm install wavesurfer.js
+> ```
 
 ### 2. Define a tool next to your API route
 
@@ -617,6 +632,8 @@ import { VoiceInputButton } from 'glirastes/react';
 ```
 
 The voice button streams audio to your backend, which proxies it to a speech-to-text provider (Deepgram, etc.). The API key never leaves the server.
+
+> Install `wavesurfer.js` (`npm install wavesurfer.js`) to get the live waveform visualization during recording. Without it the button still works — it just falls back to a static recording indicator.
 
 <br/>
 
