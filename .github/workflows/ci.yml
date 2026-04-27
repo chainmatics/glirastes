@@ -88,7 +88,12 @@ jobs:
         with:
           node-version: '20'
 
-      # Surface high/critical advisories on production deps. Non-blocking on
-      # transient registry hiccups; tighten to required-status once stable.
+      # Project uses bun.lock; npm audit needs an npm-style lockfile, so we
+      # generate one on the fly without touching node_modules or running
+      # install scripts.
+      - name: Generate package-lock.json (prod deps only)
+        run: npm install --package-lock-only --omit=dev --ignore-scripts
+
+      # Surface high/critical advisories on production deps.
       - name: npm audit (production deps, high+)
         run: npm audit --omit=dev --audit-level=high
