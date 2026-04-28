@@ -10,11 +10,13 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start"><strong>Quick Start</strong></a> ·
+  <a href="#quick-start-nextjs-or-nestjs"><strong>Quick Start</strong></a> ·
   <a href="#core-concepts"><strong>Concepts</strong></a> ·
   <a href="#examples"><strong>Examples</strong></a> ·
   <a href="#advanced"><strong>Advanced</strong></a> ·
-  <a href="#cli"><strong>CLI</strong></a>
+  <a href="#scaling-up--codegen-workflow"><strong>Scaling up</strong></a> ·
+  <a href="#cli"><strong>CLI</strong></a> ·
+  <a href="#agent-skills"><strong>Skills</strong></a>
 </p>
 
 <p align="center">
@@ -85,17 +87,42 @@ Building an AI feature means wiring together **tool definitions**, **API calls**
 
 ## Quick Start ([Next.js](https://nextjs.org/) or [NestJS](https://nestjs.com/))
 
+### Which adapter should I use?
+
+If you only have one server, the answer is "that one". If you have **both** a Next.js frontend *and* a separate backend (NestJS, Express, …), put the chat route on the **backend**:
+
+| Setup | Use this adapter |
+|---|---|
+| Next.js full-stack (no separate backend) | `glirastes/server/nextjs` |
+| Next.js frontend + NestJS backend | `glirastes/server/nestjs` ✅ |
+| Pure NestJS (Swagger UI as client) | `glirastes/server/nestjs` |
+| Express backend + any frontend | `glirastes/server` (manual wiring) |
+
+**Why prefer the real backend over a Next.js Route Handler?**
+
+- **Tools are annotated controllers.** Your existing endpoints become AI-callable in place — no second code path, no `defineEndpointTool` mirroring controller URLs.
+- **One auth source.** Your JWT guard / tenant context already runs there. Don't re-validate tokens in a Next.js route just to forward them.
+- **No extra HTTP hop.** Browser → backend → DB instead of Browser → Next.js → backend → DB on every tool call.
+- **Tools can call services directly.** No HTTP membrane between the AI tool and your business logic.
+- **One observability pipeline.** Logs, traces, rate limits where they already live.
+
+The Next.js Route Handler is right when Next.js *is* your backend, when you're prototyping, or when every tool is an external API call anyway.
+
 Pick your stack — both come up in the same four steps.
 
 ### 1. Install
 
 ```bash
+# Backend only (NestJS / Next.js Route Handlers)
 npm install glirastes
+
+# Frontend / chat UI consumers — add the React UI peers
+npm install glirastes @ai-sdk/react react-markdown
 ```
 
-That's it. The Vercel AI SDK (`ai`), React bindings (`@ai-sdk/react`), and Markdown rendering (`react-markdown`) come included so you can copy-paste any example below. Bundlers tree-shake whatever you don't import.
+The Vercel AI SDK (`ai`) is bundled. `@ai-sdk/react` and `react-markdown` are declared as **optional peer dependencies** so backend-only consumers don't have a phantom React tree in their `node_modules`. Install them yourself when you use any `glirastes/react/*` subpath.
 
-> **Requirements:** Node.js `>=20`. The React chat UI needs `react` and `react-dom` `^19` — Next.js apps already have these, and modern npm/bun auto-installs them otherwise.
+> **Requirements:** Node.js `>=20`. The React chat UI needs `react` and `react-dom` `^19` — Next.js apps already have these.
 >
 > **Optional** — only if you want voice input with a live waveform:
 > ```bash
@@ -221,9 +248,11 @@ Done. AI chat is live, streaming, and your `list_tasks` tool is callable. Add mo
 
 ### Setup notes
 
-#### Recommended `tsconfig.json` for consumers
+#### tsconfig — modern is best, legacy still works
 
-Glirastes ships ESM with subpath `exports`. Your tsconfig must support that:
+Glirastes ships **both** ESM (`dist/`) and CommonJS (`dist/cjs/`) with a conditional `exports` map, plus subpath shim directories at the package root for legacy resolvers. Both setups below are supported:
+
+**Modern (recommended):**
 
 ```jsonc
 {
@@ -238,9 +267,7 @@ Glirastes ships ESM with subpath `exports`. Your tsconfig must support that:
 }
 ```
 
-If you see `Cannot find module 'glirastes/server/nestjs'`, your `moduleResolution` is too old (legacy `"node"` does not understand `exports` maps).
-
-> **NestJS users on the default CommonJS template:** glirastes is published as ESM only. If your backend's `tsconfig` is `"module": "commonjs"`, you'll hit `TS1479: ECMAScript module cannot be imported with require`. Migrate the backend to `module: "node16"` / `"nodenext"` or follow https://github.com/chainmatics/glirastes/issues for dual-bundle progress.
+**Legacy NestJS template (default `module: commonjs`):** works as-is — no tsconfig changes required. The shim directories under `glirastes/server/`, `glirastes/react/` etc. let the classic Node resolver find each subpath, and the CommonJS build under `dist/cjs/` provides the runtime artifacts.
 
 #### Which subpath do I import from?
 
@@ -745,6 +772,65 @@ The voice button streams audio to your backend, which proxies it to a speech-to-
 
 <br/>
 
+## Scaling up — codegen workflow
+
+Hand-importing 50 tool definitions into your chat route doesn't scale. The CLI generates a registry from co-located `*.ai-tool.ts` files so you can stay co-located while still wiring everything centrally.
+
+### 1. Bootstrap a tool from an existing route
+
+```bash
+npx glirastes scaffold --route src/app/api/tasks/route.ts
+# --dry-run to preview, --force to overwrite
+```
+
+Produces `src/app/api/tasks/ai-tool.ts` with a starter `defineEndpointTool({ ... })` call — input schema derived from your route, TODO description, sensible defaults. Edit, save.
+
+### 2. Wire the codegen into your scripts
+
+```json
+{
+  "scripts": {
+    "predev":   "glirastes generate-tools --quiet",
+    "prebuild": "glirastes generate-tools --quiet",
+    "ai:scaffold":     "glirastes scaffold",
+    "ai:coverage":     "glirastes coverage",
+    "ai:coverage:ci":  "glirastes coverage --ci",
+    "ai:validate":     "glirastes validate-tools",
+    "ai:validate:ci":  "glirastes validate-tools --ci",
+    "ai:test":         "glirastes test"
+  }
+}
+```
+
+`predev` / `prebuild` regenerate `src/generated/ai-tools/{endpoint,ui,modules,action-ids}.generated.ts` on every dev start and CI build — the generated registry becomes source-of-truth.
+
+### 3. Import the registry in your chat route
+
+```ts
+// app/api/chat/route.ts (Next.js)
+import { createAiChatHandler } from 'glirastes/server/nextjs';
+import { endpointToolRegistry } from '@/generated/ai-tools/endpoint.generated';
+import { uiToolRegistry } from '@/generated/ai-tools/ui.generated';
+
+export const POST = createAiChatHandler({
+  tools: { ...endpointToolRegistry, ...uiToolRegistry },
+  model: openai('gpt-4o-mini'),
+});
+```
+
+NestJS users skip this entire workflow: `scanNestJsControllers` reads your `@AiTool`-decorated controllers at runtime. No co-located files, no `*.generated.ts`. See [NestJS with decorators](#nestjs-with-decorators).
+
+### 4. CI gates
+
+```bash
+npm run ai:coverage:ci   # fails if any route lacks an ai-tool.ts (or has an orphan handler)
+npm run ai:validate:ci   # fails if a tool definition is malformed or path-mismatched
+```
+
+For the full deep-dive — UI patterns, intent modules, approval flow, naming conventions, deterministic testing — drop the [`maintaining-glirastes-tools`](./skills/maintaining-glirastes-tools/SKILL.md) skill into your agent. See [Agent skills](#agent-skills) below.
+
+<br/>
+
 ## CLI
 
 The SDK includes a `glirastes` CLI for scaffolding, code generation, and validation. Run any command with `npx glirastes <command>` or `bunx glirastes <command>`:
@@ -759,6 +845,7 @@ The SDK includes a `glirastes` CLI for scaffolding, code generation, and validat
 | `generate-skills` | Export tools as Claude Code / Codex skill files |
 | `generate-mcp-server` | Export tools as a standalone MCP server project |
 | `generate-auto` | Auto-detect layout and run the right generator |
+| `install-skills` | Install the bundled agent skills under `skills/` into your repo (e.g. `.claude/skills/`) |
 | `validate` | Validate OpenAPI spec for `x-ai` correctness |
 | `validate-tools` | Validate AI tool configuration |
 | `coverage` | Report which API routes have AI tools and which don't |
@@ -766,6 +853,56 @@ The SDK includes a `glirastes` CLI for scaffolding, code generation, and validat
 | `test` | Scaffold an AI behavior test file |
 | `check-upgrade` | Analyze release notes for breaking changes |
 | `sync` | Upload tool schemas to the Glirastes platform |
+
+<br/>
+
+## Agent skills
+
+Glirastes ships pre-built [agent skills](https://docs.claude.com/en/docs/claude-code/skills) under [`skills/`](./skills) that teach a coding agent (Claude Code, Codex, Cursor, …) how to integrate, maintain, and customize the SDK. Drop them into your repo and the agent picks the right one automatically.
+
+| Skill | Use when |
+|---|---|
+| [`integrating-glirastes-nextjs`](./skills/integrating-glirastes-nextjs/SKILL.md) | Adding chat to a Next.js app where Next.js is the backend |
+| [`integrating-glirastes-nestjs`](./skills/integrating-glirastes-nestjs/SKILL.md) | Adding chat to a NestJS backend (with or without a frontend) |
+| [`integrating-glirastes-nextjs-with-nestjs-backend`](./skills/integrating-glirastes-nextjs-with-nestjs-backend/SKILL.md) | Full-stack setup: Next.js frontend + separate NestJS backend |
+| [`maintaining-glirastes-tools`](./skills/maintaining-glirastes-tools/SKILL.md) | Authoring `ai-tool.ts`, intent modules, codegen, all CLI commands |
+| [`building-glirastes-chat-ui`](./skills/building-glirastes-chat-ui/SKILL.md) | Customizing the chat UI — theming, mentions, voice input, action bus |
+
+### Install via the bundled CLI
+
+After `npm install glirastes`, run the bundled installer. Two scopes:
+
+- **Project-local** (default): writes to `./.claude/skills`. Each project gets the skills tied to its own installed `glirastes` version. Best for teams checking the directory into git.
+- **Global** (`-g`): writes to `~/.claude/skills`. Shared across every project on the machine. Best for solo work across multiple Glirastes projects.
+
+```bash
+# Project-local — installs into ./.claude/skills (default)
+npx glirastes install-skills
+
+# Global — installs into ~/.claude/skills (shared across all projects on this machine)
+npx glirastes install-skills -g
+
+# Only the skills relevant to your stack
+npx glirastes install-skills --stack nextjs            # Next.js standalone
+npx glirastes install-skills --stack nestjs            # NestJS standalone
+npx glirastes install-skills --stack nextjs+nestjs     # full-stack monorepo
+
+# Different agent? Pass --target
+npx glirastes install-skills --target .codex/skills
+
+# Auto-update with the SDK on every npm install
+npx glirastes install-skills --symlink
+
+# Preview without writing
+npx glirastes install-skills --dry-run
+
+# Overwrite previously installed skills
+npx glirastes install-skills --force
+```
+
+`install-skills` reads the bundled skills under `node_modules/glirastes/skills/` and writes them to your repo. The `--symlink` mode keeps them auto-fresh — bumping `glirastes` and rerunning `npm install` updates the skill content without re-running the installer.
+
+> **`generate-skills` (CLI command) ≠ these skills.** `generate-skills` exports *your tools* as skill files so external agents can call them. The skills under `skills/` instruct an agent on how to *integrate Glirastes itself*. Both ship in the npm package; they don't conflict.
 
 <br/>
 

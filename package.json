@@ -1,6 +1,6 @@
 {
   "name": "glirastes",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Official Chainmatics SDK for building AI-powered chat, tools, and agent systems. Part of the Glirastes platform.",
   "license": "Apache-2.0",
   "author": {
@@ -53,24 +53,54 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
     },
     "./server": {
-      "types": "./dist/server/index.d.ts",
-      "default": "./dist/server/index.js"
+      "import": {
+        "types": "./dist/server/index.d.ts",
+        "default": "./dist/server/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/index.d.ts",
+        "default": "./dist/cjs/server/index.js"
+      }
     },
     "./server/nextjs": {
-      "types": "./dist/server/adapters/nextjs/index.d.ts",
-      "default": "./dist/server/adapters/nextjs/index.js"
+      "import": {
+        "types": "./dist/server/adapters/nextjs/index.d.ts",
+        "default": "./dist/server/adapters/nextjs/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/adapters/nextjs/index.d.ts",
+        "default": "./dist/cjs/server/adapters/nextjs/index.js"
+      }
     },
     "./server/nestjs": {
-      "types": "./dist/server/adapters/nestjs/index.d.ts",
-      "default": "./dist/server/adapters/nestjs/index.js"
+      "import": {
+        "types": "./dist/server/adapters/nestjs/index.d.ts",
+        "default": "./dist/server/adapters/nestjs/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/adapters/nestjs/index.d.ts",
+        "default": "./dist/cjs/server/adapters/nestjs/index.js"
+      }
     },
     "./server/testing": {
-      "types": "./dist/server/testing/index.d.ts",
-      "default": "./dist/server/testing/index.js"
+      "import": {
+        "types": "./dist/server/testing/index.d.ts",
+        "default": "./dist/server/testing/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/testing/index.d.ts",
+        "default": "./dist/cjs/server/testing/index.js"
+      }
     },
     "./react": {
       "types": "./dist/react/index.d.ts",
@@ -96,6 +126,11 @@
   },
   "files": [
     "dist",
+    "server",
+    "react",
+    "codegen",
+    "openapi",
+    "skills",
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
@@ -105,20 +140,20 @@
     "SECURITY.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp src/react/styles.css dist/react/styles.css",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "zod": "^3.24.1",
+    "zod": "^3.25.76",
     "snowball-stemmers": "^0.6.0",
-    "ai": "^6.0.0",
-    "@ai-sdk/react": "^3.0.0",
-    "react-markdown": "^10.1.0"
+    "ai": "^6.0.0"
   },
   "peerDependencies": {
     "react": "^18 || ^19",
     "react-dom": "^19",
+    "@ai-sdk/react": "^3.0.0",
+    "react-markdown": "^10.1.0",
     "wavesurfer.js": "^7",
     "@nestjs/common": "^10 || ^11",
     "@nestjs/core": "^10 || ^11",
@@ -137,6 +172,12 @@
       "optional": true
     },
     "react-dom": {
+      "optional": true
+    },
+    "@ai-sdk/react": {
+      "optional": true
+    },
+    "react-markdown": {
       "optional": true
     },
     "wavesurfer.js": {
@@ -188,6 +229,8 @@
     "@types/snowball-stemmers": "^0.6.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "@ai-sdk/react": "^3.0.0",
+    "react-markdown": "^10.1.0",
     "wavesurfer.js": "^7.12.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",

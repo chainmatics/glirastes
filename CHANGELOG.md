@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-28
+
+### Added
+
+- Dual-bundle output (CJS + ESM). The package now ships a CommonJS build at
+  `dist/cjs/` alongside the ESM build at `dist/`, so legacy NestJS backends
+  on `module: commonjs` can consume `glirastes/server/nestjs` without an ESM
+  migration. The `exports` map uses conditional `import`/`require` branches
+  with their own typings.
+- Legacy subpath shim directories at the package root (`server/`, `react/`,
+  `codegen/`, `openapi/`) so consumers on `moduleResolution: node` (without
+  `exports`-map support) still resolve subpaths.
+- Pre-built agent skills under `skills/` (shipped in the npm tarball):
+  `integrating-glirastes-nextjs`, `integrating-glirastes-nestjs`,
+  `integrating-glirastes-nextjs-with-nestjs-backend`,
+  `maintaining-glirastes-tools`, `building-glirastes-chat-ui`. Drop into
+  `.claude/skills/` (or `.codex/skills/`) to give a coding agent
+  framework-specific guidance for integrating, maintaining, and customizing
+  the SDK.
+- New CLI command `glirastes install-skills` — installs the bundled agent
+  skills into a target directory. Flags:
+  - default: `./.claude/skills` (project-local)
+  - `-g` / `--global`: `~/.claude/skills` (shared across all projects on the
+    machine; mutually exclusive with `--target`)
+  - `--target <dir>`: override the destination (accepts relative, absolute,
+    or `~/`-prefixed paths)
+  - `--stack nextjs|nestjs|nextjs+nestjs|all` (default `all`): filter
+  - `--symlink`: track the installed SDK version automatically
+  - `--force`: overwrite existing
+  - `--dry-run`: preview without writing
+- Adapter-selection guidance in the README: when both a frontend and a
+  separate backend exist, put the chat route on the backend.
+- Scaling-up section in the README explaining the `glirastes scaffold` →
+  `generate-tools` → registry-import codegen workflow.
+
+### Changed
+
+- `@ai-sdk/react` and `react-markdown` moved from `dependencies` to optional
+  `peerDependencies`. Backend-only consumers no longer pull a phantom React
+  tree into `node_modules`. Frontend consumers must install them themselves
+  (the README install section is split per stack).
+- `dependencies.zod` bumped to `^3.25.76` to match what `ai@6` and
+  `@ai-sdk/openai` require.
+- `AiChatModule.attachWebSockets()` is now `async`. Consumers that enable
+  the speech-to-text feature must `await` the call.
+
+### Fixed
+
+- Optional peer `wavesurfer.js` is now truly optional. The voice
+  components load it via a runtime `Function('s', 'return import(s)')`
+  helper so browser-side bundlers (Webpack, Turbopack, Vite, esbuild)
+  don't try to resolve the specifier at build time when the package is
+  not installed. Note: requires `script-src 'unsafe-eval'` CSP — projects
+  with strict CSP should install `wavesurfer.js` unconditionally to
+  bypass the runtime trick. See `skills/building-glirastes-chat-ui` for
+  details.
+- Optional peer `ws` is now truly optional. The NestJS speech-to-text
+  gateway uses a plain dynamic `import('ws')` inside `attachWebSockets`,
+  guarded by try/catch — backends that don't enable speech-to-text no
+  longer crash with `ERR_MODULE_NOT_FOUND` at startup. (Bundled NestJS
+  deployments must either install `ws` unconditionally or mark it as a
+  bundler external.)
+
 ## [0.3.0] - 2026-04-28
 
 ### Fixed

@@ -1,12 +1,16 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IncomingMessage } from 'http';
-import WebSocket from 'ws';
+// Type-only import — erased at compile time, doesn't trigger runtime resolution.
+import type WebSocket from 'ws';
+import { loadWs } from './ws-loader.js';
 
 export function createSpeechStreamHandler(configService: ConfigService) {
   const logger = new Logger('SpeechStreamGateway');
 
   return async (clientSocket: WebSocket, req: IncomingMessage) => {
+    const { WebSocket: WebSocketCtor } = await loadWs();
+    const WS_OPEN = (WebSocketCtor as typeof WebSocket).OPEN;
     const url = new URL(req.url ?? '', `http://${req.headers.host}`);
     const token = url.searchParams.get('token');
 
@@ -36,7 +40,7 @@ export function createSpeechStreamHandler(configService: ConfigService) {
     dgUrl.searchParams.set('encoding', 'linear16');
     dgUrl.searchParams.set('sample_rate', '16000');
 
-    const dgSocket = new WebSocket(dgUrl.toString(), {
+    const dgSocket = new WebSocketCtor(dgUrl.toString(), {
       headers: { Authorization: `Token ${apiKey}` },
     });
 
@@ -45,14 +49,14 @@ export function createSpeechStreamHandler(configService: ConfigService) {
     });
 
     dgSocket.on('message', (data: Buffer | string) => {
-      if (clientSocket.readyState === WebSocket.OPEN) {
+      if (clientSocket.readyState === WS_OPEN) {
         clientSocket.send(data.toString());
       }
     });
 
     dgSocket.on('error', (err: Error) => {
       logger.error(`Deepgram error: ${err.message}`);
-      if (clientSocket.readyState === WebSocket.OPEN) {
+      if (clientSocket.readyState === WS_OPEN) {
         clientSocket.send(
           JSON.stringify({ type: 'error', message: 'Transcription error' }),
         );
@@ -60,26 +64,26 @@ export function createSpeechStreamHandler(configService: ConfigService) {
     });
 
     dgSocket.on('close', () => {
-      if (clientSocket.readyState === WebSocket.OPEN) {
+      if (clientSocket.readyState === WS_OPEN) {
         clientSocket.close();
       }
     });
 
     clientSocket.on('message', (data: Buffer) => {
-      if (dgSocket.readyState === WebSocket.OPEN) {
+      if (dgSocket.readyState === WS_OPEN) {
         dgSocket.send(data);
       }
     });
 
     clientSocket.on('close', () => {
-      if (dgSocket.readyState === WebSocket.OPEN) {
+      if (dgSocket.readyState === WS_OPEN) {
         dgSocket.close();
       }
     });
 
     clientSocket.on('error', (err: Error) => {
       logger.error(`Client socket error: ${err.message}`);
-      if (dgSocket.readyState === WebSocket.OPEN) {
+      if (dgSocket.readyState === WS_OPEN) {
         dgSocket.close();
       }
     });
