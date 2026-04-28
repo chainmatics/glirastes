@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-28
+
+### Fixed
+
+- README NestJS examples now match the real decorator API: `@AiTool({ name })`
+  not `toolName`, `@AiModule({ intent, classification })` takes an options
+  object, `scanNestJsControllers({ controllers })` takes an options object
+  and returns `{ tools, modules, toolsByModule }` (destructure `.tools`
+  before passing to `endpointToolsToRegistry`).
+- Stream handler no longer emits the fallback `"No output generated.
+  Check the stream for errors."` event when an upstream error has
+  already been streamed in the same response.
+
+### Changed
+
+- Default `safetyMaxSteps` lowered from 24 → 8. Override via
+  `createAiChatHandler({ safetyMaxSteps })` if a workflow legitimately
+  requires deeper tool chains.
+- Peer-dep range for `@nestjs/common`, `@nestjs/core`, `@nestjs/config`,
+  `@nestjs/swagger` widened to support v10 alongside v11.
+
+### Added
+
+- `examples/quickstart-nestjs/` and `examples/quickstart-nextjs/` —
+  compile-tested in CI via `tests/examples-compile.test.ts`. What you
+  copy from the README is what compiles.
+- README "Setup notes" section: recommended `tsconfig.json` (so
+  `Cannot find module 'glirastes/server/nestjs'` no longer surprises
+  consumers on legacy `moduleResolution`) and a subpath decision-tree
+  table.
+- `FOLLOWUPS.md` capturing deferred work: dual ESM+CJS bundle,
+  `glirastes`+`glirastes-react` split for production trim, optional
+  `baseUrl` for endpoint tools, registry sugar, CLI docs.
+- `DEFAULT_SAFETY_MAX_STEPS` and `resolveStepLimit` are now public exports
+  so consumers can pin / replicate the default behaviour in tests.
+
 ## [0.2.1] - 2026-04-27
 
 ### Changed
