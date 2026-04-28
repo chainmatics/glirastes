@@ -145,11 +145,17 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { AiModule, AiTool } from 'glirastes/server/nestjs';
 
 @Controller('tasks')
-@AiModule('task_management')
+@AiModule({
+  intent: 'task_management',
+  classification: {
+    hint: 'User asks about listing or filtering tasks.',
+    examples: ['show me open tasks', 'what is done?', 'list my tasks'],
+  },
+})
 export class TaskController {
   @Get()
   @AiTool({
-    toolName: 'list_tasks',
+    name: 'list_tasks',
     description: 'List tasks with an optional status filter.',
   })
   list(@Query('status') status?: 'open' | 'done') {
@@ -206,8 +212,8 @@ import { scanNestJsControllers } from 'glirastes/server/nestjs';
 import { endpointToolsToRegistry } from 'glirastes/server';
 import { TaskController } from './tasks/tasks.controller';
 
-const definitions = scanNestJsControllers([TaskController]);
-const registry = endpointToolsToRegistry(definitions);
+const scan = scanNestJsControllers({ controllers: [TaskController] });
+const registry = endpointToolsToRegistry(scan.tools);
 
 // Pass `registry` to createAiChatHandler in your chat route.
 ```
@@ -369,15 +375,21 @@ Prefer declaring tools where the endpoint lives? Use NestJS decorators. Three pi
 
 ```ts
 // tasks.controller.ts
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param } from '@nestjs/common';
 import { AiModule, AiTool } from 'glirastes/server/nestjs';
 
 @Controller('tasks')
-@AiModule('task_management')
+@AiModule({
+  intent: 'task_management',
+  classification: {
+    hint: 'User wants to create, update, or query tasks.',
+    examples: ['create a task', 'mark task as done', 'list my tasks'],
+  },
+})
 export class TaskController {
   @Post()
   @AiTool({
-    toolName: 'create_task',
+    name: 'create_task',
     description: 'Create a new task',
   })
   async create(@Body() dto: CreateTaskDto) {
@@ -417,11 +429,13 @@ Wire it up in your `AiChatModule`:
 import { scanNestJsControllers } from 'glirastes/server/nestjs';
 import { endpointToolsToRegistry } from 'glirastes/server';
 
-const definitions = scanNestJsControllers([TaskController, /* ...other controllers */]);
-const registry = endpointToolsToRegistry(definitions);
+const scan = scanNestJsControllers({
+  controllers: [TaskController, /* ...other controllers */],
+});
+const registry = endpointToolsToRegistry(scan.tools);
 ```
 
-Pass `registry` to `createAiChatHandler({ tools: registry })`. No separate `ai-tool.ts` files, no manual registration.
+`scanNestJsControllers` returns `{ tools, modules, toolsByModule }` — pass `scan.tools` to `endpointToolsToRegistry`, then hand `registry` to `createAiChatHandler({ tools: registry })`. No separate `ai-tool.ts` files, no manual registration.
 
 ### Client-side action handlers
 
