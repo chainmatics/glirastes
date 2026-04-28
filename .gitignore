@@ -16,3 +16,4 @@ src/openapi/index.d.ts
 # Local stub packages directory used by parity tooling — never commit.
 packages/
 coverage/
+docs/superpowers/

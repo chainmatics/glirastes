@@ -93,6 +93,8 @@ Pick your stack — both come up in the same four steps.
 npm install glirastes
 ```
 
+That's it. The Vercel AI SDK (`ai`), React bindings (`@ai-sdk/react`), and Markdown rendering (`react-markdown`) come included so you can copy-paste any example below. Bundlers tree-shake whatever you don't import.
+
 > **Requirements:** Node.js `>=20`. The React chat UI needs `react` and `react-dom` `^19` — Next.js apps already have these, and modern npm/bun auto-installs them otherwise.
 >
 > **Optional** — only if you want voice input with a live waveform:
@@ -138,11 +140,17 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { AiModule, AiTool } from 'glirastes/server/nestjs';
 
 @Controller('tasks')
-@AiModule('task_management')
+@AiModule({
+  intent: 'task_management',
+  classification: {
+    hint: 'User asks about listing or filtering tasks.',
+    examples: ['show me open tasks', 'what is done?', 'list my tasks'],
+  },
+})
 export class TaskController {
   @Get()
   @AiTool({
-    toolName: 'list_tasks',
+    name: 'list_tasks',
     description: 'List tasks with an optional status filter.',
   })
   list(@Query('status') status?: 'open' | 'done') {
@@ -199,8 +207,8 @@ import { scanNestJsControllers } from 'glirastes/server/nestjs';
 import { endpointToolsToRegistry } from 'glirastes/server';
 import { TaskController } from './tasks/tasks.controller';
 
-const definitions = scanNestJsControllers([TaskController]);
-const registry = endpointToolsToRegistry(definitions);
+const scan = scanNestJsControllers({ controllers: [TaskController] });
+const registry = endpointToolsToRegistry(scan.tools);
 
 // Pass `registry` to createAiChatHandler in your chat route.
 ```
@@ -210,6 +218,43 @@ const registry = endpointToolsToRegistry(definitions);
 </table>
 
 Done. AI chat is live, streaming, and your `list_tasks` tool is callable. Add more tools the same way — pick the style that matches your stack. See [NestJS with decorators](#nestjs-with-decorators) below for DTOs, `@AiParam`, and multi-controller scanning.
+
+### Setup notes
+
+#### Recommended `tsconfig.json` for consumers
+
+Glirastes ships ESM with subpath `exports`. Your tsconfig must support that:
+
+```jsonc
+{
+  "compilerOptions": {
+    "module": "node16",          // or "nodenext" / "esnext"
+    "moduleResolution": "node16", // or "nodenext" / "bundler"
+    "target": "ES2022",
+    "esModuleInterop": true,
+    "experimentalDecorators": true,    // NestJS only
+    "emitDecoratorMetadata": true      // NestJS only
+  }
+}
+```
+
+If you see `Cannot find module 'glirastes/server/nestjs'`, your `moduleResolution` is too old (legacy `"node"` does not understand `exports` maps).
+
+> **NestJS users on the default CommonJS template:** glirastes is published as ESM only. If your backend's `tsconfig` is `"module": "commonjs"`, you'll hit `TS1479: ECMAScript module cannot be imported with require`. Migrate the backend to `module: "node16"` / `"nodenext"` or follow https://github.com/chainmatics/glirastes/issues for dual-bundle progress.
+
+#### Which subpath do I import from?
+
+| Where the code runs | Import from |
+|---|---|
+| Anywhere (tool definitions, types, helpers) | `glirastes` |
+| Server-side core (registry helpers, pipeline) | `glirastes/server` |
+| Next.js App Router route handlers | `glirastes/server/nextjs` |
+| NestJS controllers / modules | `glirastes/server/nestjs` |
+| Test suite without LLM calls | `glirastes/server/testing` |
+| React components, client hooks | `glirastes/react` |
+| Vercel AI SDK chat widget | `glirastes/react/vercel` |
+| LangGraph chat widget | `glirastes/react/langgraph` |
+| Default chat panel CSS | `glirastes/react/styles.css` |
 
 <br/>
 
@@ -362,15 +407,21 @@ Prefer declaring tools where the endpoint lives? Use NestJS decorators. Three pi
 
 ```ts
 // tasks.controller.ts
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param } from '@nestjs/common';
 import { AiModule, AiTool } from 'glirastes/server/nestjs';
 
 @Controller('tasks')
-@AiModule('task_management')
+@AiModule({
+  intent: 'task_management',
+  classification: {
+    hint: 'User wants to create, update, or query tasks.',
+    examples: ['create a task', 'mark task as done', 'list my tasks'],
+  },
+})
 export class TaskController {
   @Post()
   @AiTool({
-    toolName: 'create_task',
+    name: 'create_task',
     description: 'Create a new task',
   })
   async create(@Body() dto: CreateTaskDto) {
@@ -410,11 +461,13 @@ Wire it up in your `AiChatModule`:
 import { scanNestJsControllers } from 'glirastes/server/nestjs';
 import { endpointToolsToRegistry } from 'glirastes/server';
 
-const definitions = scanNestJsControllers([TaskController, /* ...other controllers */]);
-const registry = endpointToolsToRegistry(definitions);
+const scan = scanNestJsControllers({
+  controllers: [TaskController, /* ...other controllers */],
+});
+const registry = endpointToolsToRegistry(scan.tools);
 ```
 
-Pass `registry` to `createAiChatHandler({ tools: registry })`. No separate `ai-tool.ts` files, no manual registration.
+`scanNestJsControllers` returns `{ tools, modules, toolsByModule }` — pass `scan.tools` to `endpointToolsToRegistry`, then hand `registry` to `createAiChatHandler({ tools: registry })`. No separate `ai-tool.ts` files, no manual registration.
 
 ### Client-side action handlers
 

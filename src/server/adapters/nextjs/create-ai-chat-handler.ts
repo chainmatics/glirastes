@@ -22,6 +22,7 @@ import {
   createInternalApiCallerFromRequest,
 } from './context-helpers.js';
 import { prepareModelMessages, wrapToolsForVercelAi } from './prepare-model-messages.js';
+import { filterFallbackError } from './filter-fallback-error.js';
 
 /**
  * Callback that the consumer provides to stream the AI response.
@@ -81,7 +82,14 @@ export interface AiChatHandlerFullConfig extends AiChatHandlerConfig {
   streamHandler?: (ctx: StreamHandlerContext) => Promise<Response>;
 }
 
-const DEFAULT_SAFETY_MAX_STEPS = 24;
+/**
+ * Default soft cap on reasoning steps when no module-level or explicit
+ * `maxSteps` is configured. Acts as a last-line safety against runaway
+ * tool loops; not as a normal-operation cap (modules default to 4 via
+ * EXECUTION_DEFAULTS). Override per request via `createAiChatHandler({
+ * safetyMaxSteps })`.
+ */
+export const DEFAULT_SAFETY_MAX_STEPS = 24;
 
 function asPositiveInt(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
@@ -89,7 +97,7 @@ function asPositiveInt(value: unknown): number | null {
   return normalized > 0 ? normalized : null;
 }
 
-function resolveStepLimit(options: {
+export function resolveStepLimit(options: {
   moduleMaxSteps?: number | null;
   configuredMaxSteps?: number | null;
   safetyMaxSteps?: number;
@@ -407,7 +415,10 @@ async function defaultStreamHandler(
     },
   });
 
-  return createUIMessageStreamResponse({ stream });
+  // Wrap the outer stream so the filter sees BOTH the inner result chunks AND
+  // the error chunk that createUIMessageStream emits when execute() throws —
+  // the latter is where the duplicate "No output generated" event comes from.
+  return createUIMessageStreamResponse({ stream: filterFallbackError(stream) });
 }
 
 /**
