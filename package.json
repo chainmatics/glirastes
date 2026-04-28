@@ -97,9 +97,12 @@
   "files": [
     "dist",
     "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
     "LICENSE",
     "NOTICE",
-    "README.md"
+    "README.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/react/styles.css dist/react/styles.css",
@@ -110,12 +113,12 @@
     "zod": "^3.24.1",
     "snowball-stemmers": "^0.6.0",
     "ai": "^6.0.0",
-    "@ai-sdk/react": "^3.0.0"
+    "@ai-sdk/react": "^3.0.0",
+    "react-markdown": "^10.1.0"
   },
   "peerDependencies": {
     "react": "^18 || ^19",
     "react-dom": "^19",
-    "react-markdown": ">=9 <11",
     "wavesurfer.js": "^7",
     "@nestjs/common": "^11",
     "@nestjs/core": "^11",
@@ -134,9 +137,6 @@
       "optional": true
     },
     "react-dom": {
-      "optional": true
-    },
-    "react-markdown": {
       "optional": true
     },
     "wavesurfer.js": {
@@ -187,7 +187,6 @@
     "@types/snowball-stemmers": "^0.6.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-markdown": "^10.1.0",
     "wavesurfer.js": "^7.12.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",

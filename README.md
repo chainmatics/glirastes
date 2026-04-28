@@ -93,17 +93,10 @@ Pick your stack — both come up in the same four steps.
 npm install glirastes
 ```
 
-> **Requirements:** Node.js `>=20`, React `^19` (for the chat UI — `react-dom` is pinned to `^19`).
+> **Requirements:** Node.js `>=20`. The React chat UI needs `react` and `react-dom` `^19` — Next.js apps already have these, and modern npm/bun auto-installs them otherwise.
 >
-> **Peer dependencies for the React chat UI** (only install what you use):
+> **Optional** — only if you want voice input with a live waveform:
 > ```bash
-> # Required for VercelAiChat / LangGraphAiChat:
-> npm install react react-dom ai @ai-sdk/react
->
-> # Optional — enables Markdown rendering in messages (falls back to plain text):
-> npm install react-markdown
->
-> # Optional — enables waveform visualization for voice input:
 > npm install wavesurfer.js
 > ```
 
