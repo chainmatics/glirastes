@@ -22,6 +22,7 @@ import {
   createInternalApiCallerFromRequest,
 } from './context-helpers.js';
 import { prepareModelMessages, wrapToolsForVercelAi } from './prepare-model-messages.js';
+import { filterFallbackError } from './filter-fallback-error.js';
 
 /**
  * Callback that the consumer provides to stream the AI response.
@@ -393,7 +394,7 @@ async function defaultStreamHandler(
         },
       });
 
-      writer.merge(result.toUIMessageStream());
+      writer.merge(filterFallbackError(result.toUIMessageStream()));
       try {
         await result.response;
       } catch (error) {
