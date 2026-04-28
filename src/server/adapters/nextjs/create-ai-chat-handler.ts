@@ -84,12 +84,12 @@ export interface AiChatHandlerFullConfig extends AiChatHandlerConfig {
 
 /**
  * Default soft cap on reasoning steps when no module-level or explicit
- * `maxSteps` is configured. Lowered from 24 → 8 in 0.3.0: 24 was generous
- * enough that a runaway tool loop could burn meaningful token cost before
- * the cap kicked in. Override per request via `createAiChatHandler({
- * safetyMaxSteps })` if you legitimately need more headroom.
+ * `maxSteps` is configured. Acts as a last-line safety against runaway
+ * tool loops; not as a normal-operation cap (modules default to 4 via
+ * EXECUTION_DEFAULTS). Override per request via `createAiChatHandler({
+ * safetyMaxSteps })`.
  */
-export const DEFAULT_SAFETY_MAX_STEPS = 8;
+export const DEFAULT_SAFETY_MAX_STEPS = 24;
 
 function asPositiveInt(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;

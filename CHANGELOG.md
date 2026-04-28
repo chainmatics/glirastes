@@ -22,9 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Default `safetyMaxSteps` lowered from 24 → 8. Override via
-  `createAiChatHandler({ safetyMaxSteps })` if a workflow legitimately
-  requires deeper tool chains.
 - Peer-dep range for `@nestjs/common`, `@nestjs/core`, `@nestjs/config`,
   `@nestjs/swagger` widened to support v10 alongside v11.
 
@@ -41,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `glirastes`+`glirastes-react` split for production trim, optional
   `baseUrl` for endpoint tools, registry sugar, CLI docs.
 - `DEFAULT_SAFETY_MAX_STEPS` and `resolveStepLimit` are now public exports
-  so consumers can pin / replicate the default behaviour in tests.
+  so consumers can pin / replicate the safety-cap behaviour in tests.
 
 ## [0.2.1] - 2026-04-27
 

@@ -5,10 +5,10 @@ import {
 } from '../create-ai-chat-handler.js';
 
 describe('resolveStepLimit', () => {
-  it('uses 8 as the default safetyMaxSteps when nothing is configured', () => {
-    expect(DEFAULT_SAFETY_MAX_STEPS).toBe(8);
+  it('uses 24 as the default safetyMaxSteps when nothing is configured', () => {
+    expect(DEFAULT_SAFETY_MAX_STEPS).toBe(24);
     const result = resolveStepLimit({});
-    expect(result).toEqual({ maxSteps: 8, stepLimitSource: 'safety' });
+    expect(result).toEqual({ maxSteps: 24, stepLimitSource: 'safety' });
   });
 
   it('honours an explicit safetyMaxSteps override', () => {
@@ -33,11 +33,11 @@ describe('resolveStepLimit', () => {
 
   it('falls back to safety when configured is non-positive or not a number', () => {
     expect(resolveStepLimit({ configuredMaxSteps: 0 })).toEqual({
-      maxSteps: 8,
+      maxSteps: 24,
       stepLimitSource: 'safety',
     });
     expect(resolveStepLimit({ configuredMaxSteps: -3 })).toEqual({
-      maxSteps: 8,
+      maxSteps: 24,
       stepLimitSource: 'safety',
     });
   });

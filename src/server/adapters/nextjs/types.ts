@@ -169,9 +169,8 @@ export interface AiChatHandlerConfig {
   /**
    * Safety cap used when no explicit/module maxSteps is defined.
    *
-   * Defaults to 8 and is intended as a guard against runaway loops,
-   * while users can still stop manually at any time. Override if
-   * your workflow legitimately requires deeper tool chains.
+   * Defaults to 24 and is intended as a guard against runaway loops,
+   * while users can still stop manually at any time.
    */
   safetyMaxSteps?: number;
   /**
