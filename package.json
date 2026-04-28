@@ -111,11 +111,11 @@
   },
   "dependencies": {
     "zod": "^3.24.1",
-    "snowball-stemmers": "^0.6.0"
+    "snowball-stemmers": "^0.6.0",
+    "ai": "^6.0.0",
+    "@ai-sdk/react": "^3.0.0"
   },
   "peerDependencies": {
-    "ai": "^6",
-    "@ai-sdk/react": "^3",
     "react": "^18 || ^19",
     "react-dom": "^19",
     "react-markdown": ">=9 <11",
@@ -133,9 +133,6 @@
     "vitest": ">=2.0.0"
   },
   "peerDependenciesMeta": {
-    "@ai-sdk/react": {
-      "optional": true
-    },
     "react": {
       "optional": true
     },
@@ -183,9 +180,7 @@
     }
   },
   "devDependencies": {
-    "ai": "^6",
     "@ai-sdk/openai": "^3",
-    "@ai-sdk/react": "^3",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.0",

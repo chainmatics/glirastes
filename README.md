@@ -93,17 +93,16 @@ Pick your stack — both come up in the same four steps.
 npm install glirastes
 ```
 
-> **Requirements:** Node.js `>=20`, React `^19` (for the chat UI — `react-dom` is pinned to `^19`).
+That's it. The Vercel AI SDK (`ai`) and React bindings (`@ai-sdk/react`) come included so you can copy-paste any example below. Bundlers tree-shake whatever you don't import.
+
+> **Requirements:** Node.js `>=20`. React `^18 || ^19` if you mount the chat widget (`react-dom` `^19`).
 >
-> **Peer dependencies for the React chat UI** (only install what you use):
+> **Optional add-ons** (install only if you want them):
 > ```bash
-> # Required for VercelAiChat / LangGraphAiChat:
-> npm install react react-dom ai @ai-sdk/react
->
-> # Optional — enables Markdown rendering in messages (falls back to plain text):
+> # Markdown rendering in chat messages (falls back to plain text):
 > npm install react-markdown
 >
-> # Optional — enables waveform visualization for voice input:
+> # Waveform visualisation for voice input:
 > npm install wavesurfer.js
 > ```
 
