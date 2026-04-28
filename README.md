@@ -93,16 +93,12 @@ Pick your stack — both come up in the same four steps.
 npm install glirastes
 ```
 
-That's it. The Vercel AI SDK (`ai`) and React bindings (`@ai-sdk/react`) come included so you can copy-paste any example below. Bundlers tree-shake whatever you don't import.
+That's it. The Vercel AI SDK (`ai`), React bindings (`@ai-sdk/react`), and Markdown rendering (`react-markdown`) come included so you can copy-paste any example below. Bundlers tree-shake whatever you don't import.
 
-> **Requirements:** Node.js `>=20`. React `^18 || ^19` if you mount the chat widget (`react-dom` `^19`).
+> **Requirements:** Node.js `>=20`. The React chat UI needs `react` and `react-dom` `^19` — Next.js apps already have these, and modern npm/bun auto-installs them otherwise.
 >
-> **Optional add-ons** (install only if you want them):
+> **Optional** — only if you want voice input with a live waveform:
 > ```bash
-> # Markdown rendering in chat messages (falls back to plain text):
-> npm install react-markdown
->
-> # Waveform visualisation for voice input:
 > npm install wavesurfer.js
 > ```
 
