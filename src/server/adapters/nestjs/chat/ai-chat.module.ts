@@ -6,7 +6,7 @@ import { AiToolsExplorerService } from '../module/ai-tools-explorer.service.js';
 import { AiToolsService } from '../module/ai-tools.service.js';
 import { createAiToolsProviders } from '../module/ai-tools.module.js';
 import type { INestApplication } from '@nestjs/common';
-import { WebSocketServer } from 'ws';
+import { loadWs } from './ws-loader.js';
 import { AiChatController } from './ai-chat.controller.js';
 import { AiChatService } from './ai-chat.service.js';
 import {
@@ -94,7 +94,7 @@ export class AiChatModule {
     };
   }
 
-  static attachWebSockets(app: INestApplication): void {
+  static async attachWebSockets(app: INestApplication): Promise<void> {
     if (!AiChatModule.initialized) {
       throw new Error(
         'AiChatModule.forRoot() or forRootAsync() must be called before attachWebSockets()',
@@ -119,13 +119,14 @@ export class AiChatModule {
       );
     }
 
+    const { WebSocketServer } = await loadWs();
     const httpServer = app.getHttpServer();
     const wss = new WebSocketServer({ noServer: true });
     const handleSpeechStream = createSpeechStreamHandler(configService);
 
     httpServer.on('upgrade', (req: IncomingMessage, socket: import('stream').Duplex, head: Buffer) => {
       if (req.url?.startsWith('/api/ai/speech-stream')) {
-        wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.handleUpgrade(req, socket, head, (ws: any) => {
           handleSpeechStream(ws, req);
         });
       } else {

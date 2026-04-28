@@ -26,6 +26,7 @@ type CommandName =
   | 'generate-skills'
   | 'generate-mcp-server'
   | 'generate-auto'
+  | 'install-skills'
   | 'validate-tools'
   | 'coverage'
   | 'scaffold'
@@ -55,6 +56,7 @@ function parseCommand(args: string[]): { command: CommandName; rest: string[] } 
     'generate-skills',
     'generate-mcp-server',
     'generate-auto',
+    'install-skills',
     'validate-tools',
     'coverage',
     'scaffold',
@@ -75,6 +77,7 @@ function parseCommand(args: string[]): { command: CommandName; rest: string[] } 
         `  generate-skills       Generate agent skill files (Claude Code / Codex) [--sync] [--remote]\n` +
         `  generate-mcp-server   Generate MCP server project from tool definitions [--sync] [--remote]\n` +
         `  generate-auto         Auto-detect best output format and generate\n` +
+        `  install-skills        Install bundled agent skills (default: ./.claude/skills) [-g/--global ~/.claude/skills] [--target <dir>] [--stack nextjs|nestjs|nextjs+nestjs|all] [--symlink] [--force] [--dry-run]\n` +
         `  validate-tools        Validate AI tool configuration\n` +
         `  coverage              Check AI tool coverage\n` +
         `  scaffold              Scaffold ai-tool.ts from route.ts\n` +
@@ -478,6 +481,32 @@ export async function runCli(args: string[]): Promise<void> {
     const { checkUpgrade } = await import('./commands/check-upgrade.js');
     const fromVersion = getFlagValue(rest, '--from-version');
     await checkUpgrade({ rootDir, fromVersion });
+    return;
+  }
+
+  if (command === 'install-skills') {
+    const { installSkills } = await import('./commands/install-skills.js');
+    const target = getFlagValue(rest, '--target');
+    const stackRaw = getFlagValue(rest, '--stack') ?? 'all';
+    const validStacks = ['nextjs', 'nestjs', 'nextjs+nestjs', 'all'] as const;
+    if (!(validStacks as readonly string[]).includes(stackRaw)) {
+      throw new Error(
+        `Invalid --stack value '${stackRaw}'. Use one of: ${validStacks.join(' | ')}.`,
+      );
+    }
+    const globalMode = hasFlag(rest, '--global') || hasFlag(rest, '-g');
+    const symlinkMode = hasFlag(rest, '--symlink');
+    const force = hasFlag(rest, '--force');
+    const dryRun = hasFlag(rest, '--dry-run');
+    await installSkills({
+      target,
+      global: globalMode,
+      stack: stackRaw as (typeof validStacks)[number],
+      symlink: symlinkMode,
+      force,
+      dryRun,
+      rootDir,
+    });
     return;
   }
 

@@ -4,6 +4,7 @@ import type { AiTriggerButtonProps } from '../types.js';
 import { CancelButton, StopButton } from './recording-controls.js';
 import { useDraggablePosition } from '../hooks/use-draggable-position.js';
 import { ChatContext } from '../provider/chat-context.js';
+import { loadWaveSurfer } from './wavesurfer-loader.js';
 
 // ---------------------------------------------------------------------------
 // Inline SVG icons (no lucide-react dependency)
@@ -187,12 +188,9 @@ function TriggerLiveWave() {
     let disposed = false;
     const cleanupRef = { current: () => {} };
 
-    // Lazy-load wavesurfer.js — only needed during recording
-    Promise.all([
-      import('wavesurfer.js').then((m) => m.default),
-      import('wavesurfer.js/dist/plugins/record.esm.js').then((m) => m.default),
-    ])
-      .then(([WaveSurfer, RecordPlugin]) => {
+    // Lazy-load the optional wavesurfer.js peer dep at runtime — see wavesurfer-loader.ts.
+    loadWaveSurfer()
+      .then(({ WaveSurfer, RecordPlugin }) => {
         if (disposed) return;
 
         const ws = WaveSurfer.create({

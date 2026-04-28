@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { RecordingBarProps } from '../types.js';
 import { CancelButton, StopButton } from './recording-controls.js';
+import { loadWaveSurfer } from './wavesurfer-loader.js';
 
 function joinClassNames(...values: Array<string | undefined>): string {
   return values.filter(Boolean).join(' ');
@@ -18,12 +19,9 @@ function LiveWave({ className }: { className?: string }) {
     let disposed = false;
     const cleanupRef = { current: () => {} };
 
-    // Lazy-load wavesurfer.js — only needed during recording
-    Promise.all([
-      import('wavesurfer.js').then((m) => m.default),
-      import('wavesurfer.js/dist/plugins/record.esm.js').then((m) => m.default),
-    ])
-      .then(([WaveSurfer, RecordPlugin]) => {
+    // Lazy-load the optional wavesurfer.js peer dep at runtime — see wavesurfer-loader.ts.
+    loadWaveSurfer()
+      .then(({ WaveSurfer, RecordPlugin }) => {
         if (disposed) return;
 
         const ws = WaveSurfer.create({
