@@ -394,7 +394,7 @@ async function defaultStreamHandler(
         },
       });
 
-      writer.merge(filterFallbackError(result.toUIMessageStream()));
+      writer.merge(result.toUIMessageStream());
       try {
         await result.response;
       } catch (error) {
@@ -415,7 +415,10 @@ async function defaultStreamHandler(
     },
   });
 
-  return createUIMessageStreamResponse({ stream });
+  // Wrap the outer stream so the filter sees BOTH the inner result chunks AND
+  // the error chunk that createUIMessageStream emits when execute() throws —
+  // the latter is where the duplicate "No output generated" event comes from.
+  return createUIMessageStreamResponse({ stream: filterFallbackError(stream) });
 }
 
 /**
