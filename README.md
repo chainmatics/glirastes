@@ -224,6 +224,43 @@ const registry = endpointToolsToRegistry(scan.tools);
 
 Done. AI chat is live, streaming, and your `list_tasks` tool is callable. Add more tools the same way — pick the style that matches your stack. See [NestJS with decorators](#nestjs-with-decorators) below for DTOs, `@AiParam`, and multi-controller scanning.
 
+### Setup notes
+
+#### Recommended `tsconfig.json` for consumers
+
+Glirastes ships ESM with subpath `exports`. Your tsconfig must support that:
+
+```jsonc
+{
+  "compilerOptions": {
+    "module": "node16",          // or "nodenext" / "esnext"
+    "moduleResolution": "node16", // or "nodenext" / "bundler"
+    "target": "ES2022",
+    "esModuleInterop": true,
+    "experimentalDecorators": true,    // NestJS only
+    "emitDecoratorMetadata": true      // NestJS only
+  }
+}
+```
+
+If you see `Cannot find module 'glirastes/server/nestjs'`, your `moduleResolution` is too old (legacy `"node"` does not understand `exports` maps).
+
+> **NestJS users on the default CommonJS template:** glirastes is published as ESM only. If your backend's `tsconfig` is `"module": "commonjs"`, you'll hit `TS1479: ECMAScript module cannot be imported with require`. Migrate the backend to `module: "node16"` / `"nodenext"` or follow https://github.com/chainmatics/glirastes/issues for dual-bundle progress.
+
+#### Which subpath do I import from?
+
+| Where the code runs | Import from |
+|---|---|
+| Anywhere (tool definitions, types, helpers) | `glirastes` |
+| Server-side core (registry helpers, pipeline) | `glirastes/server` |
+| Next.js App Router route handlers | `glirastes/server/nextjs` |
+| NestJS controllers / modules | `glirastes/server/nestjs` |
+| Test suite without LLM calls | `glirastes/server/testing` |
+| React components, client hooks | `glirastes/react` |
+| Vercel AI SDK chat widget | `glirastes/react/vercel` |
+| LangGraph chat widget | `glirastes/react/langgraph` |
+| Default chat panel CSS | `glirastes/react/styles.css` |
+
 <br/>
 
 ## Core Concepts
