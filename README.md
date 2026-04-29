@@ -14,7 +14,7 @@
   <a href="#core-concepts"><strong>Concepts</strong></a> ·
   <a href="#examples"><strong>Examples</strong></a> ·
   <a href="#advanced"><strong>Advanced</strong></a> ·
-  <a href="#scaling-up--codegen-workflow"><strong>Scaling up</strong></a> ·
+  <a href="#scaling-up--required-codegen-workflow-for-nextjs"><strong>Scaling up</strong></a> ·
   <a href="#cli"><strong>CLI</strong></a> ·
   <a href="#agent-skills"><strong>Skills</strong></a>
 </p>
@@ -245,6 +245,10 @@ const registry = endpointToolsToRegistry(scan.tools);
 </table>
 
 Done. AI chat is live, streaming, and your `list_tasks` tool is callable. Add more tools the same way — pick the style that matches your stack. See [NestJS with decorators](#nestjs-with-decorators) below for DTOs, `@AiParam`, and multi-controller scanning.
+
+> **One more step for Next.js once you have more than a handful of tools.** The manual `endpointToolsToRegistry([listTasks, …])` import list above stops scaling around 5–10 tools. Today's required pattern: write each tool in a co-located `*.ai-tool.ts` file and run the CLI codegen as a `predev` / `prebuild` hook to aggregate them into a generated registry your chat route imports. See [Scaling up — required codegen workflow for Next.js](#scaling-up--required-codegen-workflow-for-nextjs) below for the full setup. **NestJS users skip this entirely** — the runtime decorator scan handles aggregation automatically.
+>
+> *Coming in 0.4.0:* a `buildToolRegistry` helper backed by `import.meta.glob` / `require.context` that drops the codegen step for Next.js too. Track at [chainmatics/glirastes#issues](https://github.com/chainmatics/glirastes/issues).
 
 ### Setup notes
 
@@ -772,9 +776,13 @@ The voice button streams audio to your backend, which proxies it to a speech-to-
 
 <br/>
 
-## Scaling up — codegen workflow
+## Scaling up — required codegen workflow for Next.js
 
-Hand-importing 50 tool definitions into your chat route doesn't scale. The CLI generates a registry from co-located `*.ai-tool.ts` files so you can stay co-located while still wiring everything centrally.
+Hand-importing every tool definition into your chat route doesn't scale past a handful. **In Glirastes 0.3.x the canonical pattern for Next.js consumers is to run the CLI codegen as a build hook** — it generates a registry from co-located `*.ai-tool.ts` files. The chat route imports the generated registry instead of maintaining a manual import list.
+
+> NestJS users **skip this section entirely.** `AiChatModule.forRoot()` discovers `@AiTool`-decorated controllers at runtime via the NestJS `DiscoveryService` — no codegen step is ever needed.
+>
+> **Coming in 0.4.0:** a `buildToolRegistry` helper based on `import.meta.glob` / `require.context` will let Next.js consumers skip the codegen step too. Until then the steps below are required for any non-trivial Next.js app.
 
 ### 1. Bootstrap a tool from an existing route
 

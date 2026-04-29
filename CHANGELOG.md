@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-04-29
+
+### Changed
+
+- Documentation pass that makes the **CLI codegen step explicit as a
+  required part of the Next.js setup** for any non-trivial app. The
+  earlier framing implied codegen was only "for scaling up" — in
+  practice the manual `endpointToolsToRegistry([…])` import list breaks
+  down past a handful of tools, and codegen is the canonical wiring.
+  - README quickstart Step 4 now points readers at the codegen workflow
+    immediately after the demo manual-import example.
+  - The "Scaling up" section is renamed to **"Scaling up — required
+    codegen workflow for Next.js"** and explicitly states NestJS users
+    skip it (runtime DI scan handles aggregation).
+  - The `integrating-glirastes-nextjs` and `maintaining-glirastes-tools`
+    skills mirror the same framing so coding agents pick the codegen
+    path by default for non-trivial apps.
+- Forward-looking note in README and skills: a `buildToolRegistry`
+  helper based on `import.meta.glob` / `require.context` is planned
+  for **0.4.0** and will let Next.js consumers skip the codegen step.
+
+No code changes — patch-level docs release.
+
 ## [0.3.1] - 2026-04-28
 
 ### Added

@@ -129,7 +129,7 @@ Edit `description` (the LLM reads this to decide when to call the tool), refine 
 
 Two paths depending on tool count:
 
-### Few tools — manual import
+### Few tools (≤5) — manual import
 
 ```ts
 // src/app/api/chat/route.ts
@@ -145,9 +145,11 @@ export const POST = createAiChatHandler({
 });
 ```
 
-### Many tools — codegen pipeline
+OK as a starting point. The moment you go past a handful of tools, switch to the codegen pipeline below — manual maintenance of the import list breaks down fast.
 
-Add to `package.json`:
+### Production: codegen pipeline (required for non-trivial apps)
+
+In Glirastes 0.3.x **the canonical Next.js setup is to wire the codegen as a build hook**. Add to `package.json`:
 
 ```json
 {
@@ -162,6 +164,10 @@ Add to `package.json`:
   }
 }
 ```
+
+The `predev` and `prebuild` hooks regenerate the registry on every dev server start and CI build, so the generated files stay in sync with your `*.ai-tool.ts` source-of-truth. Without these hooks the chat route imports would point at stale generated output.
+
+> **Coming in 0.4.0:** `buildToolRegistry` based on `import.meta.glob` / `require.context` will let you skip the codegen step and the build hook entirely. Until then, the codegen pipeline is the supported pattern for any non-trivial Next.js app.
 
 Then import the generated registry instead of individual tools:
 
