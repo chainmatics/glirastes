@@ -242,9 +242,13 @@ const moduleMeta: Record<string, ModuleMeta> = {
 };
 ```
 
-## Codegen pipeline — scale to 50+ tools
+## Codegen pipeline — required for Next.js, not for NestJS
 
-Hand-importing every tool into the chat route doesn't scale. The CLI generates a registry from co-located `ai-tool.ts` files.
+Hand-importing every tool into the chat route doesn't scale past a handful. In Glirastes 0.3.x **Next.js consumers run the CLI codegen as a build hook** — the generated registry is the canonical wiring, the manual import list shown in the quickstart is only OK for tiny demos.
+
+> **NestJS users skip this entire section.** `AiChatModule.forRoot()` discovers `@AiTool`-decorated controllers at runtime via the NestJS `DiscoveryService`. There is no codegen step at all on the NestJS path — runtime DI scan is the equivalent.
+>
+> **Coming in 0.4.0:** a `buildToolRegistry` helper backed by `import.meta.glob` / `require.context` will let Next.js consumers also skip the codegen step. Until then the steps below describe the supported pattern.
 
 ### Recommended `package.json` scripts
 
