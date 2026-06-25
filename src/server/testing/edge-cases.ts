@@ -1,18 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import type { EdgeCaseTestOptions } from './types.js';
-
-interface ZodDef {
-  typeName: string;
-  checks?: Array<{ kind: string; value?: unknown }>;
-  type?: ZodSchema;
-  options?: ZodSchema[];
-  values?: unknown[];
-  innerType?: ZodSchema;
-  shape?: () => Record<string, ZodSchema>;
-}
+import {
+  getArrayElement,
+  getArrayMax,
+  getBaseType,
+  getEnumValues,
+  getObjectShape,
+  isOptional,
+  isUuidString,
+  unwrap,
+} from './zod-introspect.js';
 
 interface ZodSchema {
-  _def: ZodDef;
   safeParse: (input: unknown) => { success: boolean; error?: { issues: unknown[] } };
 }
 
@@ -122,62 +121,21 @@ export function runEdgeCaseTest(
  * Check if a shape has at least one field that would generate a test
  * (required field, enum, array with max, or string with UUID).
  */
-function hasTestableFields(shape: Record<string, ZodSchema>): boolean {
+function hasTestableFields(shape: Record<string, unknown>): boolean {
   for (const [, fieldSchema] of Object.entries(shape)) {
-    const optional = isOptional(fieldSchema);
-    if (!optional) return true; // Required field → generates "rejects missing" test
+    if (!isOptional(fieldSchema)) return true; // Required field → "rejects missing" test
 
     const inner = unwrap(fieldSchema);
-    const typeName = inner._def.typeName;
-    if (typeName === 'ZodEnum' && inner._def.values) return true;
-    if (typeName === 'ZodArray') {
-      const checks = inner._def.checks ?? [];
-      if (checks.some((c: { kind: string }) => c.kind === 'max')) return true;
-    }
-    if (typeName === 'ZodString') {
-      const checks = inner._def.checks ?? [];
-      if (checks.some((c: { kind: string }) => c.kind === 'uuid')) return true;
-    }
+    const type = getBaseType(inner);
+    if (type === 'enum' && getEnumValues(inner).length > 0) return true;
+    if (type === 'array' && getArrayMax(inner) !== null) return true;
+    if (type === 'string' && isUuidString(inner)) return true;
   }
   return false;
 }
 
-function getObjectShape(schema: ZodSchema): Record<string, ZodSchema> | null {
-  const def = schema._def;
-
-  if (def.typeName === 'ZodObject' && typeof def.shape === 'function') {
-    return def.shape();
-  }
-
-  // Unwrap ZodEffects (e.g. .refine(), .transform())
-  if (def.typeName === 'ZodEffects' && def.innerType) {
-    return getObjectShape(def.innerType);
-  }
-
-  return null;
-}
-
-function isOptional(schema: ZodSchema): boolean {
-  const name = schema._def.typeName;
-  return name === 'ZodOptional' || name === 'ZodNullable' || name === 'ZodDefault';
-}
-
-function unwrap(schema: ZodSchema): ZodSchema {
-  const name = schema._def.typeName;
-  if (
-    (name === 'ZodOptional' || name === 'ZodNullable' || name === 'ZodDefault') &&
-    schema._def.innerType
-  ) {
-    return unwrap(schema._def.innerType);
-  }
-  if (name === 'ZodEffects' && schema._def.innerType) {
-    return unwrap(schema._def.innerType);
-  }
-  return schema;
-}
-
 function generateShapeTests(
-  shape: Record<string, ZodSchema>,
+  shape: Record<string, unknown>,
   parentSchema: ZodSchema,
 ): void {
   // Build a valid base object with placeholder values
@@ -186,7 +144,7 @@ function generateShapeTests(
   for (const [fieldName, fieldSchema] of Object.entries(shape)) {
     const optional = isOptional(fieldSchema);
     const inner = unwrap(fieldSchema);
-    const typeName = inner._def.typeName;
+    const type = getBaseType(inner);
 
     // Required field: test missing
     if (!optional) {
@@ -199,9 +157,9 @@ function generateShapeTests(
     }
 
     // Enum: test each valid value + invalid
-    if (typeName === 'ZodEnum' && inner._def.values) {
-      const values = inner._def.values as string[];
-      for (const val of values) {
+    const enumValues = type === 'enum' ? getEnumValues(inner) : [];
+    if (enumValues.length > 0) {
+      for (const val of enumValues) {
         it(`accepts valid ${fieldName} enum: ${val}`, () => {
           const result = parentSchema.safeParse({ ...baseInput, [fieldName]: val });
           expect(result.success).toBe(true);
@@ -214,11 +172,9 @@ function generateShapeTests(
     }
 
     // Array with max: test at limit and over limit
-    if (typeName === 'ZodArray') {
-      const checks = inner._def.checks ?? [];
-      const maxCheck = checks.find((c: { kind: string }) => c.kind === 'max');
-      if (maxCheck && typeof maxCheck.value === 'number') {
-        const max = maxCheck.value as number;
+    if (type === 'array') {
+      const max = getArrayMax(inner);
+      if (max !== null) {
         const arrayFillValue = getArrayElementPlaceholder(inner);
         it(`accepts ${fieldName} at max(${max})`, () => {
           const result = parentSchema.safeParse({
@@ -238,70 +194,57 @@ function generateShapeTests(
     }
 
     // String with UUID check
-    if (typeName === 'ZodString') {
-      const checks = inner._def.checks ?? [];
-      const hasUuid = checks.some((c: { kind: string }) => c.kind === 'uuid');
-      if (hasUuid) {
-        it(`rejects invalid ${fieldName} UUID: "not-a-uuid"`, () => {
-          const result = parentSchema.safeParse({ ...baseInput, [fieldName]: 'not-a-uuid' });
-          expect(result.success).toBe(false);
-        });
-      }
+    if (type === 'string' && isUuidString(inner)) {
+      it(`rejects invalid ${fieldName} UUID: "not-a-uuid"`, () => {
+        const result = parentSchema.safeParse({ ...baseInput, [fieldName]: 'not-a-uuid' });
+        expect(result.success).toBe(false);
+      });
     }
   }
 }
 
-function getArrayElementPlaceholder(arraySchema: ZodSchema): unknown {
-  const elementSchema = arraySchema._def.type;
+function getArrayElementPlaceholder(arraySchema: unknown): unknown {
+  const elementSchema = getArrayElement(arraySchema);
   if (elementSchema) {
-    const elInner = unwrap(elementSchema);
-    const elType = elInner._def.typeName;
-    if (elType === 'ZodString') {
-      const elChecks = elInner._def.checks ?? [];
-      if (elChecks.some((c: { kind: string }) => c.kind === 'uuid')) {
-        return '00000000-0000-0000-0000-000000000000';
-      }
-      return 'test-id';
+    const elType = getBaseType(elementSchema);
+    if (elType === 'string') {
+      return isUuidString(elementSchema)
+        ? '00000000-0000-0000-0000-000000000000'
+        : 'test-id';
     }
-    if (elType === 'ZodNumber') return 1;
+    if (elType === 'number') return 1;
   }
   return 'test-id';
 }
 
-function buildMinimalValidInput(shape: Record<string, ZodSchema>): Record<string, unknown> {
+function buildMinimalValidInput(shape: Record<string, unknown>): Record<string, unknown> {
   const input: Record<string, unknown> = {};
   for (const [name, schema] of Object.entries(shape)) {
     if (isOptional(schema)) continue;
     const inner = unwrap(schema);
-    const typeName = inner._def.typeName;
+    const type = getBaseType(inner);
 
-    if (typeName === 'ZodString') {
-      const checks = inner._def.checks ?? [];
-      if (checks.some((c: { kind: string }) => c.kind === 'uuid')) {
-        input[name] = '00000000-0000-0000-0000-000000000000';
-      } else {
-        input[name] = 'test-value';
-      }
-    } else if (typeName === 'ZodNumber') {
+    if (type === 'string') {
+      input[name] = isUuidString(inner)
+        ? '00000000-0000-0000-0000-000000000000'
+        : 'test-value';
+    } else if (type === 'number') {
       input[name] = 1;
-    } else if (typeName === 'ZodBoolean') {
+    } else if (type === 'boolean') {
       input[name] = false;
-    } else if (typeName === 'ZodEnum' && inner._def.values) {
-      input[name] = (inner._def.values as string[])[0];
-    } else if (typeName === 'ZodArray') {
+    } else if (type === 'enum') {
+      const values = getEnumValues(inner);
+      input[name] = values.length > 0 ? values[0] : 'test';
+    } else if (type === 'array') {
       // Introspect array element type to generate valid placeholders
-      const elementSchema = inner._def.type;
+      const elementSchema = getArrayElement(inner);
       if (elementSchema) {
-        const elInner = unwrap(elementSchema);
-        const elType = elInner._def.typeName;
-        if (elType === 'ZodString') {
-          const elChecks = elInner._def.checks ?? [];
-          if (elChecks.some((c: { kind: string }) => c.kind === 'uuid')) {
-            input[name] = ['00000000-0000-0000-0000-000000000000'];
-          } else {
-            input[name] = ['test-id'];
-          }
-        } else if (elType === 'ZodNumber') {
+        const elType = getBaseType(elementSchema);
+        if (elType === 'string') {
+          input[name] = isUuidString(elementSchema)
+            ? ['00000000-0000-0000-0000-000000000000']
+            : ['test-id'];
+        } else if (elType === 'number') {
           input[name] = [1];
         } else {
           input[name] = ['test-id'];

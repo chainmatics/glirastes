@@ -122,7 +122,7 @@ export function createUiActionSchema(
     .object({
       type: z.literal('run-client-action'),
       actionId: z.string().min(1),
-      payload: z.record(z.unknown()).optional(),
+      payload: z.record(z.string(), z.unknown()).optional(),
     })
     .strict();
 
