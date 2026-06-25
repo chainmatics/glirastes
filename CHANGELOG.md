@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-25
+
+### Changed
+
+- **Upgraded Zod from v3 to v4** (`zod@^4`). The public schema-authoring API
+  is unchanged for consumers, but Zod 4 is now installed transitively — apps
+  that import `zod` directly alongside glirastes will resolve to Zod 4.
+  - Rewrote the internal Zod-introspection code that depended on Zod 3's
+    private representation (`_def.typeName`, `def.shape()`, `_def.checks`).
+    Most critically, `zodToCompactDescription()` (the `Returns: …` suffix
+    generator for AI tool descriptions) silently degraded to `"unknown"`
+    under Zod 4 — it now reads Zod 4's `_zod.def` correctly.
+  - Centralized all Zod-internals access for the test-suite generators
+    (`runEdgeCaseTest`, `runSchemaConsistencyTest`) into a single
+    `zod-introspect` module with full unit coverage, so a future Zod upgrade
+    fails loudly instead of generating empty test suites.
+  - `z.record(z.unknown())` updated to the Zod 4 two-argument form
+    `z.record(z.string(), z.unknown())`.
+
+### Added
+
+- Regression tests pinning `zodToCompactDescription` output and the Zod
+  introspection helpers, closing the silent-failure gap the upgrade exposed.
+
 ## [0.3.2] - 2026-04-29
 
 ### Changed
@@ -163,6 +187,7 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/chainmatics/glirastes/compare/v0.3.2...v0.4.0
 [0.2.1]: https://github.com/chainmatics/glirastes/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/chainmatics/glirastes/releases/tag/v0.2.0
