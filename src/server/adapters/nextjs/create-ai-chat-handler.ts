@@ -23,6 +23,11 @@ import {
 } from './context-helpers.js';
 import { prepareModelMessages, wrapToolsForVercelAi } from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
+import { PrincipalSchema } from '../../../contracts/index.js';
+import {
+  createManagedTurnGuard,
+  type ManagedTurnGuard,
+} from '../../../runtime/index.js';
 
 /**
  * Callback that the consumer provides to stream the AI response.
@@ -62,6 +67,8 @@ export interface StreamHandlerContext {
   pipelineResult?: PipelineResult;
   /** PII shield context for response de-anonymization */
   piiShield?: { shield: PiiShield; sessionId: string };
+  /** Pinned managed-local turn guard, present when managedRuntime is enabled. */
+  managedTurn?: ManagedTurnGuard;
 }
 
 /**
@@ -235,7 +242,18 @@ async function defaultStreamHandler(
   ctx: StreamHandlerContext,
   onFinish?: AiChatHandlerConfig['onFinish'],
 ): Promise<Response> {
-  const vercelTools = wrapToolsForVercelAi(ctx.tools);
+  const vercelTools = wrapToolsForVercelAi(
+    ctx.tools,
+    ctx.managedTurn
+      ? {
+          beforeToolCall: ctx.managedTurn.beforeToolCall,
+          afterToolCall: ctx.managedTurn.afterToolCall,
+          onToolError: ctx.managedTurn.onToolError,
+          resolveApproval: ctx.managedTurn.resolveApproval,
+          toolTimeoutMs: ctx.managedTurn.toolTimeoutMs,
+        }
+      : undefined,
+  );
   const modelMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
     { maxContextMessages: ctx.maxContextMessages },
@@ -440,6 +458,7 @@ async function defaultStreamHandler(
 export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   const {
     tools: staticTools,
+    managedRuntime,
     pipeline,
     followups,
 
@@ -553,9 +572,53 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // Build tool context
       const toolContext = buildToolContext(req, { locale });
       const requestStart = Date.now();
+      const turnId = deriveSessionId(messages);
+
+      let managedTurn: ManagedTurnGuard | undefined;
+      if (managedRuntime) {
+        const principalResult = PrincipalSchema.safeParse(
+          await managedRuntime.resolvePrincipal(req),
+        );
+        if (!principalResult.success) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized' }),
+            { status: 401, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        const snapshot = await managedRuntime.resolveTurnSnapshot({
+          request: req,
+          turnId,
+          principal: principalResult.data,
+        });
+        if (
+          snapshot.turnId !== turnId
+          || snapshot.principal.subjectId !== principalResult.data.subjectId
+          || snapshot.principal.tenantId !== principalResult.data.tenantId
+        ) {
+          return new Response(
+            JSON.stringify({ error: 'Turn snapshot identity mismatch' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        managedTurn = createManagedTurnGuard({
+          snapshot,
+          resolvePrincipal: async () => {
+            const current = PrincipalSchema.safeParse(
+              await managedRuntime.resolvePrincipal(req),
+            );
+            return current.success ? current.data : undefined;
+          },
+          loadRevocations: managedRuntime.loadRevocations
+            ? () => managedRuntime.loadRevocations!({ request: req, snapshot })
+            : undefined,
+          onBudgetSignal: managedRuntime.onBudgetSignal,
+        });
+      }
 
       // Derive session ID — stable per conversation turn (groups approval flows)
-      const sessionId = (onAudit || piiShield || telemetry) ? deriveSessionId(messages) : '';
+      const sessionId = (onAudit || piiShield || telemetry) ? turnId : '';
 
       const toolOptions: ToolToAiToolOptions = {
         uiActionSchema,
@@ -801,6 +864,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           modelTier: pipelineResult.model.modelId,
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
+          managedTurn,
         });
       }
 
@@ -924,6 +988,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         modelTier: routing?.modelTier,
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,
+        managedTurn,
       });
     } catch (error) {
       onError?.(error, req);

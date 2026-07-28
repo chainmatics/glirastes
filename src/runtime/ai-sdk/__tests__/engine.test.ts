@@ -99,4 +99,48 @@ describe('createAiSdkTools', () => {
 
     expect(tools.delete_task!.needsApproval).toBe(true);
   });
+
+  it('uses the pinned runtime approval resolver instead of source metadata', async () => {
+    const resolveApproval = vi.fn(async () => true);
+    const tools = createAiSdkTools({
+      tools: {
+        update_task: {
+          description: 'Update a task.',
+          parameters: z.object({ id: z.string() }),
+          needsApproval: false,
+          execute: async () => ({ success: true }),
+        },
+      },
+      resolveApproval,
+    });
+
+    await expect((tools.update_task!.needsApproval as (input: unknown) => Promise<boolean>)({
+      id: 'task-1',
+    })).resolves.toBe(true);
+    expect(resolveApproval).toHaveBeenCalledWith({
+      toolName: 'update_task',
+      input: { id: 'task-1' },
+    });
+  });
+
+  it('fails a tool that exceeds its local timeout', async () => {
+    vi.useFakeTimers();
+    const tools = createAiSdkTools({
+      tools: {
+        slow_tool: {
+          description: 'Never finishes.',
+          parameters: z.object({}),
+          execute: () => new Promise(() => {}),
+        },
+      },
+      toolTimeoutMs: 50,
+    });
+
+    const execution = tools.slow_tool!.execute!({}, {} as never);
+    const rejection = expect(execution).rejects.toThrow(/timed out.*50/i);
+    await vi.advanceTimersByTimeAsync(50);
+
+    await rejection;
+    vi.useRealTimers();
+  });
 });

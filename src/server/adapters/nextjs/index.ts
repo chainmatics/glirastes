@@ -42,4 +42,6 @@ export type {
   AiPipeline,
   FollowupsConfig,
   PipelineResult,
+  ManagedLocalRuntimeConfig,
+  ResolveTurnSnapshotContext,
 } from './types.js';

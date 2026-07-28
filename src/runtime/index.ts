@@ -14,6 +14,12 @@ export {
   type ExecutionUsage,
 } from './budget.js';
 export { createExecutionFingerprint } from './fingerprint.js';
+export {
+  createManagedTurnGuard,
+  type ManagedTurnBudgetSignal,
+  type ManagedTurnGuard,
+  type ManagedTurnGuardOptions,
+} from './managed-turn.js';
 export type {
   RuntimeEngine,
   RuntimeEngineEvent,

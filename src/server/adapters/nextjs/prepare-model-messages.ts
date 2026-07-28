@@ -15,7 +15,10 @@ import {
   pruneMessages,
   type UIMessage,
 } from 'ai';
-import { createAiSdkTools } from '../../../runtime/ai-sdk/engine.js';
+import {
+  createAiSdkTools,
+  type AiSdkToolHooks,
+} from '../../../runtime/ai-sdk/engine.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 
 // ---------------------------------------------------------------------------
@@ -144,8 +147,10 @@ interface SdkAiTool {
  */
 export function wrapToolsForVercelAi(
   sdkTools: Record<string, unknown>,
+  hooks?: AiSdkToolHooks,
 ): Record<string, unknown> {
   return createAiSdkTools({
     tools: sdkTools as Record<string, SdkAiTool>,
+    ...hooks,
   });
 }

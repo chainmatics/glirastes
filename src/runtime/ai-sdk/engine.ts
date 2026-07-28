@@ -26,6 +26,8 @@ export interface AiSdkToolHooks {
   beforeToolCall?: (call: AiSdkToolCall) => void | Promise<void>;
   afterToolCall?: (call: AiSdkToolSuccess) => void | Promise<void>;
   onToolError?: (call: AiSdkToolFailure) => void | Promise<void>;
+  resolveApproval?: (call: AiSdkToolCall) => boolean | Promise<boolean>;
+  toolTimeoutMs?: number;
 }
 
 export interface AiSdkWrappedTool {
@@ -46,18 +48,24 @@ export function createAiSdkTools(
 
   for (const [toolName, rawTool] of Object.entries(options.tools)) {
     const source = rawTool as AiSdkSourceTool;
+    const needsApproval = options.resolveApproval
+      ? (input: unknown) => options.resolveApproval!({ toolName, input })
+      : source.needsApproval;
     wrapped[toolName] = tool({
       description: source.description,
       // The existing Glirastes tool registry stores Zod schemas under
       // `parameters`; zodSchema bridges them into AI SDK 6.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       inputSchema: zodSchema(source.parameters as any),
-      needsApproval: source.needsApproval as Parameters<typeof tool>[0]['needsApproval'],
+      needsApproval: needsApproval as Parameters<typeof tool>[0]['needsApproval'],
       execute: async (input: unknown, executionOptions: unknown) => {
         await options.beforeToolCall?.({ toolName, input });
         const startedAt = now();
         try {
-          const result = await source.execute(input, executionOptions);
+          const execution = Promise.resolve(source.execute(input, executionOptions));
+          const result = options.toolTimeoutMs === undefined
+            ? await execution
+            : await withTimeout(execution, options.toolTimeoutMs, toolName);
           await options.afterToolCall?.({
             toolName,
             input,
@@ -81,4 +89,28 @@ export function createAiSdkTools(
   }
 
   return wrapped;
+}
+
+async function withTimeout<T>(
+  execution: Promise<T>,
+  timeoutMs: number,
+  toolName: string,
+): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError('toolTimeoutMs must be a positive finite number');
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      execution,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`Tool "${toolName}" timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }

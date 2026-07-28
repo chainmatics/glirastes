@@ -16,6 +16,14 @@ import type {
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import type { InternalApiCaller } from '../../core/index.js';
+import type {
+  Principal,
+  SecurityRevocation,
+} from '../../../contracts/index.js';
+import type {
+  ManagedTurnBudgetSignal,
+  TurnSnapshot,
+} from '../../../runtime/index.js';
 
 // ============================================================================
 // withAiTool - Route Wrapper Types
@@ -76,6 +84,43 @@ export type IntentRouter = (
 
 export type StepLimitSource = 'explicit' | 'module' | 'safety';
 
+export interface ResolveTurnSnapshotContext {
+  request: Request;
+  turnId: string;
+  principal: Principal;
+}
+
+export interface ManagedLocalRuntimeConfig {
+  /**
+   * Resolve identity exclusively from a verified server-side session.
+   * Returning undefined fails closed before model or tool processing.
+   */
+  resolvePrincipal: (
+    request: Request,
+  ) => Principal | undefined | Promise<Principal | undefined>;
+
+  /**
+   * Return the immutable snapshot pinned for this turn. Approval
+   * continuations must return the same snapshot for the same turnId.
+   */
+  resolveTurnSnapshot: (
+    context: ResolveTurnSnapshotContext,
+  ) => TurnSnapshot | Promise<TurnSnapshot>;
+
+  /** Load current signed security revocations before every tool call. */
+  loadRevocations?: (
+    context: {
+      request: Request;
+      snapshot: TurnSnapshot;
+    },
+  ) => ReadonlyArray<SecurityRevocation> | Promise<ReadonlyArray<SecurityRevocation>>;
+
+  /** Receives content-free local budget state transitions. */
+  onBudgetSignal?: (
+    signal: ManagedTurnBudgetSignal,
+  ) => void | Promise<void>;
+}
+
 export interface StepUsage {
   inputTokens: number;
   outputTokens: number;
@@ -117,6 +162,12 @@ export interface AiChatHandlerConfig {
    * Alternative to loadTools — when both are provided, `tools` takes precedence.
    */
   tools?: ToolRegistry;
+
+  /**
+   * Managed-local runtime boundary. When configured, the handler verifies a
+   * server principal, pins one turn snapshot, and guards every tool locally.
+   */
+  managedRuntime?: ManagedLocalRuntimeConfig;
 
   /**
    * Dynamic tool loader. Used in legacy mode (without pipeline).
