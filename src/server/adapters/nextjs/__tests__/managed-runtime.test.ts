@@ -93,6 +93,42 @@ describe('createAiChatHandler managed runtime', () => {
     expect(streamHandler).toHaveBeenCalledTimes(1);
   });
 
+  it('loads dynamic tools from the snapshot pinned for this turn', async () => {
+    let loadedSnapshot: unknown;
+    const loadTools = vi.fn((context) => {
+      loadedSnapshot = (
+        context as typeof context & { turnSnapshot?: unknown }
+      ).turnSnapshot;
+      return tools;
+    });
+    const handler = createAiChatHandler({
+      loadTools,
+      model: {},
+      systemPrompt: 'Assistant',
+      managedRuntime: {
+        resolvePrincipal: async () => principal,
+        resolveTurnSnapshot: async ({ turnId }) => createTurnSnapshot({
+          turnId,
+          agentRevision,
+          manifestRevision,
+          policyRevision,
+          principal,
+          localLimits,
+        }),
+      },
+      streamHandler: async () => new Response('ok'),
+    });
+
+    const response = await handler(request());
+
+    expect(response.status).toBe(200);
+    expect(loadTools).toHaveBeenCalledTimes(1);
+    expect(loadedSnapshot).toMatchObject({
+      turnId: 'ai-message-1',
+      manifestRevision: { revisionId: manifestRevision.revisionId },
+    });
+  });
+
   it('rejects a snapshot pinned for a different subject', async () => {
     const handler = createAiChatHandler({
       tools,

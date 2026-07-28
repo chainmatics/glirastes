@@ -20,6 +20,10 @@ export {
   type ManagedTurnGuard,
   type ManagedTurnGuardOptions,
 } from './managed-turn.js';
+export {
+  materializeManifestToolRegistry,
+  type LocalToolBinding,
+} from './local-tool-bindings.js';
 export type {
   RuntimeEngine,
   RuntimeEngineEvent,

@@ -55,7 +55,11 @@ export type AiToolRouteHandler = ((
 // ============================================================================
 
 export type LoadTools = (
-  context: ToolContext & { callEndpoint: InternalApiCaller },
+  context: ToolContext & {
+    callEndpoint: InternalApiCaller;
+    /** Immutable signed revision set pinned before dynamic tools are loaded. */
+    turnSnapshot?: TurnSnapshot;
+  },
 ) => ToolRegistry | Promise<ToolRegistry>;
 
 export interface GuardrailResult {

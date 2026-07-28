@@ -659,7 +659,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
         // Create callEndpoint for endpoint tools (needed regardless of static/dynamic)
         const callEndpoint = createInternalApiCallerFromRequest(req);
-        const endpointToolContext = { ...toolContext, callEndpoint };
+        const endpointToolContext = {
+          ...toolContext,
+          callEndpoint,
+          ...(managedTurn
+            ? { turnSnapshot: managedTurn.snapshot }
+            : {}),
+        };
 
         // Get tools (static or dynamic)
         let registry: ToolRegistry;
@@ -889,7 +895,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       // Create callEndpoint for endpoint tools (needed regardless of static/dynamic)
       const callEndpoint = createInternalApiCallerFromRequest(req);
-      const endpointToolContext = { ...toolContext, callEndpoint };
+      const endpointToolContext = {
+        ...toolContext,
+        callEndpoint,
+        ...(managedTurn
+          ? { turnSnapshot: managedTurn.snapshot }
+          : {}),
+      };
 
       // Load tools
       let registry: ToolRegistry;
