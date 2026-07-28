@@ -45,8 +45,6 @@ npm install glirastes @ai-sdk/openai
 # React UI peers (declared as optional peerDeps in glirastes 0.3.1+)
 npm install @ai-sdk/react react-markdown
 
-# Optional: voice input with live waveform
-npm install wavesurfer.js
 ```
 
 `@ai-sdk/openai` is the OpenAI provider. Swap for `@ai-sdk/anthropic`, `@ai-sdk/mistral`, etc. — Glirastes accepts any AI SDK v6 provider.
@@ -294,7 +292,7 @@ For the full deep-dive, see [maintaining-glirastes-tools](../maintaining-glirast
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Cannot resolve '@ai-sdk/react'` at build | Optional peer not installed | `npm install @ai-sdk/react react-markdown` |
-| `Cannot resolve 'wavesurfer.js/dist/plugins/record.esm.js'` | Voice input components reachable in bundle without peer | Either install `wavesurfer.js` or set `showMic={false}` on `<VercelAiChat />` |
+| Voice level indicator stays static | The authoritative recording stream is not passed to a custom trigger | Pass the `stream` returned by the STT hook; never start a second microphone capture for visualization |
 | Chat widget unstyled | `styles.css` not imported | Add `import 'glirastes/react/styles.css'` to root layout |
 | Tool never fires | `path` mismatches the actual route | Endpoint tool's `path` must match the URL the route handler serves exactly |
 | `OPENAI_API_KEY is not configured` | Env var missing | `.env.local` + restart dev server (Next caches env at startup) |

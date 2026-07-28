@@ -122,12 +122,7 @@ npm install glirastes @ai-sdk/react react-markdown
 
 The Vercel AI SDK (`ai`) is bundled. `@ai-sdk/react` and `react-markdown` are declared as **optional peer dependencies** so backend-only consumers don't have a phantom React tree in their `node_modules`. Install them yourself when you use any `glirastes/react/*` subpath.
 
-> **Requirements:** Node.js `>=20`. The React chat UI needs `react` and `react-dom` `^19` — Next.js apps already have these.
->
-> **Optional** — only if you want voice input with a live waveform:
-> ```bash
-> npm install wavesurfer.js
-> ```
+> **Requirements:** Node.js `>=20`. The React chat UI needs `react` and `react-dom` `^19` — Next.js apps already have these. Voice input and its live level indicator require no additional frontend package.
 
 ### 2. Define a tool
 
@@ -770,9 +765,7 @@ import { VoiceInputButton } from 'glirastes/react';
 />
 ```
 
-The voice button streams audio to your backend, which proxies it to a speech-to-text provider (Deepgram, etc.). The API key never leaves the server.
-
-> Install `wavesurfer.js` (`npm install wavesurfer.js`) to get the live waveform visualization during recording. Without it the button still works — it just falls back to a static recording indicator.
+The voice button streams audio to your backend, which proxies it to a speech-to-text provider (Deepgram, etc.). The API key never leaves the server. The live level indicator consumes the same authoritative microphone stream as transcription and never opens a second stream.
 
 <br/>
 

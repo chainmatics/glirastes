@@ -57,7 +57,7 @@ export function VoiceInputButton({
 
   const handleClick = useCallback(async () => {
     if (isRecording) {
-      const finalText = stopRecording();
+      const finalText = await stopRecording();
       if (finalText.trim()) {
         onTranscript(finalText);
       }

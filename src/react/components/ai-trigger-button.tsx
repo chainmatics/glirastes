@@ -1,10 +1,10 @@
-import { useContext, useEffect, useState, useRef, type ReactElement, type CSSProperties } from 'react';
+import { useContext, useEffect, useState, type ReactElement, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { AiTriggerButtonProps } from '../types.js';
 import { CancelButton, StopButton } from './recording-controls.js';
 import { useDraggablePosition } from '../hooks/use-draggable-position.js';
 import { ChatContext } from '../provider/chat-context.js';
-import { loadWaveSurfer } from './wavesurfer-loader.js';
+import { createStreamAnalyser } from '../stt/waveform.js';
 
 // ---------------------------------------------------------------------------
 // Inline SVG icons (no lucide-react dependency)
@@ -160,7 +160,7 @@ function injectStyles() {
 }
 
 // ---------------------------------------------------------------------------
-// ConnectingDots — shown while connecting or as wavesurfer fallback
+// ConnectingDots — shown while the speech provider connects.
 // ---------------------------------------------------------------------------
 
 function ConnectingDots() {
@@ -174,74 +174,52 @@ function ConnectingDots() {
 }
 
 // ---------------------------------------------------------------------------
-// TriggerLiveWave — real-time mic waveform via WaveSurfer.js
+// TriggerLiveWave — visualizes the STT controller's authoritative stream.
 // ---------------------------------------------------------------------------
 
-function TriggerLiveWave() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+function TriggerLiveWave({ stream }: { stream: MediaStream | null | undefined }) {
+  const [level, setLevel] = useState(0);
 
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
+    if (!stream) return;
     let disposed = false;
-    const cleanupRef = { current: () => {} };
-
-    // Lazy-load the optional wavesurfer.js peer dep at runtime — see wavesurfer-loader.ts.
-    loadWaveSurfer()
-      .then(({ WaveSurfer, RecordPlugin }) => {
-        if (disposed) return;
-
-        const ws = WaveSurfer.create({
-          container: el,
-          waveColor: '#000000',
-          height: 24,
-          barWidth: 2,
-          barGap: 1,
-          barRadius: 2,
-          cursorWidth: 0,
-          interact: false,
-          normalize: true,
-        });
-
-        const record = ws.registerPlugin(
-          RecordPlugin.create({
-            scrollingWaveform: true,
-            scrollingWaveformWindow: 5,
-            renderRecordedAudio: false,
-          }),
-        );
-
-        record.startMic().catch((err: unknown) => {
-          console.warn('[AiTriggerButton] Failed to start waveform mic:', err);
-        });
-
-        cleanupRef.current = () => {
-          record.stopMic();
-          record.destroy();
-          ws.destroy();
-        };
-      })
-      .catch((err) => {
-        console.warn(
-          '[AiTriggerButton] wavesurfer.js is not installed — waveform visualization disabled. Install it with: npm install wavesurfer.js',
-          err,
-        );
-        if (!disposed) setLoadFailed(true);
-      });
+    let frame = 0;
+    let analyser: ReturnType<typeof createStreamAnalyser> | null = null;
+    try {
+      analyser = createStreamAnalyser(stream);
+      const draw = () => {
+        if (disposed || !analyser) return;
+        setLevel(analyser.readLevel());
+        frame = requestAnimationFrame(draw);
+      };
+      frame = requestAnimationFrame(draw);
+    } catch {
+      setLevel(0);
+    }
 
     return () => {
       disposed = true;
-      cleanupRef.current();
+      cancelAnimationFrame(frame);
+      void analyser?.close();
     };
-  }, []);
+  }, [stream]);
 
-  if (loadFailed) {
-    return <ConnectingDots />;
-  }
-
-  return <div ref={containerRef} data-element="waveform" style={{ flex: 1, minWidth: 0 }} />;
+  const heights = [0.45, 0.75, 1, 0.65, 0.85, 0.5].map(
+    (weight) => Math.max(4, Math.round(4 + level * weight * 20)),
+  );
+  return (
+    <div
+      data-element="waveform"
+      style={{ flex: 1, minWidth: 0, display: 'flex', gap: 3, alignItems: 'center', justifyContent: 'center' }}
+    >
+      {heights.map((height, index) => (
+        <span
+          key={index}
+          style={{ width: 3, height, borderRadius: 2, background: 'currentColor' }}
+        />
+      ))}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +231,8 @@ export function AiTriggerButton({
   onClickMic,
   isRecording,
   isConnecting,
+  recordingStream,
+  recordingTranscript,
   onStopRecording,
   onCancelRecording,
   portal = true,
@@ -318,7 +298,19 @@ export function AiTriggerButton({
           <CancelButton onClick={onCancelRecording!} ariaLabel={cancelAriaLabel} />
 
           <div style={WAVEFORM_CONTAINER_STYLE} data-element="waveform-container">
-            {isConnecting ? <ConnectingDots /> : <TriggerLiveWave />}
+            {isConnecting ? (
+              <ConnectingDots />
+            ) : (
+              <>
+                <TriggerLiveWave stream={recordingStream} />
+                <span
+                  aria-live="polite"
+                  style={{ flex: 2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {recordingTranscript || '…'}
+                </span>
+              </>
+            )}
           </div>
 
           <StopButton onClick={onStopRecording!} ariaLabel={stopAriaLabel} />

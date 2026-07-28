@@ -1,78 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { RecordingBarProps } from '../types.js';
 import { CancelButton, StopButton } from './recording-controls.js';
-import { loadWaveSurfer } from './wavesurfer-loader.js';
 
 function joinClassNames(...values: Array<string | undefined>): string {
   return values.filter(Boolean).join(' ');
-}
-
-function LiveWave({ className }: { className?: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    let disposed = false;
-    const cleanupRef = { current: () => {} };
-
-    // Lazy-load the optional wavesurfer.js peer dep at runtime — see wavesurfer-loader.ts.
-    loadWaveSurfer()
-      .then(({ WaveSurfer, RecordPlugin }) => {
-        if (disposed) return;
-
-        const ws = WaveSurfer.create({
-          container,
-          waveColor: '#000000',
-          height: 28,
-          barWidth: 2,
-          barGap: 1,
-          barRadius: 2,
-          cursorWidth: 0,
-          interact: false,
-          normalize: true,
-        });
-
-        const record = ws.registerPlugin(
-          RecordPlugin.create({
-            scrollingWaveform: true,
-            scrollingWaveformWindow: 5,
-            renderRecordedAudio: false,
-          }),
-        ) as { startMic: () => Promise<MediaStream>; stopMic: () => void; destroy: () => void };
-
-        void record.startMic().catch(() => {
-          // Ignore: mic permissions may be handled by the transcription hook.
-        });
-
-        cleanupRef.current = () => {
-          record.stopMic();
-          record.destroy();
-          ws.destroy();
-        };
-      })
-      .catch((err) => {
-        console.warn(
-          '[RecordingBar] wavesurfer.js is not installed — waveform visualization disabled. Install it with: npm install wavesurfer.js',
-          err,
-        );
-        if (!disposed) setLoadFailed(true);
-      });
-
-    return () => {
-      disposed = true;
-      cleanupRef.current();
-    };
-  }, []);
-
-  if (loadFailed) {
-    return <LoadingDots />;
-  }
-
-  return <div ref={containerRef} className={joinClassNames('glirastes-recording-wave', className)} />;
 }
 
 function LoadingDots() {
@@ -87,6 +19,7 @@ function LoadingDots() {
 
 function RecordingBarInner({
   isConnecting,
+  transcript,
   onCancel,
   onStop,
   variant,
@@ -105,7 +38,13 @@ function RecordingBarInner({
       <CancelButton onClick={handleCancel} ariaLabel="Aufnahme abbrechen" title="Aufnahme abbrechen" />
 
       <div data-part="wave-container" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
-        {isConnecting ? <LoadingDots /> : <LiveWave />}
+        {isConnecting ? (
+          <LoadingDots />
+        ) : (
+          <span data-part="live-transcript" aria-live="polite">
+            {transcript || '…'}
+          </span>
+        )}
       </div>
 
       <StopButton onClick={handleStop} ariaLabel="Aufnahme stoppen" title="Aufnahme stoppen" />

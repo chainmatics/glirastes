@@ -186,7 +186,6 @@
     "react-dom": "^19",
     "@ai-sdk/react": "^3.0.0",
     "react-markdown": "^10.1.0",
-    "wavesurfer.js": "^7",
     "@nestjs/common": "^10 || ^11",
     "@nestjs/core": "^10 || ^11",
     "@nestjs/config": "^3 || ^4",
@@ -210,9 +209,6 @@
       "optional": true
     },
     "react-markdown": {
-      "optional": true
-    },
-    "wavesurfer.js": {
       "optional": true
     },
     "@nestjs/common": {
@@ -263,7 +259,6 @@
     "react-dom": "^19.0.0",
     "@ai-sdk/react": "^3.0.0",
     "react-markdown": "^10.1.0",
-    "wavesurfer.js": "^7.12.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/config": "^4.0.0",

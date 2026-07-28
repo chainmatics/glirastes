@@ -95,7 +95,7 @@ Highlights:
 | `headers` | Function returning request headers — refreshed on every request, ideal for JWT |
 | `bodyExtras` | Extra fields merged into the chat request body — tenant ID, locale, etc. |
 | `shortcut` | Keyboard shortcut to toggle the chat (e.g. `⌘K`) |
-| `showMic` | Voice input toggle. Set `false` to drop `wavesurfer.js` from the bundle entirely |
+| `showMic` | Voice input toggle. Set `false` to omit the microphone control |
 | `sessions` | Multi-session history — switches between conversations, persists across reloads |
 | `autoResumeOnApproval` | After an approval card is approved, the LLM continues without manual nudge |
 
@@ -267,16 +267,10 @@ For deeper customization, swap the default `glirastes/react/styles.css` for your
 The trigger button has a built-in mic mode. When the user holds the mic:
 
 1. Browser captures audio
-2. `wavesurfer.js` renders a live waveform
+2. The built-in level indicator renders from that same authoritative stream
 3. Audio frames stream to your backend's `/api/ai/speech-stream` WebSocket
 4. Backend proxies to Deepgram, streams transcriptions back
 5. On release, the final transcript becomes the chat input
-
-**Frontend setup:**
-
-```bash
-npm install wavesurfer.js
-```
 
 ```tsx
 <VercelAiChat
@@ -291,19 +285,7 @@ npm install wavesurfer.js
 
 **Backend setup:** see [integrating-glirastes-nestjs](../integrating-glirastes-nestjs/SKILL.md) → "Speech-to-text WebSocket". For Next.js standalone, you need a separate WebSocket server — Next.js Route Handlers don't support WS natively.
 
-If you don't want voice input at all, set `showMic={false}` and skip installing `wavesurfer.js`. The components are tree-shaken.
-
-### Content Security Policy and `wavesurfer.js`
-
-The optional-peer loader for `wavesurfer.js` uses `new Function('s', 'return import(s)')` to hide the specifier from bundlers (so apps that don't install the peer don't fail to build). This requires `script-src 'unsafe-eval'` in your CSP.
-
-If your deployment forbids `unsafe-eval` **and** you want voice input, install `wavesurfer.js` unconditionally:
-
-```bash
-npm install wavesurfer.js
-```
-
-With the peer present at install time, the bundler resolves the static path successfully and the runtime trick is bypassed entirely. Strict-CSP environments without voice can stay on `showMic={false}` and never need `wavesurfer.js`.
+If you don't want voice input, set `showMic={false}`. Voice input has no optional waveform dependency and requires no `unsafe-eval` CSP exception.
 
 ## ChatWindow — portal, draggable, resizable
 
@@ -369,7 +351,7 @@ No setup beyond having the key — the timeline auto-renders inside the message 
 | Approval card not shown for a mutation | Tool sets `needsApproval: false` explicitly | Either remove the override or set `autoApproveTools` per-user |
 | Approval card shown for a benign GET | Tool overrides `needsApproval: true` | GETs default to `false` — drop the override |
 | Multiple chat instances on the page | Mounted `<VercelAiChat />` more than once | Render exactly one in your root layout |
-| Bundle includes `wavesurfer.js` despite `showMic={false}` | Direct import of voice components elsewhere | Remove any `import` from `glirastes/react/components/recording-bar` etc. |
+| Browser requests microphone twice | A custom visualization starts its own capture | Pass the controller-owned stream to the visualization and remove every additional `getUserMedia` call |
 
 ## What this skill does NOT cover
 

@@ -27,8 +27,10 @@ export function VoiceInputAddon({
   const {
     isRecording,
     isConnecting,
+    displayTranscript,
     startRecording,
     stopRecording,
+    cancelRecording,
   } = useDeepgramTranscription({
     language,
     baseUrl,
@@ -36,8 +38,8 @@ export function VoiceInputAddon({
     onError,
   });
 
-  const stopAndSubmit = useCallback(() => {
-    const transcript = stopRecording().trim();
+  const stopAndSubmit = useCallback(async () => {
+    const transcript = (await stopRecording()).trim();
     if (transcript.length > 0) {
       onTranscript(transcript);
     }
@@ -45,7 +47,7 @@ export function VoiceInputAddon({
 
   const handleClick = useCallback(async () => {
     if (isRecording) {
-      stopAndSubmit();
+      await stopAndSubmit();
       return;
     }
     await startRecording();
@@ -65,11 +67,12 @@ export function VoiceInputAddon({
         {isRecording ? 'stop' : 'mic'}
       </button>
 
-      {showRecordingBar && isRecording && (
+      {showRecordingBar && (isConnecting || isRecording) && (
         <RecordingBar
           isConnecting={isConnecting}
-          onCancel={stopRecording}
-          onStop={stopAndSubmit}
+          transcript={displayTranscript}
+          onCancel={() => { void cancelRecording(); }}
+          onStop={() => { void stopAndSubmit(); }}
           variant={recordingBarVariant}
         />
       )}

@@ -298,7 +298,7 @@ To enable live voice transcription via Deepgram:
 
 3. Install `ws`: `npm install ws` (only needed for this feature).
 
-4. Frontend: pass `showMic={true}` and install `wavesurfer.js` for the live waveform UI.
+4. Frontend: pass `showMic={true}`. The live level indicator is built in and consumes the transcription stream, so no second microphone capture or waveform dependency is needed.
 
 The WebSocket lives at `/api/ai/speech-stream`. The browser sends audio frames; the SDK proxies them to Deepgram with your `DEEPGRAM_API_KEY` server-side and streams transcriptions back.
 

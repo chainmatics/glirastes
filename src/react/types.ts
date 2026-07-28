@@ -99,12 +99,18 @@ export interface UseDeepgramTranscriptionOptions {
 }
 
 export interface UseDeepgramTranscriptionReturn {
+  phase: import('./stt/controller.js').SttSessionPhase;
   isRecording: boolean;
   isConnecting: boolean;
   error: string | null;
   transcript: string;
-  startRecording: () => Promise<void>;
-  stopRecording: () => string;
+  interimTranscript: string;
+  displayTranscript: string;
+  stream: MediaStream | null;
+  startRecording: (previousDraft?: string) => Promise<void>;
+  stopRecording: () => Promise<string>;
+  cancelRecording: () => Promise<string>;
+  retry: () => Promise<void>;
 }
 
 export interface VoiceInputButtonProps {
@@ -120,6 +126,7 @@ export interface VoiceInputButtonProps {
 
 export interface RecordingBarProps {
   isConnecting: boolean;
+  transcript?: string;
   onCancel: () => void;
   onStop: () => void;
   variant: 'trigger' | 'inline';
@@ -892,6 +899,10 @@ export interface AiTriggerButtonProps {
   isRecording?: boolean;
   /** Whether voice connection is being established */
   isConnecting?: boolean;
+  /** The single authoritative stream owned by the STT controller */
+  recordingStream?: MediaStream | null;
+  /** Live final plus interim transcript shown while recording */
+  recordingTranscript?: string;
   /** Called when user stops recording (red circle) */
   onStopRecording?: () => void;
   /** Called when user cancels recording (X) */

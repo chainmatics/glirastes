@@ -61,8 +61,6 @@ npm install glirastes @ai-sdk/openai
 ```bash
 cd frontend
 npm install glirastes @ai-sdk/react react-markdown
-# Optional: voice input UI
-# npm install wavesurfer.js
 ```
 
 The frontend gets the React UI peers but not `@ai-sdk/openai` — the model never runs in the browser. The backend gets the model provider.
@@ -324,7 +322,7 @@ If the request fails with 401: the JWT isn't reaching the backend. Check `header
 
 ## Step 10 — Optional: speech-to-text
 
-Add `features: { speechToText: true }` to `AiChatModule.forRoot`, install `ws` on the backend, set `DEEPGRAM_API_KEY`, and call `await AiChatModule.attachWebSockets(app)` after `app.listen()`. Frontend: `showMic={true}` on `<VercelAiChat />` and install `wavesurfer.js`. Full instructions in [integrating-glirastes-nestjs](../integrating-glirastes-nestjs/SKILL.md) → "Speech-to-text WebSocket".
+Add `features: { speechToText: true }` to `AiChatModule.forRoot`, install `ws` on the backend, set `DEEPGRAM_API_KEY`, and call `await AiChatModule.attachWebSockets(app)` after `app.listen()`. Frontend: set `showMic={true}` on `<VercelAiChat />`. Full instructions in [integrating-glirastes-nestjs](../integrating-glirastes-nestjs/SKILL.md) → "Speech-to-text WebSocket".
 
 ## Architectural decisions made
 
@@ -333,7 +331,6 @@ Add `features: { speechToText: true }` to `AiChatModule.forRoot`, install `ws` o
 | Chat route on the backend, not Next.js Route Handler | Tools are NestJS controllers — annotating them in place avoids a duplicate code path. JWT guard already exists. No HTTP hop per tool call. |
 | `@ai-sdk/openai` lives only in backend | Model calls are server-side; the API key must never reach the browser. |
 | `@ai-sdk/react` and `react-markdown` only in frontend | Optional peers since 0.3.1; backend doesn't need React. |
-| `wavesurfer.js` only in frontend (and only if voice) | Browser-only library; backend doesn't render waveforms. |
 | `ws` only in backend (and only if speech-to-text) | Server-side WebSocket proxy to Deepgram. Loaded via runtime helper since 0.3.1 — won't crash if missing when the feature is off. |
 | CORS configured backend-side | Same-origin convenience requires a reverse proxy; without one, CORS is the cleanest path. |
 
@@ -347,7 +344,7 @@ Add `features: { speechToText: true }` to `AiChatModule.forRoot`, install `ws` o
 | Backend imports `glirastes/server/nestjs` but build fails | Old SDK (≤0.3.0 was ESM-only); workspace contains stale `shared/dist` | Upgrade to ≥0.3.1; rebuild `shared` package |
 | Chat works in dev but breaks in production | `NEXT_PUBLIC_API_URL` not set in the production env | Set in your hosting provider's env config |
 | Two chat widgets render on the page | `<ChatWidget />` duplicated | Render exactly once in the root layout |
-| Voice input fails silently | `ws` missing on backend, or `wavesurfer.js` missing on frontend | Install on the side that needs it; check both browser DevTools (WS frame) and backend logs |
+| Voice input fails silently | `ws` missing on backend or the speech WebSocket is unreachable | Install `ws` on the backend and check browser DevTools plus backend logs |
 
 ## What this skill does NOT cover
 
