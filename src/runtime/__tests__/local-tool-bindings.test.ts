@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { z as z3 } from 'zod-v3';
 import { defineTool } from '../../types.js';
 import {
   agentRevision,
@@ -183,5 +184,51 @@ describe('createLocalSchemaDigest', () => {
     expect(createLocalSchemaDigest(first)).toMatch(
       /^sha256:[A-Za-z0-9_-]+$/,
     );
+  });
+
+  it('depends on schema meaning rather than shared object identity', () => {
+    const sharedMember = z3.object({
+      id: z3.string(),
+      label: z3.string().optional(),
+    });
+    const shared = z3.object({
+      registered: z3.array(sharedMember),
+      discoverable: z3.array(sharedMember),
+    });
+    const expanded = z3.object({
+      registered: z3.array(z3.object({
+        id: z3.string(),
+        label: z3.string().optional(),
+      })),
+      discoverable: z3.array(z3.object({
+        id: z3.string(),
+        label: z3.string().optional(),
+      })),
+    });
+
+    expect(createLocalSchemaDigest(shared))
+      .toBe(createLocalSchemaDigest(expanded));
+  });
+
+  it('ignores build-dependent function source formatting', () => {
+    const verbose = {
+      _def: {
+        typeName: 'ZodString',
+        errorMap: function errorMap(issue: unknown) {
+          return issue ? { message: 'invalid' } : undefined;
+        },
+      },
+      safeParse: () => ({ success: true as const, data: '' }),
+    };
+    const minified = {
+      _def: {
+        typeName: 'ZodString',
+        errorMap: (a: unknown) => a ? { message: 'invalid' } : undefined,
+      },
+      safeParse: () => ({ success: true as const, data: '' }),
+    };
+
+    expect(createLocalSchemaDigest(verbose))
+      .toBe(createLocalSchemaDigest(minified));
   });
 });

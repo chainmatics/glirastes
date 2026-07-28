@@ -9,7 +9,7 @@ import type { TurnSnapshot } from './turn-snapshot.js';
 
 function canonicalSchemaValue(
   value: unknown,
-  seen = new WeakSet<object>(),
+  ancestors: ReadonlyArray<object> = [],
 ): unknown {
   if (
     value === null
@@ -21,38 +21,37 @@ function canonicalSchemaValue(
   }
   if (value === undefined) return { type: 'undefined' };
   if (typeof value === 'bigint') return { bigint: value.toString() };
-  if (typeof value === 'function') {
-    return { function: Function.prototype.toString.call(value) };
-  }
+  if (typeof value === 'function') return { function: true };
   if (typeof value !== 'object') return { type: typeof value };
   if (value instanceof Date) return { date: value.toISOString() };
   if (value instanceof RegExp) return { regexp: value.toString() };
-  if (seen.has(value)) return { circular: true };
-  seen.add(value);
+  if (ancestors.includes(value)) return { circular: true };
+  const nextAncestors = [...ancestors, value];
 
   const schemaDefinition = (
     value as { _zod?: { def?: unknown }; _def?: unknown }
   )._zod?.def ?? (value as { _def?: unknown })._def;
   if (schemaDefinition) {
     return {
-      schema: canonicalSchemaValue(schemaDefinition, seen),
+      schema: canonicalSchemaValue(schemaDefinition, nextAncestors),
     };
   }
   if (Array.isArray(value)) {
-    return value.map((entry) => canonicalSchemaValue(entry, seen));
+    return value.map((entry) =>
+      canonicalSchemaValue(entry, nextAncestors));
   }
   if (value instanceof Map) {
     return [...value.entries()]
       .map(([key, entry]) => [
-        canonicalSchemaValue(key, seen),
-        canonicalSchemaValue(entry, seen),
+        canonicalSchemaValue(key, nextAncestors),
+        canonicalSchemaValue(entry, nextAncestors),
       ])
       .sort(([left], [right]) =>
         JSON.stringify(left).localeCompare(JSON.stringify(right)));
   }
   if (value instanceof Set) {
     return [...value]
-      .map((entry) => canonicalSchemaValue(entry, seen))
+      .map((entry) => canonicalSchemaValue(entry, nextAncestors))
       .sort((left, right) =>
         JSON.stringify(left).localeCompare(JSON.stringify(right)));
   }
@@ -66,17 +65,23 @@ function canonicalSchemaValue(
           (key === 'shape' || key === 'getter')
           && typeof child === 'function'
         )
-          ? canonicalSchemaValue(child(), seen)
-          : canonicalSchemaValue(child, seen);
+          ? canonicalSchemaValue(child(), nextAncestors)
+          : canonicalSchemaValue(child, nextAncestors);
         return [key, canonicalChild];
       }),
   );
 }
 
+function createLocalSchemaDescriptor(
+  schema: SchemaLike | undefined,
+): string {
+  return JSON.stringify(canonicalSchemaValue(schema));
+}
+
 export function createLocalSchemaDigest(
   schema: SchemaLike | undefined,
 ): string {
-  const canonical = JSON.stringify(canonicalSchemaValue(schema));
+  const canonical = createLocalSchemaDescriptor(schema);
   return `sha256:${createHash('sha256')
     .update(canonical)
     .digest('base64url')}`;
