@@ -22,6 +22,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
  * Subpath segments determine how many `../` we need to climb back to root.
  */
 const SHIMS = [
+  ['contracts', 'contracts'],
   ['server', 'server'],
   ['server/nextjs', 'server/adapters/nextjs'],
   ['server/nestjs', 'server/adapters/nestjs'],

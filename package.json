@@ -62,6 +62,16 @@
         "default": "./dist/cjs/index.js"
       }
     },
+    "./contracts": {
+      "import": {
+        "types": "./dist/contracts/index.d.ts",
+        "default": "./dist/contracts/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/contracts/index.d.ts",
+        "default": "./dist/cjs/contracts/index.js"
+      }
+    },
     "./server": {
       "import": {
         "types": "./dist/server/index.d.ts",
@@ -126,6 +136,7 @@
   },
   "files": [
     "dist",
+    "contracts",
     "server",
     "react",
     "codegen",
