@@ -129,6 +129,50 @@ describe('createAiChatHandler managed runtime', () => {
     });
   });
 
+  it('preserves a revision-bound followup tool already in the registry', async () => {
+    const revisionBoundTools = {
+      ...tools,
+      suggest_followups: defineTool({
+        id: 'published-followup-id',
+        description: 'Published followup description.',
+        inputSchema: {
+          safeParse: (value: unknown) => ({
+            success: true as const,
+            data: value,
+          }),
+        },
+        execute: async () => ({ success: true }),
+      }),
+    };
+    const streamHandler = vi.fn(async ({ tools: aiTools }) => {
+      expect((
+        aiTools.suggest_followups as { description?: string }
+      ).description).toBe('Published followup description.');
+      return new Response('ok');
+    });
+    const handler = createAiChatHandler({
+      tools: revisionBoundTools,
+      pipeline: {
+        process: async () => ({
+          model: { modelId: 'test', instance: {} },
+          tools: ['suggest_followups'],
+          sanitizedInput: 'show tasks',
+          intent: { intent: 'task_query', confidence: 1 },
+          module: null,
+          followupsEnabled: true,
+        }),
+      },
+      followups: { enabled: true },
+      systemPrompt: 'Assistant',
+      streamHandler,
+    });
+
+    const response = await handler(request());
+
+    expect(response.status).toBe(200);
+    expect(streamHandler).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a snapshot pinned for a different subject', async () => {
     const handler = createAiChatHandler({
       tools,

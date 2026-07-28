@@ -678,7 +678,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // Add followup tool if configured
         if (followups) {
           const followupTool = createFollowupTool(followups);
-          if (followupTool) {
+          if (followupTool && !registry[followupTool.id]) {
             registry = { ...registry, [followupTool.id]: followupTool };
           }
         }
