@@ -72,6 +72,16 @@
         "default": "./dist/cjs/contracts/index.js"
       }
     },
+    "./runtime": {
+      "import": {
+        "types": "./dist/runtime/index.d.ts",
+        "default": "./dist/runtime/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/runtime/index.d.ts",
+        "default": "./dist/cjs/runtime/index.js"
+      }
+    },
     "./server": {
       "import": {
         "types": "./dist/server/index.d.ts",
@@ -137,6 +147,7 @@
   "files": [
     "dist",
     "contracts",
+    "runtime",
     "server",
     "react",
     "codegen",
