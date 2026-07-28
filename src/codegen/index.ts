@@ -1,4 +1,12 @@
 export { scanEndpointTools, generateEndpointRegistry } from './endpoint-scanner.js';
+export {
+  scanNextAppRoutes,
+  writeNextAppRouteScan,
+  type NextAppRouteScanResult,
+  type ScannedRouteCandidate,
+  type ScanNextAppRoutesOptions,
+  type WriteNextAppRouteScanOptions,
+} from './route-scanner.js';
 export { scanUiTools, generateUiRegistry, generateActionIdRegistry } from './ui-scanner.js';
 export { generateModuleRegistry } from './module-generator.js';
 export { validateAiTools, formatValidationReport, type ValidationResult, type ValidationIssue } from './validator.js';

@@ -13,6 +13,7 @@ import {
   generateMcpServer,
   recommendOutputFormat,
   syncAssetToGlirastes,
+  writeNextAppRouteScan,
   type GenerateSkillsOptions,
 } from '../codegen/index.js';
 
@@ -32,7 +33,8 @@ type CommandName =
   | 'scaffold'
   | 'test'
   | 'check-upgrade'
-  | 'sync';
+  | 'sync'
+  | 'scan';
 
 function getFlagValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
@@ -63,6 +65,7 @@ function parseCommand(args: string[]): { command: CommandName; rest: string[] } 
     'test',
     'check-upgrade',
     'sync',
+    'scan',
   ];
 
   if (!command || !validCommands.includes(command as CommandName)) {
@@ -83,6 +86,7 @@ function parseCommand(args: string[]): { command: CommandName; rest: string[] } 
         `  scaffold              Scaffold ai-tool.ts from route.ts\n` +
         `  test                  Scaffold AI behavior test file\n` +
         `  check-upgrade         Analyze upgrade gaps from release notes (--from-version)\n` +
+        `  scan                  Scan Next.js routes into a local sync artifact [--output]\n` +
         `  sync                  Sync tool schemas to Glirastes platform\n`,
     );
   }
@@ -162,6 +166,22 @@ export async function runCli(args: string[]): Promise<void> {
     nestjsDirs: nestjsDirs.length > 0 ? nestjsDirs : undefined,
     nestjsApiPrefix: glirastesConfig.nestjsApiPrefix,
   };
+
+  if (command === 'scan') {
+    const outputPath = getFlagValue(rest, '--output');
+    const artifact = await writeNextAppRouteScan({
+      rootDir,
+      apiDir: glirastesConfig.apiDir,
+      outputPath,
+    });
+    if (!quiet) {
+      console.log(
+        `Scanned ${artifact.result.candidates.length} route operations to `
+        + artifact.outputPath,
+      );
+    }
+    return;
+  }
 
   if (command === 'generate-tools') {
     const metaPath = getFlagValue(rest, '--meta');
