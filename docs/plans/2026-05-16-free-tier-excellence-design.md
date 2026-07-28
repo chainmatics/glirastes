@@ -1,5 +1,8 @@
 # Glirastes SDK — Free-Tier Excellence Design
 
+> Superseded for the Foundation Pilot by
+> `2026-07-28-glirastes-foundation-design.md`. Retained as historical context.
+
 **Date:** 2026-05-16
 **Status:** Design (pre-roadmap)
 **Audience:** SDK contributors, design reviewers

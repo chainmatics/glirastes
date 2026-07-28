@@ -1,5 +1,9 @@
 # Glirastes Free-Tier Excellence — Implementation Roadmap
 
+> Superseded for the Foundation Pilot by
+> `2026-07-28-glirastes-foundation-implementation.md`. Retained as historical
+> context.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this roadmap workstream-by-workstream. Each workstream below is sized as a release-phase; before starting one, expand it into a bite-sized TDD plan via writing-plans and execute that.
 
 **Goal:** Deliver the Free-Tier Excellence design ([docs/plans/2026-05-16-free-tier-excellence-design.md](docs/plans/2026-05-16-free-tier-excellence-design.md)) across versions 0.4 (foundation), 0.5 (DX), 0.6 (excellence), with consumer migration sequenced after the SDK releases that unblock it.
