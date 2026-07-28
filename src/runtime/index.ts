@@ -22,7 +22,9 @@ export {
 } from './managed-turn.js';
 export {
   materializeManifestToolRegistry,
+  type LocalEndpointToolBinding,
   type LocalToolBinding,
+  type LocalUiToolBinding,
 } from './local-tool-bindings.js';
 export type {
   RuntimeEngine,

@@ -56,6 +56,7 @@ const manifestRevision: ManifestRevision = {
   tools: [{
     toolId: agentRevision.toolAllowlist[0]!,
     sourceFingerprint: 'sha256:tool',
+    executionKind: 'endpoint',
     name: 'list_tasks',
     description: 'List visible tasks.',
     riskClass: 'safe-read',

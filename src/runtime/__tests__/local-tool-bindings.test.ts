@@ -27,6 +27,7 @@ const localTool = defineTool({
 const binding: LocalToolBinding = {
   toolId: manifestRevision.tools[0]!.toolId,
   sourceFingerprint: 'sha256:tool',
+  executionKind: 'endpoint',
   method: 'GET',
   path: '/api/tasks',
   inputSchemaDigest: 'sha256:input',
@@ -80,6 +81,61 @@ describe('materializeManifestToolRegistry', () => {
       snapshot: restrictedSnapshot,
       bindings: [binding],
     })).toEqual({});
+  });
+
+  it('materializes a UI action binding without an HTTP endpoint', () => {
+    const endpointManifestTool = manifestRevision.tools[0]!;
+    if (endpointManifestTool.executionKind !== 'endpoint') {
+      throw new Error('Expected endpoint fixture');
+    }
+    const {
+      method: _method,
+      path: _path,
+      authBindingRef: _authBindingRef,
+      ...commonTool
+    } = endpointManifestTool;
+    const uiSnapshot = createTurnSnapshot({
+      turnId: 'turn-1',
+      agentRevision,
+      manifestRevision: {
+        ...manifestRevision,
+        tools: [{
+          ...commonTool,
+          executionKind: 'ui',
+          name: 'open_task_details',
+          actionBindingRef: 'task-details.open',
+        }],
+      },
+      policyRevision,
+      principal,
+      localLimits,
+    });
+    const uiBinding: LocalToolBinding = {
+      toolId: endpointManifestTool.toolId,
+      sourceFingerprint: endpointManifestTool.sourceFingerprint,
+      executionKind: 'ui',
+      actionBindingRef: 'task-details.open',
+      inputSchemaDigest: endpointManifestTool.inputSchemaDigest,
+      outputSchemaDigest: endpointManifestTool.outputSchemaDigest,
+      tool: localTool,
+    };
+    const registry = materializeManifestToolRegistry({
+      snapshot: uiSnapshot,
+      bindings: [uiBinding],
+    });
+
+    expect(registry.open_task_details).toMatchObject({
+      id: endpointManifestTool.toolId,
+      description: endpointManifestTool.description,
+    });
+    expect(registry.open_task_details?.method).toBeUndefined();
+    expect(() => materializeManifestToolRegistry({
+      snapshot: uiSnapshot,
+      bindings: [{
+        ...uiBinding,
+        actionBindingRef: 'task-details.wrong',
+      }],
+    })).toThrow(/local tool binding mismatch/i);
   });
 
   it.each([

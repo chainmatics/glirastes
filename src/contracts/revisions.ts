@@ -29,7 +29,7 @@ export const ToolRiskClassSchema = z.enum([
   'unknown',
 ]);
 
-export const ManifestToolSchema = z.object({
+const ManifestToolBaseSchema = z.object({
   toolId: uuid,
   sourceFingerprint: digest,
   name: identifier,
@@ -37,12 +37,26 @@ export const ManifestToolSchema = z.object({
   riskClass: ToolRiskClassSchema,
   enabled: z.boolean(),
   tombstone: z.boolean(),
-  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
-  path: z.string().startsWith('/').max(2_048),
   inputSchemaDigest: digest,
   outputSchemaDigest: digest,
+});
+
+const ManifestEndpointToolSchema = ManifestToolBaseSchema.extend({
+  executionKind: z.literal('endpoint'),
+  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  path: z.string().startsWith('/').max(2_048),
   authBindingRef: identifier,
-}).strict().superRefine((tool, context) => {
+}).strict();
+
+const ManifestUiToolSchema = ManifestToolBaseSchema.extend({
+  executionKind: z.literal('ui'),
+  actionBindingRef: identifier,
+}).strict();
+
+export const ManifestToolSchema = z.discriminatedUnion('executionKind', [
+  ManifestEndpointToolSchema,
+  ManifestUiToolSchema,
+]).superRefine((tool, context) => {
   if (tool.tombstone && tool.enabled) {
     context.addIssue({
       code: 'custom',

@@ -38,6 +38,7 @@ describe('ManifestRevisionSchema', () => {
     tools: [{
       toolId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3905',
       sourceFingerprint: 'sha256:tool',
+      executionKind: 'endpoint',
       name: 'list_tasks',
       description: 'List visible tasks.',
       riskClass: 'safe-read',
@@ -60,6 +61,26 @@ describe('ManifestRevisionSchema', () => {
     const candidate = structuredClone(manifest);
     candidate.tools[0]!.tombstone = true;
     expect(ManifestRevisionSchema.safeParse(candidate).success).toBe(false);
+  });
+
+  it('accepts a local UI action binding without an HTTP endpoint', () => {
+    const uiTool = {
+      ...manifest.tools[0],
+      toolId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3906',
+      sourceFingerprint: 'sha256:ui-tool',
+      executionKind: 'ui',
+      name: 'open_task_details',
+      riskClass: 'safe-read',
+      actionBindingRef: 'task-details.open',
+    };
+    delete (uiTool as Partial<typeof uiTool>).method;
+    delete (uiTool as Partial<typeof uiTool>).path;
+    delete (uiTool as Partial<typeof uiTool>).authBindingRef;
+
+    expect(ManifestRevisionSchema.safeParse({
+      ...manifest,
+      tools: [uiTool],
+    }).success).toBe(true);
   });
 
   it('rejects secret-bearing revision payloads', () => {
