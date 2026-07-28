@@ -63,4 +63,41 @@ describe('createLocalAiPipeline', () => {
     expect(generateText).not.toHaveBeenCalled();
     expect(JSON.stringify(onAudit.mock.calls)).not.toContain('sensitive raw input');
   });
+
+  it('bypasses model classification for promoted standalone inputs only', async () => {
+    const generateText = vi.fn(async () => ({
+      text: JSON.stringify({ moduleId: 'task_query', confidence: 0.98 }),
+    }));
+    const pipeline = createLocalAiPipeline({
+      modules,
+      classifier: { modules, model: {} },
+      generateText,
+      fastPath: {
+        initialPatterns: [{
+          pattern: 'zeige meine aufgaben',
+          intent: 'task_query',
+          confidence: 0.98,
+          hitCount: 3,
+          lastSeen: Date.now(),
+          promotedAt: Date.now(),
+        }],
+      },
+    });
+
+    const fastResult = await pipeline.process(
+      'Zeige meine Aufgaben',
+      context,
+    );
+    await pipeline.process(
+      'Zeige meine Aufgaben',
+      context,
+      [{ role: 'user', content: 'vorherige Frage' }],
+    );
+
+    expect(fastResult.intent).toEqual({
+      intent: 'task_query',
+      confidence: 0.95,
+    });
+    expect(generateText).toHaveBeenCalledTimes(1);
+  });
 });

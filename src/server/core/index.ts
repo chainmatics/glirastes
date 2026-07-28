@@ -20,6 +20,10 @@ import type {
 import { defineTool } from '../../types.js';
 import { zodToCompactDescription } from './zod-compact.js';
 export { createLocalGuardrails } from './local-guardrails.js';
+export {
+  createAdaptiveFastPath,
+  createInMemoryFastPathStorage,
+} from './adaptive-fast-path.js';
 
 // ============================================================================
 // Transport Types

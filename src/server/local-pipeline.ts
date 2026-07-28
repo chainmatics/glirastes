@@ -8,6 +8,7 @@ import type {
 } from '../types.js';
 import {
   createAiRouter,
+  createAdaptiveFastPath,
   createIntentClassifier,
   createModelSelector,
   createModelSelectorFromMap,
@@ -29,6 +30,15 @@ export function createLocalAiPipeline(
   config: LocalAiPipelineConfig,
 ): AiPipeline {
   const guardrails = createLocalGuardrails(config.guardrails);
+  const fastPath = createAdaptiveFastPath(
+    config.fastPath,
+    config.fastPathStorage,
+  );
+  let fastPathReady: Promise<void> | undefined;
+  const ensureFastPathReady = () => {
+    fastPathReady ??= fastPath.loadFromStorage();
+    return fastPathReady;
+  };
   const router = createAiRouter({
     modules: config.modules,
     relatedModules: config.relatedModules,
@@ -97,11 +107,23 @@ export function createLocalAiPipeline(
       }
 
       const startedAt = Date.now();
-      const intent = await classifier.classify(
-        validation.sanitized,
-        context,
-        conversationHistory,
-      );
+      await ensureFastPathReady();
+      const hasConversationHistory = Boolean(conversationHistory?.length);
+      let intent = hasConversationHistory
+        ? null
+        : fastPath.match(validation.sanitized);
+      const fastPathHit = intent !== null;
+      if (!intent) {
+        intent = await classifier.classify(
+          validation.sanitized,
+          context,
+          conversationHistory,
+        );
+        if (!hasConversationHistory) {
+          fastPath.learn(validation.sanitized, intent);
+        }
+      }
+      void fastPath.saveToStorage();
       config.onAudit?.({
         type: 'intent.classified',
         timestamp: new Date().toISOString(),
@@ -111,6 +133,7 @@ export function createLocalAiPipeline(
           intent: intent.intent,
           confidence: intent.confidence,
           latencyMs: Date.now() - startedAt,
+          fastPathHit,
         },
       });
 
