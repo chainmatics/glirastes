@@ -12,6 +12,9 @@ export {
 export * from './lancer/index.js';
 
 // PII shield
-export { createPiiShield } from './pii-shield/index.js';
+export {
+  createPiiShield,
+  createRegexPiiDetector,
+} from './pii-shield/index.js';
 export { createAegisDetector } from './pii-shield/index.js';
 export type { AegisLike } from './pii-shield/index.js';
