@@ -13,10 +13,9 @@
 import {
   convertToModelMessages,
   pruneMessages,
-  tool,
-  zodSchema,
   type UIMessage,
 } from 'ai';
+import { createAiSdkTools } from '../../../runtime/ai-sdk/engine.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 
 // ---------------------------------------------------------------------------
@@ -146,21 +145,7 @@ interface SdkAiTool {
 export function wrapToolsForVercelAi(
   sdkTools: Record<string, unknown>,
 ): Record<string, unknown> {
-  const wrapped: Record<string, unknown> = {};
-
-  for (const [name, raw] of Object.entries(sdkTools)) {
-    const sdkTool = raw as SdkAiTool;
-    wrapped[name] = tool({
-      description: sdkTool.description,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      inputSchema: zodSchema(sdkTool.parameters as any),
-      needsApproval: sdkTool.needsApproval as Parameters<
-        typeof tool
-      >[0]['needsApproval'],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      execute: sdkTool.execute as any,
-    });
-  }
-
-  return wrapped;
+  return createAiSdkTools({
+    tools: sdkTools as Record<string, SdkAiTool>,
+  });
 }

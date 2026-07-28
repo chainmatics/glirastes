@@ -24,6 +24,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SHIMS = [
   ['contracts', 'contracts'],
   ['runtime', 'runtime'],
+  ['runtime/ai-sdk', 'runtime/ai-sdk'],
   ['server', 'server'],
   ['server/nextjs', 'server/adapters/nextjs'],
   ['server/nestjs', 'server/adapters/nestjs'],

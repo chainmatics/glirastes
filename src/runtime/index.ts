@@ -14,3 +14,8 @@ export {
   type ExecutionUsage,
 } from './budget.js';
 export { createExecutionFingerprint } from './fingerprint.js';
+export type {
+  RuntimeEngine,
+  RuntimeEngineEvent,
+  RuntimeRunRequest,
+} from './engine.js';

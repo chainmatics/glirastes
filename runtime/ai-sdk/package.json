@@ -1,0 +1,5 @@
+{
+  "main": "../../dist/cjs/runtime/ai-sdk/index.js",
+  "module": "../../dist/runtime/ai-sdk/index.js",
+  "types": "../../dist/runtime/ai-sdk/index.d.ts"
+}

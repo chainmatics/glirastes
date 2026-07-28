@@ -82,6 +82,16 @@
         "default": "./dist/cjs/runtime/index.js"
       }
     },
+    "./runtime/ai-sdk": {
+      "import": {
+        "types": "./dist/runtime/ai-sdk/index.d.ts",
+        "default": "./dist/runtime/ai-sdk/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/runtime/ai-sdk/index.d.ts",
+        "default": "./dist/cjs/runtime/ai-sdk/index.js"
+      }
+    },
     "./server": {
       "import": {
         "types": "./dist/server/index.d.ts",
