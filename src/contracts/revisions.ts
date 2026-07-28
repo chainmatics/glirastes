@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ExecutionBudgetSchema } from './runtime.js';
+import { findForbiddenContentPath } from './content-boundary.js';
 
 const uuid = z.uuid();
 const identifier = z.string().trim().min(1).max(200);
@@ -128,6 +129,104 @@ export const ExecutionLeaseSchema = z.object({
   }
 });
 
+export const RuntimeRevisionEnvelopeSchema = z.object({
+  schemaVersion: z.literal(1),
+  revisionId: uuid,
+  revisionType: z.enum(['tool', 'manifest', 'agent', 'policy']),
+  revision: z.number().int().positive(),
+  tenantId: uuid,
+  targetAppId: uuid,
+  environmentId: uuid.optional(),
+  subjectId: uuid.optional(),
+  contentHash: digest,
+  payload: z.unknown(),
+  publishedAt,
+  signature: RevisionSignatureSchema,
+}).strict().superRefine((revisionEnvelope, context) => {
+  if (
+    ['manifest', 'policy'].includes(revisionEnvelope.revisionType)
+    && !revisionEnvelope.environmentId
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Environment-scoped revisions require environmentId',
+      path: ['environmentId'],
+    });
+  }
+  if (
+    ['tool', 'agent'].includes(revisionEnvelope.revisionType)
+    && !revisionEnvelope.subjectId
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Subject-scoped revisions require subjectId',
+      path: ['subjectId'],
+    });
+  }
+  const forbiddenPath = findForbiddenContentPath(
+    revisionEnvelope.payload,
+    ['payload'],
+  );
+  if (forbiddenPath) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Runtime revision payload contains raw content or credentials',
+      path: forbiddenPath,
+    });
+  }
+});
+
+export const RuntimeDeploymentBundleSchema = z.object({
+  deploymentId: uuid,
+  environmentId: uuid,
+  status: z.enum(['pending', 'active']),
+  rolloutMode: z.enum(['stable', 'canary']),
+  targetPercentage: z.number().int().min(1).max(100),
+  pinned: z.boolean(),
+  healthStatus: z.enum(['unknown', 'healthy', 'degraded', 'unhealthy']),
+  agentRevision: RuntimeRevisionEnvelopeSchema.refine(
+    (revision) => revision.revisionType === 'agent',
+    'Expected agent revision',
+  ),
+  manifestRevision: RuntimeRevisionEnvelopeSchema.refine(
+    (revision) => revision.revisionType === 'manifest',
+    'Expected manifest revision',
+  ),
+  policyRevision: RuntimeRevisionEnvelopeSchema.refine(
+    (revision) => revision.revisionType === 'policy',
+    'Expected policy revision',
+  ),
+  updatedAt: publishedAt,
+}).strict().superRefine((deployment, context) => {
+  if (
+    deployment.rolloutMode === 'stable'
+    && deployment.targetPercentage !== 100
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Stable rollout must target 100 percent',
+      path: ['targetPercentage'],
+    });
+  }
+  if (
+    deployment.rolloutMode === 'canary'
+    && deployment.targetPercentage >= 100
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Canary rollout must target less than 100 percent',
+      path: ['targetPercentage'],
+    });
+  }
+});
+
+export const RuntimeSyncBundleSchema = z.object({
+  cursor: publishedAt,
+  activeSnapshotComplete: z.literal(true),
+  deployments: z.array(RuntimeDeploymentBundleSchema),
+  revocations: z.array(SecurityRevocationSchema),
+}).strict();
+
 export type RevisionSignature = z.infer<typeof RevisionSignatureSchema>;
 export type LocalBindingReference = z.infer<typeof LocalBindingReferenceSchema>;
 export type ToolRiskClass = z.infer<typeof ToolRiskClassSchema>;
@@ -138,3 +237,6 @@ export type RuntimeToolPolicy = z.infer<typeof RuntimeToolPolicySchema>;
 export type RuntimePolicyRevision = z.infer<typeof RuntimePolicyRevisionSchema>;
 export type SecurityRevocation = z.infer<typeof SecurityRevocationSchema>;
 export type ExecutionLease = z.infer<typeof ExecutionLeaseSchema>;
+export type RuntimeRevisionEnvelope = z.infer<typeof RuntimeRevisionEnvelopeSchema>;
+export type RuntimeDeploymentBundle = z.infer<typeof RuntimeDeploymentBundleSchema>;
+export type RuntimeSyncBundle = z.infer<typeof RuntimeSyncBundleSchema>;

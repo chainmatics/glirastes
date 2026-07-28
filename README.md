@@ -857,6 +857,15 @@ The SDK includes a `glirastes` CLI for scaffolding, code generation, and validat
 
 <br/>
 
+## Managed local runtime
+
+The [`glirastes/sync`](./docs/managed-runtime-sync.md) subpath verifies and
+caches signed deployments locally with push plus polling fallback,
+last-known-good preservation, security revocations, and stable/canary
+selection. Model and tool credentials remain in the target application.
+
+<br/>
+
 ## Agent skills
 
 Glirastes ships pre-built [agent skills](https://docs.claude.com/en/docs/claude-code/skills) under [`skills/`](./skills) that teach a coding agent (Claude Code, Codex, Cursor, …) how to integrate, maintain, and customize the SDK. Drop them into your repo and the agent picks the right one automatically.

@@ -1,0 +1,38 @@
+export {
+  canonicalRuntimeJson,
+  RuntimeRevisionVerifier,
+  RuntimeSyncVerificationError,
+} from './signature-verifier.js';
+export type {
+  RuntimePublicJwk,
+  RuntimePublicKeyProvider,
+} from './signature-verifier.js';
+export {
+  FileRuntimeStateStore,
+  MemoryRuntimeStateStore,
+} from './state-store.js';
+export type {
+  RuntimeStateStore,
+  RuntimeSyncState,
+} from './state-store.js';
+export {
+  RuntimeSyncManager,
+} from './sync-manager.js';
+export type {
+  RuntimeSyncApplyResult,
+} from './sync-manager.js';
+export {
+  RuntimeControlPlaneClient,
+} from './control-plane-client.js';
+export type {
+  RuntimePushConnector,
+} from './control-plane-client.js';
+export { FetchSsePushConnector } from './fetch-sse-push.js';
+export { HttpRuntimePublicKeyProvider } from './jwks-provider.js';
+export {
+  selectRuntimeDeployment,
+  stableCohortBucket,
+} from './deployment-selector.js';
+export { materializeDeploymentRevisions } from './materialize-deployment.js';
+export type { MaterializedDeploymentRevisions } from './materialize-deployment.js';
+export { createManagedRuntimeSync } from './managed-sync.js';

@@ -92,6 +92,16 @@
         "default": "./dist/cjs/runtime/ai-sdk/index.js"
       }
     },
+    "./sync": {
+      "import": {
+        "types": "./dist/sync/index.d.ts",
+        "default": "./dist/sync/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/sync/index.d.ts",
+        "default": "./dist/cjs/sync/index.js"
+      }
+    },
     "./server": {
       "import": {
         "types": "./dist/server/index.d.ts",
@@ -158,6 +168,7 @@
     "dist",
     "contracts",
     "runtime",
+    "sync",
     "server",
     "react",
     "codegen",
