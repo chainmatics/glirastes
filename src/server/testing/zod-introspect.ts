@@ -1,5 +1,5 @@
 /**
- * Zod schema introspection helpers (Zod v4).
+ * Zod schema introspection helpers (Zod v3 and v4).
  *
  * Centralizes all access to Zod's internal `_zod.def` representation so the
  * test-suite generators (`edge-cases.ts`, `schema-consistency.ts`) don't each
@@ -9,9 +9,42 @@
  * returning nothing) instead of letting it ship as a green-but-empty suite.
  */
 
-/** Read Zod v4's internal schema definition (`schema._zod.def`). */
+const ZOD_3_TYPES: Record<string, string> = {
+  ZodArray: 'array',
+  ZodBoolean: 'boolean',
+  ZodCatch: 'catch',
+  ZodDefault: 'default',
+  ZodDiscriminatedUnion: 'union',
+  ZodEffects: 'effects',
+  ZodEnum: 'enum',
+  ZodLazy: 'lazy',
+  ZodNativeEnum: 'enum',
+  ZodNullable: 'nullable',
+  ZodNumber: 'number',
+  ZodObject: 'object',
+  ZodOptional: 'optional',
+  ZodPipeline: 'pipe',
+  ZodReadonly: 'readonly',
+  ZodString: 'string',
+  ZodTuple: 'tuple',
+  ZodUnion: 'union',
+};
+
+/** Read and normalize Zod v3/v4 internal schema definitions. */
 function getDef(schema: unknown): any {
-  return (schema as any)?._zod?.def;
+  const v4 = (schema as any)?._zod?.def;
+  if (v4) return v4;
+  const v3 = (schema as any)?._def;
+  if (!v3) return undefined;
+  return {
+    ...v3,
+    type: ZOD_3_TYPES[v3.typeName] ?? v3.typeName,
+    element: v3.type,
+    entries: v3.values
+      ? Object.fromEntries(v3.values.map((value: string) => [value, value]))
+      : v3.values,
+    in: v3.in ?? v3.schema,
+  };
 }
 
 /** Wrapper types that hold their inner schema in `def.innerType`. */
@@ -52,6 +85,7 @@ export function unwrap<T = unknown>(schema: T): T {
   const type = def?.type;
   if (WRAPPER_TYPES.has(type)) return unwrap(def.innerType);
   if (type === 'pipe') return unwrap(def.in);
+  if (type === 'effects') return unwrap(def.schema);
   return schema;
 }
 
@@ -70,13 +104,18 @@ export function getObjectShape(
   const def = getDef(schema);
   if (!def) return null;
   if (def.type === 'object') {
-    return def.shape as Record<string, unknown>;
+    return (
+      typeof def.shape === 'function' ? def.shape() : def.shape
+    ) as Record<string, unknown>;
   }
   if (WRAPPER_TYPES.has(def.type) && def.innerType) {
     return getObjectShape(def.innerType);
   }
   if (def.type === 'pipe' && def.in) {
     return getObjectShape(def.in);
+  }
+  if (def.type === 'effects' && def.schema) {
+    return getObjectShape(def.schema);
   }
   return null;
 }
@@ -100,6 +139,9 @@ export function getArrayElement(schema: unknown): unknown | null {
 export function getArrayMax(schema: unknown): number | null {
   const def = getDef(unwrap(schema));
   if (def?.type !== 'array') return null;
+  if (def.maxLength?.value !== undefined) {
+    return def.maxLength.value as number;
+  }
   for (const check of def.checks ?? []) {
     const cd = check?._zod?.def;
     if (cd?.check === 'max_length') return cd.maximum as number;
@@ -113,7 +155,10 @@ export function hasStringFormat(schema: unknown, format: string): boolean {
   if (def?.type !== 'string') return false;
   return (def.checks ?? []).some((check: any) => {
     const cd = check?._zod?.def;
-    return cd?.check === 'string_format' && cd?.format === format;
+    return (
+      (cd?.check === 'string_format' && cd?.format === format)
+      || check?.kind === format
+    );
   });
 }
 

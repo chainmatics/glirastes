@@ -13,10 +13,11 @@ import type {
   ToastPattern,
   AuditEmitter,
   AuditEvent,
+  InferSchema,
+  SchemaLike,
   TelemetrySink,
 } from '../../types.js';
 import { defineTool } from '../../types.js';
-import { z } from 'zod';
 import { zodToCompactDescription } from './zod-compact.js';
 export { createLocalGuardrails } from './local-guardrails.js';
 
@@ -422,7 +423,7 @@ function buildUiActionsFromPatterns(
  */
 export function normalizeResultUiAction(
   result: unknown,
-  uiActionSchema?: z.ZodTypeAny,
+  uiActionSchema?: SchemaLike,
 ): unknown {
   if (!isRecord(result) || !('uiAction' in result)) return result;
   if (!uiActionSchema) return result; // No schema provided, pass through
@@ -463,7 +464,7 @@ export function normalizeResultUiAction(
  * Convert an endpoint tool definition into a Tool.
  * Uses callEndpoint from the ToolContext to execute HTTP requests.
  */
-export function endpointToolToTool<TInput extends z.ZodTypeAny>(
+export function endpointToolToTool<TInput extends SchemaLike>(
   endpointTool: AiEndpointToolDefinition<TInput>,
 ): Tool {
   let description = endpointTool.description;
@@ -481,7 +482,7 @@ export function endpointToolToTool<TInput extends z.ZodTypeAny>(
       endpointTool.needsApproval ??
       (endpointTool.method === 'GET' ? false : true),
     execute: async (
-      rawInput: z.infer<TInput>,
+      rawInput: InferSchema<TInput>,
       context: ToolContext,
     ) => {
       const endpointContext = context as EndpointToolContext;
@@ -626,7 +627,7 @@ function applyUiTemplateValue(
  * Convert a UI tool definition into a Tool.
  * UI tools never call external services — they only produce uiActions.
  */
-export function uiToolToTool<TInput extends z.ZodTypeAny>(
+export function uiToolToTool<TInput extends SchemaLike>(
   uiTool: AiUiToolDefinition<TInput>,
 ): Tool {
   let description = uiTool.description;
@@ -640,7 +641,7 @@ export function uiToolToTool<TInput extends z.ZodTypeAny>(
     inputSchema: uiTool.inputSchema,
     outputSchema: uiTool.outputSchema,
     needsApproval: uiTool.needsApproval ?? false,
-    execute: async (rawInput: z.infer<TInput>) => {
+    execute: async (rawInput: InferSchema<TInput>) => {
       const inputPayload = isRecord(rawInput) ? { ...rawInput } : {};
 
       // Priority: 1) uiPattern (dynamic), 2) uiAction (static template)
@@ -714,8 +715,8 @@ export function uiToolsToRegistry(
  * Options for converting tools to AI SDK tools.
  */
 export interface ToolToAiToolOptions {
-  /** Zod schema for validating uiActions at runtime */
-  uiActionSchema?: z.ZodTypeAny;
+  /** Host schema for validating uiActions at runtime */
+  uiActionSchema?: SchemaLike;
   /** Called when a tool execution fails */
   onError?: (toolId: string, error: unknown) => void;
   /**
@@ -827,7 +828,8 @@ export function toolToAiTool(
             console.warn(
               `[glirastes] Output schema mismatch for tool "${name}":`,
               parsed.error.issues.map(
-                (i) => `${i.path.join('.')}: ${i.message}`,
+                (i: { path?: ReadonlyArray<PropertyKey>; message?: string }) =>
+                  `${i.path?.join('.') ?? ''}: ${i.message ?? 'invalid value'}`,
               ),
             );
           }

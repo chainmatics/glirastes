@@ -1,6 +1,44 @@
 import { z } from 'zod';
 
 // ============================================================================
+// Host schema boundary
+// ============================================================================
+
+export interface SchemaIssueLike {
+  path?: ReadonlyArray<PropertyKey>;
+  message?: string;
+}
+
+export interface SchemaErrorLike {
+  issues: ReadonlyArray<SchemaIssueLike>;
+}
+
+export type SafeParseResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: SchemaErrorLike };
+
+/**
+ * Minimal runtime schema contract accepted at public Glirastes boundaries.
+ *
+ * Keeping this structural avoids coupling target applications to the SDK's
+ * own Zod major. Zod 3, Zod 4, and Standard-Schema-compatible adapters all
+ * satisfy it without conversion.
+ */
+export interface SchemaLike<T = unknown> {
+  safeParse(value: unknown):
+    | { success: true; data: T }
+    | { success: false; error: SchemaErrorLike };
+  readonly ['~standard']?: unknown;
+}
+
+export type InferSchema<TSchema> =
+  TSchema extends { readonly _output: infer TOutput }
+    ? TOutput
+    : TSchema extends SchemaLike<infer TOutput>
+      ? TOutput
+      : unknown;
+
+// ============================================================================
 // HTTP & Transport
 // ============================================================================
 
@@ -47,11 +85,11 @@ export interface Tool {
   /** Human-readable description for AI to understand when to use this */
   description: string;
 
-  /** Zod schema for input validation — shared between AI and API */
-  inputSchema: z.ZodType;
+  /** Host-provided runtime schema for input validation */
+  inputSchema: SchemaLike;
 
-  /** Optional Zod schema describing the tool's response shape */
-  outputSchema?: z.ZodType;
+  /** Optional host-provided schema describing the tool's response shape */
+  outputSchema?: SchemaLike;
 
   /** HTTP method of the underlying endpoint (e.g. GET, POST). Used by test suites to derive approval defaults. */
   method?: string;
@@ -71,20 +109,20 @@ export interface Tool {
 /**
  * Helper to define a tool with full type inference at definition site.
  */
-export function defineTool<TInput extends z.ZodType, TOutput>(tool: {
+export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
   id: string;
   description: string;
   inputSchema: TInput;
-  outputSchema?: z.ZodType<TOutput>;
+  outputSchema?: SchemaLike<TOutput>;
   method?: string;
   /** @deprecated Use Glirastes approval flows via `lancer.approvals` instead. Kept for backward compatibility. */
   needsApproval?:
     | boolean
     | ((
-        input: z.infer<TInput>,
+        input: InferSchema<TInput>,
         context: ToolContext,
       ) => boolean | Promise<boolean>);
-  execute: (input: z.infer<TInput>, context: ToolContext) => Promise<TOutput>;
+  execute: (input: InferSchema<TInput>, context: ToolContext) => Promise<TOutput>;
 }): Tool {
   return tool as Tool;
 }
@@ -116,8 +154,8 @@ export interface UiActionTemplate {
  * @param extraSchemas - Additional Zod schemas for app-specific action types
  */
 export function createUiActionSchema(
-  extraSchemas: z.ZodTypeAny[] = [],
-) {
+  extraSchemas: SchemaLike<Record<string, unknown>>[] = [],
+): SchemaLike<Record<string, unknown>> {
   const runClientActionSchema = z
     .object({
       type: z.literal('run-client-action'),
@@ -154,12 +192,23 @@ export function createUiActionSchema(
       { message: 'Entity action must include valid {entity}Id (UUID)' },
     );
 
-  return z.union([
+  const builtInSchema = z.union([
     runClientActionSchema,
     navigateSchema,
-    ...extraSchemas,
     entityActionSchema, // Fallback — must be last
-  ] as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+  ]);
+
+  return {
+    safeParse(value) {
+      for (const schema of extraSchemas) {
+        const result = schema.safeParse(value);
+        if (result.success) return result;
+      }
+      return builtInSchema.safeParse(value) as SafeParseResult<
+        Record<string, unknown>
+      >;
+    },
+  };
 }
 
 // ============================================================================
@@ -227,8 +276,8 @@ export type UiPattern =
 // ============================================================================
 
 export interface AiEndpointToolDefinition<
-  TInput extends z.ZodTypeAny = z.ZodTypeAny,
-  TOutput extends z.ZodTypeAny = z.ZodTypeAny,
+  TInput extends SchemaLike = SchemaLike,
+  TOutput extends SchemaLike = SchemaLike,
 > {
   id: string;
   toolName: string;
@@ -245,6 +294,11 @@ export interface AiEndpointToolDefinition<
    * When provided, a compact description is auto-appended to the tool description.
    */
   outputSchema?: TOutput;
+  /**
+   * Legacy discovery hint migrated into the signed runtime policy.
+   * It is never sufficient authorization for local tool execution.
+   */
+  allowedRoles?: string[];
   /** @deprecated Use Glirastes approval flows via `lancer.approvals` instead. Kept for backward compatibility. */
   needsApproval?: boolean;
   /**
@@ -262,8 +316,8 @@ export interface AiEndpointToolDefinition<
 }
 
 export function defineEndpointTool<
-  TInput extends z.ZodTypeAny,
-  TOutput extends z.ZodTypeAny = z.ZodTypeAny,
+  TInput extends SchemaLike,
+  TOutput extends SchemaLike = SchemaLike,
 >(
   definition: AiEndpointToolDefinition<TInput, TOutput>,
 ): AiEndpointToolDefinition<TInput, TOutput> {
@@ -275,8 +329,8 @@ export function defineEndpointTool<
 // ============================================================================
 
 export interface AiUiToolDefinition<
-  TInput extends z.ZodTypeAny = z.ZodTypeAny,
-  TOutput extends z.ZodTypeAny = z.ZodTypeAny,
+  TInput extends SchemaLike = SchemaLike,
+  TOutput extends SchemaLike = SchemaLike,
 > {
   id: string;
   toolName: string;
@@ -291,6 +345,11 @@ export interface AiUiToolDefinition<
    * When provided, a compact description is auto-appended to the tool description.
    */
   outputSchema?: TOutput;
+  /**
+   * Legacy discovery hint migrated into the signed runtime policy.
+   * It is never sufficient authorization for local UI action execution.
+   */
+  allowedRoles?: string[];
   /** @deprecated Use Glirastes approval flows via `lancer.approvals` instead. Kept for backward compatibility. */
   needsApproval?: boolean;
   successMessage?: string;
@@ -307,8 +366,8 @@ export interface AiUiToolDefinition<
 }
 
 export function defineUiTool<
-  TInput extends z.ZodTypeAny,
-  TOutput extends z.ZodTypeAny = z.ZodTypeAny,
+  TInput extends SchemaLike,
+  TOutput extends SchemaLike = SchemaLike,
 >(
   definition: AiUiToolDefinition<TInput, TOutput>,
 ): AiUiToolDefinition<TInput, TOutput> {

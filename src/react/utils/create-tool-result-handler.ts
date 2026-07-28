@@ -1,6 +1,8 @@
 /** Schema-like object that can validate values (compatible with Zod, Valibot, etc.) */
 interface SafeParseable {
-  safeParse(value: unknown): { success: true; data: Record<string, unknown> } | { success: false; error: { issues: unknown[] } };
+  safeParse(value: unknown):
+    | { success: true; data: Record<string, unknown> }
+    | { success: false; error: { issues: ReadonlyArray<unknown> } };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

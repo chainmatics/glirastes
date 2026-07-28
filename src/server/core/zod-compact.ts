@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import type { SchemaLike } from '../../types.js';
 
 /**
  * Convert a Zod schema to a compact TypeScript-like description string.
@@ -17,19 +17,62 @@ import { z } from 'zod';
  * @param maxDepth - Maximum nesting depth before collapsing to "..." (default: 3)
  */
 export function zodToCompactDescription(
-  schema: z.ZodTypeAny,
+  schema: SchemaLike,
   maxDepth = 3,
 ): string {
   return describeSchema(schema, 0, maxDepth);
 }
 
-/** Read Zod v4's internal schema definition (`schema._zod.def`). */
-function getDef(schema: z.ZodTypeAny): any {
-  return (schema as any)?._zod?.def;
+const ZOD_3_TYPES: Record<string, string> = {
+  ZodAny: 'any',
+  ZodArray: 'array',
+  ZodBigInt: 'bigint',
+  ZodBoolean: 'boolean',
+  ZodCatch: 'catch',
+  ZodDate: 'date',
+  ZodDefault: 'default',
+  ZodDiscriminatedUnion: 'union',
+  ZodEffects: 'effects',
+  ZodEnum: 'enum',
+  ZodLazy: 'lazy',
+  ZodLiteral: 'literal',
+  ZodNativeEnum: 'enum',
+  ZodNullable: 'nullable',
+  ZodNull: 'null',
+  ZodNumber: 'number',
+  ZodObject: 'object',
+  ZodOptional: 'optional',
+  ZodPipeline: 'pipe',
+  ZodReadonly: 'readonly',
+  ZodRecord: 'record',
+  ZodString: 'string',
+  ZodTuple: 'tuple',
+  ZodUndefined: 'undefined',
+  ZodUnion: 'union',
+  ZodUnknown: 'unknown',
+  ZodVoid: 'void',
+};
+
+/** Read and normalize Zod v3/v4 internal schema definitions. */
+function getDef(schema: unknown): any {
+  const v4 = (schema as any)?._zod?.def;
+  if (v4) return v4;
+  const v3 = (schema as any)?._def;
+  if (!v3) return undefined;
+  return {
+    ...v3,
+    type: ZOD_3_TYPES[v3.typeName] ?? v3.typeName,
+    element: v3.type,
+    entries: v3.values
+      ? Object.fromEntries(v3.values.map((value: string) => [value, value]))
+      : v3.values,
+    in: v3.in ?? v3.schema,
+    valueType: v3.valueType,
+  };
 }
 
 function describeSchema(
-  schema: z.ZodTypeAny,
+  schema: SchemaLike,
   depth: number,
   maxDepth: number,
 ): string {
@@ -49,9 +92,8 @@ function describeSchema(
     case 'date':
       return 'string'; // Dates serialize as strings in JSON
     case 'literal':
-      // Zod v4 literals hold an array of allowed values.
-      return (def.values as unknown[])
-        .map((v) => JSON.stringify(v))
+      return (def.values ?? [def.value] as unknown[])
+        .map((v: unknown) => JSON.stringify(v))
         .join(' | ');
     case 'null':
       return 'null';
@@ -76,7 +118,9 @@ function describeSchema(
       return `Array<${describeSchema(def.element, depth + 1, maxDepth)}>`;
 
     case 'object': {
-      const shape = def.shape as Record<string, z.ZodTypeAny>;
+      const shape = (
+        typeof def.shape === 'function' ? def.shape() : def.shape
+      ) as Record<string, SchemaLike>;
       const entries = Object.entries(shape);
       if (entries.length === 0) return '{}';
       const fields = entries.map(([key, value]) => {
@@ -93,15 +137,18 @@ function describeSchema(
       return `Record<string, ${describeSchema(def.valueType, depth + 1, maxDepth)}>`;
 
     case 'union': {
-      // Covers both unions and discriminated unions in Zod v4.
-      const options = def.options as z.ZodTypeAny[];
+      const options = (
+        def.options instanceof Map
+          ? [...def.options.values()]
+          : def.options
+      ) as SchemaLike[];
       return options
         .map((o) => describeSchema(o, depth + 1, maxDepth))
         .join(' | ');
     }
 
     case 'tuple': {
-      const items = def.items as z.ZodTypeAny[];
+      const items = def.items as SchemaLike[];
       return `[${items.map((i) => describeSchema(i, depth + 1, maxDepth)).join(', ')}]`;
     }
 
@@ -121,6 +168,9 @@ function describeSchema(
       // side, matching the pre-v4 behaviour of describing the base schema.
       return describeSchema(def.in, depth, maxDepth);
 
+    case 'effects':
+      return describeSchema(def.schema, depth, maxDepth);
+
     case 'lazy':
       return describeSchema(def.getter(), depth, maxDepth);
 
@@ -130,7 +180,7 @@ function describeSchema(
 }
 
 /** Unwrap optional / nullable / default / pipe wrappers to the inner schema. */
-function unwrap(schema: z.ZodTypeAny): z.ZodTypeAny {
+function unwrap(schema: SchemaLike): SchemaLike {
   const def = getDef(schema);
   const type = def?.type;
   if (
@@ -147,10 +197,13 @@ function unwrap(schema: z.ZodTypeAny): z.ZodTypeAny {
   if (type === 'pipe') {
     return unwrap(def.in);
   }
+  if (type === 'effects') {
+    return unwrap(def.schema);
+  }
   return schema;
 }
 
-function isOptional(schema: z.ZodTypeAny): boolean {
+function isOptional(schema: SchemaLike): boolean {
   const def = getDef(schema);
   const type = def?.type;
   if (type === 'optional' || type === 'default' || type === 'prefault') {
@@ -162,7 +215,7 @@ function isOptional(schema: z.ZodTypeAny): boolean {
   return false;
 }
 
-function isNullable(schema: z.ZodTypeAny): boolean {
+function isNullable(schema: SchemaLike): boolean {
   const def = getDef(schema);
   const type = def?.type;
   if (type === 'nullable') return true;

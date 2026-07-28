@@ -1,4 +1,3 @@
-import type { z } from 'zod';
 import type {
   ToolContext,
   ToolRegistry,
@@ -13,6 +12,7 @@ import type {
   PiiShield,
   TelemetrySink,
   PromptOverride,
+  SchemaLike,
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import type { InternalApiCaller } from '../../core/index.js';
@@ -29,7 +29,7 @@ import type {
 // withAiTool - Route Wrapper Types
 // ============================================================================
 
-export interface WithAiToolOptions<TInput extends z.ZodTypeAny = z.ZodTypeAny> {
+export interface WithAiToolOptions<TInput extends SchemaLike = SchemaLike> {
   toolName: string;
   id?: string;
   module?: string;
@@ -208,7 +208,7 @@ export interface AiChatHandlerConfig {
         currentDate: Date;
       }) => string);
   locale?: string;
-  uiActionSchema?: z.ZodTypeAny;
+  uiActionSchema?: SchemaLike;
   maxOutputTokens?: number;
   temperature?: number;
   /**
@@ -359,7 +359,7 @@ export interface ExecuteToolOptions {
   input: unknown;
   tools: ToolRegistry;
   locale?: string;
-  uiActionSchema?: z.ZodTypeAny;
+  uiActionSchema?: SchemaLike;
 }
 
 export interface ExecuteToolResult {
