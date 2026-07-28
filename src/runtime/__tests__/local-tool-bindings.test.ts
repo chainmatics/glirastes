@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { defineTool } from '../../types.js';
 import {
   agentRevision,
@@ -9,6 +10,7 @@ import {
 } from './turn-snapshot.test.js';
 import { createTurnSnapshot } from '../turn-snapshot.js';
 import {
+  createLocalSchemaDigest,
   materializeManifestToolRegistry,
   type LocalToolBinding,
 } from '../local-tool-bindings.js';
@@ -156,5 +158,30 @@ describe('materializeManifestToolRegistry', () => {
       snapshot: snapshot(),
       bindings: [],
     })).toThrow(/missing local tool binding/i);
+  });
+});
+
+describe('createLocalSchemaDigest', () => {
+  it('is deterministic and changes with structural validation rules', () => {
+    const first = z.object({
+      title: z.string().min(1),
+      limit: z.number().max(50).optional(),
+    });
+    const equivalent = z.object({
+      title: z.string().min(1),
+      limit: z.number().max(50).optional(),
+    });
+    const changed = z.object({
+      title: z.string().min(2),
+      limit: z.number().max(50).optional(),
+    });
+
+    expect(createLocalSchemaDigest(first))
+      .toBe(createLocalSchemaDigest(equivalent));
+    expect(createLocalSchemaDigest(changed))
+      .not.toBe(createLocalSchemaDigest(first));
+    expect(createLocalSchemaDigest(first)).toMatch(
+      /^sha256:[A-Za-z0-9_-]+$/,
+    );
   });
 });

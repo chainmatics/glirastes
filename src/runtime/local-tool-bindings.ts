@@ -1,5 +1,86 @@
-import type { EndpointMethod, Tool, ToolRegistry } from '../types.js';
+import { createHash } from 'node:crypto';
+import type {
+  EndpointMethod,
+  SchemaLike,
+  Tool,
+  ToolRegistry,
+} from '../types.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
+
+function canonicalSchemaValue(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): unknown {
+  if (
+    value === null
+    || typeof value === 'string'
+    || typeof value === 'number'
+    || typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  if (value === undefined) return { type: 'undefined' };
+  if (typeof value === 'bigint') return { bigint: value.toString() };
+  if (typeof value === 'function') {
+    return { function: Function.prototype.toString.call(value) };
+  }
+  if (typeof value !== 'object') return { type: typeof value };
+  if (value instanceof Date) return { date: value.toISOString() };
+  if (value instanceof RegExp) return { regexp: value.toString() };
+  if (seen.has(value)) return { circular: true };
+  seen.add(value);
+
+  const schemaDefinition = (
+    value as { _zod?: { def?: unknown }; _def?: unknown }
+  )._zod?.def ?? (value as { _def?: unknown })._def;
+  if (schemaDefinition) {
+    return {
+      schema: canonicalSchemaValue(schemaDefinition, seen),
+    };
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => canonicalSchemaValue(entry, seen));
+  }
+  if (value instanceof Map) {
+    return [...value.entries()]
+      .map(([key, entry]) => [
+        canonicalSchemaValue(key, seen),
+        canonicalSchemaValue(entry, seen),
+      ])
+      .sort(([left], [right]) =>
+        JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  }
+  if (value instanceof Set) {
+    return [...value]
+      .map((entry) => canonicalSchemaValue(entry, seen))
+      .sort((left, right) =>
+        JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  }
+
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => {
+        const child = (value as Record<string, unknown>)[key];
+        const canonicalChild = (
+          (key === 'shape' || key === 'getter')
+          && typeof child === 'function'
+        )
+          ? canonicalSchemaValue(child(), seen)
+          : canonicalSchemaValue(child, seen);
+        return [key, canonicalChild];
+      }),
+  );
+}
+
+export function createLocalSchemaDigest(
+  schema: SchemaLike | undefined,
+): string {
+  const canonical = JSON.stringify(canonicalSchemaValue(schema));
+  return `sha256:${createHash('sha256')
+    .update(canonical)
+    .digest('base64url')}`;
+}
 
 interface LocalToolBindingBase {
   /** Stable UUID assigned by the control plane and synced into the target app. */
