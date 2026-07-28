@@ -16,6 +16,10 @@ import {
   writeNextAppRouteScan,
   type GenerateSkillsOptions,
 } from '../codegen/index.js';
+import {
+  RuntimeSetupClient,
+  type RouteScanUpload,
+} from '../sync/runtime-setup-client.js';
 
 type CommandName =
   | 'generate'
@@ -86,7 +90,7 @@ function parseCommand(args: string[]): { command: CommandName; rest: string[] } 
         `  scaffold              Scaffold ai-tool.ts from route.ts\n` +
         `  test                  Scaffold AI behavior test file\n` +
         `  check-upgrade         Analyze upgrade gaps from release notes (--from-version)\n` +
-        `  scan                  Scan Next.js routes into a local sync artifact [--output]\n` +
+        `  scan                  Scan Next.js routes into a local artifact [--output] [--sync]\n` +
         `  sync                  Sync tool schemas to Glirastes platform\n`,
     );
   }
@@ -179,6 +183,51 @@ export async function runCli(args: string[]): Promise<void> {
         `Scanned ${artifact.result.candidates.length} route operations to `
         + artifact.outputPath,
       );
+    }
+    if (hasFlag(rest, '--sync')) {
+      const baseUrl = getFlagValue(rest, '--base-url')
+        ?? process.env.GLIRASTES_CONTROL_PLANE_URL;
+      const appId = getFlagValue(rest, '--app-id')
+        ?? process.env.GLIRASTES_APP_ID;
+      const environmentId = getFlagValue(rest, '--environment-id')
+        ?? process.env.GLIRASTES_ENVIRONMENT_ID;
+      const apiKey = process.env.GLIRASTES_SETUP_API_KEY;
+      if (!baseUrl) {
+        throw new Error(
+          '--base-url or GLIRASTES_CONTROL_PLANE_URL is required for scan --sync.',
+        );
+      }
+      if (!appId) {
+        throw new Error(
+          '--app-id or GLIRASTES_APP_ID is required for scan --sync.',
+        );
+      }
+      if (!environmentId) {
+        throw new Error(
+          '--environment-id or GLIRASTES_ENVIRONMENT_ID is required for scan --sync.',
+        );
+      }
+      if (!apiKey) {
+        throw new Error(
+          'GLIRASTES_SETUP_API_KEY is required for scan --sync.',
+        );
+      }
+      const scan = JSON.parse(
+        readFileSync(artifact.outputPath, 'utf8'),
+      ) as RouteScanUpload;
+      const imported = await new RuntimeSetupClient({
+        baseUrl,
+        apiKey,
+        appId,
+        environmentId,
+      }).importRouteScan(scan);
+      if (!quiet) {
+        console.log(
+          `Imported ${imported.createdDrafts} review drafts; `
+          + `${imported.unchanged} unchanged; `
+          + `${imported.tombstoneCandidates.length} tombstone candidates.`,
+        );
+      }
     }
     return;
   }

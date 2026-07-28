@@ -27,6 +27,11 @@ export {
 export type {
   RuntimePushConnector,
 } from './control-plane-client.js';
+export { RuntimeSetupClient } from './runtime-setup-client.js';
+export type {
+  RouteScanUpload,
+  RuntimeSetupImportResult,
+} from './runtime-setup-client.js';
 export { FetchSsePushConnector } from './fetch-sse-push.js';
 export { HttpRuntimePublicKeyProvider } from './jwks-provider.js';
 export {
