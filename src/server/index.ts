@@ -3,6 +3,10 @@ export * from './core/index.js';
 
 // AI pipeline (multi-stage: guardrails → classify → route → model select)
 export * from './pipeline.js';
+export {
+  createLocalAiPipeline,
+  type LocalAiPipelineConfig,
+} from './local-pipeline.js';
 
 // Lancer (platform client) — createLancer, ServiceBlockedError, types
 export * from './lancer/index.js';

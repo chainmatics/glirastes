@@ -18,6 +18,7 @@ import type {
 import { defineTool } from '../../types.js';
 import { z } from 'zod';
 import { zodToCompactDescription } from './zod-compact.js';
+export { createLocalGuardrails } from './local-guardrails.js';
 
 // ============================================================================
 // Transport Types
