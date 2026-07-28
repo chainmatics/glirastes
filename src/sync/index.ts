@@ -40,4 +40,7 @@ export {
 } from './deployment-selector.js';
 export { materializeDeploymentRevisions } from './materialize-deployment.js';
 export type { MaterializedDeploymentRevisions } from './materialize-deployment.js';
+export {
+  validateLocalDeploymentBindings,
+} from './local-deployment-validator.js';
 export { createManagedRuntimeSync } from './managed-sync.js';

@@ -21,6 +21,7 @@ export {
   type ManagedTurnGuardOptions,
 } from './managed-turn.js';
 export {
+  assertLocalToolBindingMatches,
   createLocalSchemaDigest,
   materializeManifestToolRegistry,
   type LocalEndpointToolBinding,

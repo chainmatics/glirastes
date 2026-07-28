@@ -65,6 +65,19 @@ export function createManagedRuntimeSync(options: {
         });
       }
     },
+    onActivated: async (deployments) => {
+      for (const deployment of deployments) {
+        await client.heartbeat({
+          health: options.validateDeployment ? 'healthy' : 'degraded',
+          lastAppliedDeploymentId: deployment.deploymentId,
+          technicalMetadata: {
+            activationStage: options.validateDeployment
+              ? 'signature-schema-bindings'
+              : 'missing-local-binding-validator',
+          },
+        });
+      }
+    },
   });
   client = new RuntimeControlPlaneClient({
     baseUrl: options.baseUrl,

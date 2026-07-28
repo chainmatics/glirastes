@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import type {
+  ManifestTool,
+} from '../contracts/revisions.js';
+import type {
   EndpointMethod,
   SchemaLike,
   Tool,
@@ -113,6 +116,45 @@ export type LocalToolBinding =
   | LocalEndpointToolBinding
   | LocalUiToolBinding;
 
+export function assertLocalToolBindingMatches(
+  binding: LocalToolBinding,
+  manifestTool: ManifestTool,
+): void {
+  const mismatches: string[] = [];
+  if (binding.executionKind !== manifestTool.executionKind) {
+    mismatches.push('execution kind');
+  }
+  if (binding.sourceFingerprint !== manifestTool.sourceFingerprint) {
+    mismatches.push('source fingerprint');
+  }
+  if (binding.inputSchemaDigest !== manifestTool.inputSchemaDigest) {
+    mismatches.push('input schema digest');
+  }
+  if (binding.outputSchemaDigest !== manifestTool.outputSchemaDigest) {
+    mismatches.push('output schema digest');
+  }
+  if (
+    binding.executionKind === 'endpoint'
+    && manifestTool.executionKind === 'endpoint'
+  ) {
+    if (binding.method !== manifestTool.method) mismatches.push('method');
+    if (binding.path !== manifestTool.path) mismatches.push('path');
+  }
+  if (
+    binding.executionKind === 'ui'
+    && manifestTool.executionKind === 'ui'
+    && binding.actionBindingRef !== manifestTool.actionBindingRef
+  ) {
+    mismatches.push('action binding');
+  }
+  if (mismatches.length > 0) {
+    throw new Error(
+      `Local tool binding mismatch (${manifestTool.toolId}): `
+      + mismatches.join(', '),
+    );
+  }
+}
+
 export function materializeManifestToolRegistry(options: {
   snapshot: TurnSnapshot;
   bindings: ReadonlyArray<LocalToolBinding>;
@@ -158,40 +200,7 @@ export function materializeManifestToolRegistry(options: {
       throw new Error(`Missing local tool binding: ${manifestTool.toolId}`);
     }
 
-    const mismatches: Array<readonly [string, unknown, unknown]> = [
-      ['execution kind', binding.executionKind, manifestTool.executionKind],
-      ['source fingerprint', binding.sourceFingerprint, manifestTool.sourceFingerprint],
-      ['input schema digest', binding.inputSchemaDigest, manifestTool.inputSchemaDigest],
-      ['output schema digest', binding.outputSchemaDigest, manifestTool.outputSchemaDigest],
-    ];
-    if (
-      binding.executionKind === 'endpoint'
-      && manifestTool.executionKind === 'endpoint'
-    ) {
-      mismatches.push(
-        ['method', binding.method, manifestTool.method],
-        ['path', binding.path, manifestTool.path],
-      );
-    }
-    if (
-      binding.executionKind === 'ui'
-      && manifestTool.executionKind === 'ui'
-    ) {
-      mismatches.push([
-        'action binding',
-        binding.actionBindingRef,
-        manifestTool.actionBindingRef,
-      ]);
-    }
-    const bindingMismatches = mismatches.filter(
-      ([, local, published]) => local !== published,
-    );
-    if (bindingMismatches.length > 0) {
-      throw new Error(
-        `Local tool binding mismatch (${manifestTool.toolId}): `
-        + bindingMismatches.map(([field]) => field).join(', '),
-      );
-    }
+    assertLocalToolBindingMatches(binding, manifestTool);
     if (registry[manifestTool.name]) {
       throw new Error(`Duplicate manifest tool name: ${manifestTool.name}`);
     }
