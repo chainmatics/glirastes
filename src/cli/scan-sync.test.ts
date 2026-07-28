@@ -1,6 +1,7 @@
 import {
   mkdtemp,
   mkdir,
+  readFile,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -38,12 +39,23 @@ afterEach(() => {
 describe('glirastes scan --sync', () => {
   it('scans locally and imports the redacted artifact with an environment key', async () => {
     const root = await projectFixture();
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      createdDrafts: 1,
-      unchanged: 0,
-      tombstoneCandidates: [],
-      interview: [],
-    }), { status: 201 }));
+    const toolId = '019fa9a9-d5f7-7ec3-a3c7-8899de1d3905';
+    const fetchImpl = vi.fn().mockImplementation(
+      async (_url: string, request: RequestInit) => {
+        const upload = JSON.parse(String(request.body));
+        return new Response(JSON.stringify({
+          createdDrafts: 1,
+          unchanged: 0,
+          bindings: [{
+            toolId,
+            stableKey: 'GET /api/tasks',
+            sourceFingerprint: upload.candidates[0].sourceFingerprint,
+          }],
+          tombstoneCandidates: [],
+          interview: [],
+        }), { status: 201 });
+      },
+    );
     vi.stubGlobal('fetch', fetchImpl);
     vi.stubEnv('GLIRASTES_SETUP_API_KEY', 'setup-secret');
 
@@ -73,6 +85,21 @@ describe('glirastes scan --sync', () => {
       authorization: 'Bearer setup-secret',
     });
     expect(String(request.body)).not.toContain('return Response');
+    const uploadedScan = JSON.parse(String(request.body));
+    const sourceFingerprint = uploadedScan.candidates[0].sourceFingerprint;
+    await expect(readFile(
+      join(root, '.glirastes/platform-tool-bindings.json'),
+      'utf8',
+    ).then(JSON.parse)).resolves.toEqual({
+      schemaVersion: 1,
+      targetAppId: 'app-1',
+      environmentId: 'env-1',
+      bindings: [{
+        toolId,
+        stableKey: 'GET /api/tasks',
+        sourceFingerprint,
+      }],
+    });
   });
 
   it('fails before network access when required sync configuration is missing', async () => {

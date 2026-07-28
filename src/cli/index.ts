@@ -145,8 +145,13 @@ export async function runCli(args: string[]): Promise<void> {
   const ci = hasFlag(rest, '--ci');
 
   // Read glirastes config from package.json (supports monorepo scan/output config)
-  const { readFileSync, existsSync } = await import('node:fs');
-  const { join } = await import('node:path');
+  const {
+    readFileSync,
+    existsSync,
+    mkdirSync,
+    writeFileSync,
+  } = await import('node:fs');
+  const { dirname, join, resolve } = await import('node:path');
   const pkgJsonPath = join(rootDir, 'package.json');
   let glirastesConfig: { scan?: string[]; output?: string; nestjsApiPrefix?: string; apiDir?: string; componentsDir?: string } = {};
   try {
@@ -221,12 +226,31 @@ export async function runCli(args: string[]): Promise<void> {
         appId,
         environmentId,
       }).importRouteScan(scan);
+      const bindingsOutput = resolve(
+        rootDir,
+        getFlagValue(rest, '--bindings-output')
+          ?? '.glirastes/platform-tool-bindings.json',
+      );
+      mkdirSync(dirname(bindingsOutput), { recursive: true });
+      writeFileSync(
+        bindingsOutput,
+        `${JSON.stringify({
+          schemaVersion: 1,
+          targetAppId: appId,
+          environmentId,
+          bindings: [...imported.bindings].sort((left, right) => (
+            left.stableKey.localeCompare(right.stableKey)
+          )),
+        }, null, 2)}\n`,
+        'utf8',
+      );
       if (!quiet) {
         console.log(
           `Imported ${imported.createdDrafts} review drafts; `
           + `${imported.unchanged} unchanged; `
           + `${imported.tombstoneCandidates.length} tombstone candidates.`,
         );
+        console.log(`Wrote authoritative tool bindings to ${bindingsOutput}.`);
       }
     }
     return;

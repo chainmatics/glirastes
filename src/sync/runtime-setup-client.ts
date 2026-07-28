@@ -1,6 +1,7 @@
 import type {
   ScannedRouteCandidate,
 } from '../codegen/route-scanner.js';
+import { z } from 'zod';
 
 export interface RouteScanUpload {
   schemaVersion: 1;
@@ -12,6 +13,11 @@ export interface RouteScanUpload {
 export interface RuntimeSetupImportResult {
   createdDrafts: number;
   unchanged: number;
+  bindings: Array<{
+    toolId: string;
+    stableKey: string;
+    sourceFingerprint: string;
+  }>;
   tombstoneCandidates: Array<{
     toolId: string;
     stableKey: string;
@@ -23,6 +29,28 @@ export interface RuntimeSetupImportResult {
     questions: string[];
   }>;
 }
+
+const fingerprintSchema = z.string().regex(
+  /^sha256:(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9+/]{43}=)$/,
+);
+const toolIdentitySchema = z.object({
+  toolId: z.string().uuid(),
+  stableKey: z.string().trim().min(1).max(2_100),
+}).strict();
+const importResultSchema = z.object({
+  createdDrafts: z.number().int().nonnegative(),
+  unchanged: z.number().int().nonnegative(),
+  bindings: z.array(toolIdentitySchema.extend({
+    sourceFingerprint: fingerprintSchema,
+  }).strict()).max(5_000),
+  tombstoneCandidates: z.array(toolIdentitySchema).max(5_000),
+  interview: z.array(z.object({
+    toolId: z.string().uuid(),
+    stableKey: z.string().trim().min(1).max(2_100),
+    reasonCodes: z.array(z.string().trim().min(1).max(200)).max(100),
+    questions: z.array(z.string().trim().min(1).max(1_000)).max(100),
+  }).strict()).max(5_000),
+}).strict();
 
 export class RuntimeSetupClient {
   constructor(private readonly options: {
@@ -50,7 +78,11 @@ export class RuntimeSetupClient {
     if (!response.ok) {
       throw new Error(`Glirastes setup import failed (${response.status})`);
     }
-    return response.json() as Promise<RuntimeSetupImportResult>;
+    const parsed = importResultSchema.safeParse(await response.json());
+    if (!parsed.success || !this.matchesUpload(scan, parsed.data?.bindings)) {
+      throw new Error('Invalid Glirastes setup import response');
+    }
+    return parsed.data;
   }
 
   private importUrl(): string {
@@ -87,5 +119,27 @@ export class RuntimeSetupClient {
       })),
       ignored: [...scan.ignored],
     };
+  }
+
+  private matchesUpload(
+    scan: RouteScanUpload,
+    bindings: RuntimeSetupImportResult['bindings'] | undefined,
+  ): boolean {
+    if (!bindings || bindings.length !== scan.candidates.length) return false;
+    const expected = new Map(scan.candidates.map((candidate) => [
+      `${candidate.method} ${candidate.path}`,
+      candidate.sourceFingerprint,
+    ]));
+    const seen = new Set<string>();
+    for (const binding of bindings) {
+      if (
+        seen.has(binding.stableKey)
+        || expected.get(binding.stableKey) !== binding.sourceFingerprint
+      ) {
+        return false;
+      }
+      seen.add(binding.stableKey);
+    }
+    return seen.size === expected.size;
   }
 }
