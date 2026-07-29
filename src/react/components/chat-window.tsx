@@ -79,6 +79,7 @@ export function ChatWindow({
     persistDimensions,
     draggable,
     resizable,
+    constrainToViewport,
   });
 
   // ---------------------------------------------------------------------------

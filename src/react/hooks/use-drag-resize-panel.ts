@@ -13,6 +13,8 @@ import {
 
 const DEFAULT_SNAP_RADIUS = 100;
 const DEFAULT_EDGE_THRESHOLD = 20;
+const DEFAULT_DRAG_THRESHOLD = 4;
+const VIEWPORT_MARGIN = 8;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +35,7 @@ export interface UseDragResizePanelOptions {
   persistDimensions?: boolean | string;
   draggable?: boolean;
   resizable?: boolean;
+  constrainToViewport?: boolean;
 }
 
 export type ResizeEdge = 'top' | 'left' | 'right';
@@ -101,6 +104,7 @@ export function useDragResizePanel(
     persistDimensions = false,
     draggable = true,
     resizable = true,
+    constrainToViewport = true,
   } = options;
 
   const storagePrefix = persistDimensions === true
@@ -163,7 +167,14 @@ export function useDragResizePanel(
     mouseY: number;
     panelX: number;
     panelY: number;
+    currentX: number;
+    currentY: number;
+    panelWidth: number;
+    panelHeight: number;
+    started: boolean;
   } | null>(null);
+  const dragListenerCleanupRef = useRef<(() => void) | null>(null);
+  const dragUserSelectRef = useRef<string | null>(null);
 
   const resizeStartRef = useRef<{
     mouseX: number;
@@ -174,8 +185,8 @@ export function useDragResizePanel(
     positionY: number | null;
     edge: 'top' | 'left' | 'right';
   } | null>(null);
-
-  const wasDraggingRef = useRef(false);
+  const resizeListenerCleanupRef = useRef<(() => void) | null>(null);
+  const resizeUserSelectRef = useRef<string | null>(null);
 
   // -----------------------------------------------------------------------
   // Snap-to-center helpers
@@ -203,6 +214,41 @@ export function useDragResizePanel(
   // Drag handlers
   // -----------------------------------------------------------------------
 
+  const constrainPosition = useCallback((
+    x: number,
+    y: number,
+    panelWidth: number,
+    panelHeight: number,
+  ) => {
+    if (!constrainToViewport || typeof window === 'undefined') {
+      return { x, y };
+    }
+
+    const constrainedX = panelWidth + (VIEWPORT_MARGIN * 2) >= window.innerWidth
+      ? window.innerWidth / 2
+      : Math.min(
+          window.innerWidth - (panelWidth / 2) - VIEWPORT_MARGIN,
+          Math.max((panelWidth / 2) + VIEWPORT_MARGIN, x),
+        );
+    const constrainedY = panelHeight + (VIEWPORT_MARGIN * 2) >= window.innerHeight
+      ? VIEWPORT_MARGIN
+      : Math.min(
+          window.innerHeight - panelHeight - VIEWPORT_MARGIN,
+          Math.max(VIEWPORT_MARGIN, y),
+        );
+    return { x: constrainedX, y: constrainedY };
+  }, [constrainToViewport]);
+
+  const releaseDragResources = useCallback(() => {
+    dragListenerCleanupRef.current?.();
+    dragListenerCleanupRef.current = null;
+    if (dragUserSelectRef.current !== null) {
+      document.body.style.userSelect = dragUserSelectRef.current;
+      dragUserSelectRef.current = null;
+    }
+    dragStartRef.current = null;
+  }, []);
+
   const handleDragStart = useCallback(
     (e: ReactMouseEvent<HTMLElement>) => {
       if (!draggable) return;
@@ -212,6 +258,7 @@ export function useDragResizePanel(
       const panel = panelRef.current;
       if (!panel) return;
 
+      releaseDragResources();
       const rect = panel.getBoundingClientRect();
 
       // When position is null (centered), the rendering uses
@@ -222,23 +269,114 @@ export function useDragResizePanel(
         mouseY: e.clientY,
         panelX: position?.x ?? rect.left + rect.width / 2,
         panelY: position?.y ?? rect.top,
+        currentX: position?.x ?? rect.left + rect.width / 2,
+        currentY: position?.y ?? rect.top,
+        panelWidth: rect.width,
+        panelHeight: rect.height,
+        started: false,
       };
 
-      setIsDragging(true);
-      e.preventDefault();
+      const onMouseMove = (event: MouseEvent) => {
+        const drag = dragStartRef.current;
+        if (!drag) return;
+
+        const deltaX = event.clientX - drag.mouseX;
+        const deltaY = event.clientY - drag.mouseY;
+        if (
+          !drag.started
+          && Math.hypot(deltaX, deltaY) < DEFAULT_DRAG_THRESHOLD
+        ) {
+          return;
+        }
+
+        if (!drag.started) {
+          drag.started = true;
+          dragUserSelectRef.current = document.body.style.userSelect;
+          document.body.style.userSelect = 'none';
+          setIsDragging(true);
+        }
+
+        const constrained = constrainPosition(
+          drag.panelX + deltaX,
+          drag.panelY + deltaY,
+          drag.panelWidth,
+          drag.panelHeight,
+        );
+        drag.currentX = constrained.x;
+        drag.currentY = constrained.y;
+        setPosition({ x: drag.currentX, y: drag.currentY });
+        if (snapToCenter) {
+          setIsNearSnapZone(
+            shouldSnapToCenter(drag.currentX, drag.currentY),
+          );
+        }
+        event.preventDefault();
+      };
+
+      const onMouseUp = () => {
+        const drag = dragStartRef.current;
+        const shouldSnap = Boolean(
+          drag?.started
+          && snapToCenter
+          && shouldSnapToCenter(drag.currentX, drag.currentY),
+        );
+        releaseDragResources();
+        setIsDragging(false);
+        setIsNearSnapZone(false);
+        if (shouldSnap) setPosition(null);
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      dragListenerCleanupRef.current = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
     },
-    [draggable, panelRef, position],
+    [
+      draggable,
+      panelRef,
+      position,
+      constrainPosition,
+      releaseDragResources,
+      snapToCenter,
+      shouldSnapToCenter,
+    ],
   );
 
   const handleDoubleClickHeader = useCallback(() => {
+    releaseDragResources();
+    setIsDragging(false);
+    setIsNearSnapZone(false);
     if (snapToCenter) {
       setPosition(null);
     }
-  }, [snapToCenter]);
+  }, [releaseDragResources, snapToCenter]);
+
+  useEffect(() => () => {
+    dragListenerCleanupRef.current?.();
+    if (dragUserSelectRef.current !== null) {
+      document.body.style.userSelect = dragUserSelectRef.current;
+    }
+    resizeListenerCleanupRef.current?.();
+    if (resizeUserSelectRef.current !== null) {
+      document.body.style.userSelect = resizeUserSelectRef.current;
+    }
+  }, []);
 
   // -----------------------------------------------------------------------
   // Edge resize handler (memoized, returns a function per edge)
   // -----------------------------------------------------------------------
+
+  const releaseResizeResources = useCallback(() => {
+    resizeListenerCleanupRef.current?.();
+    resizeListenerCleanupRef.current = null;
+    if (resizeUserSelectRef.current !== null) {
+      document.body.style.userSelect = resizeUserSelectRef.current;
+      resizeUserSelectRef.current = null;
+    }
+    resizeStartRef.current = null;
+  }, []);
 
   const handleEdgeResizeStart = useCallback(
     (edge: ResizeEdge) =>
@@ -249,6 +387,7 @@ export function useDragResizePanel(
         const panel = panelRef.current;
         if (!panel) return;
 
+        releaseResizeResources();
         const rect = panel.getBoundingClientRect();
 
         resizeStartRef.current = {
@@ -263,10 +402,78 @@ export function useDragResizePanel(
 
         setIsResizing(true);
         setActiveEdge(edge);
+        resizeUserSelectRef.current = document.body.style.userSelect;
+        document.body.style.userSelect = 'none';
+
+        const onMouseMove = (event: MouseEvent) => {
+          const start = resizeStartRef.current;
+          if (!start) return;
+
+          if (start.edge === 'top') {
+            const deltaY = start.mouseY - event.clientY;
+            let newHeight = start.height + deltaY;
+            newHeight = Math.max(minHeight, newHeight);
+            if (maxHeight != null) newHeight = Math.min(maxHeight, newHeight);
+            const actualDelta = newHeight - start.height;
+            setSize((prev) => ({ ...prev, height: newHeight }));
+            if (start.positionY != null) {
+              setPosition((prev) => prev
+                ? { ...prev, y: start.positionY! - actualDelta }
+                : prev);
+            }
+          } else if (start.edge === 'left') {
+            const deltaX = start.mouseX - event.clientX;
+            let newWidth = start.width + deltaX;
+            newWidth = Math.max(minWidth, newWidth);
+            if (maxWidth != null) newWidth = Math.min(maxWidth, newWidth);
+            const actualDelta = newWidth - start.width;
+            setSize((prev) => ({ ...prev, width: newWidth }));
+            if (start.positionX != null) {
+              setPosition((prev) => prev
+                ? { ...prev, x: start.positionX! - actualDelta / 2 }
+                : prev);
+            }
+          } else {
+            const deltaX = event.clientX - start.mouseX;
+            let newWidth = start.width + deltaX;
+            newWidth = Math.max(minWidth, newWidth);
+            if (maxWidth != null) newWidth = Math.min(maxWidth, newWidth);
+            const actualDelta = newWidth - start.width;
+            setSize((prev) => ({ ...prev, width: newWidth }));
+            if (start.positionX != null) {
+              setPosition((prev) => prev
+                ? { ...prev, x: start.positionX! + actualDelta / 2 }
+                : prev);
+            }
+          }
+          event.preventDefault();
+        };
+
+        const onMouseUp = () => {
+          releaseResizeResources();
+          setIsResizing(false);
+          setActiveEdge(null);
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        resizeListenerCleanupRef.current = () => {
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+        };
         e.preventDefault();
         e.stopPropagation();
       },
-    [resizable, panelRef, position],
+    [
+      resizable,
+      panelRef,
+      position,
+      minWidth,
+      minHeight,
+      maxWidth,
+      maxHeight,
+      releaseResizeResources,
+    ],
   );
 
   // -----------------------------------------------------------------------
@@ -304,123 +511,6 @@ export function useDragResizePanel(
       writeSessionNumber(`${storagePrefix}-height`, size.height);
     }
   }, [storagePrefix, size.width, size.height]);
-
-  // -----------------------------------------------------------------------
-  // Global mouse listeners for active drag / resize
-  // -----------------------------------------------------------------------
-
-  useEffect(() => {
-    if (!isDragging && !isResizing) return;
-
-    // Prevent accidental text selection during drag/resize
-    const prevUserSelect = document.body.style.userSelect;
-    document.body.style.userSelect = 'none';
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (isDragging && dragStartRef.current) {
-        const newX =
-          dragStartRef.current.panelX +
-          (e.clientX - dragStartRef.current.mouseX);
-        const newY =
-          dragStartRef.current.panelY +
-          (e.clientY - dragStartRef.current.mouseY);
-
-        setPosition({ x: newX, y: newY });
-
-        if (snapToCenter) {
-          setIsNearSnapZone(shouldSnapToCenter(newX, newY));
-        }
-      }
-
-      if (isResizing && resizeStartRef.current) {
-        const start = resizeStartRef.current;
-
-        if (start.edge === 'top') {
-          const deltaY = start.mouseY - e.clientY;
-          let newHeight = start.height + deltaY;
-          newHeight = Math.max(minHeight, newHeight);
-          if (maxHeight != null) newHeight = Math.min(maxHeight, newHeight);
-          const actualDelta = newHeight - start.height;
-          setSize((prev) => ({ ...prev, height: newHeight }));
-          // Move position up so the bottom edge stays anchored
-          if (start.positionY != null) {
-            setPosition((prev) => prev ? { ...prev, y: start.positionY! - actualDelta } : prev);
-          }
-        } else if (start.edge === 'left') {
-          const deltaX = start.mouseX - e.clientX;
-          let newWidth = start.width + deltaX;
-          newWidth = Math.max(minWidth, newWidth);
-          if (maxWidth != null) newWidth = Math.min(maxWidth, newWidth);
-          const actualDelta = newWidth - start.width;
-          setSize((prev) => ({ ...prev, width: newWidth }));
-          // Shift center left so the right edge stays anchored
-          // (position.x is center due to translate(-50%, 0))
-          if (start.positionX != null) {
-            setPosition((prev) => prev ? { ...prev, x: start.positionX! - actualDelta / 2 } : prev);
-          }
-        } else {
-          const deltaX = e.clientX - start.mouseX;
-          let newWidth = start.width + deltaX;
-          newWidth = Math.max(minWidth, newWidth);
-          if (maxWidth != null) newWidth = Math.min(maxWidth, newWidth);
-          const actualDelta = newWidth - start.width;
-          setSize((prev) => ({ ...prev, width: newWidth }));
-          // Shift center right so the left edge stays anchored
-          if (start.positionX != null) {
-            setPosition((prev) => prev ? { ...prev, x: start.positionX! + actualDelta / 2 } : prev);
-          }
-        }
-      }
-    };
-
-    const onMouseUp = () => {
-      if (isDragging) {
-        wasDraggingRef.current = true;
-        setIsDragging(false);
-        setIsNearSnapZone(false);
-        dragStartRef.current = null;
-      }
-      if (isResizing) {
-        setIsResizing(false);
-        setActiveEdge(null);
-        resizeStartRef.current = null;
-      }
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-    return () => {
-      document.body.style.userSelect = prevUserSelect;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-  }, [
-    isDragging,
-    isResizing,
-    snapToCenter,
-    shouldSnapToCenter,
-    minWidth,
-    minHeight,
-    maxWidth,
-    maxHeight,
-  ]);
-
-  // -----------------------------------------------------------------------
-  // Snap-on-release: detect transition from isDragging=true to false
-  // -----------------------------------------------------------------------
-
-  useEffect(() => {
-    if (!isDragging && wasDraggingRef.current) {
-      wasDraggingRef.current = false;
-      if (
-        snapToCenter &&
-        position &&
-        shouldSnapToCenter(position.x, position.y)
-      ) {
-        setPosition(null);
-      }
-    }
-  }, [isDragging, snapToCenter, position, shouldSnapToCenter]);
 
   // -----------------------------------------------------------------------
   // Return
