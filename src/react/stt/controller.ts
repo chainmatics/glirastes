@@ -161,6 +161,10 @@ export class SttSessionController {
       this.connection = connection;
       this.update({ ...this.currentSnapshot, phase: 'recording' });
     } catch (error) {
+      if (generation !== this.sessionGeneration) {
+        if (this.currentSnapshot.phase === 'failed') throw error;
+        return;
+      }
       await this.fail(error);
       throw error;
     }
@@ -171,7 +175,25 @@ export class SttSessionController {
   }
 
   async stop(): Promise<string> {
-    if (!this.connection) return this.currentSnapshot.displayTranscript;
+    if (!this.connection) {
+      const committed = this.transcript.finalText
+        || this.transcript.displayText;
+      if (
+        this.currentSnapshot.phase === 'requesting_permission'
+        || this.currentSnapshot.phase === 'connecting'
+      ) {
+        this.sessionGeneration += 1;
+        await this.releaseResources();
+        this.update({
+          phase: 'completed',
+          displayTranscript: committed,
+          finalTranscript: committed,
+          interimTranscript: '',
+          error: null,
+        });
+      }
+      return committed;
+    }
     this.update({ ...this.currentSnapshot, phase: 'finalizing' });
     try {
       await this.connection.finalize();
@@ -192,6 +214,7 @@ export class SttSessionController {
   }
 
   async cancel(): Promise<string> {
+    this.sessionGeneration += 1;
     if (this.connection) await this.connection.cancel();
     await this.releaseResources();
     this.transcript = createSttTranscript();

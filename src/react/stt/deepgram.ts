@@ -103,6 +103,18 @@ export class DeepgramSttAdapter implements SttProviderAdapter {
     const finalizeGraceMs = this.options.finalizeGraceMs ?? 750;
     let disposed = false;
     let closeAudio: (() => Promise<void>) | null = null;
+    let finalizePromise: Promise<void> | null = null;
+    let resolveFinalize: (() => void) | null = null;
+    let finalizeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const settleFinalization = () => {
+      if (!resolveFinalize) return;
+      if (finalizeTimeout) clearTimeout(finalizeTimeout);
+      finalizeTimeout = null;
+      const resolve = resolveFinalize;
+      resolveFinalize = null;
+      resolve();
+    };
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -144,6 +156,9 @@ export class DeepgramSttAdapter implements SttProviderAdapter {
         }
         const segment = parser(message);
         if (segment) input.events.onSegment(segment);
+        if (message.is_final === true || message.speech_final === true) {
+          settleFinalization();
+        }
       } catch {
         // Provider metadata may be non-JSON; it carries no transcript.
       }
@@ -151,11 +166,15 @@ export class DeepgramSttAdapter implements SttProviderAdapter {
     socket.onerror = () => input.events.onError(
       new Error('Speech provider connection failed'),
     );
-    socket.onclose = () => input.events.onClosed();
+    socket.onclose = () => {
+      settleFinalization();
+      input.events.onClosed();
+    };
 
     const close = async () => {
       if (disposed) return;
       disposed = true;
+      settleFinalization();
       await closeAudio?.();
       closeAudio = null;
       socket.onopen = null;
@@ -184,11 +203,21 @@ export class DeepgramSttAdapter implements SttProviderAdapter {
     }
 
     return {
-      finalize: async () => {
-        if (socket.readyState === WebSocket.OPEN) {
+      finalize: () => {
+        if (socket.readyState !== WebSocket.OPEN) return Promise.resolve();
+        if (finalizePromise) return finalizePromise;
+
+        finalizePromise = new Promise<void>((resolve) => {
+          resolveFinalize = resolve;
+          finalizeTimeout = setTimeout(settleFinalization, finalizeGraceMs);
+        });
+        try {
           socket.send(JSON.stringify({ type: 'Finalize' }));
-          await new Promise((resolve) => setTimeout(resolve, finalizeGraceMs));
+        } catch (error) {
+          settleFinalization();
+          return Promise.reject(error);
         }
+        return finalizePromise;
       },
       cancel: close,
       close,

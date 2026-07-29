@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import type {
   UseDeepgramTranscriptionOptions,
   UseDeepgramTranscriptionReturn,
@@ -13,10 +13,12 @@ import { useStt } from '../stt/use-stt.js';
 export function useDeepgramTranscription(
   options: UseDeepgramTranscriptionOptions = {},
 ): UseDeepgramTranscriptionReturn {
+  const getTokenRef = useRef(options.getToken);
+  getTokenRef.current = options.getToken;
   const adapter = useMemo(() => new DeepgramSttAdapter({
     baseUrl: options.baseUrl,
-    getToken: options.getToken,
-  }), [options.baseUrl, options.getToken]);
+    getToken: () => getTokenRef.current?.(),
+  }), [options.baseUrl]);
   const stt = useStt({
     adapter,
     language: options.language ?? 'de',

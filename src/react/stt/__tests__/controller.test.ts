@@ -112,6 +112,103 @@ describe('SttSessionController', () => {
     });
   });
 
+  it('cancel invalidates a pending permission request before its stream arrives', async () => {
+    const track = createTrack();
+    const stream = {
+      getTracks: () => [track],
+    } as unknown as MediaStream;
+    let resolvePermission:
+      | ((stream: MediaStream) => void)
+      | undefined;
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>((resolve) => {
+      resolvePermission = resolve;
+    }));
+    const adapter: SttProviderAdapter = {
+      connect: vi.fn(),
+    };
+    const controller = new SttSessionController({
+      adapter,
+      getUserMedia,
+      language: 'de',
+    });
+
+    const starting = controller.start('Entwurf behalten');
+    await vi.waitFor(() => {
+      expect(controller.snapshot.phase).toBe('requesting_permission');
+    });
+    await expect(controller.cancel()).resolves.toBe('Entwurf behalten');
+    resolvePermission?.(stream);
+    await starting;
+
+    expect(adapter.connect).not.toHaveBeenCalled();
+    expect(track.stop).toHaveBeenCalledTimes(1);
+    expect(controller.snapshot.phase).toBe('cancelled');
+    expect(controller.getStream()).toBeNull();
+  });
+
+  it('stop completes a pending permission request without reviving recording', async () => {
+    const track = createTrack();
+    const stream = {
+      getTracks: () => [track],
+    } as unknown as MediaStream;
+    let resolvePermission:
+      | ((stream: MediaStream) => void)
+      | undefined;
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>((resolve) => {
+      resolvePermission = resolve;
+    }));
+    const adapter: SttProviderAdapter = {
+      connect: vi.fn(),
+    };
+    const controller = new SttSessionController({
+      adapter,
+      getUserMedia,
+      language: 'de',
+    });
+
+    const starting = controller.start('');
+    await vi.waitFor(() => {
+      expect(controller.snapshot.phase).toBe('requesting_permission');
+    });
+    await expect(controller.stop()).resolves.toBe('');
+    resolvePermission?.(stream);
+    await starting;
+
+    expect(adapter.connect).not.toHaveBeenCalled();
+    expect(track.stop).toHaveBeenCalledTimes(1);
+    expect(controller.snapshot.phase).toBe('completed');
+    expect(controller.getStream()).toBeNull();
+  });
+
+  it('keeps cancel authoritative when a pending permission request rejects later', async () => {
+    let rejectPermission:
+      | ((error: Error) => void)
+      | undefined;
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>(
+      (_resolve, reject) => {
+        rejectPermission = reject;
+      },
+    ));
+    const controller = new SttSessionController({
+      adapter: { connect: vi.fn() },
+      getUserMedia,
+      language: 'de',
+    });
+
+    const starting = controller.start('Entwurf');
+    await vi.waitFor(() => {
+      expect(controller.snapshot.phase).toBe('requesting_permission');
+    });
+    await controller.cancel();
+    rejectPermission?.(new Error('Permission denied'));
+
+    await expect(starting).resolves.toBeUndefined();
+    expect(controller.snapshot).toMatchObject({
+      phase: 'cancelled',
+      error: null,
+    });
+  });
+
   it('cleans up a failed start and can retry without parallel sessions', async () => {
     const harness = createHarness({ failFirstConnect: true });
 
