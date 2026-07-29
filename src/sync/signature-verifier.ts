@@ -5,6 +5,7 @@ import {
   webcrypto,
 } from 'node:crypto';
 import type {
+  ExecutionLease,
   RuntimeRevisionEnvelope,
   SecurityRevocation,
 } from '../contracts/revisions.js';
@@ -73,6 +74,11 @@ export class RuntimeRevisionVerifier {
 
   async verifyRevocation(revocation: SecurityRevocation): Promise<void> {
     const { signature, ...unsigned } = revocation;
+    await this.verifyEnvelope(unsigned, signature);
+  }
+
+  async verifyExecutionLease(lease: ExecutionLease): Promise<void> {
+    const { signature, ...unsigned } = lease;
     await this.verifyEnvelope(unsigned, signature);
   }
 

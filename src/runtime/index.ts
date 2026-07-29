@@ -33,6 +33,11 @@ export {
   type JsonSchemaLike,
   type LocalJsonSchema,
 } from './json-schema.js';
+export {
+  OfflineExecutionLeaseAuthorizer,
+  type OfflineExecutionLeaseAuthorization,
+  type OfflineExecutionLeaseScope,
+} from './offline-execution-lease.js';
 export type {
   RuntimeEngine,
   RuntimeEngineEvent,

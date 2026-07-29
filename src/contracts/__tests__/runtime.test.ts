@@ -4,6 +4,7 @@ import {
   PrincipalSchema,
   RuntimeEnvironmentSchema,
 } from '../runtime.js';
+import { ExecutionLeaseSchema } from '../revisions.js';
 
 const budget = {
   maxModelSteps: 12,
@@ -60,6 +61,43 @@ describe('ExecutionBudgetSchema', () => {
     { ...budget, delegation: { ...budget.delegation, maxDepth: -1 } },
   ])('rejects unsafe or internally inconsistent limits', (candidate) => {
     expect(ExecutionBudgetSchema.safeParse(candidate).success).toBe(false);
+  });
+});
+
+describe('ExecutionLeaseSchema', () => {
+  const lease = {
+    schemaVersion: 1,
+    leaseId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3980',
+    tenantId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3981',
+    targetAppId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3982',
+    environmentId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3983',
+    runnerId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3984',
+    deploymentId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3985',
+    agentRevisionId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3986',
+    triggerId: 'scheduled-safe-read',
+    allowedRiskClasses: ['safe-read'],
+    budget,
+    issuedAt: '2026-07-29T15:00:00.000Z',
+    expiresAt: '2026-07-29T15:05:00.000Z',
+    signature: {
+      algorithm: 'Ed25519',
+      keyId: 'runtime-signing-2026-01',
+      value: 'c2lnbmF0dXJl',
+    },
+  };
+
+  it('requires the complete offline execution scope', () => {
+    expect(ExecutionLeaseSchema.safeParse(lease).success).toBe(true);
+    for (const field of [
+      'tenantId',
+      'targetAppId',
+      'runnerId',
+      'deploymentId',
+    ] as const) {
+      const candidate = structuredClone(lease);
+      delete candidate[field];
+      expect(ExecutionLeaseSchema.safeParse(candidate).success).toBe(false);
+    }
   });
 });
 

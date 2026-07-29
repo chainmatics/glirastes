@@ -124,11 +124,16 @@ export const SecurityRevocationSchema = z.object({
 }).strict();
 
 export const ExecutionLeaseSchema = z.object({
+  schemaVersion: z.literal(1),
   leaseId: uuid,
+  tenantId: uuid,
+  targetAppId: uuid,
   environmentId: uuid,
+  runnerId: uuid,
+  deploymentId: uuid,
   agentRevisionId: uuid,
   triggerId: identifier,
-  allowedRiskClasses: z.array(ToolRiskClassSchema),
+  allowedRiskClasses: z.array(ToolRiskClassSchema).min(1),
   budget: ExecutionBudgetSchema,
   issuedAt: publishedAt,
   expiresAt: publishedAt,
