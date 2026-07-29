@@ -196,4 +196,35 @@ describe('createAiChatHandler managed runtime', () => {
 
     expect(response.status).toBe(403);
   });
+
+  it('handles an asynchronously rejected pipeline stream', async () => {
+    const streamFailure = new Error('stream failed');
+    const onError = vi.fn();
+    const handler = createAiChatHandler({
+      tools,
+      pipeline: {
+        process: async () => ({
+          model: { modelId: 'test', instance: {} },
+          tools: ['list_tasks'],
+          sanitizedInput: 'show tasks',
+          intent: { intent: 'task_query', confidence: 1 },
+          module: null,
+          followupsEnabled: false,
+        }),
+      },
+      systemPrompt: 'Assistant',
+      streamHandler: async () => {
+        throw streamFailure;
+      },
+      onError,
+    });
+
+    const response = await handler(request());
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: 'AI request failed',
+    });
+    expect(onError).toHaveBeenCalledWith(streamFailure, expect.any(Request));
+  });
 });

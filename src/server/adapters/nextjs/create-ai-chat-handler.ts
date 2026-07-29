@@ -138,6 +138,16 @@ export function resolveStepLimit(options: {
     : resolved;
 }
 
+export function resolveTurnTimeout(
+  totalTimeoutMs: number | undefined,
+): { totalMs: number } | undefined {
+  if (totalTimeoutMs === undefined) return undefined;
+  if (!Number.isFinite(totalTimeoutMs) || totalTimeoutMs <= 0) {
+    throw new RangeError('totalTimeoutMs must be a positive finite number');
+  }
+  return { totalMs: totalTimeoutMs };
+}
+
 export function shouldStopManagedExecution(options: {
   stepCount: number;
   maxSteps: number;
@@ -323,6 +333,9 @@ async function defaultStreamHandler(
         tools: vercelTools as Parameters<typeof streamText>[0]['tools'],
         maxOutputTokens: ctx.maxOutputTokens,
         temperature: ctx.temperature,
+        timeout: resolveTurnTimeout(
+          ctx.managedTurn?.snapshot.budget.totalTimeoutMs,
+        ),
         stopWhen: shouldStop,
         onStepFinish: async (event) => {
           await ctx.managedTurn?.afterModelStep({
@@ -872,7 +885,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           modelId: resolvedModelId,
         } : undefined);
 
-        return pipelineStreamHandler({
+        return await pipelineStreamHandler({
           tools: aiTools as Record<string, unknown>,
           messages: recentMessages,
           systemPrompt,
@@ -1004,7 +1017,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       } : undefined);
 
       // Delegate streaming to consumer's handler
-      return legacyStreamHandler({
+      return await legacyStreamHandler({
         tools: aiTools as Record<string, unknown>,
         messages: recentMessages,
         systemPrompt,

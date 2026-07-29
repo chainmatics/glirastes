@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_SAFETY_MAX_STEPS,
+  resolveTurnTimeout,
   resolveStepLimit,
   shouldStopManagedExecution,
 } from '../create-ai-chat-handler.js';
@@ -66,5 +67,17 @@ describe('resolveStepLimit', () => {
       maxSteps: 10,
       budgetState: 'hard-limit',
     })).toBe(true);
+  });
+});
+
+describe('resolveTurnTimeout', () => {
+  it('passes the pinned total turn budget to the AI SDK timeout', () => {
+    expect(resolveTurnTimeout(60_000)).toEqual({ totalMs: 60_000 });
+    expect(resolveTurnTimeout(undefined)).toBeUndefined();
+  });
+
+  it('fails closed for invalid timeout configuration', () => {
+    expect(() => resolveTurnTimeout(0)).toThrow(/positive/i);
+    expect(() => resolveTurnTimeout(Number.NaN)).toThrow(/positive/i);
   });
 });
