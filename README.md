@@ -25,9 +25,13 @@ approvals, rollout, and content-free technical health.
 |---|---|
 | `glirastes/contracts` | Principals, budgets, manifests, revisions, deployments |
 | `glirastes/runtime` | Local authorization, pinned turns, budgets, durable stores |
+| `glirastes/ai-sdk` | Vercel AI SDK reference engine |
 | `glirastes/runtime/ai-sdk` | Vercel AI SDK reference-engine adapter |
+| `glirastes/stt` | Provider-neutral recording state machine and STT adapters |
 | `glirastes/react` | Chat composition, sessions, actions, STT |
 | `glirastes/react/vercel` | AI SDK React transport and `VercelAiChat` |
+| `glirastes/adapter/nextjs` | Next.js application adapter |
+| `glirastes/adapter/nestjs` | NestJS application adapter |
 | `glirastes/server/nextjs` | Next.js chat handler |
 | `glirastes/server/nestjs` | Framework adapter surface |
 | `glirastes/sync` | Signed revision cache, rollout selection, revocations |

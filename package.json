@@ -92,6 +92,26 @@
         "default": "./dist/cjs/runtime/ai-sdk/index.js"
       }
     },
+    "./ai-sdk": {
+      "import": {
+        "types": "./dist/runtime/ai-sdk/index.d.ts",
+        "default": "./dist/runtime/ai-sdk/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/runtime/ai-sdk/index.d.ts",
+        "default": "./dist/cjs/runtime/ai-sdk/index.js"
+      }
+    },
+    "./stt": {
+      "import": {
+        "types": "./dist/stt/index.d.ts",
+        "default": "./dist/stt/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/stt/index.d.ts",
+        "default": "./dist/cjs/stt/index.js"
+      }
+    },
     "./sync": {
       "import": {
         "types": "./dist/sync/index.d.ts",
@@ -123,6 +143,26 @@
       }
     },
     "./server/nestjs": {
+      "import": {
+        "types": "./dist/server/adapters/nestjs/index.d.ts",
+        "default": "./dist/server/adapters/nestjs/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/adapters/nestjs/index.d.ts",
+        "default": "./dist/cjs/server/adapters/nestjs/index.js"
+      }
+    },
+    "./adapter/nextjs": {
+      "import": {
+        "types": "./dist/server/adapters/nextjs/index.d.ts",
+        "default": "./dist/server/adapters/nextjs/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/adapters/nextjs/index.d.ts",
+        "default": "./dist/cjs/server/adapters/nextjs/index.js"
+      }
+    },
+    "./adapter/nestjs": {
       "import": {
         "types": "./dist/server/adapters/nestjs/index.d.ts",
         "default": "./dist/server/adapters/nestjs/index.js"
@@ -168,8 +208,11 @@
     "dist",
     "contracts",
     "runtime",
+    "ai-sdk",
+    "stt",
     "sync",
     "server",
+    "adapter",
     "react",
     "codegen",
     "openapi",
