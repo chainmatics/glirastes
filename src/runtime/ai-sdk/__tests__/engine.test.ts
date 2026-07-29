@@ -1,8 +1,41 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createAiSdkTools } from '../engine.js';
+import { createJsonSchemaLike } from '../../json-schema.js';
 
 describe('createAiSdkTools', () => {
+  it('passes generated JSON schemas to AI SDK with local validation', async () => {
+    const parameters = createJsonSchemaLike({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        title: { type: 'string', minLength: 1 },
+      },
+      required: ['title'],
+    });
+    const tools = createAiSdkTools({
+      tools: {
+        create_task: {
+          description: 'Create task.',
+          parameters,
+          execute: async () => ({ success: true }),
+        },
+      },
+    });
+
+    const inputSchema = tools.create_task!.inputSchema as {
+      jsonSchema: unknown;
+      validate: (value: unknown) => PromiseLike<unknown> | unknown;
+    };
+    expect(inputSchema.jsonSchema).toEqual(parameters.jsonSchema);
+    await expect(Promise.resolve(
+      inputSchema.validate({ title: '' }),
+    )).resolves.toMatchObject({
+      success: false,
+      error: expect.any(Error),
+    });
+  });
+
   it('guards every tool execution and reports success', async () => {
     const calls: string[] = [];
     const tools = createAiSdkTools({

@@ -1,4 +1,4 @@
-import { tool, zodSchema } from 'ai';
+import { jsonSchema, tool, zodSchema } from 'ai';
 
 export interface AiSdkSourceTool {
   description: string;
@@ -37,6 +37,50 @@ export interface AiSdkWrappedTool {
   [key: string]: unknown;
 }
 
+function isJsonSchemaLike(value: unknown): value is {
+  jsonSchema: Readonly<Record<string, unknown>>;
+  safeParse: (input: unknown) =>
+    | { success: true; data: unknown }
+    | {
+      success: false;
+      error: { issues: ReadonlyArray<{ path?: ReadonlyArray<PropertyKey>; message?: string }> };
+    };
+} {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && 'jsonSchema' in value
+    && 'safeParse' in value
+    && typeof value.safeParse === 'function'
+  );
+}
+
+function toAiSdkInputSchema(parameters: unknown) {
+  if (!isJsonSchemaLike(parameters)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return zodSchema(parameters as any);
+  }
+  return jsonSchema(
+    parameters.jsonSchema as Parameters<typeof jsonSchema>[0],
+    {
+      validate: (value) => {
+        const parsed = parameters.safeParse(value);
+        if (parsed.success) return { success: true, value: parsed.data };
+        const detail = parsed.error.issues
+          .map((issue) => {
+            const path = issue.path?.join('.') ?? '';
+            return `${path}${path ? ': ' : ''}${issue.message ?? 'invalid value'}`;
+          })
+          .join('; ');
+        return {
+          success: false,
+          error: new Error(detail || 'Input does not match local JSON schema'),
+        };
+      },
+    },
+  );
+}
+
 export function createAiSdkTools(
   options: {
     tools: Record<string, AiSdkSourceTool | unknown>;
@@ -53,10 +97,7 @@ export function createAiSdkTools(
       : source.needsApproval;
     wrapped[toolName] = tool({
       description: source.description,
-      // The existing Glirastes tool registry stores Zod schemas under
-      // `parameters`; zodSchema bridges them into AI SDK 6.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      inputSchema: zodSchema(source.parameters as any),
+      inputSchema: toAiSdkInputSchema(source.parameters),
       needsApproval: needsApproval as Parameters<typeof tool>[0]['needsApproval'],
       execute: async (input: unknown, executionOptions: unknown) => {
         await options.beforeToolCall?.({ toolName, input });

@@ -28,6 +28,11 @@ export {
   type LocalToolBinding,
   type LocalUiToolBinding,
 } from './local-tool-bindings.js';
+export {
+  createJsonSchemaLike,
+  type JsonSchemaLike,
+  type LocalJsonSchema,
+} from './json-schema.js';
 export type {
   RuntimeEngine,
   RuntimeEngineEvent,
