@@ -40,6 +40,11 @@ export interface ManagedTurnGuard {
   readonly tracker: ExecutionBudgetTracker;
   readonly toolTimeoutMs: number;
   beforeToolCall(call: AiSdkToolCall): Promise<void>;
+  afterModelStep(usage: {
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd?: number;
+  }): Promise<void>;
   afterToolCall(call: AiSdkToolSuccess): Promise<void>;
   onToolError(call: AiSdkToolFailure): Promise<void>;
   resolveApproval(call: AiSdkToolCall): Promise<boolean>;
@@ -115,6 +120,15 @@ export function createManagedTurnGuard(
 
       await authorize(call);
       tracker.recordToolCall();
+      await emitBudgetSignal();
+    },
+
+    async afterModelStep(usage) {
+      tracker.recordModelStep();
+      tracker.recordTokens(usage.inputTokens, usage.outputTokens);
+      if (usage.estimatedCostUsd !== undefined) {
+        tracker.recordEstimatedCost(usage.estimatedCostUsd);
+      }
       await emitBudgetSignal();
     },
 

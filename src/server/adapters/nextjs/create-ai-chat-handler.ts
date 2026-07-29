@@ -26,6 +26,7 @@ import { filterFallbackError } from './filter-fallback-error.js';
 import { PrincipalSchema } from '../../../contracts/index.js';
 import {
   createManagedTurnGuard,
+  type BudgetEvaluation,
   type ManagedTurnGuard,
 } from '../../../runtime/index.js';
 
@@ -108,21 +109,42 @@ export function resolveStepLimit(options: {
   moduleMaxSteps?: number | null;
   configuredMaxSteps?: number | null;
   safetyMaxSteps?: number;
+  runtimeBudgetMaxSteps?: number | null;
 }): { maxSteps: number; stepLimitSource: StepLimitSource } {
+  let resolved: { maxSteps: number; stepLimitSource: StepLimitSource };
   const moduleMaxSteps = asPositiveInt(options.moduleMaxSteps);
   if (moduleMaxSteps) {
-    return { maxSteps: moduleMaxSteps, stepLimitSource: 'module' };
+    resolved = { maxSteps: moduleMaxSteps, stepLimitSource: 'module' };
+  } else {
+    const configuredMaxSteps = asPositiveInt(options.configuredMaxSteps);
+    resolved = configuredMaxSteps
+      ? { maxSteps: configuredMaxSteps, stepLimitSource: 'explicit' }
+      : {
+          maxSteps:
+            asPositiveInt(options.safetyMaxSteps)
+            ?? DEFAULT_SAFETY_MAX_STEPS,
+          stepLimitSource: 'safety',
+        };
   }
 
-  const configuredMaxSteps = asPositiveInt(options.configuredMaxSteps);
-  if (configuredMaxSteps) {
-    return { maxSteps: configuredMaxSteps, stepLimitSource: 'explicit' };
-  }
+  const runtimeBudgetMaxSteps = asPositiveInt(
+    options.runtimeBudgetMaxSteps,
+  );
+  return runtimeBudgetMaxSteps && runtimeBudgetMaxSteps < resolved.maxSteps
+    ? {
+        maxSteps: runtimeBudgetMaxSteps,
+        stepLimitSource: 'runtime-budget',
+      }
+    : resolved;
+}
 
-  return {
-    maxSteps: asPositiveInt(options.safetyMaxSteps) ?? DEFAULT_SAFETY_MAX_STEPS,
-    stepLimitSource: 'safety',
-  };
+export function shouldStopManagedExecution(options: {
+  stepCount: number;
+  maxSteps: number;
+  budgetState?: BudgetEvaluation['state'];
+}): boolean {
+  return options.stepCount >= options.maxSteps
+    || options.budgetState === 'hard-limit';
 }
 
 function compactToolNames(toolCalls: Array<{ toolName: string }>): string[] {
@@ -260,33 +282,13 @@ async function defaultStreamHandler(
   );
 
   let wasTruncated = false;
-  let stoppedByLoop = false;
-
-  // Stop condition: step count OR consecutive identical tool calls (loop detection).
-  const LOOP_REPEAT_THRESHOLD = 3;
   const shouldStop = (event: {
     steps: Array<{ toolCalls: Array<{ toolName: string }> }>;
-  }) => {
-    if (event.steps.length >= ctx.maxSteps) return true;
-
-    if (event.steps.length >= LOOP_REPEAT_THRESHOLD) {
-      const recent = event.steps.slice(-LOOP_REPEAT_THRESHOLD);
-      const signatures = recent.map((s) =>
-        s.toolCalls
-          .map((c) => c.toolName)
-          .sort()
-          .join(','),
-      );
-      if (
-        signatures[0].length > 0 &&
-        signatures.every((sig) => sig === signatures[0])
-      ) {
-        stoppedByLoop = true;
-        return true;
-      }
-    }
-    return false;
-  };
+  }) => shouldStopManagedExecution({
+    stepCount: event.steps.length,
+    maxSteps: ctx.maxSteps,
+    budgetState: ctx.managedTurn?.tracker.evaluate().state,
+  });
 
   const stream = createUIMessageStream({
     execute: async ({ writer }) => {
@@ -322,7 +324,11 @@ async function defaultStreamHandler(
         maxOutputTokens: ctx.maxOutputTokens,
         temperature: ctx.temperature,
         stopWhen: shouldStop,
-        onStepFinish: (event) => {
+        onStepFinish: async (event) => {
+          await ctx.managedTurn?.afterModelStep({
+            inputTokens: event.usage.inputTokens ?? 0,
+            outputTokens: event.usage.outputTokens ?? 0,
+          });
           const report = buildStepReport({
             stepNumber: event.stepNumber,
             finishReason: event.finishReason,
@@ -362,16 +368,23 @@ async function defaultStreamHandler(
           finalStateWritten = true;
         },
         onFinish: (event) => {
+          const budgetEvaluation = ctx.managedTurn?.tracker.evaluate();
+          const stoppedByBudget =
+            budgetEvaluation?.state === 'hard-limit';
           wasTruncated =
             event.finishReason === 'tool-calls' &&
-            (event.steps.length >= ctx.maxSteps || stoppedByLoop);
+            (event.steps.length >= ctx.maxSteps || stoppedByBudget);
           totalSteps = Math.max(totalSteps, event.steps.length);
 
-          const isSafetyStop = wasTruncated && ctx.stepLimitSource === 'safety' && !stoppedByLoop;
+          const isSafetyStop =
+            wasTruncated
+            && (
+              ctx.stepLimitSource === 'safety'
+              || ctx.stepLimitSource === 'runtime-budget'
+              || stoppedByBudget
+            );
           const status: PipelineStreamState['status'] =
-            stoppedByLoop
-              ? 'safety-stop'
-              : isSafetyStop
+            isSafetyStop
                 ? 'safety-stop'
                 : event.finishReason === 'error'
                   ? 'error'
@@ -385,8 +398,10 @@ async function defaultStreamHandler(
                 finishReason: event.finishReason,
                 maxSteps: ctx.maxSteps,
                 stepLimitSource: ctx.stepLimitSource,
-                message: stoppedByLoop
-                  ? 'Stopped: repeated tool call loop detected.'
+                message: stoppedByBudget
+                  ? `Stopped at runtime budget: ${
+                      budgetEvaluation.reasons.join(', ')
+                    }.`
                   : wasTruncated
                     ? isSafetyStop
                       ? 'Paused at step safety cap. You can continue or stop.'
@@ -832,6 +847,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           moduleMaxSteps: pipelineResult.module?.executionDefaults?.maxSteps,
           configuredMaxSteps,
           safetyMaxSteps,
+          runtimeBudgetMaxSteps:
+            managedTurn?.snapshot.budget.maxModelSteps,
         });
         const contextWindow =
           pipelineResult.module?.executionDefaults?.contextWindow ??
@@ -964,6 +981,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const stepLimit = resolveStepLimit({
         configuredMaxSteps: routing?.maxSteps ?? configuredMaxSteps,
         safetyMaxSteps,
+        runtimeBudgetMaxSteps:
+          managedTurn?.snapshot.budget.maxModelSteps,
       });
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
       let recentMessages = processedMessages.slice(-contextWindow);

@@ -103,6 +103,29 @@ describe('createManagedTurnGuard', () => {
     expect(guard.tracker.usage.toolCalls).toBe(1);
   });
 
+  it('records model steps and token usage against the pinned budget', async () => {
+    const onBudgetSignal = vi.fn();
+    const guard = createManagedTurnGuard({
+      snapshot: createSnapshot(),
+      resolvePrincipal: async () => principal,
+      onBudgetSignal,
+    });
+
+    await guard.afterModelStep({
+      inputTokens: 40_000,
+      outputTokens: 8_000,
+    });
+
+    expect(guard.tracker.usage).toMatchObject({
+      modelSteps: 1,
+      inputTokens: 40_000,
+      outputTokens: 8_000,
+    });
+    expect(onBudgetSignal).toHaveBeenCalledWith(expect.objectContaining({
+      evaluation: expect.objectContaining({ state: 'soft-limit' }),
+    }));
+  });
+
   it('derives approval solely from the pinned policy', async () => {
     const snapshot = createTurnSnapshot({
       turnId: 'turn-approval',

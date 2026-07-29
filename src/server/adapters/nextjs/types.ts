@@ -86,7 +86,11 @@ export type IntentRouter = (
   allToolNames: string[],
 ) => IntentRoutingResult | Promise<IntentRoutingResult>;
 
-export type StepLimitSource = 'explicit' | 'module' | 'safety';
+export type StepLimitSource =
+  | 'explicit'
+  | 'module'
+  | 'safety'
+  | 'runtime-budget';
 
 export interface ResolveTurnSnapshotContext {
   request: Request;
