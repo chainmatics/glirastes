@@ -157,6 +157,39 @@ describe('RuntimeSyncManager', () => {
     ]);
   });
 
+  it('removes an activated deployment from pending even when another pending candidate is rejected', async () => {
+    const store = new MemoryRuntimeStateStore();
+    const candidate = deployment('stable', '33', 'pending');
+    await store.saveAtomic({
+      ...initialState(deployment('stable', '30')),
+      pending: [candidate],
+    });
+    const manager = new RuntimeSyncManager({
+      environmentId,
+      store,
+      verifier: {
+        verifyRevocation: vi.fn().mockResolvedValue(undefined),
+        verifyRevision: vi.fn().mockResolvedValue(undefined),
+      } as never,
+    });
+
+    await manager.apply({
+      cursor: '2026-07-28T20:03:00.000Z',
+      activeSnapshotComplete: true,
+      deployments: [
+        { ...candidate, status: 'active', healthStatus: 'healthy' },
+        {
+          deploymentId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3934',
+          environmentId,
+          status: 'pending',
+        },
+      ],
+      revocations: [],
+    });
+
+    expect((await store.load())?.pending).toEqual([]);
+  });
+
   it('retains last-known-good when an active snapshot cannot be verified', async () => {
     const store = new MemoryRuntimeStateStore();
     const stable = deployment('stable', '40');

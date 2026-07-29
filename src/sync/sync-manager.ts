@@ -130,11 +130,17 @@ export class RuntimeSyncManager {
         canary: this.latest(active, 'canary'),
       };
     }
+    const activeIds = new Set(
+      active.map((deployment) => deployment.deploymentId),
+    );
+    const nextPending = (
+      rejectedPending
+        ? this.mergePending(state.pending, pending)
+        : pending
+    ).filter((deployment) => !activeIds.has(deployment.deploymentId));
     state = {
       ...state,
-      pending: rejectedPending
-        ? this.mergePending(state.pending, pending)
-        : pending,
+      pending: nextPending,
       cursor: wire.cursor,
       updatedAt: wire.cursor,
     };
