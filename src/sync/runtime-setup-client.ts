@@ -8,6 +8,31 @@ export interface RouteScanUpload {
   generatedAt: string;
   candidates: ScannedRouteCandidate[];
   ignored: string[];
+  executions?: LocalExecutionEvidence[];
+}
+
+interface LocalExecutionEvidenceBase {
+  definitionId: string;
+  stableKey: string;
+  sourceFingerprint: string;
+  inputSchemaDigest: string;
+  outputSchemaDigest: string;
+}
+
+export type LocalExecutionEvidence =
+  | LocalExecutionEvidenceBase & {
+    executionKind: 'endpoint';
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    path: string;
+  }
+  | LocalExecutionEvidenceBase & {
+    executionKind: 'ui';
+    actionBindingRef: string;
+  };
+
+export interface LocalExecutionInventory {
+  schemaVersion: 1;
+  executions: LocalExecutionEvidence[];
 }
 
 export interface RuntimeSetupImportResult {
@@ -33,6 +58,28 @@ export interface RuntimeSetupImportResult {
 const fingerprintSchema = z.string().regex(
   /^sha256:(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9+/]{43}=)$/,
 );
+const executionBaseSchema = z.object({
+  definitionId: z.string().trim().min(1).max(200),
+  stableKey: z.string().trim().min(1).max(2_100),
+  sourceFingerprint: fingerprintSchema,
+  inputSchemaDigest: fingerprintSchema,
+  outputSchemaDigest: fingerprintSchema,
+});
+const localExecutionEvidenceSchema = z.discriminatedUnion('executionKind', [
+  executionBaseSchema.extend({
+    executionKind: z.literal('endpoint'),
+    method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+    path: z.string().startsWith('/').max(2_048),
+  }).strict(),
+  executionBaseSchema.extend({
+    executionKind: z.literal('ui'),
+    actionBindingRef: z.string().trim().min(1).max(200),
+  }).strict(),
+]);
+const localExecutionInventorySchema = z.object({
+  schemaVersion: z.literal(1),
+  executions: z.array(localExecutionEvidenceSchema).max(5_000),
+}).strict();
 const toolIdentitySchema = z.object({
   toolId: z.string().uuid(),
   stableKey: z.string().trim().min(1).max(2_100),
@@ -51,6 +98,12 @@ const importResultSchema = z.object({
     questions: z.array(z.string().trim().min(1).max(1_000)).max(100),
   }).strict()).max(5_000),
 }).strict();
+
+export function parseLocalExecutionInventory(
+  value: unknown,
+): LocalExecutionInventory {
+  return localExecutionInventorySchema.parse(value);
+}
 
 export class RuntimeSetupClient {
   constructor(private readonly options: {
@@ -118,6 +171,32 @@ export class RuntimeSetupClient {
         reviewReasons: [...candidate.reviewReasons],
       })),
       ignored: [...scan.ignored],
+      ...(scan.executions
+        ? {
+          executions: scan.executions.map((execution) => (
+            execution.executionKind === 'endpoint'
+              ? {
+                definitionId: execution.definitionId,
+                stableKey: execution.stableKey,
+                executionKind: execution.executionKind,
+                sourceFingerprint: execution.sourceFingerprint,
+                inputSchemaDigest: execution.inputSchemaDigest,
+                outputSchemaDigest: execution.outputSchemaDigest,
+                method: execution.method,
+                path: execution.path,
+              }
+              : {
+                definitionId: execution.definitionId,
+                stableKey: execution.stableKey,
+                executionKind: execution.executionKind,
+                sourceFingerprint: execution.sourceFingerprint,
+                inputSchemaDigest: execution.inputSchemaDigest,
+                outputSchemaDigest: execution.outputSchemaDigest,
+                actionBindingRef: execution.actionBindingRef,
+              }
+          )),
+        }
+        : {}),
     };
   }
 
@@ -125,11 +204,17 @@ export class RuntimeSetupClient {
     scan: RouteScanUpload,
     bindings: RuntimeSetupImportResult['bindings'] | undefined,
   ): boolean {
-    if (!bindings || bindings.length !== scan.candidates.length) return false;
+    if (!bindings) return false;
     const expected = new Map(scan.candidates.map((candidate) => [
       `${candidate.method} ${candidate.path}`,
       candidate.sourceFingerprint,
     ]));
+    for (const execution of scan.executions ?? []) {
+      const existing = expected.get(execution.stableKey);
+      if (existing && existing !== execution.sourceFingerprint) return false;
+      expected.set(execution.stableKey, execution.sourceFingerprint);
+    }
+    if (bindings.length !== expected.size) return false;
     const seen = new Set<string>();
     for (const binding of bindings) {
       if (

@@ -28,6 +28,11 @@ export type {
   RuntimePushConnector,
 } from './control-plane-client.js';
 export { RuntimeSetupClient } from './runtime-setup-client.js';
+export {
+  parseLocalExecutionInventory,
+  type LocalExecutionEvidence,
+  type LocalExecutionInventory,
+} from './runtime-setup-client.js';
 export type {
   RouteScanUpload,
   RuntimeSetupImportResult,

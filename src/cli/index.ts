@@ -17,6 +17,7 @@ import {
   type GenerateSkillsOptions,
 } from '../codegen/index.js';
 import {
+  parseLocalExecutionInventory,
   RuntimeSetupClient,
   type RouteScanUpload,
 } from '../sync/runtime-setup-client.js';
@@ -90,7 +91,7 @@ function parseCommand(args: string[]): { command: CommandName; rest: string[] } 
         `  scaffold              Scaffold ai-tool.ts from route.ts\n` +
         `  test                  Scaffold AI behavior test file\n` +
         `  check-upgrade         Analyze upgrade gaps from release notes (--from-version)\n` +
-        `  scan                  Scan Next.js routes into a local artifact [--output] [--sync]\n` +
+        `  scan                  Scan Next.js routes [--output] [--sync] [--execution-inventory]\n` +
         `  sync                  Sync tool schemas to Glirastes platform\n`,
     );
   }
@@ -220,6 +221,15 @@ export async function runCli(args: string[]): Promise<void> {
       const scan = JSON.parse(
         readFileSync(artifact.outputPath, 'utf8'),
       ) as RouteScanUpload;
+      const executionInventoryPath = getFlagValue(
+        rest,
+        '--execution-inventory',
+      );
+      if (executionInventoryPath) {
+        scan.executions = parseLocalExecutionInventory(JSON.parse(
+          readFileSync(resolve(rootDir, executionInventoryPath), 'utf8'),
+        )).executions;
+      }
       const imported = await new RuntimeSetupClient({
         baseUrl,
         apiKey,

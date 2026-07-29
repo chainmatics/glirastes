@@ -28,6 +28,22 @@ async function projectFixture(): Promise<string> {
       return Response.json({ ok: true });
     }`,
   );
+  await mkdir(join(root, '.glirastes'), { recursive: true });
+  await writeFile(
+    join(root, '.glirastes/local-execution-inventory.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      executions: [{
+        definitionId: 'ui.taskDetails.open',
+        stableKey: 'UI ui.taskDetails.open',
+        executionKind: 'ui',
+        sourceFingerprint: `sha256:${'B'.repeat(43)}`,
+        inputSchemaDigest: `sha256:${'C'.repeat(43)}`,
+        outputSchemaDigest: `sha256:${'D'.repeat(43)}`,
+        actionBindingRef: 'ui.taskDetails.open',
+      }],
+    }),
+  );
   return root;
 }
 
@@ -44,13 +60,20 @@ describe('glirastes scan --sync', () => {
       async (_url: string, request: RequestInit) => {
         const upload = JSON.parse(String(request.body));
         return new Response(JSON.stringify({
-          createdDrafts: 1,
+          createdDrafts: 2,
           unchanged: 0,
-          bindings: [{
-            toolId,
-            stableKey: 'GET /api/tasks',
-            sourceFingerprint: upload.candidates[0].sourceFingerprint,
-          }],
+          bindings: [
+            {
+              toolId,
+              stableKey: 'GET /api/tasks',
+              sourceFingerprint: upload.candidates[0].sourceFingerprint,
+            },
+            {
+              toolId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3906',
+              stableKey: 'UI ui.taskDetails.open',
+              sourceFingerprint: `sha256:${'B'.repeat(43)}`,
+            },
+          ],
           tombstoneCandidates: [],
           interview: [],
         }), { status: 201 });
@@ -70,6 +93,8 @@ describe('glirastes scan --sync', () => {
       'app-1',
       '--environment-id',
       'env-1',
+      '--execution-inventory',
+      '.glirastes/local-execution-inventory.json',
       '--quiet',
     ]);
 
@@ -86,6 +111,7 @@ describe('glirastes scan --sync', () => {
     });
     expect(String(request.body)).not.toContain('return Response');
     const uploadedScan = JSON.parse(String(request.body));
+    expect(uploadedScan.executions).toHaveLength(1);
     const sourceFingerprint = uploadedScan.candidates[0].sourceFingerprint;
     await expect(readFile(
       join(root, '.glirastes/platform-tool-bindings.json'),
@@ -94,11 +120,18 @@ describe('glirastes scan --sync', () => {
       schemaVersion: 1,
       targetAppId: 'app-1',
       environmentId: 'env-1',
-      bindings: [{
-        toolId,
-        stableKey: 'GET /api/tasks',
-        sourceFingerprint,
-      }],
+      bindings: [
+        {
+          toolId,
+          stableKey: 'GET /api/tasks',
+          sourceFingerprint,
+        },
+        {
+          toolId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3906',
+          stableKey: 'UI ui.taskDetails.open',
+          sourceFingerprint: `sha256:${'B'.repeat(43)}`,
+        },
+      ],
     });
   });
 

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { RuntimeSetupClient } from '../runtime-setup-client.js';
+import {
+  parseLocalExecutionInventory,
+  RuntimeSetupClient,
+} from '../runtime-setup-client.js';
 
 const sourceFingerprint = `sha256:${'A'.repeat(43)}`;
 const toolId = '019fa9a9-d5f7-7ec3-a3c7-8899de1d3905';
@@ -34,8 +37,27 @@ const importResult = {
   tombstoneCandidates: [],
   interview: [],
 };
+const uiFingerprint = `sha256:${'B'.repeat(43)}`;
+const inputSchemaDigest = `sha256:${'C'.repeat(43)}`;
+const outputSchemaDigest = `sha256:${'D'.repeat(43)}`;
 
 describe('RuntimeSetupClient', () => {
+  it('rejects executable schemas or raw content in local inventory evidence', () => {
+    expect(() => parseLocalExecutionInventory({
+      schemaVersion: 1,
+      executions: [{
+        definitionId: 'ui.taskDetails.open',
+        stableKey: 'UI ui.taskDetails.open',
+        executionKind: 'ui',
+        sourceFingerprint: uiFingerprint,
+        inputSchemaDigest,
+        outputSchemaDigest,
+        actionBindingRef: 'ui.taskDetails.open',
+        inputSchema: { type: 'object' },
+      }],
+    })).toThrow();
+  });
+
   it('uploads a route scan to the app and environment scoped setup endpoint', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(importResult), { status: 201 }),
@@ -61,6 +83,58 @@ describe('RuntimeSetupClient', () => {
         }),
       }),
     );
+  });
+
+  it('uploads content-free local execution evidence and validates every binding', async () => {
+    const uiToolId = '019fa9a9-d5f7-7ec3-a3c7-8899de1d3906';
+    const scanWithExecution = {
+      ...scan,
+      executions: [{
+        definitionId: 'ui.taskDetails.open',
+        stableKey: 'UI ui.taskDetails.open',
+        executionKind: 'ui' as const,
+        sourceFingerprint: uiFingerprint,
+        inputSchemaDigest,
+        outputSchemaDigest,
+        actionBindingRef: 'ui.taskDetails.open',
+      }],
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ...importResult,
+        createdDrafts: 2,
+        bindings: [
+          ...importResult.bindings,
+          {
+            toolId: uiToolId,
+            stableKey: 'UI ui.taskDetails.open',
+            sourceFingerprint: uiFingerprint,
+          },
+        ],
+      }), { status: 201 }),
+    );
+    const client = new RuntimeSetupClient({
+      baseUrl: 'https://control.example/',
+      apiKey: 'secret-key',
+      appId: 'app-1',
+      environmentId: 'env-1',
+      fetchImpl,
+    });
+
+    await expect(client.importRouteScan(scanWithExecution)).resolves
+      .toMatchObject({ createdDrafts: 2 });
+    const request = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      executions: [{
+        definitionId: 'ui.taskDetails.open',
+        stableKey: 'UI ui.taskDetails.open',
+        executionKind: 'ui',
+        sourceFingerprint: uiFingerprint,
+        inputSchemaDigest,
+        outputSchemaDigest,
+        actionBindingRef: 'ui.taskDetails.open',
+      }],
+    });
   });
 
   it('strips unknown raw source fields before upload', async () => {
