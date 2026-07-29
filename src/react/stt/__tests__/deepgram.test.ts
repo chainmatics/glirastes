@@ -40,7 +40,7 @@ describe('Deepgram segment parser', () => {
       channel: { alternatives: [{ transcript: 'Neue' }] },
     })).toMatchObject({
       id: 'deepgram-1.25',
-      sequence: 0,
+      sequence: 1.25,
       text: 'Neue',
       isFinal: false,
     });
@@ -51,7 +51,7 @@ describe('Deepgram segment parser', () => {
       channel: { alternatives: [{ transcript: 'Neue Aufgabe' }] },
     })).toMatchObject({
       id: 'deepgram-1.25',
-      sequence: 0,
+      sequence: 1.25,
       text: 'Neue Aufgabe',
       isFinal: true,
     });
@@ -61,6 +61,23 @@ describe('Deepgram segment parser', () => {
     const parse = createDeepgramSegmentParser();
     expect(parse({ type: 'Metadata' })).toBeNull();
     expect(parse({ channel: { alternatives: [{ transcript: '' }] } })).toBeNull();
+  });
+
+  it('orders delayed final segments by provider timestamp', () => {
+    const parse = createDeepgramSegmentParser();
+
+    const later = parse({
+      start: 1,
+      is_final: true,
+      channel: { alternatives: [{ transcript: 'morgen' }] },
+    });
+    const earlier = parse({
+      start: 0,
+      is_final: true,
+      channel: { alternatives: [{ transcript: 'Bis' }] },
+    });
+
+    expect(earlier?.sequence).toBeLessThan(later?.sequence ?? 0);
   });
 
   it('closes the socket when the provider handshake fails', async () => {

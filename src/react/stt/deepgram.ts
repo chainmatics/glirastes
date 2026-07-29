@@ -18,20 +18,23 @@ export function createDeepgramSegmentParser(): (
   message: DeepgramMessage,
 ) => SttSegment | null {
   const sequences = new Map<string, number>();
-  let nextSequence = 0;
+  let nextUntimedSequence = 0;
 
   return (message) => {
     const text = message.channel?.alternatives?.[0]?.transcript?.trim();
     if (!text) return null;
 
-    const id = Number.isFinite(message.start)
+    const hasProviderTimestamp = Number.isFinite(message.start);
+    const id = hasProviderTimestamp
       ? `deepgram-${message.start}`
-      : `deepgram-sequence-${nextSequence}`;
+      : `deepgram-sequence-${nextUntimedSequence}`;
     let sequence = sequences.get(id);
     if (sequence === undefined) {
-      sequence = nextSequence;
+      sequence = hasProviderTimestamp
+        ? message.start!
+        : 1_000_000_000 + nextUntimedSequence;
       sequences.set(id, sequence);
-      nextSequence += 1;
+      if (!hasProviderTimestamp) nextUntimedSequence += 1;
     }
 
     return {
