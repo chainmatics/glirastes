@@ -85,7 +85,7 @@ function parseCommand(args: string[]): { command: CommandName; rest: string[] } 
         `  generate-skills       Generate agent skill files (Claude Code / Codex) [--sync] [--remote]\n` +
         `  generate-mcp-server   Generate MCP server project from tool definitions [--sync] [--remote]\n` +
         `  generate-auto         Auto-detect best output format and generate\n` +
-        `  install-skills        Install bundled agent skills (default: ./.claude/skills) [-g/--global ~/.claude/skills] [--target <dir>] [--stack nextjs|nestjs|nextjs+nestjs|all] [--symlink] [--force] [--dry-run]\n` +
+        `  install-skills        Install bundled agent skills (default: ./.claude/skills) [-g/--global ~/.claude/skills] [--target <dir>] [--stack nextjs|all] [--symlink] [--force] [--dry-run]\n` +
         `  validate-tools        Validate AI tool configuration\n` +
         `  coverage              Check AI tool coverage\n` +
         `  scaffold              Scaffold ai-tool.ts from route.ts\n` +
@@ -591,7 +591,7 @@ export async function runCli(args: string[]): Promise<void> {
     const { installSkills } = await import('./commands/install-skills.js');
     const target = getFlagValue(rest, '--target');
     const stackRaw = getFlagValue(rest, '--stack') ?? 'all';
-    const validStacks = ['nextjs', 'nestjs', 'nextjs+nestjs', 'all'] as const;
+    const validStacks = ['nextjs', 'all'] as const;
     if (!(validStacks as readonly string[]).includes(stackRaw)) {
       throw new Error(
         `Invalid --stack value '${stackRaw}'. Use one of: ${validStacks.join(' | ')}.`,

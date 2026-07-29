@@ -11,7 +11,7 @@ export interface InstallSkillsOptions {
   /** Install into the user's home (`~/.claude/skills`) instead of the project. Mutually exclusive with `target`. */
   global?: boolean;
   /** Stack filter — only install skills relevant to this stack */
-  stack?: 'nextjs' | 'nestjs' | 'nextjs+nestjs' | 'all';
+  stack?: 'nextjs' | 'all';
   /** Use symlinks instead of copying — auto-updates with the SDK on `npm install` */
   symlink?: boolean;
   /** Overwrite existing skill directories at the target */
@@ -34,21 +34,8 @@ const STACK_SKILL_MAP: Record<string, ReadonlyArray<string>> = {
     'maintaining-glirastes-tools',
     'building-glirastes-chat-ui',
   ],
-  nestjs: [
-    'integrating-glirastes-nestjs',
-    'maintaining-glirastes-tools',
-    'building-glirastes-chat-ui',
-  ],
-  'nextjs+nestjs': [
-    'integrating-glirastes-nextjs-with-nestjs-backend',
-    'integrating-glirastes-nestjs',
-    'maintaining-glirastes-tools',
-    'building-glirastes-chat-ui',
-  ],
   all: [
     'integrating-glirastes-nextjs',
-    'integrating-glirastes-nestjs',
-    'integrating-glirastes-nextjs-with-nestjs-backend',
     'maintaining-glirastes-tools',
     'building-glirastes-chat-ui',
   ],
@@ -150,7 +137,7 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   const allowList = STACK_SKILL_MAP[stack];
   if (!allowList) {
     throw new Error(
-      `Unknown --stack value: '${stack}'. Use one of: nextjs | nestjs | nextjs+nestjs | all.`,
+      `Unknown --stack value: '${stack}'. Use one of: nextjs | all.`,
     );
   }
 
