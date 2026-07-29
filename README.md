@@ -864,6 +864,11 @@ caches signed deployments locally with push plus polling fallback,
 last-known-good preservation, security revocations, and stable/canary
 selection. Model and tool credentials remain in the target application.
 
+For asynchronous, unattended, or restart-resumable runs,
+[`glirastes/runtime`](./docs/runtime-persistence.md) includes a local
+PostgreSQL conversation, checkpoint, and idempotent tool-evidence adapter.
+Simple interactive chat remains zero-setup and may use an ephemeral session.
+
 <br/>
 
 ## Agent skills
