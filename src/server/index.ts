@@ -8,13 +8,8 @@ export {
   type LocalAiPipelineConfig,
 } from './local-pipeline.js';
 
-// Lancer (platform client) — createLancer, ServiceBlockedError, types
-export * from './lancer/index.js';
-
 // PII shield
 export {
   createPiiShield,
   createRegexPiiDetector,
 } from './pii-shield/index.js';
-export { createAegisDetector } from './pii-shield/index.js';
-export type { AegisLike } from './pii-shield/index.js';

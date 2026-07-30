@@ -142,16 +142,6 @@
         "default": "./dist/cjs/server/adapters/nextjs/index.js"
       }
     },
-    "./server/nestjs": {
-      "import": {
-        "types": "./dist/server/adapters/nestjs/index.d.ts",
-        "default": "./dist/server/adapters/nestjs/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/server/adapters/nestjs/index.d.ts",
-        "default": "./dist/cjs/server/adapters/nestjs/index.js"
-      }
-    },
     "./adapter/nextjs": {
       "import": {
         "types": "./dist/server/adapters/nextjs/index.d.ts",
@@ -160,16 +150,6 @@
       "require": {
         "types": "./dist/cjs/server/adapters/nextjs/index.d.ts",
         "default": "./dist/cjs/server/adapters/nextjs/index.js"
-      }
-    },
-    "./adapter/nestjs": {
-      "import": {
-        "types": "./dist/server/adapters/nestjs/index.d.ts",
-        "default": "./dist/server/adapters/nestjs/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/server/adapters/nestjs/index.d.ts",
-        "default": "./dist/cjs/server/adapters/nestjs/index.js"
       }
     },
     "./server/testing": {
@@ -190,33 +170,96 @@
       "types": "./dist/react/transports/vercel/index.d.ts",
       "default": "./dist/react/transports/vercel/index.js"
     },
-    "./react/langgraph": {
-      "types": "./dist/react/transports/langgraph/index.d.ts",
-      "default": "./dist/react/transports/langgraph/index.js"
-    },
     "./react/styles.css": "./dist/react/styles.css",
     "./codegen": {
       "types": "./dist/codegen/index.d.ts",
       "default": "./dist/codegen/index.js"
-    },
-    "./openapi": {
-      "types": "./dist/openapi/index.d.ts",
-      "default": "./dist/openapi/index.js"
     }
   },
   "files": [
     "dist",
+    "!dist/openapi",
+    "!dist/cjs/openapi",
+    "!dist/server/adapters/nestjs",
+    "!dist/cjs/server/adapters/nestjs",
+    "!dist/server/lancer",
+    "!dist/cjs/server/lancer",
+    "!dist/react/transports/langgraph.*",
+    "!dist/react/transports/langgraph",
+    "!dist/cjs/react/transports/langgraph.*",
+    "!dist/cjs/react/transports/langgraph",
+    "!dist/codegen/skill-generator.*",
+    "!dist/cjs/codegen/skill-generator.*",
+    "!dist/codegen/mcp-generator.*",
+    "!dist/cjs/codegen/mcp-generator.*",
+    "!dist/codegen/output-recommender.*",
+    "!dist/cjs/codegen/output-recommender.*",
+    "!dist/codegen/asset-sync.*",
+    "!dist/cjs/codegen/asset-sync.*",
+    "!dist/codegen/nestjs-scanner.*",
+    "!dist/cjs/codegen/nestjs-scanner.*",
+    "!dist/codegen/endpoint-scanner.*",
+    "!dist/cjs/codegen/endpoint-scanner.*",
+    "!dist/codegen/ui-scanner.*",
+    "!dist/cjs/codegen/ui-scanner.*",
+    "!dist/codegen/module-generator.*",
+    "!dist/cjs/codegen/module-generator.*",
+    "!dist/codegen/validator.*",
+    "!dist/cjs/codegen/validator.*",
+    "!dist/codegen/coverage.*",
+    "!dist/cjs/codegen/coverage.*",
+    "!dist/codegen/scaffolder.*",
+    "!dist/cjs/codegen/scaffolder.*",
+    "!dist/codegen/format.*",
+    "!dist/cjs/codegen/format.*",
+    "!dist/cli/commands",
+    "!dist/cjs/cli/commands",
+    "!dist/cli/utils",
+    "!dist/cli/deferred-full.*",
+    "!dist/cjs/cli/utils",
+    "!dist/cjs/cli/deferred-full.*",
+    "!dist/server/pii-shield/aegis-detector.*",
+    "!dist/cjs/server/pii-shield/aegis-detector.*",
+    "!dist/endpoint-scanner.*",
+    "!dist/cjs/endpoint-scanner.*",
+    "!dist/route-scanner.*",
+    "!dist/cjs/route-scanner.*",
+    "!dist/ui-scanner.*",
+    "!dist/cjs/ui-scanner.*",
+    "!dist/module-generator.*",
+    "!dist/cjs/module-generator.*",
+    "!dist/validator.*",
+    "!dist/cjs/validator.*",
+    "!dist/coverage.*",
+    "!dist/cjs/coverage.*",
+    "!dist/scaffolder.*",
+    "!dist/cjs/scaffolder.*",
+    "!dist/format.*",
+    "!dist/cjs/format.*",
+    "!dist/fs-utils.*",
+    "!dist/cjs/fs-utils.*",
+    "!dist/skill-generator.*",
+    "!dist/cjs/skill-generator.*",
+    "!dist/mcp-generator.*",
+    "!dist/cjs/mcp-generator.*",
+    "!dist/output-recommender.*",
+    "!dist/cjs/output-recommender.*",
+    "!dist/asset-sync.*",
+    "!dist/cjs/asset-sync.*",
+    "!dist/nestjs-scanner.*",
+    "!dist/cjs/nestjs-scanner.*",
     "contracts",
     "runtime",
     "ai-sdk",
     "stt",
     "sync",
     "server",
+    "!server/nestjs",
     "adapter",
+    "!adapter/nestjs",
     "react",
+    "!react/langgraph",
     "codegen",
-    "openapi",
-    "skills",
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",

@@ -15,11 +15,6 @@ describe('public foundation subpaths', () => {
       './adapter/nextjs',
       './dist/server/adapters/nextjs/index.js',
     ],
-    [
-      'NestJS adapter',
-      './adapter/nestjs',
-      './dist/server/adapters/nestjs/index.js',
-    ],
   ])('exports the independently importable %s surface', async (
     _label,
     subpath,
@@ -35,6 +30,75 @@ describe('public foundation subpaths', () => {
     expect(configured).toBeDefined();
     expect(configured?.default ?? configured?.import?.default)
       .toBe(expectedDefault);
+  });
+
+  it('does not expose deferred adapters and generators', async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as {
+      exports?: Record<string, PackageExport>;
+      files?: string[];
+    };
+
+    for (const subpath of [
+      './server/nestjs',
+      './adapter/nestjs',
+      './react/langgraph',
+      './openapi',
+    ]) {
+      expect(packageJson.exports?.[subpath]).toBeUndefined();
+    }
+    expect(packageJson.files).not.toContain('openapi');
+    expect(packageJson.files).not.toContain('skills');
+  });
+
+  it('keeps deferred generator APIs out of the Foundation codegen surface', async () => {
+    const [source, rootSource, serverSource] = await Promise.all([
+      readFile(new URL('./codegen/index.ts', import.meta.url), 'utf8'),
+      readFile(new URL('./index.ts', import.meta.url), 'utf8'),
+      readFile(new URL('./server/index.ts', import.meta.url), 'utf8'),
+    ]);
+
+    expect(source).not.toContain('generateAgentSkills');
+    expect(source).not.toContain('generateMcpServer');
+    expect(source).not.toContain('recommendOutputFormat');
+    expect(source).not.toContain('syncAssetToGlirastes');
+    expect(source).not.toContain('scanNestControllers');
+    expect(source).not.toContain('generateEndpointRegistry');
+    expect(source).not.toContain('generateUiRegistry');
+    expect(source).not.toContain('generateModuleRegistry');
+    expect(source).not.toContain('validateAiTools');
+    expect(source).not.toContain('checkAiCoverage');
+    expect(source).not.toContain('scaffoldAiTool');
+    expect(rootSource).not.toContain('skill-generator');
+    expect(rootSource).not.toContain('mcp-generator');
+    expect(serverSource).not.toContain("from './lancer/");
+    expect(serverSource).not.toContain('createAegisDetector');
+  });
+
+  it('keeps the Foundation CLI focused on scan and sync', async () => {
+    const source = await readFile(
+      new URL('./cli/index.ts', import.meta.url),
+      'utf8',
+    );
+
+    for (const command of [
+      'generate',
+      'validate',
+      'generate-skills',
+      'generate-mcp-server',
+      'generate-auto',
+      'install-skills',
+      'check-upgrade',
+      'generate-endpoint-tools',
+      'generate-ui-tools',
+      'generate-modules',
+      'sync',
+      'test',
+    ]) {
+      expect(source).not.toContain(`'${command}'`);
+    }
+    expect(source).toContain("type CommandName = 'scan'");
   });
 
   it('keeps the standalone STT surface framework-neutral', async () => {
