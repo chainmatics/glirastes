@@ -8,6 +8,7 @@ import type {
   SecurityRevocation,
 } from '../../contracts/index.js';
 import {
+  assertPromptPinForResume,
   createTurnSnapshot,
   isToolRevoked,
 } from '../turn-snapshot.js';
@@ -127,6 +128,80 @@ describe('createTurnSnapshot', () => {
       principal,
       localLimits,
     })).toThrow(/environment/i);
+  });
+
+  it('pins the prompt revision identity and digest for the whole turn', () => {
+    const promptPin = {
+      revisionId: '019fb003-0000-7000-8000-000000000004',
+      revision: 3,
+      bundleDigest: `sha256:${'A'.repeat(43)}`,
+    };
+    const snapshot = createTurnSnapshot({
+      turnId: 'turn-1',
+      agentRevision,
+      manifestRevision,
+      policyRevision,
+      principal,
+      localLimits,
+      promptPin,
+    });
+
+    expect(snapshot.promptPin).toEqual(promptPin);
+    expect(Object.isFrozen(snapshot.promptPin)).toBe(true);
+    expect(snapshot.manifestRevision.revisionId)
+      .toBe(manifestRevision.revisionId);
+  });
+});
+
+describe('assertPromptPinForResume', () => {
+  const promptPin = {
+    revisionId: '019fb003-0000-7000-8000-000000000004',
+    revision: 3,
+    bundleDigest: `sha256:${'A'.repeat(43)}`,
+  };
+  const snapshot = () => createTurnSnapshot({
+    turnId: 'turn-1',
+    agentRevision,
+    manifestRevision,
+    policyRevision,
+    principal,
+    localLimits,
+    promptPin,
+  });
+
+  it('resumes a turn on its original prompt revision', () => {
+    expect(() => assertPromptPinForResume(snapshot(), promptPin)).not.toThrow();
+  });
+
+  it('rejects a conflicting binding instead of silently swapping it', () => {
+    expect(() => assertPromptPinForResume(snapshot(), {
+      ...promptPin,
+      revisionId: '019fb003-0000-7000-8000-000000000005',
+      revision: 4,
+    })).toThrow(/prompt revision/i);
+    expect(() => assertPromptPinForResume(snapshot(), {
+      ...promptPin,
+      bundleDigest: `sha256:${'B'.repeat(43)}`,
+    })).toThrow(/digest/i);
+  });
+
+  it('rejects resuming a pinned turn without any prompt binding', () => {
+    expect(() => assertPromptPinForResume(snapshot(), undefined))
+      .toThrow(/prompt revision/i);
+  });
+
+  it('accepts a turn that never pinned a prompt bundle', () => {
+    const unpinned = createTurnSnapshot({
+      turnId: 'turn-2',
+      agentRevision,
+      manifestRevision,
+      policyRevision,
+      principal,
+      localLimits,
+    });
+
+    expect(() => assertPromptPinForResume(unpinned, undefined)).not.toThrow();
+    expect(() => assertPromptPinForResume(unpinned, promptPin)).not.toThrow();
   });
 });
 

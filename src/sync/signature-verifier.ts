@@ -9,6 +9,10 @@ import type {
   RuntimeRevisionEnvelope,
   SecurityRevocation,
 } from '../contracts/revisions.js';
+import type {
+  PromptBundle,
+  SignedPromptBinding,
+} from '../contracts/prompt-bundle.js';
 
 export type RuntimePublicJwk = webcrypto.JsonWebKey & {
   kid?: string;
@@ -69,6 +73,30 @@ export class RuntimeRevisionVerifier {
       );
     }
     const { signature, ...unsigned } = revision;
+    await this.verifyEnvelope(unsigned, signature);
+  }
+
+  /**
+   * A prompt bundle is content-addressed: its digest must match its canonical
+   * sections and its publisher signature must verify before anything downstream
+   * may parse or activate it.
+   */
+  async verifyPromptBundle(bundle: PromptBundle): Promise<void> {
+    const actualDigest = `sha256:${createHash('sha256')
+      .update(canonicalRuntimeJson(bundle.sections))
+      .digest('base64url')}`;
+    if (actualDigest !== bundle.bundleDigest) {
+      throw new RuntimeSyncVerificationError(
+        'Prompt bundle digest does not match its sections',
+        'content_hash_mismatch',
+      );
+    }
+    const { signature, ...unsigned } = bundle;
+    await this.verifyEnvelope(unsigned, signature);
+  }
+
+  async verifyPromptBinding(binding: SignedPromptBinding): Promise<void> {
+    const { signature, ...unsigned } = binding;
     await this.verifyEnvelope(unsigned, signature);
   }
 

@@ -1,8 +1,18 @@
 export {
+  assertPromptPinForResume,
   createTurnSnapshot,
   isToolRevoked,
   type TurnSnapshot,
 } from './turn-snapshot.js';
+export {
+  PromptBundleStore,
+  type ActivePromptBundle,
+  type PinnedPromptBundle,
+  type PromptArtifactRegistry,
+  type PromptBundleSections,
+  type PromptBundleStoreOptions,
+  type StagedPromptBundle,
+} from './prompt-bundle-store.js';
 export {
   authorizeToolCall,
   type ToolAuthorizationResult,

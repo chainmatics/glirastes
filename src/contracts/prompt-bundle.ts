@@ -32,6 +32,22 @@ export const PromptBundleSchema = z.object({
   signature: RevisionSignatureSchema,
 }).strict();
 
+/**
+ * Signed desired-state pin for one prompt bundle. The Platform signs the
+ * binding; the bundle contents stay in the customer-controlled registry and are
+ * proven by the content digest.
+ */
+export const SignedPromptBindingSchema = z.object({
+  schemaVersion: z.literal(1),
+  appId: uuid,
+  revisionId: uuid,
+  revision: z.number().int().positive(),
+  bundleDigest: digest,
+  artifactRef: z.string().trim().min(1).max(2_048),
+  activatedAt: timestamp,
+  signature: RevisionSignatureSchema,
+}).strict();
+
 export const PromptRevisionMetadataSchema = z.object({
   schemaVersion: z.literal(1),
   revisionId: uuid,
@@ -70,6 +86,7 @@ export function canonicalPromptBundleJson(value: unknown): string {
 }
 
 export type PromptBundle = z.infer<typeof PromptBundleSchema>;
+export type SignedPromptBinding = z.infer<typeof SignedPromptBindingSchema>;
 export type PromptRevisionMetadata = z.infer<
   typeof PromptRevisionMetadataSchema
 >;

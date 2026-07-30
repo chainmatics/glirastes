@@ -2,6 +2,7 @@ export {
   DelegationBudgetSchema,
   ExecutionBudgetSchema,
   PrincipalSchema,
+  PromptPinSchema,
   RuntimeEnvironmentNameSchema,
   RuntimeEnvironmentSchema,
 } from './runtime.js';
@@ -9,6 +10,7 @@ export type {
   DelegationBudget,
   ExecutionBudget,
   Principal,
+  PromptPin,
   RuntimeEnvironment,
 } from './runtime.js';
 
@@ -65,8 +67,10 @@ export {
   canonicalPromptBundleJson,
   PromptBundleSchema,
   PromptRevisionMetadataSchema,
+  SignedPromptBindingSchema,
 } from './prompt-bundle.js';
 export type {
   PromptBundle,
   PromptRevisionMetadata,
+  SignedPromptBinding,
 } from './prompt-bundle.js';

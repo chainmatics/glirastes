@@ -34,6 +34,17 @@ export const PrincipalSchema = z.object({
   }
 });
 
+/**
+ * Immutable prompt-revision identity pinned for the lifetime of one turn.
+ */
+export const PromptPinSchema = z.object({
+  revisionId: uuid,
+  revision: z.number().int().positive(),
+  bundleDigest: z.string().regex(
+    /^sha256:(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9+/]{43}=)$/,
+  ),
+}).strict();
+
 export const DelegationBudgetSchema = z.object({
   maxDepth: z.number().int().min(0).max(32),
   maxBreadth: z.number().int().min(0).max(128),
@@ -65,3 +76,4 @@ export type RuntimeEnvironment = z.infer<typeof RuntimeEnvironmentSchema>;
 export type Principal = z.infer<typeof PrincipalSchema>;
 export type DelegationBudget = z.infer<typeof DelegationBudgetSchema>;
 export type ExecutionBudget = z.infer<typeof ExecutionBudgetSchema>;
+export type PromptPin = z.infer<typeof PromptPinSchema>;

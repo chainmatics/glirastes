@@ -3,6 +3,7 @@ import type {
   ExecutionBudget,
   ManifestRevision,
   Principal,
+  PromptPin,
   RuntimePolicyRevision,
   SecurityRevocation,
 } from '../contracts/index.js';
@@ -15,6 +16,11 @@ export interface TurnSnapshot {
   readonly manifestRevision: ManifestRevision;
   readonly policyRevision: RuntimePolicyRevision;
   readonly budget: ExecutionBudget;
+  /**
+   * Prompt revision the turn started with. Prompt bundles hot-swap
+   * independently of the runtime bundle, so a running turn stays on this pin.
+   */
+  readonly promptPin?: PromptPin;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -83,6 +89,7 @@ export function createTurnSnapshot(options: {
   policyRevision: RuntimePolicyRevision;
   principal: Principal;
   localLimits: ExecutionBudget;
+  promptPin?: PromptPin;
   startedAt?: string;
 }): TurnSnapshot {
   const {
@@ -113,9 +120,33 @@ export function createTurnSnapshot(options: {
     manifestRevision: clone(manifestRevision),
     policyRevision: clone(policyRevision),
     budget: minBudget(options.localLimits, agentRevision.budget, policyRevision.budget),
+    ...(options.promptPin ? { promptPin: clone(options.promptPin) } : {}),
   };
 
   return deepFreeze(snapshot);
+}
+
+/**
+ * Resuming a turn must never silently change its prompt revision. A turn that
+ * pinned a prompt bundle can only resume on the identical revision and digest.
+ */
+export function assertPromptPinForResume(
+  snapshot: TurnSnapshot,
+  pin: PromptPin | undefined,
+): void {
+  const pinned = snapshot.promptPin;
+  if (!pinned) return;
+  if (!pin) {
+    throw new Error('Cannot resume a turn without its pinned prompt revision');
+  }
+  if (pin.revisionId !== pinned.revisionId || pin.revision !== pinned.revision) {
+    throw new Error(
+      'Resumed prompt revision does not match the pinned prompt revision',
+    );
+  }
+  if (pin.bundleDigest !== pinned.bundleDigest) {
+    throw new Error('Resumed prompt bundle digest does not match the pinned digest');
+  }
 }
 
 export function isToolRevoked(
