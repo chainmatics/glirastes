@@ -45,3 +45,28 @@ export type {
 
 export { TechnicalRuntimeEventSchema } from './events.js';
 export type { TechnicalRuntimeEvent } from './events.js';
+
+export {
+  AppSetupArtifactSchema,
+  AppSetupAssessmentModeSchema,
+  AppSetupOperationGroupSchema,
+  AppSetupStatusSchema,
+  AppSetupToolCandidateSchema,
+} from './app-setup.js';
+export type {
+  AppSetupArtifact,
+  AppSetupAssessmentMode,
+  AppSetupOperationGroup,
+  AppSetupStatus,
+  AppSetupToolCandidate,
+} from './app-setup.js';
+
+export {
+  canonicalPromptBundleJson,
+  PromptBundleSchema,
+  PromptRevisionMetadataSchema,
+} from './prompt-bundle.js';
+export type {
+  PromptBundle,
+  PromptRevisionMetadata,
+} from './prompt-bundle.js';
