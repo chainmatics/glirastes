@@ -7,6 +7,10 @@ import {
   FoundationExecutionInventorySchema,
 } from '../codegen/execution-inventory.js';
 import { writeNextAppRouteScan } from '../codegen/route-scanner.js';
+import {
+  buildManifests,
+  validateWorkspace,
+} from './commands/validate-build.js';
 import { AppSetupClient } from '../sync/app-setup-client.js';
 import {
   installSkills,
@@ -18,7 +22,7 @@ import {
   type RouteScanUpload,
 } from '../sync/runtime-setup-client.js';
 
-type CommandName = 'scan' | 'setup' | 'install';
+type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build';
 
 export interface CliDependencies {
   ask?: (question: string) => Promise<string>;
@@ -38,13 +42,21 @@ function parseCommand(args: string[]): {
   rest: string[];
 } {
   const [command, ...rest] = args;
-  if (command !== 'scan' && command !== 'setup' && command !== 'install') {
+  if (
+    command !== 'scan'
+    && command !== 'setup'
+    && command !== 'install'
+    && command !== 'validate'
+    && command !== 'build'
+  ) {
     throw new Error(
       'Usage: glirastes scan [--output] [--sync] '
       + '[--execution-inventory]\n'
       + '       glirastes setup <scan|sync|status> [options]\n'
       + '       glirastes install [--with-setup-skills|'
-      + '--without-setup-skills] [--host]\n',
+      + '--without-setup-skills] [--host]\n'
+      + '       glirastes validate [--root] [--app-id]\n'
+      + '       glirastes build [--root] [--app-id] [--output]\n',
     );
   }
   return { command, rest };
@@ -326,11 +338,58 @@ async function runLegacyScan(rest: string[]): Promise<void> {
   }
 }
 
+async function runValidate(rest: string[]): Promise<void> {
+  const rootDir = getFlagValue(rest, '--root') ?? process.cwd();
+  const appId = getFlagValue(rest, '--app-id') ?? process.env.GLIRASTES_APP_ID;
+  if (!appId) {
+    throw new Error('--app-id or GLIRASTES_APP_ID is required for validate.');
+  }
+  const workspace = await validateWorkspace({
+    rootDir,
+    appId,
+    inventoryPath: getFlagValue(rest, '--execution-inventory'),
+    promptBundlePath: getFlagValue(rest, '--prompt-bundle'),
+  });
+  if (!hasFlag(rest, '--quiet')) {
+    console.log(
+      `Validated ${workspace.executions.length} executions and the local `
+      + 'prompt bundle without network access.',
+    );
+  }
+}
+
+async function runBuild(rest: string[]): Promise<void> {
+  const rootDir = getFlagValue(rest, '--root') ?? process.cwd();
+  const appId = getFlagValue(rest, '--app-id') ?? process.env.GLIRASTES_APP_ID;
+  if (!appId) {
+    throw new Error('--app-id or GLIRASTES_APP_ID is required for build.');
+  }
+  const built = await buildManifests({
+    rootDir,
+    appId,
+    outputDir: getFlagValue(rest, '--output'),
+    inventoryPath: getFlagValue(rest, '--execution-inventory'),
+    promptBundlePath: getFlagValue(rest, '--prompt-bundle'),
+  });
+  if (!hasFlag(rest, '--quiet')) {
+    console.log(`Runtime manifest ${built.runtimeDigest}`);
+    console.log(`Prompt manifest  ${built.promptDigest}`);
+  }
+}
+
 export async function runCli(
   args: string[],
   dependencies: CliDependencies = {},
 ): Promise<void> {
   const { command, rest } = parseCommand(args);
+  if (command === 'validate') {
+    await runValidate(rest);
+    return;
+  }
+  if (command === 'build') {
+    await runBuild(rest);
+    return;
+  }
   if (command === 'install') {
     await runInstall(rest, dependencies);
     return;

@@ -82,9 +82,10 @@ describe('public foundation subpaths', () => {
       'utf8',
     );
 
+    // Deferred surfaces stay out. `validate` and `build` are accepted
+    // Foundation commands and are asserted positively below.
     for (const command of [
       'generate',
-      'validate',
       'generate-skills',
       'generate-mcp-server',
       'generate-auto',
@@ -98,7 +99,7 @@ describe('public foundation subpaths', () => {
       expect(source).not.toContain(`'${command}'`);
     }
     expect(source).toContain(
-      "type CommandName = 'scan' | 'setup' | 'install'",
+      "type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build'",
     );
     expect(source).toContain("['scan', 'sync', 'status']");
   });
