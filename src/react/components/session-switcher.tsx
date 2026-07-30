@@ -140,6 +140,9 @@ export function SessionSwitcher({
   });
   const current = sorted.find((s) => s.id === activeSessionId);
   const currentTitle = current?.title ?? resolvedFallback;
+  const pendingDeleteTitle = sessions.find(
+    (session) => session.id === pendingDeleteId,
+  )?.title;
 
   return (
     <div
@@ -234,7 +237,9 @@ export function SessionSwitcher({
                           onBlur={() => void commitEdit()}
                         />
                       ) : (
-                        <div data-element="row-title">{s.title || 'Untitled'}</div>
+                        <div data-element="row-title">
+                          {s.title || locale.untitledSessionLabel}
+                        </div>
                       )}
                       {ts && !isEditing && (
                         <div data-element="row-subtitle">{ts}</div>
@@ -302,8 +307,11 @@ export function SessionSwitcher({
         open={pendingDeleteId !== null}
         title={locale.confirmDeleteSessionPrompt}
         message={
-          sessions.find((s) => s.id === pendingDeleteId)?.title
-            ? `"${sessions.find((s) => s.id === pendingDeleteId)?.title}" will be archived.`
+          pendingDeleteTitle
+            ? locale.sessionArchiveMessage.replace(
+              '{title}',
+              () => pendingDeleteTitle,
+            )
             : undefined
         }
         confirmLabel={locale.deleteSessionAriaLabel}

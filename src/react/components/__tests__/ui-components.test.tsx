@@ -54,6 +54,7 @@ function resetContext() {
       renameSessionPlaceholder: 'Neuer Name',
       deleteSessionAriaLabel: 'Sitzung löschen',
       confirmDeleteSessionPrompt: 'Sitzung wirklich löschen?',
+      sessionArchiveMessage: '"{title}" wird archiviert.',
     },
     suggestions: {},
     suggestionChips: ['Aufgaben prüfen', 'Dashboard öffnen'],
@@ -152,6 +153,51 @@ describe('Glirastes UI parity components', () => {
     await waitFor(() => {
       expect(componentSpies.createSession)
         .toHaveBeenCalledWith({ title: 'Neuer Chat' });
+    });
+  });
+
+  it('renames a local session from the switcher', async () => {
+    render(<SessionSwitcher />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Aktuelle Sitzung/ }));
+    const olderRow = screen.getByText('Ältere Sitzung').closest('[role="option"]');
+    const editButton = olderRow?.querySelector<HTMLButtonElement>(
+      '[data-element="row-edit"]',
+    );
+    expect(editButton).toBeTruthy();
+    fireEvent.click(editButton!);
+
+    const input = screen.getByPlaceholderText('Neuer Name');
+    fireEvent.change(input, { target: { value: 'Planung' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(componentSpies.renameSession)
+        .toHaveBeenCalledWith('older', 'Planung');
+    });
+  });
+
+  it('confirms deletion with localized session copy', async () => {
+    render(<SessionSwitcher />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Aktuelle Sitzung/ }));
+    const olderRow = screen.getByText('Ältere Sitzung').closest('[role="option"]');
+    const deleteButton = olderRow?.querySelector<HTMLButtonElement>(
+      '[data-element="row-delete"]',
+    );
+    expect(deleteButton).toBeTruthy();
+    fireEvent.click(deleteButton!);
+
+    expect(screen.getByText('Sitzung wirklich löschen?')).toBeTruthy();
+    expect(screen.getByText('"Ältere Sitzung" wird archiviert.')).toBeTruthy();
+    expect(screen.queryByText(/will be archived/)).toBeNull();
+
+    const confirmButton = screen.getByRole('alertdialog')
+      .querySelector<HTMLButtonElement>('[data-element="confirm"]');
+    expect(confirmButton).toBeTruthy();
+    fireEvent.click(confirmButton!);
+    await waitFor(() => {
+      expect(componentSpies.removeSession).toHaveBeenCalledWith('older');
     });
   });
 });

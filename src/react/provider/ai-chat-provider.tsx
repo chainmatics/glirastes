@@ -67,8 +67,10 @@ export const DEFAULT_LOCALE: ChatLocale = {
   newChatLabel: 'New chat',
   noSessionsLabel: 'No conversations yet',
   sessionsLoadingLabel: 'Loading…',
+  untitledSessionLabel: 'Untitled',
   deleteSessionAriaLabel: 'Delete conversation',
   confirmDeleteSessionPrompt: 'Delete this conversation?',
+  sessionArchiveMessage: '"{title}" will be archived.',
   renameSessionAriaLabel: 'Rename conversation',
   renameSessionPlaceholder: 'Conversation title',
 };

@@ -484,8 +484,10 @@ export interface ChatLocale {
   newChatLabel: string;              // "+ New chat" row + default new session title
   noSessionsLabel: string;           // empty state
   sessionsLoadingLabel: string;      // loading state
+  untitledSessionLabel: string;
   deleteSessionAriaLabel: string;
   confirmDeleteSessionPrompt: string;
+  sessionArchiveMessage: string;     // supports `{title}`
   renameSessionAriaLabel: string;
   renameSessionPlaceholder: string;
 }
