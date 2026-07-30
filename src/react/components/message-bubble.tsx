@@ -35,6 +35,9 @@ function shouldRenderToolResult(
   mode: 'default' | 'hidden' | 'allowlist',
   allowlist: string[],
 ): boolean {
+  // Follow-up registration is consumed by the suggestion system, not exposed
+  // as a raw tool result in either supported message-part format.
+  if (toolName === 'suggest_followups') return false;
   if (mode === 'hidden') return false;
   if (mode === 'allowlist') return allowlist.includes(toolName);
   return true;
@@ -79,13 +82,22 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 
       // Handle tool-{name} parts (AI SDK 5.x/6.x format)
       if (partType.startsWith('tool-') && part.state === 'output-available' && isRecord(part.output)) {
-        if (typeof part.output.message === 'string') {
+        const toolName = partType.replace('tool-', '');
+        if (
+          shouldRenderToolResult(toolName, mode, allowlist)
+          && typeof part.output.message === 'string'
+        ) {
           summaries.push(part.output.message);
         }
       }
 
       // Handle tool-result parts
-      if (partType === 'tool-result' && isRecord(part.result)) {
+      if (
+        partType === 'tool-result'
+        && typeof part.toolName === 'string'
+        && shouldRenderToolResult(part.toolName, mode, allowlist)
+        && isRecord(part.result)
+      ) {
         if (typeof part.result.message === 'string') {
           summaries.push(part.result.message);
         }
@@ -96,12 +108,20 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 
   // Skip truly empty assistant messages
   if (message.role === 'assistant' && !hasTextContent && !fallbackSummary) {
-    const hasToolOutput = message.parts.some(p => {
+    const hasVisibleToolOutput = message.parts.some(p => {
       if (!isRecord(p)) return false;
       const t = typeof p.type === 'string' ? p.type : '';
-      return (t.startsWith('tool-') && p.state === 'output-available') || t === 'tool-result';
+      if (t.startsWith('tool-') && p.state === 'output-available') {
+        const toolName = t.replace('tool-', '');
+        return shouldRenderToolResult(toolName, mode, allowlist);
+      }
+      return (
+        t === 'tool-result'
+        && typeof p.toolName === 'string'
+        && shouldRenderToolResult(p.toolName, mode, allowlist)
+      );
     });
-    if (!hasToolOutput) return null;
+    if (!hasVisibleToolOutput) return null;
   }
 
   return (
@@ -173,8 +193,6 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
           const partType = typeof part.type === 'string' ? part.type : '';
           if (partType.startsWith('tool-') && part.state === 'output-available' && part.output !== undefined) {
             const toolName = partType.replace('tool-', '');
-            // Skip suggest_followups — handled by suggestion system
-            if (toolName === 'suggest_followups') return null;
             if (!shouldRenderToolResult(toolName, mode, allowlist)) return null;
             return (
               <ToolResultComponent
