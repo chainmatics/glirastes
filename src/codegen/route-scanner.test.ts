@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
+  createRouteSourceFingerprint,
   scanNextAppRoutes,
   writeNextAppRouteScan,
 } from './route-scanner.js';
@@ -137,6 +138,51 @@ describe('scanNextAppRoutes', () => {
     expect(result.ignored).toEqual([
       'src/app/api/internal/route.ts',
     ]);
+  });
+
+  it('keeps ignore comments confined to explicit legacy mode', async () => {
+    const source = `
+      // @ai-ignore
+      export async function GET() { return Response.json([]); }
+    `;
+    const rootDir = await fixture({
+      'src/app/api/tasks/route.ts': source,
+    });
+
+    const legacy = await scanNextAppRoutes({
+      rootDir,
+      apiDir: 'src/app/api',
+      mode: 'legacy-route-scan',
+    });
+    const foundation = await scanNextAppRoutes({
+      rootDir,
+      apiDir: 'src/app/api',
+      mode: 'foundation-inventory',
+      inventory: {
+        schemaVersion: 2,
+        targetAppKey: 'fixture',
+        executions: [{
+          toolId: '019fa9a9-d5f7-7ec3-a3c7-8899de1e0001',
+          definitionId: 'tasks.list',
+          stableKey: 'GET /api/tasks',
+          executionKind: 'endpoint',
+          sourceFile: 'src/app/api/tasks/route.ts',
+          sourceFingerprint: createRouteSourceFingerprint(
+            source,
+            'GET',
+            '/api/tasks',
+          ),
+          inputSchemaDigest: `sha256:${'A'.repeat(43)}`,
+          outputSchemaDigest: `sha256:${'B'.repeat(43)}`,
+          method: 'GET',
+          path: '/api/tasks',
+        }],
+      },
+    });
+
+    expect(legacy.candidates).toHaveLength(0);
+    expect(foundation.candidates).toHaveLength(1);
+    expect(foundation.ignored).toEqual([]);
   });
 
   it('changes the source fingerprint when route code changes', async () => {

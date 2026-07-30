@@ -1,9 +1,16 @@
-import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { findRouteFiles, isDirAiIgnored, readFileSafe } from './fs-utils.js';
+import {
+  discoverFoundationExecutions,
+  type DiscoveredFoundationExecution,
+  type FoundationExecutionInventory,
+} from './execution-inventory.js';
+import { createRouteSourceFingerprint } from './route-fingerprint.js';
 import type { EndpointMethod } from '../types.js';
 import type { ToolRiskClass } from '../contracts/index.js';
+
+export { createRouteSourceFingerprint } from './route-fingerprint.js';
 
 export interface ScannedQueryParameter {
   name: string;
@@ -34,11 +41,15 @@ export interface ScannedRouteCandidate {
 export interface NextAppRouteScanResult {
   candidates: ScannedRouteCandidate[];
   ignored: string[];
+  executions?: DiscoveredFoundationExecution[];
+  inventoryDigest?: string;
 }
 
 export interface ScanNextAppRoutesOptions {
   rootDir: string;
   apiDir?: string;
+  mode?: 'legacy-route-scan' | 'foundation-inventory';
+  inventory?: FoundationExecutionInventory;
 }
 
 export interface WriteNextAppRouteScanOptions
@@ -68,18 +79,6 @@ const EXTERNAL_PATTERNS: Array<[string, RegExp]> = [
   ['dynamic-code', /\b(?:eval|Function)\s*\(/],
   ['child-process', /\b(?:exec|execFile|spawn)\s*\(/],
 ];
-
-function sourceFingerprint(
-  source: string,
-  method: EndpointMethod,
-  path: string,
-): string {
-  const normalized = source.replace(/\r\n/g, '\n');
-  const hash = createHash('sha256')
-    .update(`${method}\n${path}\n${normalized}`)
-    .digest('base64url');
-  return `sha256:${hash}`;
-}
 
 function toSourceFile(rootDir: string, absolutePath: string): string {
   return relative(rootDir, absolutePath).split(sep).join('/');
@@ -265,8 +264,9 @@ function reviewReasons(options: {
   return reasons;
 }
 
-export async function scanNextAppRoutes(
+async function scanRouteCandidates(
   options: ScanNextAppRoutesOptions,
+  respectLegacyIgnores: boolean,
 ): Promise<NextAppRouteScanResult> {
   const apiDir = join(options.rootDir, options.apiDir ?? 'src/app/api');
   const candidates: ScannedRouteCandidate[] = [];
@@ -276,8 +276,11 @@ export async function scanNextAppRoutes(
     const source = await readFileSafe(routeFile);
     const sourceFile = toSourceFile(options.rootDir, routeFile);
     if (
-      source.includes('@ai-ignore')
-      || await isDirAiIgnored(dirname(routeFile))
+      respectLegacyIgnores
+      && (
+        source.includes('@ai-ignore')
+        || await isDirAiIgnored(dirname(routeFile))
+      )
     ) {
       ignored.push(sourceFile);
       continue;
@@ -296,7 +299,11 @@ export async function scanNextAppRoutes(
       const externalCallEvidence = evidence(body, EXTERNAL_PATTERNS);
       candidates.push({
         sourceFile,
-        sourceFingerprint: sourceFingerprint(source, method, route.path),
+        sourceFingerprint: createRouteSourceFingerprint(
+          source,
+          method,
+          route.path,
+        ),
         exportName: method,
         method,
         path: route.path,
@@ -322,6 +329,35 @@ export async function scanNextAppRoutes(
   }
 
   return { candidates, ignored };
+}
+
+export async function scanNextAppRoutes(
+  options: ScanNextAppRoutesOptions,
+): Promise<NextAppRouteScanResult> {
+  if ((options.mode ?? 'legacy-route-scan') === 'legacy-route-scan') {
+    return scanRouteCandidates(options, true);
+  }
+  if (!options.inventory) {
+    throw new Error('Foundation inventory mode requires an execution inventory');
+  }
+
+  const discovery = await discoverFoundationExecutions({
+    rootDir: options.rootDir,
+    inventory: options.inventory,
+  });
+  const scanned = await scanRouteCandidates(options, false);
+  const endpointKeys = new Set(discovery.executions
+    .filter((execution) => execution.executionKind === 'endpoint')
+    .map((execution) => execution.stableKey));
+
+  return {
+    candidates: scanned.candidates.filter((candidate) => (
+      endpointKeys.has(`${candidate.method} ${candidate.path}`)
+    )),
+    ignored: [],
+    executions: discovery.executions,
+    inventoryDigest: discovery.inventoryDigest,
+  };
 }
 
 export async function writeNextAppRouteScan(
