@@ -1,0 +1,4 @@
+interface:
+  display_name: "Set Up Glirastes"
+  short_description: "Assess and sync local Glirastes tools"
+  default_prompt: "Use $setting-up-glirastes to assess this app locally and prepare a safe setup artifact."

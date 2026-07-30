@@ -32,7 +32,7 @@ describe('public foundation subpaths', () => {
       .toBe(expectedDefault);
   });
 
-  it('does not expose deferred adapters and generators', async () => {
+  it('packages accepted skills without exposing deferred adapters', async () => {
     const packageJson = JSON.parse(
       await readFile(new URL('../package.json', import.meta.url), 'utf8'),
     ) as {
@@ -49,7 +49,7 @@ describe('public foundation subpaths', () => {
       expect(packageJson.exports?.[subpath]).toBeUndefined();
     }
     expect(packageJson.files).not.toContain('openapi');
-    expect(packageJson.files).not.toContain('skills');
+    expect(packageJson.files).toContain('skills');
   });
 
   it('keeps deferred generator APIs out of the Foundation codegen surface', async () => {
@@ -97,7 +97,9 @@ describe('public foundation subpaths', () => {
     ]) {
       expect(source).not.toContain(`'${command}'`);
     }
-    expect(source).toContain("type CommandName = 'scan' | 'setup'");
+    expect(source).toContain(
+      "type CommandName = 'scan' | 'setup' | 'install'",
+    );
     expect(source).toContain("['scan', 'sync', 'status']");
   });
 

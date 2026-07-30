@@ -1,5 +1,6 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { AppSetupArtifactSchema } from '../contracts/app-setup.js';
 import {
   discoverFoundationExecutions,
@@ -8,12 +9,20 @@ import {
 import { writeNextAppRouteScan } from '../codegen/route-scanner.js';
 import { AppSetupClient } from '../sync/app-setup-client.js';
 import {
+  installSkills,
+  type InstallSkillsOptions,
+} from './commands/install-skills.js';
+import {
   parseLocalExecutionInventory,
   RuntimeSetupClient,
   type RouteScanUpload,
 } from '../sync/runtime-setup-client.js';
 
-type CommandName = 'scan' | 'setup';
+type CommandName = 'scan' | 'setup' | 'install';
+
+export interface CliDependencies {
+  ask?: (question: string) => Promise<string>;
+}
 
 function getFlagValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
@@ -29,14 +38,89 @@ function parseCommand(args: string[]): {
   rest: string[];
 } {
   const [command, ...rest] = args;
-  if (command !== 'scan' && command !== 'setup') {
+  if (command !== 'scan' && command !== 'setup' && command !== 'install') {
     throw new Error(
       'Usage: glirastes scan [--output] [--sync] '
       + '[--execution-inventory]\n'
-      + '       glirastes setup <scan|sync|status> [options]\n',
+      + '       glirastes setup <scan|sync|status> [options]\n'
+      + '       glirastes install [--with-setup-skills|'
+      + '--without-setup-skills] [--host]\n',
     );
   }
   return { command, rest };
+}
+
+async function terminalAsk(question: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error(
+      'Interactive input is unavailable. Pass --with-setup-skills or '
+      + '--without-setup-skills and --host when required.',
+    );
+  }
+  const prompt = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    return await prompt.question(question);
+  } finally {
+    prompt.close();
+  }
+}
+
+function parseHost(value: string | undefined): InstallSkillsOptions['host'] {
+  if (value === undefined) return undefined;
+  if (value === 'codex' || value === 'claude' || value === 'gemini') {
+    return value;
+  }
+  throw new Error('Choose exactly one host: codex, claude, or gemini.');
+}
+
+async function runInstall(
+  rest: string[],
+  dependencies: CliDependencies,
+): Promise<void> {
+  if (
+    hasFlag(rest, '--with-setup-skills')
+    && hasFlag(rest, '--without-setup-skills')
+  ) {
+    throw new Error(
+      'Choose either --with-setup-skills or --without-setup-skills.',
+    );
+  }
+  const ask = dependencies.ask ?? terminalAsk;
+  let includeSetupSkills = hasFlag(rest, '--with-setup-skills');
+  if (
+    !includeSetupSkills
+    && !hasFlag(rest, '--without-setup-skills')
+  ) {
+    const consent = (await ask(
+      'Install the optional local Glirastes setup skills? [y/N] ',
+    )).trim().toLowerCase();
+    if (!['y', 'yes', 'n', 'no', ''].includes(consent)) {
+      throw new Error('Answer yes or no for setup skills.');
+    }
+    includeSetupSkills = consent === 'y' || consent === 'yes';
+  }
+
+  let host = parseHost(getFlagValue(rest, '--host'));
+  if (includeSetupSkills && !host) {
+    host = parseHost((await ask(
+      'Choose exactly one setup host: codex, claude, or gemini: ',
+    )).trim().toLowerCase());
+  }
+
+  await installSkills({
+    rootDir: getFlagValue(rest, '--root') ?? process.cwd(),
+    target: getFlagValue(rest, '--target'),
+    global: hasFlag(rest, '--global'),
+    stack: (getFlagValue(rest, '--stack') ?? 'all') as 'nextjs' | 'all',
+    symlink: hasFlag(rest, '--symlink'),
+    force: hasFlag(rest, '--force'),
+    dryRun: hasFlag(rest, '--dry-run'),
+    includeSetupSkills,
+    host,
+  });
 }
 
 function setupConnection(rest: string[]): {
@@ -242,8 +326,15 @@ async function runLegacyScan(rest: string[]): Promise<void> {
   }
 }
 
-export async function runCli(args: string[]): Promise<void> {
+export async function runCli(
+  args: string[],
+  dependencies: CliDependencies = {},
+): Promise<void> {
   const { command, rest } = parseCommand(args);
+  if (command === 'install') {
+    await runInstall(rest, dependencies);
+    return;
+  }
   if (command === 'setup') {
     await runSetup(rest);
     return;

@@ -6,10 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { colors, header, separator } from '../../codegen/format.js';
 
 export interface InstallSkillsOptions {
-  /** Where to install (default `.claude/skills`, or `~/.claude/skills` if `global` is set) */
+  /** Where to install; overrides the selected host's project/global default. */
   target?: string;
-  /** Install into the user's home (`~/.claude/skills`) instead of the project. Mutually exclusive with `target`. */
+  /** Install into the selected host's user directory. Mutually exclusive with `target`. */
   global?: boolean;
+  /** Exactly one local agent host for the installed skills. */
+  host?: 'codex' | 'claude' | 'gemini';
+  /** Explicit consent to include the optional local setup skill. */
+  includeSetupSkills?: boolean;
   /** Stack filter — only install skills relevant to this stack */
   stack?: 'nextjs' | 'all';
   /** Use symlinks instead of copying — auto-updates with the SDK on `npm install` */
@@ -40,6 +44,21 @@ const STACK_SKILL_MAP: Record<string, ReadonlyArray<string>> = {
     'building-glirastes-chat-ui',
   ],
 };
+
+const HOST_SKILL_TARGETS = {
+  codex: {
+    project: '.agents/skills',
+    global: join(homedir(), '.agents', 'skills'),
+  },
+  claude: {
+    project: '.claude/skills',
+    global: join(homedir(), '.claude', 'skills'),
+  },
+  gemini: {
+    project: '.gemini/skills',
+    global: join(homedir(), '.gemini', 'skills'),
+  },
+} as const;
 
 /**
  * Locate the `skills/` directory shipped with this package.
@@ -120,26 +139,36 @@ function tag(color: string, label: string): string {
 }
 
 export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
+  if (opts.includeSetupSkills && !opts.host) {
+    throw new Error(
+      'Choose exactly one setup host: codex, claude, or gemini.',
+    );
+  }
   if (opts.global && opts.target) {
     throw new Error(
-      "Pass either --global or --target, not both. --global writes to '~/.claude/skills'; --target overrides the destination.",
+      'Pass either --global or --target, not both.',
     );
   }
 
   const rootDir = resolve(opts.rootDir ?? process.cwd());
-  const defaultTarget = opts.global ? join(homedir(), '.claude', 'skills') : '.claude/skills';
+  const host = opts.host ?? 'claude';
+  const hostTargets = HOST_SKILL_TARGETS[host];
+  const defaultTarget = opts.global ? hostTargets.global : hostTargets.project;
   const targetSpec = opts.target ?? defaultTarget;
   // Treat absolute paths and `~`-prefixed paths verbatim; resolve relative paths against rootDir.
   const expanded = targetSpec.startsWith('~/') ? join(homedir(), targetSpec.slice(2)) : targetSpec;
   const targetAbs = resolve(rootDir, expanded);
   const skillsDir = findPackageSkillsDir();
   const stack = opts.stack ?? 'all';
-  const allowList = STACK_SKILL_MAP[stack];
-  if (!allowList) {
+  const baseAllowList = STACK_SKILL_MAP[stack];
+  if (!baseAllowList) {
     throw new Error(
       `Unknown --stack value: '${stack}'. Use one of: nextjs | all.`,
     );
   }
+  const allowList = opts.includeSetupSkills
+    ? [...baseAllowList, 'setting-up-glirastes']
+    : [...baseAllowList];
 
   const available = await listAvailableSkills(skillsDir);
   const selected = available.filter((s) => allowList.includes(s.name));
@@ -154,8 +183,9 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   console.log(`  ${dim('Source:')}  ${relative(rootDir, skillsDir) || skillsDir}`);
   console.log(
     `  ${dim('Target:')}  ${relative(rootDir, targetAbs) || targetAbs}` +
-      (opts.global ? dim(' (global, ~/.claude/skills)') : ''),
+      (opts.global ? dim(' (global)') : ''),
   );
+  console.log(`  ${dim('Host:')}    ${host}`);
   console.log(`  ${dim('Stack:')}   ${stack}`);
   console.log(
     `  ${dim('Mode:')}    ${opts.symlink ? 'symlink' : 'copy'}${opts.dryRun ? ' (dry run)' : ''}`,
