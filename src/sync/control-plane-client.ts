@@ -10,6 +10,18 @@ export interface RuntimePushConnector {
   }): Promise<void>;
 }
 
+export class RuntimeControlPlaneRequestError extends Error {
+  readonly operation: string;
+  readonly status: number;
+
+  constructor(operation: string, status: number) {
+    super(`Glirastes Control Plane ${operation} request failed (${status})`);
+    this.name = 'RuntimeControlPlaneRequestError';
+    this.operation = operation;
+    this.status = status;
+  }
+}
+
 export class RuntimeControlPlaneClient {
   private abortController: AbortController | null = null;
   private cursor: string | null = null;
@@ -132,8 +144,9 @@ export class RuntimeControlPlaneClient {
       },
     );
     if (!response.ok) {
-      throw new Error(
-        `Glirastes Control Plane request failed (${response.status})`,
+      throw new RuntimeControlPlaneRequestError(
+        path.split('?', 1)[0]!,
+        response.status,
       );
     }
     return response.json();

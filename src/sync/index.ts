@@ -23,6 +23,7 @@ export type {
 } from './sync-manager.js';
 export {
   RuntimeControlPlaneClient,
+  RuntimeControlPlaneRequestError,
 } from './control-plane-client.js';
 export type {
   RuntimePushConnector,

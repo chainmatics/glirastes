@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { RuntimeControlPlaneClient } from '../control-plane-client.js';
+import {
+  RuntimeControlPlaneClient,
+  RuntimeControlPlaneRequestError,
+} from '../control-plane-client.js';
 
 const baseOptions = {
   baseUrl: 'https://control.example.test',
@@ -69,5 +72,28 @@ describe('RuntimeControlPlaneClient', () => {
     client.stop();
     await running;
     expect(fetchImpl.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('reports the failed operation and status without exposing response content', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      message: 'sensitive upstream detail',
+    }), { status: 500 }));
+    const client = new RuntimeControlPlaneClient({
+      ...baseOptions,
+      fetchImpl,
+      manager: { apply: vi.fn() } as never,
+    });
+
+    const error = await client.register().catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(RuntimeControlPlaneRequestError);
+    expect(error).toMatchObject({
+      operation: 'register',
+      status: 500,
+    });
+    expect(error.message).toBe(
+      'Glirastes Control Plane register request failed (500)',
+    );
+    expect(error.message).not.toContain('sensitive upstream detail');
   });
 });
