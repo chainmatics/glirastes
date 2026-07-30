@@ -214,6 +214,11 @@ export interface AiChatHandlerConfig {
         routing?: IntentRoutingResult;
         pipelineResult?: PipelineResult;
         currentDate: Date;
+        /**
+         * Revision set pinned for this turn. It lets a consumer assemble the
+         * prompt against exactly the revisions the turn started with.
+         */
+        turnSnapshot?: TurnSnapshot;
       }) => string);
   locale?: string;
   uiActionSchema?: SchemaLike;

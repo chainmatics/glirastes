@@ -815,6 +815,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             ? systemPromptConfig({
                 pipelineResult,
                 currentDate: new Date(),
+                ...(managedTurn ? { turnSnapshot: managedTurn.snapshot } : {}),
               })
             : systemPromptConfig;
 
@@ -988,6 +989,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ? systemPromptConfig({
               routing,
               currentDate: new Date(),
+              ...(managedTurn ? { turnSnapshot: managedTurn.snapshot } : {}),
             })
           : systemPromptConfig;
 
