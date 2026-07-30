@@ -398,7 +398,8 @@ export function AiChatProvider({
 
   // Approvals state (Map for O(1) lookup)
   const [pendingApprovalsMap, setPendingApprovalsMap] = useState<Map<string, PendingApproval>>(new Map());
-  const [processingApprovalId, setProcessingApprovalId] = useState<string | null>(null);
+  const [processingApprovalIds, setProcessingApprovalIds] = useState<Set<string>>(new Set());
+  const [approvalError, setApprovalError] = useState<Error | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
 
   // ---------------------------------------------------------------------------
@@ -517,7 +518,7 @@ export function AiChatProvider({
       maxSteps: prev?.maxSteps ?? 1,
       stepLimitSource: prev?.stepLimitSource ?? 'safety',
       updatedAt: new Date().toISOString(),
-      message: typeof error.message === 'string' ? error.message : 'Pipeline failed.',
+      message: 'Pipeline failed.',
     }));
   }, [error, pipelineSteps.length]);
 
@@ -592,12 +593,9 @@ export function AiChatProvider({
         } else {
           setMessages([] as unknown as typeof rawMessages);
         }
-      } catch (err) {
+      } catch {
         if (cancelled) return;
-        console.warn(
-          `[AiChatProvider] session.load("${activeSessionId}") failed:`,
-          err,
-        );
+        console.warn('[AiChatProvider] session.load failed');
         setMessages([] as unknown as typeof rawMessages);
       } finally {
         if (!cancelled) setIsInitialized(true);
@@ -897,8 +895,8 @@ export function AiChatProvider({
         setUncontrolledActiveId(next);
         cfg.onActiveIdChange?.(next);
       }
-    } catch (err) {
-      console.warn('[AiChatProvider] session.list failed:', err);
+    } catch {
+      console.warn('[AiChatProvider] session.list failed');
     } finally {
       setIsSessionsLoading(false);
     }
@@ -1003,29 +1001,49 @@ export function AiChatProvider({
 
   // Approval handlers
   const approve = useCallback(async (id: string) => {
-    setProcessingApprovalId(id);
-    setPendingApprovalsMap(prev => {
-      const next = new Map(prev);
-      next.delete(id);
-      return next;
-    });
-    await addToolApprovalResponse({ id, approved: true });
-    setProcessingApprovalId(null);
+    setApprovalError(null);
+    setProcessingApprovalIds((prev) => new Set(prev).add(id));
+    try {
+      await addToolApprovalResponse({ id, approved: true });
+      setPendingApprovalsMap((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+    } catch {
+      setApprovalError(new Error('Tool approval response failed.'));
+    } finally {
+      setProcessingApprovalIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }, [addToolApprovalResponse]);
 
   const reject = useCallback(async (id: string) => {
-    setProcessingApprovalId(id);
-    setPendingApprovalsMap(prev => {
-      const next = new Map(prev);
-      next.delete(id);
-      return next;
-    });
-    await addToolApprovalResponse({
-      id,
-      approved: false,
-      reason: 'Rejected by user.',
-    });
-    setProcessingApprovalId(null);
+    setApprovalError(null);
+    setProcessingApprovalIds((prev) => new Set(prev).add(id));
+    try {
+      await addToolApprovalResponse({
+        id,
+        approved: false,
+        reason: 'Rejected by user.',
+      });
+      setPendingApprovalsMap((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+    } catch {
+      setApprovalError(new Error('Tool approval response failed.'));
+    } finally {
+      setProcessingApprovalIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }, [addToolApprovalResponse]);
 
   // Truncation
@@ -1140,7 +1158,7 @@ export function AiChatProvider({
       stepSummaryFormatter,
       messages: visibleMessages,
       isLoading,
-      error: error ?? null,
+      error: error ?? approvalError,
       send,
       stop,
       clear,
@@ -1151,7 +1169,7 @@ export function AiChatProvider({
       pendingApprovals,
       approve,
       reject,
-      isProcessingApproval: processingApprovalId !== null,
+      isProcessingApproval: processingApprovalIds.size > 0,
       approvalDescription: approvalDescriptionRef.current,
       truncation,
       continueTruncation,
@@ -1198,6 +1216,7 @@ export function AiChatProvider({
       visibleMessages,
       isLoading,
       error,
+      approvalError,
       send,
       stop,
       clear,
@@ -1208,7 +1227,7 @@ export function AiChatProvider({
       pendingApprovals,
       approve,
       reject,
-      processingApprovalId,
+      processingApprovalIds,
       truncation,
       continueTruncation,
       dismissTruncation,

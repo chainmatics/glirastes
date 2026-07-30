@@ -237,8 +237,7 @@ export function useAiMissingHandlerWarning(
       if (missing.length === 0) return;
 
       console.warn(
-        `[glirastes] ${missing.length} AI action handler(s) missing:`,
-        missing,
+        `[glirastes] ${missing.length} AI action handler(s) missing`,
       );
       console.warn(
         '[glirastes] Register handlers with useAiClientAction() or mark as @ai-ignore',

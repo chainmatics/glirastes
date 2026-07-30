@@ -157,7 +157,7 @@ export function createToolResultHandler(
         if (uiActionSchema) {
           const parsed = uiActionSchema.safeParse(candidate);
           if (!parsed.success) {
-            console.warn('[AI Chat] Invalid uiAction dropped:', parsed.error.issues);
+            console.warn('[AI Chat] Invalid uiAction dropped');
             continue;
           }
           uiAction = parsed.data;
