@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   useDragResizePanel,
   type UseDragResizePanelOptions,
@@ -50,6 +50,19 @@ function mouseDown(
 }
 
 describe('useDragResizePanel drag lifecycle', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    document.body.style.userSelect = '';
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 1_000,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: 800,
+    });
+  });
+
   it('does not enter a stuck drag state after an immediate click release', () => {
     const { result } = renderHook(() => useDragResizePanel(createOptions()));
 
@@ -148,5 +161,104 @@ describe('useDragResizePanel drag lifecycle', () => {
     expect(result.current.isResizing).toBe(false);
     expect(result.current.activeEdge).toBeNull();
     expect(document.body.style.userSelect).toBe('');
+  });
+
+  it('restores persisted dimensions instead of overwriting them on mount', () => {
+    sessionStorage.setItem('ai-panel-width', '720');
+    sessionStorage.setItem('ai-panel-height', '760');
+
+    const { result } = renderHook(() => useDragResizePanel({
+      ...createOptions(),
+      persistDimensions: 'ai-panel',
+    }));
+
+    expect(result.current.size).toEqual({ width: 720, height: 760 });
+  });
+
+  it('sanitizes corrupted persisted dimensions', () => {
+    sessionStorage.setItem('ai-panel-width', '-50');
+    sessionStorage.setItem('ai-panel-height', 'not-a-number');
+
+    const { result } = renderHook(() => useDragResizePanel({
+      ...createOptions(),
+      persistDimensions: 'ai-panel',
+    }));
+
+    expect(result.current.size).toEqual({ width: 320, height: 500 });
+  });
+
+  it('still follows dimension prop changes after restoring a session size', () => {
+    sessionStorage.setItem('ai-panel-width', '720');
+    sessionStorage.setItem('ai-panel-height', '760');
+
+    const { result, rerender } = renderHook(
+      ({ width, height }) => useDragResizePanel({
+        ...createOptions(),
+        width,
+        height,
+        persistDimensions: 'ai-panel',
+      }),
+      { initialProps: { width: 400, height: 500 } },
+    );
+
+    expect(result.current.size).toEqual({ width: 720, height: 760 });
+
+    rerender({ width: 600, height: 650 });
+
+    expect(result.current.size).toEqual({ width: 600, height: 650 });
+  });
+
+  it('snaps a dragged panel back to its centered anchor on release', () => {
+    const { result } = renderHook(() => useDragResizePanel(createOptions()));
+
+    act(() => {
+      result.current.handlers.onDragStart(mouseDown(500, 140));
+      document.dispatchEvent(new MouseEvent('mousemove', {
+        clientX: 520,
+        clientY: 304,
+      }));
+    });
+
+    expect(result.current.isDragging).toBe(true);
+    expect(result.current.isNearSnapZone).toBe(true);
+    expect(result.current.position).toEqual({ x: 520, y: 284 });
+
+    act(() => {
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        clientX: 520,
+        clientY: 304,
+      }));
+    });
+
+    expect(result.current.isDragging).toBe(false);
+    expect(result.current.isNearSnapZone).toBe(false);
+    expect(result.current.position).toBeNull();
+    expect(document.body.style.userSelect).toBe('');
+  });
+
+  it('clamps edge resize to the configured dimensions', () => {
+    const { result } = renderHook(() => useDragResizePanel(createOptions()));
+
+    act(() => {
+      result.current.handlers.onEdgeResizeStart('right')(
+        mouseDown(700, 300),
+      );
+      document.dispatchEvent(new MouseEvent('mousemove', {
+        clientX: 1_500,
+        clientY: 300,
+      }));
+    });
+
+    expect(result.current.size.width).toBe(800);
+
+    act(() => {
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        clientX: 1_500,
+        clientY: 300,
+      }));
+    });
+
+    expect(result.current.isResizing).toBe(false);
+    expect(result.current.activeEdge).toBeNull();
   });
 });

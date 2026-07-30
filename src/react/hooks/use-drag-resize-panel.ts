@@ -67,10 +67,20 @@ function readSessionNumber(key: string): number | null {
   if (typeof window === 'undefined') return null;
   try {
     const stored = sessionStorage.getItem(key);
-    return stored ? Number(stored) : null;
+    if (!stored) return null;
+    const value = Number(stored);
+    return Number.isFinite(value) ? value : null;
   } catch {
     return null;
   }
+}
+
+function clampDimension(
+  value: number,
+  min: number,
+  max?: number,
+): number {
+  return Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min, value));
 }
 
 function writeSessionNumber(key: string, value: number): void {
@@ -130,19 +140,68 @@ export function useDragResizePanel(
       const storedWidth = readSessionNumber(`${storagePrefix}-width`);
       const storedHeight = readSessionNumber(`${storagePrefix}-height`);
       return {
-        width: storedWidth ?? defaultWidth,
-        height: storedHeight ?? defaultHeight,
+        width: clampDimension(
+          storedWidth ?? defaultWidth,
+          minWidth,
+          maxWidth,
+        ),
+        height: clampDimension(
+          storedHeight ?? defaultHeight,
+          minHeight,
+          maxHeight,
+        ),
       };
     }
-    return { width: defaultWidth, height: defaultHeight };
+    return {
+      width: clampDimension(defaultWidth, minWidth, maxWidth),
+      height: clampDimension(defaultHeight, minHeight, maxHeight),
+    };
+  });
+  const previousDefaultsRef = useRef({
+    width: defaultWidth,
+    height: defaultHeight,
+    minWidth,
+    minHeight,
+    maxWidth,
+    maxHeight,
   });
 
   // Sync to incoming prop changes. Without this, the `size` state is
   // frozen at mount time and consumers updating their `size` / `width` /
-  // `height` props see no effect until a hard reload.
+  // `height` props see no effect until a hard reload. Do not write on the
+  // initial effect: that would immediately erase restored session dimensions.
   useEffect(() => {
-    setSize({ width: defaultWidth, height: defaultHeight });
-  }, [defaultWidth, defaultHeight]);
+    const previous = previousDefaultsRef.current;
+    if (
+      previous.width === defaultWidth
+      && previous.height === defaultHeight
+      && previous.minWidth === minWidth
+      && previous.minHeight === minHeight
+      && previous.maxWidth === maxWidth
+      && previous.maxHeight === maxHeight
+    ) {
+      return;
+    }
+    previousDefaultsRef.current = {
+      width: defaultWidth,
+      height: defaultHeight,
+      minWidth,
+      minHeight,
+      maxWidth,
+      maxHeight,
+    };
+    setSize({
+      width: clampDimension(defaultWidth, minWidth, maxWidth),
+      height: clampDimension(defaultHeight, minHeight, maxHeight),
+    });
+  }, [
+    defaultWidth,
+    defaultHeight,
+    minWidth,
+    minHeight,
+    maxWidth,
+    maxHeight,
+  ]);
 
   // -----------------------------------------------------------------------
   // Interaction states
