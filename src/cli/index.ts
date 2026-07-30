@@ -1,13 +1,19 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { AppSetupArtifactSchema } from '../contracts/app-setup.js';
+import {
+  discoverFoundationExecutions,
+  FoundationExecutionInventorySchema,
+} from '../codegen/execution-inventory.js';
 import { writeNextAppRouteScan } from '../codegen/route-scanner.js';
+import { AppSetupClient } from '../sync/app-setup-client.js';
 import {
   parseLocalExecutionInventory,
   RuntimeSetupClient,
   type RouteScanUpload,
 } from '../sync/runtime-setup-client.js';
 
-type CommandName = 'scan';
+type CommandName = 'scan' | 'setup';
 
 function getFlagValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
@@ -23,17 +29,119 @@ function parseCommand(args: string[]): {
   rest: string[];
 } {
   const [command, ...rest] = args;
-  if (command !== 'scan') {
+  if (command !== 'scan' && command !== 'setup') {
     throw new Error(
       'Usage: glirastes scan [--output] [--sync] '
-      + '[--execution-inventory]\n',
+      + '[--execution-inventory]\n'
+      + '       glirastes setup <scan|sync|status> [options]\n',
     );
   }
   return { command, rest };
 }
 
-export async function runCli(args: string[]): Promise<void> {
-  const { rest } = parseCommand(args);
+function setupConnection(rest: string[]): {
+  baseUrl: string;
+  appId: string;
+  setupApiKey: string;
+} {
+  const baseUrl = getFlagValue(rest, '--base-url')
+    ?? process.env.GLIRASTES_CONTROL_PLANE_URL;
+  const appId = getFlagValue(rest, '--app-id')
+    ?? process.env.GLIRASTES_APP_ID;
+  const setupApiKey = process.env.GLIRASTES_SETUP_API_KEY;
+  if (!baseUrl) {
+    throw new Error(
+      '--base-url or GLIRASTES_CONTROL_PLANE_URL is required for setup.',
+    );
+  }
+  if (!appId) {
+    throw new Error('--app-id or GLIRASTES_APP_ID is required for setup.');
+  }
+  if (!setupApiKey) {
+    throw new Error('GLIRASTES_SETUP_API_KEY is required for setup.');
+  }
+  return { baseUrl, appId, setupApiKey };
+}
+
+async function runSetup(rest: string[]): Promise<void> {
+  const [subcommand, ...options] = rest;
+  if (!['scan', 'sync', 'status'].includes(subcommand ?? '')) {
+    throw new Error('Usage: glirastes setup <scan|sync|status> [options]\n');
+  }
+  const rootDir = getFlagValue(options, '--root') ?? process.cwd();
+  const quiet = hasFlag(options, '--quiet');
+
+  if (subcommand === 'scan') {
+    const inventoryPath = resolve(
+      rootDir,
+      getFlagValue(options, '--execution-inventory')
+        ?? '.glirastes/local-execution-inventory.v2.json',
+    );
+    const inventory = FoundationExecutionInventorySchema.parse(JSON.parse(
+      readFileSync(inventoryPath, 'utf8'),
+    ));
+    const discovery = await discoverFoundationExecutions({
+      rootDir,
+      inventory,
+    });
+    const outputPath = resolve(
+      rootDir,
+      getFlagValue(options, '--output')
+        ?? '.glirastes/setup-discovery.json',
+    );
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(
+      outputPath,
+      `${JSON.stringify(discovery, null, 2)}\n`,
+      'utf8',
+    );
+    if (!quiet) {
+      console.log(
+        `Discovered ${discovery.executions.length} local executions to `
+        + outputPath,
+      );
+    }
+    return;
+  }
+
+  const connection = setupConnection(options);
+  const client = new AppSetupClient(connection);
+  if (subcommand === 'status') {
+    const runId = getFlagValue(options, '--run-id');
+    if (!runId) {
+      throw new Error('--run-id is required for setup status.');
+    }
+    const run = await client.getRun(runId);
+    if (!quiet) {
+      console.log(
+        `Setup run ${run.runId}: ${run.status}`,
+      );
+    }
+    return;
+  }
+
+  const artifactPath = getFlagValue(options, '--artifact');
+  if (!artifactPath) {
+    throw new Error('--artifact is required for setup sync.');
+  }
+  const artifact = AppSetupArtifactSchema.parse(JSON.parse(
+    readFileSync(resolve(rootDir, artifactPath), 'utf8'),
+  ));
+  if (artifact.appId !== connection.appId) {
+    throw new Error('App setup artifact targets a different app');
+  }
+  await client.createRun({
+    runId: artifact.runId,
+    assessmentMode: artifact.assessmentMode,
+    discoveryDigest: artifact.discoveryDigest,
+  });
+  const run = await client.uploadArtifact(artifact);
+  if (!quiet) {
+    console.log(`Synced setup run ${run.runId}: ${run.status}`);
+  }
+}
+
+async function runLegacyScan(rest: string[]): Promise<void> {
   const rootDir = getFlagValue(rest, '--root') ?? process.cwd();
   const quiet = hasFlag(rest, '--quiet');
   let config: { apiDir?: string } = {};
@@ -132,4 +240,13 @@ export async function runCli(args: string[]): Promise<void> {
     );
     console.log(`Wrote authoritative tool bindings to ${bindingsOutput}.`);
   }
+}
+
+export async function runCli(args: string[]): Promise<void> {
+  const { command, rest } = parseCommand(args);
+  if (command === 'setup') {
+    await runSetup(rest);
+    return;
+  }
+  await runLegacyScan(rest);
 }

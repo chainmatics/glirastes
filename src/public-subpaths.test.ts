@@ -76,7 +76,7 @@ describe('public foundation subpaths', () => {
     expect(serverSource).not.toContain('createAegisDetector');
   });
 
-  it('keeps the Foundation CLI focused on scan and sync', async () => {
+  it('keeps the Foundation CLI focused on legacy scan and app setup', async () => {
     const source = await readFile(
       new URL('./cli/index.ts', import.meta.url),
       'utf8',
@@ -93,12 +93,12 @@ describe('public foundation subpaths', () => {
       'generate-endpoint-tools',
       'generate-ui-tools',
       'generate-modules',
-      'sync',
       'test',
     ]) {
       expect(source).not.toContain(`'${command}'`);
     }
-    expect(source).toContain("type CommandName = 'scan'");
+    expect(source).toContain("type CommandName = 'scan' | 'setup'");
+    expect(source).toContain("['scan', 'sync', 'status']");
   });
 
   it('keeps the standalone STT surface framework-neutral', async () => {

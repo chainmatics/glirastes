@@ -38,6 +38,12 @@ export type {
   RouteScanUpload,
   RuntimeSetupImportResult,
 } from './runtime-setup-client.js';
+export { AppSetupClient } from './app-setup-client.js';
+export type {
+  AppSetupRun,
+  CreateAppSetupRun,
+  UpdateAppSetupStatus,
+} from './app-setup-client.js';
 export { FetchSsePushConnector } from './fetch-sse-push.js';
 export { HttpRuntimePublicKeyProvider } from './jwks-provider.js';
 export {
