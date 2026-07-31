@@ -93,6 +93,20 @@ export const AgentRevisionSchema = z.object({
   signature: RevisionSignatureSchema,
 }).strict();
 
+/**
+ * The v2 app-scoped planner payload the Platform publishes from a setup run.
+ * It references a budget profile instead of carrying a concrete budget; the
+ * concrete budget is pinned by the policy revision of the same deployment.
+ */
+export const PlannerRevisionPayloadSchema = z.object({
+  schemaVersion: z.literal(1),
+  plannerId: identifier,
+  modelBindingRef: identifier,
+  promptBindingRef: identifier,
+  budgetProfileRef: identifier,
+  toolAllowlist: z.array(uuid),
+}).strict();
+
 export const RuntimeToolPolicySchema = z.object({
   toolId: uuid,
   enabled: z.boolean(),

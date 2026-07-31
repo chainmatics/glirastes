@@ -88,4 +88,58 @@ describe('materializeDeploymentRevisions', () => {
     invalid.agentRevision.payload = { modelAlias: 'standard' };
     expect(() => materializeDeploymentRevisions(invalid)).toThrow();
   });
+
+  it('materializes a v2 planner payload with the policy budget', () => {
+    const bundle = deployment();
+    bundle.agentRevision.payload = {
+      schemaVersion: 1,
+      plannerId: 'foundation',
+      modelBindingRef: 'balanced',
+      promptBindingRef: 'prompt:get-it-done',
+      budgetProfileRef: 'foundation-default',
+      toolAllowlist: ['019fa9a9-d5f7-7ec3-a3c7-8899de1d3999'],
+    };
+
+    const materialized = materializeDeploymentRevisions(bundle);
+
+    expect(materialized.agentRevision.agentId).toBe(
+      '019fa9a9-d5f7-7ec3-a3c7-8899de1d3906',
+    );
+    expect(materialized.agentRevision.modelAlias).toBe('balanced');
+    expect(materialized.agentRevision.promptBindingRef).toBe(
+      'prompt:get-it-done',
+    );
+    expect(materialized.agentRevision.toolAllowlist).toEqual([
+      '019fa9a9-d5f7-7ec3-a3c7-8899de1d3999',
+    ]);
+    // A planner revision references a budget profile; the concrete budget is
+    // pinned by the policy revision of the same deployment.
+    expect(materialized.agentRevision.budget).toEqual(budget);
+  });
+
+  it('fails closed on a planner payload without a tool allowlist', () => {
+    const bundle = deployment();
+    bundle.agentRevision.payload = {
+      schemaVersion: 1,
+      plannerId: 'foundation',
+      modelBindingRef: 'balanced',
+      promptBindingRef: 'prompt:get-it-done',
+      budgetProfileRef: 'foundation-default',
+    };
+    expect(() => materializeDeploymentRevisions(bundle)).toThrow();
+  });
+
+  it('fails closed on a planner payload with unknown fields', () => {
+    const bundle = deployment();
+    bundle.agentRevision.payload = {
+      schemaVersion: 1,
+      plannerId: 'foundation',
+      modelBindingRef: 'balanced',
+      promptBindingRef: 'prompt:get-it-done',
+      budgetProfileRef: 'foundation-default',
+      toolAllowlist: [],
+      systemPrompt: 'injected',
+    };
+    expect(() => materializeDeploymentRevisions(bundle)).toThrow();
+  });
 });
