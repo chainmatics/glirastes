@@ -37,6 +37,12 @@ export const AppSetupToolCandidateSchema = z.object({
   toolId: uuid,
   sourceFingerprint: digest,
   name: identifier,
+  /**
+   * Short prose so a reviewer can judge an operation before overriding its
+   * risk class or approval requirement. Bounded because a description is
+   * never a place to carry source, schemas, or secrets.
+   */
+  description: z.string().trim().min(1).max(1_000).optional(),
   executionKind: z.enum(['endpoint', 'ui']),
   operationGroup: AppSetupOperationGroupSchema,
   riskClass: ToolRiskClassSchema,

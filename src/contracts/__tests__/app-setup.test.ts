@@ -130,3 +130,39 @@ describe('AppSetupArtifactSchema', () => {
     }).success).toBe(false);
   });
 });
+
+describe('tool descriptions', () => {
+  const withDescription = (description: unknown) => ({
+    ...artifact,
+    tools: [{ ...artifact.tools[0], description }],
+  });
+
+  /**
+   * A reviewer has to know what an operation does before overriding its risk
+   * class or approval requirement. A stable identifier like
+   * `tasks.listAttachments` does not carry that, so the artifact needs a
+   * short validated description beside it.
+   */
+  it('accepts a short description beside the technical identity', () => {
+    const parsed = AppSetupArtifactSchema.parse(
+      withDescription('Reads the attachments of a task.'),
+    );
+
+    expect(parsed.tools[0].description).toBe('Reads the attachments of a task.');
+  });
+
+  it('stays optional so an existing artifact remains valid', () => {
+    expect(() => AppSetupArtifactSchema.parse(artifact)).not.toThrow();
+  });
+
+  /** A description is prose, never a place to smuggle source or secrets. */
+  it('rejects a description long enough to carry source', () => {
+    expect(() => AppSetupArtifactSchema.parse(
+      withDescription('x'.repeat(1_001)),
+    )).toThrow();
+  });
+
+  it('rejects a description that is not text', () => {
+    expect(() => AppSetupArtifactSchema.parse(withDescription(42))).toThrow();
+  });
+});
