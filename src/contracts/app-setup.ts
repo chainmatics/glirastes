@@ -44,6 +44,22 @@ export const AppSetupToolCandidateSchema = z.object({
    */
   description: z.string().trim().min(1).max(1_000).optional(),
   executionKind: z.enum(['endpoint', 'ui']),
+  /**
+   * Technical metadata that describes the operation without being prose, so
+   * the description can stay about purpose and a reviewer can still see the
+   * facts. Optional because a UI entry has no route and an endpoint has no
+   * action binding.
+   */
+  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
+  path: z.string().startsWith('/').max(2_048).optional(),
+  authBindingRef: identifier.optional(),
+  actionBindingRef: identifier.optional(),
+  /**
+   * Roles the assessment proposes may call this. Empty means undecided, not
+   * "everyone": the local endpoint remains the final authorization boundary
+   * either way.
+   */
+  allowedRoles: z.array(identifier).max(50).optional(),
   operationGroup: AppSetupOperationGroupSchema,
   riskClass: ToolRiskClassSchema,
   enabled: z.boolean(),

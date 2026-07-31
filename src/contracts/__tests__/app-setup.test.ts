@@ -166,3 +166,77 @@ describe('tool descriptions', () => {
     expect(() => AppSetupArtifactSchema.parse(withDescription(42))).toThrow();
   });
 });
+
+describe('tool metadata', () => {
+  const withMetadata = (extra: Record<string, unknown>) => ({
+    ...artifact,
+    tools: [{ ...artifact.tools[0], ...extra }],
+  });
+
+  /**
+   * Route and method describe an operation without being prose. Keeping them
+   * as their own fields lets the description stay about purpose and lets the
+   * dashboard show the technical facts read-only.
+   */
+  it('carries the route of an endpoint beside the description', () => {
+    const parsed = AppSetupArtifactSchema.parse(withMetadata({
+      method: 'GET',
+      path: '/api/tasks/:id/attachments',
+      authBindingRef: 'verified-session',
+    }));
+
+    expect(parsed.tools[0].method).toBe('GET');
+    expect(parsed.tools[0].path).toBe('/api/tasks/:id/attachments');
+  });
+
+  it('carries the action binding of a UI entry', () => {
+    const parsed = AppSetupArtifactSchema.parse(withMetadata({
+      executionKind: 'ui',
+      operationGroup: 'ui',
+      actionBindingRef: 'ui.dashboard.refreshStats',
+    }));
+
+    expect(parsed.tools[0].actionBindingRef).toBe('ui.dashboard.refreshStats');
+  });
+
+  it('rejects a method that is not an HTTP verb', () => {
+    expect(() => AppSetupArtifactSchema.parse(withMetadata({ method: 'FETCH' })))
+      .toThrow();
+  });
+
+  it('rejects a path that is not a route', () => {
+    expect(() => AppSetupArtifactSchema.parse(withMetadata({ path: 'tasks' })))
+      .toThrow();
+  });
+
+  /** A source path would reveal the local tree and stays out of the artifact. */
+  it('rejects a source location', () => {
+    expect(() => AppSetupArtifactSchema.parse(withMetadata({
+      sourceFile: 'src/app/api/tasks/route.ts',
+    }))).toThrow();
+  });
+});
+
+describe('proposed roles', () => {
+  it('carries the roles the assessment proposes', () => {
+    const parsed = AppSetupArtifactSchema.parse({
+      ...artifact,
+      tools: [{
+        ...artifact.tools[0],
+        allowedRoles: ['admin', 'gruppenleiter'],
+      }],
+    });
+
+    expect(parsed.tools[0].allowedRoles).toEqual(['admin', 'gruppenleiter']);
+  });
+
+  it('rejects a role list long enough to be a payload', () => {
+    expect(() => AppSetupArtifactSchema.parse({
+      ...artifact,
+      tools: [{
+        ...artifact.tools[0],
+        allowedRoles: Array.from({ length: 51 }, (_, i) => `r${i}`),
+      }],
+    })).toThrow();
+  });
+});
