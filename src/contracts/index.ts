@@ -74,3 +74,10 @@ export type {
   PromptRevisionMetadata,
   SignedPromptBinding,
 } from './prompt-bundle.js';
+
+export {
+  PlatformPromptRevisionSchema,
+} from './platform-prompt-revision.js';
+export type {
+  PlatformPromptRevision,
+} from './platform-prompt-revision.js';
