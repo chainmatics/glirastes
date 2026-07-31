@@ -218,3 +218,81 @@ describe('discoverFoundationExecutions', () => {
       .toEqual([id('1'), id('2')]);
   });
 });
+
+describe('resolving a UI action to its handler', () => {
+  const uiInventory = (
+    overrides: Record<string, unknown> = {},
+  ): FoundationExecutionInventory => ({
+    schemaVersion: 2,
+    targetAppKey: 'get-it-done',
+    executions: [{
+      toolId: id('901'),
+      definitionId: 'ui.taskDetails.open',
+      stableKey: 'UI ui.taskDetails.open',
+      executionKind: 'ui',
+      actionBindingRef: 'ui.taskDetails.open',
+      actionId: 'task-details.open',
+      sourceFingerprint: digest('A'),
+      inputSchemaDigest: digest('B'),
+      outputSchemaDigest: digest('C'),
+      ...overrides,
+    }],
+  } as FoundationExecutionInventory);
+
+  const handler = `
+    import { useAiClientAction } from 'glirastes/react';
+    export function TaskListView() {
+      useAiClientAction('task-details.open', (payload) => open(payload.id));
+      return null;
+    }
+  `;
+
+  /**
+   * A UI action carried only its binding reference, so an assessment had no
+   * source to read and had to guess side effects from the name. The handler
+   * registration is the evidence, and it is findable by the action id.
+   */
+  it('records the file that registers the action', async () => {
+    const rootDir = await fixture({
+      'src/components/tasks/task-list-view.tsx': handler,
+    });
+
+    const discovery = await discoverFoundationExecutions({
+      rootDir,
+      inventory: uiInventory(),
+    });
+
+    expect(discovery.executions[0].sourceLocator).toMatchObject({
+      sourceFile: 'src/components/tasks/task-list-view.tsx',
+      actionBindingRef: 'ui.taskDetails.open',
+    });
+  });
+
+  it('reports an action whose handler is nowhere registered', async () => {
+    const rootDir = await fixture({
+      'src/components/tasks/task-list-view.tsx': handler,
+    });
+
+    const discovery = await discoverFoundationExecutions({
+      rootDir,
+      inventory: uiInventory({ actionId: 'never-registered' }),
+    });
+
+    expect(discovery.findings).toContainEqual(
+      expect.objectContaining({ code: 'ui-action-handler-not-found' }),
+    );
+  });
+
+  /** Without an action id there is nothing to search for, and that is fine. */
+  it('still accepts an entry that declares no action id', async () => {
+    const rootDir = await fixture({ 'src/a.tsx': handler });
+    const inventory = uiInventory();
+    delete (inventory.executions[0] as Record<string, unknown>).actionId;
+
+    const discovery = await discoverFoundationExecutions({ rootDir, inventory });
+
+    expect(discovery.executions[0].sourceLocator).toMatchObject({
+      actionBindingRef: 'ui.taskDetails.open',
+    });
+  });
+});

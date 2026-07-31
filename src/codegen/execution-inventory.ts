@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { createRouteSourceFingerprint } from './route-fingerprint.js';
@@ -29,6 +29,12 @@ const endpointExecution = executionBase.extend({
 const uiExecution = executionBase.extend({
   executionKind: z.literal('ui'),
   actionBindingRef: identifier,
+  /**
+   * The identifier the client handler registers with. It differs from the
+   * definition id, and it is the only way to find the code that actually runs
+   * an action, so an assessment can read it instead of guessing from a name.
+   */
+  actionId: identifier.optional(),
 }).strict();
 
 export const FoundationExecutionInventorySchema = z.object({
@@ -48,7 +54,7 @@ export type DiscoveredFoundationExecution =
   FoundationExecutionInventory['executions'][number] & {
     sourceLocator:
       | { sourceFile: string; exportName: string }
-      | { actionBindingRef: string };
+      | { actionBindingRef: string; sourceFile?: string };
   };
 
 export interface FoundationExecutionDiscovery {
@@ -56,7 +62,7 @@ export interface FoundationExecutionDiscovery {
   targetAppKey: string;
   inventoryDigest: string;
   executions: DiscoveredFoundationExecution[];
-  findings: [];
+  findings: Array<{ code: string; subjectRef: string }>;
 }
 
 function canonicalValue(value: unknown): unknown {
@@ -157,6 +163,46 @@ async function verifyEndpoint(
   };
 }
 
+/**
+ * Locate the client handler that registers an action.
+ *
+ * The registration is a literal call with the action id, so a textual search
+ * is enough and stays deterministic. Generated files are skipped: they mirror
+ * the inventory rather than implementing behaviour.
+ */
+async function findActionHandler(
+  rootDir: string,
+  actionId: string,
+): Promise<string | null> {
+  const needle = `useAiClientAction('${actionId}'`;
+  const alternate = `useAiClientAction("${actionId}"`;
+  const matches: string[] = [];
+
+  const walk = async (relative: string): Promise<void> => {
+    const entries = await readdir(resolve(rootDir, relative), {
+      withFileTypes: true,
+    }).catch(() => []);
+    for (const entry of entries) {
+      const next = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+        if (entry.name === 'generated') continue;
+        await walk(next);
+        continue;
+      }
+      if (!/\.(tsx?|jsx?)$/.test(entry.name)) continue;
+      const source = await readFile(resolve(rootDir, next), 'utf8')
+        .catch(() => '');
+      if (source.includes(needle) || source.includes(alternate)) {
+        matches.push(next);
+      }
+    }
+  };
+
+  await walk('');
+  return matches.sort()[0] ?? null;
+}
+
 export async function discoverFoundationExecutions(options: {
   rootDir: string;
   inventory: unknown;
@@ -166,15 +212,29 @@ export async function discoverFoundationExecutions(options: {
   const inventory = canonicalInventory(parsed);
   const executions: DiscoveredFoundationExecution[] = [];
 
+  const findings: Array<{ code: string; subjectRef: string }> = [];
+
   for (const execution of inventory.executions) {
-    executions.push(execution.executionKind === 'endpoint'
-      ? await verifyEndpoint(options.rootDir, execution)
-      : {
-        ...execution,
-        sourceLocator: {
-          actionBindingRef: execution.actionBindingRef,
-        },
+    if (execution.executionKind === 'endpoint') {
+      executions.push(await verifyEndpoint(options.rootDir, execution));
+      continue;
+    }
+    const sourceFile = execution.actionId
+      ? await findActionHandler(options.rootDir, execution.actionId)
+      : null;
+    if (execution.actionId && !sourceFile) {
+      findings.push({
+        code: 'ui-action-handler-not-found',
+        subjectRef: execution.definitionId,
       });
+    }
+    executions.push({
+      ...execution,
+      sourceLocator: {
+        actionBindingRef: execution.actionBindingRef,
+        ...(sourceFile ? { sourceFile } : {}),
+      },
+    });
   }
 
   const canonicalJson = JSON.stringify(canonicalValue(inventory));
@@ -185,6 +245,6 @@ export async function discoverFoundationExecutions(options: {
       .update(canonicalJson)
       .digest('base64url')}`,
     executions,
-    findings: [],
+    findings,
   };
 }
