@@ -26,17 +26,50 @@ creating an artifact. Use
 ## Workflow
 
 1. Run `glirastes setup scan` and inspect the deterministic local discovery.
+   It resolves each UI action to the file that registers its handler, so read
+   that handler rather than guessing side effects from the action's name.
 2. Confirm the app identity and show aggregate tool groups without source.
 3. Ask the user to choose exactly one mode.
 4. Assess only the positive inventory.
-5. Build planner and prompt-binding metadata without embedding prompt content.
-6. Validate with
+5. Draft the three prompt groups when the app has none, and never overwrite a
+   group that already exists: a tuned prompt is real work and the measured
+   prompt baseline depends on it.
+6. Build planner and prompt-binding metadata without embedding prompt content.
+7. Validate with
    `bun skills/setting-up-glirastes/scripts/validate-artifact.ts <artifact>`.
-7. Show a compact summary of enabled tools, approval candidates, warnings,
+8. Show a compact summary of enabled tools, approval candidates, warnings,
    planner binding, and prompt digests.
-8. Ask for explicit consent to run `glirastes setup sync --artifact <path>`.
-9. Report the bounded run ID and lifecycle status. Resume with
+9. Ask for explicit consent to run `glirastes setup sync --artifact <path>`.
+10. Report the bounded run ID and lifecycle status. Resume with
    `glirastes setup status --run-id <id>` when interrupted.
+
+## Assessment rules
+
+Decide from the execution kind and the HTTP method, not from how an operation
+happens to be named. Naming heuristics misjudge view switches and filter
+changes.
+
+- A UI action dispatches a client-side action and never reaches a backend
+  endpoint, so it cannot change server state: operation group `ui`, risk class
+  `safe-read`, and **never** `requiresApproval`. An approval prompt for
+  opening a dialog or switching a view is noise that trains users to click
+  through prompts that matter.
+- `GET` is a read: `safe-read`, no approval.
+- `POST` creates, `PATCH` and `PUT` update, `DELETE` deletes. All of them
+  require approval, and `DELETE` carries risk class `delete`.
+- An unrecognised method fails safe: treat it as a write that requires
+  approval, never as a read.
+- Propose which roles may call an operation, from what it reaches rather than
+  from its name. Everyday work on data the caller can already see stays open;
+  anything that reaches further, and anything irreversible, starts narrow.
+- Give every entry a short description. It is what the model reads when
+  choosing a tool, and it is required by the signed manifest, so an entry
+  without one cannot be published. Write it against what separates the entry
+  from its nearest sibling, and keep it short: it is paid on every turn. Route
+  and method are metadata and belong on their own fields, never in the prose.
+
+Every value is a proposal. The operator overrides it on the Platform before
+anything is signed, so prefer the conservative reading over a clever guess.
 
 ## Autonomous mode
 
