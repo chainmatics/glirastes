@@ -9,6 +9,12 @@ import {
   writeInstalledSkillsManifest,
   type InstalledSkillsManifest,
 } from './installed-skills-manifest.js';
+import {
+  detectStack,
+  partsForStackFlag,
+  resolvePartSkills,
+  type InstallerPart,
+} from './installer-parts.js';
 
 export interface InstallSkillsOptions {
   /** Where to install; overrides the selected host's project/global default. */
@@ -21,6 +27,11 @@ export interface InstallSkillsOptions {
   includeSetupSkills?: boolean;
   /** Stack filter — only install skills relevant to this stack */
   stack?: 'nextjs' | 'all';
+  /**
+   * Explicit part selection. Takes precedence over `stack` and resolves the
+   * framework part against the project's detected stack.
+   */
+  parts?: ReadonlyArray<InstallerPart>;
   /** Use symlinks instead of copying — auto-updates with the SDK on `npm install` */
   symlink?: boolean;
   /** Overwrite existing skill directories at the target */
@@ -36,19 +47,6 @@ interface SkillDescriptor {
   /** Source absolute path (where the skill lives in this package) */
   source: string;
 }
-
-const STACK_SKILL_MAP: Record<string, ReadonlyArray<string>> = {
-  nextjs: [
-    'integrating-glirastes-nextjs',
-    'maintaining-glirastes-tools',
-    'building-glirastes-chat-ui',
-  ],
-  all: [
-    'integrating-glirastes-nextjs',
-    'maintaining-glirastes-tools',
-    'building-glirastes-chat-ui',
-  ],
-};
 
 const HOST_SKILL_TARGETS = {
   codex: {
@@ -195,23 +193,25 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   const expanded = targetSpec.startsWith('~/') ? join(homedir(), targetSpec.slice(2)) : targetSpec;
   const targetAbs = resolve(rootDir, expanded);
   const skillsDir = findPackageSkillsDir();
-  const stack = opts.stack ?? 'all';
-  const baseAllowList = STACK_SKILL_MAP[stack];
-  if (!baseAllowList) {
-    throw new Error(
-      `Unknown --stack value: '${stack}'. Use one of: nextjs | all.`,
-    );
+
+  // Two ways in. An explicit part list is the wizard's path and resolves against
+  // the project's detected stack. The older --stack flag keeps resolving to
+  // exactly what it always did, so it must not start depending on detection.
+  const parts: InstallerPart[] = opts.parts
+    ? [...opts.parts]
+    : partsForStackFlag(opts.stack ?? 'all');
+  const stackContext = opts.parts ? await detectStack(rootDir) : 'nextjs';
+  if (opts.includeSetupSkills && !parts.includes('setup')) {
+    parts.push('setup');
   }
-  const allowList = opts.includeSetupSkills
-    ? [...baseAllowList, 'setting-up-glirastes']
-    : [...baseAllowList];
+  const allowList = resolvePartSkills(parts, { stack: stackContext });
 
   const available = await listAvailableSkills(skillsDir);
   const selected = available.filter((s) => allowList.includes(s.name));
 
   if (selected.length === 0) {
     throw new Error(
-      `No matching skills found for --stack=${stack}. Available: ${available.map((s) => s.name).join(', ')}`,
+      `No skills resolved from parts: ${parts.join(', ')}. Available: ${available.map((s) => s.name).join(', ')}`,
     );
   }
 
@@ -222,7 +222,7 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
       (opts.global ? dim(' (global)') : ''),
   );
   console.log(`  ${dim('Host:')}    ${host}`);
-  console.log(`  ${dim('Stack:')}   ${stack}`);
+  console.log(`  ${dim('Parts:')}   ${parts.join(', ')}`);
   console.log(
     `  ${dim('Mode:')}    ${opts.symlink ? 'symlink' : 'copy'}${opts.dryRun ? ' (dry run)' : ''}`,
   );
