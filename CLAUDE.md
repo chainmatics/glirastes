@@ -6,6 +6,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 glirastes is a single TypeScript package (`glirastes`) for building AI-powered tool systems. It turns declarative tool definitions (with Zod schemas, RBAC roles, UI patterns) into AI SDK-compatible tools that execute HTTP calls and dispatch frontend UI actions.
 
+## Read this first: which branch you are on
+
+- **`main`** (published `0.4.0`) — the historical shape: broad surface, public
+  `createLancer()`, NestJS/LangGraph/OpenAPI exported.
+- **`codex/glirastes-foundation-runtime`** — the **managed-local Foundation**
+  package. Narrowed surface, Lancer internal, new `contracts`/`runtime`/`sync`
+  subpaths. This is where active work happens, and the sections below describe
+  *this* branch.
+- **`gls-04-foundation`** — a separate line built against the 2026-05-16
+  free-tier roadmap (`GlirastesError`, `createChatHandler`, `autoTools`, CI
+  gates). It is **not** the trunk and does not contain the Foundation runtime.
+
+The approved architecture is
+`docs/plans/2026-07-28-glirastes-foundation-design.md`; it supersedes the
+2026-05-16 free-tier design and roadmap where they conflict. The live state of
+the pilot lives in the Platform repo's canonical working document and its newest
+`*-foundation-pilot-handoff.md`.
+
+Non-negotiable boundary: prompts, model calls, tool arguments, tool results,
+secrets, business data, and final authorization stay in the consumer's
+environment. The Platform receives content-free technical metadata and returns
+signed immutable revisions. Fail closed; never add an unsigned fallback.
+
+**After changing anything under `src/contracts`, run `bun run build`** — the
+pilot consumer loads from `dist/`, so a contract change that is not built is a
+change the consumer never sees.
+
 ## Commands
 
 ```bash
@@ -47,43 +74,44 @@ When declaring `peerDependencies` for libraries on `0.x` versions (e.g. `class-v
 
 ```
 src/
-├── index.ts                  — Root barrel (re-exports types)
-├── types/                    — Types, Zod schemas, definition helpers
+├── index.ts                  — Root barrel
+├── types.ts                  — Types, Zod schemas, definition helpers
+├── contracts/                — Framework-neutral contracts (Zod). No engine or
+│                               provider imports, ever. app-setup, revisions,
+│                               prompt-bundle, events, content-boundary,
+│                               platform-prompt-revision
+├── runtime/                  — Local managed runtime: turn snapshot, authorization,
+│   │                           budget, fingerprint, engine, json-schema
+│   └── ai-sdk/               — Vercel AI SDK reference engine (the only place an
+│                               engine may be imported)
+├── sync/                     — Control-plane client, app-setup client, JWKS provider,
+│                               deployment selector, SSE push, local validation
+├── stt/                      — Provider-neutral speech-to-text
 ├── server/
-│   ├── index.ts              — Barrel: server-core + pro + pii-shield + lancer
 │   ├── core/                 — Tool→AI SDK conversion, RBAC, transport adapters
-│   ├── pipeline.ts           — Pro pipeline orchestration
-│   ├── lancer/               — Thin HTTP client for Glirastes platform API
+│   ├── lancer/               — Internal-only HTTP client (NOT public)
 │   ├── pii-shield/           — PII detection, anonymization, pseudonymization
-│   ├── adapters/
-│   │   ├── nextjs/           — createAiChatHandler() for Next.js App Router
-│   │   └── nestjs/           — @AiModule/@AiTool decorators, NestJS scanning
-│   └── testing/              — createAiTestSuite() for testing without LLM calls
-├── react/                    — Chat UI components, hooks, provider
-│   ├── transports/
-│   │   ├── vercel/           — Vercel AI SDK transport
-│   │   └── langgraph/        — LangGraph transport
-│   ├── ui.ts                 — UiActionBus, useAiClientAction() hook
-│   └── styles.css            — Default chat panel styles
-├── codegen/                  — Filesystem scanner, registry code generation
-├── openapi/                  — OpenAPI spec → endpoint tool definitions
-└── cli/                      — `glirastes init | generate | validate | coverage | scaffold`
+│   ├── adapters/             — Framework adapters
+│   └── testing/              — Test helpers without LLM calls
+├── react/                    — Chat UI components, hooks, provider, STT bridges
+├── codegen/                  — Scanner, execution inventory, registry generation
+└── cli/                      — scan | sync | setup | validate | build | status |
+                                install-skills | check-upgrade
 ```
 
 ## Subpath Exports
 
-Consumers import via subpath exports (must match `package.json#exports`):
-- `glirastes` — types (root re-export)
-- `glirastes/server` — server-core + pro + pii-shield + lancer
-- `glirastes/server/nextjs` — Next.js adapter
-- `glirastes/server/nestjs` — NestJS adapter
-- `glirastes/server/testing` — Test suite
-- `glirastes/react` — Chat UI components
-- `glirastes/react/vercel` — Vercel AI SDK transport
-- `glirastes/react/langgraph` — LangGraph transport
-- `glirastes/react/styles.css` — Default styles
-- `glirastes/codegen` — Code generation
-- `glirastes/openapi` — OpenAPI generation
+The authoritative list is `package.json#exports`; `src/public-subpaths.test.ts`
+enforces it. On the Foundation branch:
+
+`glirastes` · `/contracts` · `/runtime` · `/runtime/ai-sdk` · `/ai-sdk` ·
+`/stt` · `/sync` · `/server` · `/server/nextjs` · `/adapter/nextjs` ·
+`/server/testing` · `/react` · `/react/vercel` · `/react/styles.css` · `/codegen`
+
+**Deliberately not exported here** (the confirmed pilot cut — still versioned in
+the repo, deferred from the package): NestJS, LangGraph, OpenAPI, Skill/MCP
+generation, Lancer, and remote Aegis. Reintroducing any of them needs its own
+acceptance gate; do not simply add the export back.
 
 ## Architecture
 
@@ -95,11 +123,23 @@ Consumers import via subpath exports (must match `package.json#exports`):
 4. **Execution**: Endpoint tools call backend APIs via `callEndpoint()` transport adapter; UI tools produce `uiAction` payloads
 5. **Dispatch**: Frontend `UiActionBus` receives tool results and fires registered handlers via `useAiClientAction()`
 
-**Two server modes** in `createAiChatHandler()`:
-- **Pipeline mode** (Pro): `pipeline.process()` handles guardrails → intent classification → tool scoping → model selection
-- **Legacy mode**: Direct `guardrails()` + `intentRouter()` + manual model config
+**Managed-local flow** (the Foundation path): the consumer's runner syncs signed
+revisions from the control plane and caches them locally. A turn **pins** one
+Agent/Manifest/Policy snapshot at its start and keeps it for the whole turn, even
+if the cache updates mid-turn. Every tool call passes a `beforeToolCall` guard
+that re-checks the pinned snapshot, the freshly resolved server-side principal,
+budgets, and any newly loaded revocation. A security revocation blocks the *next*
+tool call. Nothing in this path calls the Platform.
 
-**Lancer client** (`createLancer()`) is a thin HTTP client with namespaces (gate, primus, warden, aegis, config, telemetry) that delegate to the Glirastes platform. All calls use `callWithFallback()` for graceful degradation.
+**Budgets** are multidimensional (tool calls, model steps, tool timeout, whole-turn
+timeout, input/output tokens, estimated cost, consecutive errors, repeated
+fingerprint) and merge as local-max versus stricter-policy. Loop detection uses a
+deterministic normalized JSON fingerprint over tool **and arguments and
+result/progress** — comparing tool names alone is not sufficient.
+
+**Lancer is internal-only** on this branch. `createLancer()` is not exported, and
+the normal managed-local execution path must not send content to Platform
+services.
 
 ## Conventions
 
@@ -113,5 +153,10 @@ Consumers import via subpath exports (must match `package.json#exports`):
 
 - All SDK features are free and open-source
 - Pro features are unlocked by having a Glirastes API key (SaaS model)
-- **Lancer**: Free-tier gets telemetry reporting to Glirastes dashboard; Pro-tier adds guardrails, intent routing, PII protection, runtime prompt overrides
-- Glirastes platform API base URL defaults to `https://api.glirastes.chainmatics.io`, overridable via `createLancer({ baseUrl })`
+- On the Foundation branch the consumer has exactly **one** key variable,
+  `GLIRASTES_API_KEY`, with the privilege expressed as a scope on the key.
+  `GLIRASTES_SETUP_API_KEY` and `GLIRASTES_RUNTIME_API_KEY` were retired without
+  fallback — do not reintroduce a second key name.
+- The control plane is addressed via `GLIRASTES_CONTROL_PLANE_URL` together with
+  `GLIRASTES_APP_ID` and `GLIRASTES_ENVIRONMENT_ID`. What the Platform adds is
+  governance — signed revisions, approvals, rollout and rollback — not execution.
