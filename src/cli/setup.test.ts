@@ -183,11 +183,44 @@ describe('glirastes setup', () => {
     );
   });
 
+  it('accepts the one canonical GLIRASTES_API_KEY for setup', async () => {
+    const { root, artifact } = await setupFixture();
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      runId: artifact.runId,
+      appId: artifact.appId,
+      status: 'ready',
+      updatedAt: '2026-07-30T10:00:00.000Z',
+    })));
+    vi.stubGlobal('fetch', fetchImpl);
+    vi.stubEnv('GLIRASTES_SETUP_API_KEY', '');
+    vi.stubEnv('GLIRASTES_API_KEY', 'one-key');
+
+    await runCli([
+      'setup',
+      'status',
+      '--root',
+      root,
+      '--run-id',
+      String(artifact.runId),
+      '--base-url',
+      'https://control.example',
+      '--app-id',
+      String(artifact.appId),
+      '--quiet',
+    ]);
+
+    const headers = new Headers(
+      (fetchImpl.mock.calls[0]?.[1] as RequestInit).headers,
+    );
+    expect(headers.get('authorization')).toBe('Bearer one-key');
+  });
+
   it('fails before network access when app setup credentials are missing', async () => {
     const { root, artifact } = await setupFixture();
     const fetchImpl = vi.fn();
     vi.stubGlobal('fetch', fetchImpl);
     vi.stubEnv('GLIRASTES_SETUP_API_KEY', '');
+    vi.stubEnv('GLIRASTES_API_KEY', '');
 
     await expect(runCli([
       'setup',
@@ -201,7 +234,7 @@ describe('glirastes setup', () => {
       '--app-id',
       String(artifact.appId),
       '--quiet',
-    ])).rejects.toThrow('GLIRASTES_SETUP_API_KEY');
+    ])).rejects.toThrow('GLIRASTES_API_KEY');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
