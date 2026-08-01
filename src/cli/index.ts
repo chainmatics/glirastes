@@ -1,5 +1,5 @@
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { AppSetupArtifactSchema } from '../contracts/app-setup.js';
 import {
@@ -21,6 +21,14 @@ import {
   RuntimeSetupClient,
   type RouteScanUpload,
 } from '../sync/runtime-setup-client.js';
+import { type InstallerPart } from './commands/installer-parts.js';
+import {
+  defaultWizardDependencies,
+  isWizardInvocation,
+  runSetupWizard,
+  WizardStopped,
+  type AssessmentMode,
+} from './commands/setup-wizard.js';
 
 type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build';
 
@@ -160,11 +168,107 @@ function setupConnection(rest: string[]): {
   return { baseUrl, appId, setupApiKey };
 }
 
-async function runSetup(rest: string[]): Promise<void> {
-  const [subcommand, ...options] = rest;
-  if (!['scan', 'sync', 'status'].includes(subcommand ?? '')) {
-    throw new Error('Usage: glirastes setup <scan|sync|status> [options]\n');
+/**
+ * Bare `glirastes setup` — carries a fresh app from nothing to a synced setup
+ * run by delegating to the same steps the sub-commands expose. It adds no second
+ * implementation of any of them.
+ */
+async function runSetupWizardCommand(rest: string[]): Promise<void> {
+  const rootDir = resolve(getFlagValue(rest, '--root') ?? process.cwd());
+  const parts = getFlagValue(rest, '--parts')
+    ?.split(',')
+    .map((part) => part.trim())
+    .filter(Boolean) as InstallerPart[] | undefined;
+
+  try {
+    await runSetupWizard({
+      rootDir,
+      io: {
+        isInteractive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+        log: (message) => { console.log(message); },
+        ask: terminalAsk,
+      },
+      host: parseHost(getFlagValue(rest, '--host')),
+      parts,
+      assessmentMode: parseAssessmentMode(
+        getFlagValue(rest, '--assessment'),
+      ),
+      deps: {
+        ...defaultWizardDependencies(),
+        discover: async (root) => {
+          await runSetup(['scan', '--root', root, '--quiet']);
+          const discovery = JSON.parse(readFileSync(
+            join(root, '.glirastes/setup-discovery.json'),
+            'utf8',
+          )) as { executions?: unknown[] };
+          return { executionCount: discovery.executions?.length ?? 0 };
+        },
+        assessmentArtifactExists: async (root) =>
+          existsSync(join(root, artifactPathFrom(rest))),
+        validate: async (root) => {
+          const appId = getFlagValue(rest, '--app-id');
+          if (!appId) {
+            throw new Error('--app-id is required to validate the workspace.');
+          }
+          await validateWorkspace({ rootDir: root, appId });
+        },
+        sync: async (root) => {
+          await runSetup([
+            'sync',
+            '--root', root,
+            '--artifact', artifactPathFrom(rest),
+            ...connectionFlags(rest),
+          ]);
+          const artifact = JSON.parse(readFileSync(
+            join(root, artifactPathFrom(rest)),
+            'utf8',
+          )) as { runId: string };
+          return { runId: artifact.runId };
+        },
+      },
+    });
+  } catch (error) {
+    if (error instanceof WizardStopped) {
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
   }
+}
+
+function artifactPathFrom(rest: string[]): string {
+  return getFlagValue(rest, '--artifact')
+    ?? '.glirastes/app-setup-artifact.json';
+}
+
+/** Pass the connection flags through to `setup sync` untouched. */
+function connectionFlags(rest: string[]): string[] {
+  const passed: string[] = [];
+  for (const flag of ['--base-url', '--app-id', '--environment-id']) {
+    const value = getFlagValue(rest, flag);
+    if (value) passed.push(flag, value);
+  }
+  return passed;
+}
+
+function parseAssessmentMode(
+  value: string | undefined,
+): AssessmentMode | undefined {
+  if (value === undefined) return undefined;
+  if (value !== 'interview' && value !== 'autonomous') {
+    throw new Error(
+      `Unknown --assessment value: '${value}'. Use interview or autonomous.`,
+    );
+  }
+  return value;
+}
+
+async function runSetup(rest: string[]): Promise<void> {
+  if (isWizardInvocation(rest)) {
+    await runSetupWizardCommand(rest);
+    return;
+  }
+  const [subcommand, ...options] = rest;
   const rootDir = getFlagValue(options, '--root') ?? process.cwd();
   const quiet = hasFlag(options, '--quiet');
 

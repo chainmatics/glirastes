@@ -101,7 +101,14 @@ describe('public foundation subpaths', () => {
     expect(source).toContain(
       "type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build'",
     );
-    expect(source).toContain("['scan', 'sync', 'status']");
+
+    // The setup sub-commands stay the same three; bare `setup` is the guided
+    // wizard over them. The list moved to the wizard, which owns the dispatch.
+    const wizardSource = await readFile(
+      new URL('./cli/commands/setup-wizard.ts', import.meta.url),
+      'utf8',
+    );
+    expect(wizardSource).toContain("['scan', 'sync', 'status']");
   });
 
   it('keeps the standalone STT surface framework-neutral', async () => {
