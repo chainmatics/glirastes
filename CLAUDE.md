@@ -14,9 +14,21 @@ glirastes is a single TypeScript package (`glirastes`) for building AI-powered t
   package. Narrowed surface, Lancer internal, new `contracts`/`runtime`/`sync`
   subpaths. This is where active work happens, and the sections below describe
   *this* branch.
-- **`gls-04-foundation`** — a separate line built against the 2026-05-16
-  free-tier roadmap (`GlirastesError`, `createChatHandler`, `autoTools`, CI
-  gates). It is **not** the trunk and does not contain the Foundation runtime.
+- **`gls-04-foundation`** — **abandoned.** Built in a single day on 2026-05-16
+  against the 2026-05-16 free-tier roadmap (`GlirastesError`,
+  `createChatHandler`, `defineTool`, `autoTools`, four CI gates). The
+  architecture was then restarted from scratch, which is what the 2026-07-28
+  design and this branch are. Do not harvest from it and do not port it:
+  - its content boundary (G2: grep `fetch(`, list hosts in a manifest) is the
+    weaker answer to a question `src/contracts/content-boundary.ts` and the
+    zero-`fetch` handler proof answer at the data level;
+  - its public-surface snapshot (G3) is covered by `src/public-subpaths.test.ts`;
+  - its a11y baseline (G4) targets a chat panel that no longer exists here.
+
+  The only genuinely missing pieces are a bundle-size budget and an a11y
+  baseline, and both want writing fresh against the current surface rather than
+  porting. The branch is kept only as the record that the roadmap was once
+  executed.
 
 The approved architecture is
 `docs/plans/2026-07-28-glirastes-foundation-design.md`; it supersedes the
