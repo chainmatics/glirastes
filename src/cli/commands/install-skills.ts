@@ -5,7 +5,9 @@ import { join, dirname, resolve, relative, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { colors, header, separator } from '../../codegen/format.js';
 import {
+  classifyInstalledSkill,
   hashSkillDirectory,
+  readInstalledSkillsManifest,
   writeInstalledSkillsManifest,
   type InstalledSkillsManifest,
 } from './installed-skills-manifest.js';
@@ -237,15 +239,29 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   let overwritten = 0;
   const recorded: InstalledSkillsManifest['skills'] = {};
 
+  const previous = await readInstalledSkillsManifest(rootDir);
+
   for (const skill of selected) {
     const dest = join(targetAbs, skill.name);
     const exists = await pathExists(dest);
+    const state = exists
+      ? await classifyInstalledSkill(rootDir, previous, skill.name)
+      : 'missing';
 
-    if (exists && !opts.force) {
+    // A skill we installed and nobody touched is ours to upgrade. One the
+    // operator edited, or one we never installed, is not — say so and move on.
+    if (exists && state !== 'unchanged' && !opts.force) {
+      const reason = state === 'modified'
+        ? 'edited since install; use --force to replace it'
+        : 'not installed by glirastes; use --force to replace it';
       console.log(
-        `  ${tag(colors.yellow, 'skip')}     ${skill.name} ${dim('(exists; use --force to overwrite)')}`,
+        `  ${tag(colors.yellow, 'skip')}     ${skill.name} ${dim(`(${reason})`)}`,
       );
       skipped += 1;
+      // Carry the previous record forward so a skip does not drop the skill
+      // out of the manifest.
+      const carried = previous?.skills[skill.name];
+      if (carried) recorded[skill.name] = carried;
       continue;
     }
 
@@ -259,9 +275,18 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
       continue;
     }
 
-    if (exists && opts.force) {
+    if (exists) {
       await removeAtomic(dest);
       overwritten += 1;
+      if (state === 'unchanged') {
+        console.log(
+          `  ${tag(colors.cyan, 'refresh')}  ${skill.name} ${dim('(unchanged since install)')}`,
+        );
+      } else {
+        console.log(
+          `  ${tag(colors.yellow, 'replace')}  ${skill.name} ${dim(`(was ${state}; --force)`)}`,
+        );
+      }
     } else {
       installed += 1;
     }
