@@ -2,6 +2,7 @@ import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { runCli as runCliEntry } from './index.js';
 import { installSkills } from './commands/install-skills.js';
 import {
   classifyInstalledSkill,
@@ -36,6 +37,17 @@ async function freshNextApp(): Promise<string> {
     'utf8',
   );
   return rootDir;
+}
+
+/** Drive the real CLI entry point, quietly, against a fixture. */
+async function runCli(args: string[], rootDir: string): Promise<void> {
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    await runCliEntry([...args, '--root', rootDir]);
+  } finally {
+    console.log = originalLog;
+  }
 }
 
 function silentIo(): WizardIo & { lines: string[] } {
@@ -172,6 +184,38 @@ describe('parts install independently', () => {
       .toEqual(['maintaining-glirastes-tools']);
     expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}))
       .toEqual(['building-glirastes-chat-ui']);
+  });
+
+  it('installs the setup skill on its own, as manual mode tells the operator to', async () => {
+    const rootDir = await freshNextApp();
+    // The exact shape of the command the wizard prints in manual mode.
+    await runCli(['install', '--parts', 'setup', '--host', 'claude'], rootDir);
+
+    await access(join(
+      rootDir,
+      '.claude/skills/setting-up-glirastes/SKILL.md',
+    ));
+    expect(Object.keys(hostRecord(
+      await readInstalledSkillsManifest(rootDir),
+      'claude',
+    )?.skills ?? {})).toEqual(['setting-up-glirastes']);
+  });
+
+  it('accepts several hosts from one --host flag', async () => {
+    const rootDir = await freshNextApp();
+    await runCli(
+      ['install', '--parts', 'tools', '--host', 'claude,codex'],
+      rootDir,
+    );
+
+    await access(join(
+      rootDir,
+      '.claude/skills/maintaining-glirastes-tools/SKILL.md',
+    ));
+    await access(join(
+      rootDir,
+      '.agents/skills/maintaining-glirastes-tools/SKILL.md',
+    ));
   });
 
   it('installs into each host directory', async () => {

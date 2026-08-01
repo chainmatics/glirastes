@@ -59,11 +59,14 @@ function parseCommand(args: string[]): {
     && command !== 'build'
   ) {
     throw new Error(
-      'Usage: glirastes scan [--output] [--sync] '
-      + '[--execution-inventory]\n'
+      'Usage: glirastes setup [--host a,b] [--parts a,b] '
+      + '[--assessment interview|autonomous|manual]\n'
+      + '         the guided flow: skills, scan, assessment, validate, sync\n'
       + '       glirastes setup <scan|sync|status> [options]\n'
-      + '       glirastes install [--with-setup-skills|'
-      + '--without-setup-skills] [--host]\n'
+      + '         the same steps, one at a time\n'
+      + '       glirastes scan [--output] [--sync] [--execution-inventory]\n'
+      + '       glirastes install [--host a,b] [--parts a,b] [--stack] '
+      + '[--symlink] [--force] [--dry-run]\n'
       + '       glirastes validate [--root] [--app-id]\n'
       + '       glirastes build [--root] [--app-id] [--output]\n',
     );
@@ -97,6 +100,16 @@ function parseHost(value: string | undefined): InstallSkillsOptions['host'] {
   throw new Error('Choose a host: codex, claude, or gemini.');
 }
 
+/** `--parts framework,tools` — the precise selection the wizard also uses. */
+function parseParts(value: string | undefined): InstallerPart[] | undefined {
+  if (value === undefined) return undefined;
+  const parts = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean) as InstallerPart[];
+  return parts.length > 0 ? parts : undefined;
+}
+
 /** `--host claude,codex` — several agent hosts share one install. */
 function parseHosts(
   value: string | undefined,
@@ -127,9 +140,13 @@ async function runInstall(
     );
   }
   const ask = dependencies.ask ?? terminalAsk;
+  const explicitParts = parseParts(getFlagValue(rest, '--parts'));
   let includeSetupSkills = hasFlag(rest, '--with-setup-skills');
+  // --parts already says whether the setup skill is wanted, so asking again
+  // would be a second answer to a question that is already settled.
   if (
-    !includeSetupSkills
+    !explicitParts
+    && !includeSetupSkills
     && !hasFlag(rest, '--without-setup-skills')
   ) {
     const consent = (await ask(
@@ -141,23 +158,28 @@ async function runInstall(
     includeSetupSkills = consent === 'y' || consent === 'yes';
   }
 
-  let host = parseHost(getFlagValue(rest, '--host'));
-  if (includeSetupSkills && !host) {
-    host = parseHost((await ask(
-      'Choose exactly one setup host: codex, claude, or gemini: ',
+  let hosts = parseHosts(getFlagValue(rest, '--host'));
+  if (includeSetupSkills && !hosts) {
+    hosts = parseHosts((await ask(
+      'Choose the setup hosts (codex, claude, gemini; comma-separated): ',
     )).trim().toLowerCase());
   }
 
+  const parts = explicitParts;
   await installSkills({
     rootDir: getFlagValue(rest, '--root') ?? process.cwd(),
     target: getFlagValue(rest, '--target'),
     global: hasFlag(rest, '--global'),
-    stack: (getFlagValue(rest, '--stack') ?? 'all') as 'nextjs' | 'all',
+    // --parts is the precise selection; --stack stays as the older shorthand.
+    parts,
+    stack: parts
+      ? undefined
+      : (getFlagValue(rest, '--stack') ?? 'all') as 'nextjs' | 'all',
     symlink: hasFlag(rest, '--symlink'),
     force: hasFlag(rest, '--force'),
     dryRun: hasFlag(rest, '--dry-run'),
     includeSetupSkills,
-    host,
+    hosts,
   });
 }
 

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { runCli } from './index.js';
 
 describe('glirastes install', () => {
-  it('asks for setup-skill consent and exactly one host', async () => {
+  it('asks for setup-skill consent and the hosts', async () => {
     const root = await mkdtemp(join(tmpdir(), 'glirastes-cli-install-'));
     const answers = ['yes', 'codex'];
     const ask = vi.fn().mockImplementation(async () => answers.shift());
@@ -25,7 +25,7 @@ describe('glirastes install', () => {
 
     expect(ask).toHaveBeenCalledTimes(2);
     expect(ask.mock.calls[0]?.[0]).toContain('setup skills');
-    expect(ask.mock.calls[1]?.[0]).toContain('codex, claude, or gemini');
+    expect(ask.mock.calls[1]?.[0]).toContain('codex, claude, gemini');
     expect(output.join('\n')).toContain('setting-up-glirastes');
     expect(output.join('\n')).toContain('.agents/skills');
   });
