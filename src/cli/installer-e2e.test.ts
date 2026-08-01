@@ -186,25 +186,10 @@ describe('parts install independently', () => {
       .toEqual(['building-glirastes-chat-ui']);
   });
 
-  it('installs the setup skill on its own, as manual mode tells the operator to', async () => {
-    const rootDir = await freshNextApp();
-    // The exact shape of the command the wizard prints in manual mode.
-    await runCli(['install', '--parts', 'setup', '--host', 'claude'], rootDir);
-
-    await access(join(
-      rootDir,
-      '.claude/skills/setting-up-glirastes/SKILL.md',
-    ));
-    expect(Object.keys(hostRecord(
-      await readInstalledSkillsManifest(rootDir),
-      'claude',
-    )?.skills ?? {})).toEqual(['setting-up-glirastes']);
-  });
-
   it('accepts several hosts from one --host flag', async () => {
     const rootDir = await freshNextApp();
     await runCli(
-      ['install', '--parts', 'tools', '--host', 'claude,codex'],
+      ['install', '--without-setup-skills', '--host', 'claude,codex'],
       rootDir,
     );
 

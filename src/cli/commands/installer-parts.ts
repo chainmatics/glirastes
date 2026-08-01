@@ -110,15 +110,10 @@ export function resolvePartSkills(
   return resolved;
 }
 
-/**
- * Map the older `--stack` flag onto parts, so existing invocations keep
- * resolving to exactly the skills they resolved to before.
- */
-export function partsForStackFlag(stack: string): InstallerPart[] {
-  if (stack !== 'nextjs' && stack !== 'all') {
-    throw new Error(
-      `Unknown --stack value: '${stack}'. Use one of: nextjs | all.`,
-    );
-  }
-  return ['framework', 'tools', 'chat-ui'];
-}
+/** Human-readable label for a part, for the confirmation prompt. */
+export const PART_LABELS: Record<InstallerPart, string> = {
+  framework: 'framework integration',
+  'chat-ui': 'chat UI',
+  tools: 'tool maintenance',
+  setup: 'setup and assessment',
+};

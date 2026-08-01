@@ -45,8 +45,23 @@ The name `init` is deliberately **not** reused. It carries the meaning of the
 retired scaffolding command that wrote nine files into the consumer's project,
 and this installer scaffolds nothing.
 
-Non-interactive use stays fully supported: every prompt has a corresponding flag,
-and the wizard refuses to run without a TTY unless every required flag is given.
+### D1a — It asks; it does not take flags for decisions
+
+An earlier draft of this document promised a flag for every prompt so the
+installer could run without a terminal. That was speculative: nobody installs
+agent skills in a pipeline, and each flag was a second way to express something
+the wizard already derives and can simply ask about.
+
+Decisions — assessment mode, hosts, which parts — are **questions**, not flags.
+Without a terminal the wizard says so and stops. The `installSkills` function
+still takes the answers as arguments, because that is how the wizard passes them
+and how the tests drive it; that is an API, not a command-line surface.
+
+`--stack` is removed with them. It had no callers, and both of its values
+resolved to the identical three skills, so it decided nothing.
+
+Operational flags that are not decisions — `--root`, `--target`, `--global`,
+`--symlink`, `--force`, `--dry-run` — stay.
 
 ### D2 — The default path needs no external account
 
@@ -114,8 +129,8 @@ edits, rather than presenting an unexplained menu.
 | Setup skill | **implied by the assessment mode** (D2a), never asked | one or more hosts |
 | Autonomous assessment | asked as a mode, default interview | provider credential |
 
-`STACK_SKILL_MAP`'s current shape — `nextjs` and `all` resolving to an identical
-three-skill list — is replaced by per-part resolution.
+`STACK_SKILL_MAP` is replaced by per-part resolution, and the selection is a
+question in the wizard rather than a flag (D1a).
 
 ### D4 — Installed skills are recorded in a manifest
 
@@ -187,8 +202,8 @@ application source.
 **Guided flow**
 - A fresh Next.js target reaches a synced setup run through the wizard alone,
   with no prior Glirastes knowledge and no external account.
-- The same outcome is reachable non-interactively with flags only, and the wizard
-  fails with a precise message rather than prompting when a TTY is absent.
+- Without a terminal the wizard says it needs one and stops, naming no flags —
+  because there are none for its decisions.
 - Every step is resumable: re-running after an interruption continues rather than
   restarting, and never duplicates a setup run.
 

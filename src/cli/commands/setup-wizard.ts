@@ -2,7 +2,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { installSkills } from './install-skills.js';
-import { type InstallerPart } from './installer-parts.js';
+import {
+  detectStack,
+  proposeParts,
+  INSTALLER_PARTS,
+  PART_LABELS,
+  type InstallerPart,
+} from './installer-parts.js';
 
 /** Where the wizard remembers how far it got. */
 export const WIZARD_STATE_PATH = '.glirastes/setup-wizard-state.json';
@@ -181,19 +187,18 @@ async function resolveChoices(
   const givenHosts = options.hosts?.length ? [...options.hosts] : undefined;
 
   if (!io.isInteractive) {
-    const missing: string[] = [];
-    if (!options.assessmentMode) missing.push('--assessment');
-    // Hosts are only needed when something will actually be installed for them.
+    // The installer asks rather than taking flags, so without a terminal there
+    // is nothing it can fall back to.
     const needsHosts = options.assessmentMode
       ? requiresSetupSkill(options.assessmentMode)
       : true;
-    if (needsHosts && !givenHosts) missing.push('--host');
-    if (missing.length > 0) {
+    if (!options.assessmentMode || (needsHosts && !givenHosts)) {
       throw new Error(
-        `Interactive input is unavailable. Pass ${missing.join(' and ')}.`,
+        'glirastes setup asks how you want the app assessed and which agent '
+        + 'hosts to serve. Run it from a terminal.',
       );
     }
-    return { hosts: givenHosts ?? [], mode: options.assessmentMode! };
+    return { hosts: givenHosts ?? [], mode: options.assessmentMode };
   }
 
   const mode = options.assessmentMode
@@ -219,6 +224,57 @@ async function resolveChoices(
   return { hosts, mode };
 }
 
+/**
+ * Show the selection derived from the project and let the operator edit it.
+ *
+ * The setup part is never in the list: it follows from the assessment mode, and
+ * offering it would invite declining the thing that performs the chosen step.
+ */
+async function resolveParts(
+  options: SetupWizardOptions,
+  mode: AssessmentMode,
+): Promise<InstallerPart[]> {
+  const { io, rootDir } = options;
+  let chosen: InstallerPart[];
+
+  if (options.parts) {
+    chosen = [...options.parts];
+  } else if (!io.isInteractive) {
+    chosen = proposeParts(await detectStack(rootDir));
+  } else {
+    const proposed = proposeParts(await detectStack(rootDir));
+    io.log('');
+    io.log('Skills to install:');
+    for (const part of proposed) {
+      io.log(`  - ${PART_LABELS[part]}`);
+    }
+    const answer = (await io.ask(
+      'Take all of these? (yes, or name the ones you want, comma-separated) ? ',
+    )).trim().toLowerCase();
+
+    if (answer === '' || answer === 'y' || answer === 'yes') {
+      chosen = proposed;
+    } else {
+      const named = answer.split(',').map((value) => value.trim()).filter(Boolean);
+      const unknown = named.filter(
+        (value) => !(INSTALLER_PARTS as ReadonlyArray<string>).includes(value),
+      );
+      if (unknown.length > 0) {
+        throw new Error(
+          `${unknown.map((value) => `'${value}'`).join(', ')} is not one of: `
+          + `${INSTALLER_PARTS.join(', ')}.`,
+        );
+      }
+      chosen = named as InstallerPart[];
+    }
+  }
+
+  if (requiresSetupSkill(mode) && !chosen.includes('setup')) {
+    chosen.push('setup');
+  }
+  return chosen;
+}
+
 export async function runSetupWizard(
   options: SetupWizardOptions,
 ): Promise<SetupWizardResult> {
@@ -233,13 +289,8 @@ export async function runSetupWizard(
   const { hosts, mode } = await resolveChoices(options);
 
   if (!done('skills')) {
-    // The setup skill is what performs an interview or an autonomous
-    // assessment, so those modes imply it rather than offering it.
-    const parts = [...(options.parts ?? ['tools'])] as InstallerPart[];
-    if (requiresSetupSkill(mode) && !parts.includes('setup')) {
-      parts.push('setup');
-    }
-    if (hosts.length > 0) {
+    const parts = await resolveParts(options, mode);
+    if (hosts.length > 0 && parts.length > 0) {
       await deps.installSkills({ rootDir, hosts, parts });
     }
     await complete('skills');
@@ -274,8 +325,8 @@ export async function runSetupWizard(
         io.log(
           'Write the setup artifact yourself, then run setup again — it '
           + 'continues from here. The contract is documented in the '
-          + 'setting-up-glirastes skill, which you can install at any time '
-          + 'with: glirastes install --parts setup --host <agent>',
+          + 'setting-up-glirastes skill. Re-run setup and choose interview '
+          + 'or autonomous if you would rather have it do the work.',
         );
       } else {
         io.log(

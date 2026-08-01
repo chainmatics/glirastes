@@ -16,7 +16,7 @@ import {
 } from './installed-skills-manifest.js';
 import {
   detectStack,
-  partsForStackFlag,
+  proposeParts,
   resolvePartSkills,
   type InstallerPart,
 } from './installer-parts.js';
@@ -35,11 +35,10 @@ export interface InstallSkillsOptions {
   hosts?: ReadonlyArray<InstallHost>;
   /** Explicit consent to include the optional local setup skill. */
   includeSetupSkills?: boolean;
-  /** Stack filter — only install skills relevant to this stack */
-  stack?: 'nextjs' | 'all';
   /**
-   * Explicit part selection. Takes precedence over `stack` and resolves the
-   * framework part against the project's detected stack.
+   * Which parts to install. Omitted, the selection is derived from the
+   * project's detected stack. This is an argument, not a command-line flag:
+   * the wizard asks and passes the answer here.
    */
   parts?: ReadonlyArray<InstallerPart>;
   /** Use symlinks instead of copying — auto-updates with the SDK on `npm install` */
@@ -204,13 +203,12 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   }
   const skillsDir = findPackageSkillsDir();
 
-  // Two ways in. An explicit part list is the wizard's path and resolves against
-  // the project's detected stack. The older --stack flag keeps resolving to
-  // exactly what it always did, so it must not start depending on detection.
+  // Callers either name the parts, or get the selection derived from the
+  // project. There is no flag for this — the wizard asks.
+  const stackContext = await detectStack(rootDir);
   const parts: InstallerPart[] = opts.parts
     ? [...opts.parts]
-    : partsForStackFlag(opts.stack ?? 'all');
-  const stackContext = opts.parts ? await detectStack(rootDir) : 'nextjs';
+    : proposeParts(stackContext);
   if (opts.includeSetupSkills && !parts.includes('setup')) {
     parts.push('setup');
   }

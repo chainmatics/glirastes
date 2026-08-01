@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import {
   INSTALLER_PARTS,
   detectStack,
-  partsForStackFlag,
   proposeParts,
   resolvePartSkills,
 } from './installer-parts.js';
@@ -105,27 +104,5 @@ describe('part resolution', () => {
       ['guardrails' as (typeof INSTALLER_PARTS)[number]],
       { stack: 'nextjs' },
     )).toThrow(/framework/);
-  });
-});
-
-describe('backward compatibility with --stack', () => {
-  it('keeps nextjs and all resolving to the skills they resolved to before', () => {
-    const before = [
-      'integrating-glirastes-nextjs',
-      'maintaining-glirastes-tools',
-      'building-glirastes-chat-ui',
-    ].sort();
-
-    for (const flag of ['nextjs', 'all'] as const) {
-      const resolved = resolvePartSkills(
-        partsForStackFlag(flag),
-        { stack: 'nextjs' },
-      );
-      expect([...resolved].sort()).toEqual(before);
-    }
-  });
-
-  it('rejects an unknown stack value by name', () => {
-    expect(() => partsForStackFlag('svelte')).toThrow(/svelte/);
   });
 });

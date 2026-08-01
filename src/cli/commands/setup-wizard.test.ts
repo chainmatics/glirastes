@@ -108,7 +108,7 @@ describe('the guided flow', () => {
 });
 
 describe('non-interactive use', () => {
-  it('names every missing flag instead of prompting', async () => {
+  it('says it needs a terminal instead of prompting into a hang', async () => {
     const io = recordingIo();
     const { deps } = stubDeps();
 
@@ -119,8 +119,9 @@ describe('non-interactive use', () => {
     }).catch((error: Error) => error);
 
     expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toContain('--host');
-    expect((failure as Error).message).toContain('--assessment');
+    expect((failure as Error).message).toMatch(/from a terminal/i);
+    // There are no flags for these decisions, so none may be suggested.
+    expect((failure as Error).message).not.toContain('--');
 
     expect(io.lines.filter((line) => line.endsWith('? '))).toEqual([]);
   });
@@ -318,6 +319,44 @@ describe('interactive use', () => {
       parts: ['tools'],
       deps,
     })).rejects.toThrow(/emacs/);
+  });
+
+  it('proposes the parts and takes them on confirmation', async () => {
+    const io = recordingIo(['interview', 'claude', 'yes']);
+    let received: ReadonlyArray<string> = [];
+    const { deps } = stubDeps({
+      installSkills: async ({ parts }) => { received = parts; },
+    });
+
+    await runSetupWizard({ rootDir: await freshRoot(), io, deps });
+
+    const printed = io.lines.join('\n');
+    expect(printed).toContain('Skills to install:');
+    expect(printed).toContain('tool maintenance');
+    // No stack in a bare temp dir, so no framework part is proposed.
+    expect(received).toEqual(expect.arrayContaining(['tools', 'chat-ui']));
+    expect(received).toContain('setup');
+  });
+
+  it('takes a named subset instead of the proposal', async () => {
+    const io = recordingIo(['interview', 'claude', 'tools']);
+    let received: ReadonlyArray<string> = [];
+    const { deps } = stubDeps({
+      installSkills: async ({ parts }) => { received = parts; },
+    });
+
+    await runSetupWizard({ rootDir: await freshRoot(), io, deps });
+
+    // The named subset plus the setup skill the mode requires.
+    expect([...received].sort()).toEqual(['setup', 'tools']);
+  });
+
+  it('rejects a part that does not exist', async () => {
+    const io = recordingIo(['interview', 'claude', 'guardrails']);
+    const { deps } = stubDeps();
+
+    await expect(runSetupWizard({ rootDir: await freshRoot(), io, deps }))
+      .rejects.toThrow(/guardrails/);
   });
 
   it('does not ask for a host in manual mode, where no skill is installed', async () => {

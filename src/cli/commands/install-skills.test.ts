@@ -21,6 +21,17 @@ const foundationSkills = [
 ] as const;
 const setupSkill = 'setting-up-glirastes';
 
+/** A temp project that looks like a Next.js app, so the stack is detectable. */
+async function nextAppRoot(): Promise<string> {
+  const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-install-'));
+  await writeFile(
+    join(rootDir, 'package.json'),
+    JSON.stringify({ name: 'fixture', dependencies: { next: '^16.0.0' } }),
+    'utf8',
+  );
+  return rootDir;
+}
+
 async function skillSource(name: string): Promise<string> {
   return readFile(join(packageRoot, 'skills', name, 'SKILL.md'), 'utf8');
 }
@@ -67,7 +78,7 @@ describe('foundation agent skills', () => {
     console.log = (...values: unknown[]) => output.push(values.join(' '));
     try {
       await installSkills({
-        stack: 'all',
+        parts: ['framework', 'tools', 'chat-ui'],
         dryRun: true,
         rootDir: packageRoot,
         target: '.tmp-skills',
@@ -112,7 +123,7 @@ describe('foundation agent skills', () => {
       console.log = (...values: unknown[]) => output.push(values.join(' '));
       try {
         await installSkills({
-          stack: 'all',
+          parts: ['framework', 'tools', 'chat-ui'],
           includeSetupSkills: true,
           host,
           dryRun: true,
@@ -132,7 +143,7 @@ describe('foundation agent skills', () => {
 
   it('requires an explicit host when setup skills are accepted', async () => {
     await expect(installSkills({
-      stack: 'all',
+      parts: ['tools'],
       includeSetupSkills: true,
       dryRun: true,
       rootDir: packageRoot,
@@ -146,7 +157,7 @@ describe('foundation agent skills', () => {
     console.log = () => {};
     try {
       await installSkills({
-        stack: 'all',
+        parts: ['tools'],
         includeSetupSkills: true,
         host: 'codex',
         dryRun: true,
@@ -202,11 +213,15 @@ describe('foundation agent skills', () => {
   });
 
   it('records what it installed so a refresh can tell it from authored work', async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-install-'));
+    const rootDir = await nextAppRoot();
     const originalLog = console.log;
     console.log = () => {};
     try {
-      await installSkills({ rootDir, host: 'claude', stack: 'all' });
+      await installSkills({
+        rootDir,
+        host: 'claude',
+        parts: ['framework', 'tools', 'chat-ui'],
+      });
     } finally {
       console.log = originalLog;
     }
@@ -229,11 +244,15 @@ describe('foundation agent skills', () => {
   });
 
   it('reports an edited skill as modified rather than silently replacing it', async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-install-'));
+    const rootDir = await nextAppRoot();
     const originalLog = console.log;
     console.log = () => {};
     try {
-      await installSkills({ rootDir, host: 'claude', stack: 'all' });
+      await installSkills({
+        rootDir,
+        host: 'claude',
+        parts: ['framework', 'tools', 'chat-ui'],
+      });
     } finally {
       console.log = originalLog;
     }
