@@ -6,8 +6,12 @@ import {
   MANIFEST_RELATIVE_PATH,
   classifyInstalledSkill,
   hashSkillDirectory,
+  hostRecord,
   readInstalledSkillsManifest,
+  withHostRecord,
   writeInstalledSkillsManifest,
+  type InstallHost,
+  type InstalledSkillsManifest,
 } from './installed-skills-manifest.js';
 
 async function makeRoot(): Promise<string> {
@@ -30,39 +34,52 @@ async function writeSkill(
   return written;
 }
 
+/** Install one skill for one host and record it, as the installer would. */
+async function record(
+  rootDir: string,
+  host: InstallHost,
+  target: string,
+  name: string,
+  files: Record<string, string>,
+): Promise<InstalledSkillsManifest> {
+  const written = await writeSkill(rootDir, target, name, files);
+  const manifest = withHostRecord(
+    await readInstalledSkillsManifest(rootDir),
+    {
+      host,
+      target,
+      mode: 'copy',
+      skills: {
+        [name]: {
+          files: written,
+          contentHash: await hashSkillDirectory(join(rootDir, target, name)),
+        },
+      },
+    },
+    '0.4.0',
+  );
+  await writeInstalledSkillsManifest(rootDir, manifest);
+  return manifest;
+}
+
 describe('installed skills manifest', () => {
   it('records host, target, mode and one hashed entry per skill', async () => {
     const rootDir = await makeRoot();
-    const files = await writeSkill(rootDir, '.claude/skills', 'a-skill', {
+    await record(rootDir, 'claude', '.claude/skills', 'a-skill', {
       'SKILL.md': '# a\n',
       'references/detail.md': 'detail\n',
     });
 
-    await writeInstalledSkillsManifest(rootDir, {
-      schemaVersion: 1,
-      host: 'claude',
-      target: '.claude/skills',
-      mode: 'copy',
-      sdkVersion: '0.4.0',
-      skills: {
-        'a-skill': {
-          files,
-          contentHash: await hashSkillDirectory(
-            join(rootDir, '.claude/skills/a-skill'),
-          ),
-        },
-      },
-    });
-
     const raw = JSON.parse(
       await readFile(join(rootDir, MANIFEST_RELATIVE_PATH), 'utf8'),
-    ) as Record<string, unknown>;
+    ) as InstalledSkillsManifest;
 
     expect(raw.schemaVersion).toBe(1);
-    expect(raw.host).toBe('claude');
-    expect(raw.target).toBe('.claude/skills');
-    expect(raw.mode).toBe('copy');
-    expect(Object.keys(raw.skills as object)).toEqual(['a-skill']);
+    expect(raw.installs).toHaveLength(1);
+    expect(raw.installs[0]?.host).toBe('claude');
+    expect(raw.installs[0]?.target).toBe('.claude/skills');
+    expect(raw.installs[0]?.mode).toBe('copy');
+    expect(Object.keys(raw.installs[0]!.skills)).toEqual(['a-skill']);
   });
 
   it('hashes independently of file order and line endings', async () => {
@@ -94,51 +111,20 @@ describe('installed skills manifest', () => {
 
   it('classifies an untouched skill as unchanged', async () => {
     const rootDir = await makeRoot();
-    const files = await writeSkill(rootDir, '.claude/skills', 'kept', {
+    await record(rootDir, 'claude', '.claude/skills', 'kept', {
       'SKILL.md': 'kept\n',
-    });
-    await writeInstalledSkillsManifest(rootDir, {
-      schemaVersion: 1,
-      host: 'claude',
-      target: '.claude/skills',
-      mode: 'copy',
-      sdkVersion: '0.4.0',
-      skills: {
-        kept: {
-          files,
-          contentHash: await hashSkillDirectory(
-            join(rootDir, '.claude/skills/kept'),
-          ),
-        },
-      },
     });
 
     const manifest = await readInstalledSkillsManifest(rootDir);
-    expect(await classifyInstalledSkill(rootDir, manifest, 'kept'))
+    expect(await classifyInstalledSkill(rootDir, manifest, 'claude', 'kept'))
       .toBe('unchanged');
   });
 
   it('classifies an edited skill as modified so a refresh leaves it alone', async () => {
     const rootDir = await makeRoot();
-    const files = await writeSkill(rootDir, '.claude/skills', 'edited', {
+    await record(rootDir, 'claude', '.claude/skills', 'edited', {
       'SKILL.md': 'original\n',
     });
-    await writeInstalledSkillsManifest(rootDir, {
-      schemaVersion: 1,
-      host: 'claude',
-      target: '.claude/skills',
-      mode: 'copy',
-      sdkVersion: '0.4.0',
-      skills: {
-        edited: {
-          files,
-          contentHash: await hashSkillDirectory(
-            join(rootDir, '.claude/skills/edited'),
-          ),
-        },
-      },
-    });
-
     await writeFile(
       join(rootDir, '.claude/skills/edited/SKILL.md'),
       'the operator changed this\n',
@@ -146,34 +132,19 @@ describe('installed skills manifest', () => {
     );
 
     const manifest = await readInstalledSkillsManifest(rootDir);
-    expect(await classifyInstalledSkill(rootDir, manifest, 'edited'))
+    expect(await classifyInstalledSkill(rootDir, manifest, 'claude', 'edited'))
       .toBe('modified');
   });
 
   it('classifies a deleted skill as missing', async () => {
     const rootDir = await makeRoot();
-    const files = await writeSkill(rootDir, '.claude/skills', 'gone', {
+    await record(rootDir, 'claude', '.claude/skills', 'gone', {
       'SKILL.md': 'gone\n',
-    });
-    await writeInstalledSkillsManifest(rootDir, {
-      schemaVersion: 1,
-      host: 'claude',
-      target: '.claude/skills',
-      mode: 'copy',
-      sdkVersion: '0.4.0',
-      skills: {
-        gone: {
-          files,
-          contentHash: await hashSkillDirectory(
-            join(rootDir, '.claude/skills/gone'),
-          ),
-        },
-      },
     });
     await rm(join(rootDir, '.claude/skills/gone'), { recursive: true });
 
     const manifest = await readInstalledSkillsManifest(rootDir);
-    expect(await classifyInstalledSkill(rootDir, manifest, 'gone'))
+    expect(await classifyInstalledSkill(rootDir, manifest, 'claude', 'gone'))
       .toBe('missing');
   });
 
@@ -184,8 +155,9 @@ describe('installed skills manifest', () => {
     });
 
     const manifest = await readInstalledSkillsManifest(rootDir);
-    expect(await classifyInstalledSkill(rootDir, manifest, 'hand-written'))
-      .toBe('unmanaged');
+    expect(
+      await classifyInstalledSkill(rootDir, manifest, 'claude', 'hand-written'),
+    ).toBe('unmanaged');
   });
 
   it('treats an absent manifest as managing nothing', async () => {
@@ -193,7 +165,7 @@ describe('installed skills manifest', () => {
     const manifest = await readInstalledSkillsManifest(rootDir);
 
     expect(manifest).toBeNull();
-    expect(await classifyInstalledSkill(rootDir, manifest, 'anything'))
+    expect(await classifyInstalledSkill(rootDir, manifest, 'claude', 'anything'))
       .toBe('unmanaged');
   });
 
@@ -207,5 +179,51 @@ describe('installed skills manifest', () => {
     );
 
     await expect(readInstalledSkillsManifest(rootDir)).rejects.toThrow();
+  });
+});
+
+describe('several hosts side by side', () => {
+  it('keeps one host record per host', async () => {
+    const rootDir = await makeRoot();
+    await record(rootDir, 'claude', '.claude/skills', 'shared', {
+      'SKILL.md': 'shared\n',
+    });
+    await record(rootDir, 'codex', '.agents/skills', 'shared', {
+      'SKILL.md': 'shared\n',
+    });
+
+    const manifest = await readInstalledSkillsManifest(rootDir);
+    expect(manifest?.installs.map((install) => install.host))
+      .toEqual(['claude', 'codex']);
+    expect(hostRecord(manifest, 'claude')?.target).toBe('.claude/skills');
+    expect(hostRecord(manifest, 'codex')?.target).toBe('.agents/skills');
+  });
+
+  it('does not let one host erase what another installed', async () => {
+    const rootDir = await makeRoot();
+    await record(rootDir, 'claude', '.claude/skills', 'kept', {
+      'SKILL.md': 'kept\n',
+    });
+    await record(rootDir, 'gemini', '.gemini/skills', 'other', {
+      'SKILL.md': 'other\n',
+    });
+
+    const manifest = await readInstalledSkillsManifest(rootDir);
+    expect(await classifyInstalledSkill(rootDir, manifest, 'claude', 'kept'))
+      .toBe('unchanged');
+    expect(await classifyInstalledSkill(rootDir, manifest, 'gemini', 'other'))
+      .toBe('unchanged');
+  });
+
+  it('classifies per host, not across hosts', async () => {
+    const rootDir = await makeRoot();
+    await record(rootDir, 'claude', '.claude/skills', 'both', {
+      'SKILL.md': 'both\n',
+    });
+
+    const manifest = await readInstalledSkillsManifest(rootDir);
+    // Installed for claude only: codex has no record of it.
+    expect(await classifyInstalledSkill(rootDir, manifest, 'codex', 'both'))
+      .toBe('unmanaged');
   });
 });

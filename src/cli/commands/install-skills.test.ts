@@ -105,7 +105,7 @@ describe('foundation agent skills', () => {
     ['claude', '.claude/skills'],
     ['gemini', '.gemini/skills'],
   ] as const)(
-    'installs the optional setup skill for exactly one %s host',
+    'installs the optional setup skill for the %s host',
     async (host, expectedTarget) => {
       const output: string[] = [];
       const originalLog = console.log;
@@ -125,7 +125,7 @@ describe('foundation agent skills', () => {
       const report = output.join('\n');
       expect(report).toContain(expectedTarget);
       expect(report).toContain(setupSkill);
-      expect(report).toContain(`Host:`);
+      expect(report).toContain(`Hosts:`);
       expect(report).toContain(host);
     },
   );
@@ -136,7 +136,7 @@ describe('foundation agent skills', () => {
       includeSetupSkills: true,
       dryRun: true,
       rootDir: packageRoot,
-    })).rejects.toThrow('Choose exactly one setup host');
+    })).rejects.toThrow('Choose at least one setup host');
   });
 
   it('keeps dry-run side-effect free', async () => {
@@ -213,17 +213,18 @@ describe('foundation agent skills', () => {
 
     const manifest = await readInstalledSkillsManifest(rootDir);
     expect(manifest).not.toBeNull();
-    expect(manifest?.host).toBe('claude');
-    expect(manifest?.target).toBe('.claude/skills');
-    expect(manifest?.mode).toBe('copy');
-    expect(Object.keys(manifest?.skills ?? {}).sort())
+    expect(manifest?.installs).toHaveLength(1);
+    expect(manifest?.installs[0]?.host).toBe('claude');
+    expect(manifest?.installs[0]?.target).toBe('.claude/skills');
+    expect(manifest?.installs[0]?.mode).toBe('copy');
+    expect(Object.keys(manifest?.installs[0]?.skills ?? {}).sort())
       .toEqual([...foundationSkills].sort());
 
     for (const name of foundationSkills) {
-      expect(await classifyInstalledSkill(rootDir, manifest, name))
+      expect(await classifyInstalledSkill(rootDir, manifest, 'claude', name))
         .toBe('unchanged');
     }
-    expect(await classifyInstalledSkill(rootDir, manifest, setupSkill))
+    expect(await classifyInstalledSkill(rootDir, manifest, 'claude', setupSkill))
       .toBe('unmanaged');
   });
 
@@ -245,10 +246,10 @@ describe('foundation agent skills', () => {
 
     const manifest = await readInstalledSkillsManifest(rootDir);
     expect(
-      await classifyInstalledSkill(rootDir, manifest, 'maintaining-glirastes-tools'),
+      await classifyInstalledSkill(rootDir, manifest, 'claude', 'maintaining-glirastes-tools'),
     ).toBe('modified');
     expect(
-      await classifyInstalledSkill(rootDir, manifest, 'integrating-glirastes-nextjs'),
+      await classifyInstalledSkill(rootDir, manifest, 'claude', 'integrating-glirastes-nextjs'),
     ).toBe('unchanged');
   });
 

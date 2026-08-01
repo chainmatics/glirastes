@@ -7,9 +7,12 @@ import { colors, header, separator } from '../../codegen/format.js';
 import {
   classifyInstalledSkill,
   hashSkillDirectory,
+  hostRecord,
   readInstalledSkillsManifest,
+  withHostRecord,
   writeInstalledSkillsManifest,
-  type InstalledSkillsManifest,
+  type InstallHost,
+  type InstalledHostRecord,
 } from './installed-skills-manifest.js';
 import {
   detectStack,
@@ -23,8 +26,13 @@ export interface InstallSkillsOptions {
   target?: string;
   /** Install into the selected host's user directory. Mutually exclusive with `target`. */
   global?: boolean;
-  /** Exactly one local agent host for the installed skills. */
-  host?: 'codex' | 'claude' | 'gemini';
+  /** A single local agent host. Kept for callers that only serve one. */
+  host?: InstallHost;
+  /**
+   * Several local agent hosts at once. Each gets its own directory and its own
+   * manifest record; installing for one never disturbs another.
+   */
+  hosts?: ReadonlyArray<InstallHost>;
   /** Explicit consent to include the optional local setup skill. */
   includeSetupSkills?: boolean;
   /** Stack filter — only install skills relevant to this stack */
@@ -175,9 +183,9 @@ function tag(color: string, label: string): string {
 }
 
 export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
-  if (opts.includeSetupSkills && !opts.host) {
+  if (opts.includeSetupSkills && !opts.host && !opts.hosts?.length) {
     throw new Error(
-      'Choose exactly one setup host: codex, claude, or gemini.',
+      'Choose at least one setup host: codex, claude, or gemini.',
     );
   }
   if (opts.global && opts.target) {
@@ -187,13 +195,13 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   }
 
   const rootDir = resolve(opts.rootDir ?? process.cwd());
-  const host = opts.host ?? 'claude';
-  const hostTargets = HOST_SKILL_TARGETS[host];
-  const defaultTarget = opts.global ? hostTargets.global : hostTargets.project;
-  const targetSpec = opts.target ?? defaultTarget;
-  // Treat absolute paths and `~`-prefixed paths verbatim; resolve relative paths against rootDir.
-  const expanded = targetSpec.startsWith('~/') ? join(homedir(), targetSpec.slice(2)) : targetSpec;
-  const targetAbs = resolve(rootDir, expanded);
+  const hosts = resolveHosts(opts);
+  if (opts.target && hosts.length > 1) {
+    throw new Error(
+      'Pass --target with a single host; several hosts each need their own '
+      + 'directory.',
+    );
+  }
   const skillsDir = findPackageSkillsDir();
 
   // Two ways in. An explicit part list is the wizard's path and resolves against
@@ -219,103 +227,119 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
 
   console.log(header('Install Glirastes agent skills'));
   console.log(`  ${dim('Source:')}  ${relative(rootDir, skillsDir) || skillsDir}`);
-  console.log(
-    `  ${dim('Target:')}  ${relative(rootDir, targetAbs) || targetAbs}` +
-      (opts.global ? dim(' (global)') : ''),
-  );
-  console.log(`  ${dim('Host:')}    ${host}`);
+  console.log(`  ${dim('Hosts:')}   ${hosts.join(', ')}`);
   console.log(`  ${dim('Parts:')}   ${parts.join(', ')}`);
   console.log(
     `  ${dim('Mode:')}    ${opts.symlink ? 'symlink' : 'copy'}${opts.dryRun ? ' (dry run)' : ''}`,
   );
   console.log('');
 
-  if (!opts.dryRun) {
-    await mkdir(targetAbs, { recursive: true });
-  }
-
   let installed = 0;
   let skipped = 0;
   let overwritten = 0;
-  const recorded: InstalledSkillsManifest['skills'] = {};
+  let manifest = await readInstalledSkillsManifest(rootDir);
+  const sdkVersion = await readSdkVersion();
 
-  const previous = await readInstalledSkillsManifest(rootDir);
+  for (const host of hosts) {
+    const hostTargets = HOST_SKILL_TARGETS[host];
+    const defaultTarget = opts.global ? hostTargets.global : hostTargets.project;
+    const targetSpec = opts.target ?? defaultTarget;
+    // Treat absolute paths and `~`-prefixed paths verbatim; resolve relative paths against rootDir.
+    const expanded = targetSpec.startsWith('~/') ? join(homedir(), targetSpec.slice(2)) : targetSpec;
+    const targetAbs = resolve(rootDir, expanded);
 
-  for (const skill of selected) {
-    const dest = join(targetAbs, skill.name);
-    const exists = await pathExists(dest);
-    const state = exists
-      ? await classifyInstalledSkill(rootDir, previous, skill.name)
-      : 'missing';
-
-    // A skill we installed and nobody touched is ours to upgrade. One the
-    // operator edited, or one we never installed, is not — say so and move on.
-    if (exists && state !== 'unchanged' && !opts.force) {
-      const reason = state === 'modified'
-        ? 'edited since install; use --force to replace it'
-        : 'not installed by glirastes; use --force to replace it';
+    if (hosts.length > 1) {
       console.log(
-        `  ${tag(colors.yellow, 'skip')}     ${skill.name} ${dim(`(${reason})`)}`,
+        `  ${colors.bold}${host}${colors.reset} ${dim(relative(rootDir, targetAbs) || targetAbs)}`,
       );
-      skipped += 1;
-      // Carry the previous record forward so a skip does not drop the skill
-      // out of the manifest.
-      const carried = previous?.skills[skill.name];
-      if (carried) recorded[skill.name] = carried;
-      continue;
+    } else {
+      console.log(
+        `  ${dim('Target:')}  ${relative(rootDir, targetAbs) || targetAbs}` +
+          (opts.global ? dim(' (global)') : ''),
+      );
     }
 
-    if (opts.dryRun) {
-      const verb = exists ? 'overwrite' : 'install';
-      console.log(
-        `  ${tag(colors.cyan, 'would ' + verb)} ${skill.name} ${dim(opts.symlink ? '(symlink)' : '(copy)')}`,
-      );
-      if (exists) overwritten += 1;
-      else installed += 1;
-      continue;
+    if (!opts.dryRun) {
+      await mkdir(targetAbs, { recursive: true });
     }
 
-    if (exists) {
-      await removeAtomic(dest);
-      overwritten += 1;
-      if (state === 'unchanged') {
+    const recorded: InstalledHostRecord['skills'] = {};
+    const previousForHost = hostRecord(manifest, host);
+
+    for (const skill of selected) {
+      const dest = join(targetAbs, skill.name);
+      const exists = await pathExists(dest);
+      const state = exists
+        ? await classifyInstalledSkill(rootDir, manifest, host, skill.name)
+        : 'missing';
+
+      // A skill we installed and nobody touched is ours to upgrade. One the
+      // operator edited, or one we never installed, is not — say so and move on.
+      if (exists && state !== 'unchanged' && !opts.force) {
+        const reason = state === 'modified'
+          ? 'edited since install; use --force to replace it'
+          : 'not installed by glirastes; use --force to replace it';
         console.log(
-          `  ${tag(colors.cyan, 'refresh')}  ${skill.name} ${dim('(unchanged since install)')}`,
+          `  ${tag(colors.yellow, 'skip')}     ${skill.name} ${dim(`(${reason})`)}`,
         );
-      } else {
-        console.log(
-          `  ${tag(colors.yellow, 'replace')}  ${skill.name} ${dim(`(was ${state}; --force)`)}`,
-        );
+        skipped += 1;
+        // Carry the previous record forward so a skip does not drop the skill
+        // out of the manifest.
+        const carried = previousForHost?.skills[skill.name];
+        if (carried) recorded[skill.name] = carried;
+        continue;
       }
-    } else {
-      installed += 1;
+
+      if (opts.dryRun) {
+        const verb = exists ? 'overwrite' : 'install';
+        console.log(
+          `  ${tag(colors.cyan, 'would ' + verb)} ${skill.name} ${dim(opts.symlink ? '(symlink)' : '(copy)')}`,
+        );
+        if (exists) overwritten += 1;
+        else installed += 1;
+        continue;
+      }
+
+      if (exists) {
+        await removeAtomic(dest);
+        overwritten += 1;
+        if (state === 'unchanged') {
+          console.log(
+            `  ${tag(colors.cyan, 'refresh')}  ${skill.name} ${dim('(unchanged since install)')}`,
+          );
+        } else {
+          console.log(
+            `  ${tag(colors.yellow, 'replace')}  ${skill.name} ${dim(`(was ${state}; --force)`)}`,
+          );
+        }
+      } else {
+        installed += 1;
+      }
+
+      if (opts.symlink) {
+        await symlink(skill.source, dest, 'dir');
+        console.log(`  ${tag(colors.green, 'symlink')}  ${skill.name}`);
+      } else {
+        await copyDirRecursive(skill.source, dest);
+        console.log(`  ${tag(colors.green, 'copied')}   ${skill.name}`);
+      }
+
+      recorded[skill.name] = {
+        files: await listSkillFiles(rootDir, dest),
+        contentHash: await hashSkillDirectory(dest),
+      };
     }
 
-    if (opts.symlink) {
-      await symlink(skill.source, dest, 'dir');
-      console.log(`  ${tag(colors.green, 'symlink')}  ${skill.name}`);
-    } else {
-      await copyDirRecursive(skill.source, dest);
-      console.log(`  ${tag(colors.green, 'copied')}   ${skill.name}`);
+    // Record per host, so installing for one never erases what another has.
+    if (!opts.dryRun && Object.keys(recorded).length > 0) {
+      manifest = withHostRecord(manifest, {
+        host,
+        target: relative(rootDir, targetAbs) || '.',
+        mode: opts.symlink ? 'symlink' : 'copy',
+        skills: recorded,
+      }, sdkVersion);
+      await writeInstalledSkillsManifest(rootDir, manifest);
     }
-
-    recorded[skill.name] = {
-      files: await listSkillFiles(rootDir, dest),
-      contentHash: await hashSkillDirectory(dest),
-    };
-  }
-
-  // Record what we installed so a later refresh can upgrade what nobody touched
-  // and leave alone what someone edited. A dry run writes nothing at all.
-  if (!opts.dryRun && Object.keys(recorded).length > 0) {
-    await writeInstalledSkillsManifest(rootDir, {
-      schemaVersion: 1,
-      host,
-      target: relative(rootDir, targetAbs) || '.',
-      mode: opts.symlink ? 'symlink' : 'copy',
-      sdkVersion: await readSdkVersion(),
-      skills: recorded,
-    });
   }
 
   console.log('');
@@ -329,4 +353,12 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
     console.log('');
     console.log(`  ${dim('Re-run with --force to overwrite skipped skills.')}`);
   }
+}
+
+/** One host stays the default; `hosts` accepts several without repeating work. */
+function resolveHosts(opts: InstallSkillsOptions): InstallHost[] {
+  const requested = opts.hosts ?? (opts.host ? [opts.host] : []);
+  const unique = [...new Set(requested)];
+  if (unique.length === 0) return ['claude'];
+  return unique;
 }

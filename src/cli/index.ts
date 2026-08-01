@@ -28,6 +28,7 @@ import {
   runSetupWizard,
   WizardStopped,
   type AssessmentMode,
+  type InstallHost,
 } from './commands/setup-wizard.js';
 
 type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build';
@@ -93,7 +94,24 @@ function parseHost(value: string | undefined): InstallSkillsOptions['host'] {
   if (value === 'codex' || value === 'claude' || value === 'gemini') {
     return value;
   }
-  throw new Error('Choose exactly one host: codex, claude, or gemini.');
+  throw new Error('Choose a host: codex, claude, or gemini.');
+}
+
+/** `--host claude,codex` — several agent hosts share one install. */
+function parseHosts(
+  value: string | undefined,
+): InstallHost[] | undefined {
+  if (value === undefined) return undefined;
+  const hosts = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const parsed = parseHost(entry);
+      if (!parsed) throw new Error('Choose a host: codex, claude, or gemini.');
+      return parsed;
+    });
+  return hosts.length > 0 ? [...new Set(hosts)] : undefined;
 }
 
 async function runInstall(
@@ -188,7 +206,7 @@ async function runSetupWizardCommand(rest: string[]): Promise<void> {
         log: (message) => { console.log(message); },
         ask: terminalAsk,
       },
-      host: parseHost(getFlagValue(rest, '--host')),
+      hosts: parseHosts(getFlagValue(rest, '--host')),
       parts,
       assessmentMode: parseAssessmentMode(
         getFlagValue(rest, '--assessment'),
@@ -255,9 +273,14 @@ function parseAssessmentMode(
   value: string | undefined,
 ): AssessmentMode | undefined {
   if (value === undefined) return undefined;
-  if (value !== 'interview' && value !== 'autonomous') {
+  if (
+    value !== 'interview'
+    && value !== 'autonomous'
+    && value !== 'manual'
+  ) {
     throw new Error(
-      `Unknown --assessment value: '${value}'. Use interview or autonomous.`,
+      `Unknown --assessment value: '${value}'. `
+      + 'Use interview, autonomous, or manual.',
     );
   }
   return value;

@@ -18,20 +18,29 @@ export const InstalledSkillEntrySchema = z.object({
   contentHash: z.string().min(1),
 }).strict();
 
-export const InstalledSkillsManifestSchema = z.object({
-  schemaVersion: z.literal(1),
-  host: z.enum(['codex', 'claude', 'gemini']),
+export const InstallHostSchema = z.enum(['codex', 'claude', 'gemini']);
+export type InstallHost = z.infer<typeof InstallHostSchema>;
+
+/** What was installed for one host. Several hosts may be served at once. */
+export const InstalledHostRecordSchema = z.object({
+  host: InstallHostSchema,
   /** Project-relative directory the skills were installed into. */
   target: z.string().min(1),
   mode: z.enum(['copy', 'symlink']),
+  skills: z.record(z.string().min(1), InstalledSkillEntrySchema),
+}).strict();
+
+export const InstalledSkillsManifestSchema = z.object({
+  schemaVersion: z.literal(1),
   /** Version of the SDK that performed the install. */
   sdkVersion: z.string().min(1),
-  skills: z.record(z.string().min(1), InstalledSkillEntrySchema),
+  installs: z.array(InstalledHostRecordSchema),
 }).strict();
 
 export type InstalledSkillsManifest = z.infer<
   typeof InstalledSkillsManifestSchema
 >;
+export type InstalledHostRecord = z.infer<typeof InstalledHostRecordSchema>;
 
 /**
  * How an on-disk skill relates to what the manifest recorded.
@@ -114,15 +123,43 @@ export async function readInstalledSkillsManifest(
   return InstalledSkillsManifestSchema.parse(JSON.parse(raw));
 }
 
+/** The record for one host, or `undefined` when that host was never served. */
+export function hostRecord(
+  manifest: InstalledSkillsManifest | null,
+  host: InstallHost,
+): InstalledHostRecord | undefined {
+  return manifest?.installs.find((install) => install.host === host);
+}
+
+/**
+ * Replace the record for one host, leaving every other host untouched. An
+ * install for Claude must not erase what was installed for Codex.
+ */
+export function withHostRecord(
+  manifest: InstalledSkillsManifest | null,
+  record: InstalledHostRecord,
+  sdkVersion: string,
+): InstalledSkillsManifest {
+  const others = (manifest?.installs ?? [])
+    .filter((install) => install.host !== record.host);
+  return {
+    schemaVersion: 1,
+    sdkVersion,
+    installs: [...others, record].sort((a, b) => (a.host < b.host ? -1 : 1)),
+  };
+}
+
 export async function classifyInstalledSkill(
   rootDir: string,
   manifest: InstalledSkillsManifest | null,
+  host: InstallHost,
   name: string,
 ): Promise<InstalledSkillState> {
-  const entry = manifest?.skills[name];
-  if (!manifest || !entry) return 'unmanaged';
+  const record = hostRecord(manifest, host);
+  const entry = record?.skills[name];
+  if (!record || !entry) return 'unmanaged';
 
-  const dir = join(rootDir, manifest.target, name);
+  const dir = join(rootDir, record.target, name);
   let actual: string;
   try {
     actual = await hashSkillDirectory(dir);

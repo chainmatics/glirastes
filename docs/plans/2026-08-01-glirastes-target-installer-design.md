@@ -64,6 +64,43 @@ Platform is never a proxy.
 This keeps the design's "installer-confirmed setup-only egress" property intact
 while making the zero-configuration case the default rather than the exception.
 
+### D2a — Three assessment modes, and the setup skill follows from the mode
+
+The 2026-07-30 design asks whether setup skills should be installed. That
+question has no answer worth asking: **interview and autonomous are both carried
+out by the setup skill**, so both require it. Offering it as a choice invites an
+operator to decline the thing that performs the step they just picked.
+
+The mode is therefore the only question, and it has three answers:
+
+| Mode | Setup skill | Needs a provider |
+|---|---|---|
+| `interview` | installed — it conducts the interview | no |
+| `autonomous` | installed — it performs the assessment | yes |
+| `manual` | not installed | no |
+
+`manual` is the way out for an operator who writes the setup artifact
+themselves. It is the only mode where the skill is genuinely optional, and it is
+the case the earlier yes/no question was really reaching for. In manual mode the
+wizard does not ask for a host at all, and points at the artifact contract in the
+skill, which can still be installed on its own at any time.
+
+### D2b — Several agent hosts at once
+
+The 2026-07-30 design requires that "the user selects exactly one supported local
+agent host", and its acceptance asserts it. **That constraint is lifted.** A
+developer who uses more than one agent gets the skills in each; nothing about the
+skills is host-specific beyond the directory they land in, so the restriction
+bought nothing.
+
+Each host keeps its own directory and its own manifest record. Installing for one
+host never disturbs what another has, and a skill is classified per host — a
+skill installed for Claude is `unmanaged` from Codex's point of view rather than
+silently shared.
+
+`--target` remains single-host: several hosts each need their own directory, so
+pointing them all at one is an error rather than a race.
+
 ### D3 — Parts are selectable, and the selection is derived, not asked blindly
 
 The installer detects the stack and proposes a selection the operator confirms or
@@ -74,8 +111,8 @@ edits, rather than presenting an unexplained menu.
 | Framework integration skill | selected when the stack is detected | Next.js detected |
 | Chat UI skill | selected when a React chat surface is wanted | operator confirms |
 | Tool maintenance skill | selected | — |
-| Setup skill (+ one host) | asked, default yes | host choice |
-| Autonomous assessment | asked, default no | setup skill, provider credential |
+| Setup skill | **implied by the assessment mode** (D2a), never asked | one or more hosts |
+| Autonomous assessment | asked as a mode, default interview | provider credential |
 
 `STACK_SKILL_MAP`'s current shape — `nextjs` and `all` resolving to an identical
 three-skill list — is replaced by per-part resolution.
@@ -90,16 +127,20 @@ regression is reversed, with the content hash added:
 // .glirastes/installed-skills.json
 {
   "schemaVersion": 1,
-  "host": "claude",
-  "target": ".claude/skills",
-  "mode": "copy",              // or "symlink"
   "sdkVersion": "0.4.0",
-  "skills": {
-    "integrating-glirastes-nextjs": {
-      "files": [".claude/skills/integrating-glirastes-nextjs/SKILL.md"],
-      "contentHash": "sha256:…"
+  "installs": [                  // one record per host (D2b)
+    {
+      "host": "claude",
+      "target": ".claude/skills",
+      "mode": "copy",            // or "symlink"
+      "skills": {
+        "integrating-glirastes-nextjs": {
+          "files": [".claude/skills/integrating-glirastes-nextjs/SKILL.md"],
+          "contentHash": "sha256:…"
+        }
+      }
     }
-  }
+  ]
 }
 ```
 
@@ -153,8 +194,10 @@ application source.
 
 **Parts**
 - Each part installs independently; declining a part leaves no files from it.
-- Codex, Claude, and Gemini targets each install correctly, and exactly one host
-  is selected.
+- Codex, Claude, and Gemini targets each install correctly, singly or together.
+- Installing for one host leaves every other host's record and files intact.
+- Interview and autonomous both install the setup skill without asking; manual
+  installs neither it nor anything host-specific, and asks for no host.
 - Existing project files and unrelated skills are preserved.
 
 **Manifest**

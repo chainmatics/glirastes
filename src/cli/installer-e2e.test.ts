@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { installSkills } from './commands/install-skills.js';
 import {
   classifyInstalledSkill,
+  hostRecord,
   readInstalledSkillsManifest,
 } from './commands/installed-skills-manifest.js';
 import {
@@ -53,8 +54,8 @@ function silentIo(): WizardIo & { lines: string[] } {
  */
 function deps(rootDir: string): WizardDependencies {
   return {
-    installSkills: async ({ host, parts }) => {
-      await installSkills({ rootDir, host, parts });
+    installSkills: async ({ hosts, parts }) => {
+      await installSkills({ rootDir, hosts, parts });
     },
     discover: async () => ({ executionCount: 7 }),
     assessmentArtifactExists: async () => true,
@@ -73,7 +74,7 @@ describe('a fresh app reaches a synced setup run', () => {
     const result = await runSetupWizard({
       rootDir,
       io: silentIo(),
-      host: 'claude',
+      hosts: ['claude'],
       parts: proposeParts(stack),
       assessmentMode: 'interview',
       deps: deps(rootDir),
@@ -82,11 +83,15 @@ describe('a fresh app reaches a synced setup run', () => {
     expect(result.runId).toBe('run-e2e');
 
     const manifest = await readInstalledSkillsManifest(rootDir);
-    expect(Object.keys(manifest?.skills ?? {}).sort()).toEqual([
-      'building-glirastes-chat-ui',
-      'integrating-glirastes-nextjs',
-      'maintaining-glirastes-tools',
-    ]);
+    // The setup skill is there without having been asked for: interview mode is
+    // carried out by it, so the mode implies the part.
+    expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}).sort())
+      .toEqual([
+        'building-glirastes-chat-ui',
+        'integrating-glirastes-nextjs',
+        'maintaining-glirastes-tools',
+        'setting-up-glirastes',
+      ]);
     await access(join(
       rootDir,
       '.claude/skills/integrating-glirastes-nextjs/SKILL.md',
@@ -100,7 +105,7 @@ describe('a fresh app reaches a synced setup run', () => {
     await runSetupWizard({
       rootDir,
       io: silentIo(),
-      host: 'claude',
+      hosts: ['claude'],
       parts: proposeParts('nextjs'),
       assessmentMode: 'interview',
       deps: deps(rootDir),
@@ -125,6 +130,48 @@ describe('parts install independently', () => {
       rootDir,
       '.claude/skills/integrating-glirastes-nextjs',
     ))).rejects.toThrow();
+  });
+
+  it('serves several hosts in one run, each with its own record', async () => {
+    const rootDir = await freshNextApp();
+    await installSkills({
+      rootDir,
+      hosts: ['claude', 'codex'],
+      parts: ['tools'],
+    });
+
+    await access(join(
+      rootDir,
+      '.claude/skills/maintaining-glirastes-tools/SKILL.md',
+    ));
+    await access(join(
+      rootDir,
+      '.agents/skills/maintaining-glirastes-tools/SKILL.md',
+    ));
+
+    const manifest = await readInstalledSkillsManifest(rootDir);
+    expect(manifest?.installs.map((install) => install.host))
+      .toEqual(['claude', 'codex']);
+    for (const host of ['claude', 'codex'] as const) {
+      expect(await classifyInstalledSkill(
+        rootDir,
+        manifest,
+        host,
+        'maintaining-glirastes-tools',
+      )).toBe('unchanged');
+    }
+  });
+
+  it('installing for one host leaves another host alone', async () => {
+    const rootDir = await freshNextApp();
+    await installSkills({ rootDir, hosts: ['codex'], parts: ['tools'] });
+    await installSkills({ rootDir, hosts: ['claude'], parts: ['chat-ui'] });
+
+    const manifest = await readInstalledSkillsManifest(rootDir);
+    expect(Object.keys(hostRecord(manifest, 'codex')?.skills ?? {}))
+      .toEqual(['maintaining-glirastes-tools']);
+    expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}))
+      .toEqual(['building-glirastes-chat-ui']);
   });
 
   it('installs into each host directory', async () => {
@@ -173,10 +220,11 @@ describe('refreshing an install', () => {
     expect(await classifyInstalledSkill(
       rootDir,
       manifest,
+      'claude',
       'building-glirastes-chat-ui',
     )).toBe('unchanged');
     // A skipped skill stays in the manifest rather than dropping out of it.
-    expect(Object.keys(manifest?.skills ?? {}))
+    expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}))
       .toContain('maintaining-glirastes-tools');
   });
 
@@ -223,8 +271,9 @@ describe('refreshing an install', () => {
 
     expect(await readFile(ownPath, 'utf8')).toContain('name: our-own-skill');
     const manifest = await readInstalledSkillsManifest(rootDir);
-    expect(Object.keys(manifest?.skills ?? {})).not.toContain('our-own-skill');
-    expect(await classifyInstalledSkill(rootDir, manifest, 'our-own-skill'))
+    expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}))
+      .not.toContain('our-own-skill');
+    expect(await classifyInstalledSkill(rootDir, manifest, 'claude', 'our-own-skill'))
       .toBe('unmanaged');
   });
 });

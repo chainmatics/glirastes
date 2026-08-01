@@ -76,7 +76,7 @@ describe('the guided flow', () => {
     const result = await runSetupWizard({
       rootDir: await freshRoot(),
       io: recordingIo(),
-      host: 'claude',
+      hosts: ['claude'],
       parts: ['tools'],
       assessmentMode: 'interview',
       deps,
@@ -97,7 +97,7 @@ describe('the guided flow', () => {
     const result = await runSetupWizard({
       rootDir: await freshRoot(),
       io: recordingIo(),
-      host: 'claude',
+      hosts: ['claude'],
       parts: ['tools'],
       assessmentMode: 'interview',
       deps,
@@ -112,11 +112,15 @@ describe('non-interactive use', () => {
     const io = recordingIo();
     const { deps } = stubDeps();
 
-    await expect(runSetupWizard({
+    const failure = await runSetupWizard({
       rootDir: await freshRoot(),
       io,
       deps,
-    })).rejects.toThrow(/--host[\s\S]*--assessment/);
+    }).catch((error: Error) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain('--host');
+    expect((failure as Error).message).toContain('--assessment');
 
     expect(io.lines.filter((line) => line.endsWith('? '))).toEqual([]);
   });
@@ -126,7 +130,7 @@ describe('non-interactive use', () => {
     const result = await runSetupWizard({
       rootDir: await freshRoot(),
       io: recordingIo(),
-      host: 'codex',
+      hosts: ['codex'],
       parts: ['tools'],
       assessmentMode: 'interview',
       deps,
@@ -144,7 +148,7 @@ describe('autonomous assessment', () => {
     await expect(runSetupWizard({
       rootDir: await freshRoot(),
       io,
-      host: 'claude',
+      hosts: ['claude'],
       parts: ['tools'],
       assessmentMode: 'autonomous',
       deps,
@@ -161,7 +165,7 @@ describe('autonomous assessment', () => {
     const result = await runSetupWizard({
       rootDir: await freshRoot(),
       io: recordingIo(),
-      host: 'claude',
+      hosts: ['claude'],
       parts: ['tools'],
       assessmentMode: 'autonomous',
       deps,
@@ -179,7 +183,7 @@ describe('resumability', () => {
     await expect(runSetupWizard({
       rootDir,
       io: recordingIo(),
-      host: 'claude',
+      hosts: ['claude'],
       parts: ['tools'],
       assessmentMode: 'interview',
       deps: first.deps,
@@ -192,7 +196,7 @@ describe('resumability', () => {
     const result = await runSetupWizard({
       rootDir,
       io: recordingIo(),
-      host: 'claude',
+      hosts: ['claude'],
       parts: ['tools'],
       assessmentMode: 'interview',
       deps: second.deps,
@@ -210,7 +214,7 @@ describe('resumability', () => {
     const options = {
       rootDir,
       io: recordingIo(),
-      host: 'claude' as const,
+      hosts: ['claude' as const],
       parts: ['tools' as const],
       assessmentMode: 'interview' as const,
       deps,
@@ -229,7 +233,7 @@ describe('resumability', () => {
     await runSetupWizard({
       rootDir,
       io: recordingIo(),
-      host: 'claude',
+      hosts: ['claude'],
       parts: ['tools'],
       assessmentMode: 'interview',
       deps,
@@ -262,7 +266,7 @@ describe('resumability', () => {
     await expect(runSetupWizard({
       rootDir,
       io: recordingIo(),
-      host: 'claude',
+      hosts: ['claude'],
       parts: ['tools'],
       assessmentMode: 'interview',
       deps,
@@ -271,8 +275,8 @@ describe('resumability', () => {
 });
 
 describe('interactive use', () => {
-  it('asks for host and assessment mode when they were not given', async () => {
-    const io = recordingIo(['claude', 'interview']);
+  it('asks for the assessment mode and then the hosts', async () => {
+    const io = recordingIo(['interview', 'claude']);
     const { deps } = stubDeps();
 
     const result = await runSetupWizard({
@@ -283,12 +287,29 @@ describe('interactive use', () => {
     });
 
     expect(result.runId).toBe('run-1');
-    expect(io.lines.join('\n')).toMatch(/host/i);
-    expect(io.lines.join('\n')).toMatch(/interview|autonomous/i);
+    expect(io.lines.join('\n')).toMatch(/interview|autonomous|manual/i);
+    expect(io.lines.join('\n')).toMatch(/hosts/i);
+  });
+
+  it('accepts several hosts at once', async () => {
+    const io = recordingIo(['interview', 'claude, codex']);
+    let received: ReadonlyArray<string> = [];
+    const { deps } = stubDeps({
+      installSkills: async ({ hosts }) => { received = hosts; },
+    });
+
+    await runSetupWizard({
+      rootDir: await freshRoot(),
+      io,
+      parts: ['tools'],
+      deps,
+    });
+
+    expect(received).toEqual(['claude', 'codex']);
   });
 
   it('rejects an answer that is not one of the offered choices', async () => {
-    const io = recordingIo(['emacs']);
+    const io = recordingIo(['interview', 'emacs']);
     const { deps } = stubDeps();
 
     await expect(runSetupWizard({
@@ -297,5 +318,92 @@ describe('interactive use', () => {
       parts: ['tools'],
       deps,
     })).rejects.toThrow(/emacs/);
+  });
+
+  it('does not ask for a host in manual mode, where no skill is installed', async () => {
+    const io = recordingIo(['manual']);
+    const { deps, calls } = stubDeps();
+
+    const result = await runSetupWizard({
+      rootDir: await freshRoot(),
+      io,
+      parts: ['tools'],
+      deps,
+    });
+
+    expect(result.runId).toBe('run-1');
+    expect(calls).not.toContain('installSkills');
+  });
+});
+
+describe('the setup skill follows from the assessment mode', () => {
+  it.each(['interview', 'autonomous'] as const)(
+    'installs it for %s without being asked',
+    async (assessmentMode) => {
+      let received: ReadonlyArray<string> = [];
+      const { deps } = stubDeps({
+        hasProviderCredential: () => true,
+        installSkills: async ({ parts }) => { received = parts; },
+      });
+
+      await runSetupWizard({
+        rootDir: await freshRoot(),
+        io: recordingIo(),
+        hosts: ['claude'],
+        parts: ['tools'],
+        assessmentMode,
+        deps,
+      });
+
+      // Both modes are carried out by the skill, so there is nothing to choose.
+      expect(received).toContain('setup');
+      expect(received).toContain('tools');
+    },
+  );
+
+  it('leaves it out in manual mode', async () => {
+    let received: ReadonlyArray<string> = [];
+    const { deps } = stubDeps({
+      installSkills: async ({ parts }) => { received = parts; },
+    });
+
+    await runSetupWizard({
+      rootDir: await freshRoot(),
+      io: recordingIo(),
+      hosts: ['claude'],
+      parts: ['tools'],
+      assessmentMode: 'manual',
+      deps,
+    });
+
+    expect(received).not.toContain('setup');
+  });
+
+  it('tells a manual operator where the contract is documented', async () => {
+    const io = recordingIo();
+    const { deps } = stubDeps({ assessmentArtifactExists: async () => false });
+
+    await expect(runSetupWizard({
+      rootDir: await freshRoot(),
+      io,
+      parts: ['tools'],
+      assessmentMode: 'manual',
+      deps,
+    })).rejects.toBeInstanceOf(WizardStopped);
+
+    expect(io.lines.join('\n')).toContain('setting-up-glirastes');
+  });
+
+  it('needs no host in manual mode without a terminal', async () => {
+    const { deps } = stubDeps();
+    const result = await runSetupWizard({
+      rootDir: await freshRoot(),
+      io: recordingIo(),
+      parts: ['tools'],
+      assessmentMode: 'manual',
+      deps,
+    });
+
+    expect(result.runId).toBe('run-1');
   });
 });

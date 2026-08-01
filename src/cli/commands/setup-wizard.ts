@@ -20,7 +20,29 @@ export const WIZARD_STEPS = [
 
 export type WizardStep = (typeof WIZARD_STEPS)[number];
 export type InstallHost = 'codex' | 'claude' | 'gemini';
-export type AssessmentMode = 'interview' | 'autonomous';
+
+export const INSTALL_HOSTS = ['codex', 'claude', 'gemini'] as const;
+
+/**
+ * How the tool descriptions, roles and prompt groups get written.
+ *
+ * `interview` and `autonomous` are both carried out by the setup skill, so both
+ * require it — there is nothing to choose. `manual` is the way out for an
+ * operator who writes the artifact themselves, and is the only mode where the
+ * setup skill is genuinely optional.
+ */
+export const ASSESSMENT_MODES = [
+  'interview',
+  'autonomous',
+  'manual',
+] as const;
+
+export type AssessmentMode = (typeof ASSESSMENT_MODES)[number];
+
+/** Whether this mode is carried out by the setup skill. */
+export function requiresSetupSkill(mode: AssessmentMode): boolean {
+  return mode === 'interview' || mode === 'autonomous';
+}
 
 const WizardStateSchema = z.object({
   schemaVersion: z.literal(1),
@@ -50,7 +72,7 @@ export interface WizardIo {
 export interface WizardDependencies {
   installSkills(options: {
     rootDir: string;
-    host: InstallHost;
+    hosts: ReadonlyArray<InstallHost>;
     parts: ReadonlyArray<InstallerPart>;
   }): Promise<void>;
   discover(rootDir: string): Promise<{ executionCount: number }>;
@@ -65,7 +87,8 @@ export interface WizardDependencies {
 export interface SetupWizardOptions {
   rootDir: string;
   io: WizardIo;
-  host?: InstallHost;
+  /** One or several agent hosts. */
+  hosts?: ReadonlyArray<InstallHost>;
   parts?: ReadonlyArray<InstallerPart>;
   assessmentMode?: AssessmentMode;
   deps: WizardDependencies;
@@ -124,35 +147,76 @@ async function choose<T extends string>(
  * be given everything, and are told precisely what is missing rather than being
  * prompted into a hang.
  */
+async function chooseMany<T extends string>(
+  io: WizardIo,
+  question: string,
+  choices: ReadonlyArray<T>,
+): Promise<T[]> {
+  const answer = await io.ask(
+    `${question} (${choices.join(' | ')}, comma-separated) ? `,
+  );
+  const picked = answer
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (picked.length === 0) {
+    throw new Error(`Choose at least one of: ${choices.join(', ')}.`);
+  }
+  const unknown = picked.filter(
+    (value) => !(choices as ReadonlyArray<string>).includes(value),
+  );
+  if (unknown.length > 0) {
+    throw new Error(
+      `${unknown.map((value) => `'${value}'`).join(', ')} is not one of: `
+      + `${choices.join(', ')}.`,
+    );
+  }
+  return [...new Set(picked)] as T[];
+}
+
 async function resolveChoices(
   options: SetupWizardOptions,
-): Promise<{ host: InstallHost; mode: AssessmentMode }> {
+): Promise<{ hosts: InstallHost[]; mode: AssessmentMode }> {
   const { io } = options;
+  const givenHosts = options.hosts?.length ? [...options.hosts] : undefined;
+
   if (!io.isInteractive) {
     const missing: string[] = [];
-    if (!options.host) missing.push('--host');
     if (!options.assessmentMode) missing.push('--assessment');
+    // Hosts are only needed when something will actually be installed for them.
+    const needsHosts = options.assessmentMode
+      ? requiresSetupSkill(options.assessmentMode)
+      : true;
+    if (needsHosts && !givenHosts) missing.push('--host');
     if (missing.length > 0) {
       throw new Error(
         `Interactive input is unavailable. Pass ${missing.join(' and ')}.`,
       );
     }
-    return { host: options.host!, mode: options.assessmentMode! };
+    return { hosts: givenHosts ?? [], mode: options.assessmentMode! };
   }
 
-  const host = options.host
-    ?? await choose(io, 'Which agent host runs the setup skill', [
-      'codex',
-      'claude',
-      'gemini',
-    ] as const);
   const mode = options.assessmentMode
     ?? await choose(
       io,
-      'Assess the application by interview or autonomously',
-      ['interview', 'autonomous'] as const,
+      'Write the tool descriptions and prompts by interview, autonomously, '
+      + 'or manually',
+      ASSESSMENT_MODES,
     );
-  return { host, mode };
+
+  // Interview and autonomous are both carried out by the setup skill, so the
+  // host question only arises once a mode that needs one is chosen.
+  if (!requiresSetupSkill(mode)) {
+    return { hosts: givenHosts ?? [], mode };
+  }
+
+  const hosts = givenHosts
+    ?? await chooseMany(
+      io,
+      'Which agent hosts should receive the skills',
+      INSTALL_HOSTS,
+    );
+  return { hosts, mode };
 }
 
 export async function runSetupWizard(
@@ -166,14 +230,18 @@ export async function runSetupWizard(
     await writeState(rootDir, state);
   };
 
-  const { host, mode } = await resolveChoices(options);
+  const { hosts, mode } = await resolveChoices(options);
 
   if (!done('skills')) {
-    await deps.installSkills({
-      rootDir,
-      host,
-      parts: options.parts ?? ['tools'],
-    });
+    // The setup skill is what performs an interview or an autonomous
+    // assessment, so those modes imply it rather than offering it.
+    const parts = [...(options.parts ?? ['tools'])] as InstallerPart[];
+    if (requiresSetupSkill(mode) && !parts.includes('setup')) {
+      parts.push('setup');
+    }
+    if (hosts.length > 0) {
+      await deps.installSkills({ rootDir, hosts, parts });
+    }
     await complete('skills');
   }
 
@@ -202,12 +270,21 @@ export async function runSetupWizard(
 
     if (!await deps.assessmentArtifactExists(rootDir)) {
       io.log('');
-      io.log(
-        `Run the setting-up-glirastes skill in ${host} to assess the scan, `
-        + 'curate the tool descriptions, propose roles, and draft the prompt '
-        + 'groups.',
-      );
-      io.log('Then run setup again — it continues from here.');
+      if (mode === 'manual') {
+        io.log(
+          'Write the setup artifact yourself, then run setup again — it '
+          + 'continues from here. The contract is documented in the '
+          + 'setting-up-glirastes skill, which you can install at any time '
+          + 'with: glirastes install --parts setup --host <agent>',
+        );
+      } else {
+        io.log(
+          `Run the setting-up-glirastes skill in ${hosts.join(' or ')} to `
+          + 'assess the scan, curate the tool descriptions, propose roles, '
+          + 'and draft the prompt groups.',
+        );
+        io.log('Then run setup again — it continues from here.');
+      }
       throw new WizardStopped('The assessment artifact does not exist yet.');
     }
     await complete('assess');
@@ -237,8 +314,8 @@ export function defaultWizardDependencies(): Pick<
   'installSkills' | 'hasProviderCredential'
 > {
   return {
-    installSkills: async ({ rootDir, host, parts }) => {
-      await installSkills({ rootDir, host, parts });
+    installSkills: async ({ rootDir, hosts, parts }) => {
+      await installSkills({ rootDir, hosts, parts });
     },
     hasProviderCredential: () =>
       Boolean(process.env.OPENROUTER_API_KEY?.trim()),
