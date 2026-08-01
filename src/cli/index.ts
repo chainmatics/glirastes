@@ -144,10 +144,8 @@ function setupConnection(rest: string[]): {
     ?? process.env.GLIRASTES_CONTROL_PLANE_URL;
   const appId = getFlagValue(rest, '--app-id')
     ?? process.env.GLIRASTES_APP_ID;
-  // One canonical key: GLIRASTES_API_KEY. The older setup-specific name
-  // keeps working so existing environments do not break.
-  const setupApiKey = process.env.GLIRASTES_SETUP_API_KEY
-    || process.env.GLIRASTES_API_KEY;
+  // One key, one variable: GLIRASTES_API_KEY.
+  const setupApiKey = process.env.GLIRASTES_API_KEY;
   if (!baseUrl) {
     throw new Error(
       '--base-url or GLIRASTES_CONTROL_PLANE_URL is required for setup.',

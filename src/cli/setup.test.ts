@@ -127,7 +127,7 @@ describe('glirastes setup', () => {
       .mockResolvedValueOnce(response('discovering'))
       .mockResolvedValueOnce(response('ready'));
     vi.stubGlobal('fetch', fetchImpl);
-    vi.stubEnv('GLIRASTES_SETUP_API_KEY', 'setup-secret');
+    vi.stubEnv('GLIRASTES_API_KEY', 'setup-secret');
     vi.stubEnv('GLIRASTES_ENVIRONMENT_ID', '');
 
     await runCli([
@@ -161,7 +161,7 @@ describe('glirastes setup', () => {
       updatedAt: '2026-07-30T10:00:00.000Z',
     })));
     vi.stubGlobal('fetch', fetchImpl);
-    vi.stubEnv('GLIRASTES_SETUP_API_KEY', 'setup-secret');
+    vi.stubEnv('GLIRASTES_API_KEY', 'setup-secret');
 
     await runCli([
       'setup',
@@ -183,7 +183,7 @@ describe('glirastes setup', () => {
     );
   });
 
-  it('accepts the one canonical GLIRASTES_API_KEY for setup', async () => {
+  it('sends the canonical GLIRASTES_API_KEY and ignores the retired name', async () => {
     const { root, artifact } = await setupFixture();
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       runId: artifact.runId,
@@ -192,7 +192,8 @@ describe('glirastes setup', () => {
       updatedAt: '2026-07-30T10:00:00.000Z',
     })));
     vi.stubGlobal('fetch', fetchImpl);
-    vi.stubEnv('GLIRASTES_SETUP_API_KEY', '');
+    // The retired setup-specific name must not shadow the canonical one.
+    vi.stubEnv('GLIRASTES_SETUP_API_KEY', 'retired-name');
     vi.stubEnv('GLIRASTES_API_KEY', 'one-key');
 
     await runCli([
@@ -219,7 +220,8 @@ describe('glirastes setup', () => {
     const { root, artifact } = await setupFixture();
     const fetchImpl = vi.fn();
     vi.stubGlobal('fetch', fetchImpl);
-    vi.stubEnv('GLIRASTES_SETUP_API_KEY', '');
+    // The retired name alone must not satisfy the requirement.
+    vi.stubEnv('GLIRASTES_SETUP_API_KEY', 'retired-name');
     vi.stubEnv('GLIRASTES_API_KEY', '');
 
     await expect(runCli([
