@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile } from 'node:fs/promises';
+import { access, mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -164,5 +164,32 @@ describe('foundation agent skills', () => {
     expect(packageJson.files).toContain('skills');
     expect(packageJson.files).not.toContain('!dist/cli/commands');
     expect(packageJson.files).toContain('!dist/cli/commands/check-upgrade.*');
+  });
+
+  it('ships no skill directory without a described SKILL.md', async () => {
+    const skillsDir = join(packageRoot, 'skills');
+    const entries = await readdir(skillsDir, { withFileTypes: true });
+    const directories = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+
+    expect(directories.length).toBeGreaterThan(0);
+
+    const described = await Promise.all(directories.map(async (name) => {
+      const source = await readFile(
+        join(skillsDir, name, 'SKILL.md'),
+        'utf8',
+      ).catch(() => '');
+      const frontmatter = /^---\n([\s\S]*?)\n---/.exec(source)?.[1] ?? '';
+      const hasField = (field: string): boolean =>
+        new RegExp(`^${field}:\\s*\\S`, 'm').test(frontmatter);
+      return {
+        name,
+        described: hasField('name') && hasField('description'),
+      };
+    }));
+
+    expect(described.filter((entry) => !entry.described).map((e) => e.name))
+      .toEqual([]);
   });
 });
