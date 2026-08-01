@@ -1,9 +1,14 @@
-import { access, mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { access, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { installSkills } from './install-skills.js';
+import {
+  MANIFEST_RELATIVE_PATH,
+  classifyInstalledSkill,
+  readInstalledSkillsManifest,
+} from './installed-skills-manifest.js';
 
 const packageRoot = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -164,6 +169,76 @@ describe('foundation agent skills', () => {
     expect(packageJson.files).toContain('skills');
     expect(packageJson.files).not.toContain('!dist/cli/commands');
     expect(packageJson.files).toContain('!dist/cli/commands/check-upgrade.*');
+  });
+
+  it('records what it installed so a refresh can tell it from authored work', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-install-'));
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      await installSkills({ rootDir, host: 'claude', stack: 'all' });
+    } finally {
+      console.log = originalLog;
+    }
+
+    const manifest = await readInstalledSkillsManifest(rootDir);
+    expect(manifest).not.toBeNull();
+    expect(manifest?.host).toBe('claude');
+    expect(manifest?.target).toBe('.claude/skills');
+    expect(manifest?.mode).toBe('copy');
+    expect(Object.keys(manifest?.skills ?? {}).sort())
+      .toEqual([...foundationSkills].sort());
+
+    for (const name of foundationSkills) {
+      expect(await classifyInstalledSkill(rootDir, manifest, name))
+        .toBe('unchanged');
+    }
+    expect(await classifyInstalledSkill(rootDir, manifest, setupSkill))
+      .toBe('unmanaged');
+  });
+
+  it('reports an edited skill as modified rather than silently replacing it', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-install-'));
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      await installSkills({ rootDir, host: 'claude', stack: 'all' });
+    } finally {
+      console.log = originalLog;
+    }
+
+    await writeFile(
+      join(rootDir, '.claude/skills/maintaining-glirastes-tools/SKILL.md'),
+      'the operator rewrote this\n',
+      'utf8',
+    );
+
+    const manifest = await readInstalledSkillsManifest(rootDir);
+    expect(
+      await classifyInstalledSkill(rootDir, manifest, 'maintaining-glirastes-tools'),
+    ).toBe('modified');
+    expect(
+      await classifyInstalledSkill(rootDir, manifest, 'integrating-glirastes-nextjs'),
+    ).toBe('unchanged');
+  });
+
+  it('writes no manifest on a dry run', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-install-'));
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      await installSkills({
+        rootDir,
+        host: 'claude',
+        stack: 'all',
+        dryRun: true,
+      });
+    } finally {
+      console.log = originalLog;
+    }
+
+    await expect(access(join(rootDir, MANIFEST_RELATIVE_PATH)))
+      .rejects.toThrow();
   });
 
   it('ships no skill directory without a described SKILL.md', async () => {

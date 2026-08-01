@@ -1,9 +1,14 @@
-import { mkdir, readdir, copyFile, stat, symlink, lstat, unlink, rm } from 'node:fs/promises';
+import { mkdir, readdir, copyFile, readFile, stat, symlink, lstat, unlink, rm } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, dirname, resolve, relative } from 'node:path';
+import { join, dirname, resolve, relative, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { colors, header, separator } from '../../codegen/format.js';
+import {
+  hashSkillDirectory,
+  writeInstalledSkillsManifest,
+  type InstalledSkillsManifest,
+} from './installed-skills-manifest.js';
 
 export interface InstallSkillsOptions {
   /** Where to install; overrides the selected host's project/global default. */
@@ -59,6 +64,37 @@ const HOST_SKILL_TARGETS = {
     global: join(homedir(), '.gemini', 'skills'),
   },
 } as const;
+
+/** Project-relative paths of every file written for one installed skill. */
+async function listSkillFiles(
+  rootDir: string,
+  skillDir: string,
+): Promise<string[]> {
+  const entries = await readdir(skillDir, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    const absolute = join(skillDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listSkillFiles(rootDir, absolute));
+    } else if (entry.isFile()) {
+      files.push(relative(rootDir, absolute).split(sep).join(posix.sep));
+    }
+  }
+  return files.sort();
+}
+
+/** Version of the glirastes package these skills came from. */
+async function readSdkVersion(): Promise<string> {
+  const manifestPath = join(findPackageSkillsDir(), '..', 'package.json');
+  try {
+    const parsed = JSON.parse(
+      await readFile(manifestPath, 'utf8'),
+    ) as { version?: string };
+    return parsed.version?.trim() || '0.0.0-unknown';
+  } catch {
+    return '0.0.0-unknown';
+  }
+}
 
 /**
  * Locate the `skills/` directory shipped with this package.
@@ -199,6 +235,7 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   let installed = 0;
   let skipped = 0;
   let overwritten = 0;
+  const recorded: InstalledSkillsManifest['skills'] = {};
 
   for (const skill of selected) {
     const dest = join(targetAbs, skill.name);
@@ -236,6 +273,24 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
       await copyDirRecursive(skill.source, dest);
       console.log(`  ${tag(colors.green, 'copied')}   ${skill.name}`);
     }
+
+    recorded[skill.name] = {
+      files: await listSkillFiles(rootDir, dest),
+      contentHash: await hashSkillDirectory(dest),
+    };
+  }
+
+  // Record what we installed so a later refresh can upgrade what nobody touched
+  // and leave alone what someone edited. A dry run writes nothing at all.
+  if (!opts.dryRun && Object.keys(recorded).length > 0) {
+    await writeInstalledSkillsManifest(rootDir, {
+      schemaVersion: 1,
+      host,
+      target: relative(rootDir, targetAbs) || '.',
+      mode: opts.symlink ? 'symlink' : 'copy',
+      sdkVersion: await readSdkVersion(),
+      skills: recorded,
+    });
   }
 
   console.log('');
