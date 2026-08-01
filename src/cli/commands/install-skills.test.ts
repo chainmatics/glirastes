@@ -171,6 +171,36 @@ describe('foundation agent skills', () => {
     expect(packageJson.files).toContain('!dist/cli/commands/check-upgrade.*');
   });
 
+  it('names only React surfaces that actually exist in the chat UI skill', async () => {
+    const skill = await skillSource('building-glirastes-chat-ui');
+    const named = new Set(
+      [...skill.matchAll(/`([A-Za-z][A-Za-z0-9]*)`/g)]
+        .map((match) => match[1]!)
+        .filter((name) => /^(use[A-Z]|[A-Z])/.test(name)),
+    );
+    expect(named.size).toBeGreaterThan(20);
+
+    async function readTree(dir: string): Promise<string> {
+      const entries = await readdir(dir, { withFileTypes: true });
+      const parts = await Promise.all(entries.map(async (entry) => {
+        const absolute = join(dir, entry.name);
+        if (entry.isDirectory()) return readTree(absolute);
+        if (/\.tsx?$/.test(entry.name)) return readFile(absolute, 'utf8');
+        return '';
+      }));
+      return parts.join('\n');
+    }
+
+    const surface = await readTree(join(packageRoot, 'src/react'));
+    const missing = [...named].filter(
+      (name) => !new RegExp(`\\b${name}\\b`).test(surface),
+    );
+
+    // A skill that names an export nobody ships sends the reader looking for
+    // something that was renamed or never existed.
+    expect(missing).toEqual([]);
+  });
+
   it('records what it installed so a refresh can tell it from authored work', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-install-'));
     const originalLog = console.log;
