@@ -37,16 +37,12 @@ export const PromptBundleSchema = z.object({
  * binding; the bundle contents stay in the customer-controlled registry and are
  * proven by the content digest.
  */
-export const SignedPromptBindingSchema = z.object({
-  schemaVersion: z.literal(1),
-  appId: uuid,
-  revisionId: uuid,
-  revision: z.number().int().positive(),
-  bundleDigest: digest,
-  artifactRef: z.string().trim().min(1).max(2_048),
-  activatedAt: timestamp,
-  signature: RevisionSignatureSchema,
-}).strict();
+// Moved to revisions.ts, which the deployment bundle also lives in; re-exported
+// here so existing import paths keep working.
+export {
+  SignedPromptBindingSchema,
+  type SignedPromptBinding,
+} from './revisions.js';
 
 export const PromptRevisionMetadataSchema = z.object({
   schemaVersion: z.literal(1),
@@ -86,7 +82,6 @@ export function canonicalPromptBundleJson(value: unknown): string {
 }
 
 export type PromptBundle = z.infer<typeof PromptBundleSchema>;
-export type SignedPromptBinding = z.infer<typeof SignedPromptBindingSchema>;
 export type PromptRevisionMetadata = z.infer<
   typeof PromptRevisionMetadataSchema
 >;

@@ -165,7 +165,7 @@ export const ExecutionLeaseSchema = z.object({
 export const RuntimeRevisionEnvelopeSchema = z.object({
   schemaVersion: z.literal(1),
   revisionId: uuid,
-  revisionType: z.enum(['tool', 'manifest', 'agent', 'policy']),
+  revisionType: z.enum(['tool', 'manifest', 'agent', 'policy', 'config']),
   revision: z.number().int().positive(),
   tenantId: uuid,
   targetAppId: uuid,
@@ -209,6 +209,31 @@ export const RuntimeRevisionEnvelopeSchema = z.object({
   }
 });
 
+/**
+ * Signed desired-state pin for one prompt bundle. The Platform signs the
+ * binding; the bundle contents stay in the customer-controlled registry and are
+ * proven by the content digest. Defined here (not in prompt-bundle.ts) because
+ * the deployment bundle below carries it and prompt-bundle already imports from
+ * this module.
+ */
+export const SignedPromptBindingSchema = z.object({
+  schemaVersion: z.literal(1),
+  appId: uuid,
+  revisionId: uuid,
+  revision: z.number().int().positive(),
+  bundleDigest: digest,
+  artifactRef: z.string().trim().min(1).max(2_048),
+  activatedAt: publishedAt,
+  signature: RevisionSignatureSchema,
+}).strict();
+
+const DEPLOYMENT_BINDING_FIELDS = [
+  'configRevision',
+  'runtimeDigest',
+  'promptDigest',
+  'promptBinding',
+] as const;
+
 export const RuntimeDeploymentBundleSchema = z.object({
   deploymentId: uuid,
   environmentId: uuid,
@@ -229,8 +254,35 @@ export const RuntimeDeploymentBundleSchema = z.object({
     (revision) => revision.revisionType === 'policy',
     'Expected policy revision',
   ),
+  // Artifact bindings: present on every deployment created since the Platform
+  // binds runtime and prompt artifacts; absent on the transitional shape.
+  configRevision: RuntimeRevisionEnvelopeSchema.refine(
+    (revision) => revision.revisionType === 'config',
+    'Expected config revision',
+  ).optional(),
+  runtimeDigest: digest.optional(),
+  promptDigest: digest.optional(),
+  promptBinding: SignedPromptBindingSchema.optional(),
   updatedAt: publishedAt,
 }).strict().superRefine((deployment, context) => {
+  // The server emits all four binding fields or none. A partial set means
+  // something was stripped or tampered with and must not pass as either shape.
+  const bindingsPresent = DEPLOYMENT_BINDING_FIELDS
+    .filter((field) => deployment[field] !== undefined);
+  if (
+    bindingsPresent.length > 0
+    && bindingsPresent.length < DEPLOYMENT_BINDING_FIELDS.length
+  ) {
+    for (const field of DEPLOYMENT_BINDING_FIELDS) {
+      if (deployment[field] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Deployment artifact bindings are all-or-nothing',
+          path: [field],
+        });
+      }
+    }
+  }
   if (
     deployment.rolloutMode === 'stable'
     && deployment.targetPercentage !== 100
@@ -261,6 +313,7 @@ export const RuntimeSyncBundleSchema = z.object({
 }).strict();
 
 export type RevisionSignature = z.infer<typeof RevisionSignatureSchema>;
+export type SignedPromptBinding = z.infer<typeof SignedPromptBindingSchema>;
 export type LocalBindingReference = z.infer<typeof LocalBindingReferenceSchema>;
 export type ToolRiskClass = z.infer<typeof ToolRiskClassSchema>;
 export type ManifestTool = z.infer<typeof ManifestToolSchema>;

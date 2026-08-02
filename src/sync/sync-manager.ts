@@ -107,6 +107,17 @@ export class RuntimeSyncManager {
         await this.options.verifier.verifyRevision(parsed.data.agentRevision);
         await this.options.verifier.verifyRevision(parsed.data.manifestRevision);
         await this.options.verifier.verifyRevision(parsed.data.policyRevision);
+        // Artifact bindings are signed material like the three revisions above;
+        // accepting them unverified would smuggle unsigned desired state into
+        // the fail-closed path.
+        if (parsed.data.configRevision) {
+          await this.options.verifier.verifyRevision(parsed.data.configRevision);
+        }
+        if (parsed.data.promptBinding) {
+          await this.options.verifier.verifyPromptBinding(
+            parsed.data.promptBinding,
+          );
+        }
         const materialized = materializeDeploymentRevisions(parsed.data);
         await this.options.validateDeployment?.(parsed.data, materialized);
         acceptedDeployments.push(parsed.data);

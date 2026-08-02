@@ -81,6 +81,39 @@ function deployment(
   };
 }
 
+/** A pending deployment as the Platform serves it since artifact binding. */
+function boundDeployment(idSuffix: string): RuntimeDeploymentBundle {
+  return {
+    ...deployment('stable', idSuffix, 'pending'),
+    configRevision: {
+      ...revision('agent', '14'),
+      revisionType: 'config',
+      subjectId: undefined,
+      payload: {
+        schemaVersion: 1,
+        setupArtifactDigest: 'sha256:YWJj',
+        runtimeDigest: 'sha256:cnQ',
+        promptDigest: 'sha256:cHQ',
+        promptRevisionId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3941',
+        plannerRevisionId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3942',
+        tools: [],
+      },
+    },
+    runtimeDigest: 'sha256:cnQ',
+    promptDigest: 'sha256:cHQ',
+    promptBinding: {
+      schemaVersion: 1,
+      appId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3903',
+      revisionId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3941',
+      revision: 1,
+      bundleDigest: 'sha256:cHQ',
+      artifactRef: 'local://app/prompt-bundle',
+      activatedAt: '2026-07-28T20:00:00.000Z',
+      signature,
+    },
+  };
+}
+
 function initialState(stable: RuntimeDeploymentBundle): RuntimeSyncState {
   return {
     cursor: '2026-07-28T20:00:00.000Z',
@@ -127,6 +160,64 @@ describe('RuntimeSyncManager', () => {
     expect(result.rejectedDeploymentIds).toEqual([
       '019fa9a9-d5f7-7ec3-a3c7-8899de1d3930',
     ]);
+  });
+
+  it('accepts a deployment carrying artifact bindings and verifies both', async () => {
+    const store = new MemoryRuntimeStateStore();
+    const verifier = {
+      verifyRevocation: vi.fn().mockResolvedValue(undefined),
+      verifyRevision: vi.fn().mockResolvedValue(undefined),
+      verifyPromptBinding: vi.fn().mockResolvedValue(undefined),
+    };
+    const manager = new RuntimeSyncManager({
+      environmentId,
+      store,
+      verifier: verifier as never,
+    });
+
+    const bound = boundDeployment('31');
+    const result = await manager.apply({
+      cursor: '2026-07-28T20:02:00.000Z',
+      activeSnapshotComplete: true,
+      deployments: [bound],
+      revocations: [],
+    });
+
+    expect(result.rejectedDeploymentIds).toEqual([]);
+    // Config envelope and prompt binding are signed material like the other
+    // three revisions; accepting them unverified would smuggle unsigned
+    // desired state into the fail-closed path.
+    expect(verifier.verifyRevision).toHaveBeenCalledWith(bound.configRevision);
+    expect(verifier.verifyPromptBinding)
+      .toHaveBeenCalledWith(bound.promptBinding);
+    const state = await store.load();
+    expect(state?.pending.map((entry) => entry.deploymentId))
+      .toEqual([bound.deploymentId]);
+  });
+
+  it('rejects a bound deployment whose prompt binding fails verification', async () => {
+    const store = new MemoryRuntimeStateStore();
+    const manager = new RuntimeSyncManager({
+      environmentId,
+      store,
+      verifier: {
+        verifyRevocation: vi.fn().mockResolvedValue(undefined),
+        verifyRevision: vi.fn().mockResolvedValue(undefined),
+        verifyPromptBinding: vi.fn()
+          .mockRejectedValue(new Error('bad binding signature')),
+      } as never,
+    });
+
+    const bound = boundDeployment('32');
+    const result = await manager.apply({
+      cursor: '2026-07-28T20:02:00.000Z',
+      activeSnapshotComplete: true,
+      deployments: [bound],
+      revocations: [],
+    });
+
+    expect(result.rejectedDeploymentIds).toEqual([bound.deploymentId]);
+    expect((await store.load())?.pending ?? []).toEqual([]);
   });
 
   it('atomically keeps stable and canary active while separating pending candidates', async () => {
