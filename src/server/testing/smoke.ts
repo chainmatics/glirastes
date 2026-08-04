@@ -2,13 +2,8 @@ import { describe, it, expect } from 'vitest';
 import type { ModuleDefinition } from '../../types.js';
 import { getToolsByModule } from './helpers.js';
 
-/**
- * Tool names are either dotted definitionIds with camelCase segments
- * (`ui.navigate`, `tasks.bulkUpdateStatus`) — the managed manifest's name
- * domain — or historical snake_case names.
- */
-export const TOOL_NAME_PATTERN =
-  /^[a-z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*$/;
+export { TOOL_NAME_PATTERN } from '../../runtime/local-tool-bindings.js';
+import { TOOL_NAME_PATTERN } from '../../runtime/local-tool-bindings.js';
 
 /**
  * Auto-generates smoke tests from module definitions.

@@ -1,4 +1,5 @@
 import { toolsToAiTools, createFollowupTool } from '../../core/index.js';
+import { scopePipelineTools } from './scope-pipeline-tools.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
 import type { ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
@@ -783,11 +784,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           // Guardrails blocked — no tools allowed
           aiTools = {};
         } else if (pipelineResult.tools.length > 0) {
-          const scoped: typeof aiTools = {};
-          for (const name of pipelineResult.tools) {
-            if (aiTools[name]) scoped[name] = aiTools[name];
-          }
-          if (Object.keys(scoped).length > 0) aiTools = scoped;
+          aiTools = scopePipelineTools({
+            aiTools,
+            registryToolNames: new Set(Object.keys(registry)),
+            selected: pipelineResult.tools,
+          });
         }
 
         // Resolve model — config callback > pipeline instance > error

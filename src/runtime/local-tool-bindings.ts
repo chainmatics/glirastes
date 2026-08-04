@@ -156,6 +156,14 @@ export function assertLocalToolBindingMatches(
 }
 
 /**
+ * Tool names are either dotted definitionIds with camelCase segments
+ * (`ui.navigate`, `tasks.bulkUpdateStatus`) — the managed manifest's name
+ * domain — or historical snake_case names.
+ */
+export const TOOL_NAME_PATTERN =
+  /^[a-z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*$/;
+
+/**
  * Model providers reject '.' in function names (^[a-zA-Z0-9_-]+$). The signed
  * manifest name stays the identity; this is only its deterministic model-safe
  * encoding. Collisions after encoding fail closed at materialization.

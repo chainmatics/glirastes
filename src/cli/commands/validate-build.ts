@@ -4,6 +4,10 @@ import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { findForbiddenPlatformContentPath } from '../../contracts/content-boundary.js';
 import {
+  TOOL_NAME_PATTERN,
+  modelFacingToolName,
+} from '../../runtime/local-tool-bindings.js';
+import {
   FoundationExecutionInventorySchema,
   discoverFoundationExecutions,
 } from '../../codegen/execution-inventory.js';
@@ -69,6 +73,29 @@ export async function validateWorkspace(options: {
   const inventory = FoundationExecutionInventorySchema.parse(
     JSON.parse(readFileSync(inventoryPath, 'utf8')),
   );
+  // Doctor checks on the name domain: every definitionId must follow the
+  // tool naming convention and stay unique under the model-safe encoding —
+  // two names differing only in '.' vs '_' would shadow each other at the
+  // model provider.
+  const encoded = new Map<string, string>();
+  for (const execution of inventory.executions) {
+    if (!TOOL_NAME_PATTERN.test(execution.definitionId)) {
+      throw new Error(
+        'Definition id violates the tool naming convention: '
+        + execution.definitionId,
+      );
+    }
+    const modelName = modelFacingToolName(execution.definitionId);
+    const owner = encoded.get(modelName);
+    if (owner && owner !== execution.definitionId) {
+      throw new Error(
+        'Definition ids collide after model-safe encoding: '
+        + `${owner} and ${execution.definitionId} both become ${modelName}`,
+      );
+    }
+    encoded.set(modelName, execution.definitionId);
+  }
+
   const discovery = await discoverFoundationExecutions({
     rootDir: options.rootDir,
     inventory,

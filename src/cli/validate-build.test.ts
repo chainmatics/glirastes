@@ -113,6 +113,71 @@ describe('glirastes validate', () => {
     ])).rejects.toThrow();
   });
 
+  it('rejects definition ids that collide after model-safe encoding', async () => {
+    // Model providers see the encoded name (dots become underscores). Two
+    // definitions whose names only differ in that separator would shadow each
+    // other at the model — the workspace is invalid before anything ships.
+    const second = {
+      toolId: '019fb007-0000-7000-8000-00000000000b',
+      definitionId: 'tasks_list',
+      stableKey: 'GET /api/tasks?alt',
+      executionKind: 'endpoint',
+      sourceFingerprint: ROUTE_FINGERPRINT,
+      inputSchemaDigest: digest('input'),
+      outputSchemaDigest: digest('output'),
+      sourceFile: 'src/app/api/tasks/route.ts',
+      method: 'GET',
+      path: '/api/tasks',
+    };
+    const root = workspace({
+      inventory: {
+        schemaVersion: 2,
+        targetAppKey: 'fixture-app',
+        executions: [{
+          toolId: '019fb007-0000-7000-8000-00000000000a',
+          definitionId: 'tasks.list',
+          stableKey: 'GET /api/tasks',
+          executionKind: 'endpoint',
+          sourceFingerprint: ROUTE_FINGERPRINT,
+          inputSchemaDigest: digest('input'),
+          outputSchemaDigest: digest('output'),
+          sourceFile: 'src/app/api/tasks/route.ts',
+          method: 'GET',
+          path: '/api/tasks',
+        }, second],
+      },
+    });
+
+    await expect(runCli([
+      'validate', '--root', root, '--app-id', APP_ID, '--quiet',
+    ])).rejects.toThrow(/collide/i);
+  });
+
+  it('rejects definition ids outside the tool naming convention', async () => {
+    const root = workspace({
+      inventory: {
+        schemaVersion: 2,
+        targetAppKey: 'fixture-app',
+        executions: [{
+          toolId: '019fb007-0000-7000-8000-00000000000a',
+          definitionId: 'Tasks List!',
+          stableKey: 'GET /api/tasks',
+          executionKind: 'endpoint',
+          sourceFingerprint: ROUTE_FINGERPRINT,
+          inputSchemaDigest: digest('input'),
+          outputSchemaDigest: digest('output'),
+          sourceFile: 'src/app/api/tasks/route.ts',
+          method: 'GET',
+          path: '/api/tasks',
+        }],
+      },
+    });
+
+    await expect(runCli([
+      'validate', '--root', root, '--app-id', APP_ID, '--quiet',
+    ])).rejects.toThrow(/naming convention/i);
+  });
+
   it('rejects a schema-invalid inventory', async () => {
     const root = workspace({
       inventory: { schemaVersion: 1, executions: [] },
