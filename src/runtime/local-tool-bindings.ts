@@ -155,6 +155,15 @@ export function assertLocalToolBindingMatches(
   }
 }
 
+/**
+ * Model providers reject '.' in function names (^[a-zA-Z0-9_-]+$). The signed
+ * manifest name stays the identity; this is only its deterministic model-safe
+ * encoding. Collisions after encoding fail closed at materialization.
+ */
+export function modelFacingToolName(manifestName: string): string {
+  return manifestName.replace(/\./g, '_');
+}
+
 export function materializeManifestToolRegistry(options: {
   snapshot: TurnSnapshot;
   bindings: ReadonlyArray<LocalToolBinding>;
@@ -201,11 +210,14 @@ export function materializeManifestToolRegistry(options: {
     }
 
     assertLocalToolBindingMatches(binding, manifestTool);
-    if (registry[manifestTool.name]) {
-      throw new Error(`Duplicate manifest tool name: ${manifestTool.name}`);
+    const modelName = modelFacingToolName(manifestTool.name);
+    if (registry[modelName]) {
+      throw new Error(
+        `Manifest tool names collide after model-safe encoding: ${modelName}`,
+      );
     }
 
-    registry[manifestTool.name] = {
+    registry[modelName] = {
       ...binding.tool,
       id: manifestTool.toolId,
       description: manifestTool.description,

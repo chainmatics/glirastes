@@ -154,6 +154,64 @@ describe('materializeManifestToolRegistry', () => {
     })).toThrow(/local tool binding mismatch/i);
   });
 
+  it('encodes dotted manifest names into model-safe registry keys', () => {
+    // Model providers reject '.' in function names (^[a-zA-Z0-9_-]+$), so a
+    // manifest tool named by definitionId is exposed under a deterministic
+    // model-safe encoding while keeping its signed identity untouched.
+    const base = snapshot();
+    const dotted = {
+      ...base,
+      manifestRevision: {
+        ...base.manifestRevision,
+        tools: [{
+          ...base.manifestRevision.tools[0]!,
+          name: 'ui.taskView.switch',
+        }],
+      },
+    };
+
+    const registry = materializeManifestToolRegistry({
+      snapshot: dotted,
+      bindings: [binding],
+    });
+
+    expect(Object.keys(registry)).toEqual(['ui_taskView_switch']);
+  });
+
+  it('fails closed when two manifest names collide after encoding', () => {
+    const base = snapshot();
+    const first = base.manifestRevision.tools[0]!;
+    const colliding = {
+      ...base,
+      agentRevision: {
+        ...base.agentRevision,
+        toolAllowlist: [first.toolId, 'tool-2'],
+      },
+      manifestRevision: {
+        ...base.manifestRevision,
+        tools: [
+          { ...first, name: 'ui.navigate' },
+          { ...first, toolId: 'tool-2', name: 'ui_navigate' },
+        ],
+      },
+      policyRevision: {
+        ...base.policyRevision,
+        toolPolicies: [
+          ...base.policyRevision.toolPolicies,
+          { ...base.policyRevision.toolPolicies[0]!, toolId: 'tool-2' },
+        ],
+      },
+    };
+
+    expect(() => materializeManifestToolRegistry({
+      snapshot: colliding,
+      bindings: [
+        binding,
+        { ...binding, toolId: 'tool-2' },
+      ],
+    })).toThrow(/collide/i);
+  });
+
   it('fails closed when an enabled manifest tool has no local binding', () => {
     expect(() => materializeManifestToolRegistry({
       snapshot: snapshot(),

@@ -34,6 +34,7 @@ export {
   assertLocalToolBindingMatches,
   createLocalSchemaDigest,
   materializeManifestToolRegistry,
+  modelFacingToolName,
   type LocalEndpointToolBinding,
   type LocalToolBinding,
   type LocalUiToolBinding,
