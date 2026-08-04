@@ -22,6 +22,33 @@ function createSnapshot() {
 }
 
 describe('createManagedTurnGuard', () => {
+  it('authorizes calls addressed by the model-safe encoded name', async () => {
+    // The registry exposes dotted manifest names in their model-safe
+    // encoding, so authorization must resolve the same encoding — otherwise
+    // every call to a definitionId-named tool dies fail-closed as
+    // manifest_tool_unavailable.
+    const base = createSnapshot();
+    const snapshot = {
+      ...base,
+      manifestRevision: {
+        ...base.manifestRevision,
+        tools: [{
+          ...base.manifestRevision.tools[0]!,
+          name: 'ui.taskView.switch',
+        }],
+      },
+    };
+    const guard = createManagedTurnGuard({
+      snapshot,
+      resolvePrincipal: async () => principal,
+    });
+
+    await expect(guard.beforeToolCall({
+      toolName: 'ui_taskView_switch',
+      input: {},
+    })).resolves.toBeUndefined();
+  });
+
   it('re-resolves the server principal before every tool call', async () => {
     let currentPrincipal: Principal | undefined = principal;
     const resolvePrincipal = vi.fn(async () => currentPrincipal);

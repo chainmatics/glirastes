@@ -8,6 +8,7 @@ import type {
   AiSdkToolSuccess,
 } from './ai-sdk/engine.js';
 import { authorizeToolCall } from './authorization.js';
+import { modelFacingToolName } from './local-tool-bindings.js';
 import {
   ExecutionBudgetTracker,
   type BudgetEvaluation,
@@ -63,8 +64,9 @@ export function createManagedTurnGuard(
   const tracker = new ExecutionBudgetTracker(options.snapshot.budget);
 
   const resolveManifestTool = (toolName: string) => {
+    // Calls arrive under the model-safe encoding of the signed manifest name.
     const tool = options.snapshot.manifestRevision.tools.find(
-      (candidate) => candidate.name === toolName,
+      (candidate) => modelFacingToolName(candidate.name) === toolName,
     );
     if (!tool) {
       throw new Error(`Tool execution denied: manifest_tool_unavailable (${toolName})`);
