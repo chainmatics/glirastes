@@ -25,6 +25,10 @@ export {
 } from './budget.js';
 export { createExecutionFingerprint } from './fingerprint.js';
 export {
+  resolveRuntimeMode,
+  type RuntimeMode,
+} from './runtime-mode.js';
+export {
   createManagedTurnGuard,
   type ManagedTurnBudgetSignal,
   type ManagedTurnGuard,
