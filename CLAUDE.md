@@ -143,6 +143,17 @@ that re-checks the pinned snapshot, the freshly resolved server-side principal,
 budgets, and any newly loaded revocation. A security revocation blocks the *next*
 tool call. Nothing in this path calls the Platform.
 
+**Two runtime modes, one pipeline** (2026-08-10 design): **standalone is the
+default** — without `GLIRASTES_CONTROL_PLANE_URL`, `createLocalRuntimeSource`
+materializes the same `TurnSnapshot` shape from the CLI-generated
+`.glirastes/` artifacts, self-signed with an ephemeral boot-time Ed25519 key
+(`createEphemeralLocalSigner`), strictly network-silent, restart-only reload.
+**Managed is the opt-in add-on** for hot-swap and governance. Mode comes from
+`resolveRuntimeMode(env)`, which fails closed on a half-configured managed
+setup — there is no silent downgrade out of managed, and no third mode.
+Everything downstream of the source (registry materialization, model-safe
+naming, guards, budgets) is shared between both modes; never fork it.
+
 **Budgets** are multidimensional (tool calls, model steps, tool timeout, whole-turn
 timeout, input/output tokens, estimated cost, consecutive errors, repeated
 fingerprint) and merge as local-max versus stricter-policy. Loop detection uses a
