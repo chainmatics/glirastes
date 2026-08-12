@@ -100,6 +100,18 @@ export class RuntimeRevisionVerifier {
     await this.verifyEnvelope(unsigned, signature);
   }
 
+  /**
+   * Verify any signed object of the `{ ...unsigned, signature }` envelope
+   * shape. Used by the standalone runtime source, whose locally
+   * materialized revisions must pass the same chain as managed ones.
+   */
+  async verifySignedObject(
+    value: { signature: RuntimeRevisionEnvelope['signature'] } & object,
+  ): Promise<void> {
+    const { signature, ...unsigned } = value;
+    await this.verifyEnvelope(unsigned, signature);
+  }
+
   async verifyRevocation(revocation: SecurityRevocation): Promise<void> {
     const { signature, ...unsigned } = revocation;
     await this.verifyEnvelope(unsigned, signature);
