@@ -29,6 +29,16 @@ export {
   type RuntimeMode,
 } from './runtime-mode.js';
 export {
+  createEphemeralLocalSigner,
+  type LocalRevisionSigner,
+} from './local-signer.js';
+export {
+  createLocalRuntimeSource,
+  type LocalRuntimeSource,
+  type LocalRuntimeSourceIdentity,
+  type LocalRuntimeSourceOptions,
+} from './local-runtime-source.js';
+export {
   createManagedTurnGuard,
   type ManagedTurnBudgetSignal,
   type ManagedTurnGuard,
