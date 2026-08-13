@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { RecordingBarProps } from '../types.js';
 import { CancelButton, StopButton } from './recording-controls.js';
+import { StreamWaveform } from './stream-waveform.js';
 
 function joinClassNames(...values: Array<string | undefined>): string {
   return values.filter(Boolean).join(' ');
@@ -19,7 +20,7 @@ function LoadingDots() {
 
 function RecordingBarInner({
   isConnecting,
-  transcript,
+  stream,
   onCancel,
   onStop,
   variant,
@@ -33,18 +34,17 @@ function RecordingBarInner({
       className={joinClassNames('glirastes-recording-bar', variant === 'trigger' ? 'glirastes-recording-bar-trigger' : 'glirastes-recording-bar-inline', className)}
       data-component="recording-bar"
       data-variant={variant}
-      style={{ display: 'flex', alignItems: 'center', gap: '8px', ...(variant === 'inline' ? { height: '36px' } : {}) }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        ...(variant === 'inline' ? { width: '100%', height: '36px' } : {}),
+      }}
     >
       <CancelButton onClick={handleCancel} ariaLabel="Aufnahme abbrechen" title="Aufnahme abbrechen" />
 
       <div data-part="wave-container" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
-        {isConnecting ? (
-          <LoadingDots />
-        ) : (
-          <span data-part="live-transcript" aria-live="polite">
-            {transcript || '…'}
-          </span>
-        )}
+        {isConnecting ? <LoadingDots /> : <StreamWaveform stream={stream} />}
       </div>
 
       <StopButton onClick={handleStop} ariaLabel="Aufnahme stoppen" title="Aufnahme stoppen" />

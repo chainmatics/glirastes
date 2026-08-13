@@ -126,6 +126,9 @@ export interface VoiceInputButtonProps {
 
 export interface RecordingBarProps {
   isConnecting: boolean;
+  /** The existing authoritative recorder stream; never opens another mic. */
+  stream?: MediaStream | null;
+  /** @deprecated Interim text is intentionally not rendered while recording. */
   transcript?: string;
   onCancel: () => void;
   onStop: () => void;

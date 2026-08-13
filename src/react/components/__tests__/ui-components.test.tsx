@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalCard } from '../approval-card.js';
 import { SessionSwitcher } from '../session-switcher.js';
 import { SuggestionBar } from '../suggestion-bar.js';
+import { RecordingBar } from '../recording-bar.js';
 
 const componentSpies = vi.hoisted(() => ({
   approve: vi.fn(),
@@ -127,6 +128,27 @@ describe('Glirastes UI parity components', () => {
       .toHaveBeenCalledWith('Aufgaben prüfen');
     expect(document.querySelector('[data-component="suggestion-bar"]'))
       .toBeTruthy();
+  });
+
+  it('replaces the full input width with a waveform while recording', () => {
+    render(
+      <RecordingBar
+        variant="inline"
+        isConnecting={false}
+        stream={null}
+        transcript="Interim text stays out of the editor"
+        onCancel={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    const bar = document.querySelector<HTMLElement>(
+      '[data-component="recording-bar"]',
+    );
+    expect(bar?.style.width).toBe('100%');
+    expect(document.querySelector('[data-element="waveform"]')).toBeTruthy();
+    expect(screen.queryByText('Interim text stays out of the editor'))
+      .toBeNull();
   });
 
   it('renders the active session and switches to another local session', async () => {
