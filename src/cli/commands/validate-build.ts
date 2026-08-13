@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { findForbiddenPlatformContentPath } from '../../contracts/content-boundary.js';
@@ -11,6 +11,7 @@ import {
   FoundationExecutionInventorySchema,
   discoverFoundationExecutions,
 } from '../../codegen/execution-inventory.js';
+import { assertAppSetupSemanticParity } from '../../contracts/app-setup.js';
 
 const identifier = z.string().trim().min(1).max(200);
 
@@ -65,6 +66,7 @@ export async function validateWorkspace(options: {
   appId: string;
   inventoryPath?: string;
   promptBundlePath?: string;
+  setupArtifactPath?: string;
 }): Promise<ValidatedWorkspace> {
   const inventoryPath = resolve(
     options.rootDir,
@@ -100,6 +102,24 @@ export async function validateWorkspace(options: {
     rootDir: options.rootDir,
     inventory,
   });
+
+  const setupArtifactPath = resolve(
+    options.rootDir,
+    options.setupArtifactPath ?? '.glirastes/setup-artifact.json',
+  );
+  if (existsSync(setupArtifactPath)) {
+    const setupArtifact = JSON.parse(readFileSync(setupArtifactPath, 'utf8'));
+    const parsed = assertAppSetupSemanticParity(
+      setupArtifact,
+      inventory.executions.map((execution) => execution.definitionId),
+    );
+    if (parsed.appId !== options.appId) {
+      throw new Error('Local setup artifact targets a different app');
+    }
+    if (parsed.discoveryDigest !== discovery.inventoryDigest) {
+      throw new Error('Local setup artifact does not match the execution inventory');
+    }
+  }
 
   const promptBundlePath = resolve(
     options.rootDir,

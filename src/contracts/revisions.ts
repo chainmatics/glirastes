@@ -34,6 +34,11 @@ const ManifestToolBaseSchema = z.object({
   sourceFingerprint: digest,
   name: identifier,
   description: z.string().trim().min(1).max(4_000),
+  modelName: z.string().regex(/^[A-Za-z0-9_-]+$/).max(200).optional(),
+  module: identifier.optional(),
+  sharedWith: z.array(identifier).max(50).optional(),
+  usageHints: z.array(z.string().trim().min(1).max(500)).min(1).max(20)
+    .optional(),
   riskClass: ToolRiskClassSchema,
   enabled: z.boolean(),
   tombstone: z.boolean(),

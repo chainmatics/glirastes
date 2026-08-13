@@ -21,6 +21,7 @@ const digest = (value: string) => `sha256:${createHash('sha256')
 function workspace(overrides: {
   inventory?: unknown;
   promptBundle?: unknown;
+  setupArtifact?: unknown;
 } = {}): string {
   const root = mkdtempSync(join(tmpdir(), 'glirastes-validate-'));
   mkdirSync(join(root, '.glirastes'), { recursive: true });
@@ -65,6 +66,13 @@ function workspace(overrides: {
     `${JSON.stringify(promptBundle, null, 2)}\n`,
     'utf8',
   );
+  if (overrides.setupArtifact) {
+    writeFileSync(
+      join(root, '.glirastes/setup-artifact.json'),
+      `${JSON.stringify(overrides.setupArtifact, null, 2)}\n`,
+      'utf8',
+    );
+  }
   return root;
 }
 
@@ -86,6 +94,53 @@ describe('glirastes validate', () => {
 
     expect(fetchImpl).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
+  });
+
+  it('rejects an existing setup artifact with incomplete curated semantics', async () => {
+    const root = workspace({
+      setupArtifact: {
+        schemaVersion: 1,
+        artifactId: randomUUID(),
+        runId: randomUUID(),
+        appId: APP_ID,
+        discoveryDigest: digest('stale'),
+        assessmentMode: 'autonomous',
+        status: 'ready',
+        tools: [{
+          toolId: '019fb007-0000-7000-8000-00000000000a',
+          sourceFingerprint: ROUTE_FINGERPRINT,
+          name: 'tasks.list',
+          executionKind: 'endpoint',
+          operationGroup: 'read',
+          riskClass: 'safe-read',
+          enabled: true,
+          requiresApproval: false,
+          inputSchemaDigest: digest('input'),
+          outputSchemaDigest: digest('output'),
+        }],
+        planner: {
+          plannerId: randomUUID(),
+          modelBindingRef: 'balanced',
+          promptBindingRef: 'prompt:fixture',
+          budgetProfileRef: 'foundation-default',
+          toolIds: ['019fb007-0000-7000-8000-00000000000a'],
+        },
+        prompts: {
+          bundleDigest: digest('bundle'),
+          artifactRef: 'local://fixture/prompts',
+          plannerDigest: digest('planner'),
+          appBehaviorDigest: digest('behavior'),
+          responseStyleDigest: digest('style'),
+          capabilityFragmentDigests: {},
+        },
+        warnings: [],
+        generatedAt: '2026-08-13T10:00:00.000Z',
+      },
+    });
+
+    await expect(runCli([
+      'validate', '--root', root, '--app-id', APP_ID, '--quiet',
+    ])).rejects.toThrow('incomplete curated semantics');
   });
 
   it('rejects an inventory whose source file no longer exists', async () => {

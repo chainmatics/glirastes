@@ -54,6 +54,7 @@ export {
   AppSetupOperationGroupSchema,
   AppSetupStatusSchema,
   AppSetupToolCandidateSchema,
+  assertAppSetupSemanticParity,
 } from './app-setup.js';
 export type {
   AppSetupArtifact,

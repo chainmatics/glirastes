@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AppSetupArtifactSchema,
   AppSetupStatusSchema,
+  assertAppSetupSemanticParity,
 } from '../app-setup.js';
 
 const id = (suffix: string) => (
@@ -238,5 +239,53 @@ describe('proposed roles', () => {
         allowedRoles: Array.from({ length: 51 }, (_, i) => `r${i}`),
       }],
     })).toThrow();
+  });
+});
+
+describe('curated tool semantics', () => {
+  const semanticArtifact = {
+    ...artifact,
+    tools: [{
+      ...artifact.tools[0],
+      modelName: 'list_tasks',
+      module: 'task_query',
+      sharedWith: ['task_mutation'],
+      usageHints: ['Use for filtered task lists.', 'Excludes deleted tasks.'],
+    }],
+  };
+
+  it('validates model names, module membership, and usage hints together', () => {
+    const parsed = assertAppSetupSemanticParity(semanticArtifact, ['list_tasks']);
+
+    expect(parsed.tools[0]).toMatchObject({
+      modelName: 'list_tasks',
+      module: 'task_query',
+      sharedWith: ['task_mutation'],
+    });
+  });
+
+  it('fails closed when an enabled tool has incomplete semantics', () => {
+    expect(() => assertAppSetupSemanticParity({
+      ...semanticArtifact,
+      tools: [{ ...semanticArtifact.tools[0], usageHints: undefined }],
+    }, ['list_tasks'])).toThrow('incomplete curated semantics');
+  });
+
+  it('fails closed on model-safe name collisions', () => {
+    expect(() => assertAppSetupSemanticParity({
+      ...semanticArtifact,
+      tools: [
+        semanticArtifact.tools[0],
+        { ...semanticArtifact.tools[0], toolId: id('406'), name: 'list.tasks' },
+      ],
+      planner: { ...semanticArtifact.planner, toolIds: [id('404'), id('406')] },
+    }, ['list_tasks', 'list.tasks'])).toThrow('model-facing tool name');
+  });
+
+  it('fails when the semantic artifact and served registry differ', () => {
+    expect(() => assertAppSetupSemanticParity(
+      semanticArtifact,
+      ['list_tasks', 'tasks.get'],
+    )).toThrow('semantic parity');
   });
 });

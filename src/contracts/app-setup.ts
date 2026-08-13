@@ -43,6 +43,14 @@ export const AppSetupToolCandidateSchema = z.object({
    * never a place to carry source, schemas, or secrets.
    */
   description: z.string().trim().min(1).max(1_000).optional(),
+  /** Deterministic provider-safe name exposed to the model. */
+  modelName: z.string().regex(/^[A-Za-z0-9_-]+$/).max(200).optional(),
+  /** Primary intent module plus optional additional module memberships. */
+  module: identifier.optional(),
+  sharedWith: z.array(identifier).max(50).optional(),
+  /** Short operational guidance; never prompts, source, or business data. */
+  usageHints: z.array(z.string().trim().min(1).max(500)).min(1).max(20)
+    .optional(),
   executionKind: z.enum(['endpoint', 'ui']),
   /**
    * Technical metadata that describes the operation without being prose, so
@@ -136,3 +144,50 @@ export type AppSetupToolCandidate = z.infer<
   typeof AppSetupToolCandidateSchema
 >;
 export type AppSetupArtifact = z.infer<typeof AppSetupArtifactSchema>;
+
+/**
+ * Strong gate used by CLI validate/setup and standalone consumers. The base
+ * schema keeps historical artifacts readable; any newly generated artifact
+ * must pass this complete semantic parity check before it can be used.
+ */
+export function assertAppSetupSemanticParity(
+  value: unknown,
+  servedToolNames: ReadonlyArray<string>,
+): AppSetupArtifact {
+  const artifact = AppSetupArtifactSchema.parse(value);
+  const served = new Set(servedToolNames);
+  const artifactNames = new Set(artifact.tools.map((tool) => tool.name));
+  if (
+    served.size !== artifactNames.size
+    || [...served].some((name) => !artifactNames.has(name))
+  ) {
+    throw new Error('App setup semantic parity does not match the served registry');
+  }
+
+  const modelNames = new Map<string, string>();
+  for (const tool of artifact.tools.filter((candidate) => candidate.enabled)) {
+    if (
+      !tool.modelName
+      || !tool.module
+      || !tool.sharedWith
+      || !tool.usageHints
+    ) {
+      throw new Error(`Tool ${tool.name} has incomplete curated semantics`);
+    }
+    const expectedModelName = tool.name.replace(/\./g, '_');
+    if (tool.modelName !== expectedModelName) {
+      throw new Error(`Tool ${tool.name} has a non-deterministic model-facing tool name`);
+    }
+    const owner = modelNames.get(tool.modelName);
+    if (owner && owner !== tool.name) {
+      throw new Error(
+        `Tools ${owner} and ${tool.name} collide on model-facing tool name ${tool.modelName}`,
+      );
+    }
+    if (tool.sharedWith.includes(tool.module)) {
+      throw new Error(`Tool ${tool.name} repeats its primary module in sharedWith`);
+    }
+    modelNames.set(tool.modelName, tool.name);
+  }
+  return artifact;
+}
