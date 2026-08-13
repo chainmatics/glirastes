@@ -23,6 +23,7 @@ import type {
 } from '../types.js';
 import { serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
+import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 
 // ============================================================================
 // Default locale (English)
@@ -667,7 +668,8 @@ export function AiChatProvider({
     }
   }, [rawMessages]);
 
-  // Extract suggestions from suggest_followups tool
+  // Extract suggestions from suggest_followups tool, with a strict text
+  // fallback for models that append a trailing Markdown suggestion section.
   useEffect(() => {
     if (rawMessages.length === 0) return;
 
@@ -678,6 +680,7 @@ export function AiChatProvider({
       const message = rawMessages[messageIndex];
       if (message.role !== 'assistant') continue;
 
+      let structuredFollowups: string[] | null = null;
       for (const part of message.parts) {
         if (!('type' in part)) continue;
         const partType = (part as { type: string }).type;
@@ -697,7 +700,21 @@ export function AiChatProvider({
         );
 
         if (followups.length > 0) {
-          latestFollowups = followups.slice(0, count);
+          structuredFollowups = followups.slice(0, count);
+        }
+      }
+
+      if (structuredFollowups && structuredFollowups.length > 0) {
+        latestFollowups = structuredFollowups;
+      } else {
+        for (const part of message.parts) {
+          if (!isRecord(part) || part.type !== 'text' || typeof part.text !== 'string') {
+            continue;
+          }
+          const extracted = extractTrailingFollowupSuggestions(part.text, count);
+          if (extracted.suggestions.length > 0) {
+            latestFollowups = extracted.suggestions;
+          }
         }
       }
 

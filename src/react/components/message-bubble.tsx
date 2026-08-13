@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
+import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import type { MessageBubbleProps, TextPart } from '../types.js';
 
 // Lazy-load react-markdown — keeps it out of the synchronous import graph so
@@ -69,7 +70,12 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const cleanTextParts = message.parts
     .filter(isTextPart)
     .filter((p) => p.text.trim())
-    .map((p) => stripContextBlocks(p.text));
+    .map((p) => stripContextBlocks(p.text))
+    .map((text) => (
+      message.role === 'assistant'
+        ? extractTrailingFollowupSuggestions(text).text
+        : text
+    ));
   const hasTextContent = cleanTextParts.some((text) => text.trim().length > 0);
 
   // Build fallback summary from tool outputs

@@ -128,4 +128,45 @@ describe('MessageBubble tool-result visibility', () => {
     expect(screen.queryByText('Suggestions registered')).toBeNull();
     expect(document.querySelector('[data-component="message-bubble"]')).toBeNull();
   });
+
+  it('renders only the answer when the model appends a suggestion list', () => {
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-5',
+          role: 'assistant',
+          parts: [{
+            type: 'text',
+            text: 'Kanban-Ansicht geöffnet.\n\nVorschläge:\n'
+              + '- Zeige meine offenen Aufgaben.\n'
+              + '- Erstelle eine neue Aufgabe.\n'
+              + '- Filtere nach hoher Priorität.',
+          }],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Kanban-Ansicht geöffnet.')).toBeTruthy();
+    expect(screen.queryByText(/Zeige meine offenen Aufgaben/)).toBeNull();
+    expect(screen.queryByText(/Vorschläge:/)).toBeNull();
+  });
+
+  it('preserves ordinary prose that mentions suggestions', () => {
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-6',
+          role: 'assistant',
+          parts: [{
+            type: 'text',
+            text: 'Meine Vorschläge: zuerst priorisieren, dann planen.',
+          }],
+        }}
+      />,
+    );
+
+    expect(screen.getByText(
+      'Meine Vorschläge: zuerst priorisieren, dann planen.',
+    )).toBeTruthy();
+  });
 });
