@@ -27,6 +27,7 @@ const PromptIdentitySchema = z.object({
 }).passthrough();
 
 const AUTH_MARKERS = [
+  ['@azure/msal-node', 'entra'],
   ['@auth0/nextjs-auth0', 'auth0'],
   ['@clerk/nextjs', 'clerk'],
   ['@supabase/ssr', 'supabase'],
