@@ -58,6 +58,13 @@ export {
   AppSetupToolCandidateSchema,
   assertAppSetupSemanticParity,
 } from './app-setup.js';
+
+export { classifyToolSemanticChange } from './semantic-change.js';
+export type {
+  SemanticChange,
+  SemanticChangeClassification,
+  ToolSemanticState,
+} from './semantic-change.js';
 export type {
   AppSetupArtifact,
   AppSetupAssessmentMode,
