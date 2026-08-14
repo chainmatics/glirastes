@@ -91,3 +91,16 @@ export {
 export type {
   PlatformPromptRevision,
 } from './platform-prompt-revision.js';
+
+export {
+  PairingStartRequestSchema,
+  PairingStartResponseSchema,
+  PairingTokenResultSchema,
+  PlatformConnectionDescriptorSchema,
+} from './platform-connection.js';
+export type {
+  PairingStartRequest,
+  PairingStartResponse,
+  PairingTokenResult,
+  PlatformConnectionDescriptor,
+} from './platform-connection.js';
