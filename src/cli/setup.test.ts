@@ -90,6 +90,38 @@ afterEach(() => {
 });
 
 describe('glirastes setup', () => {
+  it('prints a read-only deterministic dry-run without credentials or network', async () => {
+    const { root } = await setupFixture();
+    const fetchImpl = vi.fn();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetchImpl);
+    vi.stubEnv('GLIRASTES_API_KEY', '');
+    const before = await readFile(
+      join(root, '.glirastes/app-setup.json'),
+      'utf8',
+    );
+
+    await runCli([
+      'setup', '--dry-run', '--json', '--root', root,
+      '--artifact', '.glirastes/app-setup.json',
+    ]);
+
+    const plan = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(plan.planDigest).toMatch(/^sha256:/);
+    expect(plan.operations.map((operation: { kind: string }) => operation.kind))
+      .toEqual(['validate', 'sync']);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(await readFile(
+      join(root, '.glirastes/app-setup.json'),
+      'utf8',
+    )).toBe(before);
+    expect(await readFile(
+      join(root, '.glirastes/local-execution-inventory.v2.json'),
+      'utf8',
+    )).toBeTruthy();
+    log.mockRestore();
+  });
+
   it('reports a stable scoped diagnostic when the app identity is missing', async () => {
     vi.stubEnv('GLIRASTES_CONTROL_PLANE_URL', 'https://control.example');
     vi.stubEnv('GLIRASTES_APP_ID', '');

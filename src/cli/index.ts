@@ -31,6 +31,10 @@ import {
   type InstallHost,
 } from './commands/setup-wizard.js';
 import { FoundationDiagnosticError } from '../diagnostics/index.js';
+import {
+  assertSetupPlanConfirmation,
+  createSetupPlan,
+} from './commands/setup-plan.js';
 
 type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build';
 
@@ -210,6 +214,18 @@ function setupConnection(rest: string[]): {
 async function runSetupWizardCommand(rest: string[]): Promise<void> {
   const rootDir = resolve(getFlagValue(rest, '--root') ?? process.cwd());
   try {
+    const artifactPath = artifactPathFrom(rest);
+    if (existsSync(join(rootDir, artifactPath))) {
+      const plan = await createSetupPlan({
+        rootDir,
+        artifactPath,
+        previousArtifactPath: getFlagValue(rest, '--previous-artifact'),
+      });
+      assertSetupPlanConfirmation(plan, {
+        confirmLoosening: hasFlag(rest, '--confirm-loosening'),
+        planDigest: getFlagValue(rest, '--plan-digest'),
+      });
+    }
     await runSetupWizard({
       rootDir,
       io: {
@@ -297,6 +313,24 @@ function parseAssessmentMode(
 }
 
 async function runSetup(rest: string[]): Promise<void> {
+  if (hasFlag(rest, '--dry-run')) {
+    const rootDir = resolve(getFlagValue(rest, '--root') ?? process.cwd());
+    const plan = await createSetupPlan({
+      rootDir,
+      artifactPath: artifactPathFrom(rest),
+      previousArtifactPath: getFlagValue(rest, '--previous-artifact'),
+    });
+    if (hasFlag(rest, '--json')) {
+      console.log(JSON.stringify(plan));
+    } else {
+      console.log(
+        `Setup plan ${plan.planDigest}: ${plan.operations.length} operations, `
+        + `${plan.counts.tools} tools, confirmation `
+        + `${plan.requiresConfirmation ? 'required' : 'not required'}.`,
+      );
+    }
+    return;
+  }
   if (isWizardInvocation(rest)) {
     await runSetupWizardCommand(rest);
     return;
