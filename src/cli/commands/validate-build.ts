@@ -12,6 +12,7 @@ import {
   discoverFoundationExecutions,
 } from '../../codegen/execution-inventory.js';
 import { assertAppSetupSemanticParity } from '../../contracts/app-setup.js';
+import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 
 const identifier = z.string().trim().min(1).max(200);
 
@@ -82,18 +83,24 @@ export async function validateWorkspace(options: {
   const encoded = new Map<string, string>();
   for (const execution of inventory.executions) {
     if (!TOOL_NAME_PATTERN.test(execution.definitionId)) {
-      throw new Error(
-        'Definition id violates the tool naming convention: '
-        + execution.definitionId,
-      );
+      throw new FoundationDiagnosticError({
+        code: 'E-INVENTORY-001',
+        operation: 'validate.inventory',
+        message: 'A definition id violates the tool naming convention.',
+        remediation: 'rename-tool-definition',
+        identifier: execution.definitionId,
+      });
     }
     const modelName = modelFacingToolName(execution.definitionId);
     const owner = encoded.get(modelName);
     if (owner && owner !== execution.definitionId) {
-      throw new Error(
-        'Definition ids collide after model-safe encoding: '
-        + `${owner} and ${execution.definitionId} both become ${modelName}`,
-      );
+      throw new FoundationDiagnosticError({
+        code: 'E-INVENTORY-002',
+        operation: 'validate.inventory',
+        message: 'Definition ids collide after model-safe encoding.',
+        remediation: 'rename-colliding-tool-definition',
+        identifier: modelName,
+      });
     }
     encoded.set(modelName, execution.definitionId);
   }

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRouteSourceFingerprint } from '../codegen/index.js';
+import { FoundationDiagnosticError } from '../diagnostics/foundation-diagnostic.js';
 import { runCli } from './index.js';
 
 const id = (suffix: string) => (
@@ -89,6 +90,19 @@ afterEach(() => {
 });
 
 describe('glirastes setup', () => {
+  it('reports a stable scoped diagnostic when the app identity is missing', async () => {
+    vi.stubEnv('GLIRASTES_CONTROL_PLANE_URL', 'https://control.example');
+    vi.stubEnv('GLIRASTES_APP_ID', '');
+    vi.stubEnv('GLIRASTES_API_KEY', 'local-only-secret');
+
+    await expect(runCli([
+      'setup', 'status', '--run-id', id('9'), '--quiet',
+    ])).rejects.toMatchObject<Partial<FoundationDiagnosticError>>({
+      code: 'E-SCOPE-001',
+      operation: 'setup.connection',
+    });
+  });
+
   it('scans the positive inventory locally without network access', async () => {
     const { root } = await setupFixture();
     const fetchImpl = vi.fn();

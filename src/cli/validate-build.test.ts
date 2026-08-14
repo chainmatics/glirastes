@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRouteSourceFingerprint } from '../codegen/route-fingerprint.js';
+import { FoundationDiagnosticError } from '../diagnostics/foundation-diagnostic.js';
 import { runCli } from './index.js';
 
 const ROUTE_SOURCE = 'export async function GET() { return Response.json([]); }\n';
@@ -230,7 +231,11 @@ describe('glirastes validate', () => {
 
     await expect(runCli([
       'validate', '--root', root, '--app-id', APP_ID, '--quiet',
-    ])).rejects.toThrow(/naming convention/i);
+    ])).rejects.toMatchObject<Partial<FoundationDiagnosticError>>({
+      code: 'E-INVENTORY-001',
+      operation: 'validate.inventory',
+      identifier: 'Tasks List!',
+    });
   });
 
   it('rejects a schema-invalid inventory', async () => {

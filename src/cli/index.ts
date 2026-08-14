@@ -30,6 +30,7 @@ import {
   type AssessmentMode,
   type InstallHost,
 } from './commands/setup-wizard.js';
+import { FoundationDiagnosticError } from '../diagnostics/index.js';
 
 type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build';
 
@@ -175,15 +176,28 @@ function setupConnection(rest: string[]): {
   // One key, one variable: GLIRASTES_API_KEY.
   const setupApiKey = process.env.GLIRASTES_API_KEY;
   if (!baseUrl) {
-    throw new Error(
-      '--base-url or GLIRASTES_CONTROL_PLANE_URL is required for setup.',
-    );
+    throw new FoundationDiagnosticError({
+      code: 'E-SETUP-001',
+      operation: 'setup.connection',
+      message: 'GLIRASTES_CONTROL_PLANE_URL is not configured for setup.',
+      remediation: 'configure-control-plane-url',
+    });
   }
   if (!appId) {
-    throw new Error('--app-id or GLIRASTES_APP_ID is required for setup.');
+    throw new FoundationDiagnosticError({
+      code: 'E-SCOPE-001',
+      operation: 'setup.connection',
+      message: 'GLIRASTES_APP_ID is not configured for setup.',
+      remediation: 'configure-app-id',
+    });
   }
   if (!setupApiKey) {
-    throw new Error('GLIRASTES_API_KEY is required for setup.');
+    throw new FoundationDiagnosticError({
+      code: 'E-SETUP-002',
+      operation: 'setup.connection',
+      message: 'GLIRASTES_API_KEY is not configured for setup.',
+      remediation: 'configure-app-api-key',
+    });
   }
   return { baseUrl, appId, setupApiKey };
 }
@@ -466,7 +480,12 @@ async function runValidate(rest: string[]): Promise<void> {
   const rootDir = getFlagValue(rest, '--root') ?? process.cwd();
   const appId = getFlagValue(rest, '--app-id') ?? process.env.GLIRASTES_APP_ID;
   if (!appId) {
-    throw new Error('--app-id or GLIRASTES_APP_ID is required for validate.');
+    throw new FoundationDiagnosticError({
+      code: 'E-SCOPE-001',
+      operation: 'validate.scope',
+      message: 'GLIRASTES_APP_ID is not configured for validation.',
+      remediation: 'configure-app-id',
+    });
   }
   const workspace = await validateWorkspace({
     rootDir,

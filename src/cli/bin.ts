@@ -2,6 +2,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runCli } from './index.js';
+import {
+  foundationDiagnosticJson,
+  isFoundationDiagnosticError,
+} from '../diagnostics/index.js';
 
 // Load .env and .env.local files (more specific wins)
 for (const envFile of ['.env', '.env.local']) {
@@ -27,6 +31,12 @@ for (const envFile of ['.env', '.env.local']) {
 }
 
 runCli(process.argv.slice(2)).catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
+  if (process.argv.includes('--json')) {
+    console.log(JSON.stringify(foundationDiagnosticJson(error, 'cli')));
+  } else if (isFoundationDiagnosticError(error)) {
+    console.error(`${error.code}: ${error.message}`);
+  } else {
+    console.error('E-SETUP-999: Glirastes command failed.');
+  }
   process.exit(1);
 });
