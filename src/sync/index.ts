@@ -39,6 +39,11 @@ export type {
   RuntimeSetupImportResult,
 } from './runtime-setup-client.js';
 export { AppSetupClient } from './app-setup-client.js';
+export { RuntimeConnectClient } from './runtime-connect-client.js';
+export type {
+  PollForConnectionOptions,
+  RuntimeConnectClientOptions,
+} from './runtime-connect-client.js';
 export type {
   AppSetupRun,
   CreateAppSetupRun,

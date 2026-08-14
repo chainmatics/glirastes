@@ -40,11 +40,23 @@ import {
   createDoctorReport,
   formatDoctorReport,
 } from './commands/doctor.js';
+import {
+  runConnect,
+  type ConnectCommandDependencies,
+} from './commands/connect.js';
 
-type CommandName = 'scan' | 'setup' | 'doctor' | 'install' | 'validate' | 'build';
+type CommandName =
+  | 'scan'
+  | 'setup'
+  | 'connect'
+  | 'doctor'
+  | 'install'
+  | 'validate'
+  | 'build';
 
 export interface CliDependencies {
   ask?: (question: string) => Promise<string>;
+  connect?: ConnectCommandDependencies;
 }
 
 function getFlagValue(args: string[], flag: string): string | undefined {
@@ -64,6 +76,7 @@ function parseCommand(args: string[]): {
   if (
     command !== 'scan'
     && command !== 'setup'
+    && command !== 'connect'
     && command !== 'doctor'
     && command !== 'install'
     && command !== 'validate'
@@ -72,6 +85,8 @@ function parseCommand(args: string[]): {
     throw new Error(
       'Usage: glirastes setup [--dry-run] [--managed] [--json]\n'
       + '         detect, validate and atomically install local artifacts\n'
+      + '       glirastes connect --base-url <url> [--json]\n'
+      + '         pair an existing local setup with the Platform\n'
       + '       glirastes setup guided [options]\n'
       + '         run the legacy interactive setup interview\n'
       + '       glirastes setup <scan|sync|status> [options]\n'
@@ -613,6 +628,14 @@ export async function runCli(
   dependencies: CliDependencies = {},
 ): Promise<void> {
   const { command, rest } = parseCommand(args);
+  if (command === 'connect') {
+    await runConnect({
+      rootDir: resolve(getFlagValue(rest, '--root') ?? process.cwd()),
+      baseUrl: getFlagValue(rest, '--base-url'),
+      json: hasFlag(rest, '--json'),
+    }, dependencies.connect);
+    return;
+  }
   if (command === 'doctor') {
     const report = await createDoctorReport({
       rootDir: resolve(getFlagValue(rest, '--root') ?? process.cwd()),

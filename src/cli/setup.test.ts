@@ -155,7 +155,7 @@ afterEach(() => {
 describe('glirastes setup', () => {
   it('documents direct setup and keeps the legacy wizard explicit', async () => {
     await expect(runCli(['unknown'])).rejects.toThrow(
-      /glirastes setup \[--dry-run\].*glirastes setup guided/s,
+      /glirastes setup \[--dry-run\].*glirastes connect --base-url.*glirastes setup guided/s,
     );
   });
 

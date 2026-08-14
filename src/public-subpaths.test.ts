@@ -76,7 +76,7 @@ describe('public foundation subpaths', () => {
     expect(serverSource).not.toContain('createAegisDetector');
   });
 
-  it('keeps the Foundation CLI focused on scan, setup and local doctor', async () => {
+  it('keeps the Foundation CLI focused on local setup and connection', async () => {
     const source = await readFile(
       new URL('./cli/index.ts', import.meta.url),
       'utf8',
@@ -98,9 +98,11 @@ describe('public foundation subpaths', () => {
     ]) {
       expect(source).not.toContain(`'${command}'`);
     }
-    expect(source).toContain(
-      "type CommandName = 'scan' | 'setup' | 'doctor' | 'install' | 'validate' | 'build'",
-    );
+    for (const command of [
+      'scan', 'setup', 'connect', 'doctor', 'install', 'validate', 'build',
+    ]) {
+      expect(source).toContain(`| '${command}'`);
+    }
 
     // `setup guided` preserves the old interview wizard while bare setup
     // applies the detected local plan.

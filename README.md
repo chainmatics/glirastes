@@ -60,6 +60,20 @@ loosening, and atomically adopts the complete local artifact set. Standalone is
 the default and never contacts the Control Plane. Restart the application after
 setup because Standalone materializes its runtime snapshot only at boot.
 
+To add the optional Connected Free Control Plane without repeating setup, pair
+the already validated local app once:
+
+```bash
+npx glirastes connect --base-url https://platform.example.com
+```
+
+The CLI opens only the verification URL returned by that Control Plane, waits
+for browser approval, and writes the app-scoped connection atomically. The
+local secret target must already be ignored by Git. Pairing never uploads
+prompts, schemas, source, credentials, tool arguments, results, or business
+content. Restart the application after connecting; Standalone remains the
+network-silent runtime default.
+
 Managed setup is always explicit:
 
 ```bash
