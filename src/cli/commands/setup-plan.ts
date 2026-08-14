@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import {
   AppSetupArtifactSchema,
@@ -9,15 +9,17 @@ import {
   type SemanticChange,
 } from '../../contracts/index.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
+import { detectSetupProfile } from './setup-profile.js';
 
 export interface SetupPlanOperation {
-  kind: 'validate' | 'sync';
+  kind: 'validate' | 'adopt' | 'build' | 'receipt' | 'sync';
   path: string;
   digest: string;
 }
 
 export interface SetupPlan {
   schemaVersion: 1;
+  mode: 'standalone' | 'managed';
   planDigest: string;
   operations: SetupPlanOperation[];
   counts: { tools: number; semanticChanges: number };
@@ -30,6 +32,9 @@ export interface CreateSetupPlanOptions {
   rootDir: string;
   artifactPath?: string;
   previousArtifactPath?: string;
+  inventoryPath?: string;
+  promptBundlePath?: string;
+  managed?: boolean;
 }
 
 function sha256(value: string): string {
@@ -77,6 +82,32 @@ async function readArtifact(
   return { artifact, path: bounded.relative, digest: sha256(raw) };
 }
 
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function resolvePreviousArtifactPath(
+  rootDir: string,
+  proposedPath: string,
+  canonicalPath: string,
+  configuredPath: string | undefined,
+  defaultPreviousPath: string,
+): Promise<string | undefined> {
+  if (configuredPath) return configuredPath;
+  const previous = boundedPath(rootDir, defaultPreviousPath);
+  if (await exists(previous.absolute)) return previous.relative;
+  if (proposedPath === canonicalPath) return proposedPath;
+  const canonical = boundedPath(rootDir, canonicalPath);
+  if (await exists(canonical.absolute)) return canonical.relative;
+  return undefined;
+}
+
 function compareArtifacts(
   previous: AppSetupArtifact | undefined,
   proposed: AppSetupArtifact,
@@ -119,16 +150,29 @@ function compareArtifacts(
 export async function createSetupPlan(
   options: CreateSetupPlanOptions,
 ): Promise<SetupPlan> {
+  const profile = await detectSetupProfile({
+    rootDir: options.rootDir,
+    managed: options.managed,
+    artifactPath: options.artifactPath,
+    inventoryPath: options.inventoryPath,
+    promptBundlePath: options.promptBundlePath,
+  });
   const proposed = await readArtifact(
     options.rootDir,
-    options.artifactPath ?? '.glirastes/app-setup-artifact.json',
+    profile.paths.setupArtifact,
     true,
   );
   if (!proposed) throw new Error('unreachable');
+  const previousPath = await resolvePreviousArtifactPath(
+    options.rootDir,
+    proposed.path,
+    profile.paths.canonicalSetupArtifact,
+    options.previousArtifactPath,
+    profile.paths.previousSetupArtifact,
+  );
   const previous = await readArtifact(
     options.rootDir,
-    options.previousArtifactPath
-      ?? '.glirastes/previous-app-setup-artifact.json',
+    previousPath ?? profile.paths.previousSetupArtifact,
     false,
   );
   assertAppSetupSemanticParity(
@@ -147,9 +191,29 @@ export async function createSetupPlan(
   );
   const body = {
     schemaVersion: 1 as const,
+    mode: profile.mode,
     operations: [
       { kind: 'validate' as const, path: proposed.path, digest: proposed.digest },
-      { kind: 'sync' as const, path: proposed.path, digest: proposed.digest },
+      {
+        kind: 'adopt' as const,
+        path: profile.paths.canonicalSetupArtifact,
+        digest: proposed.digest,
+      },
+      {
+        kind: 'build' as const,
+        path: profile.paths.buildDir,
+        digest: proposed.digest,
+      },
+      {
+        kind: 'receipt' as const,
+        path: profile.paths.receipt,
+        digest: proposed.digest,
+      },
+      ...(profile.mode === 'managed' ? [{
+        kind: 'sync' as const,
+        path: proposed.path,
+        digest: proposed.digest,
+      }] : []),
     ],
     counts: {
       tools: proposed.artifact.tools.length,

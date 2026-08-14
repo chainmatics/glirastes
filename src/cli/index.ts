@@ -317,8 +317,11 @@ async function runSetup(rest: string[]): Promise<void> {
     const rootDir = resolve(getFlagValue(rest, '--root') ?? process.cwd());
     const plan = await createSetupPlan({
       rootDir,
-      artifactPath: artifactPathFrom(rest),
+      artifactPath: getFlagValue(rest, '--artifact'),
       previousArtifactPath: getFlagValue(rest, '--previous-artifact'),
+      inventoryPath: getFlagValue(rest, '--execution-inventory'),
+      promptBundlePath: getFlagValue(rest, '--prompt-bundle'),
+      managed: hasFlag(rest, '--managed'),
     });
     if (hasFlag(rest, '--json')) {
       console.log(JSON.stringify(plan));

@@ -81,6 +81,35 @@ async function setupFixture(): Promise<{
     JSON.stringify(artifact),
     'utf8',
   );
+  await writeFile(
+    join(root, 'package.json'),
+    JSON.stringify({
+      name: 'fixture',
+      dependencies: { next: '16.0.0' },
+      glirastes: {
+        principal: 'server-verified',
+        setupArtifact: '.glirastes/app-setup.json',
+        inventory: '.glirastes/local-execution-inventory.v2.json',
+        promptBundle: '.glirastes/prompt-bundle.json',
+      },
+    }),
+    'utf8',
+  );
+  await writeFile(
+    join(root, '.glirastes/prompt-bundle.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      appId: artifact.appId,
+      artifactRef: 'local://fixture/prompts',
+      sections: {
+        planner: 'Plan safely.',
+        appBehavior: 'Use the fixture.',
+        responseStyle: 'Be concise.',
+        capabilityFragments: {},
+      },
+    }),
+    'utf8',
+  );
   return { root, artifact };
 }
 
@@ -109,7 +138,7 @@ describe('glirastes setup', () => {
     const plan = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
     expect(plan.planDigest).toMatch(/^sha256:/);
     expect(plan.operations.map((operation: { kind: string }) => operation.kind))
-      .toEqual(['validate', 'sync']);
+      .toEqual(['validate', 'adopt', 'build', 'receipt']);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(await readFile(
       join(root, '.glirastes/app-setup.json'),
@@ -119,6 +148,19 @@ describe('glirastes setup', () => {
       join(root, '.glirastes/local-execution-inventory.v2.json'),
       'utf8',
     )).toBeTruthy();
+    log.mockRestore();
+  });
+
+  it('resolves the app and artifacts without repeated flags', async () => {
+    const { root } = await setupFixture();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runCli(['setup', '--dry-run', '--json', '--root', root]);
+
+    const plan = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(plan.counts.tools).toBe(0);
+    expect(plan.operations.map((operation: { kind: string }) => operation.kind))
+      .toEqual(['validate', 'adopt', 'build', 'receipt']);
     log.mockRestore();
   });
 

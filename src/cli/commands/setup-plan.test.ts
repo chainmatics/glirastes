@@ -69,12 +69,41 @@ async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'glirastes-setup-plan-'));
   await mkdir(join(root, '.glirastes'), { recursive: true });
   await writeFile(
-    join(root, '.glirastes/app-setup-artifact.json'),
+    join(root, 'package.json'),
+    JSON.stringify({
+      name: 'fixture',
+      glirastes: { principal: 'server-verified' },
+    }),
+  );
+  await writeFile(
+    join(root, '.glirastes/setup-artifact.json'),
     `${JSON.stringify(artifact())}\n`,
   );
   await writeFile(
-    join(root, '.glirastes/previous-app-setup-artifact.json'),
+    join(root, '.glirastes/previous-setup-artifact.json'),
     `${JSON.stringify(artifact())}\n`,
+  );
+  await writeFile(
+    join(root, '.glirastes/foundation-execution-inventory.json'),
+    JSON.stringify({
+      schemaVersion: 2,
+      targetAppKey: 'fixture',
+      executions: [],
+    }),
+  );
+  await writeFile(
+    join(root, '.glirastes/prompt-bundle.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      appId: id('3'),
+      artifactRef: 'local://fixture/prompts',
+      sections: {
+        planner: 'Plan safely.',
+        appBehavior: 'Use the fixture.',
+        responseStyle: 'Be concise.',
+        capabilityFragments: {},
+      },
+    }),
   );
   return root;
 }
@@ -93,7 +122,9 @@ describe('createSetupPlan', () => {
     });
     expect(first.operations.map((operation) => operation.kind)).toEqual([
       'validate',
-      'sync',
+      'adopt',
+      'build',
+      'receipt',
     ]);
     const serialized = JSON.stringify(first);
     expect(serialized).not.toMatch(
@@ -102,10 +133,26 @@ describe('createSetupPlan', () => {
     expect(first.planDigest).toMatch(/^sha256:/);
   });
 
+  it('adds remote sync only for explicit Managed setup', async () => {
+    const root = await fixture();
+
+    const standalone = await createSetupPlan({ rootDir: root });
+    const managed = await createSetupPlan({ rootDir: root, managed: true });
+
+    expect(standalone.operations.some(({ kind }) => kind === 'sync')).toBe(false);
+    expect(managed.operations.map(({ kind }) => kind)).toEqual([
+      'validate',
+      'adopt',
+      'build',
+      'receipt',
+      'sync',
+    ]);
+  });
+
   it('marks a loosening and binds confirmation to its exact digest', async () => {
     const root = await fixture();
     await writeFile(
-      join(root, '.glirastes/previous-app-setup-artifact.json'),
+      join(root, '.glirastes/previous-setup-artifact.json'),
       `${JSON.stringify(artifact({ requiresApproval: true }))}\n`,
     );
     const plan = await createSetupPlan({ rootDir: root });
@@ -134,13 +181,13 @@ describe('createSetupPlan', () => {
     const fetchImpl = vi.fn();
     vi.stubGlobal('fetch', fetchImpl);
     const before = await readFile(
-      join(root, '.glirastes/app-setup-artifact.json'),
+      join(root, '.glirastes/setup-artifact.json'),
       'utf8',
     );
     await createSetupPlan({ rootDir: root });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(await readFile(
-      join(root, '.glirastes/app-setup-artifact.json'),
+      join(root, '.glirastes/setup-artifact.json'),
       'utf8',
     )).toBe(before);
     vi.unstubAllGlobals();
