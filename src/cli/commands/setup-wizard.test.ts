@@ -61,9 +61,11 @@ async function freshRoot(): Promise<string> {
 }
 
 describe('setup invocation', () => {
-  it('runs the wizard only when no subcommand was given', () => {
-    expect(isWizardInvocation([])).toBe(true);
-    expect(isWizardInvocation(['--host', 'claude'])).toBe(true);
+  it('runs the wizard only through the explicit guided subcommand', () => {
+    expect(isWizardInvocation([])).toBe(false);
+    expect(isWizardInvocation(['--host', 'claude'])).toBe(false);
+    expect(isWizardInvocation(['guided'])).toBe(true);
+    expect(isWizardInvocation(['guided', '--host', 'claude'])).toBe(true);
     expect(isWizardInvocation(['scan'])).toBe(false);
     expect(isWizardInvocation(['sync'])).toBe(false);
     expect(isWizardInvocation(['status', '--run-id', 'x'])).toBe(false);

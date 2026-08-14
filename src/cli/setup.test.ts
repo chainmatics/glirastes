@@ -153,6 +153,12 @@ afterEach(() => {
 });
 
 describe('glirastes setup', () => {
+  it('documents direct setup and keeps the legacy wizard explicit', async () => {
+    await expect(runCli(['unknown'])).rejects.toThrow(
+      /glirastes setup \[--dry-run\].*glirastes setup guided/s,
+    );
+  });
+
   it('prints a read-only deterministic dry-run without credentials or network', async () => {
     const { root } = await setupFixture();
     const fetchImpl = vi.fn();

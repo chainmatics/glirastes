@@ -13,9 +13,6 @@ import {
 /** Where the wizard remembers how far it got. */
 export const WIZARD_STATE_PATH = '.glirastes/setup-wizard-state.json';
 
-/** Sub-commands that stay scriptable single steps. */
-const SUBCOMMANDS = ['scan', 'sync', 'status'] as const;
-
 export const WIZARD_STEPS = [
   'skills',
   'scan',
@@ -104,11 +101,9 @@ export interface SetupWizardResult {
   runId: string;
 }
 
-/** Bare `glirastes setup` is the wizard; anything else is a single step. */
+/** The legacy interview is available only through `setup guided`. */
 export function isWizardInvocation(rest: ReadonlyArray<string>): boolean {
-  const first = rest[0];
-  if (first === undefined) return true;
-  return !(SUBCOMMANDS as ReadonlyArray<string>).includes(first);
+  return rest[0] === 'guided';
 }
 
 async function readState(rootDir: string): Promise<WizardState> {

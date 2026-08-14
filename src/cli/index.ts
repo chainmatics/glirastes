@@ -24,6 +24,7 @@ import {
 import { type InstallerPart } from './commands/installer-parts.js';
 import {
   defaultWizardDependencies,
+  isWizardInvocation,
   runSetupWizard,
   WizardStopped,
   type AssessmentMode,
@@ -69,9 +70,10 @@ function parseCommand(args: string[]): {
     && command !== 'build'
   ) {
     throw new Error(
-      'Usage: glirastes setup\n'
-      + '         the guided flow: it asks, then installs, scans, assesses, '
-      + 'validates and syncs\n'
+      'Usage: glirastes setup [--dry-run] [--managed] [--json]\n'
+      + '         detect, validate and atomically install local artifacts\n'
+      + '       glirastes setup guided [options]\n'
+      + '         run the legacy interactive setup interview\n'
       + '       glirastes setup <scan|sync|status> [options]\n'
       + '         the same steps, one at a time\n'
       + '       glirastes scan [--output] [--sync] [--execution-inventory]\n'
@@ -213,9 +215,8 @@ function setupConnection(rest: string[]): {
 }
 
 /**
- * Bare `glirastes setup` — carries a fresh app from nothing to a synced setup
- * run by delegating to the same steps the sub-commands expose. It adds no second
- * implementation of any of them.
+ * Explicit `glirastes setup guided` legacy interview. It delegates to the same
+ * steps the subcommands expose and adds no second implementation of them.
  */
 async function runSetupWizardCommand(rest: string[]): Promise<void> {
   const rootDir = resolve(getFlagValue(rest, '--root') ?? process.cwd());
@@ -340,7 +341,7 @@ async function runSetup(rest: string[]): Promise<void> {
     }
     return;
   }
-  if (rest[0] === 'guided') {
+  if (isWizardInvocation(rest)) {
     await runSetupWizardCommand(rest.slice(1));
     return;
   }
@@ -358,7 +359,14 @@ async function runSetup(rest: string[]): Promise<void> {
       confirmLoosening: hasFlag(rest, '--confirm-loosening'),
       planDigest: getFlagValue(rest, '--plan-digest'),
     });
-    const applied = await applySetupPlan({ rootDir, plan });
+    const applied = await applySetupPlan({
+      rootDir,
+      plan,
+      artifactPath: getFlagValue(rest, '--artifact'),
+      previousArtifactPath: getFlagValue(rest, '--previous-artifact'),
+      inventoryPath: getFlagValue(rest, '--execution-inventory'),
+      promptBundlePath: getFlagValue(rest, '--prompt-bundle'),
+    });
     if (applied.mode === 'managed') {
       await runSetup([
         'sync',
