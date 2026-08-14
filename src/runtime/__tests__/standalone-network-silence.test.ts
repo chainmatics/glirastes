@@ -9,6 +9,7 @@ import {
   materializeManifestToolRegistry,
   type LocalToolBinding,
 } from '../local-tool-bindings.js';
+import { createTurnToolDiscovery } from '../tool-discovery.js';
 
 const DIGEST = `sha256:${'A'.repeat(43)}`;
 const ENDPOINT_TOOL_ID = '11111111-1111-4111-8111-111111111111';
@@ -129,6 +130,8 @@ describe('standalone runtime is strictly network-silent', () => {
       snapshot,
       bindings: fixtureBindings(),
     });
+    const discovery = createTurnToolDiscovery({ snapshot, registry });
+    expect(discovery.search('tasks')[0]?.name).toBe('tasks_listTasks');
     const guard = createManagedTurnGuard({
       snapshot,
       resolvePrincipal: () => principal,

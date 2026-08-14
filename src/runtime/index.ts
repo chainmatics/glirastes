@@ -54,6 +54,12 @@ export {
   type LocalUiToolBinding,
 } from './local-tool-bindings.js';
 export {
+  createTurnToolDiscovery,
+  type ToolDiscoveryResult,
+  type TurnToolDiscovery,
+  type TurnToolDiscoveryOptions,
+} from './tool-discovery.js';
+export {
   createJsonSchemaLike,
   type JsonSchemaLike,
   type LocalJsonSchema,

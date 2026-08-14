@@ -12,6 +12,7 @@ import {
   type LocalToolBinding,
 } from '../local-tool-bindings.js';
 import { createTurnSnapshot } from '../turn-snapshot.js';
+import { createTurnToolDiscovery } from '../tool-discovery.js';
 
 const DIGEST = `sha256:${'A'.repeat(43)}`;
 const ENDPOINT_TOOL_ID = '11111111-1111-4111-8111-111111111111';
@@ -216,6 +217,35 @@ function principalFor(tenantId: string): Principal {
 }
 
 describe('managed and standalone sources materialize identically', () => {
+  it('produces identical discovery results from equivalent pinned revisions', () => {
+    const source = createLocalRuntimeSource({
+      setupArtifact: fixtureArtifact(),
+      bindings: fixtureBindings(),
+      localLimits: budget(),
+    });
+    const standaloneSnapshot = source.resolveTurnSnapshot({
+      turnId: 't-1',
+      principal: principalFor(source.identity.tenantId),
+    });
+    const managedSnapshot = managedStyleSnapshot(principalFor(TENANT_ID));
+    const standalone = createTurnToolDiscovery({
+      snapshot: standaloneSnapshot,
+      registry: materializeManifestToolRegistry({
+        snapshot: standaloneSnapshot,
+        bindings: fixtureBindings(),
+      }),
+    });
+    const managed = createTurnToolDiscovery({
+      snapshot: managedSnapshot,
+      registry: materializeManifestToolRegistry({
+        snapshot: managedSnapshot,
+        bindings: fixtureBindings(),
+      }),
+    });
+
+    expect(managed.search('tasks')).toEqual(standalone.search('tasks'));
+  });
+
   it('exposes identical registries for identical tool facts', () => {
     const source = createLocalRuntimeSource({
       setupArtifact: fixtureArtifact(),
