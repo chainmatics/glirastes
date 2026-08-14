@@ -35,8 +35,12 @@ import {
   createSetupPlan,
 } from './commands/setup-plan.js';
 import { applySetupPlan } from './commands/apply-setup-plan.js';
+import {
+  createDoctorReport,
+  formatDoctorReport,
+} from './commands/doctor.js';
 
-type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build';
+type CommandName = 'scan' | 'setup' | 'doctor' | 'install' | 'validate' | 'build';
 
 export interface CliDependencies {
   ask?: (question: string) => Promise<string>;
@@ -59,6 +63,7 @@ function parseCommand(args: string[]): {
   if (
     command !== 'scan'
     && command !== 'setup'
+    && command !== 'doctor'
     && command !== 'install'
     && command !== 'validate'
     && command !== 'build'
@@ -73,6 +78,7 @@ function parseCommand(args: string[]): {
       + '       glirastes install [--host a,b] [--symlink] [--force] '
       + '[--dry-run]\n'
       + '       glirastes validate [--root] [--app-id]\n'
+      + '       glirastes doctor [--root] [--managed] [--json]\n'
       + '       glirastes build [--root] [--app-id] [--output]\n',
     );
   }
@@ -599,6 +605,17 @@ export async function runCli(
   dependencies: CliDependencies = {},
 ): Promise<void> {
   const { command, rest } = parseCommand(args);
+  if (command === 'doctor') {
+    const report = await createDoctorReport({
+      rootDir: resolve(getFlagValue(rest, '--root') ?? process.cwd()),
+      managed: hasFlag(rest, '--managed'),
+    });
+    console.log(hasFlag(rest, '--json')
+      ? JSON.stringify(report)
+      : formatDoctorReport(report));
+    if (report.status === 'fail') process.exitCode = 1;
+    return;
+  }
   if (command === 'validate') {
     await runValidate(rest);
     return;
