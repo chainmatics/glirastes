@@ -2,7 +2,10 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRouteSourceFingerprint } from '../codegen/index.js';
+import {
+  createRouteSourceFingerprint,
+  discoverFoundationExecutions,
+} from '../codegen/index.js';
 import { FoundationDiagnosticError } from '../diagnostics/foundation-diagnostic.js';
 import { runCli } from './index.js';
 
@@ -25,45 +28,71 @@ async function setupFixture(): Promise<{
     source,
     'utf8',
   );
+  const inventory = {
+    schemaVersion: 2 as const,
+    targetAppKey: 'fixture',
+    executions: [{
+      toolId: id('1'),
+      definitionId: 'tasks.list',
+      stableKey: 'GET /api/tasks',
+      executionKind: 'endpoint' as const,
+      sourceFile: 'src/app/api/tasks/route.ts',
+      sourceFingerprint: createRouteSourceFingerprint(
+        source,
+        'GET',
+        '/api/tasks',
+      ),
+      inputSchemaDigest: digest('A'),
+      outputSchemaDigest: digest('B'),
+      method: 'GET' as const,
+      path: '/api/tasks',
+    }],
+  };
   await writeFile(
     join(root, '.glirastes/local-execution-inventory.v2.json'),
-    JSON.stringify({
-      schemaVersion: 2,
-      targetAppKey: 'fixture',
-      executions: [{
-        toolId: id('1'),
-        definitionId: 'tasks.list',
-        stableKey: 'GET /api/tasks',
-        executionKind: 'endpoint',
-        sourceFile: 'src/app/api/tasks/route.ts',
-        sourceFingerprint: createRouteSourceFingerprint(
-          source,
-          'GET',
-          '/api/tasks',
-        ),
-        inputSchemaDigest: digest('A'),
-        outputSchemaDigest: digest('B'),
-        method: 'GET',
-        path: '/api/tasks',
-      }],
-    }),
+    JSON.stringify(inventory),
     'utf8',
   );
+  const discovery = await discoverFoundationExecutions({ rootDir: root, inventory });
   const artifact = {
     schemaVersion: 1,
     artifactId: id('2'),
     runId: id('3'),
     appId: id('4'),
-    discoveryDigest: digest('C'),
+    discoveryDigest: discovery.inventoryDigest,
     assessmentMode: 'interview',
     status: 'ready',
-    tools: [],
+    tools: [{
+      toolId: id('1'),
+      sourceFingerprint: inventory.executions[0].sourceFingerprint,
+      name: 'tasks.list',
+      description: 'List visible tasks.',
+      modelName: 'tasks_list',
+      module: 'tasks',
+      sharedWith: [],
+      usageHints: ['Use for visible task lists.'],
+      presentation: {
+        locale: 'en-US',
+        singular: 'Task list',
+        plural: 'Task lists',
+        approval: 'Show task list',
+      },
+      executionKind: 'endpoint',
+      method: 'GET',
+      path: '/api/tasks',
+      operationGroup: 'read',
+      riskClass: 'safe-read',
+      enabled: true,
+      requiresApproval: false,
+      inputSchemaDigest: digest('A'),
+      outputSchemaDigest: digest('B'),
+    }],
     planner: {
       plannerId: id('5'),
       modelBindingRef: 'model-standard',
       promptBindingRef: 'prompt-v1',
       budgetProfileRef: 'interactive-default',
-      toolIds: [],
+      toolIds: [id('1')],
     },
     prompts: {
       bundleDigest: digest('D'),
@@ -78,6 +107,11 @@ async function setupFixture(): Promise<{
   };
   await writeFile(
     join(root, '.glirastes/app-setup.json'),
+    JSON.stringify(artifact),
+    'utf8',
+  );
+  await writeFile(
+    join(root, '.glirastes/setup-artifact.json'),
     JSON.stringify(artifact),
     'utf8',
   );
@@ -158,9 +192,31 @@ describe('glirastes setup', () => {
     await runCli(['setup', '--dry-run', '--json', '--root', root]);
 
     const plan = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
-    expect(plan.counts.tools).toBe(0);
+    expect(plan.counts.tools).toBe(1);
     expect(plan.operations.map((operation: { kind: string }) => operation.kind))
       .toEqual(['validate', 'adopt', 'build', 'receipt']);
+    log.mockRestore();
+  });
+
+  it('applies the detected Standalone plan and asks for one restart', async () => {
+    const { root } = await setupFixture();
+    const fetchImpl = vi.fn();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetchImpl);
+
+    await runCli(['setup', '--root', root]);
+
+    const receipt = JSON.parse(await readFile(
+      join(root, '.glirastes/setup-receipt.json'), 'utf8'));
+    expect(receipt).toMatchObject({
+      schemaVersion: 1,
+      mode: 'standalone',
+      appId: id('4'),
+      toolCount: 1,
+      restartRequired: true,
+    });
+    expect(log.mock.calls.flat().join('\n')).toMatch(/restart/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
     log.mockRestore();
   });
 

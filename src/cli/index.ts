@@ -24,7 +24,6 @@ import {
 import { type InstallerPart } from './commands/installer-parts.js';
 import {
   defaultWizardDependencies,
-  isWizardInvocation,
   runSetupWizard,
   WizardStopped,
   type AssessmentMode,
@@ -35,6 +34,7 @@ import {
   assertSetupPlanConfirmation,
   createSetupPlan,
 } from './commands/setup-plan.js';
+import { applySetupPlan } from './commands/apply-setup-plan.js';
 
 type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build';
 
@@ -334,8 +334,45 @@ async function runSetup(rest: string[]): Promise<void> {
     }
     return;
   }
-  if (isWizardInvocation(rest)) {
-    await runSetupWizardCommand(rest);
+  if (rest[0] === 'guided') {
+    await runSetupWizardCommand(rest.slice(1));
+    return;
+  }
+  if (rest[0] === undefined || rest[0]?.startsWith('--')) {
+    const rootDir = resolve(getFlagValue(rest, '--root') ?? process.cwd());
+    const plan = await createSetupPlan({
+      rootDir,
+      artifactPath: getFlagValue(rest, '--artifact'),
+      previousArtifactPath: getFlagValue(rest, '--previous-artifact'),
+      inventoryPath: getFlagValue(rest, '--execution-inventory'),
+      promptBundlePath: getFlagValue(rest, '--prompt-bundle'),
+      managed: hasFlag(rest, '--managed'),
+    });
+    assertSetupPlanConfirmation(plan, {
+      confirmLoosening: hasFlag(rest, '--confirm-loosening'),
+      planDigest: getFlagValue(rest, '--plan-digest'),
+    });
+    const applied = await applySetupPlan({ rootDir, plan });
+    if (applied.mode === 'managed') {
+      await runSetup([
+        'sync',
+        '--root', rootDir,
+        '--artifact', '.glirastes/setup-artifact.json',
+        '--app-id', applied.appId,
+        ...connectionFlags(rest),
+        '--quiet',
+      ]);
+    }
+    if (hasFlag(rest, '--json')) {
+      console.log(JSON.stringify({ schemaVersion: 1, ...applied }));
+    } else {
+      console.log('Glirastes setup');
+      console.log(`  ${applied.toolCount} tools validated`);
+      console.log(`  ${applied.mode === 'standalone' ? 'Standalone' : 'Managed'} artifacts installed`);
+      console.log('  Security policy unchanged');
+      console.log('');
+      console.log('Restart the application, then run: glirastes doctor');
+    }
     return;
   }
   const [subcommand, ...options] = rest;

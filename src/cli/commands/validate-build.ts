@@ -164,23 +164,26 @@ export interface BuiltManifests {
   promptDigest: string;
 }
 
-/**
- * Emits content-addressed runtime and prompt manifests. Manifests carry
- * identities and digests only: never prompt text, source, schemas, or secrets.
- * Building never publishes and never deploys.
- */
-export async function buildManifests(options: {
+export interface RenderedManifests {
+  runtimeContent: string;
+  promptContent: string;
+  runtimeDigest: string;
+  promptDigest: string;
+}
+
+export interface RenderManifestOptions {
   rootDir: string;
   appId: string;
-  outputDir?: string;
   inventoryPath?: string;
   promptBundlePath?: string;
-}): Promise<BuiltManifests> {
+  setupArtifactPath?: string;
+}
+
+/** Render the complete build outputs in memory for an atomic caller. */
+export async function renderManifests(
+  options: RenderManifestOptions,
+): Promise<RenderedManifests> {
   const workspace = await validateWorkspace(options);
-  const outputDir = resolve(
-    options.rootDir,
-    options.outputDir ?? '.glirastes/build',
-  );
 
   const executions = [...workspace.executions]
     .map((execution) => ({
@@ -224,25 +227,51 @@ export async function buildManifests(options: {
     ...promptBody,
     promptDigest: digestOf(promptBody),
   };
+  return {
+    runtimeContent: `${JSON.stringify(canonicalValue(runtimeManifest), null, 2)}\n`,
+    promptContent: `${JSON.stringify(canonicalValue(promptManifest), null, 2)}\n`,
+    runtimeDigest: runtimeManifest.runtimeDigest,
+    promptDigest: promptManifest.promptDigest,
+  };
+}
+
+/**
+ * Emits content-addressed runtime and prompt manifests. Manifests carry
+ * identities and digests only: never prompt text, source, schemas, or secrets.
+ * Building never publishes and never deploys.
+ */
+export async function buildManifests(options: {
+  rootDir: string;
+  appId: string;
+  outputDir?: string;
+  inventoryPath?: string;
+  promptBundlePath?: string;
+  setupArtifactPath?: string;
+}): Promise<BuiltManifests> {
+  const rendered = await renderManifests(options);
+  const outputDir = resolve(
+    options.rootDir,
+    options.outputDir ?? '.glirastes/build',
+  );
 
   const runtimeManifestPath = resolve(outputDir, 'runtime-manifest.json');
   const promptManifestPath = resolve(outputDir, 'prompt-manifest.json');
   mkdirSync(dirname(runtimeManifestPath), { recursive: true });
   writeFileSync(
     runtimeManifestPath,
-    `${JSON.stringify(canonicalValue(runtimeManifest), null, 2)}\n`,
+    rendered.runtimeContent,
     'utf8',
   );
   writeFileSync(
     promptManifestPath,
-    `${JSON.stringify(canonicalValue(promptManifest), null, 2)}\n`,
+    rendered.promptContent,
     'utf8',
   );
 
   return {
     runtimeManifestPath,
     promptManifestPath,
-    runtimeDigest: runtimeManifest.runtimeDigest,
-    promptDigest: promptManifest.promptDigest,
+    runtimeDigest: rendered.runtimeDigest,
+    promptDigest: rendered.promptDigest,
   };
 }
