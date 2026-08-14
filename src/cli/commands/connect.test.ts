@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { runConnect, type ConnectCommandDependencies } from './connect.js';
+import {
+  openVerificationUrl,
+  runConnect,
+  type ConnectCommandDependencies,
+} from './connect.js';
 
 const appId = '019fa9a9-d5f7-7ec3-a3c7-8899de400001';
 const environmentId = '019fa9a9-d5f7-7ec3-a3c7-8899de400002';
@@ -77,6 +81,23 @@ function connectedClient() {
 }
 
 describe('glirastes connect command', () => {
+  it('opens Windows verification URLs with metacharacters without a shell', async () => {
+    const url = 'https://platform.example/connect/pair?code=A&B=x|calc.exe';
+    const launch = vi.fn().mockResolvedValue(undefined);
+
+    await openVerificationUrl(url, 'win32', launch);
+
+    expect(launch).toHaveBeenCalledOnce();
+    expect(launch).toHaveBeenCalledWith(
+      'rundll32.exe',
+      ['url.dll,FileProtocolHandler', url],
+    );
+    expect(launch).not.toHaveBeenCalledWith(
+      expect.stringMatching(/^(?:cmd|powershell)(?:\.exe)?$/i),
+      expect.anything(),
+    );
+  });
+
   it('preflights, pairs the green receipt, and materializes only after identity validation', async () => {
     const rootDir = await fixture();
     const client = connectedClient();

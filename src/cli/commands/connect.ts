@@ -96,16 +96,20 @@ function connectError(
   });
 }
 
-async function defaultOpenBrowser(url: string): Promise<void> {
-  if (process.platform === 'darwin') {
-    await execFileAsync('open', [url]);
+export async function openVerificationUrl(
+  url: string,
+  platform: NodeJS.Platform = process.platform,
+  launch: (file: string, args: string[]) => Promise<unknown> = execFileAsync,
+): Promise<void> {
+  if (platform === 'darwin') {
+    await launch('open', [url]);
     return;
   }
-  if (process.platform === 'win32') {
-    await execFileAsync('cmd', ['/c', 'start', '', url]);
+  if (platform === 'win32') {
+    await launch('rundll32.exe', ['url.dll,FileProtocolHandler', url]);
     return;
   }
-  await execFileAsync('xdg-open', [url]);
+  await launch('xdg-open', [url]);
 }
 
 function localRunnerKey(): string {
@@ -234,7 +238,7 @@ export async function runConnect(
     log(`Open ${started.verificationUri}`);
     log(`Enter code ${started.userCode}`);
   }
-  await (dependencies.openBrowser ?? defaultOpenBrowser)(
+  await (dependencies.openBrowser ?? openVerificationUrl)(
     started.verificationUri,
   );
   const token = await client.pollForConnection({
