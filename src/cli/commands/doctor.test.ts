@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { discoverFoundationExecutions } from '../../codegen/index.js';
 import { runCli } from '../index.js';
 import { applySetupPlan } from './apply-setup-plan.js';
-import { createDoctorReport } from './doctor.js';
+import { createDoctorReport, formatDoctorReport } from './doctor.js';
 import { createSetupPlan } from './setup-plan.js';
 
 const id = (suffix: string) => (
@@ -103,6 +103,7 @@ describe('createDoctorReport', () => {
       'project', 'framework', 'auth-provider', 'principal', 'artifacts',
       'build', 'receipt', 'runtime-mode',
     ]));
+    expect(formatDoctorReport(first)).toMatch(/restart the application/i);
     expect(JSON.stringify(first)).not.toMatch(/prompt|secret|credential|source/i);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(await readFile(join(rootDir, '.glirastes/setup-artifact.json'), 'utf8'))

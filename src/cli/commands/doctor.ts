@@ -192,7 +192,7 @@ export function formatDoctorReport(report: DoctorReport): string {
   }
   lines.push('');
   lines.push(report.status === 'pass'
-    ? `${report.counts.tools} tools ready. Restart state is current.`
+    ? `${report.counts.tools} tools ready. Restart the application to activate local changes.`
     : `${report.counts.failed} required checks failed.`);
   return lines.join('\n');
 }
