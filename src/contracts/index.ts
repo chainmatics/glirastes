@@ -20,6 +20,7 @@ export {
   LocalBindingReferenceSchema,
   ManifestRevisionSchema,
   ManifestToolSchema,
+  ToolPresentationSchema,
   RevisionSignatureSchema,
   RuntimeRevisionEnvelopeSchema,
   RuntimeDeploymentBundleSchema,
@@ -42,6 +43,7 @@ export type {
   RuntimePolicyRevision,
   RuntimeToolPolicy,
   SecurityRevocation,
+  ToolPresentation,
   ToolRiskClass,
 } from './revisions.js';
 

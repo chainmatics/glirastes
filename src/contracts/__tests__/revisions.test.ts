@@ -41,6 +41,12 @@ describe('ManifestRevisionSchema', () => {
       executionKind: 'endpoint',
       name: 'list_tasks',
       description: 'List visible tasks.',
+      presentation: {
+        locale: 'de-DE',
+        singular: 'Aufgabenliste',
+        plural: 'Aufgabenlisten',
+        approval: 'Aufgabenliste anzeigen',
+      },
       riskClass: 'safe-read',
       enabled: true,
       tombstone: false,
@@ -53,8 +59,16 @@ describe('ManifestRevisionSchema', () => {
   };
 
   it('accepts immutable tool identity and source fingerprints', () => {
-    expect(ManifestRevisionSchema.parse(manifest).tools[0]?.toolId)
-      .toBe(manifest.tools[0]?.toolId);
+    const parsed = ManifestRevisionSchema.parse(manifest);
+    expect(parsed.tools[0]?.toolId).toBe(manifest.tools[0]?.toolId);
+    expect(parsed.tools[0]?.presentation?.approval)
+      .toBe('Aufgabenliste anzeigen');
+  });
+
+  it('keeps presentation optional for historical signed revisions', () => {
+    const candidate = structuredClone(manifest);
+    delete candidate.tools[0]!.presentation;
+    expect(ManifestRevisionSchema.safeParse(candidate).success).toBe(true);
   });
 
   it('rejects a tombstone that remains enabled', () => {

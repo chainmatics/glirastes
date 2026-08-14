@@ -52,6 +52,12 @@ function fixtureArtifact(): unknown {
         sourceFingerprint: DIGEST,
         name: 'tasks.listTasks',
         description: 'List the tasks the caller may see.',
+        presentation: {
+          locale: 'de-DE',
+          singular: 'Aufgabenliste',
+          plural: 'Aufgabenlisten',
+          approval: 'Aufgabenliste anzeigen',
+        },
         executionKind: 'endpoint',
         method: 'GET',
         path: '/api/tasks',
@@ -69,6 +75,12 @@ function fixtureArtifact(): unknown {
         sourceFingerprint: DIGEST,
         name: 'ui.navigate',
         description: 'Navigate the app to a named view.',
+        presentation: {
+          locale: 'de-DE',
+          singular: 'Navigation',
+          plural: 'Navigationen',
+          approval: 'Ansicht wechseln',
+        },
         executionKind: 'ui',
         actionBindingRef: 'navigate',
         allowedRoles: ['member'],
@@ -185,6 +197,8 @@ describe('createLocalRuntimeSource', () => {
     expect(snapshot.manifestRevision.signature.keyId).toBe(source.keyId);
     expect(snapshot.agentRevision.signature.keyId).toBe(source.keyId);
     expect(snapshot.policyRevision.signature.keyId).toBe(source.keyId);
+    expect(snapshot.manifestRevision.tools[0]?.presentation?.approval)
+      .toBe('Aufgabenliste anzeigen');
   });
 
   it('yields a registry in the model-safe manifest name domain', () => {

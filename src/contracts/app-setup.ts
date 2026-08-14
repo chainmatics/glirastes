@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { findForbiddenPlatformContentPath } from './content-boundary.js';
-import { ToolRiskClassSchema } from './revisions.js';
+import {
+  ToolPresentationSchema,
+  ToolRiskClassSchema,
+} from './revisions.js';
 
 const uuid = z.uuid();
 const identifier = z.string().trim().min(1).max(200);
@@ -51,6 +54,8 @@ export const AppSetupToolCandidateSchema = z.object({
   /** Short operational guidance; never prompts, source, or business data. */
   usageHints: z.array(z.string().trim().min(1).max(500)).min(1).max(20)
     .optional(),
+  /** Curated operator-facing labels, shared by CLI, runtime, and UI. */
+  presentation: ToolPresentationSchema.optional(),
   executionKind: z.enum(['endpoint', 'ui']),
   /**
    * Technical metadata that describes the operation without being prose, so
@@ -171,6 +176,7 @@ export function assertAppSetupSemanticParity(
       || !tool.module
       || !tool.sharedWith
       || !tool.usageHints
+      || !tool.presentation
     ) {
       throw new Error(`Tool ${tool.name} has incomplete curated semantics`);
     }

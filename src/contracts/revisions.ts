@@ -29,6 +29,18 @@ export const ToolRiskClassSchema = z.enum([
   'unknown',
 ]);
 
+/**
+ * Curated, locale-specific labels for operator-facing surfaces. These values
+ * describe the operation; they never replace policy or execution checks.
+ */
+export const ToolPresentationSchema = z.object({
+  locale: z.string().trim().min(2).max(35)
+    .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/),
+  singular: z.string().trim().min(1).max(200),
+  plural: z.string().trim().min(1).max(200),
+  approval: z.string().trim().min(1).max(500),
+}).strict();
+
 const ManifestToolBaseSchema = z.object({
   toolId: uuid,
   sourceFingerprint: digest,
@@ -39,6 +51,7 @@ const ManifestToolBaseSchema = z.object({
   sharedWith: z.array(identifier).max(50).optional(),
   usageHints: z.array(z.string().trim().min(1).max(500)).min(1).max(20)
     .optional(),
+  presentation: ToolPresentationSchema.optional(),
   riskClass: ToolRiskClassSchema,
   enabled: z.boolean(),
   tombstone: z.boolean(),
@@ -321,6 +334,7 @@ export type RevisionSignature = z.infer<typeof RevisionSignatureSchema>;
 export type SignedPromptBinding = z.infer<typeof SignedPromptBindingSchema>;
 export type LocalBindingReference = z.infer<typeof LocalBindingReferenceSchema>;
 export type ToolRiskClass = z.infer<typeof ToolRiskClassSchema>;
+export type ToolPresentation = z.infer<typeof ToolPresentationSchema>;
 export type ManifestTool = z.infer<typeof ManifestToolSchema>;
 export type ManifestRevision = z.infer<typeof ManifestRevisionSchema>;
 export type AgentRevision = z.infer<typeof AgentRevisionSchema>;

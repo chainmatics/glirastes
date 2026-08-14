@@ -251,6 +251,12 @@ describe('curated tool semantics', () => {
       module: 'task_query',
       sharedWith: ['task_mutation'],
       usageHints: ['Use for filtered task lists.', 'Excludes deleted tasks.'],
+      presentation: {
+        locale: 'de-DE',
+        singular: 'Aufgabenliste',
+        plural: 'Aufgabenlisten',
+        approval: 'Aufgabenliste anzeigen',
+      },
     }],
   };
 
@@ -261,6 +267,12 @@ describe('curated tool semantics', () => {
       modelName: 'list_tasks',
       module: 'task_query',
       sharedWith: ['task_mutation'],
+      presentation: {
+        locale: 'de-DE',
+        singular: 'Aufgabenliste',
+        plural: 'Aufgabenlisten',
+        approval: 'Aufgabenliste anzeigen',
+      },
     });
   });
 
@@ -268,6 +280,13 @@ describe('curated tool semantics', () => {
     expect(() => assertAppSetupSemanticParity({
       ...semanticArtifact,
       tools: [{ ...semanticArtifact.tools[0], usageHints: undefined }],
+    }, ['list_tasks'])).toThrow('incomplete curated semantics');
+  });
+
+  it('fails closed when an enabled tool has no presentation semantics', () => {
+    expect(() => assertAppSetupSemanticParity({
+      ...semanticArtifact,
+      tools: [{ ...semanticArtifact.tools[0], presentation: undefined }],
     }, ['list_tasks'])).toThrow('incomplete curated semantics');
   });
 
