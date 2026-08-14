@@ -76,7 +76,10 @@ async function fixture(overrides?: {
   descriptorEnvironmentId?: string;
   receiptAppId?: string;
   receiptPlanDigest?: string;
+  receiptRuntimeDigest?: string;
+  receiptPromptDigest?: string;
   environment?: string;
+  writeEnvironment?: boolean;
 }): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'glirastes-sync-'));
   await mkdir(join(root, '.glirastes'), { recursive: true });
@@ -92,8 +95,8 @@ async function fixture(overrides?: {
       mode: 'standalone',
       appId: overrides?.receiptAppId ?? appId,
       toolCount: 0,
-      runtimeDigest: digest('R'),
-      promptDigest: digest('S'),
+      runtimeDigest: overrides?.receiptRuntimeDigest ?? digest('R'),
+      promptDigest: overrides?.receiptPromptDigest ?? digest('S'),
       restartRequired: true,
     }, null, 2)}\n`,
   );
@@ -107,17 +110,19 @@ async function fixture(overrides?: {
       runnerKey: 'fixture-runner',
     }, null, 2)}\n`,
   );
-  await writeFile(
-    join(root, '.env.local'),
-    overrides?.environment ?? [
-      'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
-      `GLIRASTES_APP_ID=${appId}`,
-      `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
-      'GLIRASTES_RUNNER_KEY=fixture-runner',
-      'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
-      '',
-    ].join('\n'),
-  );
+  if (overrides?.writeEnvironment !== false) {
+    await writeFile(
+      join(root, '.env.local'),
+      overrides?.environment ?? [
+        'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+        `GLIRASTES_APP_ID=${appId}`,
+        `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
+        'GLIRASTES_RUNNER_KEY=fixture-runner',
+        'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+        '',
+      ].join('\n'),
+    );
+  }
   return root;
 }
 
@@ -148,6 +153,10 @@ function dependencies(overrides: Partial<SyncCommandDependencies> = {}) {
     value: {
       env: {},
       createPlan: vi.fn().mockResolvedValue(plan()),
+      currentManifestDigests: vi.fn().mockResolvedValue({
+        runtimeDigest: digest('R'),
+        promptDigest: digest('S'),
+      }),
       isGitIgnored: vi.fn().mockResolvedValue(true),
       clientFactory,
       log: vi.fn(),
@@ -209,18 +218,13 @@ describe('runSync', () => {
     expect(output).not.toContain('gl_abcdefghijklmnopqrstuvwxyz123456');
   });
 
-  it('prefers a complete process credential set over the verified local file', async () => {
+  it('uses a complete process credential set without requiring .env.local', async () => {
     const rootDir = await fixture({
-      environment: [
-        'GLIRASTES_CONTROL_PLANE_URL=https://wrong.example',
-        `GLIRASTES_APP_ID=${id('90')}`,
-        `GLIRASTES_ENVIRONMENT_ID=${id('91')}`,
-        'GLIRASTES_RUNNER_KEY=wrong-runner',
-        'GLIRASTES_API_KEY=gl_wrongwrongwrongwrongwrongwrong12',
-        '',
-      ].join('\n'),
+      writeEnvironment: false,
     });
+    const isGitIgnored = vi.fn();
     const deps = dependencies({
+      isGitIgnored,
       env: {
         GLIRASTES_CONTROL_PLANE_URL: 'https://control.example',
         GLIRASTES_APP_ID: appId,
@@ -233,6 +237,27 @@ describe('runSync', () => {
     await runSync({ rootDir }, deps.value);
 
     expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({
+      setupApiKey: 'gl_processprocessprocessprocess1234',
+    }));
+    expect(isGitIgnored).not.toHaveBeenCalled();
+  });
+
+  it('fills a partial process credential set only from verified .env.local', async () => {
+    const rootDir = await fixture();
+    const isGitIgnored = vi.fn().mockResolvedValue(true);
+    const deps = dependencies({
+      isGitIgnored,
+      env: {
+        GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234',
+      },
+    });
+
+    await runSync({ rootDir }, deps.value);
+
+    expect(isGitIgnored).toHaveBeenCalledOnce();
+    expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: 'https://control.example',
+      appId,
       setupApiKey: 'gl_processprocessprocessprocess1234',
     }));
   });
@@ -265,6 +290,9 @@ describe('runSync', () => {
   it('rejects an unignored local secret target before constructing a network client', async () => {
     const rootDir = await fixture();
     const deps = dependencies({
+      env: {
+        GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234',
+      },
       isGitIgnored: vi.fn().mockResolvedValue(false),
     });
 
@@ -277,6 +305,20 @@ describe('runSync', () => {
 
   it('rejects a stale setup receipt before constructing a network client', async () => {
     const rootDir = await fixture({ receiptPlanDigest: digest('Z') });
+    const deps = dependencies();
+
+    await expect(runSync({ rootDir }, deps.value)).rejects.toMatchObject({
+      code: 'E-SYNC-SETUP-STALE',
+    });
+
+    expect(deps.clientFactory).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['runtime', { receiptRuntimeDigest: digest('Z') }],
+    ['prompt', { receiptPromptDigest: digest('Z') }],
+  ] as const)('rejects a stale %s manifest digest before network access', async (_name, values) => {
+    const rootDir = await fixture(values);
     const deps = dependencies();
 
     await expect(runSync({ rootDir }, deps.value)).rejects.toMatchObject({

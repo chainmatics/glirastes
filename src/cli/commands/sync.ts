@@ -15,6 +15,7 @@ import {
 } from '../../sync/app-setup-client.js';
 import { connectionDescriptorPath } from './connection-descriptor.js';
 import { preflightConnectionEnvironment } from './connection-environment.js';
+import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 import { createSetupPlan, type SetupPlan } from './setup-plan.js';
 
 const digest = z.string().regex(
@@ -68,6 +69,7 @@ export interface SyncCommandDependencies {
     rootDir: string;
     managed: boolean;
   }) => Promise<SetupPlan>;
+  currentManifestDigests?: typeof renderCurrentSetupManifests;
   isGitIgnored?: (path: string, root: string) => Promise<boolean>;
   clientFactory?: (options: {
     baseUrl: string;
@@ -155,8 +157,28 @@ export async function loadConnectionCredentials(options: {
   rootDir: string;
   env?: NodeJS.ProcessEnv;
   isGitIgnored?: (path: string, root: string) => Promise<boolean>;
+  requireLocalSecretFile?: boolean;
 }): Promise<ConnectionCredentials> {
   const rootDir = resolve(options.rootDir);
+  const env = options.env ?? process.env;
+  const processValues = Object.fromEntries(connectionVariableNames.map(
+    (name) => [name, env[name]?.trim() || undefined],
+  ));
+  const hasCompleteProcessSet = connectionVariableNames.every(
+    (name) => processValues[name],
+  );
+  if (hasCompleteProcessSet && !options.requireLocalSecretFile) {
+    const parsed = connectionCredentialsSchema.safeParse(processValues);
+    if (!parsed.success) {
+      throw syncError(
+        'E-SYNC-CREDENTIAL-INVALID',
+        'The process Connected credential set is invalid.',
+        'repair-process-connection-environment',
+      );
+    }
+    return parsed.data;
+  }
+
   const targets = await preflightConnectionEnvironment({
     projectRoot: rootDir,
     framework: 'nextjs',
@@ -176,10 +198,9 @@ export async function loadConnectionCredentials(options: {
       'rerun-connect',
     );
   }
-  const env = options.env ?? process.env;
   const selected = Object.fromEntries(connectionVariableNames.map((name) => [
     name,
-    env[name]?.trim() || fileValues[name],
+    processValues[name] || fileValues[name],
   ]));
   const parsed = connectionCredentialsSchema.safeParse(selected);
   if (!parsed.success) {
@@ -258,11 +279,14 @@ export async function runSync(
     );
   }
 
+  const managed = receipt.data.mode === 'managed';
   const createPlan = dependencies.createPlan ?? createSetupPlan;
-  const currentPlan = await createPlan({
-    rootDir,
-    managed: receipt.data.mode === 'managed',
-  });
+  const currentManifestDigests = dependencies.currentManifestDigests
+    ?? renderCurrentSetupManifests;
+  const [currentPlan, rendered] = await Promise.all([
+    createPlan({ rootDir, managed }),
+    currentManifestDigests({ rootDir, managed }),
+  ]);
   const adopt = currentPlan.operations.find(({ kind }) => kind === 'adopt');
   const artifactRaw = await readFile(
     resolve(rootDir, '.glirastes/setup-artifact.json'),
@@ -275,6 +299,8 @@ export async function runSync(
     || currentPlan.planDigest !== receipt.data.planDigest
     || !adopt
     || adopt.digest !== currentArtifactDigest
+    || receipt.data.runtimeDigest !== rendered.runtimeDigest
+    || receipt.data.promptDigest !== rendered.promptDigest
   ) {
     throw syncError(
       'E-SYNC-SETUP-STALE',

@@ -155,6 +155,38 @@ describe('createDoctorReport', () => {
     }));
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('still requires the verified local secret file with complete process credentials', async () => {
+    const rootDir = await fixture();
+    const environmentId = id('9');
+    await writeJson(rootDir, '.glirastes/platform-connection.json', {
+      schemaVersion: 1,
+      baseUrl: 'https://control.example',
+      appId: id('1'),
+      environmentId,
+      runnerKey: 'fixture-runner',
+    });
+
+    const report = await createDoctorReport({
+      rootDir,
+      env: {
+        GLIRASTES_CONTROL_PLANE_URL: 'https://control.example',
+        GLIRASTES_APP_ID: id('1'),
+        GLIRASTES_ENVIRONMENT_ID: environmentId,
+        GLIRASTES_RUNNER_KEY: 'fixture-runner',
+        GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234',
+      },
+      isGitIgnored: vi.fn().mockResolvedValue(true),
+    });
+
+    expect(report.status).toBe('fail');
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: 'connection-secret-path', status: 'fail',
+    }));
+    expect(JSON.stringify(report)).not.toContain(
+      'gl_processprocessprocessprocess1234',
+    );
+  });
   it('passes a current local setup with bounded deterministic checks', async () => {
     const rootDir = await fixture();
     const fetchImpl = vi.fn();

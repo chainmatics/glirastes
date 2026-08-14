@@ -2,9 +2,10 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { isFoundationDiagnosticError } from '../../diagnostics/index.js';
-import { renderManifests } from './validate-build.js';
+import type { RenderedManifests } from './validate-build.js';
 import { detectSetupProfile } from './setup-profile.js';
 import { createSetupPlan } from './setup-plan.js';
+import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 import {
   assertConnectionScope,
   loadConnectionCredentials,
@@ -120,16 +121,14 @@ export async function createDoctorReport(
     ? check('principal', 'pass', 'E-SCOPE-102')
     : check('principal', 'fail', 'E-SCOPE-003', 'declare-server-principal'));
 
-  let rendered: Awaited<ReturnType<typeof renderManifests>> | undefined;
+  let rendered: RenderedManifests | undefined;
   let plan: Awaited<ReturnType<typeof createSetupPlan>> | undefined;
   try {
     [rendered, plan] = await Promise.all([
-      renderManifests({
+      renderCurrentSetupManifests({
         rootDir,
-        appId: profile.appId,
-        inventoryPath: profile.paths.inventory,
-        promptBundlePath: profile.paths.promptBundle,
-        setupArtifactPath: profile.paths.setupArtifact,
+        managed: Boolean(options.managed),
+        profile,
       }),
       createSetupPlan({ rootDir, managed: options.managed }),
     ]);
@@ -203,6 +202,7 @@ export async function createDoctorReport(
         rootDir,
         env: options.env,
         isGitIgnored: options.isGitIgnored,
+        requireLocalSecretFile: true,
       });
       checks.push(check('connection-secret-path', 'pass', 'E-CONNECT-101'));
       checks.push(check('connection-credential', 'pass', 'E-CONNECT-102'));
