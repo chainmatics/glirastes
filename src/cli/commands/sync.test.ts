@@ -344,4 +344,66 @@ describe('runSync', () => {
     expect(deps.createRun).toHaveBeenCalledOnce();
     expect(deps.uploadArtifact).toHaveBeenCalledOnce();
   });
+
+  it('fails closed when the canonical artifact is atomically replaced during preflight', async () => {
+    const rootDir = await fixture();
+    const replacement = {
+      ...artifact,
+      discoveryDigest: digest('Z'),
+      generatedAt: '2026-08-14T11:00:00.000Z',
+    };
+    const replacementRaw = `${JSON.stringify(replacement, null, 2)}\n`;
+    const replacementDigest = `sha256:${createHash('sha256')
+      .update(replacementRaw).digest('base64url')}`;
+    const replacementPlan = plan();
+    replacementPlan.operations = replacementPlan.operations.map((operation) => (
+      operation.kind === 'adopt'
+        ? { ...operation, digest: replacementDigest }
+        : operation
+    ));
+    const deps = dependencies({
+      createPlan: vi.fn().mockResolvedValue(replacementPlan),
+      currentManifestDigests: vi.fn(async () => {
+        await writeFile(
+          join(rootDir, '.glirastes/setup-artifact.json'),
+          replacementRaw,
+        );
+        return {
+          runtimeDigest: digest('R'),
+          promptDigest: digest('S'),
+        };
+      }),
+    });
+
+    await expect(runSync({ rootDir }, deps.value)).rejects.toMatchObject({
+      code: 'E-SYNC-SETUP-STALE',
+    });
+    expect(deps.clientFactory).not.toHaveBeenCalled();
+    expect(deps.uploadArtifact).not.toHaveBeenCalled();
+  });
+
+  it('propagates external cancellation and the bounded deadline to the sync client', async () => {
+    const rootDir = await fixture();
+    const controller = new AbortController();
+    const syncArtifact = vi.fn().mockResolvedValue({
+      runId,
+      appId,
+      status: 'ready',
+      updatedAt: '2026-08-14T10:00:00.000Z',
+    });
+    const deps = dependencies({
+      clientFactory: vi.fn(() => ({ syncArtifact })),
+    });
+
+    await runSync({
+      rootDir,
+      signal: controller.signal,
+      timeoutMs: 1_234,
+    }, deps.value);
+
+    expect(syncArtifact).toHaveBeenCalledWith(artifact, {
+      signal: controller.signal,
+      timeoutMs: 1_234,
+    });
+  });
 });

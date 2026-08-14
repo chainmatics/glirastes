@@ -285,17 +285,11 @@ async function runSetupWizardCommand(rest: string[]): Promise<void> {
           await validateWorkspace({ rootDir: root, appId });
         },
         sync: async (root) => {
-          await runSetup([
-            'sync',
-            '--root', root,
+          const run = await syncExplicitSetupArtifact(root, [
+            ...rest,
             '--artifact', artifactPathFrom(rest),
-            ...connectionFlags(rest),
           ]);
-          const artifact = JSON.parse(readFileSync(
-            join(root, artifactPathFrom(rest)),
-            'utf8',
-          )) as { runId: string };
-          return { runId: artifact.runId };
+          return { runId: run.runId };
         },
       },
     });
@@ -308,19 +302,34 @@ async function runSetupWizardCommand(rest: string[]): Promise<void> {
   }
 }
 
+/** Preserve the guided interview's explicit assessed-artifact upload path. */
+async function syncExplicitSetupArtifact(
+  rootDir: string,
+  options: string[],
+) {
+  const artifactPath = getFlagValue(options, '--artifact');
+  if (!artifactPath) {
+    throw new Error('--artifact is required for setup sync.');
+  }
+  const artifact = AppSetupArtifactSchema.parse(JSON.parse(
+    readFileSync(resolve(rootDir, artifactPath), 'utf8'),
+  ));
+  const connection = setupConnection(options);
+  if (artifact.appId !== connection.appId) {
+    throw new Error('App setup artifact targets a different app');
+  }
+  const client = new AppSetupClient(connection);
+  await client.createRun({
+    runId: artifact.runId,
+    assessmentMode: artifact.assessmentMode,
+    discoveryDigest: artifact.discoveryDigest,
+  });
+  return client.uploadArtifact(artifact);
+}
+
 function artifactPathFrom(rest: string[]): string {
   return getFlagValue(rest, '--artifact')
     ?? '.glirastes/app-setup-artifact.json';
-}
-
-/** Pass the connection flags through to `setup sync` untouched. */
-function connectionFlags(rest: string[]): string[] {
-  const passed: string[] = [];
-  for (const flag of ['--base-url', '--app-id', '--environment-id']) {
-    const value = getFlagValue(rest, flag);
-    if (value) passed.push(flag, value);
-  }
-  return passed;
 }
 
 function parseAssessmentMode(
@@ -468,22 +477,7 @@ async function runSetup(
     return;
   }
 
-  const artifactPath = getFlagValue(options, '--artifact');
-  if (!artifactPath) {
-    throw new Error('--artifact is required for setup sync.');
-  }
-  const artifact = AppSetupArtifactSchema.parse(JSON.parse(
-    readFileSync(resolve(rootDir, artifactPath), 'utf8'),
-  ));
-  if (artifact.appId !== connection.appId) {
-    throw new Error('App setup artifact targets a different app');
-  }
-  await client.createRun({
-    runId: artifact.runId,
-    assessmentMode: artifact.assessmentMode,
-    discoveryDigest: artifact.discoveryDigest,
-  });
-  const run = await client.uploadArtifact(artifact);
+  const run = await syncExplicitSetupArtifact(rootDir, options);
   if (!quiet) {
     console.log(`Synced setup run ${run.runId}: ${run.status}`);
   }

@@ -55,6 +55,11 @@ export interface UpdateAppSetupStatus {
   };
 }
 
+export interface AppSetupSyncOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 export class AppSetupClient {
   constructor(private readonly options: {
     baseUrl: string;
@@ -63,7 +68,10 @@ export class AppSetupClient {
     fetchImpl?: typeof fetch;
   }) {}
 
-  async createRun(input: CreateAppSetupRun): Promise<AppSetupRun> {
+  async createRun(
+    input: CreateAppSetupRun,
+    signal?: AbortSignal,
+  ): Promise<AppSetupRun> {
     const body = z.object({
       runId: uuid,
       assessmentMode: AppSetupAssessmentModeSchema,
@@ -72,6 +80,7 @@ export class AppSetupClient {
     return this.request('/runs', {
       method: 'POST',
       body: JSON.stringify(body),
+      signal,
     }, body.runId);
   }
 
@@ -90,7 +99,10 @@ export class AppSetupClient {
     }, parsedRunId);
   }
 
-  async uploadArtifact(value: unknown): Promise<AppSetupRun> {
+  async uploadArtifact(
+    value: unknown,
+    signal?: AbortSignal,
+  ): Promise<AppSetupRun> {
     const artifact = AppSetupArtifactSchema.parse(value);
     if (artifact.appId !== this.options.appId) {
       throw new Error('App setup artifact targets a different app');
@@ -100,22 +112,52 @@ export class AppSetupClient {
       {
         method: 'PUT',
         body: JSON.stringify(artifact),
+        signal,
       },
       artifact.runId,
     );
   }
 
-  async syncArtifact(value: unknown): Promise<AppSetupRun> {
+  async syncArtifact(
+    value: unknown,
+    options: AppSetupSyncOptions = {},
+  ): Promise<AppSetupRun> {
     const artifact = AppSetupArtifactSchema.parse(value);
     if (artifact.appId !== this.options.appId) {
       throw new Error('App setup artifact targets a different app');
     }
-    await this.createRun({
-      runId: artifact.runId,
-      assessmentMode: artifact.assessmentMode,
-      discoveryDigest: artifact.discoveryDigest,
-    });
-    return this.uploadArtifact(artifact);
+    const timeoutMs = z.number().int().positive().max(300_000).parse(
+      options.timeoutMs ?? 30_000,
+    );
+    const controller = new AbortController();
+    let timedOut = false;
+    const cancel = (): void => { controller.abort(); };
+    if (options.signal?.aborted) cancel();
+    else options.signal?.addEventListener('abort', cancel, { once: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      await this.createRun({
+        runId: artifact.runId,
+        assessmentMode: artifact.assessmentMode,
+        discoveryDigest: artifact.discoveryDigest,
+      }, controller.signal);
+      return await this.uploadArtifact(artifact, controller.signal);
+    } catch (error) {
+      if (timedOut) {
+        throw new Error('Glirastes app setup request timed out');
+      }
+      if (options.signal?.aborted) {
+        throw new Error('Glirastes app setup request cancelled');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', cancel);
+    }
   }
 
   async getRun(runId: string): Promise<AppSetupRun> {

@@ -315,6 +315,48 @@ describe('glirastes setup', () => {
     }
   });
 
+  it('keeps setup guided on its explicit assessed-artifact upload path', async () => {
+    const { root, artifact } = await setupFixture();
+    await writeFile(
+      join(root, '.glirastes/foundation-execution-inventory.json'),
+      await readFile(
+        join(root, '.glirastes/local-execution-inventory.v2.json'),
+        'utf8',
+      ),
+    );
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        runId: artifact.runId,
+        appId: artifact.appId,
+        status: 'discovering',
+        updatedAt: '2026-07-30T10:00:00.000Z',
+      }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        runId: artifact.runId,
+        appId: artifact.appId,
+        status: 'ready',
+        updatedAt: '2026-07-30T10:00:00.000Z',
+      })));
+    vi.stubGlobal('fetch', fetchImpl);
+    vi.stubEnv('GLIRASTES_API_KEY', 'guided-setup-secret');
+
+    await runCli([
+      'setup', 'guided',
+      '--root', root,
+      '--assessment', 'manual',
+      '--artifact', '.glirastes/app-setup.json',
+      '--base-url', 'https://control.example',
+      '--app-id', artifact.appId,
+    ]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+      `https://control.example/v2/apps/${artifact.appId}/runtime-setup/runs`,
+      `https://control.example/v2/apps/${artifact.appId}`
+        + `/runtime-setup/runs/${artifact.runId}/artifact`,
+    ]);
+  });
+
   it('keeps setup --managed as an adapter to the same Connected sync', async () => {
     const { root, artifact } = await setupFixture();
     const environmentId = id('9');

@@ -57,10 +57,15 @@ export interface SyncCommandOptions {
   rootDir: string;
   json?: boolean;
   quiet?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 interface AppSetupSyncClient {
-  syncArtifact(artifact: AppSetupArtifact): Promise<AppSetupRun>;
+  syncArtifact(
+    artifact: AppSetupArtifact,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<AppSetupRun>;
 }
 
 export interface SyncCommandDependencies {
@@ -95,6 +100,18 @@ function syncError(
 async function readJson(path: string): Promise<unknown> {
   try {
     return JSON.parse(await readFile(path, 'utf8')) as unknown;
+  } catch {
+    throw syncError(
+      'E-SYNC-LOCAL-INVALID',
+      'A required local Connected artifact is missing or invalid.',
+      'rerun-connect-or-setup',
+    );
+  }
+}
+
+async function readRequiredText(path: string): Promise<string> {
+  try {
+    return await readFile(path, 'utf8');
   } catch {
     throw syncError(
       'E-SYNC-LOCAL-INVALID',
@@ -240,12 +257,12 @@ export async function runSync(
 ): Promise<void> {
   const rootDir = resolve(options.rootDir);
   const [
-    artifactValue,
+    artifactRaw,
     receiptValue,
     descriptor,
     credentials,
   ] = await Promise.all([
-    readJson(resolve(rootDir, '.glirastes/setup-artifact.json')),
+    readRequiredText(resolve(rootDir, '.glirastes/setup-artifact.json')),
     readJson(resolve(rootDir, '.glirastes/setup-receipt.json')),
     readPlatformConnectionDescriptor(rootDir),
     loadConnectionCredentials({
@@ -254,6 +271,16 @@ export async function runSync(
       isGitIgnored: dependencies.isGitIgnored,
     }),
   ]);
+  let artifactValue: unknown;
+  try {
+    artifactValue = JSON.parse(artifactRaw) as unknown;
+  } catch {
+    throw syncError(
+      'E-SYNC-LOCAL-INVALID',
+      'The canonical setup artifact or receipt is invalid.',
+      'rerun-local-setup',
+    );
+  }
   const artifact = AppSetupArtifactSchema.safeParse(artifactValue);
   const receipt = receiptSchema.safeParse(receiptValue);
   if (!artifact.success || !receipt.success) {
@@ -288,10 +315,6 @@ export async function runSync(
     currentManifestDigests({ rootDir, managed }),
   ]);
   const adopt = currentPlan.operations.find(({ kind }) => kind === 'adopt');
-  const artifactRaw = await readFile(
-    resolve(rootDir, '.glirastes/setup-artifact.json'),
-    'utf8',
-  );
   const currentArtifactDigest = `sha256:${createHash('sha256')
     .update(artifactRaw).digest('base64url')}`;
   if (
@@ -309,6 +332,18 @@ export async function runSync(
     );
   }
 
+  // The uploaded object must come from the exact byte snapshot validated
+  // above. An atomic replacement during preflight is stale local state, even
+  // if a concurrently computed plan happens to describe the replacement.
+  const artifactPath = resolve(rootDir, '.glirastes/setup-artifact.json');
+  if (await readRequiredText(artifactPath) !== artifactRaw) {
+    throw syncError(
+      'E-SYNC-SETUP-STALE',
+      'The canonical setup artifact changed during sync preflight.',
+      'rerun-sync',
+    );
+  }
+
   const client = (dependencies.clientFactory ?? (
     (clientOptions) => new AppSetupClient(clientOptions)
   ))({
@@ -316,7 +351,10 @@ export async function runSync(
     setupApiKey: credentials.GLIRASTES_API_KEY,
     appId: descriptor.appId,
   });
-  const run = await client.syncArtifact(artifact.data);
+  const run = await client.syncArtifact(artifact.data, {
+    signal: options.signal,
+    timeoutMs: options.timeoutMs ?? 30_000,
+  });
   const result = {
     schemaVersion: 1 as const,
     status: run.status,

@@ -228,4 +228,69 @@ describe('AppSetupClient', () => {
       'Invalid Glirastes app setup response',
     );
   });
+
+  it.each(['create', 'upload'] as const)(
+    'bounds a hanging %s request with one deadline and redacted diagnostics',
+    async (hangingStep) => {
+      vi.useFakeTimers();
+      const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+        if (hangingStep === 'upload' && fetchImpl.mock.calls.length === 1) {
+          return Promise.resolve(new Response(JSON.stringify(runResponse)));
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('setup-secret leaked abort reason', 'AbortError'));
+          }, { once: true });
+        });
+      });
+      const client = new AppSetupClient({
+        baseUrl: 'https://control.example',
+        setupApiKey: 'setup-secret',
+        appId: artifact.appId,
+        fetchImpl,
+      });
+
+      const pending = client.syncArtifact(artifact, { timeoutMs: 250 });
+      const outcome = pending.catch((caught: unknown) => caught as Error);
+      await vi.advanceTimersByTimeAsync(250);
+      const error = await outcome;
+
+      expect(error.message).toBe('Glirastes app setup request timed out');
+      expect(error.message).not.toContain('setup-secret');
+      expect(fetchImpl).toHaveBeenCalledTimes(hangingStep === 'create' ? 1 : 2);
+      expect((fetchImpl.mock.calls.at(-1)?.[1] as RequestInit).signal?.aborted)
+        .toBe(true);
+      vi.useRealTimers();
+    },
+  );
+
+  it('propagates external cancellation through create and upload without leaking its reason', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => (
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('private cancellation reason', 'AbortError'));
+        }, { once: true });
+      })
+    ));
+    const client = new AppSetupClient({
+      baseUrl: 'https://control.example',
+      setupApiKey: 'setup-secret',
+      appId: artifact.appId,
+      fetchImpl,
+    });
+
+    const pending = client.syncArtifact(artifact, {
+      signal: controller.signal,
+      timeoutMs: 5_000,
+    });
+    controller.abort('setup-secret private cancellation reason');
+    const error = await pending.catch((caught: unknown) => caught as Error);
+
+    expect(error.message).toBe('Glirastes app setup request cancelled');
+    expect(error.message).not.toContain('setup-secret');
+    expect(error.message).not.toContain('private cancellation');
+    expect((fetchImpl.mock.calls[0]?.[1] as RequestInit).signal?.aborted)
+      .toBe(true);
+  });
 });
