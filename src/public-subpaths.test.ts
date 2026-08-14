@@ -102,13 +102,14 @@ describe('public foundation subpaths', () => {
       "type CommandName = 'scan' | 'setup' | 'doctor' | 'install' | 'validate' | 'build'",
     );
 
-    // The setup sub-commands stay the same three; `setup guided` preserves the
-    // old interview wizard while bare setup applies the detected local plan.
+    // `setup guided` preserves the old interview wizard while bare setup
+    // applies the detected local plan.
     const wizardSource = await readFile(
       new URL('./cli/commands/setup-wizard.ts', import.meta.url),
       'utf8',
     );
-    expect(wizardSource).toContain("['scan', 'sync', 'status']");
+    expect(wizardSource).toContain("return rest[0] === 'guided';");
+    expect(source).toContain('if (isWizardInvocation(rest))');
   });
 
   it('keeps the standalone STT surface framework-neutral', async () => {
