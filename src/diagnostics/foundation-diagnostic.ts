@@ -4,7 +4,8 @@ export type FoundationDiagnosticCode =
   | `E-SEMANTICS-${string}`
   | `E-BINDING-${string}`
   | `E-SIGNATURE-${string}`
-  | `E-SCOPE-${string}`;
+  | `E-SCOPE-${string}`
+  | `E-CONNECT-${string}`;
 
 export interface FoundationDiagnosticJson {
   schemaVersion: 1;
