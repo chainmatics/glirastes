@@ -84,11 +84,13 @@ async function defaultSleep(
 ): Promise<void> {
   if (signal?.aborted) return;
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener('abort', () => {
+    const finish = () => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
       resolve();
-    }, { once: true });
+    };
+    const timer = setTimeout(finish, milliseconds);
+    signal?.addEventListener('abort', finish, { once: true });
   });
 }
 
@@ -126,13 +128,21 @@ export class RuntimeConnectClient {
 
     while (true) {
       this.assertActive(options.signal, deadline);
-      await sleep(interval, options.signal);
+      await this.withDeadline(
+        deadline,
+        options.signal,
+        (signal) => sleep(interval, signal),
+      );
       this.assertActive(options.signal, deadline);
 
-      const value = await this.request(
-        '/token',
-        { deviceCode: options.deviceCode },
+      const value = await this.withDeadline(
+        deadline,
         options.signal,
+        (signal) => this.request(
+          '/token',
+          { deviceCode: options.deviceCode },
+          signal,
+        ),
       );
       const parsed = PairingTokenResultSchema.safeParse(value);
       if (!parsed.success) {
@@ -161,6 +171,62 @@ export class RuntimeConnectClient {
         'Platform pairing timed out.',
         'restart-browser-pairing',
       );
+    }
+  }
+
+  private async withDeadline<T>(
+    deadline: number,
+    externalSignal: AbortSignal | undefined,
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    this.assertActive(externalSignal, deadline);
+    const remaining = deadline - (this.options.now ?? Date.now)();
+    const controller = new AbortController();
+    let abortSource: 'external' | 'timeout' | undefined;
+    const onExternalAbort = () => {
+      if (controller.signal.aborted) return;
+      abortSource = 'external';
+      controller.abort(externalSignal?.reason);
+    };
+    const onTimeout = () => {
+      if (controller.signal.aborted) return;
+      abortSource = 'timeout';
+      controller.abort();
+    };
+    let rejectAborted: (error: Error) => void = () => undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      rejectAborted = reject;
+    });
+    const onInternalAbort = () => {
+      rejectAborted(new Error('connect operation aborted'));
+    };
+    controller.signal.addEventListener('abort', onInternalAbort, { once: true });
+    externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+    if (externalSignal?.aborted) onExternalAbort();
+    const timer = setTimeout(onTimeout, remaining);
+
+    try {
+      return await Promise.race([operation(controller.signal), aborted]);
+    } catch (error) {
+      if (abortSource === 'timeout') {
+        throw diagnostic(
+          'E-CONNECT-TIMEOUT',
+          'Platform pairing timed out.',
+          'restart-browser-pairing',
+        );
+      }
+      if (abortSource === 'external' || externalSignal?.aborted) {
+        throw diagnostic(
+          'E-CONNECT-CANCELLED',
+          'Platform pairing was cancelled.',
+          'restart-browser-pairing',
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', onExternalAbort);
+      controller.signal.removeEventListener('abort', onInternalAbort);
     }
   }
 

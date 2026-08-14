@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RuntimeConnectClient } from '../runtime-connect-client.js';
 
 const appId = '019fa9a9-d5f7-7ec3-a3c7-8899de400001';
@@ -12,6 +12,10 @@ function response(value: unknown, status = 200): Response {
     headers: { 'content-type': 'application/json' },
   });
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('RuntimeConnectClient', () => {
   it('starts pairing with only bounded local identity evidence', async () => {
@@ -76,8 +80,8 @@ describe('RuntimeConnectClient', () => {
     });
 
     expect(result.status).toBe('connected');
-    expect(sleep).toHaveBeenNthCalledWith(1, 1_000, undefined);
-    expect(sleep).toHaveBeenNthCalledWith(2, 2_000, undefined);
+    expect(sleep).toHaveBeenNthCalledWith(1, 1_000, expect.any(AbortSignal));
+    expect(sleep).toHaveBeenNthCalledWith(2, 2_000, expect.any(AbortSignal));
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     for (const [, init] of fetchImpl.mock.calls as Array<[string, RequestInit]>) {
       expect(JSON.parse(String(init.body))).toEqual({ deviceCode });
@@ -123,6 +127,104 @@ describe('RuntimeConnectClient', () => {
       expiresInSeconds: 60,
       signal: controller.signal,
     })).rejects.toMatchObject({ code: 'E-CONNECT-CANCELLED' });
+  });
+
+  it.each(['fetch', 'json'] as const)(
+    'aborts a never-resolving %s at the remaining pairing deadline',
+    async (stage) => {
+      vi.useFakeTimers();
+      let requestSignal: AbortSignal | undefined;
+      const fetchImpl = vi.fn(async (_url, init) => {
+        requestSignal = init?.signal as AbortSignal;
+        if (stage === 'fetch') {
+          return await new Promise<Response>(() => {});
+        }
+        return {
+          ok: true,
+          json: () => new Promise<unknown>(() => {}),
+        } as Response;
+      });
+      const client = new RuntimeConnectClient({
+        baseUrl: 'https://control.example',
+        fetchImpl,
+        sleep: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const polling = client.pollForConnection({
+        deviceCode,
+        pollIntervalMs: 1_000,
+        expiresInSeconds: 60,
+      });
+      const rejected = expect(polling).rejects.toMatchObject({
+        code: 'E-CONNECT-TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await rejected;
+      expect(requestSignal?.aborted).toBe(true);
+    },
+  );
+
+  it('combines external cancellation with the internal request signal', async () => {
+    const external = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    const fetchImpl = vi.fn(async (_url, init) => {
+      requestSignal = init?.signal as AbortSignal;
+      return await new Promise<Response>(() => {});
+    });
+    const client = new RuntimeConnectClient({
+      baseUrl: 'https://control.example',
+      fetchImpl,
+      sleep: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const polling = client.pollForConnection({
+      deviceCode,
+      pollIntervalMs: 1_000,
+      expiresInSeconds: 60,
+      signal: external.signal,
+    });
+    const rejected = expect(polling).rejects.toMatchObject({
+      code: 'E-CONNECT-CANCELLED',
+    });
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+    const reason = new Error('operator cancellation');
+    external.abort(reason);
+
+    await rejected;
+    expect(requestSignal).not.toBe(external.signal);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(requestSignal?.reason).toBe(reason);
+  });
+
+  it('removes external abort listeners after completed timers and polls', async () => {
+    vi.useFakeTimers();
+    const external = new AbortController();
+    const add = vi.spyOn(external.signal, 'addEventListener');
+    const remove = vi.spyOn(external.signal, 'removeEventListener');
+    const client = new RuntimeConnectClient({
+      baseUrl: 'https://control.example',
+      fetchImpl: vi.fn()
+        .mockResolvedValueOnce(response({
+          status: 'pending', pollAfterMs: 2_000,
+        }))
+        .mockResolvedValueOnce(response({ status: 'denied' })),
+    });
+
+    const polling = client.pollForConnection({
+      deviceCode,
+      pollIntervalMs: 1_000,
+      expiresInSeconds: 60,
+      signal: external.signal,
+    });
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect(polling).resolves.toEqual({ status: 'denied' });
+
+    const abortAdds = add.mock.calls.filter(([type]) => type === 'abort');
+    const abortRemoves = remove.mock.calls.filter(([type]) => type === 'abort');
+    expect(abortAdds.length).toBeGreaterThan(0);
+    expect(abortRemoves).toHaveLength(abortAdds.length);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('rejects unsafe base URLs and invalid response bodies', async () => {
