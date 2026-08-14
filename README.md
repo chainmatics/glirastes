@@ -44,6 +44,33 @@ Install the SDK, an AI SDK provider, and the React peers:
 npm install glirastes @ai-sdk/openai @ai-sdk/react react-markdown
 ```
 
+Once the app has its positive execution inventory, curated setup artifact,
+prompt bundle, and server-verified principal declaration, the complete local
+setup is three commands with no repeated app or artifact flags:
+
+```bash
+npx glirastes setup --dry-run
+npx glirastes setup
+npx glirastes doctor
+```
+
+The dry run is deterministic, read-only, and network-silent. Normal setup
+validates the same plan, requires the exact plan digest for any semantic
+loosening, and atomically adopts the complete local artifact set. Standalone is
+the default and never contacts the Control Plane. Restart the application after
+setup because Standalone materializes its runtime snapshot only at boot.
+
+Managed setup is always explicit:
+
+```bash
+npx glirastes setup --managed
+npx glirastes doctor --managed
+```
+
+It requires an existing app plus the app-scoped Control Plane connection. Setup
+never creates an app or environment and never bypasses publication, approval,
+signing, health, activation, or rollback gates.
+
 Scan existing routes without changing them:
 
 ```bash
