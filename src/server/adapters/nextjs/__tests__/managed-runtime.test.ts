@@ -34,6 +34,57 @@ function request() {
 }
 
 describe('createAiChatHandler managed runtime', () => {
+  it('exposes turn-pinned hybrid discovery to a custom stream handler', async () => {
+    const revisionBoundTools = {
+      list_tasks: defineTool({
+        id: agentRevision.toolAllowlist[0]!,
+        description: 'List visible tasks.',
+        inputSchema: { safeParse: () => ({ success: true, data: {} }) } as never,
+        execute: async () => ({ tasks: [] }),
+      }),
+    };
+    const streamHandler = vi.fn(async (context) => {
+      expect(context.toolDiscovery?.turnId).toBe('ai-message-1');
+      expect(Object.keys(context.tools).sort()).toEqual([
+        'find_tools',
+        'list_tasks',
+      ]);
+      const findTools = context.tools.find_tools as {
+        execute(input: unknown): Promise<{ tools: Array<{ name: string }> }>;
+      };
+      const found = await findTools.execute({ query: 'list' });
+      expect(found.tools.map((tool) => tool.name)).toEqual(['list_tasks']);
+      expect(context.toolDiscovery?.activeToolNames()).toEqual([
+        'find_tools',
+        'list_tasks',
+      ]);
+      return new Response('ok');
+    });
+    const handler = createAiChatHandler({
+      tools: revisionBoundTools,
+      model: {},
+      systemPrompt: 'Assistant',
+      toolDiscovery: true,
+      managedRuntime: {
+        resolvePrincipal: async () => principal,
+        resolveTurnSnapshot: async ({ turnId }) => createTurnSnapshot({
+          turnId,
+          agentRevision,
+          manifestRevision,
+          policyRevision,
+          principal,
+          localLimits,
+        }),
+      },
+      streamHandler,
+    });
+
+    const response = await handler(request());
+
+    expect(response.status).toBe(200);
+    expect(streamHandler).toHaveBeenCalledTimes(1);
+  });
+
   it('fails closed before streaming when no verified principal exists', async () => {
     const streamHandler = vi.fn(async () => new Response('unexpected'));
     const handler = createAiChatHandler({

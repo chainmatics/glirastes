@@ -178,6 +178,12 @@ export interface AiChatHandlerConfig {
   managedRuntime?: ManagedLocalRuntimeConfig;
 
   /**
+   * Enable turn-pinned local `find_tools` recovery. It requires managedRuntime
+   * and a manifest-materialized registry; false preserves static scoping.
+   */
+  toolDiscovery?: boolean;
+
+  /**
    * Dynamic tool loader. Used in legacy mode (without pipeline).
    * When `tools` is provided, loadTools is ignored.
    */

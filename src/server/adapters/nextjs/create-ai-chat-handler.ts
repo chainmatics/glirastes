@@ -27,9 +27,15 @@ import { filterFallbackError } from './filter-fallback-error.js';
 import { PrincipalSchema } from '../../../contracts/index.js';
 import {
   createManagedTurnGuard,
+  createTurnToolDiscovery,
+  isToolRevoked,
   type BudgetEvaluation,
   type ManagedTurnGuard,
 } from '../../../runtime/index.js';
+import {
+  createHybridToolDiscovery,
+  type HybridToolDiscovery,
+} from './tool-discovery.js';
 
 /**
  * Callback that the consumer provides to stream the AI response.
@@ -71,6 +77,8 @@ export interface StreamHandlerContext {
   piiShield?: { shield: PiiShield; sessionId: string };
   /** Pinned managed-local turn guard, present when managedRuntime is enabled. */
   managedTurn?: ManagedTurnGuard;
+  /** Immutable turn-local controller for custom stream integrations. */
+  toolDiscovery?: HybridToolDiscovery;
 }
 
 /**
@@ -275,8 +283,9 @@ async function defaultStreamHandler(
   ctx: StreamHandlerContext,
   onFinish?: AiChatHandlerConfig['onFinish'],
 ): Promise<Response> {
+  const { find_tools: findTools, ...domainTools } = ctx.tools;
   const vercelTools = wrapToolsForVercelAi(
-    ctx.tools,
+    domainTools,
     ctx.managedTurn
       ? {
           beforeToolCall: ctx.managedTurn.beforeToolCall,
@@ -287,6 +296,12 @@ async function defaultStreamHandler(
         }
       : undefined,
   );
+  if (findTools) {
+    Object.assign(
+      vercelTools,
+      wrapToolsForVercelAi({ find_tools: findTools }),
+    );
+  }
   const modelMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
     { maxContextMessages: ctx.maxContextMessages },
@@ -332,6 +347,14 @@ async function defaultStreamHandler(
         messages: modelMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
         system: ctx.systemPrompt,
         tools: vercelTools as Parameters<typeof streamText>[0]['tools'],
+        ...(ctx.toolDiscovery
+          ? {
+            activeTools: [...ctx.toolDiscovery.activeToolNames()],
+            prepareStep: () => ({
+              activeTools: [...ctx.toolDiscovery!.activeToolNames()],
+            }),
+          }
+          : {}),
         maxOutputTokens: ctx.maxOutputTokens,
         temperature: ctx.temperature,
         timeout: resolveTurnTimeout(
@@ -526,6 +549,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     onStepReport,
     onFinish,
     streamHandler: customStreamHandler,
+    toolDiscovery: enableToolDiscovery = false,
   } = config;
 
   // Report model defaults to Glirastes (fire-and-forget, once)
@@ -645,6 +669,34 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           onBudgetSignal: managedRuntime.onBudgetSignal,
         });
       }
+
+      const buildDiscovery = async (
+        registry: ToolRegistry,
+        initialToolNames: ReadonlyArray<string>,
+      ): Promise<HybridToolDiscovery | undefined> => {
+        if (!enableToolDiscovery || !managedTurn) return undefined;
+        const revocations = managedRuntime?.loadRevocations
+          ? await managedRuntime.loadRevocations({
+            request: req,
+            snapshot: managedTurn.snapshot,
+          })
+          : [];
+        const revokedToolIds = managedTurn.snapshot.manifestRevision.tools
+          .filter((tool) => isToolRevoked(
+            managedTurn!.snapshot,
+            tool.toolId,
+            revocations,
+          ))
+          .map((tool) => tool.toolId);
+        return createHybridToolDiscovery({
+          discovery: createTurnToolDiscovery({
+            snapshot: managedTurn.snapshot,
+            registry,
+            revokedToolIds,
+          }),
+          initialToolNames,
+        });
+      };
 
       // Derive session ID — stable per conversation turn (groups approval flows)
       const sessionId = (onAudit || piiShield || telemetry) ? turnId : '';
@@ -776,6 +828,15 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           }
         }
 
+        const initialToolNames = pipelineResult.blocked
+          ? []
+          : pipelineResult.tools.length > 0
+          ? pipelineResult.tools
+          : Object.keys(registry);
+        const discoveryController = pipelineResult.blocked
+          ? undefined
+          : await buildDiscovery(registry, initialToolNames);
+
         // Convert all tools to AI tools
         let aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
 
@@ -783,7 +844,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (pipelineResult.blocked) {
           // Guardrails blocked — no tools allowed
           aiTools = {};
-        } else if (pipelineResult.tools.length > 0) {
+        } else if (!discoveryController && pipelineResult.tools.length > 0) {
           aiTools = scopePipelineTools({
             aiTools,
             registryToolNames: new Set(Object.keys(registry)),
@@ -888,7 +949,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         } : undefined);
 
         return await pipelineStreamHandler({
-          tools: aiTools as Record<string, unknown>,
+          tools: discoveryController
+            ? { ...aiTools, find_tools: discoveryController.tool }
+            : aiTools as Record<string, unknown>,
           messages: recentMessages,
           systemPrompt,
           model,
@@ -903,6 +966,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
           managedTurn,
+          toolDiscovery: discoveryController,
         });
       }
 
@@ -970,6 +1034,16 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (Object.keys(scoped).length > 0) aiTools = scoped;
       }
 
+      const discoveryController = await buildDiscovery(
+        registry,
+        routing?.toolNames?.length ? routing.toolNames : allToolNames,
+      );
+      if (discoveryController) {
+        // Discovery needs the full eligible server-side set; `activeTools`
+        // preserves the intent router's fast initial scope.
+        aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
+      }
+
       // Resolve model + system prompt (legacy mode — no pipeline fallback)
       if (!modelConfig) {
         return new Response(
@@ -1021,7 +1095,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       // Delegate streaming to consumer's handler
       return await legacyStreamHandler({
-        tools: aiTools as Record<string, unknown>,
+        tools: discoveryController
+          ? { ...aiTools, find_tools: discoveryController.tool }
+          : aiTools as Record<string, unknown>,
         messages: recentMessages,
         systemPrompt,
         model,
@@ -1036,6 +1112,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,
         managedTurn,
+        toolDiscovery: discoveryController,
       });
     } catch (error) {
       onError?.(error, req);

@@ -17,6 +17,10 @@ export {
   type PrepareModelMessagesOptions,
 } from './prepare-model-messages.js';
 export { executeTool } from './server-action-helper.js';
+export {
+  createHybridToolDiscovery,
+  type HybridToolDiscovery,
+} from './tool-discovery.js';
 
 // Re-export from server-node for convenience
 export { createNextInternalApiCaller } from '../../core/index.js';
