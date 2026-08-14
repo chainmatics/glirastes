@@ -76,13 +76,13 @@ describe('public foundation subpaths', () => {
     expect(serverSource).not.toContain('createAegisDetector');
   });
 
-  it('keeps the Foundation CLI focused on legacy scan and app setup', async () => {
+  it('keeps the Foundation CLI focused on scan, setup and local doctor', async () => {
     const source = await readFile(
       new URL('./cli/index.ts', import.meta.url),
       'utf8',
     );
 
-    // Deferred surfaces stay out. `validate` and `build` are accepted
+    // Deferred surfaces stay out. `doctor`, `validate` and `build` are accepted
     // Foundation commands and are asserted positively below.
     for (const command of [
       'generate',
@@ -99,11 +99,11 @@ describe('public foundation subpaths', () => {
       expect(source).not.toContain(`'${command}'`);
     }
     expect(source).toContain(
-      "type CommandName = 'scan' | 'setup' | 'install' | 'validate' | 'build'",
+      "type CommandName = 'scan' | 'setup' | 'doctor' | 'install' | 'validate' | 'build'",
     );
 
-    // The setup sub-commands stay the same three; bare `setup` is the guided
-    // wizard over them. The list moved to the wizard, which owns the dispatch.
+    // The setup sub-commands stay the same three; `setup guided` preserves the
+    // old interview wizard while bare setup applies the detected local plan.
     const wizardSource = await readFile(
       new URL('./cli/commands/setup-wizard.ts', import.meta.url),
       'utf8',
