@@ -14,6 +14,10 @@ import { createSetupPlan, type SetupPlan } from './setup-plan.js';
 export interface ApplySetupPlanOptions {
   rootDir: string;
   plan: SetupPlan;
+  artifactPath?: string;
+  previousArtifactPath?: string;
+  inventoryPath?: string;
+  promptBundlePath?: string;
   hooks?: AtomicArtifactWriteHooks;
 }
 
@@ -48,10 +52,17 @@ export async function applySetupPlan(
   const profile = await detectSetupProfile({
     rootDir,
     managed: options.plan.mode === 'managed',
+    artifactPath: options.artifactPath,
+    inventoryPath: options.inventoryPath,
+    promptBundlePath: options.promptBundlePath,
   });
   const currentPlan = await createSetupPlan({
     rootDir,
     managed: options.plan.mode === 'managed',
+    artifactPath: options.artifactPath,
+    previousArtifactPath: options.previousArtifactPath,
+    inventoryPath: options.inventoryPath,
+    promptBundlePath: options.promptBundlePath,
   });
   if (currentPlan.planDigest !== options.plan.planDigest) {
     throw new FoundationDiagnosticError({

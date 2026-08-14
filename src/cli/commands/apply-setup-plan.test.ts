@@ -180,4 +180,24 @@ describe('applySetupPlan', () => {
     expect(await present(join(rootDir, '.glirastes/setup-receipt.json')))
       .toBe(false);
   });
+
+  it('revalidates an explicitly resolved plan with the same inputs', async () => {
+    const rootDir = await fixture();
+    const customPrevious = '.glirastes/custom-previous.json';
+    const proposed = JSON.parse(await readFile(
+      join(rootDir, '.glirastes/proposed-setup.json'),
+      'utf8',
+    ));
+    await writeJson(rootDir, customPrevious, proposed);
+    const plan = await createSetupPlan({
+      rootDir,
+      previousArtifactPath: customPrevious,
+    });
+
+    await expect(applySetupPlan({
+      rootDir,
+      plan,
+      previousArtifactPath: customPrevious,
+    })).resolves.toMatchObject({ planDigest: plan.planDigest });
+  });
 });

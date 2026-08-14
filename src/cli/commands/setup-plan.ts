@@ -82,6 +82,11 @@ async function readArtifact(
   return { artifact, path: bounded.relative, digest: sha256(raw) };
 }
 
+async function digestInput(rootDir: string, path: string): Promise<string> {
+  const bounded = boundedPath(rootDir, path);
+  return sha256(await readFile(bounded.absolute, 'utf8'));
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     await stat(path);
@@ -189,6 +194,14 @@ export async function createSetupPlan(
     previous?.artifact,
     proposed.artifact,
   );
+  const buildInputDigest = sha256(JSON.stringify({
+    setup: proposed.digest,
+    inventory: await digestInput(options.rootDir, profile.paths.inventory),
+    promptBundle: await digestInput(
+      options.rootDir,
+      profile.paths.promptBundle,
+    ),
+  }));
   const body = {
     schemaVersion: 1 as const,
     mode: profile.mode,
@@ -202,7 +215,7 @@ export async function createSetupPlan(
       {
         kind: 'build' as const,
         path: profile.paths.buildDir,
-        digest: proposed.digest,
+        digest: buildInputDigest,
       },
       {
         kind: 'receipt' as const,

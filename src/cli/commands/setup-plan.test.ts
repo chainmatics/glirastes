@@ -149,6 +149,21 @@ describe('createSetupPlan', () => {
     ]);
   });
 
+  it('binds inventory and local prompt inputs into the exact plan digest', async () => {
+    const root = await fixture();
+    const before = await createSetupPlan({ rootDir: root });
+    const promptPath = join(root, '.glirastes/prompt-bundle.json');
+    const prompt = JSON.parse(await readFile(promptPath, 'utf8'));
+    prompt.sections.responseStyle = 'Use a different concise style.';
+    await writeFile(promptPath, JSON.stringify(prompt));
+
+    const after = await createSetupPlan({ rootDir: root });
+
+    expect(after.planDigest).not.toBe(before.planDigest);
+    expect(after.operations.find(({ kind }) => kind === 'build')?.digest)
+      .not.toBe(before.operations.find(({ kind }) => kind === 'build')?.digest);
+  });
+
   it('marks a loosening and binds confirmation to its exact digest', async () => {
     const root = await fixture();
     await writeFile(
