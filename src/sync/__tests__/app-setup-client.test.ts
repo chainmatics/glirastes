@@ -132,6 +132,47 @@ describe('AppSetupClient', () => {
     expect(JSON.parse(String(request.body))).toEqual(artifact);
   });
 
+  it('syncs an existing identical run using only create and upload requests', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...runResponse,
+        status: 'ready',
+        artifactDigest: digest('F'),
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...runResponse,
+        status: 'ready',
+        artifactDigest: digest('F'),
+      })));
+    const client = new AppSetupClient({
+      baseUrl: 'https://control.example',
+      setupApiKey: 'setup-secret',
+      appId: artifact.appId,
+      fetchImpl,
+    });
+
+    await expect(client.syncArtifact(artifact)).resolves.toMatchObject({
+      status: 'ready',
+      artifactDigest: digest('F'),
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.map(([url, init]) => [
+      String(url),
+      (init as RequestInit).method,
+    ])).toEqual([
+      [
+        `https://control.example/v2/apps/${artifact.appId}/runtime-setup/runs`,
+        'POST',
+      ],
+      [
+        `https://control.example/v2/apps/${artifact.appId}`
+          + `/runtime-setup/runs/${artifact.runId}/artifact`,
+        'PUT',
+      ],
+    ]);
+  });
+
   it('rejects an app mismatch before network access', async () => {
     const fetchImpl = vi.fn();
     const client = new AppSetupClient({

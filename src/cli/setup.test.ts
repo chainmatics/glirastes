@@ -155,7 +155,7 @@ afterEach(() => {
 describe('glirastes setup', () => {
   it('documents direct setup and keeps the legacy wizard explicit', async () => {
     await expect(runCli(['unknown'])).rejects.toThrow(
-      /glirastes setup \[--dry-run\].*glirastes connect --base-url.*glirastes setup guided/s,
+      /glirastes setup \[--dry-run\].*glirastes connect --base-url.*glirastes sync.*glirastes setup guided/s,
     );
   });
 
@@ -265,8 +265,25 @@ describe('glirastes setup', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('syncs a final artifact by app without an environment ID', async () => {
+  it('keeps setup sync as an adapter to canonical Connected sync', async () => {
     const { root, artifact } = await setupFixture();
+    await runCli(['setup', '--root', root]);
+    const environmentId = id('9');
+    await writeFile(join(root, '.glirastes/platform-connection.json'), JSON.stringify({
+      schemaVersion: 1,
+      baseUrl: 'https://control.example',
+      appId: artifact.appId,
+      environmentId,
+      runnerKey: 'fixture-runner',
+    }));
+    await writeFile(join(root, '.env.local'), [
+      'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+      `GLIRASTES_APP_ID=${artifact.appId}`,
+      `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
+      'GLIRASTES_RUNNER_KEY=fixture-runner',
+      'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+      '',
+    ].join('\n'));
     const response = (status: string) => new Response(JSON.stringify({
       runId: artifact.runId,
       appId: artifact.appId,
@@ -277,28 +294,81 @@ describe('glirastes setup', () => {
       .mockResolvedValueOnce(response('discovering'))
       .mockResolvedValueOnce(response('ready'));
     vi.stubGlobal('fetch', fetchImpl);
-    vi.stubEnv('GLIRASTES_API_KEY', 'setup-secret');
-    vi.stubEnv('GLIRASTES_ENVIRONMENT_ID', '');
 
     await runCli([
       'setup',
       'sync',
       '--root',
       root,
-      '--artifact',
-      '.glirastes/app-setup.json',
-      '--base-url',
-      'https://control.example',
-      '--app-id',
-      String(artifact.appId),
       '--quiet',
-    ]);
+    ], {
+      sync: {
+        env: {},
+        isGitIgnored: vi.fn().mockResolvedValue(true),
+      },
+    });
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     for (const [url] of fetchImpl.mock.calls) {
       expect(url).toContain(`/v2/apps/${artifact.appId}/runtime-setup`);
       expect(url).not.toContain('environment');
     }
+  });
+
+  it('keeps setup --managed as an adapter to the same Connected sync', async () => {
+    const { root, artifact } = await setupFixture();
+    const environmentId = id('9');
+    await writeFile(join(root, '.glirastes/platform-connection.json'), JSON.stringify({
+      schemaVersion: 1,
+      baseUrl: 'https://control.example',
+      appId: artifact.appId,
+      environmentId,
+      runnerKey: 'fixture-runner',
+    }));
+    await writeFile(join(root, '.env.local'), [
+      'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+      `GLIRASTES_APP_ID=${artifact.appId}`,
+      `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
+      'GLIRASTES_RUNNER_KEY=fixture-runner',
+      'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+      '',
+    ].join('\n'));
+    const createRun = vi.fn().mockResolvedValue({
+      runId: artifact.runId,
+      appId: artifact.appId,
+      status: 'ready',
+      updatedAt: '2026-08-14T10:00:00.000Z',
+    });
+    const uploadArtifact = vi.fn().mockResolvedValue({
+      runId: artifact.runId,
+      appId: artifact.appId,
+      status: 'ready',
+      updatedAt: '2026-08-14T10:00:00.000Z',
+    });
+
+    await runCli(['setup', '--managed', '--root', root], {
+      sync: {
+        env: {},
+        isGitIgnored: vi.fn().mockResolvedValue(true),
+        clientFactory: vi.fn(() => ({
+          syncArtifact: async (value) => {
+            await createRun({
+              runId: value.runId,
+              assessmentMode: value.assessmentMode,
+              discoveryDigest: value.discoveryDigest,
+            });
+            return uploadArtifact(value);
+          },
+        })),
+      },
+    });
+
+    expect(createRun).toHaveBeenCalledOnce();
+    expect(uploadArtifact).toHaveBeenCalledOnce();
+    expect(JSON.parse(await readFile(
+      join(root, '.glirastes/setup-receipt.json'),
+      'utf8',
+    ))).toMatchObject({ mode: 'managed', appId: artifact.appId });
   });
 
   it('resumes a run status without an environment ID', async () => {

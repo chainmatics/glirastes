@@ -5,6 +5,7 @@ export type FoundationDiagnosticCode =
   | `E-BINDING-${string}`
   | `E-SIGNATURE-${string}`
   | `E-SCOPE-${string}`
+  | `E-SYNC-${string}`
   | `E-CONNECT-${string}`;
 
 export interface FoundationDiagnosticJson {

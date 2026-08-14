@@ -1,10 +1,15 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { isFoundationDiagnosticError } from '../../diagnostics/index.js';
 import { renderManifests } from './validate-build.js';
 import { detectSetupProfile } from './setup-profile.js';
 import { createSetupPlan } from './setup-plan.js';
+import {
+  assertConnectionScope,
+  loadConnectionCredentials,
+  readPlatformConnectionDescriptor,
+} from './sync.js';
 
 export type DoctorCheckStatus = 'pass' | 'warn' | 'fail';
 
@@ -18,7 +23,7 @@ export interface DoctorCheck {
 export interface DoctorReport {
   schemaVersion: 1;
   status: 'pass' | 'fail';
-  mode: 'standalone' | 'managed';
+  mode: 'standalone' | 'connected' | 'managed';
   counts: {
     tools: number;
     passed: number;
@@ -32,6 +37,7 @@ export interface CreateDoctorReportOptions {
   rootDir: string;
   managed?: boolean;
   env?: NodeJS.ProcessEnv;
+  isGitIgnored?: (path: string, root: string) => Promise<boolean>;
 }
 
 const ReceiptSchema = z.object({
@@ -59,7 +65,7 @@ function failureCode(error: unknown, fallback: `E-${string}`): `E-${string}` {
 }
 
 function finish(
-  mode: 'standalone' | 'managed',
+  mode: 'standalone' | 'connected' | 'managed',
   tools: number,
   checks: DoctorCheck[],
 ): DoctorReport {
@@ -79,7 +85,16 @@ export async function createDoctorReport(
   options: CreateDoctorReportOptions,
 ): Promise<DoctorReport> {
   const rootDir = resolve(options.rootDir);
-  const mode = options.managed ? 'managed' : 'standalone';
+  let hasConnectionDescriptor = false;
+  try {
+    await stat(resolve(rootDir, '.glirastes/platform-connection.json'));
+    hasConnectionDescriptor = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const mode = options.managed
+    ? 'managed'
+    : hasConnectionDescriptor ? 'connected' : 'standalone';
   const checks: DoctorCheck[] = [];
   let profile: Awaited<ReturnType<typeof detectSetupProfile>>;
   try {
@@ -168,20 +183,80 @@ export async function createDoctorReport(
     checks.push(check('receipt', 'fail', 'E-SETUP-010', 'repair-local-artifacts'));
   }
 
+  let connectedValid = false;
+  if (mode !== 'standalone') {
+    let descriptor: Awaited<ReturnType<typeof readPlatformConnectionDescriptor>> | undefined;
+    let credentials: Awaited<ReturnType<typeof loadConnectionCredentials>> | undefined;
+    try {
+      descriptor = await readPlatformConnectionDescriptor(rootDir);
+      checks.push(check('connection-descriptor', 'pass', 'E-CONNECT-100'));
+    } catch {
+      checks.push(check(
+        'connection-descriptor',
+        'fail',
+        'E-CONNECT-001',
+        'rerun-connect',
+      ));
+    }
+    try {
+      credentials = await loadConnectionCredentials({
+        rootDir,
+        env: options.env,
+        isGitIgnored: options.isGitIgnored,
+      });
+      checks.push(check('connection-secret-path', 'pass', 'E-CONNECT-101'));
+      checks.push(check('connection-credential', 'pass', 'E-CONNECT-102'));
+    } catch (error) {
+      checks.push(check(
+        'connection-secret-path',
+        'fail',
+        failureCode(error, 'E-CONNECT-002'),
+        'repair-ignored-local-secret',
+      ));
+      checks.push(check(
+        'connection-credential',
+        'fail',
+        'E-CONNECT-003',
+        'rerun-connect',
+      ));
+    }
+    if (descriptor && credentials) {
+      try {
+        assertConnectionScope({
+          descriptor,
+          credentials,
+          appId: profile.appId,
+        });
+        checks.push(check('connection-scope', 'pass', 'E-SCOPE-103'));
+        connectedValid = true;
+      } catch {
+        checks.push(check(
+          'connection-scope',
+          'fail',
+          'E-SCOPE-004',
+          'rerun-connect',
+        ));
+      }
+    } else {
+      checks.push(check(
+        'connection-scope',
+        'fail',
+        'E-SCOPE-004',
+        'rerun-connect',
+      ));
+    }
+  }
+
   const env = options.env ?? process.env;
-  const controlPlaneConfigured = Boolean(env.GLIRASTES_CONTROL_PLANE_URL?.trim());
-  const apiKeyConfigured = Boolean(env.GLIRASTES_API_KEY?.trim());
-  const envAppId = env.GLIRASTES_APP_ID?.trim();
-  const modeValid = mode === 'managed'
-    ? controlPlaneConfigured
-      && apiKeyConfigured
-      && (!envAppId || envAppId === profile.appId)
-    : !controlPlaneConfigured;
+  const strayControlPlane = Boolean(env.GLIRASTES_CONTROL_PLANE_URL?.trim());
+  const modeValid = mode === 'standalone'
+    ? !strayControlPlane
+    : connectedValid;
   checks.push(modeValid
     ? check('runtime-mode', 'pass', 'E-SETUP-106')
     : check('runtime-mode', 'fail', 'E-SETUP-009', 'align-explicit-runtime-mode'));
 
-  return finish(profile.mode, profile.toolCount, checks);
+  return finish(mode, profile.toolCount, checks);
 }
 
 export function formatDoctorReport(report: DoctorReport): string {

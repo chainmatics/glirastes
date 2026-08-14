@@ -83,6 +83,78 @@ afterEach(() => {
 });
 
 describe('createDoctorReport', () => {
+  it('validates a Connected descriptor, ignored secret, scope, and credential offline', async () => {
+    const rootDir = await fixture();
+    const appId = id('1');
+    const environmentId = id('9');
+    await writeJson(rootDir, '.glirastes/platform-connection.json', {
+      schemaVersion: 1,
+      baseUrl: 'https://control.example',
+      appId,
+      environmentId,
+      runnerKey: 'fixture-runner',
+    });
+    await writeFile(join(rootDir, '.env.local'), [
+      'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+      `GLIRASTES_APP_ID=${appId}`,
+      `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
+      'GLIRASTES_RUNNER_KEY=fixture-runner',
+      'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+      '',
+    ].join('\n'));
+    const fetchImpl = vi.fn();
+    vi.stubGlobal('fetch', fetchImpl);
+
+    const report = await createDoctorReport({
+      rootDir,
+      env: {},
+      isGitIgnored: vi.fn().mockResolvedValue(true),
+    });
+
+    expect(report.status).toBe('pass');
+    expect(report.mode).toBe('connected');
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'connection-descriptor', status: 'pass' }),
+      expect.objectContaining({ name: 'connection-secret-path', status: 'pass' }),
+      expect.objectContaining({ name: 'connection-scope', status: 'pass' }),
+      expect.objectContaining({ name: 'connection-credential', status: 'pass' }),
+    ]));
+    expect(JSON.stringify(report)).not.toContain('gl_abcdefghijklmnopqrstuvwxyz123456');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('fails Connected Doctor scope checks before any network access', async () => {
+    const rootDir = await fixture();
+    await writeJson(rootDir, '.glirastes/platform-connection.json', {
+      schemaVersion: 1,
+      baseUrl: 'https://control.example',
+      appId: id('1'),
+      environmentId: id('9'),
+      runnerKey: 'fixture-runner',
+    });
+    await writeFile(join(rootDir, '.env.local'), [
+      'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+      `GLIRASTES_APP_ID=${id('1')}`,
+      `GLIRASTES_ENVIRONMENT_ID=${id('8')}`,
+      'GLIRASTES_RUNNER_KEY=fixture-runner',
+      'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+      '',
+    ].join('\n'));
+    const fetchImpl = vi.fn();
+    vi.stubGlobal('fetch', fetchImpl);
+
+    const report = await createDoctorReport({
+      rootDir,
+      env: {},
+      isGitIgnored: vi.fn().mockResolvedValue(true),
+    });
+
+    expect(report.status).toBe('fail');
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: 'connection-scope', status: 'fail', code: 'E-SCOPE-004',
+    }));
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
   it('passes a current local setup with bounded deterministic checks', async () => {
     const rootDir = await fixture();
     const fetchImpl = vi.fn();

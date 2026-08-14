@@ -71,8 +71,23 @@ The CLI opens only the verification URL returned by that Control Plane, waits
 for browser approval, and writes the app-scoped connection atomically. The
 local secret target must already be ignored by Git. Pairing never uploads
 prompts, schemas, source, credentials, tool arguments, results, or business
-content. Restart the application after connecting; Standalone remains the
-network-silent runtime default.
+content. Restart the application after connecting.
+
+After local setup changes, synchronize the already validated canonical
+artifact without repeating setup, discovery, or assessment:
+
+```bash
+npx glirastes sync
+npx glirastes doctor
+```
+
+`sync` verifies the current setup receipt, app and environment scope, tracked
+connection descriptor, and ignored project-local secret before it contacts the
+Control Plane. It creates or resumes only the app-scoped setup run and uploads
+the identical artifact idempotently. It never creates an environment, publishes
+a revision, activates a deployment, or changes the network-silent Local
+default. `doctor` performs the same local Connected checks without a network
+request and never prints credential values.
 
 Managed setup is always explicit:
 
@@ -96,14 +111,16 @@ descriptions and approval policy live there. The target project keeps only
 content-free fingerprints, schema digests, local execution bindings, and
 Platform UUID references.
 
-After an environment and setup credential are configured, sync the reviewed
-manifest and regenerate local bindings:
+The earlier `glirastes setup sync` and `glirastes setup --managed` forms remain
+compatibility adapters. New integrations should use the explicit `setup`,
+`connect`, `sync`, and `doctor` lifecycle above. The legacy route-import flow
+remains separately available for migrations that still regenerate bindings:
 
 ```bash
 npm run glirastes:sync
 ```
 
-The project script should call `glirastes scan --sync`, pass its generated
+That migration script should call `glirastes scan --sync`, pass its generated
 local execution inventory, and regenerate the target-specific local registry.
 No provider secret, tool credential, prompt, description, argument, result, or
 business content is uploaded.

@@ -44,11 +44,13 @@ import {
   runConnect,
   type ConnectCommandDependencies,
 } from './commands/connect.js';
+import { runSync, type SyncCommandDependencies } from './commands/sync.js';
 
 type CommandName =
   | 'scan'
   | 'setup'
   | 'connect'
+  | 'sync'
   | 'doctor'
   | 'install'
   | 'validate'
@@ -57,6 +59,7 @@ type CommandName =
 export interface CliDependencies {
   ask?: (question: string) => Promise<string>;
   connect?: ConnectCommandDependencies;
+  sync?: SyncCommandDependencies;
 }
 
 function getFlagValue(args: string[], flag: string): string | undefined {
@@ -77,6 +80,7 @@ function parseCommand(args: string[]): {
     command !== 'scan'
     && command !== 'setup'
     && command !== 'connect'
+    && command !== 'sync'
     && command !== 'doctor'
     && command !== 'install'
     && command !== 'validate'
@@ -87,6 +91,8 @@ function parseCommand(args: string[]): {
       + '         detect, validate and atomically install local artifacts\n'
       + '       glirastes connect --base-url <url> [--json]\n'
       + '         pair an existing local setup with the Platform\n'
+      + '       glirastes sync [--json]\n'
+      + '         upload the current local setup without reassessment\n'
       + '       glirastes setup guided [options]\n'
       + '         run the legacy interactive setup interview\n'
       + '       glirastes setup <scan|sync|status> [options]\n'
@@ -334,7 +340,10 @@ function parseAssessmentMode(
   return value;
 }
 
-async function runSetup(rest: string[]): Promise<void> {
+async function runSetup(
+  rest: string[],
+  dependencies: CliDependencies = {},
+): Promise<void> {
   if (hasFlag(rest, '--dry-run')) {
     const rootDir = resolve(getFlagValue(rest, '--root') ?? process.cwd());
     const plan = await createSetupPlan({
@@ -383,14 +392,7 @@ async function runSetup(rest: string[]): Promise<void> {
       promptBundlePath: getFlagValue(rest, '--prompt-bundle'),
     });
     if (applied.mode === 'managed') {
-      await runSetup([
-        'sync',
-        '--root', rootDir,
-        '--artifact', '.glirastes/setup-artifact.json',
-        '--app-id', applied.appId,
-        ...connectionFlags(rest),
-        '--quiet',
-      ]);
+      await runSync({ rootDir, quiet: true }, dependencies.sync);
     }
     if (hasFlag(rest, '--json')) {
       console.log(JSON.stringify({ schemaVersion: 1, ...applied }));
@@ -438,6 +440,15 @@ async function runSetup(rest: string[]): Promise<void> {
         + outputPath,
       );
     }
+    return;
+  }
+
+  if (subcommand === 'sync') {
+    await runSync({
+      rootDir,
+      json: hasFlag(options, '--json'),
+      quiet,
+    }, dependencies.sync);
     return;
   }
 
@@ -636,6 +647,14 @@ export async function runCli(
     }, dependencies.connect);
     return;
   }
+  if (command === 'sync') {
+    await runSync({
+      rootDir: resolve(getFlagValue(rest, '--root') ?? process.cwd()),
+      json: hasFlag(rest, '--json'),
+      quiet: hasFlag(rest, '--quiet'),
+    }, dependencies.sync);
+    return;
+  }
   if (command === 'doctor') {
     const report = await createDoctorReport({
       rootDir: resolve(getFlagValue(rest, '--root') ?? process.cwd()),
@@ -660,7 +679,7 @@ export async function runCli(
     return;
   }
   if (command === 'setup') {
-    await runSetup(rest);
+    await runSetup(rest, dependencies);
     return;
   }
   await runLegacyScan(rest);

@@ -105,6 +105,19 @@ export class AppSetupClient {
     );
   }
 
+  async syncArtifact(value: unknown): Promise<AppSetupRun> {
+    const artifact = AppSetupArtifactSchema.parse(value);
+    if (artifact.appId !== this.options.appId) {
+      throw new Error('App setup artifact targets a different app');
+    }
+    await this.createRun({
+      runId: artifact.runId,
+      assessmentMode: artifact.assessmentMode,
+      discoveryDigest: artifact.discoveryDigest,
+    });
+    return this.uploadArtifact(artifact);
+  }
+
   async getRun(runId: string): Promise<AppSetupRun> {
     const parsedRunId = uuid.parse(runId);
     return this.request(
