@@ -816,10 +816,21 @@ export function toolToAiTool(
           isRecord(result) &&
           (result as Record<string, unknown>).success !== false
         ) {
-          const parsed = tool.outputSchema.safeParse(result);
+          const rec = result as Record<string, unknown>;
+          let parsed = tool.outputSchema.safeParse(result);
+          if (
+            !parsed.success
+            && (rec.success !== undefined || rec.uiAction !== undefined)
+          ) {
+            const {
+              success: _transportSuccess,
+              uiAction: _transportUiAction,
+              ...declaredPayload
+            } = rec;
+            parsed = tool.outputSchema.safeParse(declaredPayload);
+          }
           if (parsed.success) {
             // Use parsed data (extra fields stripped by Zod)
-            const rec = result as Record<string, unknown>;
             cleanResult = {
               ...parsed.data as Record<string, unknown>,
               // Preserve success flag

@@ -46,4 +46,35 @@ describe('createJsonSchemaLike', () => {
       },
     });
   });
+
+  it('strips additional output properties only when explicitly enabled', () => {
+    const contract = {
+      type: 'object',
+      properties: {
+        tasks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { title: { type: 'string' } },
+            required: ['title'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['tasks'],
+      additionalProperties: false,
+    } as const;
+    const response = {
+      tasks: [{ title: 'Pilot pruefen', holidayName: 'Feiertag' }],
+    };
+
+    expect(createJsonSchemaLike(contract).safeParse(response).success)
+      .toBe(false);
+    expect(createJsonSchemaLike(contract, {
+      stripAdditionalProperties: true,
+    }).safeParse(response)).toEqual({
+      success: true,
+      data: { tasks: [{ title: 'Pilot pruefen' }] },
+    });
+  });
 });

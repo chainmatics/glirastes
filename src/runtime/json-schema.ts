@@ -10,6 +10,14 @@ export interface JsonSchemaLike extends SchemaLike {
   readonly jsonSchema: LocalJsonSchema;
 }
 
+export interface CreateJsonSchemaLikeOptions {
+  /**
+   * Project successful output payloads onto the declared contract. Input
+   * schemas must keep the default fail-closed behavior.
+   */
+  stripAdditionalProperties?: boolean;
+}
+
 function issuePath(error: ErrorObject): PropertyKey[] {
   if (!error.instancePath) return [];
   return error.instancePath
@@ -20,12 +28,14 @@ function issuePath(error: ErrorObject): PropertyKey[] {
 
 export function createJsonSchemaLike(
   jsonSchema: LocalJsonSchema,
+  options: CreateJsonSchemaLikeOptions = {},
 ): JsonSchemaLike {
   const ajv = new Ajv({
     allErrors: true,
     allowUnionTypes: true,
     strict: false,
     useDefaults: true,
+    removeAdditional: options.stripAdditionalProperties ? 'failing' : false,
   });
   addFormats(ajv);
   const validate = ajv.compile(jsonSchema);
