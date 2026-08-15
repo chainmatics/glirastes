@@ -839,14 +839,20 @@ export function toolToAiTool(
               ...(rec.uiAction ? { uiAction: rec.uiAction } : {}),
             };
           } else {
-            // Schema mismatch — warn but pass through unmodified
+            // Schema mismatch — retain bounded diagnostics locally, but never
+            // expose an undeclared backend payload to the model.
             console.warn(
               `[glirastes] Output schema mismatch for tool "${name}":`,
               parsed.error.issues.map(
                 (i: { path?: ReadonlyArray<PropertyKey>; message?: string }) =>
                   `${i.path?.join('.') ?? ''}: ${i.message ?? 'invalid value'}`,
-              ),
+                ),
             );
+            cleanResult = {
+              success: false,
+              error: 'Tool output did not match its declared schema.',
+              retryable: false,
+            };
           }
         }
 
