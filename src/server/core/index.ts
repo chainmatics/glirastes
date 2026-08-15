@@ -820,8 +820,15 @@ export function toolToAiTool(
           let parsed = tool.outputSchema.safeParse(result);
           if (
             !parsed.success
-            && (rec.success !== undefined || rec.uiAction !== undefined)
+            && rec.uiAction !== undefined
           ) {
+            const {
+              uiAction: _transportUiAction,
+              ...payloadWithoutUiAction
+            } = rec;
+            parsed = tool.outputSchema.safeParse(payloadWithoutUiAction);
+          }
+          if (!parsed.success && rec.success !== undefined) {
             const {
               success: _transportSuccess,
               uiAction: _transportUiAction,

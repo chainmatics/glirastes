@@ -73,4 +73,35 @@ describe('tool output schema validation', () => {
 
     warning.mockRestore();
   });
+
+  it('preserves a declared success field while stripping transport uiAction', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tool = defineTool({
+      id: 'tasks.create',
+      description: 'Create a task.',
+      inputSchema: z.object({ title: z.string() }).strict(),
+      outputSchema: z.object({
+        success: z.literal(true),
+        taskId: z.string(),
+      }).strict(),
+      execute: async () => ({
+        success: true as const,
+        taskId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3a04',
+        uiAction: { type: 'navigate', path: '/tasks' },
+      }),
+    });
+    const aiTool = toolToAiTool(tool, {
+      currentDate: new Date('2026-08-15T10:00:00.000Z'),
+      locale: 'de-DE',
+    });
+
+    await expect(aiTool.execute({ title: 'Pilot pruefen' })).resolves.toEqual({
+      success: true,
+      taskId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3a04',
+      uiAction: { type: 'navigate', path: '/tasks' },
+    });
+    expect(warning).not.toHaveBeenCalled();
+
+    warning.mockRestore();
+  });
 });
