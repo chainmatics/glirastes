@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { defineTool } from '../../../types.js';
-import { toolToAiTool } from '../index.js';
+import { defineEndpointTool, defineTool } from '../../../types.js';
+import { endpointToolToTool, toolToAiTool } from '../index.js';
 
 describe('tool output schema validation', () => {
   it('validates the declared payload without rejecting transport metadata', async () => {
@@ -103,5 +103,68 @@ describe('tool output schema validation', () => {
     expect(warning).not.toHaveBeenCalled();
 
     warning.mockRestore();
+  });
+
+  it('projects custom tool failures onto the bounded error transport', async () => {
+    const tool = defineTool({
+      id: 'tasks.custom',
+      description: 'Custom task action.',
+      inputSchema: z.object({}).strict(),
+      execute: async () => ({
+        success: false as const,
+        error: 'Task action failed.',
+        privateField: { internalToken: 'must-not-reach-model' },
+      }),
+    });
+    const aiTool = toolToAiTool(tool, {
+      currentDate: new Date('2026-08-15T10:00:00.000Z'),
+      locale: 'de-DE',
+    });
+
+    const result = await aiTool.execute({});
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Task action failed.',
+      retryable: false,
+    });
+    expect(JSON.stringify(result)).not.toContain('privateField');
+    expect(JSON.stringify(result)).not.toContain('must-not-reach-model');
+  });
+
+  it('projects HTTP 200 failure payloads onto the bounded error transport', async () => {
+    const definition = defineEndpointTool({
+      id: 'tasks.update',
+      toolName: 'tasks_update',
+      description: 'Update a task.',
+      method: 'POST',
+      path: '/api/tasks',
+      inputSchema: z.object({ title: z.string() }).strict(),
+      outputSchema: z.object({ taskId: z.string() }).strict(),
+    });
+    const aiTool = toolToAiTool(endpointToolToTool(definition), {
+      currentDate: new Date('2026-08-15T10:00:00.000Z'),
+      locale: 'de-DE',
+      callEndpoint: async () => ({
+        ok: true,
+        status: 200,
+        data: {
+          success: false,
+          error: 'Task update rejected.',
+          retryable: true,
+          privateField: { policyTrace: 'must-not-reach-model' },
+        },
+      }),
+    });
+
+    const result = await aiTool.execute({ title: 'Pilot pruefen' });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Task update rejected.',
+      retryable: true,
+    });
+    expect(JSON.stringify(result)).not.toContain('privateField');
+    expect(JSON.stringify(result)).not.toContain('must-not-reach-model');
   });
 });

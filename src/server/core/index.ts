@@ -92,6 +92,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+const MAX_TOOL_ERROR_MESSAGE_CHARS = 1_000;
+
+function boundedToolFailure(
+  result: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const rawError = result.error;
+  const error = typeof rawError === 'string' && rawError.trim().length > 0
+    ? rawError.slice(0, MAX_TOOL_ERROR_MESSAGE_CHARS)
+    : 'Tool execution failed.';
+
+  return {
+    success: false,
+    error,
+    retryable: result.retryable === true,
+  };
+}
+
 /**
  * Default max characters for a serialized tool result (~4000 tokens).
  * Arrays exceeding this are truncated with a `_truncated` marker.
@@ -811,10 +828,11 @@ export function toolToAiTool(
 
         // Output schema: parse to strip extra fields, re-attach uiAction for client
         let cleanResult: unknown = result;
-        if (
+        if (isRecord(result) && result.success === false) {
+          cleanResult = boundedToolFailure(result);
+        } else if (
           tool.outputSchema &&
-          isRecord(result) &&
-          (result as Record<string, unknown>).success !== false
+          isRecord(result)
         ) {
           const rec = result as Record<string, unknown>;
           let parsed = tool.outputSchema.safeParse(result);
