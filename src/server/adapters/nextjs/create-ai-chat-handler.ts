@@ -282,6 +282,7 @@ function createPipelineState(options: {
 async function defaultStreamHandler(
   ctx: StreamHandlerContext,
   onFinish?: AiChatHandlerConfig['onFinish'],
+  onStreamError?: (error: unknown) => void,
 ): Promise<Response> {
   const { find_tools: findTools, ...domainTools } = ctx.tools;
   const vercelTools = wrapToolsForVercelAi(
@@ -317,9 +318,11 @@ async function defaultStreamHandler(
   });
 
   const stream = createUIMessageStream({
+    onError: () => 'AI request failed',
     execute: async ({ writer }) => {
       let totalSteps = 0;
       let finalStateWritten = false;
+      let providerErrorReported = false;
 
       const writePipelineState = (
         state: PipelineStreamState,
@@ -361,6 +364,12 @@ async function defaultStreamHandler(
           ctx.managedTurn?.snapshot.budget.totalTimeoutMs,
         ),
         stopWhen: shouldStop,
+        // AI SDK's default logs the complete provider error, including
+        // request/response content. Only the local consumer owns diagnostics.
+        onError: ({ error }) => {
+          providerErrorReported = true;
+          onStreamError?.(error);
+        },
         onStepFinish: async (event) => {
           await ctx.managedTurn?.afterModelStep({
             inputTokens: event.usage.inputTokens ?? 0,
@@ -464,7 +473,7 @@ async function defaultStreamHandler(
         },
       });
 
-      writer.merge(result.toUIMessageStream());
+      writer.merge(result.toUIMessageStream({ onError: () => 'AI request failed' }));
       try {
         await result.response;
       } catch (error) {
@@ -480,7 +489,7 @@ async function defaultStreamHandler(
           }),
         );
         finalStateWritten = true;
-        throw error;
+        if (!providerErrorReported) throw error;
       }
     },
   });
@@ -561,7 +570,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
 
   // Build stream handler factory — per-request to allow session.ended audit
-  function createStreamHandler(auditContext?: {
+  function createStreamHandler(req: Request, auditContext?: {
     sessionId: string;
     requestStart: number;
     modelId?: string;
@@ -601,7 +610,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     };
     return customStreamHandler
       ? customStreamHandler
-      : (ctx: StreamHandlerContext) => defaultStreamHandler(ctx, wrappedOnFinish);
+      : (ctx: StreamHandlerContext) => defaultStreamHandler(
+          ctx, wrappedOnFinish, (error) => onError?.(error, req),
+        );
   }
 
   if (!staticTools && !loadTools) {
@@ -942,7 +953,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           aiTools = wrapToolsWithLancerApprovals(aiTools, lancer.approvals, sessionId) as typeof aiTools;
         }
 
-        const pipelineStreamHandler = createStreamHandler((onAudit || telemetry) ? {
+        const pipelineStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
           sessionId,
           requestStart,
           modelId: resolvedModelId,
@@ -1088,7 +1099,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         aiTools = wrapToolsWithLancerApprovals(aiTools, lancer.approvals, legacySessionId || sessionId) as typeof aiTools;
       }
 
-      const legacyStreamHandler = createStreamHandler((onAudit || telemetry) ? {
+      const legacyStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
         sessionId: legacySessionId || sessionId,
         requestStart,
       } : undefined);
