@@ -46,8 +46,10 @@ import {
 } from './commands/connect.js';
 import { runSync, type SyncCommandDependencies } from './commands/sync.js';
 import { inspectSetupProject, formatSetupProjectInspection } from './commands/project-inspection.js';
+import { runAgentSetup, type AgentSetupDependencies } from './commands/agent-setup.js';
 
 type CommandName =
+  | 'init'
   | 'scan'
   | 'setup'
   | 'connect'
@@ -58,6 +60,7 @@ type CommandName =
   | 'build';
 
 export interface CliDependencies {
+  init?: AgentSetupDependencies;
   ask?: (question: string) => Promise<string>;
   connect?: ConnectCommandDependencies;
   sync?: SyncCommandDependencies;
@@ -78,7 +81,8 @@ function parseCommand(args: string[]): {
 } {
   const [command, ...rest] = args;
   if (
-    command !== 'scan'
+    command !== 'init'
+    && command !== 'scan'
     && command !== 'setup'
     && command !== 'connect'
     && command !== 'sync'
@@ -88,7 +92,9 @@ function parseCommand(args: string[]): {
     && command !== 'build'
   ) {
     throw new Error(
-      'Usage: glirastes setup [--dry-run] [--managed] [--json]\n'
+      'Usage: glirastes init [--agent codex|claude] [--root] [--dry-run] [--json]\n'
+      + '         start integration with your existing coding agent\n'
+      + '       glirastes setup [--dry-run] [--managed] [--json]\n'
       + '         detect, validate and atomically install local artifacts\n'
       + '       glirastes connect --base-url <url> [--json]\n'
       + '         pair an existing local setup with the Platform\n'
@@ -652,6 +658,14 @@ export async function runCli(
   dependencies: CliDependencies = {},
 ): Promise<void> {
   const { command, rest } = parseCommand(args);
+  if (command === 'init') {
+    await runAgentSetup({
+      rootDir: getFlagValue(rest, '--root') ?? process.cwd(),
+      agent: getFlagValue(rest, '--agent'), dryRun: hasFlag(rest, '--dry-run'),
+      json: hasFlag(rest, '--json'), managed: hasFlag(rest, '--managed'),
+    }, { ask: terminalAsk, ...dependencies.init });
+    return;
+  }
   if (command === 'connect') {
     await runConnect({
       rootDir: resolve(getFlagValue(rest, '--root') ?? process.cwd()),

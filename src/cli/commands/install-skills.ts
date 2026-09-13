@@ -49,6 +49,8 @@ export interface InstallSkillsOptions {
   dryRun?: boolean;
   /** Project root — defaults to cwd */
   rootDir?: string;
+  /** Suppress installer progress when embedded in a machine-readable workflow. */
+  quiet?: boolean;
 }
 
 interface SkillDescriptor {
@@ -107,7 +109,7 @@ async function readSdkVersion(): Promise<string> {
  * Locate the `skills/` directory shipped with this package.
  * Walks up from this module's location until a `skills/` sibling is found.
  */
-function findPackageSkillsDir(): string {
+export function findPackageSkillsDir(): string {
   const here = fileURLToPath(import.meta.url);
   let dir = dirname(here);
   for (let i = 0; i < 8; i++) {
@@ -182,6 +184,7 @@ function tag(color: string, label: string): string {
 }
 
 export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
+  const log = opts.quiet ? (_message?: string) => {} : console.log;
   if (opts.includeSetupSkills && !opts.host && !opts.hosts?.length) {
     throw new Error(
       'Choose at least one setup host: codex, claude, or gemini.',
@@ -223,14 +226,14 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
     );
   }
 
-  console.log(header('Install Glirastes agent skills'));
-  console.log(`  ${dim('Source:')}  ${relative(rootDir, skillsDir) || skillsDir}`);
-  console.log(`  ${dim('Hosts:')}   ${hosts.join(', ')}`);
-  console.log(`  ${dim('Parts:')}   ${parts.join(', ')}`);
-  console.log(
+  log(header('Install Glirastes agent skills'));
+  log(`  ${dim('Source:')}  ${relative(rootDir, skillsDir) || skillsDir}`);
+  log(`  ${dim('Hosts:')}   ${hosts.join(', ')}`);
+  log(`  ${dim('Parts:')}   ${parts.join(', ')}`);
+  log(
     `  ${dim('Mode:')}    ${opts.symlink ? 'symlink' : 'copy'}${opts.dryRun ? ' (dry run)' : ''}`,
   );
-  console.log('');
+  log('');
 
   let installed = 0;
   let skipped = 0;
@@ -247,11 +250,11 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
     const targetAbs = resolve(rootDir, expanded);
 
     if (hosts.length > 1) {
-      console.log(
+      log(
         `  ${colors.bold}${host}${colors.reset} ${dim(relative(rootDir, targetAbs) || targetAbs)}`,
       );
     } else {
-      console.log(
+      log(
         `  ${dim('Target:')}  ${relative(rootDir, targetAbs) || targetAbs}` +
           (opts.global ? dim(' (global)') : ''),
       );
@@ -277,7 +280,7 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
         const reason = state === 'modified'
           ? 'edited since install; use --force to replace it'
           : 'not installed by glirastes; use --force to replace it';
-        console.log(
+        log(
           `  ${tag(colors.yellow, 'skip')}     ${skill.name} ${dim(`(${reason})`)}`,
         );
         skipped += 1;
@@ -290,7 +293,7 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
 
       if (opts.dryRun) {
         const verb = exists ? 'overwrite' : 'install';
-        console.log(
+        log(
           `  ${tag(colors.cyan, 'would ' + verb)} ${skill.name} ${dim(opts.symlink ? '(symlink)' : '(copy)')}`,
         );
         if (exists) overwritten += 1;
@@ -302,11 +305,11 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
         await removeAtomic(dest);
         overwritten += 1;
         if (state === 'unchanged') {
-          console.log(
+          log(
             `  ${tag(colors.cyan, 'refresh')}  ${skill.name} ${dim('(unchanged since install)')}`,
           );
         } else {
-          console.log(
+          log(
             `  ${tag(colors.yellow, 'replace')}  ${skill.name} ${dim(`(was ${state}; --force)`)}`,
           );
         }
@@ -316,10 +319,10 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
 
       if (opts.symlink) {
         await symlink(skill.source, dest, 'dir');
-        console.log(`  ${tag(colors.green, 'symlink')}  ${skill.name}`);
+        log(`  ${tag(colors.green, 'symlink')}  ${skill.name}`);
       } else {
         await copyDirRecursive(skill.source, dest);
-        console.log(`  ${tag(colors.green, 'copied')}   ${skill.name}`);
+        log(`  ${tag(colors.green, 'copied')}   ${skill.name}`);
       }
 
       recorded[skill.name] = {
@@ -340,16 +343,16 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
     }
   }
 
-  console.log('');
-  console.log(separator());
-  console.log(
+  log('');
+  log(separator());
+  log(
     `  ${colors.bold}Result:${colors.reset} ${installed} installed, ${overwritten} overwritten, ${skipped} skipped` +
       (opts.dryRun ? dim(' (dry run — no files written)') : ''),
   );
 
   if (skipped > 0 && !opts.force) {
-    console.log('');
-    console.log(`  ${dim('Re-run with --force to overwrite skipped skills.')}`);
+    log('');
+    log(`  ${dim('Re-run with --force to overwrite skipped skills.')}`);
   }
 }
 

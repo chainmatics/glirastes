@@ -110,3 +110,64 @@ SDK `d697bc7`: typecheck and all 918 tests / 115 files pass. Platform `4e8f807`:
 ### Next active work: complete bootstrap, not more inspection polish
 
 The missing path is still agent launch/resume → source-derived app binding generation → local validation → actual chat/tool action → build/CI change maintenance. Consume this report as intake, reconcile the shipped skills with the local-first product decision, and prove the flow on all three integration forms. Current shipped Next.js/setup/tool-maintenance skills still contain historical Platform-interviewer/manual-resume requirements; do not use those unchanged as the new automatic workflow. Preserve explicit legacy command behavior rather than treating it as the new default. GID upstream reconciliation, common UI/STT/commands/mentions, Platform UX/metrics, live action, novice observation and release/landing gates remain open.
+
+## Batch 2B: one-command coding-agent entry
+
+**Files:** add `src/cli/commands/agent-setup.ts` and `.test.ts`; modify `src/cli/index.ts`, `environment-loading.ts` and its tests, `install-skills.ts` (reuse bundled path locator), README, and the existing three setup/integration/maintenance skills plus their focused behavior checks.
+
+1. RED: fresh `init` through the real CLI; no account/config/artifacts required for a read-only preview. Verify selected single host, in-session continuation, explicit host selection when ambiguous, no implicit dotenv loading, no nested launch, no shell or approval-bypass flags, modified skills preserved and agent exit zero not treated as successful integration.
+2. Add `glirastes init [--agent codex|claude] [--root] [--managed] [--dry-run] [--json]`. Existing selected agent context continues in that session by returning the canonical setup task, avoiding a nested agent. Outside a known agent session, start the selected installed CLI interactively in the app directory; retain its configured model/auth/permissions. Do not add model keys, silently change providers or run headless permission bypasses. Gemini skill installation remains supported by the existing installer; its new interactive bootstrap is not claimed until verified.
+3. Use the artifact-free inspection and ownership-aware existing skill installer. Preview writes nothing; actual init only installs project-local skills before handing the source integration to the selected agent. Reject linked setup/skill container directories before installer writes. Read the bundled canonical workflow even when an edited local copy is preserved; never automatically force-replace it.
+4. Baseline the old skills using a fresh-app application scenario. Update each at its canonical SDK path, correcting inventory-before-scan, local prompt/runtime flow, existing-agent assessment, and local day-2 regeneration. Read existing APIs/types instead of inventing generated artifacts or enabling unknown schemas. Keep proven principal and final authorization mandatory. Rerun scenario checks and static regression guards.
+5. After an external interactive agent exits, run actual Doctor. Nonzero exit, invalid artifacts or zero tools remain incomplete; even passing local checks are not a claim of live tool success. In-session continuation similarly returns work to perform, not a fabricated completion receipt.
+6. Run focused/full SDK tests, typecheck, build and built-CLI probes. Review independently and record exact scope. Live agent-to-action rehearsal and the three-stack binding/change corpus remain required next; launcher/skill tests alone do not satisfy them.
+
+Fresh code inspection found an additional CLI-boundary defect: `setup inspect` inherited the legacy bin's implicit `.env` loading, despite the inspector itself being read-only. Include it with `init` in the explicit no-implicit-env path and prove this at the executable boundary, not just `runCli`.
+
+## Batch 2B verified locally — 2026-09-13
+
+- Added real `init` entry: existing Codex/Claude session continues in-session;
+  otherwise an explicitly selected installed interactive CLI receives the
+  canonical task with its existing configuration. Preview is read-only.
+  Customized installed skills survive; no forced provider/model/permission
+  override or implicit dotenv loading is added. CLI installation does not
+  claim a completed integration or action.
+- TDD: eight initial launcher failures became green. Additional regressions
+  reproduced mixed JSON/interactive output, JSON host prompts and cross-host
+  nesting before fixes. Final launcher suite: 14 cases, including a real child
+  process with literal arguments and exit status. Independent review and
+  re-review found no remaining bounded launcher issue.
+- Canonical setup plus Next.js, tool-maintenance and UI companions now describe
+  source-derived local bootstrap and optional connection. Read-only agent
+  application scenarios exposed/fixed inventory ordering, Managed receipt vs
+  activation, wrong UI endpoint/transport examples and theme prop placement.
+  These scenarios and five static guards are not live integration evidence.
+- Final SDK: 971 tests / 119 files, typecheck, ESM/CJS build and 16 subpath
+  shims passed. `node scripts/verify-agent-entry.mjs` exercises the built bin
+  against a fresh temporary app: inspect, preview and same-session skill
+  installation pass with exactly one JSON result each, no implicit dotenv
+  read, no model/agent process or network request. Secret-pattern and whitespace
+  audits passed; no runtime authorization or public export change.
+- GID: all 966 tests / 58 files pass with `bun run test --maxWorkers=2`;
+  installed `tsc --noEmit` passes. Default worker concurrency timed out three
+  tests alongside SDK verification, then one real-sync test when run alone.
+  With two workers the same real-sync check took 1.47s under its unchanged 5s
+  limit. Record the default-concurrency instability, not an unconditional green
+  default invocation. No GID source, scoped bindings or connection changes.
+- No application server was running on 3030/3031/3101/8101 at the check. No
+  server was started, credentials changed, production DB accessed, or remote
+  push/publication/deployment performed. The full goal remains active.
+
+### Next code gate: missing UI handler must fail validation
+
+Skill application exposed a real validation gap: discovery emits
+`ui-action-handler-not-found` but retains the execution; `validateWorkspace`
+currently ignores that finding. Do not substitute documentation for repair.
+Add real fixture RED tests through validate/build and Doctor/setup where
+applicable; reject declared missing handlers with a fixed actionable diagnostic
+before artifact writes. Keep legacy entries without actionId compatible; do
+not invent a handler requirement for them. Prove registered handlers still
+validate and removed handlers cannot create a fresh build. Then continue the
+shared generator and full fresh-app action/change corpus, not more launcher
+polish. GID upstream, three-stack/UI/STT, Platform metrics/usability, landing
+and live acceptance remain required.

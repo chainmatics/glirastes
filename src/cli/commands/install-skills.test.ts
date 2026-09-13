@@ -49,15 +49,15 @@ describe('foundation agent skills', () => {
     },
   );
 
-  it('teaches scan and sync instead of hand-authored tool annotations', async () => {
+  it('teaches source-derived local generation and optional sync instead of hand-authored annotations', async () => {
     const sources = await Promise.all([
       skillSource('integrating-glirastes-nextjs'),
       skillSource('maintaining-glirastes-tools'),
     ]);
     const combined = sources.join('\n');
 
-    expect(combined).toContain('glirastes scan');
-    expect(combined).toContain('glirastes:sync');
+    expect(combined).toContain('source-derived generator');
+    expect(combined).toContain('glirastes sync');
     expect(combined).toContain('resolvePrincipal');
     expect(combined).not.toMatch(/ai-tool\.ts|@AiTool|@AiModule|@AiParam/);
   });
@@ -103,7 +103,8 @@ describe('foundation agent skills', () => {
     expect(source).toContain('Autonomous mode');
     expect(source).toContain('Interview mode');
     expect(source).toContain('glirastes setup scan');
-    expect(source).toContain('glirastes setup sync');
+    expect(source).toContain('glirastes sync');
+    expect(source).toContain('Standalone');
     expect(source).toContain('OpenRouter');
     expect(source).toContain('explicit consent');
     expect(source).toContain('Never send');

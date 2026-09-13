@@ -6,6 +6,8 @@ describe('shouldLoadImplicitEnvironment', () => {
     ['sync'],
     ['connect'],
     ['doctor'],
+    ['init'],
+    ['setup', 'inspect'],
     ['setup', 'sync'],
     ['setup', '--managed'],
   ])('keeps %s credentials out of unverified implicit env files', (...args) => {

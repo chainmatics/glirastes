@@ -1,12 +1,15 @@
 ---
 name: setting-up-glirastes
-description: Use when discovering, assessing, interviewing, reviewing, or syncing the local tools and prompt bindings of a Glirastes target app for its initial setup or a setup regeneration.
+description: Use when starting or resuming a Glirastes app integration, generating its initial local bindings, assessing capabilities, or regenerating setup.
 ---
 
 # Setting Up Glirastes
 
-Keep assessment local and produce the same strict artifact in both modes.
-Glirastes validates and syncs the result; the Platform does not assess source.
+The existing coding agent performs the integration in the app checkout.
+Glirastes validates its output; the Platform is optional and never assesses
+source. Do not stop after installing skills or hand routine implementation back
+to the developer. Follow the requested autonomous/interview mode without asking
+again; ask only material questions that code and prior decisions cannot answer.
 
 ## Safety boundary
 
@@ -14,10 +17,17 @@ Glirastes validates and syncs the result; the Platform does not assess source.
   data, tool arguments, or tool results to the Platform.
 - Never infer authorization from routes. Record technical evidence and keep
   final authorization in the target app.
-- Never add decorators, `@ai-ignore`, or manual tool annotations. Treat the
-  positive local execution inventory as authoritative.
+- Never add decorators, `@ai-ignore`, or manual tool annotations. Generate the
+  positive local execution inventory from source and check its freshness in CI.
 - Never sync an artifact that fails the bundled validator.
-- Ask for explicit consent before any external model call or Platform sync.
+- Use the agent's existing model configuration, not an extra setup key.
+  A separately selected provider or a new Platform connection requires explicit
+  consent; do not change provider or transmit source to the Platform silently.
+- Preserve app changes, tuned prompts, identities and modified installed skills.
+  Read the bundled version when a local skill was skipped during refresh; never
+  use `--force` to discard its custom instructions. Resolve actual conflicts.
+- No unsigned fallback, silent Managed downgrade or approval bypass. No push,
+  merge, package publication or deployment without explicit authority.
 
 Read [references/artifact-contract.md](references/artifact-contract.md) before
 creating an artifact. Use
@@ -25,36 +35,69 @@ creating an artifact. Use
 
 ## Workflow
 
-1. Run `glirastes setup scan` and inspect the deterministic local discovery.
-   It resolves each UI action to the file that registers its handler, so read
-   that handler rather than guessing side effects from the action's name.
-2. Confirm the app identity and show aggregate tool groups without source.
-3. Ask the user to choose exactly one mode.
-4. Assess only the positive inventory.
-5. Draft the three prompt groups when the app has none, and never overwrite a
-   group that already exists: a tuned prompt is real work and the measured
-   prompt baseline depends on it.
-6. Build planner and prompt-binding metadata without embedding prompt content.
-7. Validate with
-   `bun skills/setting-up-glirastes/scripts/validate-artifact.ts <artifact>`.
-8. Show a compact summary of enabled tools, approval candidates, warnings,
-   planner binding, and prompt digests.
-9. Ask for explicit consent to run `glirastes setup sync --artifact <path>`.
-10. Report the bounded run ID and lifecycle status. Resume with
-   `glirastes setup status --run-id <id>` when interrupted.
+1. Run `glirastes setup inspect --json`. Inspect app code to confirm frontend,
+   backend, auth, API schemas and UI state/actions. Manifest hints are not
+   verified support. For separate/non-Node backends, verify the adapter and
+   local runtime topology; never pretend a Python handler is a Next.js export.
+2. Reuse installed Glirastes artifacts if present. Otherwise generate an app
+   identity once, local prompt content and source-derived schemas/bindings.
+   Reuse the actual identity of an already selected Platform app. Keep a fresh
+   accountless app Standalone unless Managed was explicitly requested; use its
+   pairing bootstrap below. Read this installed SDK's exported types/API;
+   do not invent methods from another version or copy its integration blindly.
+3. Generate the local execution inventory from the real endpoint and UI code.
+   Reuse exported codegen fingerprint/discovery contracts. Generate a repeatable
+   local regeneration command covering endpoints, navigation and filters; do
+   not ask the user to add tool entries by hand. UI bindings must resolve real
+   registered handlers. Unsupported schemas are a visible implementation gap,
+   never an invented permissive schema.
+4. Only now run `glirastes setup scan --execution-inventory .glirastes/foundation-execution-inventory.json`.
+   Assess the positive inventory against actual handlers and local schemas.
+   Produce the strict setup artifact; preserve existing metadata and UUIDs on
+   regeneration. Unknown capabilities remain disabled pending clarification.
+5. Wire the verified server-side principal into the shared local runtime and
+   real app executors. Reuse shipped chat, sessions, results and STT; bind UI
+   actions where state lives. Add change checks to existing build/CI without
+   silently replacing app scripts. Draft only missing prompt groups; tuned
+   local planner/app-behavior/response-style prompts must survive regeneration.
+6. Run `glirastes setup --dry-run --json`, inspect its plan, then local setup
+   and Doctor. Existing Managed apps retain `--managed` on both. For a fresh
+   app requesting Managed, first run `glirastes setup` to create the local
+   pairing receipt (never write it by hand), without starting chat or tool
+   execution; explicitly connect it, then apply
+   `glirastes setup --managed` and `glirastes doctor --managed` before runtime
+   activation. Wire the actual Managed revision source and wait for verified,
+   compatible signed revisions; setup/doctor do not download or activate them.
+   Managed setup immediately syncs and therefore needs that scoped
+   connection first. Never downgrade an existing Managed app. Policy-loosening
+   confirmation is bound to the plan digest; do not auto-confirm it.
+7. Verify the app's own runtime model binding. Coding-agent login is not a
+   transferable runtime credential; do not extract or copy it into the app.
+   Missing runtime provider configuration is a genuine dependency, separate
+   from assessment access. Start the app using its safe development path.
+   Prove a real authorized
+   chat/tool action and refusal of unauthenticated/cross-tenant execution. Avoid
+   production data/side effects. Prove endpoint/navigation/filter add/change/
+   delete through regeneration and tests, not a manually maintained catalogue.
+8. Report setup time, changed files, tests and actual action evidence. Local
+   validation, agent exit, sync and successful action are distinct facts. If
+   blocked, report the precise missing capability/access, never a fabricated
+   five-minute integration. Skill installation alone is not completed setup.
+
+The companion `integrating-glirastes-nextjs`, `building-glirastes-chat-ui` and
+`maintaining-glirastes-tools` skills cover their respective parts. The local
+workflow here replaces historical Platform-mandatory setup instructions.
 
 ## Assessment rules
 
-Decide from the execution kind and the HTTP method, not from how an operation
-happens to be named. Naming heuristics misjudge view switches and filter
-changes.
+Inspect effects, auth and schemas before classifying. Naming heuristics or an
+HTTP method alone are not proof of behavior. Preserve existing approved policy.
 
-- A UI action dispatches a client-side action and never reaches a backend
-  endpoint, so it cannot change server state: operation group `ui`, risk class
-  `safe-read`, and **never** `requiresApproval`. An approval prompt for
-  opening a dialog or switching a view is noise that trains users to click
-  through prompts that matter.
-- `GET` is a read: `safe-read`, no approval.
+- A proven pure UI action only changes local navigation/filter state: group
+  `ui`, risk `safe-read`, no write approval. A handler calling a mutation is not
+  pure UI, regardless of its name or registration mechanism.
+- A proven read-only `GET` is `safe-read`, without a write approval. Check the
+  handler before inferring that property from the HTTP method.
 - `POST` creates, `PATCH` and `PUT` update, `DELETE` deletes. All of them
   require approval, and `DELETE` carries risk class `delete`.
 - An unrecognised method fails safe: treat it as a write that requires
@@ -68,12 +111,13 @@ changes.
   from its nearest sibling, and keep it short: it is paid on every turn. Route
   and method are metadata and belong on their own fields, never in the prose.
 
-Every value is a proposal. The operator overrides it on the Platform before
-anything is signed, so prefer the conservative reading over a clever guess.
+New values are proposals; preserve stricter existing decisions. Never change
+authorization or remove approvals just to make a test pass. Standalone uses
+the SDK's signed local runtime; no Platform account is necessary.
 
 ## Autonomous mode
 
-Use local static evidence first. If the user selects GPT-OSS through
+Use the existing coding agent and local static evidence first. If the user selects GPT-OSS through
 OpenRouter, explain exactly which selected technical context will leave the
 machine and ask for explicit consent before the call. Call OpenRouter directly
 from the local host. Never route model input or output through the Platform,
@@ -91,3 +135,12 @@ answers locally and encode only the bounded technical result.
 The workflow is canonical for Codex, Claude, and Gemini. The installer only
 adapts the destination directory. Do not fork prompts, validation, assessment,
 or sync behavior by host.
+
+For a fresh local integration, no Platform interviewer, API key or sync is a
+prerequisite. If connection was selected, run
+`glirastes connect --base-url <confirmed-control-plane-url>` and then
+`glirastes sync` after the local result validates. Sync uploads the current
+technical result; it does not reassess source. Keep prompts local. Signing,
+activation and rollout remain separate scoped operations with their existing
+approvals. Legacy guided setup remains explicit; do not route this agent
+workflow through its extra provider-key/manual-resume gates.

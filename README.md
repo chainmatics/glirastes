@@ -83,7 +83,45 @@ application source and does not automatically approve candidates. Dependency
 graph resolution, automatic assessments and watch/build orchestration remain
 separate MVP work; recognizing an export alone does not create a ready tool.
 
-## Next.js pilot path
+## Agent-led setup (local Foundation checkout)
+
+With this SDK installed in the app, start its existing coding agent:
+
+```bash
+npx --no-install glirastes init
+```
+
+Inside a Codex or Claude session, the command installs project-local skills and
+returns the integration task to that same agent. The agent must continue through
+source-derived bindings, UI integration and a real authorized tool action; the
+command does not report those as completed just because skills were installed.
+From an interactive terminal, choose an installed CLI (`--agent codex` or
+`--agent claude` if needed). It runs with its existing model and permission
+settings. No additional assessment key, provider switch or permission bypass is
+added. Its login is not a transferable credential for the app's chat model.
+
+Preview without changes or an agent process:
+
+```bash
+npx --no-install glirastes init --agent codex --dry-run --json
+```
+
+`--root` selects the app directory. Modified installed skills are preserved;
+the agent also receives the bundled canonical workflow to reconcile safely.
+`--json` is available for preview and same-session continuation, not an external
+interactive agent's terminal stream. JSON never prompts for a host choice.
+An existing agent session cannot launch a different nested agent through init.
+Both init and `setup inspect` skip implicit environment-file loading.
+
+After an external agent exits, init runs the real offline Doctor. A nonzero
+agent exit, failed checks or zero tools are not success. The interactive CLI may
+stay open until you exit it; Doctor runs afterward. A passing Doctor still is
+not live tool-action evidence. Fresh-app timing and three-stack end-to-end
+acceptance remain open; the initializer does not imply universal framework
+support. Use the exact Foundation package checkout: the historical public
+`0.4.0` package has a different surface despite the same version number.
+
+## Next.js local validation and optional connection
 
 Install the SDK, an AI SDK provider, and the React peers:
 
@@ -177,13 +215,13 @@ Scan existing routes without changing them:
 npx glirastes scan
 ```
 
-Review ambiguous or critical candidates in the Platform interviewer. Semantic
-descriptions and approval policy live there. The target project keeps only
-content-free fingerprints, schema digests, local execution bindings, and
-Platform UUID references.
+This route-only scan is not the fresh agent workflow or automatic UI discovery.
+The agent assesses actual local code and generates validated local metadata;
+Platform review is optional. Local prompts and executable schemas never go to
+the Platform. Preserve existing reviewed policy and identity when connected.
 
-The earlier `glirastes setup sync` and `glirastes setup --managed` forms remain
-compatibility adapters. New integrations should use the explicit `setup`,
+The earlier `glirastes setup sync` form remains a compatibility adapter.
+New integrations should use the explicit `setup`,
 `connect`, `sync`, and `doctor` lifecycle above. The legacy route-import flow
 remains separately available for migrations that still regenerate bindings:
 
@@ -193,8 +231,8 @@ npm run glirastes:sync
 
 That migration script should call `glirastes scan --sync`, pass its generated
 local execution inventory, and regenerate the target-specific local registry.
-No provider secret, tool credential, prompt, description, argument, result, or
-business content is uploaded.
+No provider secret, tool credential, raw prompt, argument, result, or business
+content is uploaded. Bounded technical capability descriptions may be synced.
 
 Every integration must provide a server-only resolver:
 
@@ -261,18 +299,19 @@ See [managed local runtime sync](./docs/managed-runtime-sync.md).
 Install the bundled foundation skills with:
 
 ```bash
-npx glirastes install-skills
+npx --no-install glirastes install --host codex --with-setup-skills
 ```
 
-They teach the scan/sync integration, tool revision workflow, and current
-React/STT contract. See [skills](./skills/README.md).
+They teach local agent integration, source-derived tool maintenance and the
+React/STT contract. Installation alone does not integrate an app. `init` above
+connects installation to the selected agent workflow. See [skills](./skills/README.md).
 
 ## Foundation verification
 
 Before promotion, prove:
 
-- scan → Platform review → sync → base UI → first real tool action in under
-  five minutes;
+- fresh app → agent setup → base UI → first real tool action in under five
+  minutes, with no mandatory Platform account;
 - negative principal, role manipulation, cross-tenant, approval replay, and
   revocation tests;
 - no content egress on the normal chat path;

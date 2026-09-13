@@ -18,14 +18,16 @@ durable sessions are enabled.
 
 ## Configuration
 
-Everything below is a field of `AiChatProviderConfig`, which `VercelAiChat`
-accepts directly. Reach for configuration before forking a component.
+`VercelAiChat` requires `endpoint` and creates its transport internally.
+It also accepts `AiChatProviderConfig` fields directly. Only when composing
+`AiChatProvider` yourself do you supply `transport` from the transport hook.
+Reach for configuration before forking a component.
 
 | Field | What it decides |
 |---|---|
-| `transport` | required; the backend. Use the transport hook, not a hand-rolled fetch |
+| `endpoint` | required by `VercelAiChat`; the actual server chat route |
 | `theme` | preset name or override object |
-| `primary`, `primarySoft` | accent and gradient stop, without a full theme |
+| `theme.colors.primary`, `theme.colors.primarySoft` | accent and gradient stop within a theme override |
 | `classNames` | per-slot class hooks |
 | `components` | replace a rendered component (see *Slots*) |
 | `locale` | override any user-facing string; omitted keys fall back to English |
@@ -42,7 +44,7 @@ whatever the app already uses:
 
 ```tsx
 const t = useTranslations('chat');
-<VercelAiChat locale={{ sendButton: t('send'), placeholder: t('placeholder') }} />
+<VercelAiChat endpoint="/api/chat" locale={{ sendButton: t('send'), placeholder: t('placeholder') }} />
 ```
 
 ## Theming before forking
@@ -53,8 +55,8 @@ const t = useTranslations('chat');
 `sunset-orange`, `ocean-teal`, `midnight-mono`.
 
 ```tsx
-<VercelAiChat theme="professional-dark" />
-<VercelAiChat theme={{ preset: 'minimal-white', colors: { primary: '#10b981' } }} />
+<VercelAiChat endpoint="/api/chat" theme="professional-dark" />
+<VercelAiChat endpoint="/api/chat" theme={{ preset: 'minimal-white', colors: { primary: '#10b981' } }} />
 ```
 
 `getThemeVars`, `CHAT_THEME_PRESETS`, and `DEFAULT_THEME_PRESET` are exported for
