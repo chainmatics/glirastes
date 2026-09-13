@@ -1,0 +1,6 @@
+body { margin: 0; background: #f6f7fb; color: #182338; font: 16px/1.5 system-ui, sans-serif; }
+main { padding: 32px; }
+[data-testid="native-ui"] { max-width: 520px; padding: 24px; background: white; border: 1px solid #dce1ec; border-radius: 12px; }
+nav { display: flex; gap: 8px; }
+nav button, select { font: inherit; padding: 6px 12px; }
+li { padding: 8px; }

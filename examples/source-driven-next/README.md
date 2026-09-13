@@ -1,6 +1,6 @@
 # Source-derived execution reference (development proof)
 
-This is a small **native-handler and UI integration proof**, not a production-ready
+This is a small **native-handler, Next HTTP and browser integration proof**, not a production-ready
 Next.js starter or the finished one-command installer.
 
 The files under `native/` are an ordinary app-shaped fixture: request/response
@@ -12,7 +12,7 @@ From the SDK worktree, with its dependencies already installed:
 
 ```sh
 bun run build
-bunx vitest run tests/source-driven-next.test.ts tests/source-driven-ui.test.tsx
+bunx vitest run tests/source-driven-next.test.ts tests/source-driven-ui.test.tsx tests/source-driven-build.test.ts
 ```
 
 The test copies only the native app to isolated temporary directories. It then:
@@ -48,25 +48,66 @@ authorization wrapper require local reassessment. Native modules are trusted
 application code executed inside the customer environment, not in the platform.
 The fixture's read classification is not a blanket rule that any GET is safe.
 
-Important boundaries:
+## Real Next and browser test
+
+Prerequisites: Node 22.12+ (JSON import attributes), Bun, the installed SDK dev
+dependencies, an installed Playwright module and a compatible browser. This
+does not download a browser or install the registry's different historical
+`glirastes@0.4.0`. The preparer explicitly links this worktree's built SDK and
+installed dependencies into a disposable app.
+
+```sh
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
+PLAYWRIGHT_CHANNEL=chrome \
+node --test tests/source-driven-browser.test.mjs
+
+REFERENCE_NEXT_MODE=production \
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
+PLAYWRIGHT_CHANNEL=chrome \
+node --test tests/source-driven-browser.test.mjs
+```
+
+Omit `PLAYWRIGHT_CHANNEL` when Playwright's bundled Chromium is installed.
+Port 3191 must be free. The runner starts a loopback-only Next process with a
+minimal environment, an ephemeral bootstrap capability and fictional test
+data. It stops its processes/browser and removes its generated app afterward.
+Optional `REFERENCE_SCREENSHOT=/absolute/path.png` retains a browser screenshot.
+
+The test verifies an unauthenticated chat request is denied, an unauthenticated
+session bootstrap is denied, the authenticated endpoint tool returns only
+Alice's matching tasks through real HTTP/SSE, and streamed UI tool results reach
+the existing `VercelAiChat` callback and mounted native action handlers. Headings,
+selected filter and visible tasks change in Chrome; console/page errors fail
+the test. It also changes native UI configuration after setup and verifies the
+normal app command regenerates the navigation schema before starting Next.
+
+`build.mjs` emits static imports of native contracts with the signed standalone
+runtime. The same atomically replaced `.glirastes/runtime.mjs` persists identity
+and tombstone state; it is local source-bearing output, not a Sync payload.
+Linked output containers/artifacts are rejected. Normal `dev` and `build`
+commands run generation first and stop on assessment failure. `start` serves the
+already built deployment. Do not bypass those build commands with raw `next
+build`; standalone source/schema changes require a new build/process, not a
+running in-process watch promise. Codegen does not run inside chat requests.
+
+## Important boundaries
 
 - The in-memory session implementation is **test-only**. A real app keeps its
   existing authentication and server-side principal resolution.
-- This is in-process handler execution plus jsdom/React-effect integration,
-  not HTTP socket/Next server, real-browser, language-model, streaming or
-  microphone acceptance. UI tool success means an action payload was produced;
-  the test separately dispatches it and verifies the rendered effect. A missing
-  subscriber does not provide a delivery acknowledgement via this bus.
-- No model or platform request is made. Local schemas, source and data are not
+- The original Vitest corpus is in-process/jsdom. The separate Node browser
+  test now covers actual Next HTTP, SDK streaming and browser dispatch. Its
+  deterministic model is test infrastructure, not an intent router or proof of
+  language understanding, latency/token efficiency or real-provider quality.
+  A missing bus subscriber still does not provide a delivery acknowledgement.
+- No external model or platform request is made. Local schemas, source and data are not
   synced. A generated artifact is not a platform publication or activation.
 - Standalone code/schema changes require a fresh native module graph/process.
   The corpus uses fresh source directories to represent the next deployment;
   it does not claim code hot-reloading within one Node process.
-- Generation state, including tombstones, must be persisted by the eventual
-  build integration. This proof passes it in memory between builds.
-- Native navigation/filter discovery and dispatch have a bounded DOM corpus.
-  The actual Next app shell/SDK chat and browser flow, coding-agent installation
-  timing and the other two reference integrations remain open goal gates.
+- This is not a full Add/Change/Delete browser corpus, coding-agent installation
+  timing or microphone test. Existing source/DOM tests cover the broader change
+  matrix; repeat it across real deployments and the other two reference stacks.
+  GID migration, real-model routing, STT and full MVP acceptance remain open.
 
 Do not copy this fixture's authorization policy or fixed identities into a
 customer application. Its purpose is to test the common SDK against a second

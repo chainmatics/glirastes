@@ -130,3 +130,80 @@ SDK chat in a browser, including actual streamed tool results reaching this
 UI bridge. Persist generation state at the build boundary and expose all
 runtime prerequisites. Do not count the current handler/DOM corpus as real
 browser, agent-installation timing, STT, or the completed three-stack gate.
+
+## Task 4: real Next process and streamed chat-to-UI proof
+
+Use the existing isolated SDK worktree. No customer app, database, model key or
+Platform connection is involved. The reference model is deterministic test
+infrastructure, not evidence of language understanding or token savings.
+
+1. Add a failing `tests/source-driven-browser.test.mjs` (Node test runner):
+   prepare a fresh copy of the native app with the existing SDK chat; boot Next
+   on loopback with a minimal environment; require an opaque test session;
+   POST actual UI messages, inspect streamed tool results and native scoped
+   endpoint output. Use Playwright Chromium for visible navigation and filtering.
+2. Add `examples/source-driven-next/build.mjs`: run source generation before
+   Next, emit static native schema imports and public SDK runtime bindings.
+   Persist inventory/tombstones with the generated runtime in one atomically
+   replaced file; a failed assessment must preserve the last good file and
+   fail the build. Never scan/import TypeScript codegen per chat request.
+3. Add `browser-shell/` with a Next layout/page and chat/session routes outside
+   the native API discovery directory. Mount `VercelAiChat`, native UI and its
+   existing action bridge. The test-only session endpoint requires an ephemeral
+   capability and an explicit test-mode flag; never replace app authentication.
+4. Add a development fixture preparer with explicit local SDK/dependency links.
+   Test-model calls run through the SDK's normal streaming handler, signed local
+   source, principal checks and tool guards. The HTTP tool path must use the
+   actual Next native route, not the earlier in-process handler shortcut.
+5. Run `node --test tests/source-driven-browser.test.mjs`, both prior reference
+   suites, full SDK tests/typecheck/build and a real Next production build.
+   Inspect browser console and visible UI. Review the bounded diff independently,
+   update README/canonical evidence and make a local commit. Real model routing,
+   STT, fresh agent timing and other stacks remain separate open gates.
+
+### Task 4 verified checkpoint — 2026-09-13
+
+The reference now runs a real Next 15.5.15 process and the existing public
+VercelAiChat component in Chrome. A deterministic AI-SDK V3 test model drives
+the normal SDK streaming handler, signed standalone source, principal/turn
+guards, actual HTTP native endpoint and streamed UI actions. No special chat
+transport or replacement runtime was introduced. Generated bindings use static
+native schema imports; codegen stays at the build boundary.
+
+RED evidence: missing real-app preparer/build emitter; a linked generation
+directory incorrectly accepted; normal app startup retaining a stale navigation
+schema after native config changed; missing bounded process-group cleanup.
+GREEN evidence: three build tests cover persistent identities/tombstones,
+signed importable runtime, last-good preservation, linked-directory/external
+sentinel protection and failed assessment stopping the normal build before
+Next. Real app dev/build commands regenerate; production start serves its build.
+
+The browser corpus passes with both Next dev and production build/start. It
+checks unauthorized chat/bootstrap rejection, scoped real HTTP endpoint results
+in SSE, a changed navigation schema after setup, visible SDK-chat navigation
+and filtering, and zero browser console/page errors. The screenshot was visually
+inspected: native selected filter and resulting task are visible beside the SDK
+chat. A separate subprocess test proves SIGTERM-resistant test processes are
+terminated with bounded escalation, including surviving descendants after the
+group leader exits. Production rerun: 3/3 Node tests pass.
+
+Full SDK suite: 1,019 tests / 125 files pass. Typecheck and ESM/CJS build pass.
+Next build and browser checks use local fictional data and an explicitly gated
+ephemeral test-session bootstrap, no external model or Platform request. The
+first failed browser attempts exposed missing local Chromium (used installed
+Chrome), favicon 404, tracing-root warning, and premature cache removal; those
+test/environment issues are resolved. Two trace-only caches from early attempts
+remain untracked because host policy rejected both deletion and relocation;
+they are not commit inputs. Final test runs self-clean.
+
+This closes the bounded real Next/chat/HTTP/DOM-delivery proof, NOT fresh agent
+installation timing, real-model routing quality, STT, the full cross-deployment
+change matrix, GID/upstream reconciliation, or three-stack MVP acceptance. The
+current fixture's UI labels still include technical tool names/pipeline text;
+it is functional evidence, not the novice usability gate. No customer runtime,
+DB, production SDK source, GID artifacts or remote Git/deployment state changed.
+
+Next: carry the source-derived setup/build workflow into the current-upstream
+Get It Done reconciliation and prove endpoint/navigation/filter add/change/
+delete through real deployments, then the separate-backend and non-React/non-TS
+references. Do not extend this small fixture into a second standalone product.

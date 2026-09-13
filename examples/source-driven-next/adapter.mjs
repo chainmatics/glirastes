@@ -120,7 +120,7 @@ export async function generateReference({ rootDir, previous }) {
     warnings: [], generatedAt: new Date().toISOString(),
   }, candidates.map((tool) => tool.name));
   const source = createLocalRuntimeSource({ setupArtifact: artifact, bindings, localLimits: limits, identity: { tenantId } });
-  return { ...generated, bindings,
+  return { ...generated, bindings, artifact, limits,
     createTurn({ request, resolvePrincipal }) {
       const principal = resolvePrincipal();
       if (!principal) throw new Error('missing_principal');

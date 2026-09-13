@@ -1,0 +1,11 @@
+{
+  "name": "glirastes-native-browser-reference",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node glirastes-setup/build.mjs . && next dev --hostname 127.0.0.1 --port 3191",
+    "build": "node glirastes-setup/build.mjs . && next build",
+    "start": "next start --hostname 127.0.0.1 --port 3191"
+  },
+  "dependencies": { "next": "15.5.15", "react": "^19", "react-dom": "^19", "@ai-sdk/react": "^3", "react-markdown": "^10", "ai": "^6", "zod": "^4", "glirastes": "file:../../.." }
+}
