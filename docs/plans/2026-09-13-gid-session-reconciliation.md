@@ -141,3 +141,7 @@ recording. The new Close path no longer creates that race, but the general
 controller lifecycle needs its own regression and repair before full STT parity.
 Actual browser focus return when the original opener is replaced also remains
 to be checked; component focus evidence covers an opener that stays connected.
+
+The controller follow-up is now implemented and verified separately in
+[Generation-safe STT lifecycle](2026-09-13-stt-generation-safe-lifecycle.md).
+Its unit/integration evidence does not close the live browser/microphone gate.
