@@ -61,16 +61,19 @@ export function defineModule(config: ModuleDefinition): ModuleDefinition {
 /**
  * Create an AI router that selects tools based on classified intent.
  *
- * The router uses confidence-based expansion:
+ * Legacy routing uses confidence-based expansion:
  * - High confidence (>= 0.85): Only primary module's own tools
  * - Medium confidence (0.7-0.85): Primary module tools + shared tools from all modules
  * - Low confidence (< 0.7): All tools (ambiguous fallback)
+ * Focused routing instead leaves uncertain intents unselected for clarification
+ * or bounded discovery and expands only through explicit module relationships.
  */
 export function createAiRouter(config: AiRouterConfig): AiRouter {
   const {
     modules,
     relatedModules = {},
     confidenceThresholds = {},
+    routingMode = 'legacy',
   } = config;
 
   const thresholds = {
@@ -83,6 +86,29 @@ export function createAiRouter(config: AiRouterConfig): AiRouter {
 
   return {
     route(intent: IntentClassification, _allToolNames?: string[]): SelectedTools {
+      if (routingMode === 'focused') {
+        const primary = moduleMap.get(intent.intent);
+        if (
+          intent.intent === 'ambiguous' || !primary
+          || !Number.isFinite(intent.confidence)
+          || intent.confidence < thresholds.medium
+          || intent.confidence < 0 || intent.confidence > 1
+        ) {
+          return { tools: [], module: null, strategy: 'none' };
+        }
+        const expanded = intent.confidence < thresholds.high;
+        const relatedShared = expanded
+          ? (relatedModules[primary.id] ?? []).flatMap(
+              (id) => moduleMap.get(id)?.sharedTools ?? [],
+            )
+          : [];
+        return {
+          tools: unique([...primary.tools, ...(primary.sharedTools ?? []), ...relatedShared]),
+          module: primary,
+          strategy: expanded ? 'expanded' : 'single',
+        };
+      }
+
       // Ambiguous: use all tools
       if (intent.intent === 'ambiguous') {
         return {

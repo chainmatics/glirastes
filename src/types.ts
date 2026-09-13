@@ -680,6 +680,8 @@ export function applyPromptOverride(
 
 export interface AiRouterConfig {
   modules: ModuleDefinition[];
+  /** Focused routing avoids full-catalogue fallbacks; direct routers retain legacy defaults. */
+  routingMode?: 'focused' | 'legacy';
   expansionStrategy?: 'minimal' | 'shared' | 'full';
   relatedModules?: Record<string, string[]>;
   confidenceThresholds?: {
@@ -691,7 +693,7 @@ export interface AiRouterConfig {
 export interface SelectedTools {
   tools: string[];
   module: ModuleDefinition | null;
-  strategy: 'single' | 'expanded' | 'all';
+  strategy: 'single' | 'expanded' | 'all' | 'none';
 }
 
 export interface AiRouter {
@@ -878,6 +880,8 @@ export interface AiPipelineConfig {
 export interface PipelineResult {
   model: ModelConfig;
   tools: string[];
+  /** Honor this exact selection, including zero tools. Omit for legacy empty-means-all behavior. */
+  toolSelection?: 'explicit';
   sanitizedInput: string;
   intent: IntentClassification;
   module: ModuleDefinition | null;

@@ -69,7 +69,7 @@ export interface SimulatedPipelineResult {
   tools: string[];
   module: string | null;
   intent: IntentClassification;
-  strategy?: 'single' | 'expanded' | 'all';
+  strategy?: 'single' | 'expanded' | 'all' | 'none';
 }
 
 // ============================================================================

@@ -10,6 +10,19 @@ const aiTools = {
 const registryToolNames = new Set(Object.keys(aiTools));
 
 describe('scopePipelineTools', () => {
+  it('keeps an explicit empty selection empty', () => {
+    expect(scopePipelineTools({
+      aiTools, registryToolNames, selected: [], fallbackToAll: false,
+    })).toEqual({});
+  });
+
+  it('does not expose unrelated tools when every selected tool was role-filtered', () => {
+    expect(scopePipelineTools({
+      aiTools: { ui_navigate: aiTools.ui_navigate },
+      registryToolNames, selected: ['tasks_list'], fallbackToAll: false,
+    })).toEqual({});
+  });
+
   it('scopes to the selected tools', () => {
     const scoped = scopePipelineTools({
       aiTools,

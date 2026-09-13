@@ -1,6 +1,7 @@
 import type {
   AiPipeline,
   AiPipelineConfig,
+  AiRouterConfig,
   IntentClassification,
   ModelConfig,
   PipelineResult,
@@ -17,6 +18,8 @@ import {
 import { createLocalGuardrails } from './core/local-guardrails.js';
 
 export interface LocalAiPipelineConfig extends AiPipelineConfig {
+  /** Focused by default; legacy keeps the historical full-catalogue fallback. */
+  routingMode?: AiRouterConfig['routingMode'];
   /** AI SDK generateText or a compatible local model callback. */
   generateText?: LocalClassifierConfig['generateText'];
 }
@@ -43,6 +46,7 @@ export function createLocalAiPipeline(
     modules: config.modules,
     relatedModules: config.relatedModules,
     confidenceThresholds: config.confidenceThresholds,
+    routingMode: config.routingMode ?? 'focused',
   });
   const modelSelector = config.models && config.modelInstanceFactory
     ? createModelSelectorFromMap(
@@ -98,6 +102,7 @@ export function createLocalAiPipeline(
         return {
           model: selectModel(intent, context),
           tools: [],
+          toolSelection: 'explicit',
           sanitizedInput: validation.sanitized,
           intent,
           module: null,
@@ -144,12 +149,24 @@ export function createLocalAiPipeline(
           ...(module.sharedTools ?? []),
         ]),
       );
+      config.onAudit?.({
+        type: 'routing.resolved',
+        timestamp: new Date().toISOString(),
+        sessionId: '',
+        source: 'server-core',
+        details: {
+          module: selected.module?.id ?? null,
+          strategy: selected.strategy,
+          toolCount: selected.tools.length,
+        },
+      });
       const tools = [...selected.tools];
       if (followupsEnabled) tools.push('suggest_followups');
 
       return {
         model: selectModel(intent, context),
         tools: [...new Set(tools)],
+        ...(config.routingMode === 'legacy' ? {} : { toolSelection: 'explicit' as const }),
         sanitizedInput: validation.sanitized,
         intent,
         module: selected.module,

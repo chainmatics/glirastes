@@ -19,6 +19,37 @@ const context = {
 };
 
 describe('createLocalAiPipeline', () => {
+  it('uses an explicit empty selection for an ambiguous local intent', async () => {
+    const onAudit = vi.fn();
+    const pipeline = createLocalAiPipeline({
+      modules,
+      classifier: { modules, model: {} },
+      generateText: async () => ({ text: '{"moduleId":"ambiguous","confidence":0}' }),
+      onAudit,
+    });
+
+    const result = await pipeline.process('private ambiguous request', context);
+
+    expect(result).toMatchObject({ tools: [], toolSelection: 'explicit', blocked: false });
+    expect(onAudit).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'routing.resolved',
+      details: { module: null, strategy: 'none', toolCount: 0 },
+    }));
+    expect(JSON.stringify(onAudit.mock.calls)).not.toContain('private ambiguous request');
+  });
+
+  it('retains an explicit legacy routing option', async () => {
+    const pipeline = createLocalAiPipeline({
+      modules,
+      routingMode: 'legacy',
+      classifier: { modules, model: {} },
+      generateText: async () => ({ text: '{"moduleId":"ambiguous","confidence":0}' }),
+    });
+    const result = await pipeline.process('unclear', context);
+    expect(result.tools).toEqual(['list_tasks']);
+    expect(result.toolSelection).toBeUndefined();
+  });
+
   it('classifies, routes, and selects the model entirely locally', async () => {
     const generateText = vi.fn(async () => ({
       text: JSON.stringify({ moduleId: 'task_query', confidence: 0.98 }),

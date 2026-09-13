@@ -839,9 +839,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           }
         }
 
+        const hasExplicitSelection = pipelineResult.toolSelection === 'explicit';
         const initialToolNames = pipelineResult.blocked
           ? []
-          : pipelineResult.tools.length > 0
+          : hasExplicitSelection || pipelineResult.tools.length > 0
           ? pipelineResult.tools
           : Object.keys(registry);
         const discoveryController = pipelineResult.blocked
@@ -855,11 +856,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (pipelineResult.blocked) {
           // Guardrails blocked — no tools allowed
           aiTools = {};
-        } else if (!discoveryController && pipelineResult.tools.length > 0) {
+        } else if (!discoveryController && (hasExplicitSelection || pipelineResult.tools.length > 0)) {
           aiTools = scopePipelineTools({
             aiTools,
             registryToolNames: new Set(Object.keys(registry)),
             selected: pipelineResult.tools,
+            fallbackToAll: !hasExplicitSelection,
           });
         }
 

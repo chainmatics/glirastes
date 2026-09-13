@@ -12,6 +12,8 @@ export function scopePipelineTools<T>(options: {
   aiTools: Record<string, T>;
   registryToolNames: ReadonlySet<string>;
   selected: ReadonlyArray<string>;
+  /** Preserve historical behavior unless the pipeline declares an exact selection. */
+  fallbackToAll?: boolean;
 }): Record<string, T> {
   const unknown = options.selected.filter(
     (name) => !options.registryToolNames.has(name),
@@ -27,5 +29,7 @@ export function scopePipelineTools<T>(options: {
   for (const name of options.selected) {
     if (options.aiTools[name]) scoped[name] = options.aiTools[name];
   }
-  return Object.keys(scoped).length > 0 ? scoped : options.aiTools;
+  return options.fallbackToAll === false || Object.keys(scoped).length > 0
+    ? scoped
+    : options.aiTools;
 }
