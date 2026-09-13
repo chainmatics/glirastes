@@ -1,5 +1,9 @@
 # Get It Done upstream reconciliation: shared sessions
 
+Shared sidebar/floating follow-through and its SDK/browser evidence are tracked
+in [Shared chat layout](2026-09-13-shared-chat-layout.md). The SDK shell is now
+implemented; the GID shell integration remains the next checkpoint.
+
 This is one implementation checkpoint within the complete MVP requirements,
 not a replacement for the three-stack, fresh-setup or current-upstream gates.
 

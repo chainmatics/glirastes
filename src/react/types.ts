@@ -780,6 +780,8 @@ export interface RichMentionInputProps {
 }
 
 export interface ChatWindowHeaderRenderProps {
+  /** Insert these controls in a custom header when layoutControls is enabled. */
+  layoutControls?: ReactNode;
   onClose: () => void;
   isDragging: boolean;
   onDragStart: (e: ReactMouseEvent<HTMLElement>) => void;
@@ -806,7 +808,23 @@ export interface ChatWindowProps {
   className?: string;
   headerClassName?: string;
   bodyClassName?: string;
+  /** Keep this stable across mode changes. false reserves space in the host
+   * flex row for a sidebar; true renders an overlay in document.body. */
   portal?: boolean;
+  mode?: 'floating' | 'sidebar';
+  defaultMode?: 'floating' | 'sidebar';
+  onModeChange?: (mode: 'floating' | 'sidebar') => void;
+  /** Opt into common dock/float/collapse buttons. Default false. */
+  layoutControls?: boolean;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+  /** Initial sidebar width; changed props resize it. Echoing onSidebarWidthChange
+   * into this prop is supported. Floating width/height remain independent. */
+  sidebarWidth?: number;
+  minSidebarWidth?: number;
+  maxSidebarWidth?: number;
+  onSidebarWidthChange?: (width: number) => void;
+  layoutLabels?: Partial<Record<'dock' | 'float' | 'collapse' | 'expand' | 'resize', string>>;
   open?: boolean;
   /** Preserve child state while closed. Hidden content is inert; consumers must
    * stop owned media and dismiss external portals when closing. Default false. */
