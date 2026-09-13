@@ -136,6 +136,13 @@ a revision, activates a deployment, or changes the network-silent Local
 default. `doctor` performs the same local Connected checks without a network
 request and never prints credential values.
 
+`doctor` explains local checks in plain language and gives one next action when
+something needs attention. Use `doctor --verbose` for technical codes or
+`doctor --json` for the structured agent-readable report. A passing Doctor is
+not proof that the Platform is reachable, an update is active, or a chat/tool
+action has succeeded; those require separate live checks. Fresh projects still
+need their local integration generated before setup can validate it.
+
 Managed setup is always explicit:
 
 ```bash

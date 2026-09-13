@@ -6,6 +6,7 @@ import type { RenderedManifests } from './validate-build.js';
 import { detectSetupProfile } from './setup-profile.js';
 import { createSetupPlan } from './setup-plan.js';
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
+export { formatDoctorReport } from './doctor-presentation.js';
 import {
   assertConnectionScope,
   loadConnectionCredentials,
@@ -106,7 +107,9 @@ export async function createDoctorReport(
       'project',
       'fail',
       failureCode(error, 'E-SETUP-007'),
-      'repair-local-project-profile',
+      isFoundationDiagnosticError(error)
+        ? error.remediation
+        : 'repair-local-project-profile',
     ));
     return finish(mode, 0, checks);
   }
@@ -257,17 +260,4 @@ export async function createDoctorReport(
     : check('runtime-mode', 'fail', 'E-SETUP-009', 'align-explicit-runtime-mode'));
 
   return finish(mode, profile.toolCount, checks);
-}
-
-export function formatDoctorReport(report: DoctorReport): string {
-  const lines = ['Glirastes doctor'];
-  for (const item of report.checks) {
-    const symbol = item.status === 'pass' ? '✓' : item.status === 'warn' ? '!' : '✗';
-    lines.push(`  ${symbol} ${item.name} (${item.code})`);
-  }
-  lines.push('');
-  lines.push(report.status === 'pass'
-    ? `${report.counts.tools} tools ready. Restart the application to activate local changes.`
-    : `${report.counts.failed} required checks failed.`);
-  return lines.join('\n');
 }

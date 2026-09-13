@@ -83,6 +83,42 @@ afterEach(() => {
 });
 
 describe('createDoctorReport', () => {
+  it('keeps the actionable missing-setup diagnosis for a fresh app without changing it', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-fresh-doctor-'));
+    const source = JSON.stringify({ name: 'fresh-app', dependencies: { next: '16.0.0' } });
+    await writeFile(join(rootDir, 'package.json'), source);
+    const fetchImpl = vi.fn();
+    vi.stubGlobal('fetch', fetchImpl);
+
+    const report = await createDoctorReport({ rootDir, env: {} });
+
+    expect(report.status).toBe('fail');
+    expect(report.checks).toContainEqual({
+      name: 'project', status: 'fail', code: 'E-SETUP-005',
+      remediation: 'create-required-setup-artifact',
+    });
+    expect(formatDoctorReport(report)).toContain('Ask your coding agent');
+    expect(await readFile(join(rootDir, 'package.json'), 'utf8')).toBe(source);
+    await expect(readFile(join(rootDir, '.glirastes/setup-artifact.json')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('offers optional diagnostic details through the real CLI', async () => {
+    const rootDir = await fixture(false);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await runCli(['doctor', '--root', rootDir]);
+      expect(String(log.mock.calls[0]?.[0])).not.toContain('E-SCOPE-003');
+      log.mockClear();
+      await runCli(['doctor', '--root', rootDir, '--verbose']);
+      expect(String(log.mock.calls[0]?.[0])).toContain('E-SCOPE-003');
+      expect(String(log.mock.calls[0]?.[0])).toContain('server-side');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('validates a Connected descriptor, ignored secret, scope, and credential offline', async () => {
     const rootDir = await fixture();
     const appId = id('1');

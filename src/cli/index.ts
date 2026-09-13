@@ -101,7 +101,7 @@ function parseCommand(args: string[]): {
       + '       glirastes install [--host a,b] [--symlink] [--force] '
       + '[--dry-run]\n'
       + '       glirastes validate [--root] [--app-id]\n'
-      + '       glirastes doctor [--root] [--managed] [--json]\n'
+      + '       glirastes doctor [--root] [--managed] [--json] [--verbose]\n'
       + '       glirastes build [--root] [--app-id] [--output]\n',
     );
   }
@@ -665,7 +665,7 @@ export async function runCli(
     });
     console.log(hasFlag(rest, '--json')
       ? JSON.stringify(report)
-      : formatDoctorReport(report));
+      : formatDoctorReport(report, { verbose: hasFlag(rest, '--verbose') }));
     if (report.status === 'fail') process.exitCode = 1;
     return;
   }
