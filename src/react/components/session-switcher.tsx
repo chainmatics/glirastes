@@ -3,6 +3,8 @@ import { useChatContext } from '../provider/chat-context.js';
 import { ConfirmDialog } from './confirm-dialog.js';
 
 export interface SessionSwitcherProps {
+  /** Temporarily lock session controls, e.g. while the app records a voice draft. */
+  disabled?: boolean;
   /** Shown when no sessions exist yet. */
   fallbackTitle?: string;
   /** Format the per-row subtitle. Default: `updatedAt` or `createdAt` as locale date. */
@@ -29,6 +31,7 @@ function defaultFormatTimestamp(value: string | number | undefined): string {
  * ancestor whose `session` config exposes `list`, `create`, and `remove`.
  */
 export function SessionSwitcher({
+  disabled = false,
   fallbackTitle,
   formatTimestamp = defaultFormatTimestamp,
   className,
@@ -38,12 +41,15 @@ export function SessionSwitcher({
     activeSessionId,
     sessionsSupported,
     isSessionsLoading,
+    isLoading,
+    isSessionChangeBlocked,
     switchSession,
     createSession,
     removeSession,
     renameSession,
     locale,
   } = useChatContext();
+  const blocked = disabled || (isSessionChangeBlocked ?? isLoading);
   const resolvedFallback = fallbackTitle ?? locale.newChatLabel;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -85,6 +91,13 @@ export function SessionSwitcher({
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!blocked) return;
+    setOpen(false);
+    setPendingDeleteId(null);
+    setEditingId(null);
+  }, [blocked]);
+
+  useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
       if (!rootRef.current) return;
@@ -97,17 +110,18 @@ export function SessionSwitcher({
   }, [open]);
 
   const onNew = useCallback(async () => {
+    if (blocked) return;
     setOpen(false);
     await createSession({ title: locale.newChatLabel });
-  }, [createSession, locale.newChatLabel]);
+  }, [createSession, locale.newChatLabel, blocked]);
 
   const onPick = useCallback(
     async (id: string) => {
+      if (blocked) return;
       setOpen(false);
-      if (id === activeSessionId) return;
       await switchSession(id);
     },
-    [switchSession, activeSessionId],
+    [switchSession, blocked],
   );
 
   const onDelete = useCallback(
@@ -119,11 +133,12 @@ export function SessionSwitcher({
   );
 
   const confirmDelete = useCallback(async () => {
+    if (blocked) return;
     const id = pendingDeleteId;
     setPendingDeleteId(null);
     if (!id) return;
     await removeSession(id);
-  }, [pendingDeleteId, removeSession]);
+  }, [pendingDeleteId, removeSession, blocked]);
 
   const cancelDelete = useCallback(() => {
     setPendingDeleteId(null);
@@ -158,6 +173,7 @@ export function SessionSwitcher({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        disabled={blocked}
       >
         <span data-element="trigger-title">{currentTitle}</span>
         <svg
@@ -175,7 +191,7 @@ export function SessionSwitcher({
         </svg>
       </button>
 
-      {open && (
+      {open && !blocked && (
         <div
           data-element="popover"
           role="listbox"
@@ -304,7 +320,7 @@ export function SessionSwitcher({
       )}
 
       <ConfirmDialog
-        open={pendingDeleteId !== null}
+        open={pendingDeleteId !== null && !blocked}
         title={locale.confirmDeleteSessionPrompt}
         message={
           pendingDeleteTitle

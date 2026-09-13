@@ -404,6 +404,13 @@ export function AiChatProvider({
   const [processingApprovalIds, setProcessingApprovalIds] = useState<Set<string>>(new Set());
   const [approvalError, setApprovalError] = useState<Error | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  // A completed load belongs to one session, not to the provider forever.
+  // Otherwise a render with a new id can persist the previous session's rows.
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
+  const [sessionLoadFailure, setSessionLoadFailure] = useState<{ id: string; error: Error } | null>(null);
+  const [sessionRestoreAttempt, setSessionRestoreAttempt] = useState(0);
+  const [isSessionMutating, setIsSessionMutating] = useState(false);
+  const sessionMutationRef = useRef(false);
 
   // ---------------------------------------------------------------------------
   // Multi-session state
@@ -418,6 +425,9 @@ export function AiChatProvider({
   );
   const activeSessionId = session?.activeId ?? uncontrolledActiveId;
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const isBootstrapSentinel = activeSessionId === 'default'
+    && session?.list !== undefined && session.defaultActiveId === undefined
+    && session.activeId === undefined && !sessions.some((entry) => entry.id === 'default');
   const [isSessionsLoading, setIsSessionsLoading] = useState(false);
 
   const sessionsSupported = Boolean(
@@ -504,13 +514,17 @@ export function AiChatProvider({
     messages: rawMessages,
     sendMessage,
     status,
-    error,
+    error: transportError,
     stop: transportStop,
     setMessages,
     addToolApprovalResponse,
   } = resolvedTransport;
 
   const isLoading = status === 'submitted' || status === 'streaming';
+  const streamActiveRef = useRef(isLoading);
+  streamActiveRef.current = isLoading;
+  const sessionNotReady = Boolean(session?.load && loadedSessionId !== activeSessionId);
+  const error = transportError ?? (sessionLoadFailure?.id === activeSessionId ? sessionLoadFailure.error : null);
 
   useEffect(() => {
     if (!error) return;
@@ -559,6 +573,7 @@ export function AiChatProvider({
   useEffect(() => {
     const cfg = sessionRef.current;
     if (!cfg?.load) {
+      setLoadedSessionId(activeSessionId);
       if (!isInitialized) setIsInitialized(true);
       return;
     }
@@ -567,16 +582,15 @@ export function AiChatProvider({
     // active — `'default'` is unlikely to be a valid session id in the
     // consumer's backend, and the auto-select effect (below) will switch
     // us to the first real session as soon as `list()` resolves.
-    const isBootstrapSentinel =
-      activeSessionId === 'default' &&
-      cfg.list !== undefined &&
-      cfg.activeId === undefined;
     if (isBootstrapSentinel) {
       if (!isInitialized) setIsInitialized(true);
       return;
     }
 
     let cancelled = false;
+    setLoadedSessionId(null);
+    setSessionLoadFailure(null);
+    setMessages([] as unknown as typeof rawMessages);
 
     (async () => {
       try {
@@ -596,9 +610,11 @@ export function AiChatProvider({
         } else {
           setMessages([] as unknown as typeof rawMessages);
         }
+        setLoadedSessionId(activeSessionId);
       } catch {
         if (cancelled) return;
         console.warn('[AiChatProvider] session.load failed');
+        setSessionLoadFailure({ id: activeSessionId, error: new Error('Chat history could not be loaded. Reopen this chat to retry.') });
         setMessages([] as unknown as typeof rawMessages);
       } finally {
         if (!cancelled) setIsInitialized(true);
@@ -610,18 +626,19 @@ export function AiChatProvider({
     };
     // rawMessages intentionally excluded — we only re-load on session switch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionId, setMessages, markStoredMessagesAsProcessed]);
+  }, [activeSessionId, setMessages, markStoredMessagesAsProcessed, sessionRestoreAttempt, isBootstrapSentinel]);
 
   // Save messages to session on change (scoped to the active session).
   useEffect(() => {
     if (!isInitialized) return;
+    if (loadedSessionId !== activeSessionId) return;
     if (rawMessages.length === 0) return;
     const cfg = sessionRef.current;
     if (!cfg?.save) return;
     void Promise.resolve(
       cfg.save(activeSessionId, rawMessages as unknown as ChatMessage[]),
     );
-  }, [rawMessages, isInitialized, activeSessionId]);
+  }, [rawMessages, isInitialized, activeSessionId, loadedSessionId]);
 
   // Process tool results and approvals from streaming messages
   useEffect(() => {
@@ -791,6 +808,7 @@ export function AiChatProvider({
 
   // Actions
   const send = useCallback(async (message: string) => {
+    if (sessionNotReady || sessionMutationRef.current) return;
     // Clear truncation and suggestion chips on new message
     setTruncation(null);
     setSuggestionChips([]);
@@ -839,6 +857,7 @@ export function AiChatProvider({
     setMentionResults([]);
     setIsMentionSearching(false);
   }, [
+    sessionNotReady,
     rawMessages,
     setMessages,
     sendMessage,
@@ -905,10 +924,10 @@ export function AiChatProvider({
       // Auto-select the first session if we're still on the bootstrap
       // sentinel and the consumer doesn't control `activeId` externally.
       if (
+        !streamActiveRef.current &&
         list.length > 0 &&
         cfg.activeId === undefined &&
-        (uncontrolledActiveIdRef.current === 'default' ||
-          !list.some((s) => s.id === uncontrolledActiveIdRef.current))
+        !list.some((s) => s.id === uncontrolledActiveIdRef.current)
       ) {
         const next = list[0].id;
         setUncontrolledActiveId(next);
@@ -947,7 +966,11 @@ export function AiChatProvider({
 
   const switchSession = useCallback(
     async (id: string) => {
-      if (id === activeSessionId) return;
+      if (streamActiveRef.current) return;
+      if (id === activeSessionId) {
+        if (sessionLoadFailure?.id === id) setSessionRestoreAttempt((attempt) => attempt + 1);
+        return;
+      }
       // Reset transient UI state before loading new session
       setPendingApprovalsMap(new Map());
       setTruncation(null);
@@ -957,43 +980,59 @@ export function AiChatProvider({
       setVisibleMessageCount(30);
       applyActiveId(id);
     },
-    [activeSessionId, applyActiveId, suggestionsConfig.staticChips],
+    [activeSessionId, applyActiveId, suggestionsConfig.staticChips, isLoading, sessionLoadFailure],
   );
 
   const createSession = useCallback(
     async (opts?: { title?: string }): Promise<SessionSummary | null> => {
+      if (streamActiveRef.current || sessionMutationRef.current) return null;
       const cfg = sessionRef.current;
       if (!cfg?.create) return null;
-      const created = await cfg.create(opts);
-      await refreshSessions();
-      await switchSession(created.id);
-      return created;
+      sessionMutationRef.current = true;
+      setIsSessionMutating(true);
+      try {
+        const created = await cfg.create(opts);
+        await refreshSessions();
+        await switchSession(created.id);
+        return created;
+      } finally {
+        sessionMutationRef.current = false;
+        setIsSessionMutating(false);
+      }
     },
-    [refreshSessions, switchSession],
+    [refreshSessions, switchSession, isLoading],
   );
 
   const removeSession = useCallback(
     async (id: string) => {
+      if (streamActiveRef.current || sessionMutationRef.current) return;
       const cfg = sessionRef.current;
       if (!cfg?.remove) return;
-      await cfg.remove(id);
-      // Re-fetch first so the fallback target reflects reality
-      const cfgList = cfg.list ? await cfg.list() : [];
-      setSessions(cfgList);
-      if (id === activeSessionId) {
-        const next = cfgList.find((s) => s.id !== id);
-        if (next) {
-          await switchSession(next.id);
-        } else if (cfg.create) {
-          // No sessions left — spin up a fresh one
-          const created = await cfg.create();
-          const refreshed = cfg.list ? await cfg.list() : [created];
-          setSessions(refreshed);
-          await switchSession(created.id);
+      sessionMutationRef.current = true;
+      setIsSessionMutating(true);
+      try {
+        await cfg.remove(id);
+        // Re-fetch first so the fallback target reflects reality
+        const cfgList = cfg.list ? await cfg.list() : [];
+        setSessions(cfgList);
+        if (id === activeSessionId) {
+          const next = cfgList.find((s) => s.id !== id);
+          if (next) {
+            await switchSession(next.id);
+          } else if (cfg.create) {
+            // No sessions left — spin up a fresh one
+            const created = await cfg.create();
+            const refreshed = cfg.list ? await cfg.list() : [created];
+            setSessions(refreshed);
+            await switchSession(created.id);
+          }
         }
+      } finally {
+        sessionMutationRef.current = false;
+        setIsSessionMutating(false);
       }
     },
-    [activeSessionId, switchSession],
+    [activeSessionId, switchSession, isLoading],
   );
 
   const renameSession = useCallback(
@@ -1176,7 +1215,8 @@ export function AiChatProvider({
       pipelineMessageTranslator,
       stepSummaryFormatter,
       messages: visibleMessages,
-      isLoading,
+      isLoading: isLoading || isSessionMutating || sessionNotReady,
+      isSessionChangeBlocked: isLoading || isSessionMutating,
       error: error ?? approvalError,
       send,
       stop,
@@ -1234,6 +1274,9 @@ export function AiChatProvider({
       stepSummaryFormatter,
       visibleMessages,
       isLoading,
+      sessionNotReady,
+      isSessionMutating,
+      isBootstrapSentinel,
       error,
       approvalError,
       send,

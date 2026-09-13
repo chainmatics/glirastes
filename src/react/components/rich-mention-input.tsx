@@ -660,13 +660,43 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           hasMentionSupport
             ? getFullValue()
             : normalizeInputValue(editableRef.current?.innerText ?? ''),
-        setValue: (nextValue: string) => {
+        setValue: (nextValue: string, draftMentions: MentionData[] = []) => {
           if (!editableRef.current) return;
+          const editor = editableRef.current;
+          editor.textContent = '';
           if (hasMentionSupport) {
-            editableRef.current.innerHTML = '';
-            setMentions([]);
+            const remaining = [...draftMentions];
+            const restored: MentionData[] = [];
+            let offset = 0;
+            while (remaining.length) {
+              let selected = -1;
+              let position = nextValue.length;
+              let tokenLength = 0;
+              remaining.forEach((mention, index) => {
+                if (!mention.prefix || !mention.slug) return;
+                const token = `${mention.prefix}${mention.slug}`;
+                let found = nextValue.indexOf(token, offset);
+                while (found >= 0 && /[\p{L}\p{N}_-]/u.test(nextValue[found + token.length] ?? '')) {
+                  found = nextValue.indexOf(token, found + token.length);
+                }
+                if (found >= 0 && (selected < 0 || found < position)) {
+                  selected = index;
+                  position = found;
+                  tokenLength = token.length;
+                }
+              });
+              if (selected < 0) break;
+              const [mention] = remaining.splice(selected, 1);
+              editor.append(document.createTextNode(nextValue.slice(offset, position)), createChipElement(mention));
+              restored.push(mention);
+              offset = position + tokenLength;
+            }
+            editor.append(document.createTextNode(nextValue.slice(offset)));
+            setMentions(restored);
+            closeDropdown();
+          } else {
+            editor.textContent = nextValue;
           }
-          editableRef.current.textContent = nextValue;
           setValue(nextValue);
         },
         getMentions: () => (hasMentionSupport ? getMentionsFromDOM() : []),

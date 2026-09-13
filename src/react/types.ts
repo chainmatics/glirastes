@@ -745,7 +745,8 @@ export interface RichMentionInputHandle {
   focus: () => void;
   clear: () => void;
   getValue: () => string;
-  setValue: (value: string) => void;
+  /** Restore text, optionally retaining the ordered identities of its mention tokens. */
+  setValue: (value: string, mentions?: MentionData[]) => void;
   getMentions: () => MentionData[];
   addMention: (mention: MentionData) => void;
 }

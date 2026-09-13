@@ -101,6 +101,8 @@ export interface ChatContextValue {
   sessionsSupported: boolean;
   /** `true` while session CRUD or loading is in flight. */
   isSessionsLoading: boolean;
+  /** Active generation or session mutation prevents changing the conversation. */
+  isSessionChangeBlocked?: boolean;
   /** Switch to an existing session. Reloads messages from `session.load`. */
   switchSession: (id: string) => Promise<void>;
   /** Create a new session, switch to it, refresh the list. */
