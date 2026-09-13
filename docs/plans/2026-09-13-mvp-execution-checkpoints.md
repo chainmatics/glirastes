@@ -69,6 +69,21 @@ This repairs a directly observed recovery dead end while full integration work r
 
 Specify the shared agent-to-core project assessment / binding contract against actual Next.js, separate-backend and Python fixtures. Reuse existing contracts where possible. Distinguish detected framework from validated support. Resolve the runnable bootstrap path, change trigger and deterministic validation before presenting any new installer as complete. In parallel sequencing, reconcile GID upstream files in its existing pilot without restoring old Agentic dependencies.
 
+### Batch 2A: artifact-free agent intake (implementation specification)
+
+The current `detectSetupProfile` is a validator for already integrated apps, not a fresh-project inspector. Keep that contract and legacy skill selection unchanged. Add a separate local-only intake used through `glirastes setup inspect --json` and later the agent orchestrator. This command does not create executable tools, claim integration or send Platform data.
+
+**Files:** create `src/cli/commands/project-inspection.ts` and `project-inspection.test.ts`; modify `src/cli/index.ts` and `README.md`.
+
+1. Add real temporary-project tests through the existing CLI entry point. Next.js, split React/NestJS and Vue/Python requirements must be recognized without `.glirastes` artifacts. Assert the current CLI fails before implementing.
+2. Implement `inspectSetupProject(rootDir)` with a versioned `local-only` report: separate project components, declared frontend/backend/runtime/auth markers and relative manifest evidence. Never infer verified principal, endpoint exposure or official framework support from dependency presence. All results require integration verification.
+3. Inspect only `package.json`, `requirements.txt` and presence of `pyproject.toml`, using bounded depth/directory/file-size limits. Ignore hidden/generated/vendor/dependency directories; do not follow symlinks. Python requirements recognition is deliberately limited to direct named requirements; pyproject presence alone never claims a framework. Report malformed/skipped/limited inspection with fixed codes, not raw source/error messages.
+4. Add privacy/read-only/security cases: no scripts or `.env` values in output; no network or source execution; linked manifests/directories ignored; malformed JSON and oversized manifest do not become a successful framework detection; separate components never become a fabricated frontend/backend pairing.
+5. Wire `setup inspect` before existing setup validation and dry-run handling. JSON is the agent contract; human text explains declared technologies versus integration proof and the safe next action. No change to normal setup, guided setup, sync or runtime mode behavior.
+6. Run focused tests RED/GREEN, full SDK tests/typecheck/build, built CLI probes and independent review. Update this record with exact evidence and commit the bounded change.
+
+Subsequent 2B work must consume this intake in the one-command agent bootstrap, correct shipped skills against the confirmed local-first workflow, generate/verify common bindings and complete the three-stack action/change corpus. Do not stop at an inspection-only installer. The reference integrations and GID upstream reconciliation remain mandatory.
+
 ## Initial evidence — 2026-09-13
 
 SDK `d697bc7`: typecheck and all 918 tests / 115 files pass. Platform `4e8f807`: Citadel 250 tests / 38 files pass. GID remains `453e17f`, preserving its two scoped-artifact edits; it was not retested in this initial check. No listeners on 3030/3031/3101/8101 at inspection. No live DB, model, browser or microphone proof is inferred from these results.
@@ -82,3 +97,16 @@ SDK `d697bc7`: typecheck and all 918 tests / 115 files pass. Platform `4e8f807`:
 - GID consumer verification: 966 tests / 58 files passed; local `tsc --noEmit` passed. The repository has no `typecheck` script, so the initially attempted script invocation was replaced with its installed TypeScript binary. No consumer source or scoped connection artifacts changed.
 - Owned diff and whitespace reviewed; bounded private-key/token pattern audit found no matches. This is not a substitute for live privacy/security acceptance.
 - No push, package publication, deployment, credential change, business database write or server restart occurred. The full goal remains active; the next batch below is required.
+
+## Batch 2A verified locally — 2026-09-13
+
+- Implementation commit: `1e7a08b` (`feat(cli): inspect fresh app stacks for local agent setup`). Agent intake now works before artifacts exist through the real CLI; this is not a completed one-command setup.
+- TDD: 10 initial cases failed because the unknown subcommand fell through to Platform configuration. Implemented the isolated local path; expanded to 16 passing cases. The queued-directory symlink replacement was independently reproduced, then fixed with canonical-path rechecks and a real-files regression. The remaining adversarial filesystem race boundary is explicit in README. Review and re-review found no other actionable issue in this bounded change.
+- Final SDK verification: 16 focused tests, all 950 tests / 117 files, typecheck and ESM/CJS build passed. Diff/whitespace and bounded secret-pattern checks passed. No package export or runtime authorization changes.
+- Real CLI probes: a fresh temporary Next.js project returned local-only declared markers and `needs-integration-verification`; existing GID returned Next.js, React and Entra. Traversal limits are visible without a noisy list in human output; per-path findings remain in JSON. These probes do not prove the three full integrations or a tool action.
+- GID's complete 966-test suite was rerun against the rebuilt inspector SDK and passed. No source, connection, inventory or credential changes in GID. The final SDK-only change after that consumer run condensed human inspection text; final SDK tests/build and a built GID inspection were rerun.
+- Goal-turn classification: concrete progress (two implemented/verified CLI changes and durable commits), not a wait or blocker. No live API/model/browser/STT acceptance is inferred.
+
+### Next active work: complete bootstrap, not more inspection polish
+
+The missing path is still agent launch/resume → source-derived app binding generation → local validation → actual chat/tool action → build/CI change maintenance. Consume this report as intake, reconcile the shipped skills with the local-first product decision, and prove the flow on all three integration forms. Current shipped Next.js/setup/tool-maintenance skills still contain historical Platform-interviewer/manual-resume requirements; do not use those unchanged as the new automatic workflow. Preserve explicit legacy command behavior rather than treating it as the new default. GID upstream reconciliation, common UI/STT/commands/mentions, Platform UX/metrics, live action, novice observation and release/landing gates remain open.
