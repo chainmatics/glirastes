@@ -53,6 +53,24 @@ afterEach(() => {
 });
 
 describe('glirastes scan --sync', () => {
+  it('does not sync a partial scan or overwrite bindings when exports are unresolved', async () => {
+    const root = await projectFixture();
+    await writeFile(join(root, 'src/app/api/tasks/route.ts'), 'export { GET } from "./handlers";');
+    const bindings = join(root, '.glirastes/platform-tool-bindings.json');
+    await writeFile(bindings, '{"existing":true}');
+    const fetchImpl = vi.fn();
+    vi.stubGlobal('fetch', fetchImpl);
+
+    await expect(runCli(['scan', '--root', root, '--sync', '--quiet']))
+      .rejects.toMatchObject({ code: 'E-INVENTORY-001' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(await readFile(bindings, 'utf8')).toBe('{"existing":true}');
+    const scan = JSON.parse(await readFile(join(root, '.glirastes/route-scan.json'), 'utf8'));
+    expect(scan.findings).toEqual([{
+      sourceFile: 'src/app/api/tasks/route.ts', exportName: 'GET', code: 'route-export-unresolved',
+    }]);
+  });
+
   it('scans locally and imports the redacted artifact with an environment key', async () => {
     const root = await projectFixture();
     const toolId = '019fa9a9-d5f7-7ec3-a3c7-8899de1d3905';

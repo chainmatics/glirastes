@@ -509,6 +509,15 @@ async function runLegacyScan(rest: string[]): Promise<void> {
   }
   if (!hasFlag(rest, '--sync')) return;
 
+  if (artifact.result.findings?.length) {
+    throw new FoundationDiagnosticError({
+      code: 'E-INVENTORY-001',
+      operation: 'scan.sync',
+      message: 'Route scan is incomplete. Review findings in the local scan artifact before syncing.',
+      remediation: 'resolve-route-scan-findings',
+    });
+  }
+
   const baseUrl = getFlagValue(rest, '--base-url')
     ?? process.env.GLIRASTES_CONTROL_PLANE_URL;
   const appId = getFlagValue(rest, '--app-id')

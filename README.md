@@ -1,10 +1,18 @@
 # Glirastes
 
-Glirastes is a managed-local TypeScript runtime for AI chat and tool execution.
+Glirastes is a TypeScript SDK for operating application features through an embedded chat.
+Execution is local; the optional Platform manages connected instances and revisions.
 The target environment keeps prompts, model calls, credentials, business data,
 tool arguments/results, and final authorization. The Glirastes Platform is the
 Control Plane for reviewed configuration, immutable signed revisions,
 approvals, rollout, and content-free technical health.
+
+> This is the in-development Foundation branch. Its `0.4.0` version label does
+> not identify the same package contents as the currently published npm
+> `glirastes@0.4.0`. The Foundation examples require this branch's build until
+> a distinct release is published. One-command fresh-app bootstrap and fully
+> automatic capability maintenance are MVP work in progress, not completed
+> features implied by the prepared-pilot commands below.
 
 ## Foundation guarantees
 
@@ -15,8 +23,7 @@ approvals, rollout, and content-free technical health.
 - Local multidimensional budgets, loop detection, timeouts, and circuit
   breakers.
 - Vercel AI SDK 6 as the reference engine behind framework-neutral contracts.
-- Scan and Platform interview instead of required decorators or hand-authored
-  semantic tool metadata.
+- Local route discovery and assessment artifacts without mandatory decorators.
 - One React chat implementation with provider-neutral push-to-talk STT.
 
 ## Package surface
@@ -31,10 +38,50 @@ approvals, rollout, and content-free technical health.
 | `glirastes/react` | Chat composition, sessions, actions, STT |
 | `glirastes/react/vercel` | AI SDK React transport and `VercelAiChat` |
 | `glirastes/adapter/nextjs` | Next.js application adapter |
-| `glirastes/adapter/nestjs` | NestJS application adapter |
 | `glirastes/server/nextjs` | Next.js chat handler |
-| `glirastes/server/nestjs` | Framework adapter surface |
 | `glirastes/sync` | Signed revision cache, rollout selection, revocations |
+
+NestJS, LangGraph and the older generator surfaces remain in source for later
+acceptance; they are not exported by this Foundation package.
+
+## Focused local intent routing
+
+`createLocalAiPipeline` now defaults to focused routing. Confident intents get
+their module tools plus its explicitly shared dependencies. Medium-confidence
+intents expand only to shared tools of declared `relatedModules`. Uncertain or
+unknown intents do not receive the full domain-tool catalogue.
+
+The local pipeline marks its selection as explicit, so the Next.js handler
+preserves even an empty selection. With managed-turn `toolDiscovery` enabled,
+the existing local `find_tools` mechanism can load eligible tools on demand;
+otherwise the model can ask a clarifying question without domain tools.
+Selection does not replace endpoint authorization or turn guards.
+
+For migration, `createLocalAiPipeline({ ...config, routingMode: 'legacy' })`
+retains broad routing and the historical empty-selection convention. Direct
+`createAiRouter` consumers keep legacy defaults unless they select
+`routingMode: 'focused'`. Existing custom pipelines remain compatible; they
+can return `toolSelection: 'explicit'` to opt into exact selection semantics.
+
+Routing audit callbacks report strategy, module and tool count without raw
+input. Smaller tool selections are not a claimed measured token/latency gain:
+benchmark successful representative tasks in the target app.
+
+## Route discovery boundaries
+
+The scanner and execution-inventory verifier share syntax-tree recognition of
+named function exports, constant arrow/function handlers and local aliases
+such as `export { handler as GET }`. Comments and strings are not exports.
+Syntax errors and unresolved wrappers/re-exports appear as bounded findings
+in the local scan artifact. Legacy `scan --sync` refuses a partial scan rather
+than treating undiscovered operations as removed; existing bindings remain
+unchanged.
+
+The TypeScript parser is a Node-side tooling dependency, not imported by the
+React, server-handler or runtime entry points. Discovery never executes scanned
+application source and does not automatically approve candidates. Dependency
+graph resolution, automatic assessments and watch/build orchestration remain
+separate MVP work; recognizing an export alone does not create a ready tool.
 
 ## Next.js pilot path
 

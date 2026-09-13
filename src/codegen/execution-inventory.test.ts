@@ -50,6 +50,28 @@ function endpoint(options: {
 }
 
 describe('discoverFoundationExecutions', () => {
+  it.each([
+    'export const GET = async () => Response.json([]);',
+    'const handler = async () => Response.json([]); export { handler as GET };',
+  ])('accepts the same local constant and aliased exports as the scanner', async (source) => {
+    const rootDir = await fixture({ 'src/app/api/tasks/route.ts': source });
+    const result = await discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [endpoint({ source })] },
+    });
+    expect(result.executions).toHaveLength(1);
+    expect(result.executions[0].sourceLocator).toMatchObject({ exportName: 'GET' });
+  });
+
+  it('does not accept a removed export preserved only in a comment', async () => {
+    const source = '// export async function GET() {}';
+    const rootDir = await fixture({ 'src/app/api/tasks/route.ts': source });
+    await expect(discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [endpoint({ source })] },
+    })).rejects.toThrow(/missing route export/);
+  });
+
   it('discovers only the positive inventory even when comments say otherwise', async () => {
     const listed = `
       // @ai-ignore

@@ -19,6 +19,45 @@ async function fixture(files: Record<string, string>): Promise<string> {
 }
 
 describe('scanNextAppRoutes', () => {
+  it.each([
+    'export const GET = async (request: Request) => { await getSession(); new URL(request.url).searchParams.get("status"); };',
+    'export const GET = async function (request: Request) { await getSession(); new URL(request.url).searchParams.get("status"); };',
+    'const handler = async (request: Request) => { await getSession(); new URL(request.url).searchParams.get("status"); }; export { handler as GET };',
+    'async function handler(request: Request) { await getSession(); new URL(request.url).searchParams.get("status"); } const GET = handler; export { GET };',
+  ])('discovers local route exports without requiring function declaration syntax', async (source) => {
+    const rootDir = await fixture({ 'src/app/api/tasks/route.ts': source });
+    const result = await scanNextAppRoutes({ rootDir });
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      exportName: 'GET', authEvidence: ['getSession'],
+      queryParams: [{ name: 'status', repeated: false }], autoApprovalEligible: false,
+    });
+  });
+
+  it('does not discover commented, quoted or default exports', async () => {
+    const rootDir = await fixture({ 'src/app/api/tasks/route.ts': `
+      // export async function GET() {}
+      const example = "export function POST() {}";
+      export default function DELETE() {}
+    ` });
+    expect((await scanNextAppRoutes({ rootDir })).candidates).toEqual([]);
+  });
+
+  it('reports unresolved route forms instead of silently claiming complete discovery', async () => {
+    const rootDir = await fixture({ 'src/app/api/tasks/route.ts': `
+      export { GET } from './handlers';
+      export const POST = withAuth(handler);
+      export * from './other-handlers';
+    ` });
+    const result = await scanNextAppRoutes({ rootDir });
+    expect(result.candidates).toEqual([]);
+    expect(result.findings).toEqual([
+      { sourceFile: 'src/app/api/tasks/route.ts', exportName: 'GET', code: 'route-export-unresolved' },
+      { sourceFile: 'src/app/api/tasks/route.ts', exportName: 'POST', code: 'route-export-unresolved' },
+      { sourceFile: 'src/app/api/tasks/route.ts', code: 'route-wildcard-export-unresolved' },
+    ]);
+  });
+
   it('discovers route structure and evidence without auto-approving GET', async () => {
     const rootDir = await fixture({
       'src/app/api/tasks/[id]/route.ts': `

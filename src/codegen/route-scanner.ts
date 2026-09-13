@@ -7,6 +7,7 @@ import {
   type FoundationExecutionInventory,
 } from './execution-inventory.js';
 import { createRouteSourceFingerprint } from './route-fingerprint.js';
+import { readRouteExports, type RouteExportFinding } from './route-exports.js';
 import type { EndpointMethod } from '../types.js';
 import type { ToolRiskClass } from '../contracts/index.js';
 
@@ -41,6 +42,7 @@ export interface ScannedRouteCandidate {
 export interface NextAppRouteScanResult {
   candidates: ScannedRouteCandidate[];
   ignored: string[];
+  findings?: Array<RouteExportFinding & { sourceFile: string }>;
   executions?: DiscoveredFoundationExecution[];
   inventoryDigest?: string;
 }
@@ -57,14 +59,6 @@ export interface WriteNextAppRouteScanOptions
   outputPath?: string;
   now?: () => Date;
 }
-
-const HTTP_METHODS = new Set<EndpointMethod>([
-  'GET',
-  'POST',
-  'PUT',
-  'PATCH',
-  'DELETE',
-]);
 
 const AUTH_PATTERNS: Array<[string, RegExp]> = [
   ['resolvePrincipal', /\bresolvePrincipal\s*\(/],
@@ -115,80 +109,6 @@ function toRoutePath(
     path: `/api${segments.length ? `/${segments.join('/')}` : ''}`,
     pathParams,
   };
-}
-
-function findMatchingDelimiter(
-  source: string,
-  startIndex: number,
-  open: string,
-  close: string,
-): number {
-  let depth = 0;
-  let quote: '"' | '\'' | '`' | undefined;
-  let lineComment = false;
-  let blockComment = false;
-
-  for (let index = startIndex; index < source.length; index += 1) {
-    const character = source[index];
-    const next = source[index + 1];
-
-    if (lineComment) {
-      if (character === '\n') lineComment = false;
-      continue;
-    }
-    if (blockComment) {
-      if (character === '*' && next === '/') {
-        blockComment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      if (character === '\\') {
-        index += 1;
-      } else if (character === quote) {
-        quote = undefined;
-      }
-      continue;
-    }
-    if (character === '/' && next === '/') {
-      lineComment = true;
-      index += 1;
-      continue;
-    }
-    if (character === '/' && next === '*') {
-      blockComment = true;
-      index += 1;
-      continue;
-    }
-    if (character === '"' || character === '\'' || character === '`') {
-      quote = character;
-      continue;
-    }
-    if (character === open) depth += 1;
-    if (character === close) depth -= 1;
-    if (depth === 0) return index;
-  }
-  return -1;
-}
-
-function extractFunctionBody(source: string, startIndex: number): string {
-  const parametersStart = source.indexOf('(', startIndex);
-  if (parametersStart < 0) return '';
-  const parametersEnd = findMatchingDelimiter(
-    source,
-    parametersStart,
-    '(',
-    ')',
-  );
-  if (parametersEnd < 0) return '';
-  const bodyStart = source.indexOf('{', parametersEnd + 1);
-  if (bodyStart < 0) return '';
-  const bodyEnd = findMatchingDelimiter(source, bodyStart, '{', '}');
-  return source.slice(
-    bodyStart + 1,
-    bodyEnd < 0 ? source.length : bodyEnd,
-  );
 }
 
 function extractQueryParams(body: string): ScannedQueryParameter[] {
@@ -271,6 +191,7 @@ async function scanRouteCandidates(
   const apiDir = join(options.rootDir, options.apiDir ?? 'src/app/api');
   const candidates: ScannedRouteCandidate[] = [];
   const ignored: string[] = [];
+  const findings: NonNullable<NextAppRouteScanResult['findings']> = [];
 
   for (const routeFile of await findRouteFiles(apiDir)) {
     const source = await readFileSafe(routeFile);
@@ -288,13 +209,9 @@ async function scanRouteCandidates(
 
     const imports = importBindings(source);
     const route = toRoutePath(apiDir, routeFile);
-    const methodPattern =
-      /export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\b/g;
-
-    for (const match of source.matchAll(methodPattern)) {
-      const method = match[1] as EndpointMethod;
-      if (!HTTP_METHODS.has(method)) continue;
-      const body = extractFunctionBody(source, match.index);
+    const parsed = readRouteExports(source);
+    findings.push(...parsed.findings.map((finding) => ({ sourceFile, ...finding })));
+    for (const { method, body } of parsed.exports) {
       const authEvidence = evidence(body, AUTH_PATTERNS);
       const externalCallEvidence = evidence(body, EXTERNAL_PATTERNS);
       candidates.push({
@@ -328,7 +245,7 @@ async function scanRouteCandidates(
     }
   }
 
-  return { candidates, ignored };
+  return { candidates, ignored, ...(findings.length ? { findings } : {}) };
 }
 
 export async function scanNextAppRoutes(
@@ -357,6 +274,7 @@ export async function scanNextAppRoutes(
     ignored: [],
     executions: discovery.executions,
     inventoryDigest: discovery.inventoryDigest,
+    ...(scanned.findings ? { findings: scanned.findings } : {}),
   };
 }
 

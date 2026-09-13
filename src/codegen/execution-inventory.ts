@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { createRouteSourceFingerprint } from './route-fingerprint.js';
+import { readRouteExports } from './route-exports.js';
 
 const uuid = z.uuid();
 const identifier = z.string().trim().min(1).max(200);
@@ -127,10 +128,7 @@ async function verifyEndpoint(
     throw error;
   }
 
-  const exportPattern = new RegExp(
-    `export\\s+(?:async\\s+)?function\\s+${execution.method}\\b`,
-  );
-  if (!exportPattern.test(source)) {
+  if (!readRouteExports(source).exports.some(({ method }) => method === execution.method)) {
     throw new Error(
       `Foundation inventory references a missing route export: ${execution.stableKey}`,
     );
