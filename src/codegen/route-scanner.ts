@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { findRouteFiles, isDirAiIgnored, readFileSafe } from './fs-utils.js';
 import {
@@ -50,7 +50,7 @@ export interface NextAppRouteScanResult {
 export interface ScanNextAppRoutesOptions {
   rootDir: string;
   apiDir?: string;
-  mode?: 'legacy-route-scan' | 'foundation-inventory';
+  mode?: 'legacy-route-scan' | 'foundation-inventory' | 'source-discovery';
   inventory?: FoundationExecutionInventory;
 }
 
@@ -187,14 +187,15 @@ function reviewReasons(options: {
 async function scanRouteCandidates(
   options: ScanNextAppRoutesOptions,
   respectLegacyIgnores: boolean,
+  strictSources?: Map<string, string>,
 ): Promise<NextAppRouteScanResult> {
   const apiDir = join(options.rootDir, options.apiDir ?? 'src/app/api');
   const candidates: ScannedRouteCandidate[] = [];
   const ignored: string[] = [];
   const findings: NonNullable<NextAppRouteScanResult['findings']> = [];
 
-  for (const routeFile of await findRouteFiles(apiDir)) {
-    const source = await readFileSafe(routeFile);
+  for (const routeFile of strictSources ? [...strictSources.keys()].sort() : await findRouteFiles(apiDir)) {
+    const source = strictSources ? strictSources.get(routeFile)! : await readFileSafe(routeFile);
     const sourceFile = toSourceFile(options.rootDir, routeFile);
     if (
       respectLegacyIgnores
@@ -209,7 +210,7 @@ async function scanRouteCandidates(
 
     const imports = importBindings(source);
     const route = toRoutePath(apiDir, routeFile);
-    const parsed = readRouteExports(source);
+    const parsed = readRouteExports(source, sourceFile);
     findings.push(...parsed.findings.map((finding) => ({ sourceFile, ...finding })));
     for (const { method, body } of parsed.exports) {
       const authEvidence = evidence(body, AUTH_PATTERNS);
@@ -251,6 +252,32 @@ async function scanRouteCandidates(
 export async function scanNextAppRoutes(
   options: ScanNextAppRoutesOptions,
 ): Promise<NextAppRouteScanResult> {
+  if (options.mode === 'source-discovery') {
+    const inputRoot = resolve(options.rootDir);
+    const rootDir = await realpath(options.rootDir);
+    const relativeApi = relative(inputRoot, resolve(inputRoot, options.apiDir ?? 'src/app/api'));
+    if (relativeApi.startsWith(`..${sep}`) || relativeApi === '..') throw new Error('Source directory must remain inside the app');
+    const apiDir = resolve(rootDir, relativeApi);
+    const sources = new Map<string, string>();
+    let visited = 0;
+    const walk = async (directory: string): Promise<void> => {
+      if (++visited > 10_000 || await realpath(directory) !== directory) throw new Error('Source discovery is incomplete');
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        if (entry.isDirectory() && entry.name.startsWith('_')) continue;
+        const path = join(directory, entry.name);
+        if (entry.isSymbolicLink()) throw new Error('Source discovery is incomplete');
+        if (entry.isDirectory()) { await walk(path); continue; }
+        if (!entry.isFile() || !/^route\.(ts|tsx|js|jsx)$/.test(entry.name)) continue;
+        if (sources.size >= 5_000 || await realpath(path) !== path || (await stat(path)).size > 2_000_000) {
+          throw new Error('Source discovery is incomplete');
+        }
+        sources.set(path, await readFile(path, 'utf8'));
+      }
+    };
+    await walk(apiDir);
+    return scanRouteCandidates({ ...options, rootDir, apiDir: relativeApi }, false, sources);
+  }
   if ((options.mode ?? 'legacy-route-scan') === 'legacy-route-scan') {
     return scanRouteCandidates(options, true);
   }

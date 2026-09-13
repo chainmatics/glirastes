@@ -15,3 +15,13 @@ export {
   type FoundationExecutionDiscovery,
   type FoundationExecutionInventory,
 } from './execution-inventory.js';
+
+export {
+  reconcileExecutionInventory,
+  ExecutionGenerationStateSchema,
+  type ExecutionGenerationState,
+  type ExecutionGenerationResult,
+  type ObservedExecution,
+} from './inventory-generation.js';
+
+export { collectNextEndpointExecutions, type ResolvedEndpointContract } from './next-source-generation.js';

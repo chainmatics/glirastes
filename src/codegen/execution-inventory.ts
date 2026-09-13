@@ -129,7 +129,7 @@ async function verifyEndpoint(
     throw error;
   }
 
-  if (!readRouteExports(source).exports.some(({ method }) => method === execution.method)) {
+  if (!readRouteExports(source, execution.sourceFile).exports.some(({ method }) => method === execution.method)) {
     throw new Error(
       `Foundation inventory references a missing route export: ${execution.stableKey}`,
     );

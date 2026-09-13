@@ -9,15 +9,15 @@ export interface RouteExportFinding {
 }
 
 /** Read only local export syntax. Never import or execute the scanned application. */
-export function readRouteExports(source: string): {
+export function readRouteExports(source: string, fileName = 'route.ts'): {
   exports: Array<{ method: EndpointMethod; body: string }>;
   findings: RouteExportFinding[];
 } {
-  const file = ts.createSourceFile('route.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
   // A recovery AST can contain a seemingly valid export in invalid source.
   // Use the public diagnostic API with an in-memory host: no imports, libs,
   // filesystem reads or evaluation of application code.
-  const program = ts.createProgram([file.fileName], { noLib: true, noResolve: true, noEmit: true }, {
+  const program = ts.createProgram([file.fileName], { noLib: true, noResolve: true, noEmit: true, allowJs: true, jsx: ts.JsxEmit.Preserve }, {
     getSourceFile: (name) => name === file.fileName ? file : undefined,
     getDefaultLibFileName: () => '',
     writeFile: () => {},

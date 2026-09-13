@@ -201,3 +201,69 @@ and live acceptance remain required.
   Full Goal remains active; next required work is shared source-derived binding
   generation and a fresh app's actual action/change corpus, then the other
   integration/Platform/UI/live gates, not further diagnostic-only work.
+
+## Batch 3A: source-driven inventory generation
+
+The GID script currently derives identities/fingerprints from a pre-generated
+schema registry. Its route scan therefore does not add new endpoint contracts.
+Do not present that as automatic regeneration. Retain its migration artifacts
+until a replacement passes app parity.
+
+Implement the common generation step in `src/codegen/inventory-generation.ts`
+with real tests in `inventory-generation.test.ts`, and expose it from codegen.
+It consumes source-adapter observations, not manually curated semantic tools.
+Each observation is the existing v2 execution contract minus its tool UUID;
+schemas/fingerprints must already come from actual source adapters. Preserve
+previous UUIDs by stable execution key and target app. Reject incomplete scans,
+duplicate identities and cross-app state; never infer removals from a partial
+scan. Produce the next inventory plus added/changed/removed/unchanged lists.
+Changed source/schema/binding is visible even if the label stays the same.
+This generator does not author approval/roles/prompts or activate new tools.
+
+1. RED real-files add/change/delete tests: Next route source fingerprint plus
+   UI handler-derived observations, preserving IDs and exact unaffected bytes.
+2. Implement deterministic reconciliation and validated output. New IDs are
+   generated once and retained through the returned app-scoped state. Keep
+   removed identities as tombstones so reappearance cannot silently reuse an
+   obsolete approval. No filesystem/network/model side effects in this core.
+3. Prove incomplete observations leave previous state unchanged and cannot
+   return a publishable updated inventory. Duplicate stable keys/definition IDs
+   and conflicting prior identity mappings fail closed with fixed diagnostics.
+4. Add the Next.js adapter that enumerates source routes independently of the
+   old positive catalogue, with source-schema resolution supplied by the setup
+   agent's thin app adapter. New unresolved contracts must trigger assessment,
+   not fabricated permissive schemas or silent omission. UI navigation/filter
+   extraction and the actual execution corpus remain part of this batch's
+   subsequent work, not implied by the reconciliation helper.
+5. Verify full SDK, typecheck/build, consumer tests and review; record evidence.
+   Then wire a fresh reference app from source through this generator to real
+   runtime action. Do not stop at a standalone manifest utility as MVP proof.
+
+### Batch 3A verified checkpoint — 2026-09-13
+
+- Added `reconcileExecutionInventory`: complete app-scoped source observations
+  produce deterministic v2 inventories, change sets and persistent tombstones.
+  IDs survive source/schema edits, but do not resurrect after removal. Partial,
+  cross-app, duplicate and inconsistent observations reject without writes.
+- Added `collectNextEndpointExecutions`: enumerate source routes before local
+  schema resolution. Missing/invalid contracts request local agent assessment;
+  no fabricated schemas, permissions or implicit activation. This helper does
+  not yet supply the actual app-specific schema adapter or UI extraction.
+- Review reproduced five issues. RED tests precede repairs for fingerprint/
+  endpoint-key conflicts, JSX parser selection, absolute source-directory
+  normalization, private subtrees and mutation through resolver arguments.
+  Reconciliation and real-source verification are exercised together for JSX.
+  Private folders follow the Next convention documented at
+  https://nextjs.org/docs/app/getting-started/project-structure#private-folders.
+  Existing legacy ignore and inventory paths remain supported.
+- Full SDK: 1,001 tests / 122 files, typecheck and ESM/CJS build pass. Built
+  agent-entry probe passes without implicit dotenv reads or agent/model launch.
+  Independent re-review: 56 targeted tests pass, no remaining actionable finding.
+- GID against rebuilt SDK: default full suite 966 / 58 and `tsc --noEmit` pass.
+  No GID source/generated-binding replacement was performed. Its existing
+  platform binding and connection changes remain untouched.
+- Next: replace the prepared-catalogue dependency with a thin source/schema
+  adapter and UI bridge in a fresh reference fixture, execute an actual local
+  tool through the common runtime, and run endpoint/navigation/filter changes.
+  This checkpoint is not a five-minute onboarding, browser or three-stack gate.
+  No live model, business DB, server restart, push, publication or deployment.
