@@ -10,6 +10,7 @@ import type { ChatWindowProps } from '../types.js';
 import { useDragResizePanel } from '../hooks/use-drag-resize-panel.js';
 import { useSidebarResize } from '../hooks/use-sidebar-resize.js';
 import { ChatContext } from '../provider/chat-context.js';
+import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
 
 export function ChatWindow({
   children,
@@ -86,6 +87,13 @@ export function ChatWindow({
   const themeEffect = ctx?.themeEffect;
 
   const panelRef = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(isOpen);
+  useEffect(() => {
+    const opening = isOpen && !wasOpen.current;
+    wasOpen.current = isOpen;
+    if (!opening || isCollapsed) return;
+    panelRef.current?.querySelector<HTMLElement>('[data-component="chat-window-body"] :is(input:not([disabled]), textarea:not([disabled]), [contenteditable="true"])')?.focus();
+  }, [isOpen, isCollapsed]);
   const wasCollapsed = useRef(isCollapsed);
   useEffect(() => {
     if (wasCollapsed.current === isCollapsed) return;
@@ -257,6 +265,7 @@ export function ChatWindow({
   // ---------------------------------------------------------------------------
 
   const content = (
+    <ChatWindowVisibilityContext.Provider value={isOpen && !isCollapsed}>
     <section
       ref={panelRef as React.RefObject<HTMLElement>}
       className={className}
@@ -381,6 +390,7 @@ export function ChatWindow({
         {children}
       </div>
     </section>
+    </ChatWindowVisibilityContext.Provider>
   );
 
   if (portal && typeof document !== 'undefined') {

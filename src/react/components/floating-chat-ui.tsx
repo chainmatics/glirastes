@@ -1,15 +1,16 @@
 'use client';
 
 import '../styles.css';
-import { useEffect, useState, useCallback, type ReactNode } from 'react';
+import { useEffect, useState, useCallback, useContext, type ReactNode } from 'react';
 import { AiTriggerButton } from './ai-trigger-button.js';
 import { ChatWindow } from './chat-window.js';
 import { AiChatPanel } from './ai-chat-panel.js';
 import { SessionSwitcher } from './session-switcher.js';
 import { ConfirmDialog } from './confirm-dialog.js';
+import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { useKeyboardShortcut } from '../hooks/use-keyboard-shortcut.js';
-import type { ChatDimension, ChatSize } from '../types.js';
+import type { ChatDimension, ChatSize, ChatWindowProps } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Size resolution
@@ -101,7 +102,11 @@ function useViewportSize(): { vw: number; vh: number } {
   return size;
 }
 
-export interface FloatingChatUIProps {
+export interface FloatingChatUIProps extends Pick<ChatWindowProps,
+  'portal' | 'mode' | 'defaultMode' | 'onModeChange' | 'layoutControls' |
+  'collapsed' | 'onCollapsedChange' | 'sidebarWidth' | 'minSidebarWidth' |
+  'maxSidebarWidth' | 'onSidebarWidthChange' | 'layoutLabels' | 'keepMounted' |
+  'persistDimensions' | 'persistSidebarWidth'> {
   /** Window header title. Default: "AI Assistant" */
   title?: string;
   /**
@@ -205,6 +210,21 @@ export function FloatingChatUI({
   triggerIcon,
   showMic,
   welcomeMessage,
+  portal,
+  mode: controlledMode,
+  defaultMode = 'floating',
+  onModeChange,
+  layoutControls,
+  collapsed: controlledCollapsed,
+  onCollapsedChange,
+  sidebarWidth,
+  minSidebarWidth,
+  maxSidebarWidth,
+  onSidebarWidthChange,
+  layoutLabels,
+  keepMounted,
+  persistDimensions,
+  persistSidebarWidth,
 }: FloatingChatUIProps = {}) {
   const { classNames, locale, voice, sessionsSupported } = useChatContext();
   const { vw, vh } = useViewportSize();
@@ -212,6 +232,18 @@ export function FloatingChatUI({
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const [localMode, setLocalMode] = useState(defaultMode);
+  const [localCollapsed, setLocalCollapsed] = useState(false);
+  const mode = controlledMode ?? localMode;
+  const collapsed = controlledCollapsed ?? localCollapsed;
+  const setMode = (next: 'sidebar' | 'floating') => {
+    if (controlledMode === undefined) setLocalMode(next);
+    onModeChange?.(next);
+  };
+  const setCollapsed = (next: boolean) => {
+    if (controlledCollapsed === undefined) setLocalCollapsed(next);
+    onCollapsedChange?.(next);
+  };
   const setOpen = useCallback(
     (next: boolean | ((prev: boolean) => boolean)) => {
       const resolved =
@@ -225,7 +257,12 @@ export function FloatingChatUI({
   );
   const noop = useCallback(() => {}, []);
 
-  useKeyboardShortcut(shortcut, () => setOpen((v) => !v));
+  useKeyboardShortcut(shortcut, () => {
+    if (mode === 'sidebar' && collapsed) {
+      setCollapsed(false);
+      if (!open) setOpen(true);
+    } else setOpen((v) => !v);
+  });
   useKeyboardShortcut('escape', () => setOpen(false), { enabled: open });
 
   // Was the title prop explicitly set by the consumer? (vs using the
@@ -264,6 +301,20 @@ export function FloatingChatUI({
         />
       )}
       <ChatWindow
+        portal={portal}
+        mode={mode}
+        onModeChange={setMode}
+        collapsed={collapsed}
+        onCollapsedChange={setCollapsed}
+        layoutControls={layoutControls}
+        sidebarWidth={sidebarWidth}
+        minSidebarWidth={minSidebarWidth}
+        maxSidebarWidth={maxSidebarWidth}
+        onSidebarWidthChange={onSidebarWidthChange}
+        layoutLabels={layoutLabels}
+        keepMounted={keepMounted}
+        persistDimensions={persistDimensions}
+        persistSidebarWidth={persistSidebarWidth}
         open={open}
         onOpenChange={setOpen}
         title={resolvedTitle}
@@ -339,7 +390,9 @@ function FloatingHeaderActions({
   confirmClear: boolean;
 }) {
   const { clear, messages, locale } = useChatContext();
+  const visible = useContext(ChatWindowVisibilityContext);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  useEffect(() => { if (!visible) setConfirmOpen(false); }, [visible]);
   if (!showClearButton) return null;
   const disabled = messages.length === 0;
 
@@ -381,7 +434,7 @@ function FloatingHeaderActions({
       </svg>
     </button>
     <ConfirmDialog
-      open={confirmOpen}
+      open={visible && confirmOpen}
       title={locale.confirmClearPrompt}
       confirmLabel={locale.clearButton}
       cancelLabel={locale.cancelButton}

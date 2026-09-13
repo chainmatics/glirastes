@@ -73,9 +73,20 @@ action labels. A custom renderHeader receives layoutControls to insert beside
 its existing actions; custom menus/media still require their normal lifecycle
 owner. Mode changes must not change portal or the component key.
 
-The VercelAiChat/FloatingChatUI convenience components do not yet forward these
-new layout options. Exposing the common layout through that simple entry and
-the actual GID shell is required follow-through, not a second chat runtime.
+The VercelAiChat/FloatingChatUI convenience components accept these layout
+options at the top level. For a retained in-flow sidebar, put the component
+beside the app content in a bounded-height flex row:
+
+```tsx
+<VercelAiChat endpoint="/api/chat" portal={false} defaultMode="sidebar"
+  layoutControls keepMounted />
+```
+
+The existing floating/portal and unmount-on-close defaults remain unchanged.
+Use open/onOpenChange for external controls; the built-in shortcut expands a
+collapsed sidebar. The window passes visibility to its built-in recording and
+header controls so hidden recordings finalize and dialogs close without an
+action. Custom media, inputs or external portals still own their lifecycle.
 
 ## Verified checkpoint — 2026-09-13
 
@@ -151,3 +162,64 @@ important findings. This does not establish live provider/microphone parity,
 complete upstream reconciliation, all shortcut/focus cases or novice usability.
 Convenience-entry forwarding through VercelAiChat/FloatingChatUI remains the
 next common-SDK follow-through; all other full-Goal gates remain open.
+
+## Task 4 — Simple entry follow-through
+
+Extend FloatingChatUI and VercelAiChat with the existing common layout options,
+not a second shell. Tests must render the real transport/provider/input, prove
+controlled open, welcome text, widths, retained drafts, mode/collapse callbacks
+and shortcut expansion. Built-in media and portaled dialogs must respond to
+hidden window state. Cover repeated Stop plus close/collapse with the actual
+recording controller and fake provider/media boundaries. Replace the minimal
+layout browser fixture's manually composed input with the public VercelAiChat
+entry; retain geometry, pointer, mobile and focus assertions. Run the full SDK
+suite/build before dependent browser and GID checks, then independent review.
+
+In progress: the first ten new component/controller integration tests passed
+after observed failures (incorrect UI labels in two initial test selectors
+were corrected before the meaningful RED run). They cover the entry options,
+hidden menus/dialogs, automatic hidden recording finalization and duplicate
+Stop delivery. Full verification and browser results are recorded separately
+when terminal evidence is available; no live microphone claim is implied.
+
+## Simple entry verified checkpoint — 2026-09-13
+
+Task 4 implemented. VercelAiChat now forwards all exposed common layout options
+through FloatingChatUI: stable portal placement, controlled/uncontrolled mode
+and collapse, width bounds/callbacks, localized actions, keepMounted and separate
+sidebar/floating persistence. Existing floating and unmount defaults remain.
+Controlled open/onOpenChange and welcomeMessage were already advertised but
+silently lost in the wrapper; their forwarding is now regression-tested too.
+README includes the small in-flow sidebar setup, without custom chat internals.
+
+ChatWindow's internal visibility signal is shared by built-in input/header
+components. Hidden initial input no longer takes focus; reopening a retained
+window focuses its composer. Session menus and clear dialogs dismiss without
+executing an action. Hidden built-in voice finalizes through the existing
+controller. Concurrent Stop controls and hiding insert final text once, and
+failed finalization is observed rather than leaving an unhandled rejection.
+These changes introduce no new media stream, recording controller or transport.
+
+- **12 added tests**, all with observed failing behavior before their fixes,
+  including actual Vercel transport/provider/input and real STT controller with
+  fake microphone/provider edges. Review reproduced the focus and rejection
+  paths; independent final review reran **34 targeted tests** with no remaining
+  important finding in this increment.
+- Full SDK: **1,079 tests / 130 files**, typecheck, ESM/CJS build and 16 shims.
+- Production Next/Chrome reference: **3 checks passed**, including two bounded
+  process cleanup tests and the actual HTTP/SSE scoped tool/native UI flow.
+  The layout fixture now mounts VercelAiChat instead of a hand-built composer.
+  Sidebar width/real pointer changes, mode/collapse retained draft, keyboard
+  focus, 390x844 mobile fullscreen and retained reopen focus pass. Inspected
+  `/tmp/glirastes-dropin-layout-desktop.png` and `-mobile.png`. This is a test
+  model/reference app, not live model/STT or new-user usability acceptance.
+- GID compatibility production build passes: same isolated source/scripts
+  copy, no .env, unreachable dummy database, Next 16.1.6 Webpack, 47 static
+  pages. Known middleware/proxy warning remains. GID tests recorded in the
+  canonical working document after the final run.
+
+Custom media/portals still own cleanup. This checkpoint does not claim full
+generic voice UX parity (trigger-to-mic behavior, provider failure/retry flows,
+session switching while recording, native microphone/mobile tests), all
+current-upstream GID features or remaining MVP gates. LangGraph remains deferred;
+no legacy paths, auth/scopes, package exports or runtime policy were removed.

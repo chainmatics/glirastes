@@ -2,12 +2,14 @@ import {
   useState,
   useCallback,
   useRef,
+  useContext,
   useLayoutEffect,
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
+import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
 import type { ChatInputProps } from '../types.js';
 
 /**
@@ -19,6 +21,7 @@ import type { ChatInputProps } from '../types.js';
  * Toggles between send and stop button based on loading state.
  */
 export function ChatInput({ className, onSubmit }: ChatInputProps) {
+  const visible = useContext(ChatWindowVisibilityContext);
   const { send, stop, isLoading, classNames, locale, components, voice } = useChatContext();
   const [value, setValue] = useState('');
   const InputExtra = components.InputExtra;
@@ -73,7 +76,7 @@ export function ChatInput({ className, onSubmit }: ChatInputProps) {
     >
       <textarea
         ref={textareaRef}
-        autoFocus
+        autoFocus={visible}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}

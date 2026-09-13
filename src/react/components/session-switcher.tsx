@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import { ConfirmDialog } from './confirm-dialog.js';
+import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
 
 export interface SessionSwitcherProps {
   /** Temporarily lock session controls, e.g. while the app records a voice draft. */
@@ -49,7 +50,8 @@ export function SessionSwitcher({
     renameSession,
     locale,
   } = useChatContext();
-  const blocked = disabled || (isSessionChangeBlocked ?? isLoading);
+  const visible = useContext(ChatWindowVisibilityContext);
+  const blocked = !visible || disabled || (isSessionChangeBlocked ?? isLoading);
   const resolvedFallback = fallbackTitle ?? locale.newChatLabel;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');

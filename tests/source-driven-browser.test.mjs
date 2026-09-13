@@ -151,7 +151,8 @@ test('real Next SDK chat streams native endpoint results and updates the browser
   assert.equal(await native.getByLabel('Status').inputValue(), 'done');
   if (process.env.REFERENCE_SCREENSHOT) await page.screenshot({ path: process.env.REFERENCE_SCREENSHOT, fullPage: true });
   await page.goto(`${origin}/layout-proof`);
-  const layoutDraft = page.getByRole('textbox', { name: 'Layout draft' });
+  const layoutDraft = page.getByRole('textbox');
+  await page.getByText('Ask your app to help').waitFor();
   await layoutDraft.fill('Retained across layouts');
   const panel = page.locator('[data-component="chat-window"]');
   const divider = page.getByRole('separator', { name: 'Resize chat sidebar' });
@@ -193,6 +194,7 @@ test('real Next SDK chat streams native endpoint results and updates the browser
   await page.getByRole('button', { name: 'Close chat', exact: true }).click();
   await page.getByRole('button', { name: 'Open assistant', exact: true }).click();
   assert.equal(await layoutDraft.inputValue(), 'Retained across layouts');
+  assert.equal(await layoutDraft.evaluate(element => element === document.activeElement), true, 'retained reopen must focus the actual drop-in composer');
   assert.deepEqual(errors, []);
   assert.doesNotMatch(logs, /Module not found|Error:|Warning:/);
   t.diagnostic('Verified real Next HTTP + SSE, scoped endpoint results, SDK chat, navigation/filtering, and common desktop/mobile layout geometry and draft retention. Test model only; no LLM/STT/timing claim.');

@@ -265,6 +265,25 @@ export function ChatWidget() {
 Use themes, slots, session adapters, tool renderers, and
 `useAiClientAction` for product-specific UX.
 
+For a sidebar that can float or collapse, place the same widget alongside your
+page in a bounded-height flex row. No custom chat implementation is needed:
+
+```tsx
+<div style={{ display: 'flex', height: '100dvh', minWidth: 0 }}>
+  <main style={{ flex: 1, minWidth: 0 }}>{children}</main>
+  <VercelAiChat endpoint="/api/ai/chat" portal={false}
+    defaultMode="sidebar" layoutControls keepMounted />
+</div>
+```
+
+`keepMounted` retains unsent input while closed; `portal={false}` reserves app
+space in sidebar mode. Keep portal placement stable when switching modes.
+`open`/`onOpenChange`, `mode`/`onModeChange`, `collapsed`/`onCollapsedChange`,
+sidebar width bounds and `layoutLabels` support app-owned controls/preferences.
+The built-in input finalizes recording when hidden and keeps its text editable;
+custom inputs or external media/portals still own their cleanup. These options
+also work with the transport-independent `FloatingChatUI` inside your provider.
+
 ## Speech-to-text
 
 The React STT controller owns exactly one state machine and microphone stream.
