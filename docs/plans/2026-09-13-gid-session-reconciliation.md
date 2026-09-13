@@ -85,5 +85,59 @@ pre-existing middleware-to-proxy deprecation warning.
 
 No production runtime, auth flow, live microphone/provider, customer database,
 push, merge, release or deployment was exercised. Browser/microphone and full
-latest-upstream parity remain separate gates. The wrapper still unmounts when
-closed, so unsent draft preservation across close/routes is not yet proven.
+latest-upstream parity remain separate gates. At this checkpoint the wrapper
+still unmounted when closed; the continuation below addresses that lifecycle.
+
+## Retained chat window continuation — 2026-09-13
+
+The next slice retains the existing common window and GID wrapper after the
+first opening. It does not replace the outstanding sidebar/mobile shell or
+claim completion of all upstream reconciliation.
+
+- Add an opt-in SDK `ChatWindow.keepMounted`, keeping its existing default.
+  Closed content is hidden and inert, including when consumer CSS uses flex.
+  Disabling drag/resize releases document listeners and text-selection locks.
+- Keep the GID provider, selected session, input and structured draft mounted
+  when closing. Restore focus where the original element still exists; hidden
+  wrappers do not intercept shortcuts. Native route-content rerenders preserve
+  state. Dismiss portalled confirmations without executing their actions.
+- Close finalizes an active shared recording into an editable, unsent draft.
+  Keep the editor mounted during recording so delayed final text and structured
+  task identities survive. Already-hidden trigger recordings are not stopped
+  merely because the retained panel observes the shared controller.
+- Bind explicit new app requests to the currently selected chat, not the chat
+  that happened to be active on the first mount. Ordinary reopen is not a new
+  request and must not reset the draft.
+
+TDD reproduced the missing behaviors before implementation. The earlier STT
+test requiring the editor's DOM removal now checks invisibility instead, since
+retaining that DOM is necessary for the requested state preservation. No voice
+or authorization assertion was removed. Full verification and review follow.
+
+Review found three important gaps, reproduced before repair: STT `stop()`
+returns speech only (empty while permission is pending), a restored task draft
+could override a later task-only app request, and retained app-request state
+could cross a user/tenant change even though the session adapter was scoped.
+The editor now owns the pre-recording text/mentions and appends final speech;
+explicit task requests replace stale task chips; a keyed `ScopedAppShell` resets
+all request/open/STT state at the authentication-scope boundary. Additional
+actual-controller tests cover late microphone permission cleanup and deferred
+finalization. Closing during `finalizing` does not call `stop()` again.
+
+Still open: actual browser focus/mobile/microphone parity, route-triggered
+recording cleanup, surviving remounted layouts/reloads, sidebar/floating mode
+switches, native task/team/MCP reconciliation and the other complete Goal gates.
+
+Full verification: SDK **1,035 tests / 128 files**, typecheck and ESM/CJS build;
+GID **989 tests / 60 files** and typecheck. Independent re-review runs all
+**27 targeted GID tests** and finds no remaining blocking issue in this slice.
+The 13 targeted SDK tests passed independently in the first review. Whitespace
+and changed/new source secret-pattern audits pass. Production-build outcome is
+recorded in the canonical working document after the final source-copy build.
+
+Follow-up discovered by review: the generic STT controller's `stop()` is not
+single-flight. Two other callers can still race asynchronous cleanup with a new
+recording. The new Close path no longer creates that race, but the general
+controller lifecycle needs its own regression and repair before full STT parity.
+Actual browser focus return when the original opener is replaced also remains
+to be checked; component focus evidence covers an opener that stays connected.

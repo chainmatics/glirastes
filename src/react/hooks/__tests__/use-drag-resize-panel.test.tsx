@@ -79,6 +79,26 @@ describe('useDragResizePanel drag lifecycle', () => {
     expect(document.body.style.userSelect).toBe('');
   });
 
+  it('cancels dragging when disabled without waiting for pointer release', () => {
+    const options = createOptions();
+    document.body.style.userSelect = 'text';
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useDragResizePanel({ ...options, draggable: enabled }),
+      { initialProps: { enabled: true } },
+    );
+    act(() => {
+      result.current.handlers.onDragStart(mouseDown(500, 140));
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 550, clientY: 180 }));
+    });
+    expect(result.current.isDragging).toBe(true);
+    rerender({ enabled: false });
+    expect(result.current.isDragging).toBe(false);
+    expect(document.body.style.userSelect).toBe('text');
+    const position = result.current.position;
+    act(() => document.dispatchEvent(new MouseEvent('mousemove', { clientX: 600, clientY: 200 })));
+    expect(result.current.position).toEqual(position);
+  });
+
   it('starts dragging only after the pointer crosses a movement threshold', () => {
     const { result } = renderHook(() => useDragResizePanel(createOptions()));
 

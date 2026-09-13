@@ -19,6 +19,7 @@ export function ChatWindow({
   bodyClassName,
   portal = true,
   open,
+  keepMounted = false,
   defaultOpen = true,
   onOpenChange,
   draggable = true,
@@ -77,8 +78,8 @@ export function ChatWindow({
     snapRadius,
     edgeThreshold,
     persistDimensions,
-    draggable,
-    resizable,
+    draggable: isOpen && draggable,
+    resizable: isOpen && resizable,
     constrainToViewport,
   });
 
@@ -110,7 +111,7 @@ export function ChatWindow({
 
   const handleClose = useCallback(() => updateOpen(false), [updateOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !keepMounted) return null;
 
   // ---------------------------------------------------------------------------
   // Position style — always use translate(-50%, 0) so x means "center"
@@ -188,11 +189,14 @@ export function ChatWindow({
       className={className}
       data-component="chat-window"
       data-theme-effect={themeEffect}
+      hidden={!isOpen}
+      inert={!isOpen}
       style={{
         ...themeVars,
         ...positionStyle,
         width: size.width,
         height: size.height,
+        display: isOpen ? undefined : 'none',
       }}
       onMouseMove={handlers.onPanelMouseMove}
       onMouseLeave={handlers.onPanelMouseLeave}

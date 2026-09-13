@@ -437,6 +437,21 @@ export function useDragResizePanel(
     resizeStartRef.current = null;
   }, []);
 
+  // A retained panel can become inactive without unmounting. Release document
+  // listeners and selection locks immediately, rather than waiting for mouseup.
+  useEffect(() => {
+    if (!draggable) {
+      releaseDragResources();
+      setIsDragging(false);
+      setIsNearSnapZone(false);
+    }
+    if (!resizable) {
+      releaseResizeResources();
+      setIsResizing(false);
+      setActiveEdge(null);
+    }
+  }, [draggable, resizable, releaseDragResources, releaseResizeResources]);
+
   const handleEdgeResizeStart = useCallback(
     (edge: ResizeEdge) =>
       (e: ReactMouseEvent<HTMLElement>) => {

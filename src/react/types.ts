@@ -808,6 +808,9 @@ export interface ChatWindowProps {
   bodyClassName?: string;
   portal?: boolean;
   open?: boolean;
+  /** Preserve child state while closed. Hidden content is inert; consumers must
+   * stop owned media and dismiss external portals when closing. Default false. */
+  keepMounted?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   draggable?: boolean;
