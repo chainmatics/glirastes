@@ -40,6 +40,7 @@ describe('bundled local-first setup workflow', () => {
     }
     expect(source).not.toContain('Platform interviewer');
     expect(source).not.toContain('Never duplicate Platform semantics');
+    expect(source).not.toContain('Setup/Doctor alone do not currently guarantee this handler check');
   });
 
   it('uses the drop-in endpoint instead of requesting a second transport', async () => {

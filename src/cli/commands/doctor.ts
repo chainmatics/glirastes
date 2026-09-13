@@ -141,7 +141,7 @@ export async function createDoctorReport(
       'artifacts',
       'fail',
       failureCode(error, 'E-SETUP-007'),
-      'repair-local-artifacts',
+      isFoundationDiagnosticError(error) ? error.remediation : 'repair-local-artifacts',
     ));
   }
 

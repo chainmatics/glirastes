@@ -47,7 +47,8 @@ as executable without a matching local handler/schema/fingerprint.
    stale/incomplete generation as a failure, not keep obsolete tools silently.
    Evaluate discovery findings explicitly: `ui-action-handler-not-found` must
    fail generation/CI even if the inventory still contains that execution.
-   Setup/Doctor alone do not currently guarantee this handler check.
+   Setup/Doctor also reject that missing-handler finding. Static source matching
+   does not prove that a handler mounts or executes; retain the behavior tests.
 
 Managed publication/activation remain separate approved operations. Compatible
 updates only affect subsequent turns; existing turns retain their pinned

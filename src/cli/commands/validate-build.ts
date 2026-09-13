@@ -109,6 +109,14 @@ export async function validateWorkspace(options: {
     rootDir: options.rootDir,
     inventory,
   });
+  if (discovery.findings.some(({ code }) => code === 'ui-action-handler-not-found')) {
+    throw new FoundationDiagnosticError({
+      code: 'E-BINDING-004',
+      operation: 'validate.inventory',
+      message: 'A declared UI action handler is missing from the app source.',
+      remediation: 'repair-missing-ui-handler',
+    });
+  }
 
   const setupArtifactPath = resolve(
     options.rootDir,

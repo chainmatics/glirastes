@@ -34,6 +34,8 @@ const NEXT_ACTIONS = new Map([
     'Ask your coding agent to verify the server-side signed-in user integration before declaring it configured. Do not bypass this check.'],
   ['repair-local-artifacts',
     'Ask your coding agent to check the local tool bindings against the current app code, then rerun glirastes setup.'],
+  ['repair-missing-ui-handler',
+    'Ask your coding agent to restore the UI action handler or regenerate the tool inventory after its removal, then rerun glirastes setup.'],
   ['rerun-local-setup',
     'Run glirastes setup to refresh the local generated files, then run glirastes doctor again.'],
   ['rerun-connect',

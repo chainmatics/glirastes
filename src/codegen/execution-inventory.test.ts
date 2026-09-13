@@ -305,6 +305,50 @@ describe('resolving a UI action to its handler', () => {
     );
   });
 
+  it.each([
+    `import { useAiClientAction } from 'glirastes/react';
+     function View() { useAiClientAction(\n 'task-details.open', () => {}); }`,
+    `import { useAiClientAction as register } from 'glirastes/react';
+     function View() { register('task-details.open', () => {}); }`,
+    `import * as ui from 'glirastes/react';
+     function View() { ui.useAiClientAction('task-details.open', () => {}); }`,
+    `import { useAiClientActionById as register } from 'glirastes/react';
+     function View() { register(bus, 'task-details.open', () => {}); }`,
+  ])('recognizes a real hook call regardless of formatting or import alias', async (source) => {
+    const rootDir = await fixture({ 'src/view.tsx': source });
+    const discovery = await discoverFoundationExecutions({ rootDir, inventory: uiInventory() });
+    expect(discovery.findings).toEqual([]);
+    expect(discovery.executions[0].sourceLocator).toMatchObject({ sourceFile: 'src/view.tsx' });
+  });
+
+  it.each([
+    `// useAiClientAction('task-details.open', () => {});`,
+    `const example = "useAiClientAction('task-details.open', () => {})";`,
+  ])('does not accept an example or commented-out handler as live source', async (source) => {
+    const rootDir = await fixture({ 'src/view.tsx': source });
+    const discovery = await discoverFoundationExecutions({ rootDir, inventory: uiInventory() });
+    expect(discovery.findings).toContainEqual(expect.objectContaining({ code: 'ui-action-handler-not-found' }));
+  });
+
+  it('indexes multiple registrations with deterministic source selection', async () => {
+    const rootDir = await fixture({
+      'src/z.tsx': handler,
+      'src/a.tsx': handler,
+      'src/filter.tsx': `import { useAiClientAction as register } from 'glirastes/react';
+        function Filters() { register('tasks.filter', () => {}); }`,
+    });
+    const inventory = uiInventory();
+    inventory.executions.push({ ...inventory.executions[0], toolId: id('902'),
+      definitionId: 'ui.tasks.filter', stableKey: 'UI ui.tasks.filter', executionKind: 'ui',
+      sourceFingerprint: digest('B'), actionBindingRef: 'ui.tasks.filter', actionId: 'tasks.filter' });
+    const discovery = await discoverFoundationExecutions({ rootDir, inventory });
+    expect(discovery.findings).toEqual([]);
+    expect(discovery.executions.map(({ sourceLocator }) => sourceLocator)).toEqual([
+      { actionBindingRef: 'ui.taskDetails.open', sourceFile: 'src/a.tsx' },
+      { actionBindingRef: 'ui.tasks.filter', sourceFile: 'src/filter.tsx' },
+    ]);
+  });
+
   /** Without an action id there is nothing to search for, and that is fine. */
   it('still accepts an entry that declares no action id', async () => {
     const rootDir = await fixture({ 'src/a.tsx': handler });

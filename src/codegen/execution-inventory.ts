@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import ts from 'typescript';
 import { createRouteSourceFingerprint } from './route-fingerprint.js';
 import { readRouteExports } from './route-exports.js';
 
@@ -162,19 +163,45 @@ async function verifyEndpoint(
 }
 
 /**
- * Locate the client handler that registers an action.
- *
- * The registration is a literal call with the action id, so a textual search
- * is enough and stays deterministic. Generated files are skipped: they mirror
- * the inventory rather than implementing behaviour.
+ * Read literal registrations from syntax, never comments or example strings.
+ * This is source evidence, not proof that the component mounts at runtime.
  */
-async function findActionHandler(
-  rootDir: string,
-  actionId: string,
-): Promise<string | null> {
-  const needle = `useAiClientAction('${actionId}'`;
-  const alternate = `useAiClientAction("${actionId}"`;
-  const matches: string[] = [];
+function registeredActionIds(source: string, fileName: string): Set<string> {
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const hooks = new Map<string, number>([['useAiClientAction', 0], ['useAiClientActionById', 1]]);
+  const aliases = new Map(hooks);
+  const namespaces = new Set<string>();
+  for (const node of file.statements) {
+    if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)
+      || node.moduleSpecifier.text !== 'glirastes/react' || node.importClause?.isTypeOnly) continue;
+    const bindings = node.importClause?.namedBindings;
+    if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text);
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const entry of bindings.elements) {
+        const argument = hooks.get((entry.propertyName ?? entry.name).text);
+        if (!entry.isTypeOnly && argument !== undefined) aliases.set(entry.name.text, argument);
+      }
+    }
+  }
+  const ids = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const argument = ts.isIdentifier(callee) ? aliases.get(callee.text)
+        : ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
+          && namespaces.has(callee.expression.text) ? hooks.get(callee.name.text) : undefined;
+      const value = argument === undefined ? undefined : node.arguments[argument];
+      if (value && ts.isStringLiteralLike(value)) ids.add(value.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return ids;
+}
+
+/** Index once per discovery, not once per UI tool. Generated files are mirrors. */
+async function findActionHandlers(rootDir: string): Promise<Map<string, string>> {
+  const matches = new Map<string, string>();
 
   const walk = async (relative: string): Promise<void> => {
     const entries = await readdir(resolve(rootDir, relative), {
@@ -191,14 +218,16 @@ async function findActionHandler(
       if (!/\.(tsx?|jsx?)$/.test(entry.name)) continue;
       const source = await readFile(resolve(rootDir, next), 'utf8')
         .catch(() => '');
-      if (source.includes(needle) || source.includes(alternate)) {
-        matches.push(next);
+      if (!source.includes('useAiClientAction')) continue;
+      for (const actionId of registeredActionIds(source, next)) {
+        const previous = matches.get(actionId);
+        if (!previous || next < previous) matches.set(actionId, next);
       }
     }
   };
 
   await walk('');
-  return matches.sort()[0] ?? null;
+  return matches;
 }
 
 export async function discoverFoundationExecutions(options: {
@@ -209,6 +238,8 @@ export async function discoverFoundationExecutions(options: {
   assertUniqueInventory(parsed);
   const inventory = canonicalInventory(parsed);
   const executions: DiscoveredFoundationExecution[] = [];
+  const handlers = inventory.executions.some((execution) => execution.executionKind === 'ui' && execution.actionId)
+    ? await findActionHandlers(options.rootDir) : new Map<string, string>();
 
   const findings: Array<{ code: string; subjectRef: string }> = [];
 
@@ -218,7 +249,7 @@ export async function discoverFoundationExecutions(options: {
       continue;
     }
     const sourceFile = execution.actionId
-      ? await findActionHandler(options.rootDir, execution.actionId)
+      ? handlers.get(execution.actionId)
       : null;
     if (execution.actionId && !sourceFile) {
       findings.push({

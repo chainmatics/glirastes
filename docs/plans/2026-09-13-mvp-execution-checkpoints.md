@@ -171,3 +171,33 @@ validate and removed handlers cannot create a fresh build. Then continue the
 shared generator and full fresh-app action/change corpus, not more launcher
 polish. GID upstream, three-stack/UI/STT, Platform metrics/usability, landing
 and live acceptance remain required.
+
+## Missing UI handler gate verified — 2026-09-13
+
+- Previous bootstrap batch committed as `a3a0c67`. The following code repair
+  closes its identified handler-validation gap; it does not implement the full
+  source generator or runtime UI delivery.
+- Real fixture: configure and build a registered filter, remove its handler,
+  run validate/build/setup and Doctor. Four assertions failed before repair
+  (all paths incorrectly succeeded); they now reject with `E-BINDING-004` and
+  actionable recovery. Last build bytes remain unchanged, no network call is
+  made, and valid or legacy binding-only inventories remain accepted.
+- Review found valid multiline/import-aliased hooks were missed by the old
+  substring search. Added RED tests, then AST-based literal hook recognition
+  with aliases, namespace imports and `useAiClientActionById`. Comments/example
+  strings no longer count. UI registrations are indexed once per discovery,
+  not by repeatedly scanning the tree for each tool. Deterministic source
+  selection is tested. This is local syntactic evidence, not component mounting,
+  imported constant resolution or runtime execution proof.
+- Final SDK: 983 tests / 120 files, typecheck, ESM/CJS build, built-entry probe,
+  whitespace and bounded secret-pattern audits pass. Independent re-review
+  found no remaining issue in this change. Maintenance guidance reflects the
+  newly enforced gate and still requires real behavior tests.
+- GID against this rebuilt SDK: default `bun run test` now passes all 966
+  tests / 58 files. Inventory discovery took 471ms and real-sync test 2.54s in
+  that run. These are observed test timings, not a controlled performance
+  benchmark or proof that earlier concurrency flakiness is permanently fixed.
+- No production/DB/model call, server restart, publication or remote Git write.
+  Full Goal remains active; next required work is shared source-derived binding
+  generation and a fresh app's actual action/change corpus, then the other
+  integration/Platform/UI/live gates, not further diagnostic-only work.
