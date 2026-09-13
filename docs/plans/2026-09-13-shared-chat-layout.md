@@ -118,3 +118,36 @@ Actual GID sidebar defaults/width persistence, collapsed session-menu/media
 lifecycle, small available app width, keyboard/focus/mobile parity and route
 recording cleanup still require integration evidence. The full current-upstream
 reconciliation and remaining MVP gates are unchanged and incomplete.
+
+## Get It Done integration checkpoint — 2026-09-13
+
+Task 3 is now implemented in the GID pilot's actual AppShell/AIChatWrapper.
+The one retained chat lives in an in-flow host with stable portal=false. The
+shared layout controls are localized. Upstream user/tenant-scoped UI preferences
+retain their existing storage format, default mode and bounded width. A narrow
+available app area gives the chat the full area instead of squeezing the page;
+collapsing restores the page. Floating geometry is separately user-scoped.
+
+SDK addition: persistSidebarWidth=false disables only the optional sidebar
+sessionStorage cache when an app owns that preference. Floating persistence
+continues normally. This prevents a stale SDK cache overriding the app's saved
+width. Its added real-component regression was observed RED before the change;
+ChatWindow now has 22 tests. SDK full verification: **1,067 tests / 128 files**,
+typecheck and ESM/CJS build.
+
+Collapsing makes custom-header menus inactive and uses the existing input/STT
+lifecycle. Route changes finalize trigger recording without submitting. A
+retained draft with task chips must not be replaced by speech-only text when
+reopening. The global voice shortcut expands a collapsed chat before recording.
+Tests use the real SDK and recording controller with fake provider/media edges.
+GID full verification: **1,000 tests / 61 files**, typecheck and a secret-free
+source-only Next 16.1.6 Webpack production build (47 static pages). The known
+middleware/proxy deprecation warning remains.
+
+The actual GID browser fixture and its command are documented in the GID
+`docs/plans/2026-09-13-shared-chat-layout-integration.md`. Independent review
+of the bounded integration reran 38 targeted tests and reported no remaining
+important findings. This does not establish live provider/microphone parity,
+complete upstream reconciliation, all shortcut/focus cases or novice usability.
+Convenience-entry forwarding through VercelAiChat/FloatingChatUI remains the
+next common-SDK follow-through; all other full-Goal gates remain open.

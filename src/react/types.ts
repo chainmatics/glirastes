@@ -845,6 +845,9 @@ export interface ChatWindowProps {
   snapRadius?: number;
   edgeThreshold?: number;
   persistDimensions?: boolean | string;
+  /** Set false when the app persists sidebarWidth itself. Floating dimension
+   * persistence remains enabled. Default true. */
+  persistSidebarWidth?: boolean;
   onPositionChange?: (pos: { x: number; y: number } | null) => void;
   onDimensionChange?: (size: { width: number; height: number }) => void;
   resizeHandleClassName?: string;

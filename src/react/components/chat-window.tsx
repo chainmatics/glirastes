@@ -48,6 +48,7 @@ export function ChatWindow({
   snapRadius,
   edgeThreshold,
   persistDimensions,
+  persistSidebarWidth = true,
   header,
   headerActions,
   headerTitle,
@@ -104,7 +105,7 @@ export function ChatWindow({
   const sidebar = useSidebarResize({
     active: isOpen && isSidebar && !isCollapsed && resizable,
     width: sidebarWidth, minWidth: minSidebarWidth, maxWidth: maxSidebarWidth,
-    storageKey: persistDimensions ? `${persistDimensions === true ? 'chat-panel' : persistDimensions}-sidebar-width` : undefined,
+    storageKey: persistDimensions && persistSidebarWidth ? `${persistDimensions === true ? 'chat-panel' : persistDimensions}-sidebar-width` : undefined,
     onWidthChange: onSidebarWidthChange,
   });
 

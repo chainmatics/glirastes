@@ -58,6 +58,17 @@ describe('ChatWindow visibility lifecycle', () => {
 });
 
 describe('ChatWindow shared layouts', () => {
+  it('lets an app-owned sidebar width override the optional browser cache', () => {
+    window.sessionStorage.setItem('app-owned-sidebar-width', '420');
+    render(<ChatWindow mode="sidebar" sidebarWidth={530} persistDimensions="app-owned" persistSidebarWidth={false}><Draft /></ChatWindow>);
+    const panel = screen.getByRole('textbox').closest('section')!;
+    expect(panel.style.width).toBe('530px');
+    fireEvent.keyDown(screen.getByRole('separator'), { key: 'ArrowLeft' });
+    expect(panel.style.width).toBe('550px');
+    expect(window.sessionStorage.getItem('app-owned-sidebar-width')).toBe('420');
+    window.sessionStorage.removeItem('app-owned-sidebar-width');
+  });
+
   it('continues dragging when the app persists each sidebar width update in state', () => {
     function App() {
       const [width, setWidth] = useState(420);
