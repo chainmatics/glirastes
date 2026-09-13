@@ -143,6 +143,23 @@ not proof that the Platform is reachable, an update is active, or a chat/tool
 action has succeeded; those require separate live checks. Fresh projects still
 need their local integration generated before setup can validate it.
 
+For local coding-agent intake before any Glirastes artifacts exist, run
+`glirastes setup inspect --json` from the app folder. It reports separate
+manifest components and declared Next.js, React, Vue, NestJS or FastAPI markers;
+it does not pair unrelated components or certify framework support, installed
+runtimes, authentication, or executable tools. Node package manifests and direct
+Python requirements are inspected; `pyproject.toml` presence is only a Python
+hint, not parsed dependency evidence. Linked, hidden, generated and dependency
+directories are skipped, with bounded traversal and findings for incomplete or
+invalid input. No source code or scripts are executed, environment files are
+not read, and nothing is sent to the Platform. This local-only report is not a
+sync artifact or a finished one-command integration.
+
+Inspection rechecks canonical paths as it traverses and reads them, including
+directories replaced by links after discovery. It is not an OS filesystem
+sandbox: run it against a trusted, stable checkout, not one being adversarially
+rewritten concurrently.
+
 Managed setup is always explicit:
 
 ```bash

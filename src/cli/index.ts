@@ -45,6 +45,7 @@ import {
   type ConnectCommandDependencies,
 } from './commands/connect.js';
 import { runSync, type SyncCommandDependencies } from './commands/sync.js';
+import { inspectSetupProject, formatSetupProjectInspection } from './commands/project-inspection.js';
 
 type CommandName =
   | 'scan'
@@ -95,6 +96,8 @@ function parseCommand(args: string[]): {
       + '         upload the current local setup without reassessment\n'
       + '       glirastes setup guided [options]\n'
       + '         run the legacy interactive setup interview\n'
+      + '       glirastes setup inspect [--root] [--json]\n'
+      + '         inspect local manifests before app integration\n'
       + '       glirastes setup <scan|sync|status> [options]\n'
       + '         the same steps, one at a time\n'
       + '       glirastes scan [--output] [--sync] [--execution-inventory]\n'
@@ -353,6 +356,13 @@ async function runSetup(
   rest: string[],
   dependencies: CliDependencies = {},
 ): Promise<void> {
+  if (rest[0] === 'inspect') {
+    const inspection = await inspectSetupProject(getFlagValue(rest, '--root') ?? process.cwd());
+    console.log(hasFlag(rest, '--json')
+      ? JSON.stringify(inspection)
+      : formatSetupProjectInspection(inspection));
+    return;
+  }
   if (hasFlag(rest, '--dry-run')) {
     const rootDir = resolve(getFlagValue(rest, '--root') ?? process.cwd());
     const plan = await createSetupPlan({
