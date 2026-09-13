@@ -78,3 +78,55 @@ existing `UiActionBus`, and verify actual rendered state plus add/change/delete.
 Do not invent a separate record per AI command or rebuild the SDK chat. Then
 wire the real Next shell/chat and browser flow, and continue the other reference
 stacks and remaining full-goal gates.
+
+## Task 3: native UI configuration and rendered dispatch
+
+- Add `examples/source-driven-next/native-ui/ui-config.json` and `ui.js`:
+  UI-owned views/filter definitions, runtime schemas derived from those same
+  definitions, native DOM rendering and validated navigation/filter methods.
+  These files have no Glirastes dependency. No custom chat is built.
+- Add `examples/source-driven-next/ui-bridge.js`: one React hook bridge for
+  navigation and one for filtering, using existing `UiActionBus` APIs. The setup
+  fixture copies it into the app source so source verification sees the same
+  integration that is actually mounted. Unmount removes subscriptions.
+- Extend the reference adapter: when native UI configuration exists, derive
+  UI observations and schemas, reconcile together with endpoints, validate
+  declared handler presence, and use the existing UI tool conversion/runtime.
+  Missing previously configured UI sources must fail, not imply successful
+  deletion. Removing the final actual filter removes that tool with a tombstone.
+- RED/GREEN in `tests/source-driven-ui.test.tsx`: native rendering; navigation
+  and filtering through runtime tool result plus mounted bus bridge; add/change/
+  delete view and filter domains across source builds; reject removed values;
+  removed bridge/config and unmount; no network/Platform action. Use jsdom and
+  actual React effects, not mocked UI handlers. This is DOM integration proof,
+  still not the real-browser or full SDK chat acceptance gate.
+- Run both reference suites, full tests, build/typecheck and independent review.
+  Then wire the actual Next shell/chat and browser rather than declaring the
+  synthetic fixture to be a completed reference-app acceptance.
+
+### Task 3 verified checkpoint — 2026-09-13
+
+Native UI contracts/rendering and the setup-time React bus bridge are now
+implemented. Five tests first failed on absent native rendering; after the
+bridge was implemented, the copied target app revealed a missing SDK package
+link. The fixture now explicitly links the local built SDK, instead of relying
+on self-reference resolution from the SDK's own package scope.
+
+Six UI tests plus nine endpoint tests pass. UI evidence includes the actual
+copied bridge mounted with React effects; runtime-generated action payloads
+dispatched through UiActionBus; headings, rows and selected options; normal
+buttons/selects; view addition/rename/removal; filter field/value changes;
+last-filter removal/tombstone; missing bridge/config rejection; unmount and
+no fetch invocation. Schemas and UI both read the same native configuration.
+No per-view/per-filter Glirastes catalogue is maintained.
+
+Full SDK: 1,016 tests / 124 files, typecheck, ESM/CJS build and JavaScript syntax
+checks pass. Independent review ran both reference suites (15 passing tests)
+and found no blocking issue. README now includes the UI command and evidence
+boundary. No production SDK/GID source changes, remote requests or deployment.
+
+Next required acceptance work is the real Next shell/API process and existing
+SDK chat in a browser, including actual streamed tool results reaching this
+UI bridge. Persist generation state at the build boundary and expose all
+runtime prerequisites. Do not count the current handler/DOM corpus as real
+browser, agent-installation timing, STT, or the completed three-stack gate.

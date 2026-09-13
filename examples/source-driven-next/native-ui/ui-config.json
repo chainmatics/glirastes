@@ -1,0 +1,8 @@
+{
+  "views": [
+    { "id": "tasks", "label": "Tasks", "filters": [
+      { "key": "status", "label": "Status", "values": ["open", "done"] }
+    ] },
+    { "id": "overview", "label": "Overview", "filters": [] }
+  ]
+}

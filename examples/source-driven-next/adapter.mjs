@@ -8,6 +8,7 @@ import { assertAppSetupSemanticParity } from 'glirastes/contracts';
 import { createLocalRuntimeSource, createLocalSchemaDigest, createManagedTurnGuard, materializeManifestToolRegistry } from 'glirastes/runtime';
 import { createAiSdkTools } from 'glirastes/ai-sdk';
 import { endpointToolToTool, toolsToAiTools } from 'glirastes/server';
+import { collectNativeUi } from './ui-adapter.mjs';
 
 const appId = '019fb007-0000-7000-8000-000000000001';
 export const tenantId = '019fb007-0000-7000-8000-000000000002';
@@ -73,13 +74,27 @@ export async function generateReference({ rootDir, previous }) {
       };
     },
   });
+  const uiEntries = await collectNativeUi(root, previous);
+  for (const entry of uiEntries) {
+    executions.push(entry.execution);
+    contracts.set(entry.execution.stableKey, entry.native);
+  }
   const generated = reconcileExecutionInventory({ appId, targetAppKey: 'native-query-fixture',
     previous, observed: { complete: true, executions } });
   const discovery = await discoverFoundationExecutions({ rootDir: root, inventory: generated.state.inventory });
+  if (discovery.findings.length) throw new Error('UI binding incomplete; restore the declared app handler');
   const handlers = new Map();
   const bindings = [];
   const candidates = [];
   for (const entry of generated.state.inventory.executions) {
+    if (entry.executionKind === 'ui') {
+      const ui = uiEntries.find((candidate) => candidate.execution.stableKey === entry.stableKey);
+      bindings.push({ ...entry, tool: ui.tool });
+      candidates.push({ ...ui.candidate, toolId: entry.toolId, name: entry.definitionId,
+        modelName: entry.definitionId.replaceAll('.', '_'), sourceFingerprint: entry.sourceFingerprint,
+        inputSchemaDigest: entry.inputSchemaDigest, outputSchemaDigest: entry.outputSchemaDigest });
+      continue;
+    }
     const native = contracts.get(entry.stableKey);
     const handler = await import(pathToFileURL(resolve(root, entry.sourceFile)).href);
     handlers.set(entry.path, handler.GET);
