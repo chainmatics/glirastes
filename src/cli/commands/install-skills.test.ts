@@ -281,7 +281,6 @@ describe('foundation agent skills', () => {
       await installSkills({
         rootDir,
         host: 'claude',
-        stack: 'all',
         dryRun: true,
       });
     } finally {

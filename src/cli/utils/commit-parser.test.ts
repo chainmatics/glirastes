@@ -1,6 +1,6 @@
 // packages/cli/src/utils/commit-parser.test.ts
 import { describe, it, expect } from 'vitest';
-import { parseCommits, type ParsedCommit } from './commit-parser';
+import { parseCommits, type ParsedCommit } from './commit-parser.js';
 
 describe('parseCommits', () => {
   it('should parse conventional commits', () => {

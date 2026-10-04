@@ -6,6 +6,7 @@ import {
   createRouteSourceFingerprint,
   discoverFoundationExecutions,
 } from '../codegen/index.js';
+import type { AppSetupArtifact } from '../contracts/index.js';
 import { FoundationDiagnosticError } from '../diagnostics/foundation-diagnostic.js';
 import { runCli } from './index.js';
 
@@ -16,7 +17,7 @@ const digest = (character: string) => `sha256:${character.repeat(43)}`;
 
 async function setupFixture(): Promise<{
   root: string;
-  artifact: Record<string, unknown>;
+  artifact: { appId: string; runId: string } & Record<string, unknown>;
 }> {
   const root = await mkdtemp(join(tmpdir(), 'glirastes-cli-setup-'));
   const source =
@@ -233,10 +234,10 @@ describe('glirastes setup', () => {
 
     await expect(runCli([
       'setup', 'status', '--run-id', id('9'), '--quiet',
-    ])).rejects.toMatchObject<Partial<FoundationDiagnosticError>>({
+    ])).rejects.toMatchObject({
       code: 'E-SCOPE-001',
       operation: 'setup.connection',
-    });
+    } satisfies Partial<FoundationDiagnosticError>);
   });
 
   it('scans the positive inventory locally without network access', async () => {
@@ -393,7 +394,7 @@ describe('glirastes setup', () => {
         env: {},
         isGitIgnored: vi.fn().mockResolvedValue(true),
         clientFactory: vi.fn(() => ({
-          syncArtifact: async (value) => {
+          syncArtifact: async (value: AppSetupArtifact) => {
             await createRun({
               runId: value.runId,
               assessmentMode: value.assessmentMode,

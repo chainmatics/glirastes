@@ -231,11 +231,11 @@ describe('glirastes validate', () => {
 
     await expect(runCli([
       'validate', '--root', root, '--app-id', APP_ID, '--quiet',
-    ])).rejects.toMatchObject<Partial<FoundationDiagnosticError>>({
+    ])).rejects.toMatchObject({
       code: 'E-INVENTORY-001',
       operation: 'validate.inventory',
       identifier: 'Tasks List!',
-    });
+    } satisfies Partial<FoundationDiagnosticError>);
   });
 
   it('rejects a schema-invalid inventory', async () => {

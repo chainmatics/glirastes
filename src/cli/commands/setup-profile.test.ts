@@ -131,9 +131,10 @@ describe('detectSetupProfile', () => {
   it('fails closed when local artifacts disagree on app identity', async () => {
     const rootDir = await fixture({ promptAppId: id('9') });
 
-    await expect(detectSetupProfile({ rootDir })).rejects.toMatchObject<
-      Partial<FoundationDiagnosticError>
-    >({ code: 'E-SCOPE-002', operation: 'setup.profile' });
+    await expect(detectSetupProfile({ rootDir })).rejects.toMatchObject({
+      code: 'E-SCOPE-002',
+      operation: 'setup.profile',
+    } satisfies Partial<FoundationDiagnosticError>);
   });
 
   it('fails closed when two undeclared setup candidates are present', async () => {
@@ -146,9 +147,10 @@ describe('detectSetupProfile', () => {
       'utf8',
     );
 
-    await expect(detectSetupProfile({ rootDir })).rejects.toMatchObject<
-      Partial<FoundationDiagnosticError>
-    >({ code: 'E-SETUP-004', operation: 'setup.profile' });
+    await expect(detectSetupProfile({ rootDir })).rejects.toMatchObject({
+      code: 'E-SETUP-004',
+      operation: 'setup.profile',
+    } satisfies Partial<FoundationDiagnosticError>);
   });
 
   it('rejects configured paths outside the workspace', async () => {
@@ -156,9 +158,10 @@ describe('detectSetupProfile', () => {
       glirastes: { setupArtifact: '../outside.json' },
     });
 
-    await expect(detectSetupProfile({ rootDir })).rejects.toMatchObject<
-      Partial<FoundationDiagnosticError>
-    >({ code: 'E-SETUP-003', operation: 'setup.profile' });
+    await expect(detectSetupProfile({ rootDir })).rejects.toMatchObject({
+      code: 'E-SETUP-003',
+      operation: 'setup.profile',
+    } satisfies Partial<FoundationDiagnosticError>);
   });
 
   it('never returns credential values', async () => {

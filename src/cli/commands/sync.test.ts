@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import type { AppSetupArtifact } from '../../contracts/index.js';
 import { runCli } from '../index.js';
 import type { SetupPlan } from './setup-plan.js';
 import {
@@ -140,7 +141,7 @@ function dependencies(overrides: Partial<SyncCommandDependencies> = {}) {
     artifactDigest,
     updatedAt: '2026-08-14T10:00:00.000Z',
   });
-  const syncArtifact = vi.fn(async (value: typeof artifact) => {
+  const syncArtifact = vi.fn(async (value: AppSetupArtifact) => {
     await createRun({
       runId: value.runId,
       assessmentMode: value.assessmentMode,
@@ -154,6 +155,8 @@ function dependencies(overrides: Partial<SyncCommandDependencies> = {}) {
       env: {},
       createPlan: vi.fn().mockResolvedValue(plan()),
       currentManifestDigests: vi.fn().mockResolvedValue({
+        runtimeContent: '',
+        promptContent: '',
         runtimeDigest: digest('R'),
         promptDigest: digest('S'),
       }),
@@ -369,6 +372,8 @@ describe('runSync', () => {
           replacementRaw,
         );
         return {
+          runtimeContent: '',
+          promptContent: '',
           runtimeDigest: digest('R'),
           promptDigest: digest('S'),
         };
