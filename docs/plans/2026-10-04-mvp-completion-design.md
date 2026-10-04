@@ -1,6 +1,6 @@
 # Glirastes MVP-Abschluss: Design
 
-Version: 1.1 · Stand: 2026-10-04 · Status: Entwurf zur Freigabe durch Philipp
+Version: 1.2 · Stand: 2026-10-04 · Status: Entwurf zur Freigabe durch Philipp
 
 Grundlage: [MVP-Scope v1.2](2026-09-13-mvp-scope-and-requirements.md), [Fokussiertes MVP](2026-09-13-focused-mvp-design.md), Platform-Design [Local, Connected Free, Managed](/Users/philipprollmann/Dev/chainmatics/glirastes-platform/.worktrees/foundation-control-plane-v1/docs/plans/2026-08-14-local-connected-managed-platform-design.md). Dieses Dokument ersetzt keine dieser Quellen, sondern legt fest, wie das MVP fertiggestellt wird. Wo es abweicht, ist das ausdrücklich markiert.
 
@@ -9,7 +9,9 @@ Grundlage: [MVP-Scope v1.2](2026-09-13-mvp-scope-and-requirements.md), [Fokussie
 ### Was Philipp gesagt hat (2026-10-04)
 
 - Alle MVP-Ziele abschließen; „es soll alles reibungslos laufen“; die erforderlichen Tests fahren.
-- Tools ziehen bei Codeänderungen automatisch nach. Wo das deterministisch nicht geht, übernimmt ein Agent, der über **OpenRouter** läuft.
+- Tools ziehen bei Codeänderungen automatisch nach. Wo das deterministisch nicht geht, übernimmt ein Agent; das gilt ausdrücklich auch für Beschreibungen und Schemas, weil viele Endpunkte nicht über API-Doku, Zod o. Ä. beschrieben sind.
+- Agentische Tool-Generierung läuft **in Local/Free lokal mit dem eigenen Coding-Agenten (kein OpenRouter)** und **in Pro als Managed Service: von CI/CD ausgelöst, im CI-Runner ausgeführt, von der Platform gesteuert (OpenRouter), Ergebnisse als Commit/PR im Repo**. Quellcode geht dabei nie über die Glirastes-Platform.
+- Den OpenRouter-Key braucht die **Zielapp** für die Nutzung von Glirastes: Er ist der Modellzugang ihres Chats zur Laufzeit (Konto des App-Betreibers), nicht der Tool-Generierung.
 - Auslöser: **lokal bei dev/build plus CI-Prüfung**. Ergebnisse werden mit dem Code committet, Deploys bleiben reproduzierbar.
 - Neue Tools: **sofort aktiv**, immer mit den App-Rechten des eingeloggten Nutzers; schreibende und löschende Tools erhalten automatisch eine Rückfrage vor der Ausführung.
 - Übersteuerungen und Freigaben: **lokal (CLI/committete Datei) und in der Platform**.
@@ -48,10 +50,10 @@ Weitere bekannte Defekte aus der Bestandsaufnahme: GID-Deploy kaputt (Key-Name `
 | TP | Inhalt | Anforderungen | Abhängig von |
 | --- | --- | --- | --- |
 | TP0 | Stand sichern, Hygiene, Testbasis stabilisieren | Release-Gate | – |
-| TP1 | Code-getriebene Tool-Synchronisierung inkl. OpenRouter-Agent, Risiko-Defaults, Policy, Referenz-Fixtures | FR-1, FR-2, FR-8 (generisch) | TP0 |
+| TP1 | Code-getriebene Tool-Synchronisierung inkl. agentischer Stufe (Coding-Agent bzw. Managed-Job), Risiko-Defaults, Policy, Referenz-Fixtures | FR-1, FR-2, FR-8 (generisch) | TP0 |
 | TP2 | Get It Done auf aktuellem `master` mit Foundation | FR-8, FR-2 (GID) | TP1-Kern |
 | TP3 | Routing, Suche, Rückfragen, Chat-UI, Einbettung, STT | FR-3, FR-4, FR-5 | TP0 (parallel zu TP1 möglich) |
-| TP4 | Platform: fünf Fragen, Capabilities, Overrides, Metriken, Platform-Hygiene | FR-6, FR-7 | TP1-Verträge |
+| TP4 | Platform: fünf Fragen, Capabilities, Overrides, Managed Tool-Generierung (Pro), Metriken, Platform-Hygiene | FR-6, FR-7 | TP1-Verträge |
 | TP5 | Landingpage | Landing | TP1–TP4 belegt |
 | TP6 | Abnahme, Release-Vorbereitung, Dokumentation | Release | alle |
 
@@ -61,12 +63,12 @@ TP1 und TP3 laufen in getrennten Worktrees parallel; TP2 und TP4 starten, sobald
 
 ### 4.1 Überblick
 
-Ein SDK-Generator leitet bei `dev` und `build` alle Endpunkt-, Navigations- und Filter-Tools deterministisch aus dem App-Code ab. Er nutzt die vorhandenen Bausteine weiter (`reconcileExecutionInventory` mit Tombstones, Setup-Artifact, `applySetupPlan`/`writeArtifactSetAtomically`, `discoverFoundationExecutions`) und schreibt **byte-reproduzierbare, committete Artefakte**. CI prüft sie im Frozen-Modus, Docker nur ihre Digest-Kette. Lokal löst ein OpenRouter-Agent die Befunde, die der Generator benennt, und reichert Beschreibungen und Schemas an; er liefert nur Daten zurück und entscheidet nie über Ausführbarkeit. Eine begrenzte Policy (lokal oder per signiertem Platform-Delta) kann Tools nur einschränken oder justieren, die der deployte Code besitzt.
+Ein SDK-Generator leitet bei `dev` und `build` alle Endpunkt-, Navigations- und Filter-Tools deterministisch aus dem App-Code ab. Er nutzt die vorhandenen Bausteine weiter (`reconcileExecutionInventory` mit Tombstones, Setup-Artifact, `applySetupPlan`/`writeArtifactSetAtomically`, `discoverFoundationExecutions`) und schreibt **byte-reproduzierbare, committete Artefakte**. CI prüft sie im Frozen-Modus, Docker nur ihre Digest-Kette. Agentische Arbeit (Befunde auflösen, Beschreibungen und Schemas anreichern) erledigt in Local und Free der eigene Coding-Agent des Entwicklers, in Pro ein Managed-Job im CI-Runner, den die Platform steuert. Beide liefern nur Daten; der Generator validiert sie und entscheidet allein über Ausführbarkeit. Eine begrenzte Policy (lokal oder per signiertem Platform-Delta) kann Tools nur einschränken oder justieren, die der deployte Code besitzt.
 
 Die Ermittlung läuft in **zwei Stufen**:
 
 - **Stufe 1 – deterministisch (Existenz und Sicherheit):** welche Tools es gibt, Identität, Methode/Pfad, Eingabe-Schlüssel, Auth-Evidenz und Risiko. Reproduzierbar, in CI ohne Key prüfbar; entscheidet allein über Ausführbarkeit. Der Agent darf hier nur Vorschläge machen, die der Generator gegen den Code bestätigt (4.6).
-- **Stufe 2 – agentisch (Verständnis und Qualität):** Beschreibungen, typisierte Ein- und Ausgabeschemas, Parameterbeschreibungen, Synonyme, Modulzuordnung, Anzeigetexte, Rückfragehinweise und Beispielsätze – besonders für Endpunkte ohne Zod, OpenAPI oder vergleichbare Doku. Läuft lokal über OpenRouter, Ergebnisse werden committet und durch eine deterministische Routing-Prüfung abgesichert (4.7). Ohne Stufe 2 bleiben Tools aktiv, aber mit sichtbar schwächerer Beschreibung.
+- **Stufe 2 – agentisch (Verständnis und Qualität):** Beschreibungen, typisierte Ein- und Ausgabeschemas, Parameterbeschreibungen, Synonyme, Modulzuordnung, Anzeigetexte, Rückfragehinweise und Beispielsätze – besonders für Endpunkte ohne Zod, OpenAPI oder vergleichbare Doku. Erledigt in Local/Free der eigene Coding-Agent, in Pro ein Managed-Job im CI über OpenRouter; Ergebnisse werden committet und durch eine deterministische Routing-Prüfung abgesichert (4.7). Ohne Stufe 2 bleiben Tools aktiv, aber mit sichtbar schwächerer Beschreibung.
 
 Datenfluss:
 
@@ -86,11 +88,12 @@ Neuer Befehl `glirastes tools` (Subcommand-Parsing in `src/cli/commands/tools/in
 
 | Befehl | Zweck |
 | --- | --- |
-| `tools refresh [--keep-going] [--resolve] [--adopt <inventory>] [--watch] [--json]` | Tools aus dem Code neu ableiten und schreiben |
+| `tools refresh [--keep-going] [--adopt <inventory>] [--watch] [--json]` | Tools aus dem Code neu ableiten und schreiben |
 | `tools check [--strict] [--integrity-only] [--json]` | Frozen-Refresh: schreibt nie, kein Modell, kein Netz |
 | `tools status [--json]` | Lokales „Was kann mein Chat?“ |
-| `tools resolve [--print] [--max-items] [--budget-usd] [--model] [--retry] [--yes]` | OpenRouter-Agent für offene Befunde; `--print` liefert eine Arbeitsliste für einen vorhandenen Coding-Agenten |
-| `tools describe [<tool>…\|--all] [--retry] [--write-contracts] [--budget-usd]` | Stufe 2: agentische Anreicherung von Beschreibung und Schema |
+| `tools resolve --print [--json]` | Arbeitsliste offener Stufe-1-Befunde für den eigenen Coding-Agenten (Local/Free) |
+| `tools describe --print [<tool>…\|--all] [--write-contracts]` | Arbeitsliste für Stufe 2 (Beschreibung und Schema) für den eigenen Coding-Agenten |
+| `tools enrich --managed [--first-run] [--budget-usd]` | Pro: Managed-Job im CI-Runner (Befunde und Anreicherung), Ergebnis als Commit |
 | `tools eval [--json]` | Deterministische Routing-Prüfung mit den Beispielsätzen (kein Modell, CI-fähig) |
 | `tools policy <show\|disable\|enable\|confirm\|relax\|raise\|roles\|describe\|exclude\|include\|accept\|reset> <tool> [wert] [--reason]` | Lokale Übersteuerung |
 | `tools verify <tool\|--all>` | Entwickler bestätigt einen beschreibenden Vertrag nach Review |
@@ -101,7 +104,7 @@ Modus: Flag → `GLIRASTES_TOOLS_MODE` (`write`/`frozen`/`integrity`) → `CI` g
 
 Eingaben (von Menschen, `init` oder dem Agenten geschrieben; `refresh` überschreibt sie nie):
 
-- `tools.json`: `{schemaVersion, appId, targetAppKey, locale, sources:[…], emit:{module?, mcpCatalog?}, agent:{model?, consent?, auto?, budget?, keyEnvFile?}, ci:{strict?}}`
+- `tools.json`: `{schemaVersion, appId, targetAppKey, locale, sources:[…], emit:{module?, mcpCatalog?}, enrich:{managed?, model?, writeContracts?}, ci:{strict?, requireEnrichment?}}` (nie ein Key)
 - `tool-policy.json`: Übersteuerungen und Ausschlüsse (schreibt nur der Entwickler bzw. die CLI, nie der Agent)
 - `tool-resolutions.json`: deklarative Konventionen (`handlerWrappers`, `bodyReaders`, `authHelpers`, `filterValues`) und Verträge pro Tool – nur Daten
 - `tool-semantics.json`: Prosa und Anreicherung pro `stableKey` (bestehendes GID-Format, erweitert um Herkunft je Feld `human`/`code`/`agent`, `locked`, Synonyme, verwandte Module, Rückfragehinweise und Beispielsätze). Von Hand gepflegte oder gesperrte Felder überschreibt der Agent nie.
@@ -183,28 +186,40 @@ Lebenszyklus:
   "acceptedRisk": { "<stableKey>": { "riskClass": "write", "toolId": "<uuid>" } } }
 ```
 
-### 4.6 Agent über OpenRouter (gemeinsamer Harness, Stufe-1-Befunde)
+### 4.6 Agentische Arbeit: wer sie ausführt und wie sie geprüft wird
 
-Der Harness erledigt zwei Aufgaben: **Befunde auflösen** (`tools resolve`, dieser Abschnitt) und **anreichern** (`tools describe`, Stufe 2, 4.7). Engine, Werkzeuge, Key, Zustimmung, Modell und Sicherheitsregeln gelten für beide.
+Es gibt zwei agentische Aufgaben: **Befunde auflösen** (Stufe 1 kann ein Element nicht bestimmen, z. B. `input-contract-unresolved`, Schema-Rolle unklar/nicht exportiert, `ui-action-payload-untyped`, `auth-evidence-missing` nur als Konventionsvorschlag, `contract-stale`) und **anreichern** (Stufe 2, 4.7). Beide liefern ausschließlich Daten in `tool-resolutions.json` und `tool-semantics.json` (optional neue `contract.ts`). Wer die Arbeit erledigt, hängt von der Variante ab; die Prüfung ist immer dieselbe.
 
-- **Wann:** nur über `tools resolve`, `refresh --resolve` oder in `predev`, wenn `agent.auto` gesetzt, Zustimmung erfasst, ein Key vorhanden, ein TTY aktiv und `CI` nicht gesetzt ist. Nur für auflösbare Befunde (`input-contract-unresolved`, Schema-Rolle unklar/nicht exportiert, `ui-action-payload-untyped`, `auth-evidence-missing` – nur als Konventionsvorschlag, `contract-stale`). Verweigert in CI, im Frozen-/Integrity-Modus und in `check`. **Deploys rufen nie ein Modell.**
-- **Engine:** `ai@6` (`generateText` mit Tools, `stopWhen` auf `submit_resolutions` und Schrittgrenze), Provider wie in den Apps: `createOpenAI({ baseURL: 'https://openrouter.ai/api/v1' }).chat(model)`. `@ai-sdk/openai` wird optionale Peer-Abhängigkeit und nur vom Resolver dynamisch geladen. Ein kleiner Fetch-Wrapper setzt `provider: { data_collection: 'deny', zdr: true, require_parameters: true }` und `usage: { include: true }` und protokolliert Kosten und tatsächlich bedientes Modell.
-- **Werkzeuge des Modells:** nur lesend `list_files`, `read_file`, `grep` (Pfad bleibt im Repo, keine Symlinks, git-ignorierte Dateien ausgeschlossen, Denylist `.env*`, `.secrets/`, `*.pem`, `*.key`, Verbindungs-/Receipt-/State-Dateien, `.git`, `node_modules`, Build-Ordner; Secrets werden redigiert; 64 KB je Datei, 400 KB je Lauf) sowie `submit_resolutions` und `report_unresolvable`. Keine Shell, kein Schreibwerkzeug, kein weiteres Netz.
-- **Was geschrieben wird (vom Harness, nicht vom Modell):** `tool-resolutions.json` (Konventionen, Verträge mit Herkunft `agent`, Modell, Digest, Bindung an `interfaceDigest`) und Prosa in `tool-semantics.json`. Effekte dürfen das Risiko nur anheben. Nie: `tool-policy.json`, App-Code, Inventar, IDs, generierte Ausgaben, Ausschlüsse.
-- **Validierung vor dem Schreiben:** strikter Zod-Parse; `schemaRef` über Checker und Schema-Probe aufgelöst; JSON-Schema per Ajv strict (Objekt, `additionalProperties:false`, ≤ 32 KB); Abgleich mit dem Scan; Effekt ≥ Default; Inhaltsgrenzen; **voller Pipeline-Lauf im Temp-Verzeichnis: Befund weg, keine neuen Befunde, kein Tool verloren** (der Agent kann einen Befund nicht durch Weglassen lösen); dann atomar schreiben, normaler Refresh, Diff-Zusammenfassung. Höchstens eine Reparaturrunde.
-- **Caching:** `inputDigest` über Harness-/Prompt-Version, Modell, Befund, `interfaceDigest` und Kontextdateien. Akzeptierte Ergebnisse sind committete Daten; danach löst der deterministische Pfad das Element, bis sich `interfaceDigest` ändert. Fehlschläge werden bis zur nächsten Änderung übersprungen (`--retry` übersteuert).
-- **Budget (Standard):** 10 Elemente, 12 Modellschritte, 40 Tool-Aufrufe, 400 k Input-/24 k Output-Tokens, **0,50 USD je Lauf**, 180 s; unbekannte Kosten bleiben `null`, nie 0.
-- **Modell:** fest gepinnter Slug in `tools.json`, Standard `anthropic/claude-sonnet-5.5`, Fallback `openai/gpt-6.1-sol` (laut OpenRouter-Modellliste vom 2026-10-04; der Resolver prüft beim Start über `/api/v1/models` die Unterstützung von Tools und Structured Outputs), überschreibbar per `GLIRASTES_AGENT_MODEL`. Aliasse wie `~latest` werden abgelehnt.
-- **Key:** `GLIRASTES_AGENT_OPENROUTER_API_KEY`, sonst `OPENROUTER_API_KEY` aus der Prozessumgebung. Für den reibungslosen Alltag darf `tools.json agent.keyEnvFile` (z. B. `.env.local`) gesetzt werden; dann wird **nur diese eine Variable** aus der Datei gelesen, nichts sonst. Der Key wird nie ausgegeben oder gespeichert; geschriebene Dateien werden auf `sk-or-v1`-Muster geprüft.
-- **Zustimmung:** beim ersten Lauf zeigt die CLI Dateien, Bytes und Empfänger (OpenRouter und Modellanbieter, nie die Glirastes-Platform) und schreibt `agent.consent` in `tools.json` (teamweit, im Review sichtbar).
-- **Ohne Key oder Zustimmung:** Refresh läuft deterministisch durch; offene Tools bleiben deaktiviert und werden mit drei Optionen gelistet: Key setzen und `tools resolve`; `tools resolve --print` für den vorhandenen Coding-Agenten (gleiche Validierung); `tools policy exclude`.
+**Einheitliche Prüfung im Generator.** `tools refresh` und `tools check` validieren jeden agentischen Eintrag, egal ob ihn der eigene Coding-Agent oder der Managed-Job geschrieben hat: strikter Schema-Parse; `schemaRef` über Checker und Schema-Probe auflösbar; JSON-Schema per Ajv strict (Objekt, `additionalProperties:false`, ≤ 32 KB); Abgleich mit der Stufe-1-Evidenz (keine unbelegten Schlüssel); Effekte nur risikoerhöhend; Inhaltsgrenzen (keine Secrets, kein `sk-or-v1`-Muster, keine Geschäftsdaten); menschliche oder `locked` Felder haben Vorrang; kein Tool und keine Zuordnung geht verloren (ein Befund lässt sich nicht durch Weglassen lösen). Ungültige Einträge werden ignoriert und als Befund `resolution-rejected` gemeldet; das Tool behält seinen Fallback. Nie geschrieben werden dürfen `tool-policy.json`, App-Handler, Inventar, IDs, generierte Ausgaben und Ausschlüsse.
+
+**Local und Free: eigener Coding-Agent, kein OpenRouter für die Generierung.**
+
+- `tools resolve --print` und `tools describe --print` erzeugen eine JSON-Arbeitsliste: pro Tool `stableKey`, Befund oder Lücke, relevante Dateien, Stufe-1-Evidenz, Zieldatei und das erwartete Eintragsformat.
+- Die mitgelieferte Skill `maintaining-glirastes-tools` beschreibt den Ablauf; `glirastes init` ergänzt `AGENTS.md`/`CLAUDE.md` um einen kurzen Hinweis: nach Änderungen an API-Routen, Seiten oder UI-Aktionen `glirastes tools refresh` ausführen, die Arbeitsliste abarbeiten, danach `tools refresh` und `tools eval` erneut.
+- Jeder Refresh endet bei offenen Lücken mit einem Satz wie „12 Tools brauchen eine bessere Beschreibung – dein Coding-Agent kann das mit `glirastes tools describe --print` erledigen“.
+- Kosten entstehen nur im Abo des Coding-Agenten; für die Generierung braucht Glirastes keinen Key.
+
+**Pro: Managed-Job im CI-Runner, gesteuert von der Platform.**
+
+- **Auslöser:** Der von `glirastes init --ci github` erzeugte Workflow-Job `glirastes-tools-enrich` läuft bei Pushes auf PR-Branches (optional auf `main`), führt `tools refresh` im Schreibmodus aus und startet bei Lücken `glirastes tools enrich --managed`. Der normale Prüfjob `glirastes-tools` bleibt modellfrei.
+- **Job anlegen:** Die CLI ruft mit einem app-gebundenen CI-Key (neuer Scope `ci`) `POST /v2/apps/:appId/tool-jobs` auf. Die Nutzlast ist inhaltsfrei: `discoveryDigest`, Liste der `stableKey`s mit Lückencodes, Commit-SHA, Branch. Die Platform prüft Entitlement (Pro), Monatslimit des Tenants und App-Einstellungen, legt den Job an und erzeugt über die OpenRouter-Provisioning-API einen **kurzlebigen OpenRouter-Key** (Laufzeit ≤ 1 h, Guthabenlimit = Job-Budget). Antwort: `jobId`, Key, Modell, Budget, Routing-Vorgaben. Alternativ (BYOK) hinterlegt der Kunde einen eigenen OpenRouter-Key als CI-Secret; die Platform orchestriert dann nur.
+- **Harness (im SDK, `src/agent/`, nur mit Job-Token oder BYOK in CI aktiv):** `ai@6`-Tool-Loop, Provider `createOpenAI({ baseURL: 'https://openrouter.ai/api/v1' }).chat(model)` mit `provider: { data_collection: 'deny', zdr: true, require_parameters: true }` und `usage: { include: true }`. Werkzeuge des Modells nur lesend (`list_files`, `read_file`, `grep`; Pfad im Repo, keine Symlinks, keine git-ignorierten Dateien; Denylist `.env*`, `.secrets/`, `*.pem`, `*.key`, Verbindungs-/Receipt-/State-Dateien, `.git`, `node_modules`, Build-Ordner; Secrets redigiert; 64 KB je Datei, 400 KB je Lauf) plus `submit_resolutions` und `report_unresolvable`. Keine Shell, kein Schreibwerkzeug, kein weiteres Netz. Der Harness schreibt die Datendateien, führt `tools refresh` und `tools eval` erneut aus, höchstens eine Reparaturrunde.
+- **Ergebnis:** Der CI-Job committet die geänderten `.glirastes`-Dateien (und ggf. `contract.ts`) als Bot-Commit (`glirastes-bot`, Marker `[glirastes-tools]`) in den PR-Branch; bei Auslösung auf `main` öffnet er einen PR. Schleifenschutz: kein Lauf, wenn der letzte Commit ein Bot-Commit ist oder keine Lücken bestehen; Pfadfilter. Benötigt `contents: write` (PR-Modus zusätzlich `pull-requests: write`).
+- **Rückmeldung:** inhaltsfreier Ledger an die Platform (Status, gelöste/gescheiterte Elemente mit Codes, Tokens, Kosten laut OpenRouter oder `null`, angefragtes und bedientes Modell, Dauer); die Platform widerruft den Key bei Jobende. Citadel zeigt Job-Historie, Kosten pro Monat, Qualität je Tool und die Einstellungen.
+- **Datenpfad und Zustimmung:** Quelltext-Auszüge gehen nur vom CI-Runner zu OpenRouter und dem Modellanbieter (ZDR, keine Datensammlung, optional EU-Routing), **nie über die Glirastes-Platform**. Ein Pro-Admin aktiviert die Managed-Generierung pro App in der Platform und bestätigt den Datenpfad (Audit-Ereignis).
+- **Modell und Budget:** Standard `anthropic/claude-sonnet-5.5`, Fallback `openai/gpt-6.1-sol` (laut OpenRouter-Modellliste vom 2026-10-04; der Harness prüft beim Start über `/api/v1/models` Tools- und Structured-Output-Unterstützung); gepinnte Slugs, keine Aliasse. Budget je Job standardmäßig 2 USD; ein einmaliger Erstbeschreibungs-Job (`--first-run`) bis 8 USD; Monatslimit je Tenant konfigurierbar (Standard 25 USD) bis zur Preisentscheidung. Unbekannte Kosten bleiben `null`, nie 0.
+- **Caching:** Neu bearbeitet wird nur bei geändertem `interfaceDigest` oder geänderten Kontextdateien; gescheiterte Elemente werden bis zur nächsten Änderung übersprungen.
+
+**Nie:** in `tools check`, im Frozen-/Integrity-Modus oder beim Deploy. Deploys rufen nie ein Modell.
+
+**Abgrenzung:** Der OpenRouter-Key der Zielapp (4.8, Modellzugang des App-Chats) wird für die Tool-Generierung nicht verwendet.
 
 ### 4.7 Stufe 2: agentische Anreicherung von Beschreibung und Schema
 
 Ziel: Das Modell versteht jedes Tool so gut, als hätte ein Entwickler es sorgfältig dokumentiert – auch wenn der Endpunkt weder Zod noch OpenAPI noch JSDoc hat. In Get It Done lesen etwa 40 Routen `request.json()`, nur 17 validieren mit Zod; dort ist Stufe 2 die eigentliche Dokumentationsquelle.
 
-- **Auslöser (pro Tool):** neu oder Schnittstelle geändert (`interfaceDigest`) und mindestens eines davon: Beschreibung nur Vorlage; Eingabevertrag nur abgeleitet (Feldnamen ohne Typen); Ausgabe opak; Filterdomäne offen; Synonyme/Beispielsätze fehlen; Routing-Prüfung (`tools eval`) gescheitert. Läuft nach einem schreibenden Refresh automatisch, wenn `agent.auto`, Zustimmung und Key vorhanden sind (sonst manuell per `tools describe`). Nie in CI, Frozen-/Integrity-Modus oder beim Deploy.
-- **Kontext für den Agenten:** Handler-Quelltext, importierte Service-/Repository-/Schema-Module (z. B. Drizzle-Selects für die Ausgabe), verwandte Seiten/UI-Aufrufe und die Stufe-1-Evidenz (Pfad-/Query-/Body-Schlüssel, Methode, Risiko). Gleiche Lese-Sandbox wie in 4.6. Tools eines Moduls werden gebündelt beschrieben, damit sich Kontext teilt und Abgrenzungen zwischen ähnlichen Tools explizit werden.
+- **Auslöser (pro Tool):** neu oder Schnittstelle geändert (`interfaceDigest`) und mindestens eines davon: Beschreibung nur Vorlage; Eingabevertrag nur abgeleitet (Feldnamen ohne Typen); Ausgabe opak; Filterdomäne offen; Synonyme/Beispielsätze fehlen; Routing-Prüfung (`tools eval`) gescheitert. Local/Free: Refresh listet die Lücken, der eigene Coding-Agent arbeitet sie über `tools describe --print` ab. Pro: der Managed-Job im CI übernimmt sie automatisch (4.6). Nie im Prüfjob, Frozen-/Integrity-Modus oder beim Deploy.
+- **Kontext für den Agenten:** Handler-Quelltext, importierte Service-/Repository-/Schema-Module (z. B. Drizzle-Selects für die Ausgabe), verwandte Seiten/UI-Aufrufe und die Stufe-1-Evidenz (Pfad-/Query-/Body-Schlüssel, Methode, Risiko). Die Arbeitsliste nennt diese Dateien; der Managed-Harness nutzt die Lese-Sandbox aus 4.6. Tools eines Moduls werden gebündelt beschrieben, damit sich Kontext teilt und Abgrenzungen zwischen ähnlichen Tools explizit werden.
 - **Ergebnis pro Tool:**
   - Beschreibung für das Modell: was das Tool tut, wann es passt, wann ein anderes Tool besser passt;
   - typisiertes Eingabeschema: Typen, Pflichtfelder, Enums, Formate, Grenzen und eine Beschreibung je Parameter;
@@ -214,19 +229,21 @@ Ziel: Das Modell versteht jedes Tool so gut, als hätte ein Entwickler es sorgf�
   - 3–5 Beispielsätze je Sprache plus passende Beispielaufrufe.
   Effekte dürfen das Risiko nur anheben (z. B. `/archive` als destruktiv).
 - **Speicherort und Herkunft:** Schemas als Verträge mit Herkunft `agent-enriched` in `tool-resolutions.json`, Prosa/Synonyme/Beispiele in `tool-semantics.json`; jeweils mit Modell, Digest und Bindung an `interfaceDigest`. **Vorrang:** menschlich (JSDoc, Zod, OpenAPI, Vertragsmodul, von Hand gepflegte oder `locked` Felder) > Agent > Vorlage. Der Agent füllt nur Lücken oder ersetzt seine eigene frühere Ausgabe.
-- **Validierung vor dem Schreiben:** Ajv strict; Eingabeschlüssel stimmen mit der Stufe-1-Evidenz überein (zusätzliche Schlüssel nur mit belegter Fundstelle, z. B. Weitergabe an einen Service); Beispielaufrufe validieren gegen das neue Schema; kein Risiko-Absenken; Inhaltsgrenzen (keine Secrets, keine Geschäftsdaten aus Fixtures); Pipeline-Lauf ohne neue Befunde.
-- **Qualitätsschleife (`tools eval`, deterministisch, ohne Modell):** Für jedes Tool müssen seine Beispielsätze über `find_tools` und das Modul-Routing das richtige Tool unter den ersten Treffern liefern; Verwechslungen mit anderen Tools werden benannt. Scheitert das, überarbeitet der Agent die betroffenen Beschreibungen einmal; was dann noch scheitert, wird als Warnung `routing-ambiguous` mit den konkurrierenden Tools gemeldet. Die Beispielsätze sind zugleich Regressionskorpus für FR-3 und laufen in CI.
-- **Laufzeit:** Angereicherte Schemas steuern das Modell und die Vorvalidierung der Tool-Argumente; der Endpunkt bleibt die maßgebliche Validierung. Lehnt er einen nach dem Schema gültigen Aufruf mit 400 ab, entsteht ein inhaltsfreies technisches Ereignis `tool_contract_rejected` (sichtbar in `doctor` und den Metriken); `tools describe --retry <tool>` beschreibt neu.
+- **Validierung:** die einheitliche Prüfung im Generator (4.6), zusätzlich: Eingabeschlüssel nur mit belegter Fundstelle (z. B. Weitergabe an einen Service); Beispielaufrufe validieren gegen das neue Schema.
+- **Qualitätsschleife (`tools eval`, deterministisch, ohne Modell):** Für jedes Tool müssen seine Beispielsätze über `find_tools` und das Modul-Routing das richtige Tool unter den ersten Treffern liefern; Verwechslungen mit anderen Tools werden benannt. Scheitert das, überarbeitet der Agent (Coding-Agent oder Managed-Job) die betroffenen Beschreibungen einmal; was dann noch scheitert, wird als Warnung `routing-ambiguous` mit den konkurrierenden Tools gemeldet. Die Beispielsätze sind zugleich Regressionskorpus für FR-3 und laufen in CI.
+- **Laufzeit:** Angereicherte Schemas steuern das Modell und die Vorvalidierung der Tool-Argumente; der Endpunkt bleibt die maßgebliche Validierung. Lehnt er einen nach dem Schema gültigen Aufruf mit 400 ab, entsteht ein inhaltsfreies technisches Ereignis `tool_contract_rejected` (sichtbar in `doctor` und den Metriken); die betroffenen Tools erscheinen in der nächsten Arbeitsliste bzw. im nächsten Managed-Job.
 - **Optional `--write-contracts`:** Der Agent legt für schlecht dokumentierte Endpunkte eine Geschwisterdatei `contract.ts` mit Zod-Schemas an (nur neue Dateien, nie Änderungen an Handlern), zur Übernahme im PR. Danach erkennt Stufe 1 den Vertrag deterministisch, und die App hat bessere API-Doku. Standard: aus.
-- **Caching und Kosten:** neu beschrieben wird nur bei geändertem `interfaceDigest` oder geänderten Kontextdateien; eigenes Budget `agent.enrichBudget` (Standard 1 USD und 25 Tools je Lauf). Es handelt sich um OpenRouter-Tokenkosten auf dem Key des Entwicklers, nur während der Entwicklung, nie pro Chat-Nachricht und nie an die Glirastes-Platform. Schätzung mit `anthropic/claude-sonnet-5.5` (2 USD je 1 Mio. Input-, 10 USD je 1 Mio. Output-Tokens, Cache-Lesen 0,20 USD; OpenRouter-Preisliste 2026-10-04): Erstlauf Get It Done (93 Tools) rund 3–6 USD, je nach Prompt-Caching; danach etwa 0,05–0,20 USD je geändertem Tool. Der Erstlauf braucht deshalb einmalig ein höheres Budget (`tools describe --all --budget-usd 8`) oder mehrere Läufe; das Standardbudget von 1 USD deckt etwa 15–25 Tools. Tatsächliche Kosten stehen im Ledger (`usage.cost` laut OpenRouter).
-- **Ohne Key oder in CI:** Tools bleiben aktiv mit Fallback-Beschreibung. `tools status`, `doctor` und die Platform zeigen die Qualität je Tool: Beschreibung `von Hand`/`aus Code`/`Agent`/`Vorlage`, Schema `Zod`/`OpenAPI`/`Agent`/`nur Feldnamen`. Optional `ci.requireEnrichment` (Standard aus): `check` scheitert, solange Tools nur Vorlage oder Feldnamen haben.
+- **Kosten:** Local/Free: keine Glirastes-seitigen Modellkosten für die Generierung, nur das Abo des eigenen Coding-Agenten. Pro: OpenRouter-Tokenkosten auf Chainmatics' Rechnung (oder BYOK), nur bei Codeänderungen. Schätzung mit `anthropic/claude-sonnet-5.5` (2 USD je 1 Mio. Input-, 10 USD je 1 Mio. Output-Tokens, Cache-Lesen 0,20 USD; Preisliste 2026-10-04): Erstbeschreibung Get It Done (93 Tools) rund 3–6 USD je nach Prompt-Caching, danach etwa 0,05–0,20 USD je geändertem Tool. Tatsächliche Kosten stehen im Ledger und fließen in die Pro-Preisfindung. Davon getrennt: die Chat-Kosten der Zielapp pro Nachricht (4.8).
+- **Ohne Anreicherung:** Tools bleiben aktiv mit Fallback-Beschreibung. `tools status`, `doctor` und die Platform zeigen die Qualität je Tool: Beschreibung `von Hand`/`aus Code`/`Agent`/`Vorlage`, Schema `Zod`/`OpenAPI`/`Agent`/`nur Feldnamen`. Optional `ci.requireEnrichment` (Standard aus): `check` scheitert, solange Tools nur Vorlage oder Feldnamen haben.
 
 ### 4.8 Entwicklung, CI, Deploy
 
+- **Modellzugang der Zielapp:** `glirastes init` richtet den Chat-Modellzugang der App ein, Standard OpenRouter über `OPENROUTER_API_KEY` in der App-Umgebung (lokal z. B. `.env.local`, im Deploy als Secret); andere AI-SDK-Provider sind konfigurierbar. Der Entwickler trägt den Key selbst ein; Setup-Agent und CLI lesen oder kopieren ihn nie, `doctor` prüft nur, ob er gesetzt ist. Das ist in Local/Free die einzige Key-Voraussetzung von Glirastes; die Kosten pro Chat-Nachricht trägt der App-Betreiber über sein Konto.
 - `glirastes init` schreibt die Skripte: `predev: glirastes tools refresh --keep-going`, `prebuild: glirastes tools refresh` (lokal schreibend, in CI frozen, im Docker-Build integrity). Kein `prestart`. Optional `tools refresh --watch` neben `next dev`.
 - Ausgabe jedes Refresh: hinzugefügt, geändert, Risiko angehoben, entfernt, braucht Aufmerksamkeit, ausgeschlossen – jeweils mit der nächsten sicheren Aktion.
 - Commit: Code, `.glirastes`-Ausgaben und generiertes Modul in einem PR; der Diff von `setup-artifact.json`/`tool-contracts.json` ist der reviewbare Tool-Diff. Merge-Konflikte in generierten Dateien löst ein erneuter Refresh (IDs sind eine reine Funktion von App, `stableKey` und Tombstone-Generation).
 - CI-Job `glirastes-tools` ohne Secrets: Install, `glirastes tools check --json` und `glirastes tools eval` (Routing-Regression mit den Beispielsätzen); `--strict` optional per `tools.json ci.strict` (Standard aus, damit Kollegen nicht blockiert werden; offene Tools bleiben deaktiviert und sichtbar). `check` scheitert bei Byte-Drift, unvollständiger Aufzählung, ungültiger Policy oder unbestätigter Lockerung.
+- Pro zusätzlich: Workflow-Job `glirastes-tools-enrich` (4.6) mit `contents: write`, Bot-Commits in PR-Branches, Schleifenschutz; ohne Pro-Verbindung bleibt er aus.
 - Deploy nutzt nur committete Ausgaben; Integrity-Prüfung der Kette Inventar → Discovery-Digest → Artifact → Runtime-Manifest (`runtimeDigest`, `policyDigest`) → Receipt plus Digests des generierten Moduls. Kein Modell, kein Platform-Call, keine Schreibvorgänge.
 - `doctor` zeigt zusätzlich offene, veraltete und verfallene Einträge.
 
@@ -251,6 +268,7 @@ Ziel: Das Modell versteht jedes Tool so gut, als hätte ein Entwickler es sorgf�
 8. Citadel: Karte „Was kann mein Chat?“, Tool-Explorer pro Umgebung, Override-Formular nur einschränkend („Deaktivieren“, „Bestätigung verlangen“, „Risiko anheben“, „Rollen einschränken“; „Lockern“ nur bis Stufe 2 mit Hinweis auf Sicherheitsfreigabe).
 9. Verträge im Gleichschritt (beide unveröffentlicht): `RuntimePolicyRevision.toolOverrides`, optionale Herkunftsfelder an `AppSetupToolCandidate`.
 10. Connected Apply: neue Tools brauchen kein Sync/Apply mehr, um ausführbar zu werden; Apply nur noch für Override-, Prompt- oder Budget-Revisionen.
+11. Managed Tool-Generierung (Pro): CI-Key-Scope `ci`; Job-API `POST/GET /v2/apps/:appId/tool-jobs` mit inhaltsfreier Nutzlast; Entitlement- und Monatslimit-Prüfung; kurzlebige OpenRouter-Keys über die Provisioning-API (Chainmatics-Provisioning-Key als Platform-Secret), Widerruf bei Jobende; Ledger-Ingest (Content-Boundary-geprüft); Migration `0045_tool_generation_jobs` (Jobs, Einstellungen, Zustimmung); Citadel: Aktivierung mit Datenpfad-Erklärung, Job-Historie, Kosten, Qualität je Tool, BYOK-Option.
 
 ### 4.11 Referenz-Fixtures im SDK-Repo
 
@@ -266,10 +284,11 @@ Python 3.12 ist deklarierte Voraussetzung für die Vue/FastAPI-Fixture (README, 
 
 - **Änderungskorpus:** 3 Fixtures × {Endpunkt, Navigation, Filter} × {hinzufügen, ändern, entfernen} = 27 Tests. Jeder: Fixture kopieren, Refresh, Patch anwenden, `check` scheitert mit benanntem Befund, Refresh, Change-Set/IDs/Defaults prüfen (GET ohne, schreibend mit Rückfrage, keine Plan-Bestätigung für neue Tools), `check` grün, Runtime aus den committeten Ausgaben booten und Wirkung prüfen (neu: Tool läuft in der Nutzer-Session, unauthentifiziert vom Endpunkt abgelehnt; geändert: neues Schema greift; entfernt: Tool fehlt, Direktaufruf ⇒ `manifest_tool_unavailable`).
 - **Zusatzkorpus:** Lockerung verfällt bei Risikoanstieg; Absenkung gehalten bis `accept`; Lockern auf DELETE ⇒ `E-POLICY-002`; nicht unterstützte Änderung ⇒ `needs_attention` und `check --strict` rot; unaufgelöstes bekanntes Tool behält ID; `export *` ⇒ Refresh schreibt nichts; entfernte Brücke ⇒ Navigation/Filter `needs_attention`; Chat-Route nie ein Tool; Integrity-Modus erkennt manipulierte Ausgaben; zweimal byte-identisch auf Node 20 und 22.
-- **Agent (MockLanguageModelV3):** akzeptiert gültige Referenz; lehnt fehlenden Export, Lockerung, ungültiges/zu großes Schema, Weglassen/Ausschließen von Tools und Inhaltsverstöße ab; eine Reparaturrunde; Budget-/Timeout-Stopp; Cache; ohne Key/Zustimmung bleibt alles offen; CI verweigert; Denylist-Dateien erreichen nie den Kontext; `check` importiert nie `@ai-sdk/openai`. Live-Evaluation nur per `GLIRASTES_LIVE_AGENT_EVAL=1` und nach Philipps Freigabe des Keys.
-- **Stufe 2 (MockLanguageModelV3):** füllt nur Lücken, überschreibt keine `human`/`locked`-Felder; lehnt Schemas mit unbelegten Schlüsseln, ungültige Beispielaufrufe und Risiko-Absenkung ab; Neubeschreibung nur bei geändertem `interfaceDigest`; `tools eval` erkennt Verwechslungen und ist ohne Modell byte-stabil; `--write-contracts` legt nur neue `contract.ts` an, die Stufe 1 danach deterministisch erkennt; ohne Key bleiben Tools aktiv und die Qualitätsanzeige stimmt; `ci.requireEnrichment` greift.
+- **Prüfung agentischer Einträge (ohne Modell):** vom Coding-Agenten geschriebene Einträge werden akzeptiert bzw. als `resolution-rejected` abgelehnt (fehlender Export, Lockerung, ungültiges/zu großes Schema, unbelegte Schlüssel, Weglassen/Ausschließen von Tools, Inhaltsverstöße, Überschreiben von `locked`); Arbeitslisten von `resolve --print`/`describe --print` sind vollständig und stabil.
+- **Managed-Harness (MockLanguageModelV3, Mock-Platform):** läuft nur mit Job-Token oder BYOK in CI; eine Reparaturrunde; Budget-/Timeout-Stopp; Cache; Denylist-Dateien erreichen nie den Kontext; Ledger ist inhaltsfrei; Bot-Commit und Schleifenschutz; `check` importiert nie `@ai-sdk/openai`. Live-Lauf gegen OpenRouter nur nach Philipps Freigabe.
+- **Stufe 2 (MockLanguageModelV3 bzw. vorbereitete Coding-Agent-Ausgaben):** füllt nur Lücken, überschreibt keine `human`/`locked`-Felder; lehnt Schemas mit unbelegten Schlüsseln, ungültige Beispielaufrufe und Risiko-Absenkung ab; Neubeschreibung nur bei geändertem `interfaceDigest`; `tools eval` erkennt Verwechslungen und ist ohne Modell byte-stabil; `--write-contracts` legt nur neue `contract.ts` an, die Stufe 1 danach deterministisch erkennt; ohne Anreicherung bleiben Tools aktiv und die Qualitätsanzeige stimmt; `ci.requireEnrichment` greift.
 - **Runtime:** Overlay kann unbekannte/`needs_attention`-IDs nicht aktivieren und Stufe 3 nicht lockern; Revocation blockiert; neues lokales Tool ohne Platform aktiv; fehlendes Binding deaktiviert nur ein Tool; kein Netz pro Turn.
-- **Platform:** 422-Grenzmatrix plus Vektorparität, Migration 0044, leere Rollen, Policy-only-Republish, richtungsabhängige Publikation, Report-Scope, Capability-Status, Citadel-Formular.
+- **Platform:** Job-API (Entitlement, Monatslimit, Key-Erzeugung über gemockte Provisioning-API, Widerruf, inhaltsfreier Ledger, CI-Scope); 422-Grenzmatrix plus Vektorparität, Migration 0044, leere Rollen, Policy-only-Republish, richtungsabhängige Publikation, Report-Scope, Capability-Status, Citadel-Formular.
 - **Browser-E2E** für alle drei Fixtures (Vue zusätzlich Styling, Tastatur, Unmount).
 
 ## 5. TP2 – Get It Done auf aktuellem `master`
@@ -292,7 +311,7 @@ Python 3.12 ist deklarierte Voraussetzung für die Vue/FastAPI-Fixture (README, 
 - **Chat-UI:** generische Provider-API für `/`-Befehle und `@`-Erwähnungen (asynchrone Suche, Tastatursteuerung, stabile IDs, Berechtigungskontext); eingebauter Befehls-Provider aus den UI-Tools des Katalogs; Registry für eigene Ergebnis-Komponenten pro Tool (`definitionId`, Schema-Version, sicherer Fallback für alte Nachrichten); mobile Darstellung mit Browser-Test.
 - **Framework-neutrale Einbettung:** neues Subpaket `glirastes/embed` mit Custom Element `<glirastes-chat>` (Shadow DOM, CSS-Variablen, Events, sauberes Unmount); intern die React-UI. Genutzt von der Vue-Fixture.
 - **STT:** Push-to-talk (gedrückt halten, Taste und Button) zusätzlich zum Umschalten; Zwischentext auch in der Aufnahmeleiste; Bearbeiten vor dem Senden; kein Auto-Senden durch Finalisierung; weiterhin genau ein Controller und ein Mikrofonstream. Browser-Tests mit Chromes Fake-Media-Device: Stop, Cancel, Retry, Routen- und Sessionwechsel, Unmount hinterlassen keinen Stream.
-- **Messung:** Vergleichskorpus mit identischem Modell vorher/nachher (Erfolgsquote, erste Antwort, Gesamtzeit, Modellrunden, Tokens). Live-Läufe mit OpenRouter nur nach Philipps Freigabe der Key-Nutzung; bis dahin deterministisches Testmodell.
+- **Messung:** Vergleichskorpus mit identischem Modell vorher/nachher (Erfolgsquote, erste Antwort, Gesamtzeit, Modellrunden, Tokens). Live-Läufe mit dem Chat-Modellzugang der Zielapp (OpenRouter-Key von Get It Done) nur nach Philipps Freigabe der Key-Nutzung; bis dahin deterministisches Testmodell.
 
 ## 7. TP4 – Platform-Betrieb und Metriken (FR-6, FR-7)
 
@@ -338,17 +357,18 @@ Erst nach belegtem Produkt: Hero-Glyphen als kontrollierte SVG-/Textebene lesbar
 ## 10. Von mir festgelegte Standardentscheidungen (Veto möglich)
 
 1. Neue Endpunkte ohne Schema: sofort aktiv mit abgeleitetem schwachem Vertrag (Endpunkt validiert weiterhin), Warnung sichtbar.
-2. Agent-Key: `GLIRASTES_AGENT_OPENROUTER_API_KEY`, sonst `OPENROUTER_API_KEY`; optional nur diese Variable aus `agent.keyEnvFile`.
-3. Agent in `predev`: teamweite, committete Zustimmung in `tools.json`; ohne Key läuft alles deterministisch weiter.
-4. Modell: `anthropic/claude-sonnet-5.5` über OpenRouter, Fallback `openai/gpt-6.1-sol`; Budget 0,50 USD je Lauf.
+2. Local/Free brauchen für die Tool-Generierung keinen OpenRouter-Key; agentische Arbeit erledigt der eigene Coding-Agent über Arbeitslisten und Skill.
+3. Pro: Managed-Job im CI-Runner mit kurzlebigem, budgetbegrenztem OpenRouter-Key von der Platform (Chainmatics-Rechnung); BYOK optional; Quellcode nur CI → OpenRouter.
+4. Modell des Managed-Jobs: `anthropic/claude-sonnet-5.5`, Fallback `openai/gpt-6.1-sol`; 2 USD je Job, Erstbeschreibung bis 8 USD, Monatslimit 25 USD je Tenant bis zur Preisentscheidung.
 5. Vorrang: über alle Ebenen gewinnt das Strengste; die Platform kann eine lokale Härtung nicht lockern.
 6. CI: `tools check` standardmäßig, `--strict` optional.
 7. GID-Migration auf neuem Branch von `origin/master`; konvertierte `contract.ts` sind als Übergang erlaubt, bis Routen damit validieren.
 8. Dritte Referenz: Vue 3 + FastAPI, Python 3.12.
 9. Metriken-Aufbewahrung technisch konfigurierbar (Standard Free 30, Pro 365 Tage) bis zur Produktentscheidung.
-10. Stufe 2 läuft automatisch nach jedem schreibenden Refresh, sobald Key und Zustimmung vorliegen; Budget 1 USD je Lauf, für den Erstlauf einmalig höher.
+10. Pro-Managed-Job läuft bei Pushes auf PR-Branches, wenn Lücken bestehen; Ergebnisse als Bot-Commit in den PR-Branch, bei `main` als PR.
 11. Von Hand gepflegte oder als `locked` markierte Beschreibungen und Schemas überschreibt der Agent nie.
 12. `--write-contracts` (Agent legt `contract.ts` an) ist standardmäßig aus; `ci.requireEnrichment` ebenfalls.
+13. Modellzugang der Zielapp: Standard OpenRouter über `OPENROUTER_API_KEY` in der App-Umgebung, andere AI-SDK-Provider konfigurierbar; Kosten pro Chat-Nachricht beim App-Betreiber.
 
 ## 11. Nicht im Umfang
 
@@ -363,9 +383,11 @@ Omnify (keine Lese- oder Schreibarbeit); Pushes, Merges nach `main`/`master`, np
 - GID-Migration ist groß (121 Commits, 86 Routen, Umbenennungen); MCP-Alias- und Grant-Kontinuität hängt am Codemod.
 - Modellnamen wechseln von Legacy-snake_case zu abgeleiteten Namen; Beschreibungen müssen nachgezogen werden, sonst sinkt die Routing-Qualität.
 - Agentisch abgeleitete Schemas können falsch oder zu streng sein; Abhilfe: Evidenzabgleich, Beispielaufrufe, `tools eval`, Endpunkt bleibt maßgeblich, `tool_contract_rejected` stößt Neubeschreibung an.
-- OpenRouter: Modellverfügbarkeit, Kosten, ablaufende Slugs; `zdr`/`require_parameters` können Anbieter ausschließen. Der Key-Status (früher 403 „Key limit exceeded“) ist unbekannt; Live-Nachweise brauchen Philipps Freigabe.
+- OpenRouter: Modellverfügbarkeit, Kosten, ablaufende Slugs; `zdr`/`require_parameters` können Anbieter ausschließen; der Managed-Service braucht einen Chainmatics-Provisioning-Key (Einrichtung durch Philipp). Der Status des App-Keys von Get It Done (früher 403 „Key limit exceeded“) ist unbekannt; Live-Nachweise brauchen Philipps Freigabe.
+- Qualität der Free-Anreicherung hängt vom Coding-Agenten des Entwicklers ab; abgesichert durch die einheitliche Prüfung und `tools eval`.
+- Der Pro-Job braucht Schreibrechte im Repo des Kunden; Bot-Commits müssen zu Branch-Schutzregeln passen.
 - Echter Nutzertest bleibt eine menschliche Aufgabe.
 
 ## 13. Aufwand und Vorgehen
 
-Grobe Schätzung in Entwicklertagen (menschliches Äquivalent): TP0 3, TP1 55 (davon Stufe 2 rund 5), TP2 8, TP3 12, TP4 15, TP5 4, TP6 3 – zusammen rund 100. Umsetzung durch orchestrierte Agenten in isolierten Worktrees, Phase für Phase mit lokalen Commits, grünen Gates und einem Checkpoint-Bericht nach jeder Phase. Freigaben, die ich unterwegs einhole: Backup-Push, Nutzung des OpenRouter-Keys für Live-Läufe, Merges, Veröffentlichung, Deployments.
+Grobe Schätzung in Entwicklertagen (menschliches Äquivalent): TP0 3, TP1 57 (davon Stufe 2 und Managed-Harness rund 7), TP2 8, TP3 12, TP4 19 (davon Managed-Service rund 4), TP5 4, TP6 3 – zusammen rund 106. Umsetzung durch orchestrierte Agenten in isolierten Worktrees, Phase für Phase mit lokalen Commits, grünen Gates und einem Checkpoint-Bericht nach jeder Phase. Freigaben, die ich unterwegs einhole: Backup-Push, Einrichtung eines OpenRouter-Provisioning-Keys, Live-Läufe mit OpenRouter, Merges, Veröffentlichung, Deployments.
