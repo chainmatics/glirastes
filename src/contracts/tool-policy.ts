@@ -416,16 +416,33 @@ export function resolveToolPolicy(
 function collectPolicyLayers(
   input: ResolveToolPolicyInput,
   warnings: PolicyWarning[],
-  _errors: PolicyError[],
+  errors: PolicyError[],
 ): CollectedLayers {
   const layers: PolicyLayer[] = [];
-  if (input.local) {
-    layers.push({ name: 'local', origin: 'local-policy', entry: input.local });
-  }
-  if (input.platform) {
-    layers.push({ name: 'platform', origin: 'platform', entry: input.platform });
-  }
-  for (const layer of layers) {
+  let invalidOrigin: PolicyOrigin | undefined;
+  const candidates = [
+    { name: 'local', origin: 'local-policy', entry: input.local },
+    { name: 'platform', origin: 'platform', entry: input.platform },
+  ] as const;
+  for (const candidate of candidates) {
+    if (candidate.entry === undefined) continue;
+    const parsed = ToolPolicyEntrySchema.safeParse(candidate.entry);
+    if (!parsed.success) {
+      const path = parsed.error.issues[0]?.path.map(String).join('.') ?? '';
+      errors.push({
+        code: 'E-POLICY-001',
+        field: path ? `${candidate.name}.${path}` : candidate.name,
+        reason: 'invalid-entry',
+      });
+      // A layer we cannot read must not silently drop its restrictions.
+      invalidOrigin ??= candidate.origin;
+      continue;
+    }
+    const layer: PolicyLayer = {
+      name: candidate.name,
+      origin: candidate.origin,
+      entry: parsed.data,
+    };
     // A pin from an earlier incarnation: relaxations lapse, hardenings stay.
     if (layer.entry.pin && layer.entry.pin.toolId !== input.toolId) {
       warnings.push({
@@ -433,14 +450,15 @@ function collectPolicyLayers(
         field: `${layer.name}.pin.toolId`,
       });
     }
+    layers.push(layer);
   }
-  return { layers };
+  return { layers, ...(invalidOrigin ? { invalidOrigin } : {}) };
 }
 
 function resolveRiskClass(
   input: ResolveToolPolicyInput,
   layers: ReadonlyArray<PolicyLayer>,
-  _warnings: PolicyWarning[],
+  warnings: PolicyWarning[],
 ): ResolvedField<ToolRiskClass> {
   let value: ToolRiskClass = input.defaults.riskClass;
   let origin: PolicyOrigin = 'code-default';
@@ -449,6 +467,18 @@ function resolveRiskClass(
     if (raised !== value) {
       value = raised;
       origin = layer.origin;
+    }
+  }
+  // Ratchet: a code-caused decrease is held until `tools policy accept`.
+  const previous = input.previousEffectiveRiskClass;
+  if (previous !== undefined && riskTier(previous) > riskTier(value)) {
+    const acceptedRisk = input.acceptedRisk;
+    const accepted = acceptedRisk !== undefined
+      && acceptedRisk.toolId === input.toolId
+      && acceptedRisk.riskClass === value;
+    if (!accepted) {
+      warnings.push({ code: 'risk-lower-available', field: 'riskClass' });
+      return { value: previous, origin: 'code-default' };
     }
   }
   return { value, origin };

@@ -4,6 +4,7 @@ import {
   resolveToolPolicy,
   type ResolveToolPolicyInput,
   type ToolPolicyDefaults,
+  type ToolPolicyEntry,
 } from '../tool-policy.js';
 
 const TOOL_ID = '019fa9a9-d5f7-7ec3-a3c7-8899de1d3905';
@@ -262,5 +263,70 @@ describe('resolveToolPolicy relaxation bounds', () => {
       warnings: [{ code: 'policy-entry-orphaned', field: 'local.pin.toolId' }],
       errors: [],
     });
+  });
+});
+
+describe('resolveToolPolicy ratchet and entry validation', () => {
+  it('holds a code-caused risk decrease until it is accepted', () => {
+    expect(resolve({ previousEffectiveRiskClass: 'write' })).toMatchObject({
+      effective: {
+        riskClass: 'write',
+        requiresApproval: true,
+        origin: { riskClass: 'code-default' },
+      },
+      warnings: [{ code: 'risk-lower-available', field: 'riskClass' }],
+    });
+    expect(resolve({
+      previousEffectiveRiskClass: 'write',
+      acceptedRisk: { riskClass: 'safe-read', toolId: TOOL_ID },
+    })).toMatchObject({
+      effective: { riskClass: 'safe-read', requiresApproval: false },
+      warnings: [],
+    });
+  });
+
+  it.each([
+    ['another tool id', { riskClass: 'safe-read', toolId: OTHER_TOOL_ID }],
+    ['another risk class', { riskClass: 'read-sensitive', toolId: TOOL_ID }],
+  ] as const)('ignores an acceptance for %s', (_label, acceptedRisk) => {
+    expect(resolve({ previousEffectiveRiskClass: 'write', acceptedRisk }))
+      .toMatchObject({
+        effective: { riskClass: 'write' },
+        warnings: [{ code: 'risk-lower-available', field: 'riskClass' }],
+      });
+  });
+
+  it('takes risk increases over automatically and counts layer raises', () => {
+    expect(resolve({ defaults: DELETE, previousEffectiveRiskClass: 'write' }))
+      .toMatchObject({ effective: { riskClass: 'delete' }, warnings: [] });
+    expect(resolve({
+      local: { riskClass: 'write' },
+      previousEffectiveRiskClass: 'write',
+    })).toMatchObject({
+      effective: { riskClass: 'write', origin: { riskClass: 'local-policy' } },
+      warnings: [],
+    });
+  });
+
+  it('fails a malformed entry closed with E-POLICY-001', () => {
+    expect(resolve({
+      defaults: WRITE,
+      platform: { riskClass: 'critical' } as unknown as ToolPolicyEntry,
+    })).toMatchObject({
+      effective: {
+        enabled: false,
+        riskClass: 'write',
+        requiresApproval: true,
+        origin: { enabled: 'platform' },
+      },
+      errors: [
+        { code: 'E-POLICY-001', field: 'platform.riskClass', reason: 'invalid-entry' },
+      ],
+    });
+    expect(resolve({
+      local: { enabled: true, toolId: TOOL_ID } as unknown as ToolPolicyEntry,
+    }).errors).toEqual([
+      { code: 'E-POLICY-001', field: 'local', reason: 'invalid-entry' },
+    ]);
   });
 });
