@@ -470,6 +470,10 @@ function resolveRiskClass(
     }
   }
   // Ratchet: a code-caused decrease is held until `tools policy accept`.
+  // `acceptedRisk.riskClass` is matched against the layered `value` (defaults
+  // plus local/Platform raises), so accept must record what this function
+  // resolves without `previousEffectiveRiskClass`, not the class the code
+  // alone derives.
   const previous = input.previousEffectiveRiskClass;
   if (previous !== undefined && riskTier(previous) > riskTier(value)) {
     const acceptedRisk = input.acceptedRisk;

@@ -329,4 +329,102 @@ describe('resolveToolPolicy ratchet and entry validation', () => {
       { code: 'E-POLICY-001', field: 'local', reason: 'invalid-entry' },
     ]);
   });
+
+  it('matches an acceptance against the layered class, not the code class', () => {
+    // `tools policy accept` must record what the resolver gives without
+    // previousEffectiveRiskClass: code defaults plus local/Platform raises.
+    const local: ToolPolicyEntry = { riskClass: 'read-sensitive' };
+    const layered = resolve({ local }).effective.riskClass;
+    expect(layered).toBe('read-sensitive');
+    expect(resolve({
+      local,
+      previousEffectiveRiskClass: 'write',
+      acceptedRisk: { riskClass: layered, toolId: TOOL_ID },
+    })).toMatchObject({
+      effective: {
+        riskClass: 'read-sensitive',
+        origin: { riskClass: 'local-policy' },
+      },
+      warnings: [],
+    });
+    // The class the code alone derives never matches under a layer raise.
+    expect(resolve({
+      local,
+      previousEffectiveRiskClass: 'write',
+      acceptedRisk: { riskClass: READ.riskClass, toolId: TOOL_ID },
+    })).toMatchObject({
+      effective: { riskClass: 'write' },
+      warnings: [{ code: 'risk-lower-available', field: 'riskClass' }],
+    });
+  });
+
+  it('applies the trimmed text of a valid entry', () => {
+    expect(resolve({
+      local: { allowedRoles: [' admin '], description: '  Local text.  ' },
+      platform: { allowedRoles: ['admin'], description: '  Platform text.  ' },
+    })).toMatchObject({
+      effective: {
+        enabled: true,
+        allowedRoles: ['admin'],
+        description: 'Platform text.',
+      },
+      errors: [],
+    });
+  });
+
+  it('fails a whitespace-only description closed instead of trimming it away', () => {
+    expect(resolve({ platform: { description: '   ' } })).toMatchObject({
+      effective: { enabled: false, origin: { enabled: 'platform' } },
+      errors: [
+        { code: 'E-POLICY-001', field: 'platform.description', reason: 'invalid-entry' },
+      ],
+    });
+  });
+
+  it.each([
+    [
+      'a nested pin key',
+      'platform',
+      { pin: { toolId: 'not-a-uuid', atRiskClass: 'write' } },
+      'platform.pin.toolId',
+    ],
+    [
+      'an array element index',
+      'local',
+      { allowedRoles: ['admin', ''] },
+      'local.allowedRoles.1',
+    ],
+  ] as const)('names %s with a dotted path', (_label, layer, entry, field) => {
+    expect(resolve({ [layer]: entry } as Partial<ResolveToolPolicyInput>).errors)
+      .toEqual([{ code: 'E-POLICY-001', field, reason: 'invalid-entry' }]);
+  });
+
+  it('reports every malformed layer in order and blames the local layer', () => {
+    expect(resolve({
+      local: { riskClass: 'critical' } as unknown as ToolPolicyEntry,
+      platform: { description: '   ' },
+    })).toMatchObject({
+      effective: { enabled: false, origin: { enabled: 'local-policy' } },
+      errors: [
+        { code: 'E-POLICY-001', field: 'local.riskClass', reason: 'invalid-entry' },
+        { code: 'E-POLICY-001', field: 'platform.description', reason: 'invalid-entry' },
+      ],
+    });
+  });
+
+  it('keeps the restrictions of a valid layer next to a malformed one', () => {
+    expect(resolve({
+      local: { allowedRoles: ['admin'] },
+      platform: { riskClass: 'critical' } as unknown as ToolPolicyEntry,
+    })).toMatchObject({
+      effective: {
+        enabled: false,
+        allowedRoles: ['admin'],
+        origin: { enabled: 'platform', allowedRoles: 'local-policy' },
+      },
+      errors: [
+        { code: 'E-POLICY-001', field: 'platform.riskClass', reason: 'invalid-entry' },
+      ],
+    });
+  });
 });
