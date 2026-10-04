@@ -1,4 +1,7 @@
-import type { ToolRiskClass } from './revisions.js';
+import { z } from 'zod';
+import { FoundationDiagnosticError } from '../diagnostics/index.js';
+import { findSensitiveStringPath } from './content-boundary.js';
+import { ToolRiskClassSchema, type ToolRiskClass } from './revisions.js';
 
 /**
  * Version of the default table and the policy bounds below. The golden
@@ -228,4 +231,77 @@ export function deriveToolPolicyDefaults(
     requiresApproval: base.requiresApproval || riskTier(riskClass) >= 2,
     rulesVersion: TOOL_POLICY_RULES_VERSION,
   };
+}
+
+const boundedText = (max: number) => z.string().trim().min(1).max(max);
+const stableKey = z.string().min(1).max(512);
+
+export const ToolPolicyPinSchema = z.object({
+  toolId: z.uuid(),
+  atRiskClass: ToolRiskClassSchema,
+}).strict();
+
+/** One policy layer entry: the same shape for local files and Platform deltas. */
+export const ToolPolicyEntrySchema = z.object({
+  enabled: z.boolean().optional(),
+  requiresApproval: z.boolean().optional(),
+  riskClass: ToolRiskClassSchema.optional(),
+  allowedRoles: z.array(boundedText(200)).max(100).optional(),
+  description: boundedText(4_000).optional(),
+  reason: boundedText(500).optional(),
+  pin: ToolPolicyPinSchema.optional(),
+}).strict();
+
+export interface ToolPolicyEntry {
+  enabled?: boolean;
+  requiresApproval?: boolean;
+  riskClass?: ToolRiskClass;
+  allowedRoles?: string[];
+  description?: string;
+  reason?: string;
+  pin?: { toolId: string; atRiskClass: ToolRiskClass };
+}
+
+/**
+ * `.glirastes/tool-policy.json`. Written by the developer or the CLI only,
+ * never by an agent; `tools refresh` never rewrites it.
+ */
+export const ToolPolicyFileSchema = z.object({
+  schemaVersion: z.literal(1),
+  tools: z.record(stableKey, ToolPolicyEntrySchema).default({}),
+  exclude: z.array(z.object({
+    match: boundedText(2_048),
+    reason: boundedText(500),
+  }).strict()).max(500).default([]),
+  acceptedRisk: z.record(stableKey, z.object({
+    riskClass: ToolRiskClassSchema,
+    toolId: z.uuid(),
+  }).strict()).default({}),
+}).strict().superRefine((file, context) => {
+  // Values only: stable keys such as "POST /api/auth/token" are not content.
+  const sensitivePath = findSensitiveStringPath(file);
+  if (sensitivePath) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Tool policy contains secret-like content',
+      path: sensitivePath,
+    });
+  }
+});
+
+export type ToolPolicyFile = z.infer<typeof ToolPolicyFileSchema>;
+
+export function parseToolPolicyFile(value: unknown): ToolPolicyFile {
+  const parsed = ToolPolicyFileSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  // The issue path names the field; the offending value is never echoed.
+  const identifier = parsed.error.issues[0]?.path.map(String).join('.') ?? '';
+  throw new FoundationDiagnosticError({
+    code: 'E-POLICY-001',
+    operation: 'tools.policy',
+    message: 'The tool policy file is invalid.',
+    remediation: 'repair-tool-policy-file',
+    path: '.glirastes/tool-policy.json',
+    ...(identifier ? { identifier } : {}),
+  });
 }
