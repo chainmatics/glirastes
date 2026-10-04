@@ -5,6 +5,7 @@ import { parseMentionSegments, stripContextBlocks } from '../utils/mention-marku
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, readClarificationPart } from '../utils/clarification.js';
 import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
+import { RendererBoundary } from '../tool-renderers/renderer-boundary.js';
 import {
   CLARIFICATION_TOOL_NAME,
   stripClarificationMarkers,
@@ -70,6 +71,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
     classNames,
     components,
     toolResults,
+    toolRendererRegistry,
     messages,
     send,
     isLoading,
@@ -79,6 +81,33 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const MentionChipComponent = components.MentionChip ?? DefaultMentionChip;
   const ClarificationComponent = components.ClarificationCard ?? DefaultClarificationCard;
   const isLatestMessage = messages?.[messages.length - 1]?.id === message.id;
+
+  const renderToolResult = (key: string, toolName: string, result: unknown) => {
+    const fallback = <ToolResultComponent key={key} toolName={toolName} result={result} />;
+    const resolved = toolRendererRegistry?.resolve(toolName, result);
+    if (!resolved) return fallback;
+    const Renderer = resolved.renderer.component;
+    return (
+      <RendererBoundary
+        key={`${key}@${resolved.renderer.schemaVersion}`}
+        fallback={<ToolResultComponent toolName={toolName} result={result} />}
+      >
+        <div
+          data-component="tool-result"
+          data-tool={toolName}
+          data-renderer={resolved.renderer.definitionId}
+          data-schema-version={resolved.renderer.schemaVersion}
+        >
+          <Renderer
+            definitionId={resolved.renderer.definitionId}
+            toolName={toolName}
+            schemaVersion={resolved.renderer.schemaVersion}
+            output={resolved.output}
+          />
+        </div>
+      </RendererBoundary>
+    );
+  };
 
   const mode = toolResults.mode ?? 'default';
   const allowlist = toolResults.allowlist ?? [];
@@ -220,13 +249,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         // Standard ToolResultPart
         if ('toolName' in part && 'result' in part && part.result !== undefined) {
           if (!shouldRenderToolResult(part.toolName, mode, allowlist)) return null;
-          return (
-            <ToolResultComponent
-              key={`tool-${i}`}
-              toolName={part.toolName}
-              result={part.result}
-            />
-          );
+          return renderToolResult(`tool-${i}`, part.toolName, part.result);
         }
 
         // AI SDK 5.x/6.x tool-{name} parts with output
@@ -235,13 +258,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
           if (partType.startsWith('tool-') && part.state === 'output-available' && part.output !== undefined) {
             const toolName = partType.replace('tool-', '');
             if (!shouldRenderToolResult(toolName, mode, allowlist)) return null;
-            return (
-              <ToolResultComponent
-                key={`tool-${i}`}
-                toolName={toolName}
-                result={part.output}
-              />
-            );
+            return renderToolResult(`tool-${i}`, toolName, part.output);
           }
         }
 

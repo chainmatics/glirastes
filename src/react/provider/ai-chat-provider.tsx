@@ -26,6 +26,7 @@ import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
+import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
   parseClarificationAnswer,
@@ -359,6 +360,7 @@ export function AiChatProvider({
   completionProviders,
   completionContext,
   onCompletionProviderError,
+  toolRenderers,
   toolResults: userToolResults,
   voice: userVoice,
   session,
@@ -396,6 +398,12 @@ export function AiChatProvider({
   const toolResultConfig = useMemo(
     () => ({ mode: 'default' as const, allowlist: [], ...userToolResults }),
     [userToolResults],
+  );
+  const toolRendererRegistry = useMemo(
+    () => (toolRenderers && toolRenderers.length > 0
+      ? createToolResultRendererRegistry(toolRenderers)
+      : undefined),
+    [toolRenderers],
   );
   const voiceConfig = useMemo(
     () => ({
@@ -1255,6 +1263,7 @@ export function AiChatProvider({
       suggestions: suggestionsConfig,
       toolLabels,
       toolResults: toolResultConfig,
+      toolRendererRegistry,
       voice: voiceConfig,
       mentionConfig: mentions,
       pipelineMessageTranslator,
@@ -1315,6 +1324,7 @@ export function AiChatProvider({
       suggestionsConfig,
       toolLabels,
       toolResultConfig,
+      toolRendererRegistry,
       voiceConfig,
       mentions,
       pipelineMessageTranslator,

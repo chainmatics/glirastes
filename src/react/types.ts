@@ -1,5 +1,6 @@
 import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent } from 'react';
 import type { ClarificationRequest } from '../contracts/clarification.js';
+import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
 
 export type {
   ClarificationOption,
@@ -612,6 +613,12 @@ export type StepSummaryFormatter = (step: PipelineStepReport) => string;
 
 export interface AiChatProviderConfig {
   mentions?: MentionConfig;
+  /**
+   * Local compact result components per tool `definitionId` and schema
+   * version. Memoize the array. Unknown tools, outputs that fail every
+   * version's schema, and throwing renderers use the default block.
+   */
+  toolRenderers?: ReadonlyArray<AnyToolResultRenderer>;
   /**
    * Generic `/` and `@` providers. Memoize the array: a new identity
    * rebuilds the search. When set, the composer uses provider search with

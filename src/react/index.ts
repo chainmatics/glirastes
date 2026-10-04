@@ -172,6 +172,17 @@ export { AiTriggerButton } from './components/ai-trigger-button.js';
 export { SessionSwitcher, type SessionSwitcherProps } from './components/session-switcher.js';
 export { ClarificationCard } from './components/clarification-card.js';
 
+// Tool result renderers
+export {
+  createToolResultRendererRegistry,
+  defineToolResultRenderer,
+  type AnyToolResultRenderer,
+  type ResolvedToolResultRenderer,
+  type ToolResultRenderer,
+  type ToolResultRendererProps,
+  type ToolResultRendererRegistry,
+} from './tool-renderers/registry.js';
+
 // Completion providers
 export {
   createCompletionSearch,

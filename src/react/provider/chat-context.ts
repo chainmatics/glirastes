@@ -21,6 +21,7 @@ import type {
   SessionSummary,
 } from '../types.js';
 import type { CompletionSearch } from '../completions/completion-search.js';
+import type { ToolResultRendererRegistry } from '../tool-renderers/registry.js';
 
 type MentionTrigger = '@' | '/' | null;
 
@@ -44,6 +45,8 @@ export interface ChatContextValue {
   suggestions: SuggestionsConfig;
   toolLabels: ToolLabelConfig;
   toolResults: ToolResultDisplayConfig;
+  /** Custom result components; absent when none are configured. */
+  toolRendererRegistry?: ToolResultRendererRegistry;
   voice: VoiceInputConfig;
   mentionConfig?: MentionConfig;
   pipelineMessageTranslator?: PipelineMessageTranslator;
