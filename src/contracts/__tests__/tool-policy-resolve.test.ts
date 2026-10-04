@@ -146,6 +146,121 @@ describe('resolveToolPolicy', () => {
   });
 });
 
-// Keeps the helpers referenced until Task 5 appends its block.
-void pin;
-void OTHER_TOOL_ID;
+describe('resolveToolPolicy relaxation bounds', () => {
+  it('relaxes tiers 0 and 1 freely', () => {
+    expect(resolve({
+      defaults: { ...READ, riskClass: 'read-sensitive', requiresApproval: true },
+      local: { requiresApproval: false },
+    })).toMatchObject({
+      effective: {
+        requiresApproval: false,
+        origin: { requiresApproval: 'local-policy' },
+      },
+      warnings: [],
+      errors: [],
+    });
+  });
+
+  it('relaxes write only through a reviewed entry pinned at write', () => {
+    expect(resolve({
+      defaults: WRITE,
+      local: { requiresApproval: false, reason: 'reviewed', pin: pin('write') },
+    })).toMatchObject({
+      effective: {
+        requiresApproval: false,
+        origin: { requiresApproval: 'local-policy' },
+      },
+      warnings: [],
+      errors: [],
+    });
+    expect(resolve({
+      defaults: WRITE,
+      platform: { requiresApproval: false, pin: pin('write') },
+    }).effective).toMatchObject({
+      requiresApproval: false,
+      origin: { requiresApproval: 'platform' },
+    });
+  });
+
+  it('lets a hardening win over a valid relaxation', () => {
+    expect(resolve({
+      defaults: WRITE,
+      local: { requiresApproval: true },
+      platform: { requiresApproval: false, pin: pin('write') },
+    }).effective).toMatchObject({
+      requiresApproval: true,
+      origin: { requiresApproval: 'local-policy' },
+    });
+  });
+
+  it.each([
+    ['write without a pin', WRITE, {}, 'relaxation-requires-reviewed-pin'],
+    ['delete without a pin', DELETE, {}, 'tier-3-always-requires-approval'],
+    ['delete pinned at delete', DELETE, { pin: pin('delete') },
+      'tier-3-always-requires-approval'],
+  ] as const)('rejects relaxing %s with E-POLICY-002', (
+    _label,
+    defaults,
+    extra,
+    reason,
+  ) => {
+    const result = resolve({
+      defaults,
+      local: { requiresApproval: false, ...extra },
+    });
+    expect(result.effective.requiresApproval).toBe(true);
+    expect(result.errors).toEqual([
+      { code: 'E-POLICY-002', field: 'local.requiresApproval', reason },
+    ]);
+  });
+
+  it('lets a pinned relaxation lapse with a warning when the risk rises', () => {
+    expect(resolve({
+      defaults: DELETE,
+      local: { requiresApproval: false, pin: pin('write') },
+    })).toMatchObject({
+      effective: { requiresApproval: true },
+      warnings: [
+        { code: 'override-lapsed-risk-raised', field: 'local.requiresApproval' },
+      ],
+      errors: [],
+    });
+    expect(resolve({
+      defaults: WRITE,
+      local: { requiresApproval: false, pin: pin('safe-read') },
+    })).toMatchObject({
+      effective: { requiresApproval: true },
+      warnings: [
+        { code: 'override-lapsed-risk-raised', field: 'local.requiresApproval' },
+      ],
+      errors: [],
+    });
+  });
+
+  it('never revives a relaxation for a reappeared tool but keeps its hardenings', () => {
+    expect(resolve({
+      defaults: WRITE,
+      local: {
+        requiresApproval: false,
+        allowedRoles: ['admin'],
+        pin: pin('write', OTHER_TOOL_ID),
+      },
+    })).toEqual({
+      effective: {
+        enabled: true,
+        requiresApproval: true,
+        riskClass: 'write',
+        allowedRoles: ['admin'],
+        origin: {
+          enabled: 'code-default',
+          requiresApproval: 'code-default',
+          riskClass: 'code-default',
+          allowedRoles: 'local-policy',
+          description: 'code-default',
+        },
+      },
+      warnings: [{ code: 'policy-entry-orphaned', field: 'local.pin.toolId' }],
+      errors: [],
+    });
+  });
+});

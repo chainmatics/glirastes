@@ -415,7 +415,7 @@ export function resolveToolPolicy(
 
 function collectPolicyLayers(
   input: ResolveToolPolicyInput,
-  _warnings: PolicyWarning[],
+  warnings: PolicyWarning[],
   _errors: PolicyError[],
 ): CollectedLayers {
   const layers: PolicyLayer[] = [];
@@ -424,6 +424,15 @@ function collectPolicyLayers(
   }
   if (input.platform) {
     layers.push({ name: 'platform', origin: 'platform', entry: input.platform });
+  }
+  for (const layer of layers) {
+    // A pin from an earlier incarnation: relaxations lapse, hardenings stay.
+    if (layer.entry.pin && layer.entry.pin.toolId !== input.toolId) {
+      warnings.push({
+        code: 'policy-entry-orphaned',
+        field: `${layer.name}.pin.toolId`,
+      });
+    }
   }
   return { layers };
 }
@@ -492,8 +501,8 @@ function resolveApproval(
   input: ResolveToolPolicyInput,
   layers: ReadonlyArray<PolicyLayer>,
   risk: ResolvedField<ToolRiskClass>,
-  _warnings: PolicyWarning[],
-  _errors: PolicyError[],
+  warnings: PolicyWarning[],
+  errors: PolicyError[],
 ): ResolvedField<boolean> {
   const tier = riskTier(risk.value);
   const raisedIntoConfirmation = tier >= 2
@@ -503,17 +512,70 @@ function resolveApproval(
     !input.defaults.requiresApproval && raisedIntoConfirmation
       ? risk.origin
       : 'code-default';
-  const hardenedBy = layers.find(
-    (layer) => layer.entry.requiresApproval === true,
-  );
-  if (hardenedBy) {
-    return {
-      value: true,
-      origin: baseline ? baselineOrigin : hardenedBy.origin,
-    };
+  let hardenedBy: PolicyLayer | undefined;
+  let relaxedBy: PolicyLayer | undefined;
+  for (const layer of layers) {
+    if (layer.entry.requiresApproval === true) {
+      hardenedBy ??= layer;
+    } else if (
+      layer.entry.requiresApproval === false
+      && relaxationAllowed(input.toolId, layer, tier, warnings, errors)
+    ) {
+      relaxedBy = layer;
+    }
   }
-  if (!baseline && tier >= 3) return { value: true, origin: 'code-default' };
-  return { value: baseline, origin: baselineOrigin };
+  let result: ResolvedField<boolean>;
+  if (hardenedBy) {
+    result = {
+      value: true,
+      origin: baseline && !relaxedBy ? baselineOrigin : hardenedBy.origin,
+    };
+  } else if (relaxedBy) {
+    result = { value: false, origin: relaxedBy.origin };
+  } else {
+    result = { value: baseline, origin: baselineOrigin };
+  }
+  // Tier 3 always confirms, whatever any layer says.
+  return !result.value && tier >= 3
+    ? { value: true, origin: 'code-default' }
+    : result;
+}
+
+function relaxationAllowed(
+  toolId: string,
+  layer: PolicyLayer,
+  tier: RiskTier,
+  warnings: PolicyWarning[],
+  errors: PolicyError[],
+): boolean {
+  const pin = layer.entry.pin;
+  const field = `${layer.name}.requiresApproval`;
+  if (pin && pin.toolId !== toolId) return false;
+  if (tier <= 1) return true;
+  if (!pin) {
+    errors.push({
+      code: 'E-POLICY-002',
+      field,
+      reason: tier >= 3
+        ? 'tier-3-always-requires-approval'
+        : 'relaxation-requires-reviewed-pin',
+    });
+    return false;
+  }
+  const pinnedTier = riskTier(pin.atRiskClass);
+  if (pinnedTier >= 3) {
+    errors.push({
+      code: 'E-POLICY-002',
+      field,
+      reason: 'tier-3-always-requires-approval',
+    });
+    return false;
+  }
+  if (tier > pinnedTier) {
+    warnings.push({ code: 'override-lapsed-risk-raised', field });
+    return false;
+  }
+  return true;
 }
 
 function resolveDescription(
