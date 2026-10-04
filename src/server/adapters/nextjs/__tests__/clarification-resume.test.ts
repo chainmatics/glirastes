@@ -50,6 +50,21 @@ describe('clarification resume', () => {
     expect(JSON.stringify(messages[2])).toContain('glirastes:clarification');
   });
 
+  it('resumes from a provider id with dots and colons (Kimi K2 functions.<name>:<index>)', () => {
+    const toolCallId = 'functions.ask_clarification:0';
+    const messages = [
+      user('u1', 'Lösche die Aufgabe'),
+      clarificationTurn(toolCallId, 'Welche Aufgabe?'),
+      user('u2', formatClarificationAnswer({ toolCallId, answer: 'Bericht schreiben' })),
+    ];
+    expect(resolveClarificationResume(messages)).toMatchObject({
+      originalRequest: 'Lösche die Aufgabe',
+      answer: 'Bericht schreiben',
+      routingText: 'Lösche die Aufgabe\nWelche Aufgabe? Bericht schreiben',
+      answerMessageIndex: 2,
+    });
+  });
+
   it('follows chained clarifications back to the first request', () => {
     const messages = [
       user('u1', 'Weise die Aufgabe zu'),

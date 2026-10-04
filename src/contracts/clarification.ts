@@ -46,7 +46,14 @@ export interface ParsedClarificationAnswer {
   readonly answer: string;
 }
 
-const TOOL_CALL_ID = /^[A-Za-z0-9_-]{1,200}$/;
+/**
+ * Provider tool call ids are passed through unchanged, so this covers the
+ * ones in use: `call_*` (OpenAI), `toolu_*` (Anthropic), `tooluse_*`
+ * (Bedrock), `chatcmpl-tool-*` and `functions.<name>:<index>` (Kimi K2).
+ * `<`, `>`, quotes, backslashes and whitespace stay out, so an id can never
+ * close the marker comment or the JSON payload.
+ */
+const TOOL_CALL_ID = /^[A-Za-z0-9._:-]{1,200}$/;
 const MARKER = /<!--glirastes:clarification (\{[^<>\n]{1,400}\})-->/;
 const MARKERS = /<!--glirastes:clarification \{[^<>\n]{0,400}\}-->[ \t]*\n?/g;
 

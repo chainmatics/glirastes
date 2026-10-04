@@ -68,6 +68,10 @@ describe('clarification marker validation on the parse side', () => {
     ['a tool call id over 200 characters', `{"toolCallId":"${'c'.repeat(201)}"}`],
     ['a numeric tool call id', '{"toolCallId":7}'],
     ['a missing tool call id', '{"optionId":"task-42"}'],
+    ['a tool call id with a slash', '{"toolCallId":"functions/get_weather:0"}'],
+    ['a tool call id with a space', '{"toolCallId":"functions.get_weather 0"}'],
+    ['a tool call id that decodes to a closing angle bracket', '{"toolCallId":"a\\u003eb"}'],
+    ['a tool call id that decodes to a newline', '{"toolCallId":"a\\nb"}'],
   ])('ignores %s', (_label, payload) => {
     expect(parseClarificationAnswer(marker(payload))).toBeUndefined();
   });
@@ -87,6 +91,39 @@ describe('clarification marker validation on the parse side', () => {
 
   it('rejects a tool call id one character over the limit when formatting', () => {
     expect(() => formatClarificationAnswer({ toolCallId: 'c'.repeat(201), answer: 'x' }))
+      .toThrow('Invalid clarification tool call id');
+  });
+});
+
+describe('clarification tool call ids emitted by live providers', () => {
+  it.each([
+    ['OpenAI', 'call_5kJq3Zr9XyLw8mNp2vBt1Hd4'],
+    ['Anthropic', 'toolu_01A09q90qw90lq917835lq9'],
+    ['Bedrock', 'tooluse_Zq3x-8vK2TeaR1mP9aBcDe'],
+    ['OpenRouter relaying a chat completion', 'chatcmpl-tool-9f8a7b6c5d4e3f2a1b0c'],
+    ['DeepSeek', 'call_0_5d2a1c7e-91f4-4a52-8e6b-2c0f7a1d9b33'],
+    ['Kimi K2 (functions.<name>:<index>)', 'functions.get_weather:0'],
+    ['Kimi K2 with a multi-digit index', 'functions.ask_clarification:12'],
+  ])('round-trips a %s id through the marker', (_provider, toolCallId) => {
+    const text = formatClarificationAnswer({ toolCallId, answer: 'Alice' });
+    expect(parseClarificationAnswer(text)).toEqual({
+      reference: { toolCallId },
+      answer: 'Alice',
+    });
+    expect(stripClarificationMarkers(text)).toBe('Alice');
+  });
+
+  it.each([
+    ['a closing angle bracket', 'a>b'],
+    ['an opening angle bracket', 'a<b'],
+    ['a comment terminator', 'a-->'],
+    ['a newline', 'a\nb'],
+    ['a double quote', 'a"b'],
+    ['a backslash', 'a\\b'],
+    ['a space', 'functions.get_weather 0'],
+    ['a slash', 'functions/get_weather:0'],
+  ])('still rejects an id with %s when formatting', (_label, toolCallId) => {
+    expect(() => formatClarificationAnswer({ toolCallId, answer: 'x' }))
       .toThrow('Invalid clarification tool call id');
   });
 });
