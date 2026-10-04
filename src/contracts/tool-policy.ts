@@ -38,11 +38,13 @@ export function confirmationFloor(
 /**
  * Raise-only combination. A candidate replaces the current class only from a
  * strictly higher tier; a same-tier relabel or a lower class never applies.
+ * Generic so a caller working on a narrower class set (for example without
+ * `unknown`) keeps that type through the comparison.
  */
-export function mostRestrictiveRiskClass(
-  current: ToolRiskClass,
-  candidate: ToolRiskClass | undefined,
-): ToolRiskClass {
+export function mostRestrictiveRiskClass<T extends ToolRiskClass>(
+  current: T,
+  candidate: T | undefined,
+): T {
   if (candidate === undefined) return current;
   return riskTier(candidate) > riskTier(current) ? candidate : current;
 }
@@ -68,4 +70,150 @@ export function intersectAllowedRoles(
 
 function normalizedRoles(roles: ReadonlyArray<string>): string[] {
   return [...new Set(roles)].sort();
+}
+
+export type DeclaredEffect =
+  | 'read'
+  | 'write'
+  | 'destructive'
+  | 'external'
+  | 'financial';
+
+export interface ToolPolicyDefaultsInput {
+  executionKind: 'endpoint' | 'ui';
+  method?: string;
+  path?: string;
+  definitionId: string;
+  declaredEffect?: DeclaredEffect;
+  evidence?: { externalCall?: boolean; uiMutation?: boolean };
+}
+
+export interface ToolPolicyDefaults {
+  operationGroup: 'read' | 'create' | 'update' | 'delete' | 'ui';
+  riskClass: Exclude<ToolRiskClass, 'unknown'>;
+  requiresApproval: boolean;
+  rulesVersion: typeof TOOL_POLICY_RULES_VERSION;
+}
+
+type AssessedRiskClass = Exclude<ToolRiskClass, 'unknown'>;
+type PolicyDefaultsCore = Omit<ToolPolicyDefaults, 'rulesVersion'>;
+
+const METHOD_DEFAULTS = new Map<string, PolicyDefaultsCore>([
+  ['GET', { operationGroup: 'read', riskClass: 'safe-read', requiresApproval: false }],
+  ['HEAD', { operationGroup: 'read', riskClass: 'safe-read', requiresApproval: false }],
+  ['POST', { operationGroup: 'create', riskClass: 'write', requiresApproval: true }],
+  ['PUT', { operationGroup: 'update', riskClass: 'write', requiresApproval: true }],
+  ['PATCH', { operationGroup: 'update', riskClass: 'write', requiresApproval: true }],
+  ['DELETE', { operationGroup: 'delete', riskClass: 'delete', requiresApproval: true }],
+]);
+
+const UNKNOWN_METHOD_DEFAULTS: PolicyDefaultsCore = {
+  operationGroup: 'update',
+  riskClass: 'write',
+  requiresApproval: true,
+};
+
+const UI_DEFAULTS: PolicyDefaultsCore = {
+  operationGroup: 'ui',
+  riskClass: 'safe-read',
+  requiresApproval: false,
+};
+
+const DESTRUCTIVE_WORDS = new Set([
+  'delete',
+  'remove',
+  'destroy',
+  'purge',
+  'erase',
+  'wipe',
+  'permanent',
+  'revoke',
+]);
+
+/** Multi-word tokens; `hard-delete` is already covered by `delete`. */
+const DESTRUCTIVE_WORD_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ['empty', 'trash'],
+];
+
+const DECLARED_EFFECT_RISK: Readonly<Record<DeclaredEffect, AssessedRiskClass>> = {
+  read: 'safe-read',
+  write: 'write',
+  destructive: 'delete',
+  external: 'external',
+  financial: 'financial',
+};
+
+function segmentWords(segment: string): string[] {
+  return segment
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 0);
+}
+
+/** Whole-word match per path or definitionId segment (camelCase aware). */
+function hasDestructiveToken(
+  ...sources: ReadonlyArray<string | undefined>
+): boolean {
+  for (const source of sources) {
+    for (const segment of (source ?? '').split(/[/.]/)) {
+      const words = segmentWords(segment);
+      if (words.some((word) => DESTRUCTIVE_WORDS.has(word))) return true;
+      for (let index = 0; index + 1 < words.length; index += 1) {
+        if (DESTRUCTIVE_WORD_PAIRS.some(([first, second]) =>
+          words[index] === first && words[index + 1] === second)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Deterministic stage-1 defaults (spec 4.5). Escalations only ever raise;
+ * `unknown` is never produced. Roles are not part of the defaults: the
+ * endpoint's own authorization applies.
+ */
+export function deriveToolPolicyDefaults(
+  input: ToolPolicyDefaultsInput,
+): ToolPolicyDefaults {
+  const isUi = input.executionKind === 'ui';
+  const method = input.method?.toUpperCase();
+  const base = isUi
+    ? UI_DEFAULTS
+    : METHOD_DEFAULTS.get(method ?? '') ?? UNKNOWN_METHOD_DEFAULTS;
+  let operationGroup = base.operationGroup;
+  let riskClass = base.riskClass;
+
+  const readOnlyMethod = !isUi && (method === 'GET' || method === 'HEAD');
+  const tokensApply = isUi
+    ? input.evidence?.uiMutation === true
+    : !readOnlyMethod;
+  if (tokensApply && hasDestructiveToken(input.path, input.definitionId)) {
+    riskClass = mostRestrictiveRiskClass(riskClass, 'delete');
+    if (!isUi) operationGroup = 'delete';
+  }
+  if (input.declaredEffect !== undefined) {
+    riskClass = mostRestrictiveRiskClass(
+      riskClass,
+      DECLARED_EFFECT_RISK[input.declaredEffect],
+    );
+    if (input.declaredEffect === 'destructive' && !isUi) {
+      operationGroup = 'delete';
+    }
+  }
+  if (input.evidence?.externalCall) {
+    riskClass = mostRestrictiveRiskClass(riskClass, 'external');
+  }
+  if (isUi && input.evidence?.uiMutation) {
+    riskClass = mostRestrictiveRiskClass(riskClass, 'write');
+  }
+
+  return {
+    operationGroup,
+    riskClass,
+    requiresApproval: base.requiresApproval || riskTier(riskClass) >= 2,
+    rulesVersion: TOOL_POLICY_RULES_VERSION,
+  };
 }
