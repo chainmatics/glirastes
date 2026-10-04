@@ -1,3 +1,4 @@
+import { riskTier } from '../contracts/tool-policy.js';
 import {
   assertLocalToolBindingMatches,
   type LocalToolBinding,
@@ -41,8 +42,9 @@ export function validateLocalDeploymentBindings(options: {
     if (!policy || !policy.enabled) {
       throw new Error(`Missing enabled runtime tool policy: ${toolId}`);
     }
-    if (policy.riskClass !== manifestTool.riskClass) {
-      throw new Error(`Runtime tool policy risk mismatch: ${toolId}`);
+    // A policy may raise the manifest risk, never lower it.
+    if (riskTier(policy.riskClass) < riskTier(manifestTool.riskClass)) {
+      throw new Error(`Runtime tool policy risk below manifest: ${toolId}`);
     }
     const binding = bindings.get(toolId);
     if (!binding) {

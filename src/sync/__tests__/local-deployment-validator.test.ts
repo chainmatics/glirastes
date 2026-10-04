@@ -134,4 +134,24 @@ describe('validateLocalDeploymentBindings', () => {
       bindings: bindings(),
     })).toThrow(/policy/i);
   });
+
+  it('accepts a policy that raises the manifest risk', () => {
+    const deployment = revisions();
+    deployment.policyRevision.toolPolicies[0]!.riskClass = 'write';
+
+    expect(() => validateLocalDeploymentBindings({
+      revisions: deployment,
+      bindings: bindings(),
+    })).not.toThrow();
+  });
+
+  it('rejects a policy below the manifest risk', () => {
+    const deployment = revisions();
+    deployment.manifestRevision.tools[0]!.riskClass = 'write';
+
+    expect(() => validateLocalDeploymentBindings({
+      revisions: deployment,
+      bindings: bindings(),
+    })).toThrow(/risk below manifest/i);
+  });
 });

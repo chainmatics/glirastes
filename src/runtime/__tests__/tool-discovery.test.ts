@@ -133,4 +133,16 @@ describe('createTurnToolDiscovery', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  it('keeps a tool whose policy raised its risk and drops one whose policy lowered it', () => {
+    const raised = fixture();
+    raised.snapshot.policyRevision.toolPolicies[0]!.riskClass = 'delete';
+    expect(createTurnToolDiscovery(raised).eligibleNames)
+      .toContain('tasks_listTasks');
+
+    const lowered = fixture();
+    lowered.snapshot.manifestRevision.tools[0]!.riskClass = 'write';
+    expect(createTurnToolDiscovery(lowered).eligibleNames)
+      .not.toContain('tasks_listTasks');
+  });
 });
