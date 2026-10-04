@@ -354,8 +354,35 @@ describe('resolveToolPolicy ratchet and entry validation', () => {
       acceptedRisk: { riskClass: READ.riskClass, toolId: TOOL_ID },
     })).toMatchObject({
       effective: { riskClass: 'write' },
-      warnings: [{ code: 'risk-lower-available', field: 'riskClass' }],
+      warnings: [
+        { code: 'risk-lower-available', field: 'riskClass', riskClass: layered },
+      ],
     });
+  });
+
+  it.each([
+    ['a code-caused decrease', {}, 'safe-read'],
+    [
+      'a decrease under a local raise',
+      { local: { riskClass: 'read-sensitive' } },
+      'read-sensitive',
+    ],
+    [
+      'a decrease under a Platform raise',
+      { platform: { riskClass: 'read-sensitive' } },
+      'read-sensitive',
+    ],
+  ] as const)('names the class that releases %s', (_label, layers, riskClass) => {
+    const { warnings } = resolve({ ...layers, previousEffectiveRiskClass: 'write' });
+    expect(warnings).toEqual([
+      { code: 'risk-lower-available', field: 'riskClass', riskClass },
+    ]);
+    // Recording exactly the named class, as `tools policy accept` must, releases the hold.
+    expect(resolve({
+      ...layers,
+      previousEffectiveRiskClass: 'write',
+      acceptedRisk: { riskClass: warnings[0]!.riskClass!, toolId: TOOL_ID },
+    })).toMatchObject({ effective: { riskClass }, warnings: [] });
   });
 
   it('applies the trimmed text of a valid entry', () => {

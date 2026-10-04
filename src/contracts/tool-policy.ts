@@ -337,9 +337,9 @@ export interface ResolveToolPolicyInput {
   platform?: ToolPolicyEntry;
   /**
    * Releases a held `risk-lower-available` decrease. `riskClass` is matched
-   * exactly against the layered class, so it must be the class this resolver
-   * yields for `toolId` without `previousEffectiveRiskClass` (code defaults
-   * plus local/Platform raises), not the class the code alone derives.
+   * exactly against the layered class (code defaults plus local/Platform
+   * raises), not the class the code alone derives; record the `riskClass`
+   * that the `risk-lower-available` warning names.
    */
   acceptedRisk?: { riskClass: ToolRiskClass; toolId: string };
   /** The riskClass this toolId resolved to in the previous committed refresh. */
@@ -348,7 +348,12 @@ export interface ResolveToolPolicyInput {
 
 export interface ResolveToolPolicyResult {
   effective: EffectiveToolPolicy;
-  warnings: Array<{ code: ToolPolicyWarningCode; field?: string }>;
+  warnings: Array<{
+    code: ToolPolicyWarningCode;
+    field?: string;
+    /** `risk-lower-available` only: the class `acceptedRisk` must record. */
+    riskClass?: ToolRiskClass;
+  }>;
   errors: Array<{
     code: 'E-POLICY-001' | 'E-POLICY-002';
     field: string;
@@ -477,9 +482,8 @@ function resolveRiskClass(
   }
   // Ratchet: a code-caused decrease is held until `tools policy accept`.
   // `acceptedRisk.riskClass` is matched against the layered `value` (defaults
-  // plus local/Platform raises), so accept must record what this function
-  // resolves without `previousEffectiveRiskClass`, not the class the code
-  // alone derives.
+  // plus local/Platform raises), not the class the code alone derives, so the
+  // warning names `value` as the class accept must record.
   const previous = input.previousEffectiveRiskClass;
   if (previous !== undefined && riskTier(previous) > riskTier(value)) {
     const acceptedRisk = input.acceptedRisk;
@@ -487,7 +491,11 @@ function resolveRiskClass(
       && acceptedRisk.toolId === input.toolId
       && acceptedRisk.riskClass === value;
     if (!accepted) {
-      warnings.push({ code: 'risk-lower-available', field: 'riskClass' });
+      warnings.push({
+        code: 'risk-lower-available',
+        field: 'riskClass',
+        riskClass: value,
+      });
       return { value: previous, origin: 'code-default' };
     }
   }
