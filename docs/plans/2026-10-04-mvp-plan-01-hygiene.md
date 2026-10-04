@@ -540,6 +540,8 @@ git commit -m "fix(aegis): keep surname variants with their first identity group
 
 `deriveGroupPseudonym` returns `${firstName} ${lastName}` for PERSON and ignores `existingPseudonyms`, so two groups with the same seed outcome (1 in 400 per pair) get the identical pseudonym and the second person's original overwrites the first one's full-name mapping. The fix re-draws the seed (bounded, 32 draws) while the generated full name is already taken in the session.
 
+Section 7 from Task 3 holds three tests, not two: per the pre-flight ruling it also contains `keeps surname variants with their first owner in batched tool results` (the `shieldResults` path), appended after the single-result test. Hunk 2 below is therefore anchored on the end of that batched test, and every count in Steps 2, 4 and 5 is one higher than the original pin.
+
 - [ ] **Step 1: Write the failing test**
 
 ```bash
@@ -555,8 +557,8 @@ git apply <<'PATCH'
      const fullName = (group: { firstName: string; lastName: string }) =>
        `${group.firstName} ${group.lastName}`;
  
-@@ -531,6 +532,27 @@
-       expect(shield.reverseMapPatch).not.toHaveProperty('Neumann');
+@@ -542,6 +543,27 @@
+       await service.shieldResults(sessionId, [{ owner: 'Hans Weber' }]);
        await expect(service.rehydrate(sessionId, 'Herr Neumann'))
          .resolves.toEqual({ rehydrated: 'Maria Schmidt' });
 +    });
@@ -592,7 +594,7 @@ PATCH
 cd /Users/philipprollmann/Dev/chainmatics/glirastes-platform/.worktrees/foundation-control-plane-v1/apps/api && ./node_modules/.bin/vitest run src/modules/aegis/__tests__/identity-group-e2e.spec.ts -t "draws a fresh identity"
 ```
 
-Expected: `1 failed | 8 skipped` with `expected [ 'Max Neumann', 'Max Neumann' ] to deeply equal [ 'Max Neumann', 'Sophie Hoffmann' ]`.
+Expected: `1 failed | 9 skipped` with `expected [ 'Max Neumann', 'Max Neumann' ] to deeply equal [ 'Max Neumann', 'Sophie Hoffmann' ]`.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -669,7 +671,7 @@ grep -c "Math.random" src/modules/aegis/aegis.service.ts
 for i in $(seq 1 20); do ./node_modules/.bin/vitest run src/modules/aegis/__tests__/identity-group-e2e.spec.ts >/dev/null 2>&1 || echo "run $i failed"; done
 ```
 
-Expected: `3 passed | 6 skipped`; `177 passed | 10 skipped (187)`; `2` (both inside `drawGroupSeed`); the loop prints nothing.
+Expected: `4 passed | 6 skipped`; `178 passed | 10 skipped (188)`; `2` (both inside `drawGroupSeed`); the loop prints nothing.
 
 - [ ] **Step 5: Full API suite**
 
@@ -678,7 +680,7 @@ cd /Users/philipprollmann/Dev/chainmatics/glirastes-platform/.worktrees/foundati
 ./node_modules/.bin/vitest run
 ```
 
-Expected: `1129 passed | 10 skipped (1139)` (baseline 1,136 plus the 3 new tests; the former Aegis flake is gone).
+Expected: `1130 passed | 10 skipped (1140)` (baseline 1,136 plus the 4 new tests; the former Aegis flake is gone).
 
 - [ ] **Step 6: Commit**
 
@@ -2362,7 +2364,7 @@ git status --short
 git -C /Users/philipprollmann/Dev/chainmatics/glirastes-platform log --oneline -1 -- CLAUDE.md
 ```
 
-Expected: API `1129 passed | 10 skipped (1139)`; Citadel `tsc` exit 0 and 250/250; DB 90/90; clean status; the Task 2 commit on `main`.
+Expected: API `1130 passed | 10 skipped (1140)`; Citadel `tsc` exit 0 and 250/250; DB 90/90; clean status; the Task 2 commit on `main`.
 
 - [ ] **Step 3: GID gates**
 
@@ -2405,6 +2407,6 @@ Report: the 17 P01 commits with hashes, per repo (Platform worktree: Tasks 1, 3,
 
 Deliberately not in P01 (per roadmap): Drizzle journal/snapshots, API typecheck explosion, Citadel ESLint, pairing-key scope → P08; GID `bun.lock` for the `file:` SDK and deploy defects → P11; `server/testing` not loadable via CJS (spec 2) → P13 package check.
 
-**Placeholder scan:** done – every code step carries the exact code or a patch verified with `git apply --check` against the current worktrees on 2026-10-04; the SDK patches were applied cumulatively in a scratch copy (error counts 92 → 69 → 45 → 33 → 21 → 6 → 0, full Vitest suite 1,079/1,079 afterwards); the Aegis patches were verified RED then GREEN (API suite 1,128 + 10 skipped with two of the three new tests, 1,129 with all three); the GID timeout, guard-test typing and ESLint baseline were verified in a scratch copy. Independent re-check on 2026-10-04 (scratch copies, no repo writes): all ten patches apply with `git apply --check` and reproduce the stated RED/GREEN counts (Aegis `2 failed` → `2 passed`, `1 failed` → `3 passed`, aegis dir `177 passed | 10 skipped (187)`, API `1129 passed | 10 skipped (1139)`; SDK 92 → 69 → 45 → 33 → 21 → 6 → 0, per-task Vitest counts 69/54/33/39/58/18, full suite 1,079); Task 9 RED `# pass 2 # fail 3`, GREEN `# pass 5`; GID guard RED/GREEN, describe-level timeout overrides `--testTimeout=1` for all seven tests, `tsc --noEmit` clean, ESLint `96 errors` → `54 files 96 suppressed` → `0 errors`, both probes exit 1, unused suppressions exit 2; Task 17 RED/GREEN. Every bash block now starts with an absolute `cd`.
+**Placeholder scan:** done – every code step carries the exact code or a patch verified with `git apply --check` against the current worktrees on 2026-10-04; the SDK patches were applied cumulatively in a scratch copy (error counts 92 → 69 → 45 → 33 → 21 → 6 → 0, full Vitest suite 1,079/1,079 afterwards); the Aegis patches were verified RED then GREEN (API suite 1,128 + 10 skipped with the two pinned Task 3 tests, 1,129 with the batched `shieldResults` test added by the pre-flight ruling, 1,130 with Task 4's test); the GID timeout, guard-test typing and ESLint baseline were verified in a scratch copy. Independent re-check on 2026-10-04 (scratch copies, no repo writes): all ten patches apply with `git apply --check` and reproduce the stated RED/GREEN counts (Aegis `2 failed` → `2 passed` for the two pinned Task 3 tests, `3 passed | 6 skipped` after Task 3 with the batched test, `1 failed | 9 skipped` → `4 passed | 6 skipped` for Task 4, aegis dir `178 passed | 10 skipped (188)`, API `1130 passed | 10 skipped (1140)`, re-verified end to end with the re-anchored Task 4 spec patch in the Task 3 fix round; SDK 92 → 69 → 45 → 33 → 21 → 6 → 0, per-task Vitest counts 69/54/33/39/58/18, full suite 1,079); Task 9 RED `# pass 2 # fail 3`, GREEN `# pass 5`; GID guard RED/GREEN, describe-level timeout overrides `--testTimeout=1` for all seven tests, `tsc --noEmit` clean, ESLint `96 errors` → `54 files 96 suppressed` → `0 errors`, both probes exit 1, unused suppressions exit 2; Task 17 RED/GREEN. Every bash block now starts with an absolute `cd`.
 
 **Type consistency:** done – `indexPseudonym(session: PiiSession, original: string, pseudonym: string, variants: readonly string[]): void` and `drawGroupSeed(session: PiiSession, locale: string): number` are used identically at all call sites; `rejectionOf(promise: Promise<unknown>): Promise<Error>` is identical in both sync test files; `stopProcessGroup(child, graceMs = 3_000, kill = systemKill)` keeps every existing two-argument call valid; the `.d.mts` types match the runtime shapes the tests read (`state.inventory.executions`, `state.tombstones`, `changes.added`, `bindings[0].inputSchemaDigest`, `createTurn(...).execute(...)`). P01 neither consumes nor produces the pinned P02+ contracts (`src/contracts/tool-policy.ts`, `src/codegen/tools/*`).
