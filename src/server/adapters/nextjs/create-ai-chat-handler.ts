@@ -1,7 +1,16 @@
-import { toolsToAiTools, createFollowupTool } from '../../core/index.js';
+import {
+  toolsToAiTools,
+  createFollowupTool,
+  createClarificationTool,
+} from '../../core/index.js';
+import { CLARIFICATION_TOOL_NAME } from '../../../contracts/clarification.js';
+import {
+  applyClarificationResume,
+  resolveClarificationResume,
+} from './clarification-resume.js';
 import { scopePipelineTools } from './scope-pipeline-tools.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
-import type { ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
+import type { Tool, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import {
@@ -81,6 +90,14 @@ export interface StreamHandlerContext {
   managedTurn?: ManagedTurnGuard;
   /** Immutable turn-local controller for custom stream integrations. */
   toolDiscovery?: HybridToolDiscovery;
+  /**
+   * Identity set of SDK built-ins (`NON_DOMAIN_TOOL_NAMES`) whose tool
+   * instance this handler created itself for the turn. Only these run outside
+   * the managed guard; a registry- or manifest-supplied tool that merely
+   * shares a built-in's name stays fully guarded (revocation, principal
+   * re-authorization, budget).
+   */
+  handlerBuiltinToolNames?: ReadonlyArray<string>;
 }
 
 /**
@@ -163,9 +180,12 @@ export function shouldStopManagedExecution(options: {
   stepCount: number;
   maxSteps: number;
   budgetState?: BudgetEvaluation['state'];
+  /** Tool names called in the latest step; a clarification ends the turn. */
+  lastStepToolNames?: ReadonlyArray<string>;
 }): boolean {
   return options.stepCount >= options.maxSteps
-    || options.budgetState === 'hard-limit';
+    || options.budgetState === 'hard-limit'
+    || (options.lastStepToolNames ?? []).includes(CLARIFICATION_TOOL_NAME);
 }
 
 function compactToolNames(toolCalls: Array<{ toolName: string }>): string[] {
@@ -286,7 +306,14 @@ async function defaultStreamHandler(
   onFinish?: AiChatHandlerConfig['onFinish'],
   onStreamError?: (error: unknown) => void,
 ): Promise<Response> {
-  const { find_tools: findTools, ...domainTools } = ctx.tools;
+  // SDK built-ins the handler created itself are not manifest tools, so the
+  // managed guard would deny them. Everything else stays guarded.
+  const builtinNames = new Set(ctx.handlerBuiltinToolNames ?? []);
+  const builtinTools: Record<string, unknown> = {};
+  const domainTools: Record<string, unknown> = {};
+  for (const [name, tool] of Object.entries(ctx.tools)) {
+    (builtinNames.has(name) ? builtinTools : domainTools)[name] = tool;
+  }
   const vercelTools = wrapToolsForVercelAi(
     domainTools,
     ctx.managedTurn
@@ -299,11 +326,8 @@ async function defaultStreamHandler(
         }
       : undefined,
   );
-  if (findTools) {
-    Object.assign(
-      vercelTools,
-      wrapToolsForVercelAi({ find_tools: findTools }),
-    );
+  if (Object.keys(builtinTools).length > 0) {
+    Object.assign(vercelTools, wrapToolsForVercelAi(builtinTools));
   }
   const modelMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
@@ -317,6 +341,7 @@ async function defaultStreamHandler(
     stepCount: event.steps.length,
     maxSteps: ctx.maxSteps,
     budgetState: ctx.managedTurn?.tracker.evaluate().state,
+    lastStepToolNames: event.steps.at(-1)?.toolCalls.map((call) => call.toolName),
   });
 
   const stream = createUIMessageStream({
@@ -524,6 +549,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     managedRuntime,
     pipeline,
     followups,
+    clarification,
 
     loadTools,
 
@@ -624,17 +650,33 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     );
   }
 
+  const clarificationTool = clarification
+    ? createClarificationTool(clarification)
+    : null;
+  const withClarification = (registry: ToolRegistry): ToolRegistry =>
+    clarificationTool && !registry[CLARIFICATION_TOOL_NAME]
+      ? { ...registry, [CLARIFICATION_TOOL_NAME]: clarificationTool }
+      : registry;
+
   async function handler(req: Request): Promise<Response> {
     reportDefaultsOnce();
     try {
-      const { messages } = await req.json();
+      const { messages: requestMessages } = await req.json();
 
-      if (!Array.isArray(messages)) {
+      if (!Array.isArray(requestMessages)) {
         return new Response(
           JSON.stringify({ error: 'messages must be an array' }),
           { status: 400, headers: { 'Content-Type': 'application/json' } },
         );
       }
+
+      // A clarification answer resumes its original request: routing sees
+      // request + answer, the model sees an explicit continuation. The client
+      // session keeps the untouched messages.
+      const clarificationResume = resolveClarificationResume(requestMessages);
+      const messages: unknown[] = clarificationResume
+        ? applyClarificationResume(requestMessages, clarificationResume)
+        : requestMessages;
 
       // Build tool context
       const toolContext = buildToolContext(req, { locale });
@@ -687,8 +729,16 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const buildDiscovery = async (
         registry: ToolRegistry,
         initialToolNames: ReadonlyArray<string>,
+        handlerBuiltinNames: ReadonlyArray<string>,
       ): Promise<HybridToolDiscovery | undefined> => {
         if (!enableToolDiscovery) return undefined;
+        // Handler-created SDK built-ins stay active next to the searchable
+        // domain tools: clarification whenever configured, follow-ups when
+        // this turn's pipeline selected them. Registry-supplied tools sharing
+        // a built-in's name are never listed here and stay discoverable only
+        // through the manifest-checked index.
+        const builtinToolNames = handlerBuiltinNames.filter((name) =>
+          name === CLARIFICATION_TOOL_NAME || initialToolNames.includes(name));
         if (!managedTurn) {
           return createHybridToolDiscovery({
             discovery: createRegistryToolDiscovery({
@@ -698,6 +748,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
               semantics: toolSemantics,
             }),
             initialToolNames,
+            builtinToolNames,
           });
         }
         const revocations = managedRuntime?.loadRevocations
@@ -721,6 +772,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             semantics: toolSemantics,
           }),
           initialToolNames,
+          builtinToolNames,
         });
       };
 
@@ -783,15 +835,19 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         }
 
         // Add followup tool if configured
-        if (followups) {
-          const followupTool = createFollowupTool(followups);
-          if (followupTool && !registry[followupTool.id]) {
-            registry = { ...registry, [followupTool.id]: followupTool };
-          }
+        const followupTool = followups ? createFollowupTool(followups) : null;
+        if (followupTool && !registry[followupTool.id]) {
+          registry = { ...registry, [followupTool.id]: followupTool };
         }
+        registry = withClarification(registry);
+        const handlerBuiltinNames = findHandlerBuiltins(
+          registry,
+          [followupTool, clarificationTool],
+        );
 
         // Extract user input for pipeline
-        let userText = extractLastUserText(messages);
+        let userText = clarificationResume?.routingText
+          ?? extractLastUserText(messages);
         if (piiShield) {
           userText = await piiShield.outbound(userText, sessionId);
         }
@@ -862,10 +918,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           : Object.keys(registry);
         const discoveryController = pipelineResult.blocked
           ? undefined
-          : await buildDiscovery(registry, initialToolNames);
+          : await buildDiscovery(registry, initialToolNames, handlerBuiltinNames);
 
         // Convert all tools to AI tools
         let aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
+        const clarificationAiTool = aiTools[CLARIFICATION_TOOL_NAME];
 
         // Scope tools to pipeline selection
         if (pipelineResult.blocked) {
@@ -878,6 +935,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             selected: pipelineResult.tools,
             fallbackToAll: !hasExplicitSelection,
           });
+          // Clarification stays callable, also for an empty focused selection.
+          if (clarificationAiTool) {
+            aiTools = { ...aiTools, [CLARIFICATION_TOOL_NAME]: clarificationAiTool };
+          }
         }
 
         // Resolve model — config callback > pipeline instance > error
@@ -995,6 +1056,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
           managedTurn,
           toolDiscovery: discoveryController,
+          handlerBuiltinToolNames: discoveryController
+            ? [...handlerBuiltinNames, 'find_tools']
+            : handlerBuiltinNames,
         });
       }
 
@@ -1034,7 +1098,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       } else {
         registry = await loadTools!(endpointToolContext);
       }
-      const allToolNames = Object.keys(registry);
+      registry = withClarification(registry);
+      const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool]);
+      const allToolNames = Object.keys(registry)
+        .filter((name) => name !== CLARIFICATION_TOOL_NAME);
 
       // PII Shield: anonymize for legacy mode
       const legacySessionId = piiShield ? deriveSessionId(processedMessages) : '';
@@ -1046,7 +1113,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // Intent routing
       let routing: IntentRoutingResult | undefined;
       if (intentRouter) {
-        const text = extractLastUserText(processedMessages);
+        const text = clarificationResume?.routingText
+          ?? extractLastUserText(processedMessages);
         routing = await intentRouter(text, allToolNames);
       }
 
@@ -1059,12 +1127,17 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         for (const name of routing.toolNames) {
           if (aiTools[name]) scoped[name] = aiTools[name];
         }
-        if (Object.keys(scoped).length > 0) aiTools = scoped;
+        if (Object.keys(scoped).length > 0) {
+          aiTools = aiTools[CLARIFICATION_TOOL_NAME]
+            ? { ...scoped, [CLARIFICATION_TOOL_NAME]: aiTools[CLARIFICATION_TOOL_NAME] }
+            : scoped;
+        }
       }
 
       const discoveryController = await buildDiscovery(
         registry,
         routing?.toolNames?.length ? routing.toolNames : allToolNames,
+        handlerBuiltinNames,
       );
       if (discoveryController) {
         // Discovery needs the full eligible server-side set; `activeTools`
@@ -1141,6 +1214,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,
         managedTurn,
         toolDiscovery: discoveryController,
+        handlerBuiltinToolNames: discoveryController
+          ? [...handlerBuiltinNames, 'find_tools']
+          : handlerBuiltinNames,
       });
     } catch (error) {
       onError?.(error, req);
@@ -1156,6 +1232,19 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
 
   return handler;
+}
+
+/**
+ * SDK built-ins whose tool instance the handler itself put into the registry.
+ * Instance identity decides, not the name: a registry- or manifest-supplied
+ * tool that shares a built-in's name is never listed and stays fully guarded.
+ */
+function findHandlerBuiltins(
+  registry: ToolRegistry,
+  created: ReadonlyArray<Tool | null>,
+): string[] {
+  return NON_DOMAIN_TOOL_NAMES.filter((name) =>
+    created.some((tool) => tool !== null && registry[name] === tool));
 }
 
 // ============================================================================

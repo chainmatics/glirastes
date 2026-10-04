@@ -15,7 +15,7 @@ import type {
   SchemaLike,
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
-import type { InternalApiCaller } from '../../core/index.js';
+import type { ClarificationConfig, InternalApiCaller } from '../../core/index.js';
 import type {
   Principal,
   SecurityRevocation,
@@ -214,6 +214,14 @@ export interface AiChatHandlerConfig {
   followups?: FollowupsConfig;
 
   /**
+   * Built-in structured clarification (`ask_clarification`). The model asks
+   * one targeted question inside its normal step (no extra planner call);
+   * the turn ends after the question, and the UI's answer resumes the
+   * original request. Omit to keep the tool unavailable.
+   */
+  clarification?: ClarificationConfig;
+
+  /**
    * Model or model-resolver. Optional when pipeline `ModelSelectorConfig`
    * entries include an `instance` field — the adapter falls back to
    * `pipelineResult.model.instance` automatically.
@@ -378,6 +386,7 @@ export type { PromptOverride };
 
 // Re-export pipeline types for consumer convenience
 export type { AiPipeline, FollowupsConfig, PipelineResult };
+export type { ClarificationConfig };
 
 // ============================================================================
 // Server Action Helper Types
