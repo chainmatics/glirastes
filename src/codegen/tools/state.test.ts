@@ -252,6 +252,26 @@ describe('previous tool state', () => {
     expect(previous.state?.inventory.executions.map((entry) => entry.toolId)).toEqual([TOOL_C]);
   });
 
+  it('rejects an explicit adopt path that does not exist instead of dropping the committed inventory', async () => {
+    const root = await app({
+      '.glirastes/foundation-execution-inventory.json': canonicalJson(
+        inventory([execution(TOOL_A, 'GET /api/tasks', 'tasks.search')]),
+      ),
+    });
+    await expect(readPreviousToolState(root, config, { adoptInventoryPath: 'pilot/typo.json' }))
+      .rejects.toEqual(expect.objectContaining({
+        name: 'ToolStateError',
+        path: 'pilot/typo.json',
+        message: 'pilot/typo.json does not exist.',
+      }));
+    // The default committed path stays fail-open: no file means no previous state.
+    const fresh = await readPreviousToolState(await app({}), config);
+    expect(fresh.state).toBeUndefined();
+    // Without the flag the committed inventory is still read.
+    const committed = await readPreviousToolState(root, config);
+    expect(committed.state?.inventory.executions.map((entry) => entry.definitionId)).toEqual(['tasks.search']);
+  });
+
   it('keeps the strictest previous risk and the stale contract binding across a conflict', async () => {
     const root = await app({
       '.glirastes/setup-artifact.json': conflict(canonicalJson(artifact('safe-read')), canonicalJson(artifact('write'))),

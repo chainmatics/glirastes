@@ -71,12 +71,24 @@ export function splitMergeConflict(text: string): [string, string] | undefined {
   return [ours.join('\n'), theirs.join('\n')];
 }
 
-async function readSides(root: string, path: string): Promise<unknown[]> {
+/**
+ * A committed state file that is absent means "no previous state". A path the
+ * caller named explicitly (`required`, e.g. `--adopt`) must exist: a typo there
+ * would otherwise silently discard the committed identities it should adopt.
+ */
+async function readSides(
+  root: string,
+  path: string,
+  options: { required?: boolean } = {},
+): Promise<unknown[]> {
   let text: string;
   try {
     text = await readFile(resolve(root, path), 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (options.required) throw new ToolStateError(path, `${path} does not exist.`);
+      return [];
+    }
     throw error;
   }
   const sides = splitMergeConflict(text) ?? [text];
@@ -246,7 +258,7 @@ export async function readPreviousToolState(
   const inventoryPath = options.adoptInventoryPath ?? TOOLS_PATHS.inventory;
   const inventories = parseSides(
     inventoryPath,
-    await readSides(root, inventoryPath),
+    await readSides(root, inventoryPath, { required: options.adoptInventoryPath !== undefined }),
     FoundationExecutionInventorySchema,
   );
   for (const inventory of inventories) {
