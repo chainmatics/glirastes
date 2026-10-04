@@ -23,6 +23,11 @@ const executionBase = z.object({
 
 const endpointExecution = executionBase.extend({
   executionKind: z.literal('endpoint'),
+  /**
+   * The deterministic source that enumerated the endpoint. Absent on
+   * inventories written before the tools generator; treated as next-app.
+   */
+  sourceKind: z.enum(['next-app']).optional(),
   sourceFile: z.string().trim().min(1).max(2_048),
   method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
   path: z.string().startsWith('/').max(2_048),
@@ -113,7 +118,7 @@ function assertUniqueInventory(
   }
 }
 
-async function verifyEndpoint(
+async function verifyNextEndpoint(
   rootDir: string,
   execution: z.infer<typeof endpointExecution>,
 ): Promise<DiscoveredFoundationExecution> {
@@ -129,7 +134,14 @@ async function verifyEndpoint(
     throw error;
   }
 
-  if (!readRouteExports(source, execution.sourceFile).exports.some(({ method }) => method === execution.method)) {
+  // A wrapper export (`export const GET = withAuth(…)`) exists even though the
+  // reader cannot resolve its body; the fingerprint below still pins the file.
+  const routeExports = readRouteExports(source, execution.sourceFile);
+  const declared = routeExports.exports.some(({ method }) => method === execution.method)
+    || routeExports.findings.some((finding) => (
+      finding.code === 'route-export-unresolved' && finding.exportName === execution.method
+    ));
+  if (!declared) {
     throw new Error(
       `Foundation inventory references a missing route export: ${execution.stableKey}`,
     );
@@ -160,6 +172,15 @@ async function verifyEndpoint(
       exportName: execution.method,
     },
   };
+}
+
+async function verifyEndpoint(
+  rootDir: string,
+  execution: z.infer<typeof endpointExecution>,
+): Promise<DiscoveredFoundationExecution> {
+  const kind = execution.sourceKind ?? 'next-app';
+  if (kind === 'next-app') return verifyNextEndpoint(rootDir, execution);
+  throw new Error(`Unsupported endpoint source kind: ${String(kind)}`);
 }
 
 /**

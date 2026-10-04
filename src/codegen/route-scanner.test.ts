@@ -3,8 +3,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
+  AUTH_PATTERNS,
   createRouteSourceFingerprint,
   scanNextAppRoutes,
+  toRoutePath,
   writeNextAppRouteScan,
 } from './route-scanner.js';
 
@@ -267,5 +269,21 @@ describe('scanNextAppRoutes', () => {
       candidates: artifact.result.candidates,
       ignored: [],
     });
+  });
+});
+
+describe('route scanner exports for the tools generator', () => {
+  it('maps app-router files to stable paths without route groups', () => {
+    const apiDir = join('/app', 'src/app/api');
+    expect(toRoutePath(apiDir, join(apiDir, '(admin)', 'tasks', '[id]', 'route.ts')))
+      .toEqual({ path: '/api/tasks/:id', pathParams: ['id'] });
+    expect(toRoutePath(apiDir, join(apiDir, 'files', '[...slug]', 'route.ts')))
+      .toEqual({ path: '/api/files/*slug', pathParams: ['slug'] });
+  });
+
+  it('exposes the default auth helper names', () => {
+    expect(AUTH_PATTERNS.map(([name]) => name)).toEqual([
+      'resolvePrincipal', 'resolveUser', 'getServerSession', 'getSession', 'auth',
+    ]);
   });
 });
