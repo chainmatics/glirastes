@@ -35,4 +35,24 @@ describe('authorizeToolCall', () => {
       toolId,
     })).toEqual({ allowed: false, reason });
   });
+
+  it('always confirms tier-3 tools even when the policy does not ask for it', () => {
+    expect(authorizeToolCall({
+      principal,
+      agentRevision,
+      manifestRevision: {
+        ...manifestRevision,
+        tools: [{ ...manifestRevision.tools[0]!, riskClass: 'delete' }],
+      },
+      policyRevision: {
+        ...policyRevision,
+        toolPolicies: [{
+          ...policyRevision.toolPolicies[0]!,
+          riskClass: 'delete',
+          requiresApproval: false,
+        }],
+      },
+      toolId: agentRevision.toolAllowlist[0]!,
+    })).toEqual({ allowed: true, requiresApproval: true, riskClass: 'delete' });
+  });
 });

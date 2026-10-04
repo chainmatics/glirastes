@@ -5,6 +5,7 @@ import type {
   RuntimePolicyRevision,
   ToolRiskClass,
 } from '../contracts/index.js';
+import { confirmationFloor } from '../contracts/tool-policy.js';
 
 export type ToolAuthorizationResult =
   | {
@@ -68,7 +69,8 @@ export function authorizeToolCall(options: {
 
   return {
     allowed: true,
-    requiresApproval: policy.requiresApproval,
+    // Tier 3 always confirms, whatever the pinned policy says.
+    requiresApproval: confirmationFloor(policy.riskClass, policy.requiresApproval),
     riskClass: policy.riskClass,
   };
 }

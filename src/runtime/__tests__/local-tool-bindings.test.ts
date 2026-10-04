@@ -218,6 +218,52 @@ describe('materializeManifestToolRegistry', () => {
       bindings: [],
     })).toThrow(/missing local tool binding/i);
   });
+
+  it('confirms tier-3 tools even when the policy does not ask for it', () => {
+    const base = snapshot();
+    const tierThree = {
+      ...base,
+      manifestRevision: {
+        ...base.manifestRevision,
+        tools: [{ ...base.manifestRevision.tools[0]!, riskClass: 'delete' as const }],
+      },
+      policyRevision: {
+        ...base.policyRevision,
+        toolPolicies: [{
+          ...base.policyRevision.toolPolicies[0]!,
+          riskClass: 'delete' as const,
+          requiresApproval: false,
+        }],
+      },
+    };
+    expect(materializeManifestToolRegistry({
+      snapshot: tierThree,
+      bindings: [binding],
+    }).list_tasks?.needsApproval).toBe(true);
+  });
+
+  it('keeps a reviewed write relaxation unconfirmed', () => {
+    const base = snapshot();
+    const relaxedWrite = {
+      ...base,
+      manifestRevision: {
+        ...base.manifestRevision,
+        tools: [{ ...base.manifestRevision.tools[0]!, riskClass: 'write' as const }],
+      },
+      policyRevision: {
+        ...base.policyRevision,
+        toolPolicies: [{
+          ...base.policyRevision.toolPolicies[0]!,
+          riskClass: 'write' as const,
+          requiresApproval: false,
+        }],
+      },
+    };
+    expect(materializeManifestToolRegistry({
+      snapshot: relaxedWrite,
+      bindings: [binding],
+    }).list_tasks?.needsApproval).toBe(false);
+  });
 });
 
 describe('createLocalSchemaDigest', () => {

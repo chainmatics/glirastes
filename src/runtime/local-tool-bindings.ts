@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type {
   ManifestTool,
 } from '../contracts/revisions.js';
+import { confirmationFloor } from '../contracts/tool-policy.js';
 import type {
   EndpointMethod,
   SchemaLike,
@@ -232,7 +233,7 @@ export function materializeManifestToolRegistry(options: {
       method: manifestTool.executionKind === 'endpoint'
         ? manifestTool.method
         : undefined,
-      needsApproval: policy.requiresApproval,
+      needsApproval: confirmationFloor(policy.riskClass, policy.requiresApproval),
     };
   }
 

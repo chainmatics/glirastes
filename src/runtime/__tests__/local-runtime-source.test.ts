@@ -281,4 +281,24 @@ describe('createLocalRuntimeSource', () => {
       fixtureOptions({ promptBundle: bundle }),
     )).toThrow(/digest/i);
   });
+
+  it('never lets a tier-3 tool run unattended', () => {
+    const artifact = fixtureArtifact() as {
+      tools: Array<Record<string, unknown>>;
+    };
+    artifact.tools[0]!.riskClass = 'delete';
+    artifact.tools[0]!.requiresApproval = false;
+    const source = createLocalRuntimeSource(
+      fixtureOptions({ setupArtifact: artifact }),
+    );
+    const snapshot = source.resolveTurnSnapshot({
+      turnId: 't-1',
+      principal: fixturePrincipal(source.identity.tenantId),
+    });
+    expect(snapshot.policyRevision.toolPolicies[0]).toMatchObject({
+      toolId: ENDPOINT_TOOL_ID,
+      riskClass: 'delete',
+      requiresApproval: true,
+    });
+  });
 });
