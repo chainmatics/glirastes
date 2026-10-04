@@ -3,6 +3,13 @@ import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
+import { readClarificationPart } from '../utils/clarification.js';
+import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
+import {
+  CLARIFICATION_TOOL_NAME,
+  formatClarificationAnswer,
+  stripClarificationMarkers,
+} from '../../contracts/clarification.js';
 import type { MessageBubbleProps, TextPart } from '../types.js';
 
 // Lazy-load react-markdown — keeps it out of the synchronous import graph so
@@ -39,6 +46,8 @@ function shouldRenderToolResult(
   // Follow-up registration is consumed by the suggestion system, not exposed
   // as a raw tool result in either supported message-part format.
   if (toolName === 'suggest_followups') return false;
+  // Clarifications render as an answerable card, never as raw output.
+  if (toolName === CLARIFICATION_TOOL_NAME) return false;
   if (mode === 'hidden') return false;
   if (mode === 'allowlist') return allowlist.includes(toolName);
   return true;
@@ -58,10 +67,19 @@ function isTextPart(part: unknown): part is TextPart {
  * Uses `data-role` attribute for styling (user/assistant/system).
  */
 export function MessageBubble({ message, className }: MessageBubbleProps) {
-  const { classNames, components, toolResults } = useChatContext();
+  const {
+    classNames,
+    components,
+    toolResults,
+    messages,
+    send,
+    isLoading,
+  } = useChatContext();
   const MarkdownComponent = components.Markdown ?? DefaultMarkdown;
   const ToolResultComponent = components.ToolResultBlock ?? DefaultToolResult;
   const MentionChipComponent = components.MentionChip ?? DefaultMentionChip;
+  const ClarificationComponent = components.ClarificationCard ?? DefaultClarificationCard;
+  const isLatestMessage = messages?.[messages.length - 1]?.id === message.id;
 
   const mode = toolResults.mode ?? 'default';
   const allowlist = toolResults.allowlist ?? [];
@@ -70,7 +88,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const cleanTextParts = message.parts
     .filter(isTextPart)
     .filter((p) => p.text.trim())
-    .map((p) => stripContextBlocks(p.text))
+    .map((p) => stripClarificationMarkers(stripContextBlocks(p.text)))
     .map((text) => (
       message.role === 'assistant'
         ? extractTrailingFollowupSuggestions(text).text
@@ -115,6 +133,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   // Skip truly empty assistant messages
   if (message.role === 'assistant' && !hasTextContent && !fallbackSummary) {
     const hasVisibleToolOutput = message.parts.some(p => {
+      if (readClarificationPart(p)) return true;
       if (!isRecord(p)) return false;
       const t = typeof p.type === 'string' ? p.type : '';
       if (t.startsWith('tool-') && p.state === 'output-available') {
@@ -182,6 +201,23 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 
       {/* Render tool results via ToolResultBlock */}
       {message.parts.map((part, i) => {
+        const clarification = readClarificationPart(part);
+        if (clarification) {
+          return (
+            <ClarificationComponent
+              key={`clarification-${clarification.toolCallId}`}
+              toolCallId={clarification.toolCallId}
+              request={clarification.request}
+              interactive={clarification.ready && isLatestMessage && !isLoading}
+              onAnswer={(answer) => send(formatClarificationAnswer({
+                toolCallId: clarification.toolCallId,
+                answer: answer.text,
+                ...(answer.optionId ? { optionId: answer.optionId } : {}),
+              }))}
+            />
+          );
+        }
+
         // Standard ToolResultPart
         if ('toolName' in part && 'result' in part && part.result !== undefined) {
           if (!shouldRenderToolResult(part.toolName, mode, allowlist)) return null;

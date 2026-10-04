@@ -74,6 +74,8 @@ export const DEFAULT_LOCALE: ChatLocale = {
   sessionArchiveMessage: '"{title}" will be archived.',
   renameSessionAriaLabel: 'Rename conversation',
   renameSessionPlaceholder: 'Conversation title',
+  clarificationInputLabel: 'Your answer',
+  clarificationSubmitButton: 'Answer',
 };
 
 // ============================================================================

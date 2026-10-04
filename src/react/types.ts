@@ -1,4 +1,11 @@
 import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent } from 'react';
+import type { ClarificationRequest } from '../contracts/clarification.js';
+
+export type {
+  ClarificationOption,
+  ClarificationRequest,
+  ClarificationTarget,
+} from '../contracts/clarification.js';
 
 // ============================================================================
 // Chat Transport — transport-agnostic interface for chat backends
@@ -435,6 +442,7 @@ export interface ChatComponents {
   PipelineTimeline?: ComponentType<PipelineTimelineProps>;
   SuggestionChip?: ComponentType<SuggestionChipProps>;
   MentionChip?: ComponentType<MentionChipProps>;
+  ClarificationCard?: ComponentType<ClarificationCardProps>;
 }
 
 // ============================================================================
@@ -493,6 +501,10 @@ export interface ChatLocale {
   sessionArchiveMessage: string;     // supports `{title}`
   renameSessionAriaLabel: string;
   renameSessionPlaceholder: string;
+
+  // Structured clarification
+  clarificationInputLabel: string;
+  clarificationSubmitButton: string;
 }
 
 // ============================================================================
@@ -888,6 +900,15 @@ export interface SuggestionChipProps {
 }
 
 export interface SuggestionBarProps {
+  className?: string;
+}
+
+export interface ClarificationCardProps {
+  toolCallId: string;
+  request: ClarificationRequest;
+  /** False once answered or when a newer message exists. */
+  interactive: boolean;
+  onAnswer: (answer: { text: string; optionId?: string }) => void;
   className?: string;
 }
 

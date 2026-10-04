@@ -84,6 +84,10 @@ export type {
   SuggestionBarProps,
   AiTriggerButtonProps,
   ToolResultBlockProps,
+  ClarificationCardProps,
+  ClarificationOption,
+  ClarificationRequest,
+  ClarificationTarget,
   MarkdownProps,
   // Transport
   ChatTransport,
@@ -160,6 +164,7 @@ export { VoiceInputButton } from './components/voice-input-button.js';
 export { RecordingBar } from './components/recording-bar.js';
 export { AiTriggerButton } from './components/ai-trigger-button.js';
 export { SessionSwitcher, type SessionSwitcherProps } from './components/session-switcher.js';
+export { ClarificationCard } from './components/clarification-card.js';
 
 // Bridges
 export {
@@ -189,6 +194,15 @@ export {
   createApprovalDescriptionGenerator,
   type ApprovalDescriptionConfig,
 } from './utils/create-approval-description.js';
+export {
+  findOpenClarification,
+  readClarificationPart,
+  type ClarificationPart,
+} from './utils/clarification.js';
+export {
+  formatClarificationAnswer,
+  stripClarificationMarkers,
+} from '../contracts/clarification.js';
 
 // UI action bus + hooks (client action dispatch)
 export * from './ui.js';
