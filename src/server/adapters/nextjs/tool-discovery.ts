@@ -8,6 +8,16 @@ const FindToolsInputSchema = z.object({
   query: z.string().trim().min(1).max(200),
 });
 
+/**
+ * SDK-provided tools that are never domain capabilities: registry-mode
+ * `find_tools` never indexes them, and they are not manifest tools.
+ */
+export const NON_DOMAIN_TOOL_NAMES = Object.freeze([
+  'find_tools',
+  'suggest_followups',
+  'ask_clarification',
+] as const);
+
 export interface HybridToolDiscovery {
   readonly turnId: string;
   readonly tool: {

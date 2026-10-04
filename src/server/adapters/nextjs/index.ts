@@ -19,6 +19,7 @@ export {
 export { executeTool } from './server-action-helper.js';
 export {
   createHybridToolDiscovery,
+  NON_DOMAIN_TOOL_NAMES,
   type HybridToolDiscovery,
 } from './tool-discovery.js';
 

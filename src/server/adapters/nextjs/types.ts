@@ -22,6 +22,7 @@ import type {
 } from '../../../contracts/index.js';
 import type {
   ManagedTurnBudgetSignal,
+  ToolSearchSemanticsMap,
   TurnSnapshot,
 } from '../../../runtime/index.js';
 
@@ -178,10 +179,19 @@ export interface AiChatHandlerConfig {
   managedRuntime?: ManagedLocalRuntimeConfig;
 
   /**
-   * Enable turn-pinned local `find_tools` recovery. It requires managedRuntime
-   * and a manifest-materialized registry; false preserves static scoping.
+   * Enable local `find_tools` recovery. With managedRuntime (managed or
+   * standalone source) discovery is pinned to the turn snapshot and its
+   * authorization; without it the per-request registry is the deployed,
+   * app-authorized tool set. false preserves static scoping.
    */
   toolDiscovery?: boolean;
+
+  /**
+   * Search-only synonyms keyed by model-facing tool name (for example from
+   * generated tool semantics). They improve `find_tools` ranking and never
+   * make a tool eligible or reach the model.
+   */
+  toolSemantics?: ToolSearchSemanticsMap;
 
   /**
    * Dynamic tool loader. Used in legacy mode (without pipeline).

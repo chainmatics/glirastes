@@ -27,6 +27,7 @@ import { filterFallbackError } from './filter-fallback-error.js';
 import { PrincipalSchema } from '../../../contracts/index.js';
 import {
   createManagedTurnGuard,
+  createRegistryToolDiscovery,
   createTurnToolDiscovery,
   isToolRevoked,
   type BudgetEvaluation,
@@ -34,6 +35,7 @@ import {
 } from '../../../runtime/index.js';
 import {
   createHybridToolDiscovery,
+  NON_DOMAIN_TOOL_NAMES,
   type HybridToolDiscovery,
 } from './tool-discovery.js';
 
@@ -559,6 +561,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     onFinish,
     streamHandler: customStreamHandler,
     toolDiscovery: enableToolDiscovery = false,
+    toolSemantics,
   } = config;
 
   // Report model defaults to Glirastes (fire-and-forget, once)
@@ -685,7 +688,18 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         registry: ToolRegistry,
         initialToolNames: ReadonlyArray<string>,
       ): Promise<HybridToolDiscovery | undefined> => {
-        if (!enableToolDiscovery || !managedTurn) return undefined;
+        if (!enableToolDiscovery) return undefined;
+        if (!managedTurn) {
+          return createHybridToolDiscovery({
+            discovery: createRegistryToolDiscovery({
+              turnId,
+              registry,
+              excludeNames: NON_DOMAIN_TOOL_NAMES,
+              semantics: toolSemantics,
+            }),
+            initialToolNames,
+          });
+        }
         const revocations = managedRuntime?.loadRevocations
           ? await managedRuntime.loadRevocations({
             request: req,
@@ -704,6 +718,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             snapshot: managedTurn.snapshot,
             registry,
             revokedToolIds,
+            semantics: toolSemantics,
           }),
           initialToolNames,
         });
