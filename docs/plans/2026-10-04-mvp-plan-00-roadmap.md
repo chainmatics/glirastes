@@ -43,7 +43,8 @@
 | P06 | Referenz-Fixtures React+NestJS und Vue+FastAPI inkl. Änderungskorpus (18 Tests) | SDK `mvp-tools` | P05, P07 (Einbettung) | wird geschrieben vor Start |
 | P07 | [Routing, Suche, Rückfragen, Chat-UI, Einbettung, STT](2026-10-04-mvp-plan-07-routing-chat-stt.md) | SDK `.worktrees/mvp-chat` (`codex/mvp-chat`) | P01 | ausgeschrieben |
 | P07b | Generisches @- und /-System (Spec 6a, freigegeben): deklarative Entitäten/Befehle, direkte `ui`/`tool`-Befehle ohne Modellaufruf, Ableitung aus dem Code, React + `<glirastes-chat>` | SDK `mvp-tools` (nach Merge von P07) | P07, P04 | wird geschrieben vor Start |
-| P08 | Platform: Hygiene (Journal, API-Typecheck, ESLint, Pairing-Key), begrenzte Overrides (0044), Policy-Revisionen, Capability-Report/-Ansicht, `/connect` und `/manage` nach den fünf Fragen | Platform `.worktrees/mvp-platform` (`codex/mvp-platform`) | P01 (Hygiene), P02 (Verträge) | wird geschrieben vor Start |
+| P08a | [Platform-Hygiene](2026-10-04-mvp-plan-08a-platform-hygiene.md): Migrationsjournal, API-Typecheck, Citadel-ESLint, Pairing-Key-Sicherheit, Pairing-Robustheit, Aegis-Folgepunkte | Platform `.worktrees/mvp-platform` (`codex/mvp-platform`) | P01 | ausgeschrieben |
+| P08 | Platform (P08b): Hygiene (Journal, API-Typecheck, ESLint, Pairing-Key), begrenzte Overrides (0044), Policy-Revisionen, Capability-Report/-Ansicht, `/connect` und `/manage` nach den fünf Fragen | Platform `.worktrees/mvp-platform` (`codex/mvp-platform`) | P01 (Hygiene), P02 (Verträge) | wird geschrieben vor Start |
 | P09 | Metriken (FR-7): Event v2 + Senke im SDK, Ingest, Aggregation, Dashboard | SDK `mvp-tools` + Platform `mvp-platform` | P08 | wird geschrieben vor Start |
 | P10 | Pro: Managed Tool-Generierung (Job-API, OpenRouter-Provisioning, Skill-Runner, CI-Workflow) | Platform + SDK | P05, P08 | wird geschrieben vor Start |
 | P11 | Get It Done auf aktuellem `master` mit Foundation | GID `.worktrees/glirastes-mvp` (`codex/glirastes-mvp` von `origin/master`) | P05 (Generator + Migrations-Skill), P07 | wird geschrieben vor Start |
@@ -94,6 +95,12 @@ Nach jedem Teilplan:
 | Kanonisches Arbeitsdokument der Platform: Aegis-Flake als behoben eintragen (`18ff671`, `39f0eeb`) | P08 |
 | GID: `.planning/codebase/CONVENTIONS.md` beschreibt noch `npm run lint`/`next lint`; `eslint.config.mjs` ignoriert `.worktrees/**` nicht; `eslint-suppressions.json` beim Umstieg auf `master` neu erzeugen statt zusammenführen | P11 |
 | SDK: EPERM-Toleranz auf dem Signalpfad des Test-Cleanups ohne eigenen Test; `prepare-browser`-Import in `tests/source-driven-browser.test.mjs:97` verschluckt echte Importfehler; `typecheck:tests` hängt von frischem `dist/` ab (Mapping `glirastes/*` → `src/*` erwägen) | P13 |
+| Pro-Freischaltung per abgesichertem Admin-Befehl (kein DB-Handeingriff, Spec 7) | P08b, vor P10 |
+| Platform-CI-Workflow (API-Typecheck, API-/Citadel-/DB-Tests, Citadel-Lint, Migration von Null) | P13 |
+| `glirastes connect` übernimmt das Framework aus `tools.json` statt fest `nextjs` | P05 |
+| App-Scope-Prüfung für app-gebundene Keys in `/v1/audit`, `/v1/stream`, Gate-Config, Deployment-Liste | P08b |
+| Connect + Sync Ende-zu-Ende mit dem neuen Pairing-Key über den GID-Piloten (braucht Freigabe für lokale Wegwerf-Postgres) | P11/P13 |
+| Platform-UI-Redesign „Living Network“ (deutlich eleganter, Wow-Effekt), Design-Abschnitt + P08b-Plan nach Freigabe des Mockups | P08b |
 
 ## Freigaben, die unterwegs eingeholt werden
 
