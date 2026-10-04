@@ -47,12 +47,23 @@ export {
 export {
   assertLocalToolBindingMatches,
   createLocalSchemaDigest,
+  localToolBindingMismatches,
   materializeManifestToolRegistry,
   modelFacingToolName,
   type LocalEndpointToolBinding,
   type LocalToolBinding,
   type LocalUiToolBinding,
+  type ToolRegistryDiagnostic,
+  type ToolRegistryDiagnosticReason,
 } from './local-tool-bindings.js';
+export {
+  applyPolicyOverlay,
+  policyOverlayFromRevision,
+  type PolicyOverlayEntry,
+  type PolicyOverlayIgnoredEntry,
+  type PolicyOverlayResult,
+  type VerifiedPolicyOverlay,
+} from './policy-overlay.js';
 export {
   createTurnToolDiscovery,
   type ToolDiscoveryResult,
