@@ -1,6 +1,6 @@
 # Glirastes MVP-Abschluss: Design
 
-Version: 1.4 · Stand: 2026-10-04 (Abschnitt 6a zur Freigabe) · Status: Entwurf zur Freigabe durch Philipp
+Version: 1.4 · Stand: 2026-10-04 (Abschnitt 6a freigegeben) · Status: Entwurf zur Freigabe durch Philipp
 
 Grundlage: [MVP-Scope v1.2](2026-09-13-mvp-scope-and-requirements.md), [Fokussiertes MVP](2026-09-13-focused-mvp-design.md), Platform-Design [Local, Connected Free, Managed](/Users/philipprollmann/Dev/chainmatics/glirastes-platform/.worktrees/foundation-control-plane-v1/docs/plans/2026-08-14-local-connected-managed-platform-design.md). Dieses Dokument ersetzt keine dieser Quellen, sondern legt fest, wie das MVP fertiggestellt wird. Wo es abweicht, ist das ausdrücklich markiert.
 
@@ -327,7 +327,7 @@ Python 3.12 ist deklarierte Voraussetzung für die Vue/FastAPI-Fixture (README, 
 - **STT:** Push-to-talk (gedrückt halten, Taste und Button) zusätzlich zum Umschalten; Zwischentext auch in der Aufnahmeleiste; Bearbeiten vor dem Senden; kein Auto-Senden durch Finalisierung; weiterhin genau ein Controller und ein Mikrofonstream. Browser-Tests mit Chromes Fake-Media-Device: Stop, Cancel, Retry, Routen- und Sessionwechsel, Unmount hinterlassen keinen Stream.
 - **Messung:** Vergleichskorpus mit identischem Modell vorher/nachher (Erfolgsquote, erste Antwort, Gesamtzeit, Modellrunden, Tokens). Live-Läufe mit dem Chat-Modellzugang der Zielapp (OpenRouter-Key von Get It Done) nur nach Philipps Freigabe der Key-Nutzung; bis dahin deterministisches Testmodell.
 
-## 6a. Ergänzung (zur Freigabe): Generisches @- und /-System für jede Zielapp
+## 6a. Ergänzung (freigegeben 2026-10-04): Generisches @- und /-System für jede Zielapp
 
 Wunsch Philipp (2026-10-04): Jede beliebige Zielapp kann vorgeben, mit welchen Dingen und Befehlen man im Chat direkt interagiert. P07 liefert dafür nur die Grundlage (generische Suche für `/` und `@` mit strukturierten IDs). Diese Ergänzung macht daraus ein deklaratives, framework-unabhängiges System, das sich soweit möglich automatisch aus dem Code ableitet.
 

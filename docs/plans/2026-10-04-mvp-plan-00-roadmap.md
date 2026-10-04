@@ -42,7 +42,7 @@
 | P05 | Agentische Arbeit per Skills: Arbeitslisten, einheitliche Prüfung, `tools eval`, Stufe-2-Datenmodell, sieben Skills, `init`-Anpassungen | SDK `mvp-tools` | P04, P07 (Merge vorher) | wird geschrieben vor Start |
 | P06 | Referenz-Fixtures React+NestJS und Vue+FastAPI inkl. Änderungskorpus (18 Tests) | SDK `mvp-tools` | P05, P07 (Einbettung) | wird geschrieben vor Start |
 | P07 | [Routing, Suche, Rückfragen, Chat-UI, Einbettung, STT](2026-10-04-mvp-plan-07-routing-chat-stt.md) | SDK `.worktrees/mvp-chat` (`codex/mvp-chat`) | P01 | ausgeschrieben |
-| P07b | Generisches @- und /-System (Spec 6a, **wartet auf Freigabe**): deklarative Entitäten/Befehle, direkte `ui`/`tool`-Befehle ohne Modellaufruf, Ableitung aus dem Code, React + `<glirastes-chat>` | SDK `mvp-tools` (nach Merge von P07) | P07, P04 | wird geschrieben vor Start |
+| P07b | Generisches @- und /-System (Spec 6a, freigegeben): deklarative Entitäten/Befehle, direkte `ui`/`tool`-Befehle ohne Modellaufruf, Ableitung aus dem Code, React + `<glirastes-chat>` | SDK `mvp-tools` (nach Merge von P07) | P07, P04 | wird geschrieben vor Start |
 | P08 | Platform: Hygiene (Journal, API-Typecheck, ESLint, Pairing-Key), begrenzte Overrides (0044), Policy-Revisionen, Capability-Report/-Ansicht, `/connect` und `/manage` nach den fünf Fragen | Platform `.worktrees/mvp-platform` (`codex/mvp-platform`) | P01 (Hygiene), P02 (Verträge) | wird geschrieben vor Start |
 | P09 | Metriken (FR-7): Event v2 + Senke im SDK, Ingest, Aggregation, Dashboard | SDK `mvp-tools` + Platform `mvp-platform` | P08 | wird geschrieben vor Start |
 | P10 | Pro: Managed Tool-Generierung (Job-API, OpenRouter-Provisioning, Skill-Runner, CI-Workflow) | Platform + SDK | P05, P08 | wird geschrieben vor Start |
