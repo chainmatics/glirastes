@@ -1,6 +1,6 @@
 # Glirastes MVP-Abschluss: Design
 
-Version: 1.3 · Stand: 2026-10-04 · Status: Entwurf zur Freigabe durch Philipp
+Version: 1.4 · Stand: 2026-10-04 (Abschnitt 6a zur Freigabe) · Status: Entwurf zur Freigabe durch Philipp
 
 Grundlage: [MVP-Scope v1.2](2026-09-13-mvp-scope-and-requirements.md), [Fokussiertes MVP](2026-09-13-focused-mvp-design.md), Platform-Design [Local, Connected Free, Managed](/Users/philipprollmann/Dev/chainmatics/glirastes-platform/.worktrees/foundation-control-plane-v1/docs/plans/2026-08-14-local-connected-managed-platform-design.md). Dieses Dokument ersetzt keine dieser Quellen, sondern legt fest, wie das MVP fertiggestellt wird. Wo es abweicht, ist das ausdrücklich markiert.
 
@@ -326,6 +326,38 @@ Python 3.12 ist deklarierte Voraussetzung für die Vue/FastAPI-Fixture (README, 
 - **Framework-neutrale Einbettung:** neues Subpaket `glirastes/embed` mit Custom Element `<glirastes-chat>` (Shadow DOM, CSS-Variablen, Events, sauberes Unmount); intern die React-UI. Genutzt von der Vue-Fixture.
 - **STT:** Push-to-talk (gedrückt halten, Taste und Button) zusätzlich zum Umschalten; Zwischentext auch in der Aufnahmeleiste; Bearbeiten vor dem Senden; kein Auto-Senden durch Finalisierung; weiterhin genau ein Controller und ein Mikrofonstream. Browser-Tests mit Chromes Fake-Media-Device: Stop, Cancel, Retry, Routen- und Sessionwechsel, Unmount hinterlassen keinen Stream.
 - **Messung:** Vergleichskorpus mit identischem Modell vorher/nachher (Erfolgsquote, erste Antwort, Gesamtzeit, Modellrunden, Tokens). Live-Läufe mit dem Chat-Modellzugang der Zielapp (OpenRouter-Key von Get It Done) nur nach Philipps Freigabe der Key-Nutzung; bis dahin deterministisches Testmodell.
+
+## 6a. Ergänzung (zur Freigabe): Generisches @- und /-System für jede Zielapp
+
+Wunsch Philipp (2026-10-04): Jede beliebige Zielapp kann vorgeben, mit welchen Dingen und Befehlen man im Chat direkt interagiert. P07 liefert dafür nur die Grundlage (generische Suche für `/` und `@` mit strukturierten IDs). Diese Ergänzung macht daraus ein deklaratives, framework-unabhängiges System, das sich soweit möglich automatisch aus dem Code ableitet.
+
+**Entitäten (`@`).** `defineChatEntity({ type, label: { de, en }, search(query, ctx), resolve?(id), card?, actions? })`. Die Auswahl fügt eine strukturierte Referenz `{ type, id, label }` in die Nachricht ein; das Modell erhält sie eindeutig als Kontext statt eines zu erratenden Namens. Zu jeder Entität erscheinen Kontextaktionen (z. B. „Öffnen“, „Erledigen“, „Zuweisen …“), per Maus und Tastatur erreichbar.
+
+**Befehle (`/`).** `defineChatCommand({ id, label, args?, run })` mit drei Ausführungsarten:
+
+| `run.kind` | Wirkung | Modellaufruf |
+| --- | --- | --- |
+| `ui` | deterministische UI-Aktion über den UiActionBus (Navigation, Filter, Dialoge) | nein |
+| `tool` | ruft ein Tool direkt mit den eingegebenen Argumenten auf – über dieselbe serverseitige Ausführung inkl. Rechte, Rückfrage, Revocation und Budget | nein |
+| `prompt` | fügt eine vorbereitete Anweisung ein, die das Modell ausführt | ja |
+
+Argumente können selbst `@`-Referenzen sein (z. B. `/zuweisen @Aufgabe @Person`); fehlende Argumente fragt die UI gezielt ab.
+
+**Automatische Ableitung (Generator, aufbauend auf P04/P05).**
+- Entitätssuche aus lesenden Such-/Listen-Endpunkten mit erkanntem Suchparameter und ID-/Label-Feldern im Ausgabeschema (z. B. `GET /api/tasks?search=`).
+- Kontextaktionen aus Endpunkten mit einem Pfadparameter dieses Typs (z. B. `PATCH /api/tasks/[id]`).
+- Befehle aus UI-Aktionen, Navigation (`/öffne …`) und Filtern (`/filter …`).
+- Ausgabe im generierten Modul (`chatEntities`, `chatCommands`); Übersteuerung in `.glirastes/chat-interactions.json` oder im App-Code; Labels, Synonyme und Icons ergänzt Stufe 2 über die Skills (`describing-glirastes-tools`, `building-glirastes-chat-ui`).
+
+**Framework-unabhängig.** Dieselben Definitionen gelten in React (Provider-Props/Hooks) und für `<glirastes-chat>` per JS-API (`el.defineEntity(…)`, `el.defineCommand(…)`) bzw. automatisch aus dem generierten Modul. Die Vue-Fixture nutzt genau diesen Weg.
+
+**Sicherheit.** Suchen laufen mit der Session des Nutzers über die App-Endpunkte; direkte Tool-Befehle nutzen exakt die normale Tool-Ausführung, nichts umgeht Rechte oder Rückfrage. Suchergebnisse und Referenzen gehen nie an die Glirastes-Platform.
+
+**Get It Done.** Ersetzt die hart codierten `UI_COMMANDS` und die app-spezifische Erwähnungssuche (P11).
+
+**Tests.** Ableitung aus den drei Fixtures; `ui`- und `tool`-Befehle laufen ohne Modellaufruf (Mock-Modell wird nachweislich nicht aufgerufen); Tool-Befehle respektieren Rückfrage und Rechte; Referenzen erreichen das Modell strukturiert; Tastatur und ARIA im Browser-Test; React und `<glirastes-chat>` verhalten sich gleich.
+
+Umsetzung als Teilplan P07b nach P07 und P04, vor P11.
 
 ## 7. TP4 – Platform-Betrieb und Metriken (FR-6, FR-7)
 
