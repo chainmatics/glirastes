@@ -305,3 +305,228 @@ export function parseToolPolicyFile(value: unknown): ToolPolicyFile {
     ...(identifier ? { identifier } : {}),
   });
 }
+
+export type PolicyOrigin = 'code-default' | 'local-policy' | 'platform';
+
+export interface EffectiveToolPolicy {
+  enabled: boolean;
+  requiresApproval: boolean;
+  riskClass: ToolRiskClass;
+  allowedRoles: string[];
+  description?: string;
+  origin: {
+    enabled: PolicyOrigin;
+    requiresApproval: PolicyOrigin;
+    riskClass: PolicyOrigin;
+    allowedRoles: PolicyOrigin;
+    description: PolicyOrigin;
+  };
+}
+
+export type ToolPolicyWarningCode =
+  | 'override-lapsed-risk-raised'
+  | 'risk-lower-available'
+  | 'policy-entry-orphaned';
+
+export interface ResolveToolPolicyInput {
+  toolId: string;
+  defaults: ToolPolicyDefaults;
+  /** False for needs_attention, excluded or missing tools; nothing re-enables them. */
+  codeEnabled: boolean;
+  local?: ToolPolicyEntry;
+  platform?: ToolPolicyEntry;
+  acceptedRisk?: { riskClass: ToolRiskClass; toolId: string };
+  /** The riskClass this toolId resolved to in the previous committed refresh. */
+  previousEffectiveRiskClass?: ToolRiskClass;
+}
+
+export interface ResolveToolPolicyResult {
+  effective: EffectiveToolPolicy;
+  warnings: Array<{ code: ToolPolicyWarningCode; field?: string }>;
+  errors: Array<{
+    code: 'E-POLICY-001' | 'E-POLICY-002';
+    field: string;
+    reason: string;
+  }>;
+}
+
+type PolicyWarning = ResolveToolPolicyResult['warnings'][number];
+type PolicyError = ResolveToolPolicyResult['errors'][number];
+
+interface PolicyLayer {
+  name: 'local' | 'platform';
+  origin: Exclude<PolicyOrigin, 'code-default'>;
+  entry: ToolPolicyEntry;
+}
+
+interface CollectedLayers {
+  layers: PolicyLayer[];
+  invalidOrigin?: PolicyOrigin;
+}
+
+interface ResolvedField<T> {
+  value: T;
+  origin: PolicyOrigin;
+}
+
+/**
+ * Pure policy resolution shared with the Platform port via golden vectors.
+ * Code defaults are the base; local and Platform entries restrict, except a
+ * reviewed, pinned relaxation of confirmation up to tier 2. Across all layers
+ * the most restrictive protection value wins.
+ */
+export function resolveToolPolicy(
+  input: ResolveToolPolicyInput,
+): ResolveToolPolicyResult {
+  const warnings: PolicyWarning[] = [];
+  const errors: PolicyError[] = [];
+  const { layers, invalidOrigin } = collectPolicyLayers(input, warnings, errors);
+  const risk = resolveRiskClass(input, layers, warnings);
+  const roles = resolveAllowedRoles(layers);
+  const enabled = resolveEnabled(
+    input.codeEnabled,
+    layers,
+    roles.disjointOrigin,
+    invalidOrigin,
+  );
+  const approval = resolveApproval(input, layers, risk, warnings, errors);
+  const description = resolveDescription(layers);
+  return {
+    effective: {
+      enabled: enabled.value,
+      requiresApproval: approval.value,
+      riskClass: risk.value,
+      allowedRoles: roles.value,
+      ...(description.value === undefined
+        ? {}
+        : { description: description.value }),
+      origin: {
+        enabled: enabled.origin,
+        requiresApproval: approval.origin,
+        riskClass: risk.origin,
+        allowedRoles: roles.origin,
+        description: description.origin,
+      },
+    },
+    warnings,
+    errors,
+  };
+}
+
+function collectPolicyLayers(
+  input: ResolveToolPolicyInput,
+  _warnings: PolicyWarning[],
+  _errors: PolicyError[],
+): CollectedLayers {
+  const layers: PolicyLayer[] = [];
+  if (input.local) {
+    layers.push({ name: 'local', origin: 'local-policy', entry: input.local });
+  }
+  if (input.platform) {
+    layers.push({ name: 'platform', origin: 'platform', entry: input.platform });
+  }
+  return { layers };
+}
+
+function resolveRiskClass(
+  input: ResolveToolPolicyInput,
+  layers: ReadonlyArray<PolicyLayer>,
+  _warnings: PolicyWarning[],
+): ResolvedField<ToolRiskClass> {
+  let value: ToolRiskClass = input.defaults.riskClass;
+  let origin: PolicyOrigin = 'code-default';
+  for (const layer of layers) {
+    const raised = mostRestrictiveRiskClass(value, layer.entry.riskClass);
+    if (raised !== value) {
+      value = raised;
+      origin = layer.origin;
+    }
+  }
+  return { value, origin };
+}
+
+function sameRoles(
+  left: ReadonlyArray<string>,
+  right: ReadonlyArray<string>,
+): boolean {
+  return left.length === right.length
+    && left.every((role, index) => role === right[index]);
+}
+
+function resolveAllowedRoles(
+  layers: ReadonlyArray<PolicyLayer>,
+): ResolvedField<string[]> & { disjointOrigin?: PolicyOrigin } {
+  let value: string[] = [];
+  let origin: PolicyOrigin = 'code-default';
+  for (const layer of layers) {
+    const restriction = layer.entry.allowedRoles;
+    if (!restriction || restriction.length === 0) continue;
+    const next = intersectAllowedRoles(value, restriction);
+    if (next.disjoint) {
+      // [] would read as "everyone"; a disjoint restriction means nobody.
+      return { value: [], origin: layer.origin, disjointOrigin: layer.origin };
+    }
+    if (!sameRoles(next.roles, value)) {
+      value = next.roles;
+      origin = layer.origin;
+    }
+  }
+  return { value, origin };
+}
+
+function resolveEnabled(
+  codeEnabled: boolean,
+  layers: ReadonlyArray<PolicyLayer>,
+  disjointOrigin: PolicyOrigin | undefined,
+  invalidOrigin: PolicyOrigin | undefined,
+): ResolvedField<boolean> {
+  if (!codeEnabled) return { value: false, origin: 'code-default' };
+  if (invalidOrigin) return { value: false, origin: invalidOrigin };
+  const disabledBy = layers.find((layer) => layer.entry.enabled === false);
+  if (disabledBy) return { value: false, origin: disabledBy.origin };
+  if (disjointOrigin) return { value: false, origin: disjointOrigin };
+  return { value: true, origin: 'code-default' };
+}
+
+function resolveApproval(
+  input: ResolveToolPolicyInput,
+  layers: ReadonlyArray<PolicyLayer>,
+  risk: ResolvedField<ToolRiskClass>,
+  _warnings: PolicyWarning[],
+  _errors: PolicyError[],
+): ResolvedField<boolean> {
+  const tier = riskTier(risk.value);
+  const raisedIntoConfirmation = tier >= 2
+    && tier > riskTier(input.defaults.riskClass);
+  const baseline = input.defaults.requiresApproval || raisedIntoConfirmation;
+  const baselineOrigin: PolicyOrigin =
+    !input.defaults.requiresApproval && raisedIntoConfirmation
+      ? risk.origin
+      : 'code-default';
+  const hardenedBy = layers.find(
+    (layer) => layer.entry.requiresApproval === true,
+  );
+  if (hardenedBy) {
+    return {
+      value: true,
+      origin: baseline ? baselineOrigin : hardenedBy.origin,
+    };
+  }
+  if (!baseline && tier >= 3) return { value: true, origin: 'code-default' };
+  return { value: baseline, origin: baselineOrigin };
+}
+
+function resolveDescription(
+  layers: ReadonlyArray<PolicyLayer>,
+): ResolvedField<string | undefined> {
+  let result: ResolvedField<string | undefined> = {
+    value: undefined,
+    origin: 'code-default',
+  };
+  for (const layer of layers) {
+    if (layer.entry.description !== undefined) {
+      result = { value: layer.entry.description, origin: layer.origin };
+    }
+  }
+  return result;
+}
