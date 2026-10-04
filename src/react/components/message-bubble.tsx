@@ -3,11 +3,10 @@ import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
-import { readClarificationPart } from '../utils/clarification.js';
+import { clarificationAnswerMessage, readClarificationPart } from '../utils/clarification.js';
 import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
 import {
   CLARIFICATION_TOOL_NAME,
-  formatClarificationAnswer,
   stripClarificationMarkers,
 } from '../../contracts/clarification.js';
 import type { MessageBubbleProps, TextPart } from '../types.js';
@@ -209,7 +208,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
               toolCallId={clarification.toolCallId}
               request={clarification.request}
               interactive={clarification.ready && isLatestMessage && !isLoading}
-              onAnswer={(answer) => send(formatClarificationAnswer({
+              onAnswer={(answer) => send(clarificationAnswerMessage({
                 toolCallId: clarification.toolCallId,
                 answer: answer.text,
                 ...(answer.optionId ? { optionId: answer.optionId } : {}),

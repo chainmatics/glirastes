@@ -1,4 +1,5 @@
 import {
+  CLARIFICATION_MAX_ANSWER_LENGTH,
   CLARIFICATION_MAX_DESCRIPTION_LENGTH,
   CLARIFICATION_MAX_LABEL_LENGTH,
   CLARIFICATION_MAX_OPTIONS,
@@ -6,6 +7,7 @@ import {
   CLARIFICATION_OPTION_ID_PATTERN,
   CLARIFICATION_TARGETS,
   CLARIFICATION_TOOL_NAME,
+  formatClarificationAnswer,
   parseClarificationAnswer,
   type ClarificationOption,
   type ClarificationRequest,
@@ -106,4 +108,23 @@ export function isClarificationAnswered(
       && parseClarificationAnswer(part.text)?.reference.toolCallId === toolCallId
     ))
   ));
+}
+
+/**
+ * The user message that answers a clarification: the marked answer that
+ * resumes the original request. When the ids cannot be carried by the marker
+ * (a provider id over 200 characters or with unusual characters) it falls back
+ * to the plain visible answer, so answering never throws and never leaves the
+ * user with a card that did nothing; the model still sees the answer.
+ */
+export function clarificationAnswerMessage(input: {
+  toolCallId: string;
+  answer: string;
+  optionId?: string;
+}): string {
+  try {
+    return formatClarificationAnswer(input);
+  } catch {
+    return input.answer.trim().slice(0, CLARIFICATION_MAX_ANSWER_LENGTH);
+  }
 }

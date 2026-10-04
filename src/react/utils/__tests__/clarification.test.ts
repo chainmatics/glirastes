@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CLARIFICATION_MAX_ANSWER_LENGTH,
   CLARIFICATION_MAX_LABEL_LENGTH,
   CLARIFICATION_MAX_OPTIONS,
   CLARIFICATION_MAX_QUESTION_LENGTH,
   formatClarificationAnswer,
 } from '../../../contracts/clarification.js';
 import {
+  clarificationAnswerMessage,
   findOpenClarification,
   isClarificationAnswered,
   readClarificationPart,
@@ -130,5 +132,32 @@ describe('isClarificationAnswered', () => {
       { role: 'assistant', parts: [{ type: 'text', text: marker('call-1') }] },
       { role: 'user', parts: [{ type: 'tool-x', text: marker('call-1') }, 'call-1'] },
     ], 'call-1')).toBe(false);
+  });
+});
+
+describe('clarificationAnswerMessage', () => {
+  it('carries the answer marker when the ids fit the contract', () => {
+    expect(clarificationAnswerMessage({
+      toolCallId: 'functions.get_weather:0', optionId: 'task-2', answer: ' Release prüfen ',
+    })).toBe(formatClarificationAnswer({
+      toolCallId: 'functions.get_weather:0', optionId: 'task-2', answer: 'Release prüfen',
+    }));
+  });
+
+  it.each([
+    ['a tool call id over 200 characters', { toolCallId: 'c'.repeat(201) }],
+    ['a tool call id with characters the marker cannot hold', { toolCallId: 'fn/get weather' }],
+    ['an option id the marker cannot hold', { toolCallId: 'call-1', optionId: 'a b' }],
+  ])('falls back to the plain answer for %s instead of throwing', (_label, ids) => {
+    expect(clarificationAnswerMessage({ ...ids, answer: '  Release prüfen ' }))
+      .toBe('Release prüfen');
+  });
+
+  it('bounds the plain fallback like a marked answer', () => {
+    const text = clarificationAnswerMessage({
+      toolCallId: 'c'.repeat(201),
+      answer: 'a'.repeat(CLARIFICATION_MAX_ANSWER_LENGTH + 50),
+    });
+    expect(text).toHaveLength(CLARIFICATION_MAX_ANSWER_LENGTH);
   });
 });

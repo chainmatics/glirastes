@@ -28,6 +28,11 @@ const clarificationMessage = {
   }],
 } as unknown as ChatMessage;
 
+function withToolCallId(toolCallId: string): ChatMessage {
+  const [part] = clarificationMessage.parts as unknown as Array<Record<string, unknown>>;
+  return { ...clarificationMessage, parts: [{ ...part, toolCallId }] } as unknown as ChatMessage;
+}
+
 const chatContext = vi.hoisted(() => ({
   current: {} as Record<string, unknown>,
 }));
@@ -99,6 +104,45 @@ describe('structured clarification card', () => {
       .toBe(true);
     expect(document.querySelector('[data-component="clarification-card"]')?.getAttribute('data-state'))
       .toBe('disabled');
+  });
+
+  it('answers a clarification whose provider id contains dots and colons', () => {
+    const kimi = withToolCallId('functions.ask_clarification:0');
+    const send = setContext([kimi]);
+    render(<MessageBubble message={kimi} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Release prüfen/ }));
+
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      '<!--glirastes:clarification {"toolCallId":"functions.ask_clarification:0","optionId":"task-2"}-->\nRelease prüfen',
+    );
+  });
+
+  it.each([
+    ['longer than the marker allows', 'c'.repeat(201)],
+    ['holding characters the marker cannot carry', 'fn/ask clarification:0'],
+  ])('still sends the plain answer when the provider id is %s', (_label, toolCallId) => {
+    const odd = withToolCallId(toolCallId);
+    const send = setContext([odd]);
+    render(<MessageBubble message={odd} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Release prüfen/ }));
+
+    expect(send).toHaveBeenCalledExactlyOnceWith('Release prüfen');
+    expect(document.querySelector('[data-component="clarification-card"]')?.getAttribute('data-state'))
+      .toBe('answered');
+  });
+
+  it('sends the plain free-text answer when the provider id cannot carry a marker', () => {
+    const odd = withToolCallId('c'.repeat(201));
+    const send = setContext([odd]);
+    render(<MessageBubble message={odd} />);
+
+    const input = screen.getByRole('textbox', { name: 'Deine Antwort' });
+    fireEvent.change(input, { target: { value: 'die von gestern' } });
+    fireEvent.submit(input.closest('form')!);
+
+    expect(send).toHaveBeenCalledExactlyOnceWith('die von gestern');
   });
 
   it('shows only the visible answer in the user bubble', () => {
