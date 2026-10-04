@@ -5,6 +5,7 @@ import type {
   Principal,
 } from '../../contracts/index.js';
 import { assertModuleRegistryParity } from '../../server/testing/registry-parity.js';
+import type { ModuleDefinition } from '../../types.js';
 import { createEphemeralLocalSigner } from '../local-signer.js';
 import { createLocalRuntimeSource } from '../local-runtime-source.js';
 import {
@@ -70,7 +71,7 @@ function fixtureBindings(): LocalToolBinding[] {
       tool: {
         id: fact.name,
         description: fact.description,
-        inputSchema: { type: 'object' },
+        inputSchema: { safeParse: (value: unknown) => ({ success: true as const, data: value }) },
         execute: async () => ({}),
       },
     };
@@ -275,9 +276,9 @@ describe('managed and standalone sources materialize identically', () => {
   });
 
   it('passes the shared module parity gate from both sources', () => {
-    const modules = [
-      { id: 'tasks', tools: ['tasks.listTasks'] },
-      { id: 'navigation', tools: ['ui_navigate'] },
+    const modules: ModuleDefinition[] = [
+      { id: 'tasks', name: 'Tasks', description: 'Task queries.', tools: ['tasks.listTasks'] },
+      { id: 'navigation', name: 'Navigation', description: 'App navigation.', tools: ['ui_navigate'] },
     ];
     const source = createLocalRuntimeSource({
       setupArtifact: fixtureArtifact(),
@@ -302,7 +303,7 @@ describe('managed and standalone sources materialize identically', () => {
         servedToolNames: Object.keys(registry),
       })).not.toThrow();
       expect(() => assertModuleRegistryParity({
-        modules: [{ id: 'ghost', tools: ['tasks.retiredSnakeCase'] }],
+        modules: [{ id: 'ghost', name: 'Ghost', description: 'Retired module.', tools: ['tasks.retiredSnakeCase'] }],
         servedToolNames: Object.keys(registry),
       })).toThrow(/drift/i);
     }

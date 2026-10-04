@@ -88,7 +88,7 @@ function fixtureBindings(): LocalToolBinding[] {
     tool: {
       id: 'tasks.listTasks',
       description: 'List the tasks the caller may see.',
-      inputSchema: { type: 'object' },
+      inputSchema: { safeParse: (value: unknown) => ({ success: true as const, data: value }) },
       execute: async () => ({ tasks: [] }),
     },
   }];
@@ -145,9 +145,9 @@ describe('standalone runtime is strictly network-silent', () => {
     await guard.beforeToolCall(call);
     const result = await registry.tasks_listTasks!.execute(
       {},
-      { user: { id: 'user-1', roles: ['member'] } },
+      { currentDate: new Date('2026-08-12T00:00:00.000Z'), locale: 'en' },
     );
-    await guard.afterToolCall({ ...call, output: result });
+    await guard.afterToolCall({ ...call, result, durationMs: 0 });
     await guard.afterModelStep({ inputTokens: 10, outputTokens: 10 });
 
     expect(result).toEqual({ tasks: [] });

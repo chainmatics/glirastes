@@ -116,7 +116,7 @@ function fixtureBindings(): LocalToolBinding[] {
   const tool = (id: string, description: string) => ({
     id,
     description,
-    inputSchema: { type: 'object' },
+    inputSchema: { safeParse: (value: unknown) => ({ success: true as const, data: value }) },
     execute: async () => ({}),
   });
   return [

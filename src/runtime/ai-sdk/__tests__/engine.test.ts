@@ -43,7 +43,7 @@ describe('createAiSdkTools', () => {
         list_tasks: {
           description: 'List tasks.',
           parameters: z.object({ status: z.string() }),
-          execute: async (input) => {
+          execute: async (input: unknown) => {
             calls.push(`execute:${JSON.stringify(input)}`);
             return { count: 2 };
           },

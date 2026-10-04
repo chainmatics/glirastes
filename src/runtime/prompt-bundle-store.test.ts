@@ -3,7 +3,7 @@ import {
   generateKeyPairSync,
   sign,
 } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
   canonicalPromptBundleJson,
   type PromptBundle,
@@ -91,7 +91,7 @@ function binding(bundle: PromptBundle, overrides: {
 }
 
 describe('PromptBundleStore', () => {
-  let registry: { fetch: ReturnType<typeof vi.fn> };
+  let registry: { fetch: Mock<(artifactRef: string) => Promise<unknown>> };
   let store: PromptBundleStore;
   const artifacts = new Map<string, PromptBundle>();
 

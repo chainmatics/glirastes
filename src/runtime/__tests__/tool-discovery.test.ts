@@ -76,7 +76,10 @@ function fixture(): { snapshot: TurnSnapshot; registry: ToolRegistry } {
     .map((fact) => [fact.name.replaceAll('.', '_'), {
       id: fact.id,
       description: fact.description,
-      inputSchema: { secretSchema: true },
+      inputSchema: {
+        secretSchema: true,
+        safeParse: (value: unknown) => ({ success: true as const, data: value }),
+      },
       execute: async () => ({ secretResult: true }),
     }]));
   return { snapshot, registry };
