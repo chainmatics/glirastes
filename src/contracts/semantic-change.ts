@@ -1,5 +1,6 @@
 import type { ToolPresentation, ToolRiskClass } from './revisions.js';
 import { FoundationDiagnosticError } from '../diagnostics/index.js';
+import { riskTier } from './tool-policy.js';
 
 export type SemanticChangeClassification =
   | 'unchanged'
@@ -28,15 +29,6 @@ export interface SemanticChange {
   requiresConfirmation: boolean;
 }
 
-const RISK_TIER: Partial<Record<ToolRiskClass, number>> = {
-  'safe-read': 0,
-  'read-sensitive': 1,
-  write: 2,
-  delete: 3,
-  financial: 3,
-  external: 3,
-};
-
 function incomparable(toolId: string): never {
   throw new FoundationDiagnosticError({
     code: 'E-SEMANTICS-003',
@@ -50,18 +42,13 @@ function incomparable(toolId: string): never {
 function compareRisk(
   before: ToolRiskClass,
   after: ToolRiskClass,
-  toolId: string,
 ): SemanticChangeClassification {
   if (before === after) return 'unchanged';
-  const beforeTier = RISK_TIER[before];
-  const afterTier = RISK_TIER[after];
-  if (
-    beforeTier === undefined
-    || afterTier === undefined
-    || beforeTier === afterTier
-  ) {
-    return incomparable(toolId);
-  }
+  const beforeTier = riskTier(before);
+  const afterTier = riskTier(after);
+  // Equal-tier relabels (the unassessed 'unknown' counts as tier 3) change
+  // no protection, so they never need confirmation.
+  if (beforeTier === afterTier) return 'neutral';
   return afterTier > beforeTier ? 'hardening' : 'loosening';
 }
 
@@ -124,7 +111,7 @@ export function classifyToolSemanticChange(
       after.requiresApproval ? 'hardening' : 'loosening',
     );
   }
-  add('riskClass', compareRisk(before.riskClass, after.riskClass, after.toolId));
+  add('riskClass', compareRisk(before.riskClass, after.riskClass));
   add(
     'allowedRoles',
     compareRoles(before.allowedRoles, after.allowedRoles, after.toolId),
