@@ -2,33 +2,30 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAiPipeline } from './pipeline.js';
 import { ServiceBlockedError } from './lancer/index.js';
 import type { Lancer } from './lancer/index.js';
-import type { ToolContext } from '../types.js';
+import type { ModuleDefinition, ToolContext } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const mockContext: ToolContext = {
-  user: { userId: 'u1', roles: ['user'] },
   currentDate: new Date('2024-01-01'),
   locale: 'en',
 };
 
-const testModule = {
+const testModule: ModuleDefinition = {
   id: 'test-module',
   name: 'Test',
   description: 'Test module for managing tasks and to-do items',
   tools: ['tool1', 'tool2'],
   classification: {
+    hint: 'Task management',
     examples: ['create a new task', 'add a to-do item', 'manage my tasks'],
   },
 };
 
 function makeMockLancer(overrides: Partial<Lancer> = {}): Lancer {
   return {
-    gate: {
-      filter: vi.fn().mockResolvedValue({ allowed: [], denied: [] }),
-    },
     primus: {
       classify: vi.fn().mockResolvedValue({ moduleId: 'test-module', confidence: 0.9, modelTier: 'standard' }),
     },
@@ -42,6 +39,7 @@ function makeMockLancer(overrides: Partial<Lancer> = {}): Lancer {
     },
     config: {
       fetch: vi.fn().mockResolvedValue({ modules: {} }),
+      reportModels: vi.fn().mockResolvedValue(undefined),
     },
     telemetry: {
       emit: vi.fn(),
@@ -199,7 +197,7 @@ describe('createAiPipeline — degradation', () => {
         createAiPipeline({
           modules: [testModule],
           lancer,
-          degradation: { warden: 'block', primus: 'fallback', gate: 'silent' },
+          degradation: { warden: 'block', primus: 'fallback', proctor: 'silent' },
           onServiceUnavailable: vi.fn().mockResolvedValue('fallback'),
         }),
       ).not.toThrow();

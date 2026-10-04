@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { defineEndpointTool, defineTool } from '../../../types.js';
-import { endpointToolToTool, toolToAiTool } from '../index.js';
+import {
+  endpointToolToTool,
+  toolToAiTool,
+  type EndpointToolContext,
+} from '../index.js';
 
 describe('tool output schema validation', () => {
   it('validates the declared payload without rejecting transport metadata', async () => {
@@ -46,6 +50,7 @@ describe('tool output schema validation', () => {
           creatorId: z.string(),
         }).strict()),
       }).strict(),
+      // Deliberately violates the declared output schema.
       execute: async () => ({
         success: true as const,
         tasks: [{
@@ -53,7 +58,7 @@ describe('tool output schema validation', () => {
           title: 'Pilot pruefen',
           rank: 0.75,
         }],
-      }),
+      }) as unknown as { tasks: Array<{ id: string; creatorId: string }> },
     });
     const aiTool = toolToAiTool(tool, {
       currentDate: new Date('2026-08-15T10:00:00.000Z'),
@@ -142,7 +147,7 @@ describe('tool output schema validation', () => {
       inputSchema: z.object({ title: z.string() }).strict(),
       outputSchema: z.object({ taskId: z.string() }).strict(),
     });
-    const aiTool = toolToAiTool(endpointToolToTool(definition), {
+    const context: EndpointToolContext = {
       currentDate: new Date('2026-08-15T10:00:00.000Z'),
       locale: 'de-DE',
       callEndpoint: async () => ({
@@ -155,7 +160,8 @@ describe('tool output schema validation', () => {
           privateField: { policyTrace: 'must-not-reach-model' },
         },
       }),
-    });
+    };
+    const aiTool = toolToAiTool(endpointToolToTool(definition), context);
 
     const result = await aiTool.execute({ title: 'Pilot pruefen' });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { createLancer } from '../client';
-import type { Lancer } from '../types';
+import { createLancer } from '../client.js';
+import type { Lancer } from '../types.js';
 
 /**
  * Contract-compatibility tests
