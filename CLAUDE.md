@@ -54,6 +54,9 @@ bun run build
 # Typecheck
 bun run typecheck
 
+# Typecheck test files (glirastes/* self-imports resolve via dist: build first)
+bun run typecheck:tests
+
 # Run all tests
 bun run test
 
