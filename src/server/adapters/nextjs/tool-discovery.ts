@@ -39,13 +39,21 @@ export interface HybridToolDiscovery {
 export function createHybridToolDiscovery(options: {
   discovery: TurnToolDiscovery;
   initialToolNames: ReadonlyArray<string>;
+  /**
+   * Server-configured SDK tools (for example `ask_clarification`) that stay
+   * active for the whole turn. They are never searchable or model-supplied.
+   */
+  builtinToolNames?: ReadonlyArray<string>;
 }): HybridToolDiscovery {
   const eligible = new Set(options.discovery.eligibleNames);
+  const builtins = [...new Set(options.builtinToolNames ?? [])]
+    .filter((name) => name !== 'find_tools' && !eligible.has(name));
   const active = new Set(
     options.initialToolNames.filter((name) => eligible.has(name)),
   );
   const activeNames = () => Object.freeze(
-    ['find_tools', ...active].sort((left, right) => left.localeCompare(right)),
+    ['find_tools', ...builtins, ...active]
+      .sort((left, right) => left.localeCompare(right)),
   );
 
   const controller: HybridToolDiscovery = {

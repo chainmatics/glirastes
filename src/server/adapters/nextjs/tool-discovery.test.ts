@@ -58,6 +58,23 @@ describe('createHybridToolDiscovery', () => {
     expect(domain).not.toHaveBeenCalled();
   });
 
+  it('keeps server-configured built-ins active without making them searchable', async () => {
+    const controller = createHybridToolDiscovery({
+      discovery: discovery(),
+      initialToolNames: [],
+      builtinToolNames: ['ask_clarification', 'find_tools', 'tasks_list'],
+    });
+    expect(controller.activeToolNames()).toEqual([
+      'ask_clarification',
+      'find_tools',
+    ]);
+    await controller.tool.execute({ query: 'ask_clarification' });
+    expect(controller.activeToolNames()).toEqual([
+      'ask_clarification',
+      'find_tools',
+    ]);
+  });
+
   it('does not share loaded state across controllers or turns', async () => {
     const first = createHybridToolDiscovery({
       discovery: discovery(), initialToolNames: [],
