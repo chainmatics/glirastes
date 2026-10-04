@@ -24,6 +24,11 @@ import type {
 import { serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
+import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
+import {
+  CLARIFICATION_MAX_ANSWER_LENGTH,
+  parseClarificationAnswer,
+} from '../../contracts/clarification.js';
 
 // ============================================================================
 // Default locale (English)
@@ -829,6 +834,23 @@ export function AiChatProvider({
     }
     if (onBeforeSend) {
       processedMessage = onBeforeSend(processedMessage, activeMentions);
+    }
+
+    // Typing into the composer while a clarification is open answers it, so
+    // the server resumes the original request instead of starting over.
+    const openClarification = findOpenClarification(
+      rawMessages as unknown as Array<{ role: string; parts: unknown[] }>,
+    );
+    if (
+      openClarification?.request.allowFreeText
+      && processedMessage.trim().length > 0
+      && processedMessage.length <= CLARIFICATION_MAX_ANSWER_LENGTH
+      && !parseClarificationAnswer(processedMessage)
+    ) {
+      processedMessage = clarificationAnswerMessage({
+        toolCallId: openClarification.toolCallId,
+        answer: processedMessage,
+      });
     }
 
     // Sanitize messages before sending to prevent AI_MissingToolResultsError
