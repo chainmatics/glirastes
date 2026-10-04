@@ -39,7 +39,7 @@
 | P02 | [Tool-Policy und Laufzeit-Durchsetzung](2026-10-04-mvp-plan-02-tool-policy.md) | SDK `.worktrees/mvp-tools` (`codex/mvp-tools`) | P01 | ausgeschrieben |
 | P03 | [Generator-Kern, Next.js-Endpunkte, CLI refresh/check/status](2026-10-04-mvp-plan-03-tools-generator-next.md) | SDK `mvp-tools` | P02 | ausgeschrieben |
 | P04 | Navigation, Filter, UI-Aktionen, `glirastes/browser` | SDK `mvp-tools` | P03 | wird geschrieben vor Start |
-| P05 | Agentische Arbeit per Skills: Arbeitslisten, einheitliche Prüfung, `tools eval`, Stufe-2-Datenmodell, sieben Skills, `init`-Anpassungen | SDK `mvp-tools` | P04 | wird geschrieben vor Start |
+| P05 | Agentische Arbeit per Skills: Arbeitslisten, einheitliche Prüfung, `tools eval`, Stufe-2-Datenmodell, sieben Skills, `init`-Anpassungen | SDK `mvp-tools` | P04, P07 (Merge vorher) | wird geschrieben vor Start |
 | P06 | Referenz-Fixtures React+NestJS und Vue+FastAPI inkl. Änderungskorpus (18 Tests) | SDK `mvp-tools` | P05, P07 (Einbettung) | wird geschrieben vor Start |
 | P07 | [Routing, Suche, Rückfragen, Chat-UI, Einbettung, STT](2026-10-04-mvp-plan-07-routing-chat-stt.md) | SDK `.worktrees/mvp-chat` (`codex/mvp-chat`) | P01 | ausgeschrieben |
 | P08 | Platform: Hygiene (Journal, API-Typecheck, ESLint, Pairing-Key), begrenzte Overrides (0044), Policy-Revisionen, Capability-Report/-Ansicht, `/connect` und `/manage` nach den fünf Fragen | Platform `.worktrees/mvp-platform` (`codex/mvp-platform`) | P01 (Hygiene), P02 (Verträge) | wird geschrieben vor Start |
@@ -52,15 +52,15 @@
 ## Reihenfolge und Parallelität
 
 ```
-P01 ──┬── P02 ── P03 ── P04 ── P05 ──┬── P06 ──┐
-      │                              ├── P10 ──┤
-      ├── P07 (parallel) ────────────┼── P11 ──┼── P12 ── P13
+P01 ──┬── P02 ── P03 ── P04 ──┬── P05 ──┬── P06 ──┐
+      │                       │         ├── P10 ──┤
+      ├── P07 (parallel) ─────┘(Merge)  └── P11 ──┼── P12 ── P13
       └── P08 (Hygiene sofort; Overrides nach P02) ── P09 ──┘
 ```
 
 - P07 läuft ab P01 parallel zu P02–P05 in einem eigenen Worktree und fasst `src/codegen` und `src/contracts/tool-policy.ts` nicht an.
 - P08-Hygiene (Journal, Typecheck, ESLint, Pairing-Key) kann parallel zu P02 beginnen; der Override-Teil wartet auf die P02-Verträge.
-- Zusammenführung der SDK-Worktrees: nach P05 und nach P07 wird `codex/mvp-tools` bzw. `codex/mvp-chat` lokal in `codex/glirastes-foundation-runtime` gemergt (lokaler Feature-Branch-Merge, kein Hauptbranch, kein Push), damit P06/P11 beide Stände haben.
+- Zusammenführung der SDK-Worktrees: nach P04 und P07 werden `codex/mvp-tools` und `codex/mvp-chat` lokal in `codex/glirastes-foundation-runtime` gemergt und `mvp-tools` danach auf diesen Stand gebracht (lokale Feature-Branch-Merges, kein Hauptbranch, kein Push), damit P05 `createToolSearchIndex` nutzen kann. Merge-Checkliste (aus dem Pre-Flight-Scan): `src/runtime/tool-discovery.ts` P07-Datei behalten und die P02-Bedingung `riskTier(policy.riskClass) < riskTier(manifestTool.riskClass)` samt Import wieder einsetzen (Gate: P02-Test in `tool-discovery.test.ts`); `package.json` `build` als Vereinigung beider Änderungen; `src/runtime/index.ts` und `src/public-subpaths.test.ts` als Vereinigung; danach alle Gates.
 
 ## Gates und Checkpoints
 
@@ -82,6 +82,13 @@ Nach jedem Teilplan:
 | `ToolContract.runtime` ist Pflichtfeld; P04 und P06 müssen es liefern | P04, P06 |
 | Tool-Policy-Einträge für ausgeschlossene Routen werden zusätzlich als `policy-entry-orphaned` gemeldet | P05 |
 | `typecheck:tests` als Schritt in `.github/workflows/ci.yml` des SDK | P13 |
+| Signiertes Delta-Feld `RuntimePolicyRevision.toolOverrides` plus Overlay-Adapter im SDK (P02-Overlay nutzt übergangsweise volle Policy-Kopien) | P08, vor P11 |
+| Platform-„Lockern“ im Managed-Modus nur als wirksam anzeigen, wenn ein committeter lokaler Eintrag existiert | P08 |
+| `examples/source-driven-next/*.d.mts` zusammen mit den `.mjs`-Modulen entfernen | P04 |
+| `glirastes init` schreibt immer `.glirastes/prompt-bundle.json` (Refresh verlangt es) | P05 |
+| `createToolBindings()` ohne `ctx` (Abweichung von Spec 4.3, Kontext über `ToolContext.callEndpoint`) | P11 beachten |
+| HEAD als lesendes Tool aufzählen (P03 meldet HEAD/OPTIONS als begründete Ausschlüsse) | P04 |
+| Platform-`CLAUDE.md` im Haupt-Checkout (`main`) zeigt noch auf `agentic-sdk`; Korrektur erst mit freigegebenem Merge (P01 Task 2 übersprungen) | P13 |
 
 ## Freigaben, die unterwegs eingeholt werden
 
