@@ -612,6 +612,14 @@ export type StepSummaryFormatter = (step: PipelineStepReport) => string;
 
 export interface AiChatProviderConfig {
   mentions?: MentionConfig;
+  /**
+   * Generic `/` and `@` providers. Memoize the array: a new identity
+   * rebuilds the search. When set, the composer uses provider search with
+   * keyboard navigation and keeps structured ids on send.
+   */
+  completionProviders?: ReadonlyArray<ChatCompletionProvider>;
+  completionContext?: CompletionPermissionContext;
+  onCompletionProviderError?: (providerId: string, error: unknown) => void;
   toolResults?: ToolResultDisplayConfig;
   voice?: VoiceInputConfig;
   session?: SessionConfig;
@@ -856,7 +864,8 @@ export interface RichMentionInputProps {
   disabled?: boolean;
   className?: string;
   onChange?: (nextValue: string) => void;
-  onSubmit?: (message: string) => void;
+  /** Receives the text and the structured mentions (chips and commands) still in it. */
+  onSubmit?: (message: string, mentions: MentionData[]) => void;
   /** Search callback for mention autocomplete (BYOS). Return matching results for the given query and trigger character. */
   onSearch?: (query: string, trigger: string) => Promise<MentionResult[]> | MentionResult[];
   /** Mention data to render as inline chips on mount (e.g. pre-filled context from a detail view). */

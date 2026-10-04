@@ -25,6 +25,7 @@ import { serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
+import { createCompletionSearch } from '../completions/completion-search.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
   parseClarificationAnswer,
@@ -355,6 +356,9 @@ export interface AiChatProviderProps extends AiChatProviderConfig {
 export function AiChatProvider({
   transport,
   mentions,
+  completionProviders,
+  completionContext,
+  onCompletionProviderError,
   toolResults: userToolResults,
   voice: userVoice,
   session,
@@ -466,6 +470,19 @@ export function AiChatProvider({
   const [mentionResults, setMentionResults] = useState<MentionResult[]>([]);
   const [activeMentions, setActiveMentions] = useState<MentionData[]>([]);
   const [isMentionSearching, setIsMentionSearching] = useState(false);
+
+  const onCompletionProviderErrorRef = useRef(onCompletionProviderError);
+  onCompletionProviderErrorRef.current = onCompletionProviderError;
+  const completionSearch = useMemo(
+    () => (completionProviders && completionProviders.length > 0
+      ? createCompletionSearch(completionProviders, {
+        context: completionContext,
+        onProviderError: (providerId, error) =>
+          onCompletionProviderErrorRef.current?.(providerId, error),
+      })
+      : undefined),
+    [completionProviders, completionContext],
+  );
 
   // Refs for deduplication
   const processedToolCallsRef = useRef<Set<string>>(new Set());
@@ -814,7 +831,11 @@ export function AiChatProvider({
   }, [mentionQuery, mentionTrigger, mentions]);
 
   // Actions
-  const send = useCallback(async (message: string) => {
+  const send = useCallback(async (
+    message: string,
+    sendOptions?: { mentions?: MentionData[] },
+  ) => {
+    const mentionsForSend = sendOptions?.mentions ?? activeMentions;
     if (sessionNotReady || sessionMutationRef.current) return;
     // Clear truncation and suggestion chips on new message
     setTruncation(null);
@@ -828,12 +849,12 @@ export function AiChatProvider({
     if (mentionSerializeConfig?.enabled !== false) {
       processedMessage = serializeMentionsForSend(
         processedMessage,
-        activeMentions,
+        mentionsForSend,
         mentionSerializeConfig,
       );
     }
     if (onBeforeSend) {
-      processedMessage = onBeforeSend(processedMessage, activeMentions);
+      processedMessage = onBeforeSend(processedMessage, mentionsForSend);
     }
 
     // Typing into the composer while a clarification is open answers it, so
@@ -1269,6 +1290,8 @@ export function AiChatProvider({
       clearActiveMentions,
       isMentionSearching,
       hasMentions: !!mentions,
+      completionSearch,
+      hasCompletions: completionSearch !== undefined,
       suggestionChips,
       selectSuggestion,
       refreshSuggestions,
@@ -1328,6 +1351,7 @@ export function AiChatProvider({
       removeActiveMention,
       clearActiveMentions,
       isMentionSearching,
+      completionSearch,
       suggestionChips,
       selectSuggestion,
       refreshSuggestions,

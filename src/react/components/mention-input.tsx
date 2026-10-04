@@ -4,15 +4,104 @@ import { RichMentionInput } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { inferMentionPrefix, normalizeMentionSlug } from '../utils/mention-markup.js';
-import type { MentionInputProps, RichMentionInputHandle } from '../types.js';
+import type {
+  MentionData,
+  MentionInputProps,
+  RichMentionInputHandle,
+} from '../types.js';
 
 /**
- * Chat input with mention autocomplete support.
+ * Chat input with `@` mention and `/` command autocomplete.
  *
- * Uses `RichMentionInput` for editing, provides autocomplete for `@` and `/`,
- * and keeps selected mentions in provider state for serialization on send.
+ * With `completionProviders` the editor searches the providers directly
+ * (debounced, arrow keys, Tab/Enter, Escape) and submits structured ids.
+ * Without them the legacy `mentions` flow is unchanged.
  */
-export function MentionInput({ className, onSubmit }: MentionInputProps) {
+export function MentionInput(props: MentionInputProps) {
+  const { completionSearch } = useChatContext();
+  return completionSearch
+    ? <ProviderMentionInput {...props} />
+    : <LegacyMentionInput {...props} />;
+}
+
+function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
+  const {
+    send,
+    stop,
+    isLoading,
+    classNames,
+    locale,
+    components,
+    completionSearch,
+    voice,
+  } = useChatContext();
+  const [value, setValue] = useState('');
+  const inputRef = useRef<RichMentionInputHandle | null>(null);
+  const InputExtra = components.InputExtra;
+
+  const submit = useCallback((text: string, mentions: MentionData[]) => {
+    const trimmed = text.trim();
+    if (!trimmed || isLoading) return false;
+    if (onSubmit) {
+      onSubmit(trimmed);
+    } else {
+      send(trimmed, { mentions });
+    }
+    setValue('');
+    return true;
+  }, [isLoading, onSubmit, send]);
+
+  return (
+    <div data-component="mention-input" data-mode="providers">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const handle = inputRef.current;
+          if (handle && submit(handle.getValue(), handle.getMentions())) handle.clear();
+        }}
+        className={className ?? classNames.input}
+      >
+        <RichMentionInput
+          ref={inputRef}
+          onChange={setValue}
+          onSubmit={(text, mentions) => { submit(text, mentions); }}
+          onSearch={completionSearch}
+          placeholder={locale.placeholder}
+          disabled={isLoading}
+        />
+        {voice.enabled && (
+          <VoiceInputAddon
+            disabled={isLoading}
+            language={voice.language ?? 'de'}
+            baseUrl={voice.baseUrl}
+            getToken={voice.getToken}
+            onTranscript={(text) => {
+              const handle = inputRef.current;
+              if (!handle) return;
+              const current = handle.getValue();
+              handle.setValue(current ? `${current} ${text}` : text, handle.getMentions());
+            }}
+            onError={voice.onError}
+            showRecordingBar={voice.recordingBar?.enabled ?? true}
+            recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
+          />
+        )}
+        {InputExtra && <InputExtra />}
+        {isLoading ? (
+          <button type="button" onClick={stop} data-action="stop">
+            {locale.stopButton}
+          </button>
+        ) : (
+          <button type="submit" disabled={!value.trim()} data-action="send">
+            {locale.sendButton}
+          </button>
+        )}
+      </form>
+    </div>
+  );
+}
+
+function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
   const {
     send,
     stop,
