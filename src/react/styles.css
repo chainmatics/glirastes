@@ -382,6 +382,16 @@
 }
 
 /* ---------- Provider composer, '/' and '@' list ---------- */
+/* The wrapper above is flex, but the editor, mic and Send sit inside a bare
+   <form> (classNames.input is empty by default). Without this rule the form
+   shrink-wraps its contents and the editor and its list collapse to ~111px. */
+[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
 [data-component="ai-chat-panel"] [data-component="rich-mention-input"] {
   position: relative;
   flex: 1;
@@ -547,6 +557,12 @@
 }
 [data-component="ai-chat-panel"] [data-component="recording-bar"] {
   min-width: 0;
+}
+/* The inline bar is `width: 100%` (inline style) and, as a row item next to the
+   editor, would starve it to a sliver. A non-auto flex-basis wins over that
+   width, so the bar and the editor share the row. */
+[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"] {
+  flex: 1;
 }
 
 /* ===========================================================================
