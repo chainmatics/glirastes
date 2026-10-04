@@ -13,7 +13,7 @@ describe('drop-in shared chat layout', () => {
     native.focus();
     render(<VercelAiChat endpoint="/api/chat" keepMounted />);
     expect(document.activeElement).toBe(native);
-    fireEvent.click(screen.getByRole('button', { name: 'AI Assistant', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'AI Assistant' }));
     expect(document.activeElement).toBe(screen.getByRole('textbox'));
     fireEvent.click(screen.getByRole('button', { name: 'Close chat' }));
     native.focus();
@@ -22,7 +22,7 @@ describe('drop-in shared chat layout', () => {
   });
 
   it('dismisses the session menu when the window collapses', async () => {
-    const sessions = { defaultActiveId: 'one', load: async () => [], list: async () => [{ id: 'one', title: 'First chat' }], create: async () => ({ id: 'two' }), remove: async () => {} };
+    const sessions = { defaultActiveId: 'one', load: async () => [], list: async () => [{ id: 'one', title: 'First chat' }], create: async () => ({ id: 'two', title: 'Second chat' }), remove: async () => {} };
     const { rerender } = render(<VercelAiChat endpoint="/api/chat" sessions={sessions} open mode="sidebar" keepMounted />);
     fireEvent.click(await screen.findByRole('button', { name: 'First chat' }));
     expect(screen.getByRole('listbox')).toBeTruthy();
@@ -77,7 +77,7 @@ describe('drop-in shared chat layout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close chat' }));
     expect(input.isConnected).toBe(true);
     expect(screen.queryByRole('textbox')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'AI Assistant', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'AI Assistant' }));
     expect(screen.getByRole('textbox')).toBe(input);
     expect(input.value).toBe('Not submitted');
   });

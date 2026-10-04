@@ -53,8 +53,8 @@ describe('built-in voice in a retained window', () => {
     fireEvent.click(screen.getByRole('button', { name: 'mic' }));
     await waitFor(() => expect(document.querySelector('[data-component="voice-input-addon"]')?.getAttribute('data-state')).toBe('recording'));
     // Stop and hiding can race; only one final draft insertion is allowed.
-    fireEvent.click(screen.getByRole('button', { name: 'stop', exact: true }));
-    fireEvent.click(screen.getByRole('button', { name: 'stop', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'stop' }));
+    fireEvent.click(screen.getByRole('button', { name: 'stop' }));
     rerender(view(action !== 'close', action === 'collapse'));
     await act(async () => { release(); });
     await waitFor(() => expect(stopTrack).toHaveBeenCalled());

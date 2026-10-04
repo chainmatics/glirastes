@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   useDragResizePanel,
   type UseDragResizePanelOptions,
-} from '../use-drag-resize-panel';
+} from '../use-drag-resize-panel.js';
 
 function createOptions(): UseDragResizePanelOptions {
   const panel = document.createElement('section');

@@ -97,6 +97,7 @@ describe('Glirastes UI parity components', () => {
       <ApprovalCard
         approval={{
           id: 'approval-1',
+          messageId: 'message-1',
           toolName: 'tasks.update',
           description: 'Aufgabe aktualisieren',
           details: ['Titel: Quartalsbericht', 'Hohe Auswirkung'],

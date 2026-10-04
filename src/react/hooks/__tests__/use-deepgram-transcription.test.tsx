@@ -15,7 +15,7 @@ vi.mock('../../stt/deepgram.js', () => ({
   },
 }));
 
-import { useDeepgramTranscription } from '../use-deepgram-transcription';
+import { useDeepgramTranscription } from '../use-deepgram-transcription.js';
 
 afterEach(() => {
   adapterConnect.mockClear();
@@ -38,7 +38,7 @@ describe('useDeepgramTranscription', () => {
       ({ getToken }) => useDeepgramTranscription({ getToken }),
       {
         initialProps: {
-          getToken: () => 'first-token',
+          getToken: (): string => 'first-token',
         },
       },
     );
