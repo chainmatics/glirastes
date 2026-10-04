@@ -2,6 +2,7 @@ import type { ToolPresentation } from '../contracts/index.js';
 import type { ToolRegistry } from '../types.js';
 import { authorizeToolCall } from './authorization.js';
 import { modelFacingToolName } from './local-tool-bindings.js';
+import { createToolSearchIndex } from './tool-search.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
 
 export interface ToolDiscoveryResult {
@@ -25,16 +26,20 @@ export interface TurnToolDiscoveryOptions {
   maxHintLength?: number;
 }
 
+/**
+ * Search-only enrichment keyed by the model-facing tool name. Synonyms are
+ * indexed but never returned and never make a tool eligible.
+ */
+export interface ToolSearchSemantics {
+  readonly synonyms?: ReadonlyArray<string>;
+}
+
+export type ToolSearchSemanticsMap = Readonly<Record<string, ToolSearchSemantics>>;
+
 interface DiscoveryEntry {
   result: ToolDiscoveryResult;
-  nameTokens: ReadonlyArray<string>;
-  descriptionTokens: ReadonlyArray<string>;
-  moduleTokens: ReadonlyArray<string>;
-  hintTokens: ReadonlyArray<string>;
-  nameText: string;
-  descriptionText: string;
-  moduleText: string;
-  hintText: string;
+  synonyms: ReadonlyArray<string>;
+  sharedWith: ReadonlyArray<string>;
 }
 
 const DEFAULT_MAX_QUERY_LENGTH = 200;
@@ -42,14 +47,8 @@ const DEFAULT_MAX_RESULTS = 8;
 const HARD_MAX_RESULTS = 20;
 const DEFAULT_MAX_DESCRIPTION_LENGTH = 500;
 const DEFAULT_MAX_HINT_LENGTH = 300;
-
-function words(value: string): string[] {
-  return value
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .toLocaleLowerCase('en-US')
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-}
+const MAX_SYNONYMS = 20;
+const MAX_SYNONYM_LENGTH = 100;
 
 function bounded(value: string, maxLength: number): string {
   return value.slice(0, maxLength);
@@ -61,21 +60,72 @@ function freezeResult(result: ToolDiscoveryResult): ToolDiscoveryResult {
   return Object.freeze(result);
 }
 
-function rank(entry: DiscoveryEntry, query: string): number | undefined {
-  const queryTokens = words(query);
-  if (queryTokens.length === 0) return undefined;
-  const allIn = (tokens: ReadonlyArray<string>) =>
-    queryTokens.every((token) => tokens.includes(token));
-  const textIncludes = (text: string) => text.includes(query.toLocaleLowerCase('en-US'));
+function boundedSynonyms(
+  semantics: ToolSearchSemanticsMap | undefined,
+  name: string,
+): ReadonlyArray<string> {
+  const entry = semantics && Object.hasOwn(semantics, name)
+    ? semantics[name]
+    : undefined;
+  return (entry?.synonyms ?? [])
+    .filter((synonym): synonym is string => typeof synonym === 'string')
+    .slice(0, MAX_SYNONYMS)
+    .map((synonym) => bounded(synonym, MAX_SYNONYM_LENGTH));
+}
 
-  if (entry.nameText === query.toLocaleLowerCase('en-US')) return 0;
-  if (allIn(entry.nameTokens)) return 1;
-  if (textIncludes(entry.nameText)) return 2;
-  if (allIn(entry.descriptionTokens)) return 3;
-  if (textIncludes(entry.descriptionText)) return 4;
-  if (allIn(entry.moduleTokens) || textIncludes(entry.moduleText)) return 5;
-  if (allIn(entry.hintTokens) || textIncludes(entry.hintText)) return 6;
-  return undefined;
+function resolveLimits(options: TurnToolDiscoveryOptions) {
+  return {
+    maxQueryLength: Math.min(
+      Math.max(options.maxQueryLength ?? DEFAULT_MAX_QUERY_LENGTH, 1),
+      DEFAULT_MAX_QUERY_LENGTH,
+    ),
+    maxResults: Math.min(
+      Math.max(options.maxResults ?? DEFAULT_MAX_RESULTS, 1),
+      HARD_MAX_RESULTS,
+    ),
+    maxDescriptionLength: Math.min(
+      Math.max(options.maxDescriptionLength ?? DEFAULT_MAX_DESCRIPTION_LENGTH, 1),
+      DEFAULT_MAX_DESCRIPTION_LENGTH,
+    ),
+    maxHintLength: Math.min(
+      Math.max(options.maxHintLength ?? DEFAULT_MAX_HINT_LENGTH, 1),
+      DEFAULT_MAX_HINT_LENGTH,
+    ),
+  };
+}
+
+function createDiscovery(
+  turnId: string,
+  unsortedEntries: DiscoveryEntry[],
+  limits: ReturnType<typeof resolveLimits>,
+): TurnToolDiscovery {
+  const entries = [...unsortedEntries].sort((left, right) =>
+    left.result.name.localeCompare(right.result.name));
+  Object.freeze(entries);
+  const byName = new Map(entries.map((entry) => [entry.result.name, entry.result] as const));
+  const eligibleNames = Object.freeze(entries.map((entry) => entry.result.name));
+  const index = createToolSearchIndex(entries.map((entry) => ({
+    name: entry.result.name,
+    description: entry.result.description,
+    ...(entry.result.module ? { module: entry.result.module } : {}),
+    sharedWith: entry.sharedWith,
+    ...(entry.result.usageHints ? { usageHints: entry.result.usageHints } : {}),
+    synonyms: entry.synonyms,
+  })));
+
+  return Object.freeze({
+    turnId,
+    eligibleNames,
+    search(query: string, limit = limits.maxResults) {
+      if (query.length > limits.maxQueryLength) {
+        throw new Error('Tool discovery query exceeds the configured limit.');
+      }
+      const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), limits.maxResults);
+      return Object.freeze(index.search(query, boundedLimit)
+        .map((name) => byName.get(name))
+        .filter((result): result is ToolDiscoveryResult => result !== undefined));
+    },
+  });
 }
 
 /**
@@ -88,25 +138,12 @@ export function createTurnToolDiscovery(
     snapshot: TurnSnapshot;
     registry: ToolRegistry;
     revokedToolIds?: ReadonlyArray<string>;
+    semantics?: ToolSearchSemanticsMap;
   },
   options: TurnToolDiscoveryOptions = {},
 ): TurnToolDiscovery {
-  const maxQueryLength = Math.min(
-    Math.max(options.maxQueryLength ?? DEFAULT_MAX_QUERY_LENGTH, 1),
-    DEFAULT_MAX_QUERY_LENGTH,
-  );
-  const maxResults = Math.min(
-    Math.max(options.maxResults ?? DEFAULT_MAX_RESULTS, 1),
-    HARD_MAX_RESULTS,
-  );
-  const maxDescriptionLength = Math.min(
-    Math.max(options.maxDescriptionLength ?? DEFAULT_MAX_DESCRIPTION_LENGTH, 1),
-    DEFAULT_MAX_DESCRIPTION_LENGTH,
-  );
-  const maxHintLength = Math.min(
-    Math.max(options.maxHintLength ?? DEFAULT_MAX_HINT_LENGTH, 1),
-    DEFAULT_MAX_HINT_LENGTH,
-  );
+  const limits = resolveLimits(options);
+  const { maxDescriptionLength, maxHintLength } = limits;
   const revoked = new Set(input.revokedToolIds ?? []);
   const policies = new Map(input.snapshot.policyRevision.toolPolicies.map(
     (policy) => [policy.toolId, policy] as const,
@@ -146,42 +183,42 @@ export function createTurnToolDiscovery(
         ? { presentation: { ...manifestTool.presentation } }
         : {}),
     });
-    const moduleValues = [manifestTool.module, ...(manifestTool.sharedWith ?? [])]
-      .filter((value): value is string => Boolean(value));
     entries.push({
       result,
-      nameTokens: words(name),
-      descriptionTokens: words(description),
-      moduleTokens: words(moduleValues.join(' ')),
-      hintTokens: words((usageHints ?? []).join(' ')),
-      nameText: name.toLocaleLowerCase('en-US'),
-      descriptionText: description.toLocaleLowerCase('en-US'),
-      moduleText: moduleValues.join(' ').toLocaleLowerCase('en-US'),
-      hintText: (usageHints ?? []).join(' ').toLocaleLowerCase('en-US'),
+      synonyms: boundedSynonyms(input.semantics, name),
+      sharedWith: manifestTool.sharedWith ?? [],
     });
   }
-  entries.sort((left, right) => left.result.name.localeCompare(right.result.name));
-  Object.freeze(entries);
-  const eligibleNames = Object.freeze(entries.map((entry) => entry.result.name));
+  return createDiscovery(input.snapshot.turnId, entries, limits);
+}
 
-  return Object.freeze({
-    turnId: input.snapshot.turnId,
-    eligibleNames,
-    search(query: string, limit = maxResults) {
-      if (query.length > maxQueryLength) {
-        throw new Error('Tool discovery query exceeds the configured limit.');
-      }
-      const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), maxResults);
-      const ranked = entries
-        .map((entry) => ({ entry, rank: rank(entry, query) }))
-        .filter((candidate): candidate is { entry: DiscoveryEntry; rank: number } =>
-          candidate.rank !== undefined)
-        .sort((left, right) =>
-          left.rank - right.rank
-          || left.entry.result.name.localeCompare(right.entry.result.name))
-        .slice(0, boundedLimit)
-        .map((candidate) => candidate.entry.result);
-      return Object.freeze(ranked);
-    },
-  });
+/**
+ * Discovery for apps without a managed or standalone runtime source. The
+ * per-request registry is the deployed, app-authorized tool set; names in
+ * `excludeNames` (SDK built-ins) are never indexed.
+ */
+export function createRegistryToolDiscovery(
+  input: {
+    turnId: string;
+    registry: ToolRegistry;
+    excludeNames?: ReadonlyArray<string>;
+    semantics?: ToolSearchSemanticsMap;
+  },
+  options: TurnToolDiscoveryOptions = {},
+): TurnToolDiscovery {
+  const limits = resolveLimits(options);
+  const excluded = new Set(input.excludeNames ?? []);
+  const entries: DiscoveryEntry[] = [];
+  for (const [name, tool] of Object.entries(input.registry)) {
+    if (excluded.has(name) || typeof tool?.description !== 'string') continue;
+    entries.push({
+      result: freezeResult({
+        name,
+        description: bounded(tool.description, limits.maxDescriptionLength),
+      }),
+      synonyms: boundedSynonyms(input.semantics, name),
+      sharedWith: [],
+    });
+  }
+  return createDiscovery(input.turnId, entries, limits);
 }

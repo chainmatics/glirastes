@@ -54,11 +54,21 @@ export {
   type LocalUiToolBinding,
 } from './local-tool-bindings.js';
 export {
+  createRegistryToolDiscovery,
   createTurnToolDiscovery,
   type ToolDiscoveryResult,
+  type ToolSearchSemantics,
+  type ToolSearchSemanticsMap,
   type TurnToolDiscovery,
   type TurnToolDiscoveryOptions,
 } from './tool-discovery.js';
+export {
+  createToolSearchIndex,
+  searchTermVariants,
+  searchTokens,
+  type ToolSearchDocument,
+  type ToolSearchIndex,
+} from './tool-search.js';
 export {
   createJsonSchemaLike,
   type JsonSchemaLike,
