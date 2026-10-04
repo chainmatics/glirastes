@@ -80,18 +80,16 @@ export function parseClarificationAnswer(
 ): ParsedClarificationAnswer | undefined {
   const match = MARKER.exec(text);
   if (!match) return undefined;
-  let decoded: unknown;
+  let record: Record<string, unknown>;
   try {
-    decoded = JSON.parse(match[1]!);
+    // MARKER only captures a brace-delimited payload: this is an object or throws.
+    record = JSON.parse(match[1]!) as Record<string, unknown>;
   } catch {
     return undefined;
   }
-  if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) {
+  if (Object.keys(record).some((key) => key !== 'toolCallId' && key !== 'optionId')) {
     return undefined;
   }
-  const record = decoded as Record<string, unknown>;
-  const keys = Object.keys(record);
-  if (keys.some((key) => key !== 'toolCallId' && key !== 'optionId')) return undefined;
   if (typeof record.toolCallId !== 'string' || !TOOL_CALL_ID.test(record.toolCallId)) {
     return undefined;
   }
