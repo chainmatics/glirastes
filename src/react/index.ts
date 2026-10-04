@@ -24,6 +24,11 @@ export type {
   MentionData,
   MentionConfig,
   MentionSerializationConfig,
+  // Completion providers
+  ChatCompletionProvider,
+  CompletionItem,
+  CompletionPermissionContext,
+  CompletionSearchRequest,
   // Session
   SessionConfig,
   SessionSummary,
@@ -165,6 +170,13 @@ export { RecordingBar } from './components/recording-bar.js';
 export { AiTriggerButton } from './components/ai-trigger-button.js';
 export { SessionSwitcher, type SessionSwitcherProps } from './components/session-switcher.js';
 export { ClarificationCard } from './components/clarification-card.js';
+
+// Completion providers
+export {
+  createCompletionSearch,
+  type CompletionSearch,
+  type CompletionSearchOptions,
+} from './completions/completion-search.js';
 
 // Bridges
 export {

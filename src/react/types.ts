@@ -234,6 +234,10 @@ export interface MentionResult {
   label: string;
   description?: string;
   icon?: string;
+  /** Stable list identity when several providers may return the same id. */
+  key?: string;
+  /** Token text after the trigger; defaults to a slug of `label`. */
+  slug?: string;
 }
 
 export interface MentionData {
@@ -248,6 +252,47 @@ export interface MentionConfig {
   resolve: (id: string, type: string) => Promise<MentionData>;
   types: string[];
   serialize?: MentionSerializationConfig;
+}
+
+// ============================================================================
+// Completion Providers ('/' commands and '@' mentions)
+// ============================================================================
+
+/**
+ * What the app UI knows about the signed-in user. Providers use it to hide
+ * entries; it never authorizes anything (the server and the app do).
+ */
+export interface CompletionPermissionContext {
+  readonly roles?: ReadonlyArray<string>;
+  readonly attributes?: Readonly<Record<string, unknown>>;
+}
+
+export interface CompletionItem {
+  /** The app's own stable id; it reaches the model via the mention marker. */
+  id: string;
+  /** Mention type, e.g. `user`, `task`, `command`. */
+  type: string;
+  label: string;
+  description?: string;
+  slug?: string;
+}
+
+export interface CompletionSearchRequest {
+  query: string;
+  trigger: string;
+  /** Aborted when a newer search starts; pass it to `fetch`. */
+  signal: AbortSignal;
+  context: CompletionPermissionContext;
+  limit: number;
+}
+
+export interface ChatCompletionProvider {
+  /** Stable, unique provider id (`[a-z0-9-]`, max 40). */
+  id: string;
+  trigger: '@' | '/';
+  search(
+    request: CompletionSearchRequest,
+  ): Promise<ReadonlyArray<CompletionItem>> | ReadonlyArray<CompletionItem>;
 }
 
 export interface MentionSerializationConfig {
