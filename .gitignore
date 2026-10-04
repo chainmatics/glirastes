@@ -25,3 +25,6 @@ src/openapi/index.d.ts
 packages/
 coverage/
 docs/superpowers/
+
+# Temporary app fixtures created by the tools generator tests.
+.tool-fixtures/
