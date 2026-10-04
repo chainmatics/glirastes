@@ -65,6 +65,34 @@ export type {
   SemanticChangeClassification,
   ToolSemanticState,
 } from './semantic-change.js';
+
+export {
+  TOOL_POLICY_RULES_VERSION,
+  ToolPolicyEntrySchema,
+  ToolPolicyFileSchema,
+  ToolPolicyPinSchema,
+  confirmationFloor,
+  deriveToolPolicyDefaults,
+  intersectAllowedRoles,
+  mostRestrictiveRiskClass,
+  parseToolPolicyFile,
+  resolveToolPolicy,
+  riskTier,
+} from './tool-policy.js';
+export type {
+  AllowedRolesIntersection,
+  DeclaredEffect,
+  EffectiveToolPolicy,
+  PolicyOrigin,
+  ResolveToolPolicyInput,
+  ResolveToolPolicyResult,
+  RiskTier,
+  ToolPolicyDefaults,
+  ToolPolicyDefaultsInput,
+  ToolPolicyEntry,
+  ToolPolicyFile,
+  ToolPolicyWarningCode,
+} from './tool-policy.js';
 export type {
   AppSetupArtifact,
   AppSetupAssessmentMode,
