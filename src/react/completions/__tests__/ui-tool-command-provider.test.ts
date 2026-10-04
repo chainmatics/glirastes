@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatCompletionProvider, CompletionItem } from '../../types.js';
+import {
+  mentionDataFromResult,
+  normalizeMentionSlug,
+  serializeMentionsForSend,
+} from '../../utils/mention-markup.js';
+import { createCompletionSearch } from '../completion-search.js';
 import { createUiToolCommandProvider } from '../ui-tool-command-provider.js';
 
 const provider = createUiToolCommandProvider({
@@ -163,5 +169,37 @@ describe('createUiToolCommandProvider with command ids and arguments', () => {
     expect(run(lenient, '', [], 8)).toEqual([
       { id: 'ui.dialog.newTask', type: 'command', label: 'Neue Aufgabe' },
     ]);
+  });
+});
+
+describe('a picked tool-backed command', () => {
+  it('reaches the model with its definition id and arguments', async () => {
+    const commands = createUiToolCommandProvider({
+      tools: [
+        {
+          definitionId: 'ui.navigate',
+          commandId: 'ui.navigate.admin',
+          label: 'Administration öffnen',
+          args: { destination: 'admin' },
+        },
+        { definitionId: 'ui.filter', commandId: 'ui.filter.done', label: 'Erledigte filtern' },
+      ],
+    });
+    const find = createCompletionSearch([commands]);
+
+    const results = await find('admin', '/');
+    expect(results).toHaveLength(1);
+    const picked = results[0];
+    const slug = normalizeMentionSlug(picked.label);
+    const sent = serializeMentionsForSend(
+      `/${slug}`,
+      [mentionDataFromResult(picked, { prefix: '/', slug })],
+    );
+
+    expect(sent).toBe(
+      '<!--context:[Referenced entities: Administration öffnen '
+      + '(ID: ui.navigate.admin, tool: ui.navigate, args: {"destination":"admin"})]--> '
+      + '{{mention:command:ui.navigate.admin:Administration öffnen}}',
+    );
   });
 });

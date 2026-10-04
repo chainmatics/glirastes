@@ -1,4 +1,9 @@
-import type { Mention, MentionData, MentionSerializationConfig } from '../types.js';
+import type {
+  Mention,
+  MentionData,
+  MentionResult,
+  MentionSerializationConfig,
+} from '../types.js';
 
 const CONTEXT_BLOCK_RE = /<!--\s*context:[\s\S]*?-->\s*/gi;
 const MENTION_MARKER_RE = /\{\{mention:([^:}]+):([^:}]+):([^}]+)\}\}/g;
@@ -36,6 +41,27 @@ export function describeToolReference(
   if (json === undefined || json.length > MAX_TOOL_ARGS_LENGTH) return undefined;
   const safe = json.replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
   return `tool: ${definitionId}, args: ${safe}`;
+}
+
+/**
+ * The structured mention a picked completion result becomes in the composer.
+ * A tool-backed command keeps its `definitionId` and `args`, because the
+ * serializer needs them to tell the model what the command runs.
+ */
+export function mentionDataFromResult(
+  result: MentionResult,
+  token: { prefix: string; slug: string },
+): MentionData {
+  return {
+    id: result.id,
+    type: result.type,
+    label: result.label,
+    displayName: result.label,
+    slug: token.slug,
+    prefix: token.prefix,
+    ...(result.definitionId ? { definitionId: result.definitionId } : {}),
+    ...(result.args ? { args: result.args } : {}),
+  };
 }
 
 export function inferMentionPrefix(type: string): string {
@@ -129,6 +155,20 @@ export function serializeMentionsForSend(
   let nextText = cleaned;
   const serializedMentions: SerializableMention[] = [];
 
+  // One command can arrive twice: as a chip read back from the editor DOM
+  // (dataset only, so without definition id and arguments) and as the state
+  // entry that still carries them. Only the entry first in line replaces the
+  // token, so the reference is looked up per mention, not per entry.
+  const toolReferences = new Map<string, string>();
+  for (const mention of mentions) {
+    if (typeof mention.id !== 'string' || typeof mention.type !== 'string') continue;
+    if (mention.definitionId === undefined) continue;
+    const key = `${mention.type}\u0000${mention.id}`;
+    if (toolReferences.has(key)) continue;
+    const reference = describeToolReference(mention.definitionId, mention.args);
+    if (reference) toolReferences.set(key, reference);
+  }
+
   for (const mention of mentions) {
     const id = typeof mention.id === 'string' ? mention.id : '';
     const type = typeof mention.type === 'string' ? mention.type : '';
@@ -166,9 +206,7 @@ export function serializeMentionsForSend(
         displayName: label,
         slug,
         prefix,
-        toolReference: mention.definitionId === undefined
-          ? undefined
-          : describeToolReference(mention.definitionId, mention.args),
+        toolReference: toolReferences.get(`${type}\u0000${id}`),
       });
     }
   }

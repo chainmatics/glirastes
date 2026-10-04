@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { MentionData } from '../../types.js';
+import type { MentionData, MentionResult } from '../../types.js';
 import {
   describeToolReference,
+  mentionDataFromResult,
   serializeMentionsForSend,
   stripContextBlocks,
 } from '../mention-markup.js';
@@ -106,5 +107,79 @@ describe('serializeMentionsForSend with tool-backed commands', () => {
       [command({ definitionId: 'ui.navigate', args: { destination: 'admin' } })],
       { enabled: false },
     )).toBe('/administration-offnen');
+  });
+});
+
+describe('serializeMentionsForSend with two entries for one command', () => {
+  // A command that was dictated into after it was picked comes back twice:
+  // as a chip rebuilt from the editor DOM (dataset only: no definition id, no
+  // arguments) and as the state entry that still carries them.
+  const chip = command();
+  const entry = command({ definitionId: 'ui.navigate', args: { destination: 'admin' } });
+  const expected = '<!--context:[Referenced entities: Administration öffnen '
+    + '(ID: ui.navigate.admin, tool: ui.navigate, args: {"destination":"admin"})]--> '
+    + MARKER;
+
+  it.each([
+    ['the chip first', [chip, entry]],
+    ['the state entry first', [entry, chip]],
+  ])('keeps the tool reference when %s', (_name, mentions) => {
+    expect(serializeMentionsForSend('/administration-offnen', mentions)).toBe(expected);
+  });
+
+  it('lists the command once with the option on', () => {
+    expect(serializeMentionsForSend(
+      '/administration-offnen',
+      [chip, entry],
+      { includeContextBlock: true },
+    )).toBe(expected);
+  });
+
+  it('does not lend the reference to a different mention', () => {
+    const other = command({ id: 'ui.filter.done', label: 'Erledigte filtern', slug: 'erledigte-filtern' });
+    expect(serializeMentionsForSend('/erledigte-filtern', [other, entry]))
+      .toBe('{{mention:command:ui.filter.done:Erledigte filtern}}');
+  });
+});
+
+describe('mentionDataFromResult', () => {
+  const picked: MentionResult = {
+    id: 'ui.navigate.admin',
+    key: 'ui-tools:command:ui.navigate.admin',
+    type: 'command',
+    label: 'Administration öffnen',
+    description: 'Seite wechseln',
+    definitionId: 'ui.navigate',
+    args: { destination: 'admin' },
+  };
+  const token = { prefix: '/', slug: 'administration-offnen' };
+
+  it('keeps the definition and arguments of a tool-backed command', () => {
+    expect(mentionDataFromResult(picked, token)).toEqual({
+      id: 'ui.navigate.admin',
+      type: 'command',
+      label: 'Administration öffnen',
+      displayName: 'Administration öffnen',
+      slug: 'administration-offnen',
+      prefix: '/',
+      definitionId: 'ui.navigate',
+      args: { destination: 'admin' },
+    });
+  });
+
+  it('adds no keys for a result without a tool reference', () => {
+    const { definitionId: _definitionId, args: _args, ...plain } = picked;
+    expect(Object.keys(mentionDataFromResult(plain, token)).sort()).toEqual(
+      ['displayName', 'id', 'label', 'prefix', 'slug', 'type'],
+    );
+  });
+
+  it('reaches the model through the serializer', () => {
+    expect(serializeMentionsForSend('/administration-offnen', [mentionDataFromResult(picked, token)]))
+      .toBe(
+        '<!--context:[Referenced entities: Administration öffnen '
+        + '(ID: ui.navigate.admin, tool: ui.navigate, args: {"destination":"admin"})]--> '
+        + MARKER,
+      );
   });
 });

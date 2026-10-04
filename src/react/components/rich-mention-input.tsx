@@ -15,7 +15,11 @@ import type {
   RichMentionInputHandle,
   RichMentionInputProps,
 } from '../types.js';
-import { inferMentionPrefix, normalizeMentionSlug } from '../utils/mention-markup.js';
+import {
+  inferMentionPrefix,
+  mentionDataFromResult,
+  normalizeMentionSlug,
+} from '../utils/mention-markup.js';
 
 const DEFAULT_TRIGGERS = ['@', '/'];
 const SEARCH_DEBOUNCE_MS = 100;
@@ -339,14 +343,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         const prefix = inferMentionPrefix(result.type);
         const slug = normalizeMentionSlug(result.label);
 
-        const mentionData: MentionData = {
-          id: result.id,
-          type: result.type,
-          label: result.label,
-          displayName: result.label,
-          slug,
-          prefix,
-        };
+        const mentionData = mentionDataFromResult(result, { prefix, slug });
 
         // For command type: insert as text, no chip
         if (result.type === 'command') {
