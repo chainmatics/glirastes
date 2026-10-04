@@ -169,6 +169,28 @@ describe('composer with completion providers', () => {
     }));
   });
 
+  it('keeps the separator after a picked command and chip literal for the next typed word', async () => {
+    const chat = transport();
+    render(<Composer chat={chat} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    // Chrome collapses the trailing space of `/slug ` and the leading space of
+    // the text after a chip under `white-space: normal`, so the next word
+    // would merge into the token. jsdom cannot lay out text; pin the rule.
+    expect(editor.style.whiteSpace).toBe('pre-wrap');
+    await pickFirstCommand(editor, '/er', 'Erledigte filtern', '/erledigte-filtern');
+    // insertMention restores the caret in a rAF; let it land before typing on.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(window.getComputedStyle(editor).whiteSpace).toBe('pre-wrap');
+
+    typeInto(editor, '/erledigte-filtern bitte @al');
+    await waitFor(() => expect(screen.getByText('Alice Doe')).toBeTruthy());
+    fireEvent.keyDown(editor, { key: 'Tab' });
+    await waitFor(() => expect(editor.querySelector('[data-mention-id="42"]')).toBeTruthy());
+    expect(editor.lastChild!.textContent!.startsWith(' ')).toBe(true);
+    expect(window.getComputedStyle(editor).whiteSpace).toBe('pre-wrap');
+  });
+
   it('closes the list with Escape without sending', async () => {
     const chat = transport();
     render(<Composer chat={chat} />);

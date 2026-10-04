@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
 } from 'react';
 import type {
@@ -25,6 +26,16 @@ import {
 
 const DEFAULT_TRIGGERS = ['@', '/'];
 const SEARCH_DEBOUNCE_MS = 100;
+
+/**
+ * Picking a command leaves `/slug ` in the editor and picking a chip leaves a
+ * text node that starts with a space. Under the default `white-space: normal`
+ * the browser collapses that separator, so the next typed word merges into the
+ * token and its structured id is lost. This is behaviour, not theming: it is
+ * set inline so it also holds for BYOS and shadow-DOM consumers that do not
+ * load styles.css.
+ */
+const EDITOR_STYLE: CSSProperties = { whiteSpace: 'pre-wrap' };
 
 function normalizeInputValue(text: string): string {
   return text.replace(/\u00A0/g, ' ');
@@ -784,6 +795,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         <div
           ref={editableRef}
           className={className}
+          style={EDITOR_STYLE}
           contentEditable={!disabled}
           role="textbox"
           tabIndex={0}
