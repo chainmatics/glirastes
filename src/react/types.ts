@@ -136,7 +136,10 @@ export interface RecordingBarProps {
   isConnecting: boolean;
   /** The existing authoritative recorder stream; never opens another mic. */
   stream?: MediaStream | null;
-  /** @deprecated Interim text is intentionally not rendered while recording. */
+  /**
+   * Live final plus interim transcript shown next to the waveform. It is
+   * never written into the editor before Stop.
+   */
   transcript?: string;
   onCancel: () => void;
   onStop: () => void;

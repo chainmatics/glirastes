@@ -18,9 +18,39 @@ function LoadingDots() {
   );
 }
 
+const MAX_VISIBLE_TRANSCRIPT = 80;
+
+/** Shows the newest words; the full text stays available as a tooltip. */
+function InterimTranscript({ text }: { text?: string }) {
+  const trimmed = text?.trim() ?? '';
+  if (!trimmed) return null;
+  const visible = trimmed.length > MAX_VISIBLE_TRANSCRIPT
+    ? `…${trimmed.slice(-(MAX_VISIBLE_TRANSCRIPT - 1))}`
+    : trimmed;
+  return (
+    <span
+      data-part="interim-transcript"
+      aria-live="polite"
+      title={trimmed}
+      style={{
+        flex: '2 1 0',
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        fontSize: '0.8125rem',
+        opacity: 0.85,
+      }}
+    >
+      {visible}
+    </span>
+  );
+}
+
 function RecordingBarInner({
   isConnecting,
   stream,
+  transcript,
   onCancel,
   onStop,
   variant,
@@ -46,6 +76,8 @@ function RecordingBarInner({
       <div data-part="wave-container" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
         {isConnecting ? <LoadingDots /> : <StreamWaveform stream={stream} />}
       </div>
+
+      <InterimTranscript text={transcript} />
 
       <StopButton onClick={handleStop} ariaLabel="Aufnahme stoppen" title="Aufnahme stoppen" />
     </div>
