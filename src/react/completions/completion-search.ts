@@ -4,6 +4,7 @@ import type {
   CompletionPermissionContext,
   MentionResult,
 } from '../types.js';
+import { describeToolReference } from '../utils/mention-markup.js';
 
 export interface CompletionSearchOptions {
   /** Passed to every provider; it only hides entries, the server authorizes. */
@@ -33,7 +34,9 @@ function isItem(value: unknown): value is CompletionItem {
   return typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 200
     && !/[:}]/.test(item.id)
     && typeof item.type === 'string' && /^[a-z][a-z0-9_-]{0,39}$/.test(item.type)
-    && typeof item.label === 'string' && item.label.trim().length > 0;
+    && typeof item.label === 'string' && item.label.trim().length > 0
+    && (item.definitionId === undefined && item.args === undefined
+      || describeToolReference(item.definitionId, item.args) !== undefined);
 }
 
 function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
@@ -107,6 +110,8 @@ export function createCompletionSearch(
           label: item.label.trim(),
           ...(item.description ? { description: item.description } : {}),
           ...(item.slug ? { slug: item.slug } : {}),
+          ...(item.definitionId ? { definitionId: item.definitionId } : {}),
+          ...(item.args ? { args: item.args } : {}),
         });
         if (results.length >= maxResults) return results;
       }

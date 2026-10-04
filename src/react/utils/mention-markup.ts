@@ -2,6 +2,8 @@ import type { Mention, MentionData, MentionSerializationConfig } from '../types.
 
 const CONTEXT_BLOCK_RE = /<!--\s*context:[\s\S]*?-->\s*/gi;
 const MENTION_MARKER_RE = /\{\{mention:([^:}]+):([^:}]+):([^}]+)\}\}/g;
+const DEFINITION_ID_RE = /^[A-Za-z0-9_.-]{1,200}$/;
+const MAX_TOOL_ARGS_LENGTH = 2_000;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -9,6 +11,31 @@ function escapeRegex(value: string): string {
 
 export function stripContextBlocks(text: string): string {
   return text.replace(CONTEXT_BLOCK_RE, '').trimStart();
+}
+
+/**
+ * The text that tells the model which catalog definition a tool-backed
+ * command runs and with which arguments (`tool: ui.navigate, args: {...}`),
+ * or `undefined` when the definition id or the arguments cannot be sent
+ * safely. Arguments must be a JSON object of at most 2000 characters; `<` and
+ * `>` stay escaped so they can never close the surrounding context comment.
+ */
+export function describeToolReference(
+  definitionId: unknown,
+  args?: unknown,
+): string | undefined {
+  if (typeof definitionId !== 'string' || !DEFINITION_ID_RE.test(definitionId)) return undefined;
+  if (args === undefined) return `tool: ${definitionId}`;
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) return undefined;
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(args);
+  } catch {
+    return undefined;
+  }
+  if (json === undefined || json.length > MAX_TOOL_ARGS_LENGTH) return undefined;
+  const safe = json.replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  return `tool: ${definitionId}, args: ${safe}`;
 }
 
 export function inferMentionPrefix(type: string): string {
@@ -70,6 +97,8 @@ interface SerializableMention {
   displayName?: string;
   slug?: string;
   prefix?: string;
+  /** From `describeToolReference`; only tool-backed commands have one. */
+  toolReference?: string;
 }
 
 function buildContextBlock(
@@ -80,7 +109,7 @@ function buildContextBlock(
   const summary = mentions
     .map((m) => {
       const displayName = m.displayName ?? m.label ?? m.id;
-      return `${displayName} (ID: ${m.id})`;
+      return `${displayName} (ID: ${m.id}${m.toolReference ? `, ${m.toolReference}` : ''})`;
     })
     .join(', ');
   return `<!--context:[${label}: ${summary}]--> `;
@@ -137,16 +166,24 @@ export function serializeMentionsForSend(
         displayName: label,
         slug,
         prefix,
+        toolReference: mention.definitionId === undefined
+          ? undefined
+          : describeToolReference(mention.definitionId, mention.args),
       });
     }
   }
 
-  if (options?.includeContextBlock) {
-    const contextLabel = options.contextLabel ?? 'Referenced entities';
-    const contextBlock = buildContextBlock(serializedMentions, contextLabel);
-    if (contextBlock) {
-      return `${contextBlock}${nextText}`.trim();
-    }
+  // A tool-backed command is only meaningful with its definition and
+  // arguments, so those always reach the model; other mentions need the option.
+  const contextMentions = options?.includeContextBlock
+    ? serializedMentions
+    : serializedMentions.filter((m) => m.toolReference);
+  const contextBlock = buildContextBlock(
+    contextMentions,
+    options?.contextLabel ?? 'Referenced entities',
+  );
+  if (contextBlock) {
+    return `${contextBlock}${nextText}`.trim();
   }
 
   return nextText;

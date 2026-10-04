@@ -29,6 +29,7 @@ export type {
   CompletionItem,
   CompletionPermissionContext,
   CompletionSearchRequest,
+  UiToolCommandSource,
   // Session
   SessionConfig,
   SessionSummary,
@@ -177,6 +178,7 @@ export {
   type CompletionSearch,
   type CompletionSearchOptions,
 } from './completions/completion-search.js';
+export { createUiToolCommandProvider } from './completions/ui-tool-command-provider.js';
 
 // Bridges
 export {

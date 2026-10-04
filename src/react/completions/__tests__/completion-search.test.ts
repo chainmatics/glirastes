@@ -117,4 +117,57 @@ describe('createCompletionSearch', () => {
     expect(() => createCompletionSearch([people, people])).toThrow(/Duplicate/);
     expect(() => createCompletionSearch([{ ...people, id: 'Bad Id' }])).toThrow(/Invalid/);
   });
+
+  it('hands the definition id and arguments of a tool-backed command to the result', async () => {
+    const search = createCompletionSearch([{
+      id: 'ui-tools',
+      trigger: '/',
+      search: () => [
+        {
+          id: 'ui.navigate.admin',
+          type: 'command',
+          label: 'Administration öffnen',
+          definitionId: 'ui.navigate',
+          args: { destination: 'admin' },
+        },
+        { id: 'ui.filter.done', type: 'command', label: 'Erledigte filtern' },
+      ],
+    }]);
+    expect(await search('', '/')).toEqual([
+      {
+        id: 'ui.navigate.admin',
+        key: 'ui-tools:command:ui.navigate.admin',
+        type: 'command',
+        label: 'Administration öffnen',
+        definitionId: 'ui.navigate',
+        args: { destination: 'admin' },
+      },
+      { id: 'ui.filter.done', key: 'ui-tools:command:ui.filter.done', type: 'command', label: 'Erledigte filtern' },
+    ]);
+  });
+
+  it('drops tool-backed items whose definition id or arguments cannot be sent to the model', async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const bad = [
+      { definitionId: 'ui navigate' },
+      { definitionId: 42 },
+      { args: { destination: 'admin' } },
+      { definitionId: 'ui.navigate', args: ['admin'] },
+      { definitionId: 'ui.navigate', args: null },
+      { definitionId: 'ui.navigate', args: circular },
+      { definitionId: 'ui.navigate', args: { text: 'x'.repeat(2_001) } },
+    ];
+    const search = createCompletionSearch([{
+      id: 'ui-tools',
+      trigger: '/',
+      search: () => [
+        ...bad.map((extra, index) => ({
+          id: `bad-${index}`, type: 'command', label: `Bad ${index}`, ...extra,
+        })),
+        { id: 'ok', type: 'command', label: 'Ok', definitionId: 'ui.navigate', args: { destination: 'x' } },
+      ] as never,
+    }]);
+    expect((await search('', '/')).map((result) => result.id)).toEqual(['ok']);
+  });
 });

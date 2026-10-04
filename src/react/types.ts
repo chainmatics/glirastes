@@ -238,6 +238,10 @@ export interface MentionResult {
   key?: string;
   /** Token text after the trigger; defaults to a slug of `label`. */
   slug?: string;
+  /** Tool-backed commands: the catalog definition to run (see `CompletionItem`). */
+  definitionId?: string;
+  /** Tool-backed commands: fixed arguments for the definition. */
+  args?: Readonly<Record<string, unknown>>;
 }
 
 export interface MentionData {
@@ -275,6 +279,14 @@ export interface CompletionItem {
   label: string;
   description?: string;
   slug?: string;
+  /**
+   * Tool-backed commands: the catalog definition to run. Set it when `id` is
+   * not the definition id (several commands share one definition) or `args`
+   * are present; it reaches the model next to the id on send.
+   */
+  definitionId?: string;
+  /** Fixed arguments for `definitionId` (needs `definitionId`), e.g. `{ destination: 'overview' }`. */
+  args?: Readonly<Record<string, unknown>>;
 }
 
 export interface CompletionSearchRequest {
@@ -293,6 +305,25 @@ export interface ChatCompletionProvider {
   search(
     request: CompletionSearchRequest,
   ): Promise<ReadonlyArray<CompletionItem>> | ReadonlyArray<CompletionItem>;
+}
+
+/** A catalog UI tool offered as a `/` command. */
+export interface UiToolCommandSource {
+  readonly definitionId: string;
+  /**
+   * Stable, unique list identity and mention id of this command; defaults to
+   * `definitionId`. One definition can back several commands (a single
+   * `ui.navigate` with a `destination` enum becomes one command per
+   * destination). No `:` or `}`, max 200 characters.
+   */
+  readonly commandId?: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly keywords?: ReadonlyArray<string>;
+  /** Fixed arguments the command passes to the definition, e.g. `{ destination: 'overview' }`. */
+  readonly args?: Readonly<Record<string, unknown>>;
+  /** Empty or omitted: visible to everyone. */
+  readonly allowedRoles?: ReadonlyArray<string>;
 }
 
 export interface MentionSerializationConfig {
