@@ -19,6 +19,8 @@ import {
   inferMentionPrefix,
   mentionDataFromResult,
   normalizeMentionSlug,
+  toolReferenceFromDataset,
+  toolReferenceToDataset,
 } from '../utils/mention-markup.js';
 
 const DEFAULT_TRIGGERS = ['@', '/'];
@@ -183,6 +185,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
               slug: el.dataset.mentionSlug,
               prefix: el.dataset.mentionPrefix,
               displayName: el.dataset.mentionLabel,
+              ...toolReferenceFromDataset(el.dataset),
             });
           }
         }
@@ -219,6 +222,13 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       chip.dataset.mentionLabel = displayName;
       chip.dataset.mentionPrefix = prefix;
       chip.dataset.size = 'inline';
+      // A command's definition id and arguments stay on its chip, so the
+      // entry read back from the editor (getMentions, drafts) still has them.
+      const toolReference = toolReferenceToDataset(mention);
+      if (toolReference) {
+        chip.dataset.mentionDefinitionId = toolReference.definitionId;
+        if (toolReference.args !== undefined) chip.dataset.mentionArgs = toolReference.args;
+      }
 
       const prefixSpan = document.createElement('span');
       prefixSpan.dataset.element = 'prefix';

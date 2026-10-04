@@ -64,6 +64,46 @@ export function mentionDataFromResult(
   };
 }
 
+/**
+ * A mention's tool reference as chip `dataset` values, so a chip read back
+ * from the editor keeps the definition id and arguments of the command it
+ * stands for. `undefined` when the mention has none, or none the model could
+ * be given.
+ */
+export function toolReferenceToDataset(
+  mention: MentionData,
+): { definitionId: string; args?: string } | undefined {
+  if (mention.definitionId === undefined) return undefined;
+  if (describeToolReference(mention.definitionId, mention.args) === undefined) return undefined;
+  const definitionId = mention.definitionId as string;
+  return mention.args === undefined
+    ? { definitionId }
+    : { definitionId, args: JSON.stringify(mention.args) };
+}
+
+/**
+ * The inverse of `toolReferenceToDataset`: the `definitionId` (and `args`)
+ * stored in a chip's dataset, or `undefined` when there is none or it is
+ * malformed. It is validated like a reference taken from a picked result.
+ */
+export function toolReferenceFromDataset(dataset: {
+  mentionDefinitionId?: string;
+  mentionArgs?: string;
+}): { definitionId: string; args?: Record<string, unknown> } | undefined {
+  const definitionId = dataset.mentionDefinitionId;
+  if (!definitionId) return undefined;
+  let args: Record<string, unknown> | undefined;
+  if (dataset.mentionArgs !== undefined) {
+    try {
+      args = JSON.parse(dataset.mentionArgs) as Record<string, unknown>;
+    } catch {
+      return undefined;
+    }
+  }
+  if (describeToolReference(definitionId, args) === undefined) return undefined;
+  return args === undefined ? { definitionId } : { definitionId, args };
+}
+
 export function inferMentionPrefix(type: string): string {
   return type === 'task' || type === 'command' ? '/' : '@';
 }

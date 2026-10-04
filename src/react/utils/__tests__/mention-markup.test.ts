@@ -5,6 +5,8 @@ import {
   mentionDataFromResult,
   serializeMentionsForSend,
   stripContextBlocks,
+  toolReferenceFromDataset,
+  toolReferenceToDataset,
 } from '../mention-markup.js';
 
 const MARKER = '{{mention:command:ui.navigate.admin:Administration öffnen}}';
@@ -181,5 +183,42 @@ describe('mentionDataFromResult', () => {
         + '(ID: ui.navigate.admin, tool: ui.navigate, args: {"destination":"admin"})]--> '
         + MARKER,
       );
+  });
+});
+
+describe('tool reference chip dataset', () => {
+  it('round-trips the definition id and arguments', () => {
+    const stored = toolReferenceToDataset(command({
+      definitionId: 'ui.navigate',
+      args: { destination: 'admin', note: '--> <b>' },
+    }));
+    expect(stored).toEqual({
+      definitionId: 'ui.navigate',
+      args: '{"destination":"admin","note":"--> <b>"}',
+    });
+    const read = toolReferenceFromDataset({
+      mentionDefinitionId: stored!.definitionId,
+      mentionArgs: stored!.args,
+    });
+    expect(read).toEqual({ definitionId: 'ui.navigate', args: { destination: 'admin', note: '--> <b>' } });
+    // The stored text is raw; escaping happens only when the model is told.
+    expect(serializeMentionsForSend('/administration-offnen', [command({ ...read })]))
+      .toContain('args: {"destination":"admin","note":"--\\u003e \\u003cb\\u003e"}');
+  });
+
+  it('stores nothing for a mention without a reference or with an unsendable one', () => {
+    expect(toolReferenceToDataset(command())).toBeUndefined();
+    expect(toolReferenceToDataset(command({ definitionId: 'ui navigate' }))).toBeUndefined();
+    expect(toolReferenceToDataset(command({ definitionId: 'ui.navigate', args: [1] }))).toBeUndefined();
+    expect(toolReferenceToDataset(command({ definitionId: 'ui.navigate', args: { big: 'x'.repeat(2_001) } })))
+      .toBeUndefined();
+  });
+
+  it('reads nothing from a missing or malformed dataset', () => {
+    expect(toolReferenceFromDataset({})).toBeUndefined();
+    expect(toolReferenceFromDataset({ mentionArgs: '{"a":1}' })).toBeUndefined();
+    expect(toolReferenceFromDataset({ mentionDefinitionId: 'ui.navigate', mentionArgs: '{oops' })).toBeUndefined();
+    expect(toolReferenceFromDataset({ mentionDefinitionId: 'ui.navigate', mentionArgs: '[1]' })).toBeUndefined();
+    expect(toolReferenceFromDataset({ mentionDefinitionId: 'ui.navigate' })).toEqual({ definitionId: 'ui.navigate' });
   });
 });
