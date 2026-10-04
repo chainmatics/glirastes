@@ -655,6 +655,12 @@ export interface AiChatProviderConfig {
    * ```
    */
   theme?: ChatTheme;
+  /**
+   * `inline` (default) writes the theme as inline `--cm-*` variables on
+   * widget roots. `inherit` leaves them to stylesheets and host variables;
+   * `<glirastes-chat>` uses it so page CSS can theme the shadow root.
+   */
+  themeScope?: 'inline' | 'inherit';
   onToolResult?: OnToolResult;
   onBeforeSend?: OnBeforeSend;
   approvalDescription?: ApprovalDescriptionFn;

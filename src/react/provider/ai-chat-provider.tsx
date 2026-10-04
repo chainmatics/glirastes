@@ -369,6 +369,7 @@ export function AiChatProvider({
   suggestions: userSuggestions,
   locale: userLocale,
   theme: userTheme,
+  themeScope = 'inline',
   onToolResult,
   onBeforeSend,
   approvalDescription: userApprovalDescription,
@@ -385,8 +386,8 @@ export function AiChatProvider({
   );
   // Resolve `theme` prop → CSS variables spread onto widget roots.
   const themeVars = useMemo<CSSProperties>(
-    () => getThemeVars(userTheme) as CSSProperties,
-    [userTheme],
+    () => (themeScope === 'inherit' ? {} : getThemeVars(userTheme)) as CSSProperties,
+    [userTheme, themeScope],
   );
   const themeEffect = useMemo(() => getThemeEffect(userTheme), [userTheme]);
   const classNames = useMemo(() => userClassNames ?? {}, [userClassNames]);
