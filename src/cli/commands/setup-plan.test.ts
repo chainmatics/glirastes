@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -108,6 +108,19 @@ async function fixture(): Promise<string> {
   return root;
 }
 
+async function firstSetupFixture(
+  proposed: ReturnType<typeof artifact>,
+): Promise<string> {
+  const root = await fixture();
+  await rm(join(root, '.glirastes/setup-artifact.json'));
+  await rm(join(root, '.glirastes/previous-setup-artifact.json'));
+  await writeFile(
+    join(root, '.glirastes/proposed-setup.json'),
+    `${JSON.stringify(proposed)}\n`,
+  );
+  return root;
+}
+
 describe('createSetupPlan', () => {
   it('is byte-deterministic and contains bounded technical facts only', async () => {
     const root = await fixture();
@@ -189,6 +202,104 @@ describe('createSetupPlan', () => {
       confirmLoosening: true,
       planDigest: digest('Z'),
     })).toThrowError(expect.objectContaining({ code: 'E-SEMANTICS-004' }));
+  });
+
+  it('adds a new tool at its route defaults without confirmation', async () => {
+    const root = await fixture();
+    const previous = artifact({
+      toolId: id('9'),
+      name: 'tasks.archived',
+      modelName: 'tasks_archived',
+      path: '/api/tasks/archived',
+    });
+    previous.planner.toolIds = [id('9')];
+    await writeFile(
+      join(root, '.glirastes/previous-setup-artifact.json'),
+      `${JSON.stringify(previous)}\n`,
+    );
+
+    const plan = await createSetupPlan({ rootDir: root });
+
+    expect(plan.semanticChanges).toEqual([
+      {
+        toolId: id('4'),
+        classification: 'added',
+        fields: ['toolId'],
+        requiresConfirmation: false,
+      },
+      {
+        toolId: id('9'),
+        classification: 'hardening',
+        fields: ['toolId'],
+        requiresConfirmation: false,
+      },
+    ]);
+    expect(plan.requiresConfirmation).toBe(false);
+    expect(() => assertSetupPlanConfirmation(plan, {})).not.toThrow();
+  });
+
+  it('needs no confirmation for a first setup at the defaults', async () => {
+    const root = await firstSetupFixture(artifact({
+      name: 'tasks.create',
+      modelName: 'tasks_create',
+      method: 'POST',
+      operationGroup: 'create',
+      riskClass: 'write',
+      requiresApproval: true,
+    }));
+
+    const plan = await createSetupPlan({
+      rootDir: root,
+      artifactPath: '.glirastes/proposed-setup.json',
+    });
+
+    expect(plan.semanticChanges).toEqual([{
+      toolId: id('4'),
+      classification: 'added',
+      fields: ['toolId'],
+      requiresConfirmation: false,
+    }]);
+    expect(plan.requiresConfirmation).toBe(false);
+  });
+
+  it.each([
+    ['an unconfirmed write', {
+      name: 'tasks.create',
+      modelName: 'tasks_create',
+      method: 'POST',
+      operationGroup: 'create',
+      riskClass: 'write',
+      requiresApproval: false,
+    }, ['toolId', 'requiresApproval']],
+    ['a delete below its default risk', {
+      name: 'tasks.delete',
+      modelName: 'tasks_delete',
+      method: 'DELETE',
+      path: '/api/tasks/[id]',
+      operationGroup: 'delete',
+      riskClass: 'write',
+      requiresApproval: true,
+    }, ['toolId', 'riskClass']],
+  ])('keeps %s on a new tool as a confirmable loosening', async (
+    _label,
+    overrides,
+    fields,
+  ) => {
+    const root = await firstSetupFixture(artifact(overrides));
+
+    const plan = await createSetupPlan({
+      rootDir: root,
+      artifactPath: '.glirastes/proposed-setup.json',
+    });
+
+    expect(plan.semanticChanges).toEqual([{
+      toolId: id('4'),
+      classification: 'loosening',
+      fields,
+      requiresConfirmation: true,
+    }]);
+    expect(() => assertSetupPlanConfirmation(plan, {}))
+      .toThrowError(expect.objectContaining({ code: 'E-SEMANTICS-004' }));
   });
 
   it('does not call network or mutation dependencies', async () => {

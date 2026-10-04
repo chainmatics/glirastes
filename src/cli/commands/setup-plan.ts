@@ -5,7 +5,10 @@ import {
   AppSetupArtifactSchema,
   assertAppSetupSemanticParity,
   classifyToolSemanticChange,
+  deriveToolPolicyDefaults,
+  riskTier,
   type AppSetupArtifact,
+  type AppSetupToolCandidate,
   type SemanticChange,
 } from '../../contracts/index.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
@@ -113,33 +116,57 @@ async function resolvePreviousArtifactPath(
   return undefined;
 }
 
+/**
+ * A tool that is new in the proposal needs no confirmation when its policy is
+ * at least as strict as the deterministic defaults for its route. Only a
+ * committed relaxation below those defaults stays a confirmable loosening.
+ */
+function classifyNewTool(tool: AppSetupToolCandidate): SemanticChange {
+  const defaults = deriveToolPolicyDefaults({
+    executionKind: tool.executionKind,
+    ...(tool.method ? { method: tool.method } : {}),
+    ...(tool.path ? { path: tool.path } : {}),
+    definitionId: tool.name,
+  });
+  const relaxedFields: string[] = [];
+  if (riskTier(tool.riskClass) < riskTier(defaults.riskClass)) {
+    relaxedFields.push('riskClass');
+  }
+  const approvalExpected = defaults.requiresApproval
+    || riskTier(tool.riskClass) >= 2;
+  if (approvalExpected && !tool.requiresApproval) {
+    relaxedFields.push('requiresApproval');
+  }
+  if (relaxedFields.length === 0) {
+    return {
+      toolId: tool.toolId,
+      classification: 'added',
+      fields: ['toolId'],
+      requiresConfirmation: false,
+    };
+  }
+  return {
+    toolId: tool.toolId,
+    classification: 'loosening',
+    fields: ['toolId', ...relaxedFields],
+    requiresConfirmation: true,
+  };
+}
+
 function compareArtifacts(
   previous: AppSetupArtifact | undefined,
   proposed: AppSetupArtifact,
 ): SemanticChange[] {
-  if (!previous) {
-    return proposed.tools.map((tool) => ({
-      toolId: tool.toolId,
-      classification: 'loosening' as const,
-      fields: ['toolId'],
-      requiresConfirmation: true,
-    }));
-  }
+  const previousTools = previous?.tools ?? [];
   const proposedById = new Map(proposed.tools.map((tool) => [tool.toolId, tool]));
-  const previousById = new Map(previous.tools.map((tool) => [tool.toolId, tool]));
-  const changes: SemanticChange[] = [];
-  for (const tool of proposed.tools) {
+  const previousById = new Map(previousTools.map((tool) => [tool.toolId, tool]));
+  const changes: SemanticChange[] = proposed.tools.map((tool) => {
     const before = previousById.get(tool.toolId);
-    changes.push(before
+    return before
       ? classifyToolSemanticChange(before, tool)
-      : {
-        toolId: tool.toolId,
-        classification: 'loosening',
-        fields: ['toolId'],
-        requiresConfirmation: true,
-      });
-  }
-  for (const tool of previous.tools) {
+      : classifyNewTool(tool);
+  });
+  for (const tool of previousTools) {
     if (!proposedById.has(tool.toolId)) {
       changes.push({
         toolId: tool.toolId,

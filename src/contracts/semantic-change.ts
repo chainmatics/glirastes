@@ -4,6 +4,7 @@ import { riskTier } from './tool-policy.js';
 
 export type SemanticChangeClassification =
   | 'unchanged'
+  | 'added'
   | 'hardening'
   | 'neutral'
   | 'loosening';
