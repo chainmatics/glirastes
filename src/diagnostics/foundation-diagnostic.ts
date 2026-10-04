@@ -7,7 +7,8 @@ export type FoundationDiagnosticCode =
   | `E-SCOPE-${string}`
   | `E-SYNC-${string}`
   | `E-CONNECT-${string}`
-  | `E-POLICY-${string}`;
+  | `E-POLICY-${string}`
+  | `E-TOOLS-${string}`;
 
 export interface FoundationDiagnosticJson {
   schemaVersion: 1;
