@@ -66,8 +66,8 @@ describe('ManifestRevisionSchema', () => {
   });
 
   it('keeps presentation optional for historical signed revisions', () => {
-    const candidate = structuredClone(manifest);
-    delete candidate.tools[0]!.presentation;
+    const { presentation: _presentation, ...historicalTool } = manifest.tools[0]!;
+    const candidate = { ...manifest, tools: [historicalTool] };
     expect(ManifestRevisionSchema.safeParse(candidate).success).toBe(true);
   });
 

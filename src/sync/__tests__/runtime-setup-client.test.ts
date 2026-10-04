@@ -156,7 +156,7 @@ describe('RuntimeSetupClient', () => {
         ...scan.candidates[0],
         rawSource: 'private source',
       }],
-    } as typeof scan);
+    } as unknown as typeof scan);
 
     const request = fetchImpl.mock.calls[0]?.[1] as RequestInit;
     const body = String(request.body);

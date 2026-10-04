@@ -41,6 +41,15 @@ const runResponse = {
   updatedAt: '2026-07-30T10:00:00.000Z',
 };
 
+async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (caught) {
+    return caught as Error;
+  }
+  throw new Error('expected the app setup request to reject');
+}
+
 describe('AppSetupClient', () => {
   it('creates an app-scoped run without transmitting an environment ID', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
@@ -202,9 +211,7 @@ describe('AppSetupClient', () => {
       fetchImpl,
     });
 
-    const error = await client.getRun(artifact.runId).catch(
-      (caught: unknown) => caught as Error,
-    );
+    const error = await rejectionOf(client.getRun(artifact.runId));
     expect(error.message).toBe('Glirastes app setup request failed (403)');
     expect(error.message).not.toContain('setup-secret');
     expect(error.message).not.toContain('private business');
@@ -251,7 +258,7 @@ describe('AppSetupClient', () => {
       });
 
       const pending = client.syncArtifact(artifact, { timeoutMs: 250 });
-      const outcome = pending.catch((caught: unknown) => caught as Error);
+      const outcome = rejectionOf(pending);
       await vi.advanceTimersByTimeAsync(250);
       const error = await outcome;
 
@@ -285,7 +292,7 @@ describe('AppSetupClient', () => {
       timeoutMs: 5_000,
     });
     controller.abort('setup-secret private cancellation reason');
-    const error = await pending.catch((caught: unknown) => caught as Error);
+    const error = await rejectionOf(pending);
 
     expect(error.message).toBe('Glirastes app setup request cancelled');
     expect(error.message).not.toContain('setup-secret');

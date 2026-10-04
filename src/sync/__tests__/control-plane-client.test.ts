@@ -13,6 +13,15 @@ const baseOptions = {
   version: '1.0.0',
 };
 
+async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (caught) {
+    return caught as Error;
+  }
+  throw new Error('expected the control plane request to reject');
+}
+
 describe('RuntimeControlPlaneClient', () => {
   it('registers and polls using only the app-scoped credential header', async () => {
     const fetchImpl = vi.fn()
@@ -98,7 +107,7 @@ describe('RuntimeControlPlaneClient', () => {
       manager: { apply: vi.fn() } as never,
     });
 
-    const error = await client.register().catch((caught) => caught);
+    const error = await rejectionOf(client.register());
 
     expect(error).toBeInstanceOf(RuntimeControlPlaneRequestError);
     expect(error).toMatchObject({
