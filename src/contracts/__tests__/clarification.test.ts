@@ -55,6 +55,42 @@ describe('clarification answer protocol', () => {
   });
 });
 
+describe('clarification marker validation on the parse side', () => {
+  const marker = (payload: string): string => `<!--glirastes:clarification ${payload}-->\nanswer`;
+
+  it.each([
+    ['an option id with a space', '{"toolCallId":"call-1","optionId":"x y"}'],
+    ['an option id over 64 characters', `{"toolCallId":"call-1","optionId":"${'x'.repeat(65)}"}`],
+    ['an empty option id', '{"toolCallId":"call-1","optionId":""}'],
+    ['a numeric option id', '{"toolCallId":"call-1","optionId":5}'],
+    ['a null option id', '{"toolCallId":"call-1","optionId":null}'],
+    ['an array option id', '{"toolCallId":"call-1","optionId":["a"]}'],
+    ['a tool call id over 200 characters', `{"toolCallId":"${'c'.repeat(201)}"}`],
+    ['a numeric tool call id', '{"toolCallId":7}'],
+    ['a missing tool call id', '{"optionId":"task-42"}'],
+  ])('ignores %s', (_label, payload) => {
+    expect(parseClarificationAnswer(marker(payload))).toBeUndefined();
+  });
+
+  it('accepts the largest valid marker (200-char tool call id, 64-char option id)', () => {
+    const toolCallId = 'c'.repeat(200);
+    const optionId = 'o'.repeat(64);
+    const text = formatClarificationAnswer({ toolCallId, optionId, answer: 'Bericht' });
+    const payload = /<!--glirastes:clarification (\{.*\})-->/.exec(text)?.[1] ?? '';
+    expect(payload).toHaveLength(295);
+    expect(parseClarificationAnswer(text)).toEqual({
+      reference: { toolCallId, optionId },
+      answer: 'Bericht',
+    });
+    expect(stripClarificationMarkers(text)).toBe('Bericht');
+  });
+
+  it('rejects a tool call id one character over the limit when formatting', () => {
+    expect(() => formatClarificationAnswer({ toolCallId: 'c'.repeat(201), answer: 'x' }))
+      .toThrow('Invalid clarification tool call id');
+  });
+});
+
 describe('clarification shared option limits', () => {
   it('exposes the limits the server schema and the chat UI validate against', () => {
     expect({
