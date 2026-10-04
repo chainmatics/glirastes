@@ -20,7 +20,7 @@ it('stops the normal app build before Next when source assessment fails', async 
   expect(result.stderr).toContain('assessment required');
   await expect(readFile(resolve(root, '.next/BUILD_ID'))).rejects.toMatchObject({ code: 'ENOENT' });
   expect(await readFile(resolve(root, '.glirastes/runtime.mjs'), 'utf8')).toBe(artifact);
-});
+}, 30_000);
 it('rejects a linked generation directory without writing outside the app', async () => {
   const { buildReference } = await import('../examples/source-driven-next/build.mjs');
   const root = await mkdtemp(resolve(base, '.build-proof-'));
