@@ -103,6 +103,19 @@ describe('applyPolicyOverlay', () => {
     ]).policies).toEqual([{ ...WRITE, enabled: false, allowedRoles: [] }]);
   });
 
+  it.each(['Delete', 'constructor'])(
+    'raises an out-of-enum overlay risk class %j to unknown and confirms it',
+    (label) => {
+      expect(applyPolicyOverlay([READ, { ...WRITE, requiresApproval: false }], [
+        { toolId: READ_ID, riskClass: label as ToolRiskClass },
+        { toolId: WRITE_ID, riskClass: label as ToolRiskClass },
+      ]).policies).toEqual([
+        { ...READ, riskClass: 'unknown', requiresApproval: true },
+        { ...WRITE, riskClass: 'unknown', requiresApproval: true },
+      ]);
+    },
+  );
+
   const parityCases: Array<[string, RuntimeToolPolicy, ToolPolicyEntry]> = [
     ['disable', READ, { enabled: false }],
     ['raise read to write', READ, { riskClass: 'write' }],

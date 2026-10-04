@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { z as z3 } from 'zod-v3';
+import type { ToolRiskClass } from '../../contracts/index.js';
 import { defineTool } from '../../types.js';
 import {
   agentRevision,
@@ -409,6 +410,56 @@ describe('materializeManifestToolRegistry', () => {
       bindings: [binding],
     }).list_tasks?.needsApproval).toBe(false);
   });
+
+  it.each(['Delete', 'constructor'])(
+    'disables a tool whose manifest risk class %j is out of enum above its policy',
+    (label) => {
+      const base = snapshot();
+      const unassessed = {
+        ...base,
+        manifestRevision: {
+          ...base.manifestRevision,
+          tools: [{
+            ...base.manifestRevision.tools[0]!,
+            riskClass: label as ToolRiskClass,
+          }],
+        },
+      };
+      const diagnostics: ToolRegistryDiagnostic[] = [];
+      expect(materializeManifestToolRegistry({
+        snapshot: unassessed,
+        bindings: [binding],
+        onToolUnavailable: (diagnostic) => diagnostics.push(diagnostic),
+      })).toEqual({});
+      expect(diagnostics).toEqual([{
+        code: 'E-POLICY-011',
+        reason: 'runtime-policy-risk-below-manifest',
+        toolId: binding.toolId,
+      }]);
+    },
+  );
+
+  it.each(['Delete', 'constructor'])(
+    'confirms a tool whose policy risk class %j is out of enum',
+    (label) => {
+      const base = snapshot();
+      const unassessed = {
+        ...base,
+        policyRevision: {
+          ...base.policyRevision,
+          toolPolicies: [{
+            ...base.policyRevision.toolPolicies[0]!,
+            riskClass: label as ToolRiskClass,
+            requiresApproval: false,
+          }],
+        },
+      };
+      expect(materializeManifestToolRegistry({
+        snapshot: unassessed,
+        bindings: [binding],
+      }).list_tasks?.needsApproval).toBe(true);
+    },
+  );
 });
 
 describe('createLocalSchemaDigest', () => {

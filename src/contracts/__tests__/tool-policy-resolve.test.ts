@@ -296,6 +296,25 @@ describe('resolveToolPolicy ratchet and entry validation', () => {
       });
   });
 
+  it.each(['Delete', 'constructor'])(
+    'holds an out-of-enum previous class %j as unknown instead of dropping the hold',
+    (label) => {
+      expect(resolve({
+        defaults: WRITE,
+        previousEffectiveRiskClass: label as ToolRiskClass,
+      })).toMatchObject({
+        effective: {
+          riskClass: 'unknown',
+          requiresApproval: true,
+          origin: { riskClass: 'code-default' },
+        },
+        warnings: [
+          { code: 'risk-lower-available', field: 'riskClass', riskClass: 'write' },
+        ],
+      });
+    },
+  );
+
   it('takes risk increases over automatically and counts layer raises', () => {
     expect(resolve({ defaults: DELETE, previousEffectiveRiskClass: 'write' }))
       .toMatchObject({ effective: { riskClass: 'delete' }, warnings: [] });

@@ -23,8 +23,17 @@ const RISK_TIERS: Readonly<Record<ToolRiskClass, RiskTier>> = {
   unknown: 3,
 };
 
+/**
+ * A value outside the enum (untyped input, an `as` cast) is unassessed. Own
+ * keys only: a prototype key such as 'constructor' must not read as a tier.
+ */
+function knownRiskClass(riskClass: ToolRiskClass): ToolRiskClass {
+  return Object.hasOwn(RISK_TIERS, riskClass) ? riskClass : 'unknown';
+}
+
+/** Fails closed: an out-of-enum class is tier 3, like `unknown`. */
 export function riskTier(riskClass: ToolRiskClass): RiskTier {
-  return RISK_TIERS[riskClass];
+  return RISK_TIERS[knownRiskClass(riskClass)];
 }
 
 /**
@@ -41,13 +50,16 @@ export function confirmationFloor(
 /**
  * Raise-only combination. A candidate replaces the current class only from a
  * strictly higher tier; a same-tier relabel or a lower class never applies.
+ * An out-of-enum candidate raises as `unknown`, so none enters the result.
  */
 export function mostRestrictiveRiskClass(
   current: ToolRiskClass,
   candidate: ToolRiskClass | undefined,
 ): ToolRiskClass {
   if (candidate === undefined) return current;
-  return riskTier(candidate) > riskTier(current) ? candidate : current;
+  return riskTier(candidate) > riskTier(current)
+    ? knownRiskClass(candidate)
+    : current;
 }
 
 export interface AllowedRolesIntersection {
@@ -496,7 +508,8 @@ function resolveRiskClass(
         field: 'riskClass',
         riskClass: value,
       });
-      return { value: previous, origin: 'code-default' };
+      // An out-of-enum previous class is held as tier-3 `unknown`.
+      return { value: knownRiskClass(previous), origin: 'code-default' };
     }
   }
   return { value, origin };

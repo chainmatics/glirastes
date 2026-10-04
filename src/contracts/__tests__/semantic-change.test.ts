@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
+import type { ToolRiskClass } from '../revisions.js';
 import { classifyToolSemanticChange } from '../semantic-change.js';
 
 const base = {
@@ -118,6 +119,22 @@ describe('classifyToolSemanticChange', () => {
     )).toThrowError(expect.objectContaining<Partial<FoundationDiagnosticError>>({
       code: 'E-SEMANTICS-003',
       operation: 'setup.semantic-change',
+    }));
+  });
+
+  it.each([
+    ['write', 'Delete'],
+    ['Delete', 'write'],
+    ['Delete', 'Remove'],
+    ['delete', 'constructor'],
+  ])('fails closed for the out-of-enum risk change %s -> %s', (beforeRisk, afterRisk) => {
+    expect(() => classifyToolSemanticChange(
+      { ...base, riskClass: beforeRisk as ToolRiskClass },
+      { ...base, riskClass: afterRisk as ToolRiskClass },
+    )).toThrowError(expect.objectContaining<Partial<FoundationDiagnosticError>>({
+      code: 'E-SEMANTICS-003',
+      operation: 'setup.semantic-change',
+      identifier: base.toolId,
     }));
   });
 

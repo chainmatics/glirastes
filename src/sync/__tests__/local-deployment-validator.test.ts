@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import type { ToolRiskClass } from '../../contracts/index.js';
 import type { LocalToolBinding } from '../../runtime/local-tool-bindings.js';
 import type { MaterializedDeploymentRevisions } from '../materialize-deployment.js';
 import { validateLocalDeploymentBindings } from '../local-deployment-validator.js';
@@ -154,4 +155,17 @@ describe('validateLocalDeploymentBindings', () => {
       bindings: bindings(),
     })).toThrow(/risk below manifest/i);
   });
+
+  it.each(['Delete', 'constructor'])(
+    'rejects a manifest risk class %j that is out of enum above its policy',
+    (label) => {
+      const deployment = revisions();
+      deployment.manifestRevision.tools[0]!.riskClass = label as ToolRiskClass;
+
+      expect(() => validateLocalDeploymentBindings({
+        revisions: deployment,
+        bindings: bindings(),
+      })).toThrow(/risk below manifest/i);
+    },
+  );
 });

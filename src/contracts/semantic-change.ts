@@ -1,4 +1,8 @@
-import type { ToolPresentation, ToolRiskClass } from './revisions.js';
+import {
+  ToolRiskClassSchema,
+  type ToolPresentation,
+  type ToolRiskClass,
+} from './revisions.js';
 import { FoundationDiagnosticError } from '../diagnostics/index.js';
 import { riskTier } from './tool-policy.js';
 
@@ -43,8 +47,16 @@ function incomparable(toolId: string): never {
 function compareRisk(
   before: ToolRiskClass,
   after: ToolRiskClass,
+  toolId: string,
 ): SemanticChangeClassification {
   if (before === after) return 'unchanged';
+  // An out-of-enum label cannot be ranked; never guess a direction.
+  if (
+    !ToolRiskClassSchema.safeParse(before).success
+    || !ToolRiskClassSchema.safeParse(after).success
+  ) {
+    return incomparable(toolId);
+  }
   const beforeTier = riskTier(before);
   const afterTier = riskTier(after);
   // Equal-tier relabels (the unassessed 'unknown' counts as tier 3) change
@@ -112,7 +124,10 @@ export function classifyToolSemanticChange(
       after.requiresApproval ? 'hardening' : 'loosening',
     );
   }
-  add('riskClass', compareRisk(before.riskClass, after.riskClass));
+  add(
+    'riskClass',
+    compareRisk(before.riskClass, after.riskClass, after.toolId),
+  );
   add(
     'allowedRoles',
     compareRoles(before.allowedRoles, after.allowedRoles, after.toolId),

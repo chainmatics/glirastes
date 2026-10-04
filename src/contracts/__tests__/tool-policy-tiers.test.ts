@@ -79,6 +79,33 @@ describe('mostRestrictiveRiskClass', () => {
   });
 });
 
+// Labels that skipped schema validation (untyped JSON, `as` casts). A plain
+// lookup reads them as no tier at all, or as an Object.prototype member.
+const OUT_OF_ENUM = [
+  'Delete',
+  'constructor',
+  'toString',
+  '__proto__',
+  'hasOwnProperty',
+  '',
+] as const;
+
+describe('out-of-enum risk classes fail closed', () => {
+  it.each(OUT_OF_ENUM)('reads %j as tier 3 and confirms it', (label) => {
+    const riskClass = label as ToolRiskClass;
+    expect(riskTier(riskClass)).toBe(3);
+    expect(confirmationFloor(riskClass, false)).toBe(true);
+  });
+
+  it.each(OUT_OF_ENUM)('raises a lower class to unknown for %j', (label) => {
+    const riskClass = label as ToolRiskClass;
+    expect(mostRestrictiveRiskClass('write', riskClass)).toBe('unknown');
+    expect(mostRestrictiveRiskClass('safe-read', riskClass)).toBe('unknown');
+    // Same tier: no relabel, the assessed class stays.
+    expect(mostRestrictiveRiskClass('delete', riskClass)).toBe('delete');
+  });
+});
+
 describe('intersectAllowedRoles', () => {
   it('treats an empty list as no restriction', () => {
     expect(intersectAllowedRoles([], undefined))

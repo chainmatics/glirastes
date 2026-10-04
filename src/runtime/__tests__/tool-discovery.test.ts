@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ToolRiskClass } from '../../contracts/index.js';
 import type { ToolRegistry } from '../../types.js';
 import type { TurnSnapshot } from '../turn-snapshot.js';
 import { createTurnToolDiscovery } from '../tool-discovery.js';
@@ -145,4 +146,15 @@ describe('createTurnToolDiscovery', () => {
     expect(createTurnToolDiscovery(lowered).eligibleNames)
       .not.toContain('tasks_listTasks');
   });
+
+  it.each(['Delete', 'constructor'])(
+    'drops a tool whose manifest risk class %j is out of enum above its policy',
+    (label) => {
+      const unassessed = fixture();
+      unassessed.snapshot.manifestRevision.tools[0]!.riskClass =
+        label as ToolRiskClass;
+      expect(createTurnToolDiscovery(unassessed).eligibleNames)
+        .not.toContain('tasks_listTasks');
+    },
+  );
 });
