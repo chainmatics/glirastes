@@ -38,13 +38,11 @@ export function confirmationFloor(
 /**
  * Raise-only combination. A candidate replaces the current class only from a
  * strictly higher tier; a same-tier relabel or a lower class never applies.
- * Generic so a caller working on a narrower class set (for example without
- * `unknown`) keeps that type through the comparison.
  */
-export function mostRestrictiveRiskClass<T extends ToolRiskClass>(
-  current: T,
-  candidate: T | undefined,
-): T {
+export function mostRestrictiveRiskClass(
+  current: ToolRiskClass,
+  candidate: ToolRiskClass | undefined,
+): ToolRiskClass {
   if (candidate === undefined) return current;
   return riskTier(candidate) > riskTier(current) ? candidate : current;
 }
@@ -171,6 +169,20 @@ function hasDestructiveToken(
 }
 
 /**
+ * Raise-only step on the assessed class set. It delegates to
+ * `mostRestrictiveRiskClass` so the raise rule lives in one place; both inputs
+ * are assessed, so the result is always one of them and never `unknown`.
+ */
+function raiseAssessed(
+  current: AssessedRiskClass,
+  candidate: AssessedRiskClass,
+): AssessedRiskClass {
+  return mostRestrictiveRiskClass(current, candidate) === candidate
+    ? candidate
+    : current;
+}
+
+/**
  * Deterministic stage-1 defaults (spec 4.5). Escalations only ever raise;
  * `unknown` is never produced. Roles are not part of the defaults: the
  * endpoint's own authorization applies.
@@ -191,11 +203,11 @@ export function deriveToolPolicyDefaults(
     ? input.evidence?.uiMutation === true
     : !readOnlyMethod;
   if (tokensApply && hasDestructiveToken(input.path, input.definitionId)) {
-    riskClass = mostRestrictiveRiskClass(riskClass, 'delete');
+    riskClass = raiseAssessed(riskClass, 'delete');
     if (!isUi) operationGroup = 'delete';
   }
   if (input.declaredEffect !== undefined) {
-    riskClass = mostRestrictiveRiskClass(
+    riskClass = raiseAssessed(
       riskClass,
       DECLARED_EFFECT_RISK[input.declaredEffect],
     );
@@ -204,10 +216,10 @@ export function deriveToolPolicyDefaults(
     }
   }
   if (input.evidence?.externalCall) {
-    riskClass = mostRestrictiveRiskClass(riskClass, 'external');
+    riskClass = raiseAssessed(riskClass, 'external');
   }
   if (isUi && input.evidence?.uiMutation) {
-    riskClass = mostRestrictiveRiskClass(riskClass, 'write');
+    riskClass = raiseAssessed(riskClass, 'write');
   }
 
   return {

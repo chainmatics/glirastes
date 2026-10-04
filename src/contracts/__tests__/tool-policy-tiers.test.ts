@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { ToolRiskClass } from '../revisions.js';
 import {
   TOOL_POLICY_RULES_VERSION,
   confirmationFloor,
   intersectAllowedRoles,
   mostRestrictiveRiskClass,
   riskTier,
+  type ToolPolicyDefaults,
 } from '../tool-policy.js';
 
 describe('riskTier', () => {
@@ -54,6 +56,26 @@ describe('mostRestrictiveRiskClass', () => {
     ['write', 'unknown', 'unknown'],
   ] as const)('%s raised by %s is %s', (current, candidate, expected) => {
     expect(mostRestrictiveRiskClass(current, candidate)).toBe(expected);
+  });
+
+  // Frozen non-generic signature: a layer fold assigns the result back to a
+  // `ToolRiskClass` variable that starts from the narrower assessed defaults.
+  // A generic signature makes `raised` circularly typed (TS7022) here, which
+  // typecheck and typecheck:tests would reject.
+  it('keeps a layer fold typable and raises across layers', () => {
+    const defaults: Pick<ToolPolicyDefaults, 'riskClass'> = { riskClass: 'write' };
+    const layers: ReadonlyArray<{ entry: { riskClass?: ToolRiskClass } }> = [
+      { entry: {} },
+      { entry: { riskClass: 'safe-read' } },
+      { entry: { riskClass: 'delete' } },
+      { entry: { riskClass: 'financial' } },
+    ];
+    let value: ToolRiskClass = defaults.riskClass;
+    for (const layer of layers) {
+      const raised = mostRestrictiveRiskClass(value, layer.entry.riskClass);
+      if (raised !== value) value = raised;
+    }
+    expect(value).toBe('delete');
   });
 });
 
