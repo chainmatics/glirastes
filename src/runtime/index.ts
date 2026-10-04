@@ -37,6 +37,7 @@ export {
   type LocalRuntimeSource,
   type LocalRuntimeSourceIdentity,
   type LocalRuntimeSourceOptions,
+  type PlatformRevisionRefs,
 } from './local-runtime-source.js';
 export {
   createManagedTurnGuard,

@@ -16,6 +16,7 @@ import {
 import {
   createLocalRuntimeSource,
   type LocalRuntimeSourceOptions,
+  type PlatformRevisionRefs,
 } from '../local-runtime-source.js';
 import { createManagedTurnGuard } from '../managed-turn.js';
 import type { VerifiedPolicyOverlay } from '../policy-overlay.js';
@@ -315,7 +316,38 @@ describe('createLocalRuntimeSource with a verified Platform overlay', () => {
   };
   const OVERLAY_REVISION_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
   const REMOVED_TOOL_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const PLATFORM_AGENT_REVISION_ID = '12121212-1212-4212-8212-121212121212';
+  const PLATFORM_MANIFEST_REVISION_ID = '13131313-1313-4313-8313-131313131313';
   const principal = fixturePrincipal(PLATFORM_IDENTITY.tenantId);
+  const PLATFORM_REVISIONS: PlatformRevisionRefs = {
+    agentRevision: { revisionId: PLATFORM_AGENT_REVISION_ID, revision: 7 },
+    manifestRevision: { revisionId: PLATFORM_MANIFEST_REVISION_ID, revision: 5 },
+  };
+
+  function revocation(
+    targets: Partial<Pick<
+      SecurityRevocation,
+      'toolIds' | 'agentRevisionIds' | 'policyRevisionIds'
+    >>,
+  ): SecurityRevocation {
+    return {
+      revocationId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      environmentId: PLATFORM_IDENTITY.environmentId,
+      effectiveAt: '2026-08-12T00:00:00.000Z',
+      reasonCode: 'security-disable',
+      toolIds: [],
+      agentRevisionIds: [],
+      policyRevisionIds: [],
+      ...targets,
+      signature: {
+        algorithm: 'Ed25519',
+        keyId: 'platform-key',
+        value: 'c2lnbmF0dXJl',
+      },
+    };
+  }
+
+  const AFTER_REVOCATION = new Date('2026-08-12T00:00:01.000Z');
 
   function overlay(
     entries: VerifiedPolicyOverlay['entries'],
@@ -327,10 +359,13 @@ describe('createLocalRuntimeSource with a verified Platform overlay', () => {
   function managedSource(
     policyOverlay: () => VerifiedPolicyOverlay | undefined,
     onPolicyOverlayApplied?: LocalRuntimeSourceOptions['onPolicyOverlayApplied'],
+    platformRevisions: () => PlatformRevisionRefs | undefined =
+      () => PLATFORM_REVISIONS,
   ) {
     return createLocalRuntimeSource(fixtureOptions({
       identity: PLATFORM_IDENTITY,
       policyOverlay,
+      platformRevisions,
       ...(onPolicyOverlayApplied ? { onPolicyOverlayApplied } : {}),
     }));
   }
@@ -430,27 +465,89 @@ describe('createLocalRuntimeSource with a verified Platform overlay', () => {
   it('keeps revocations of the Platform policy revision effective', () => {
     const source = managedSource(() => overlay([]));
     const snapshot = source.resolveTurnSnapshot({ turnId: 't-1', principal });
-    const revocation: SecurityRevocation = {
-      revocationId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
-      environmentId: PLATFORM_IDENTITY.environmentId,
-      effectiveAt: '2026-08-12T00:00:00.000Z',
-      reasonCode: 'security-disable',
-      toolIds: [],
-      agentRevisionIds: [],
-      policyRevisionIds: [OVERLAY_REVISION_ID],
-      signature: {
-        algorithm: 'Ed25519',
-        keyId: 'platform-key',
-        value: 'c2lnbmF0dXJl',
-      },
-    };
 
     expect(isToolRevoked(
       snapshot,
       ENDPOINT_TOOL_ID,
-      [revocation],
-      new Date('2026-08-12T00:00:01.000Z'),
+      [revocation({ policyRevisionIds: [OVERLAY_REVISION_ID] })],
+      AFTER_REVOCATION,
     )).toBe(true);
+  });
+
+  it('keeps revocations of the Platform agent revision effective', () => {
+    const source = managedSource(() => overlay([]));
+    const snapshot = source.resolveTurnSnapshot({ turnId: 't-1', principal });
+
+    expect(snapshot.agentRevision).toMatchObject({
+      revisionId: PLATFORM_AGENT_REVISION_ID,
+      revision: 7,
+    });
+    expect(snapshot.manifestRevision).toMatchObject({
+      revisionId: PLATFORM_MANIFEST_REVISION_ID,
+      revision: 5,
+    });
+    AgentRevisionSchema.parse(snapshot.agentRevision);
+    ManifestRevisionSchema.parse(snapshot.manifestRevision);
+    expect(isToolRevoked(
+      snapshot,
+      ENDPOINT_TOOL_ID,
+      [revocation({ agentRevisionIds: [PLATFORM_AGENT_REVISION_ID] })],
+      AFTER_REVOCATION,
+    )).toBe(true);
+  });
+
+  it('pins each turn to the Platform revisions it started with', () => {
+    let current = PLATFORM_REVISIONS;
+    const source = managedSource(() => overlay([]), undefined, () => current);
+    const first = source.resolveTurnSnapshot({ turnId: 't-1', principal });
+    current = {
+      agentRevision: {
+        revisionId: '14141414-1414-4414-8414-141414141414',
+        revision: 8,
+      },
+      manifestRevision: PLATFORM_REVISIONS.manifestRevision,
+    };
+    const next = source.resolveTurnSnapshot({ turnId: 't-2', principal });
+
+    expect(source.resolveTurnSnapshot({ turnId: 't-1', principal }))
+      .toBe(first);
+    expect(first.agentRevision.revisionId).toBe(PLATFORM_AGENT_REVISION_ID);
+    expect(next.agentRevision).toMatchObject({
+      revisionId: '14141414-1414-4414-8414-141414141414',
+      revision: 8,
+    });
+    expect(next.manifestRevision.revisionId)
+      .toBe(PLATFORM_MANIFEST_REVISION_ID);
+  });
+
+  // Regression guard (green before the change): no Platform revision is in
+  // effect yet, so only tool-id revocations can apply, and those match.
+  it('runs on the local base before the first accepted deployment', () => {
+    const managed = managedSource(() => undefined, undefined, () => undefined)
+      .resolveTurnSnapshot({ turnId: 't-1', principal });
+    const standalone = createLocalRuntimeSource(fixtureOptions({
+      identity: PLATFORM_IDENTITY,
+    })).resolveTurnSnapshot({ turnId: 't-1', principal });
+
+    expect(managed.agentRevision.revisionId)
+      .toBe(standalone.agentRevision.revisionId);
+    expect(managed.policyRevision.revisionId)
+      .toBe(standalone.policyRevision.revisionId);
+    expect(isToolRevoked(
+      managed,
+      ENDPOINT_TOOL_ID,
+      [revocation({ toolIds: [ENDPOINT_TOOL_ID] })],
+      AFTER_REVOCATION,
+    )).toBe(true);
+  });
+
+  it('refuses a turn whose overlay and Platform revisions disagree', () => {
+    expect(() => managedSource(() => overlay([]), undefined, () => undefined)
+      .resolveTurnSnapshot({ turnId: 't-1', principal }))
+      .toThrow(/same accepted deployment/);
+    expect(() => managedSource(() => undefined)
+      .resolveTurnSnapshot({ turnId: 't-1', principal }))
+      .toThrow(/same accepted deployment/);
   });
 
   it('applies an overlay budget only as a further restriction', () => {
@@ -480,6 +577,7 @@ describe('createLocalRuntimeSource with a verified Platform overlay', () => {
       policyOverlay: () => overlay([
         { toolId: UI_TOOL_ID, enabled: true, requiresApproval: false },
       ]),
+      platformRevisions: () => PLATFORM_REVISIONS,
       onPolicyOverlayApplied: applied,
     }));
 
@@ -499,10 +597,23 @@ describe('createLocalRuntimeSource with a verified Platform overlay', () => {
   it('refuses managed mode without the Platform tenant and environment', () => {
     expect(() => createLocalRuntimeSource(fixtureOptions({
       policyOverlay: () => overlay([]),
+      platformRevisions: () => PLATFORM_REVISIONS,
     }))).toThrow(/Platform tenantId and environmentId/);
     expect(() => createLocalRuntimeSource(fixtureOptions({
       identity: { tenantId: PLATFORM_IDENTITY.tenantId },
       policyOverlay: () => overlay([]),
+      platformRevisions: () => PLATFORM_REVISIONS,
     }))).toThrow(/Platform tenantId and environmentId/);
+  });
+
+  it('refuses managed mode without the Platform revisions and vice versa', () => {
+    expect(() => createLocalRuntimeSource(fixtureOptions({
+      identity: PLATFORM_IDENTITY,
+      policyOverlay: () => overlay([]),
+    }))).toThrow(/policyOverlay and platformRevisions/);
+    expect(() => createLocalRuntimeSource(fixtureOptions({
+      identity: PLATFORM_IDENTITY,
+      platformRevisions: () => PLATFORM_REVISIONS,
+    }))).toThrow(/policyOverlay and platformRevisions/);
   });
 });
