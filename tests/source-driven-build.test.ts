@@ -35,8 +35,8 @@ it('rejects a linked generation directory without writing outside the app', asyn
   expect(await readFile(resolve(outside, 'runtime.mjs'), 'utf8')).toBe('external sentinel');
 });
 it('persists source identities and tombstones with a statically importable signed runtime, preserving the last good build on failure', async () => {
-  const buildModule = await import('../examples/source-driven-next/build.mjs').catch(() => ({}));
-  expect(buildModule.buildReference, 'build-time runtime emitter').toBeTypeOf('function');
+  const { buildReference } = await import('../examples/source-driven-next/build.mjs');
+  expect(buildReference, 'build-time runtime emitter').toBeTypeOf('function');
   const root = await mkdtemp(resolve(base, '.build-proof-'));
   roots.push(root);
   await cp(resolve(base, 'native'), root, { recursive: true });
@@ -45,7 +45,7 @@ it('persists source identities and tombstones with a statically importable signe
   await mkdir(resolve(root, 'node_modules'));
   await symlink(resolve('.'), resolve(root, 'node_modules/glirastes'), 'dir');
   const output = resolve(root, '.glirastes/runtime.mjs');
-  const first = await buildModule.buildReference(root);
+  const first = await buildReference(root);
   const runtime = await import(pathToFileURL(output).href);
   const principal = { subjectId: 'alice', tenantId: runtime.tenantId, roles: ['member'], attributes: {} };
   const snapshot = runtime.source.resolveTurnSnapshot({ turnId: 'build-test', principal });
@@ -53,10 +53,10 @@ it('persists source identities and tombstones with a statically importable signe
   expect(runtime.bindings).toHaveLength(3);
   expect(await readFile(output, 'utf8')).not.toContain('glirastes/codegen');
   await rm(resolve(root, 'src/app/api/tasks/route.js'));
-  const removed = await buildModule.buildReference(root);
-  expect(removed.state.tombstones[0].toolId).toBe(first.state.inventory.executions.find((entry) => entry.executionKind === 'endpoint').toolId);
+  const removed = await buildReference(root);
+  expect(removed.state.tombstones[0].toolId).toBe(first.state.inventory.executions.find((entry) => entry.executionKind === 'endpoint')!.toolId);
   const valid = await readFile(output, 'utf8');
   await writeFile(resolve(root, 'src/query.js'), 'unreviewed native wrapper');
-  await expect(buildModule.buildReference(root)).rejects.toThrow('assessment');
+  await expect(buildReference(root)).rejects.toThrow('assessment');
   expect(await readFile(output, 'utf8')).toBe(valid);
 });
