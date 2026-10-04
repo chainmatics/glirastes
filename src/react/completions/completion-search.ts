@@ -49,7 +49,7 @@ function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
 /**
  * Merges `/` and `@` providers into one async search. Item ids stay the
  * app's ids (they reach the model through mention markers); `key` is the
- * stable list identity `providerId:itemId`. A newer search aborts the older
+ * stable list identity `providerId:type:itemId`. A newer search aborts the older
  * one, and a failing or slow provider never empties the others.
  */
 export function createCompletionSearch(
@@ -102,7 +102,7 @@ export function createCompletionSearch(
         seen.add(identity);
         results.push({
           id: item.id,
-          key: `${provider.id}:${item.id}`,
+          key: `${provider.id}:${item.type}:${item.id}`,
           type: item.type,
           label: item.label.trim(),
           ...(item.description ? { description: item.description } : {}),

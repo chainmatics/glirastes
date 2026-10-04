@@ -24,11 +24,26 @@ describe('createCompletionSearch', () => {
   it('merges providers of one trigger with stable keys and app ids', async () => {
     const search = createCompletionSearch([people, tasks]);
     expect(await search('al', '@')).toEqual([
-      { id: '42', key: 'people:42', type: 'user', label: 'Alice Doe', description: 'match al' },
-      { id: '43', key: 'people:43', type: 'user', label: 'Alex Roe' },
-      { id: '42', key: 'tasks:42', type: 'task', label: 'Bericht schreiben' },
+      { id: '42', key: 'people:user:42', type: 'user', label: 'Alice Doe', description: 'match al' },
+      { id: '43', key: 'people:user:43', type: 'user', label: 'Alex Roe' },
+      { id: '42', key: 'tasks:task:42', type: 'task', label: 'Bericht schreiben' },
     ]);
     expect(await search('al', '/')).toEqual([]);
+  });
+
+  it('gives items that share an id across types of one provider distinct keys', async () => {
+    const search = createCompletionSearch([{
+      id: 'workspace',
+      trigger: '@',
+      search: () => [
+        { id: '42', type: 'user', label: 'Alice Doe' },
+        { id: '42', type: 'task', label: 'Bericht schreiben' },
+        { id: '42', type: 'user', label: 'Duplicate Alice' },
+      ],
+    }]);
+    const results = await search('', '@');
+    expect(results.map((result) => result.key)).toEqual(['workspace:user:42', 'workspace:task:42']);
+    expect(new Set(results.map((result) => result.key)).size).toBe(results.length);
   });
 
   it('passes the permission context, limit and an abort signal', async () => {
@@ -57,7 +72,7 @@ describe('createCompletionSearch', () => {
       ], { timeoutMs: 50, onProviderError });
       const pending = search('al', '@');
       await vi.advanceTimersByTimeAsync(60);
-      expect((await pending).map((result) => result.key)).toEqual(['people:42', 'people:43']);
+      expect((await pending).map((result) => result.key)).toEqual(['people:user:42', 'people:user:43']);
       expect(onProviderError.mock.calls.map(([id]) => id)).toEqual(['broken', 'slow']);
     } finally {
       vi.useRealTimers();
