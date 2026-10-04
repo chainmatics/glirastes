@@ -335,6 +335,12 @@ export interface ResolveToolPolicyInput {
   codeEnabled: boolean;
   local?: ToolPolicyEntry;
   platform?: ToolPolicyEntry;
+  /**
+   * Releases a held `risk-lower-available` decrease. `riskClass` is matched
+   * exactly against the layered class, so it must be the class this resolver
+   * yields for `toolId` without `previousEffectiveRiskClass` (code defaults
+   * plus local/Platform raises), not the class the code alone derives.
+   */
   acceptedRisk?: { riskClass: ToolRiskClass; toolId: string };
   /** The riskClass this toolId resolved to in the previous committed refresh. */
   previousEffectiveRiskClass?: ToolRiskClass;
