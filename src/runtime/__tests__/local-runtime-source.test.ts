@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   AgentRevisionSchema,
   ManifestRevisionSchema,
   RuntimePolicyRevisionSchema,
   type ExecutionBudget,
   type Principal,
+  type SecurityRevocation,
 } from '../../contracts/index.js';
 import { canonicalRuntimeJson } from '../../sync/signature-verifier.js';
 import {
@@ -16,6 +17,9 @@ import {
   createLocalRuntimeSource,
   type LocalRuntimeSourceOptions,
 } from '../local-runtime-source.js';
+import { createManagedTurnGuard } from '../managed-turn.js';
+import type { VerifiedPolicyOverlay } from '../policy-overlay.js';
+import { isToolRevoked } from '../turn-snapshot.js';
 
 const DIGEST = `sha256:${'A'.repeat(43)}`;
 const ENDPOINT_TOOL_ID = '11111111-1111-4111-8111-111111111111';
@@ -300,5 +304,205 @@ describe('createLocalRuntimeSource', () => {
       riskClass: 'delete',
       requiresApproval: true,
     });
+  });
+});
+
+describe('createLocalRuntimeSource with a verified Platform overlay', () => {
+  const PLATFORM_IDENTITY = {
+    tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    targetAppId: APP_ID,
+    environmentId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  };
+  const OVERLAY_REVISION_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const REMOVED_TOOL_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const principal = fixturePrincipal(PLATFORM_IDENTITY.tenantId);
+
+  function overlay(
+    entries: VerifiedPolicyOverlay['entries'],
+    extra: Partial<VerifiedPolicyOverlay> = {},
+  ): VerifiedPolicyOverlay {
+    return { revisionId: OVERLAY_REVISION_ID, revision: 3, entries, ...extra };
+  }
+
+  function managedSource(
+    policyOverlay: () => VerifiedPolicyOverlay | undefined,
+    onPolicyOverlayApplied?: LocalRuntimeSourceOptions['onPolicyOverlayApplied'],
+  ) {
+    return createLocalRuntimeSource(fixtureOptions({
+      identity: PLATFORM_IDENTITY,
+      policyOverlay,
+      ...(onPolicyOverlayApplied ? { onPolicyOverlayApplied } : {}),
+    }));
+  }
+
+  it('runs a new local tool that the Platform has not seen yet', () => {
+    expect(createLocalRuntimeSource(fixtureOptions()).mode).toBe('standalone');
+    const source = managedSource(() => overlay([
+      { toolId: ENDPOINT_TOOL_ID, enabled: true },
+    ]));
+    expect(source.mode).toBe('managed');
+
+    const snapshot = source.resolveTurnSnapshot({ turnId: 't-1', principal });
+    const registry = materializeManifestToolRegistry({
+      snapshot,
+      bindings: fixtureBindings(),
+    });
+
+    expect(Object.keys(registry).sort()).toEqual(['tasks_listTasks', 'ui_navigate']);
+  });
+
+  it('applies the overlay restrict-only and ignores ids the code does not have', async () => {
+    const applied = vi.fn();
+    const source = managedSource(() => overlay([
+      { toolId: ENDPOINT_TOOL_ID, riskClass: 'delete', requiresApproval: false },
+      { toolId: UI_TOOL_ID, enabled: false },
+      { toolId: REMOVED_TOOL_ID, enabled: true, requiresApproval: false },
+    ]), applied);
+
+    const snapshot = source.resolveTurnSnapshot({ turnId: 't-1', principal });
+
+    expect(snapshot.policyRevision.revisionId).toBe(OVERLAY_REVISION_ID);
+    expect(snapshot.policyRevision.toolPolicies).toEqual([
+      {
+        toolId: ENDPOINT_TOOL_ID,
+        enabled: true,
+        riskClass: 'delete',
+        requiresApproval: true,
+        allowedRoles: ['member'],
+      },
+      {
+        toolId: UI_TOOL_ID,
+        enabled: false,
+        riskClass: 'safe-read',
+        requiresApproval: false,
+        allowedRoles: ['member'],
+      },
+    ]);
+    expect(applied).toHaveBeenCalledWith({
+      revisionId: OVERLAY_REVISION_ID,
+      ignored: [{ toolId: REMOVED_TOOL_ID, reason: 'platform-tool-not-in-code' }],
+    });
+    const registry = materializeManifestToolRegistry({
+      snapshot,
+      bindings: fixtureBindings(),
+    });
+    expect(Object.keys(registry)).toEqual(['tasks_listTasks']);
+    expect(registry.tasks_listTasks!.needsApproval).toBe(true);
+
+    const guard = createManagedTurnGuard({
+      snapshot,
+      resolvePrincipal: async () => principal,
+    });
+    await expect(guard.beforeToolCall({
+      toolName: 'tasks_removedTask',
+      input: {},
+    })).rejects.toThrow(/manifest_tool_unavailable/);
+  });
+
+  it('pins each turn to the overlay it started with and never calls the network', () => {
+    const fetchImpl = vi.fn();
+    vi.stubGlobal('fetch', fetchImpl);
+    try {
+      let current = overlay([{ toolId: ENDPOINT_TOOL_ID, enabled: true }]);
+      const getOverlay = vi.fn(() => current);
+      const source = managedSource(getOverlay);
+
+      const first = source.resolveTurnSnapshot({ turnId: 't-1', principal });
+      current = overlay(
+        [{ toolId: ENDPOINT_TOOL_ID, enabled: false }],
+        { revisionId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', revision: 4 },
+      );
+
+      expect(source.resolveTurnSnapshot({ turnId: 't-1', principal }))
+        .toBe(first);
+      const next = source.resolveTurnSnapshot({ turnId: 't-2', principal });
+      expect(first.policyRevision.toolPolicies[0])
+        .toMatchObject({ toolId: ENDPOINT_TOOL_ID, enabled: true });
+      expect(next.policyRevision.toolPolicies[0])
+        .toMatchObject({ toolId: ENDPOINT_TOOL_ID, enabled: false });
+      expect(getOverlay).toHaveBeenCalledTimes(2);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps revocations of the Platform policy revision effective', () => {
+    const source = managedSource(() => overlay([]));
+    const snapshot = source.resolveTurnSnapshot({ turnId: 't-1', principal });
+    const revocation: SecurityRevocation = {
+      revocationId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      environmentId: PLATFORM_IDENTITY.environmentId,
+      effectiveAt: '2026-08-12T00:00:00.000Z',
+      reasonCode: 'security-disable',
+      toolIds: [],
+      agentRevisionIds: [],
+      policyRevisionIds: [OVERLAY_REVISION_ID],
+      signature: {
+        algorithm: 'Ed25519',
+        keyId: 'platform-key',
+        value: 'c2lnbmF0dXJl',
+      },
+    };
+
+    expect(isToolRevoked(
+      snapshot,
+      ENDPOINT_TOOL_ID,
+      [revocation],
+      new Date('2026-08-12T00:00:01.000Z'),
+    )).toBe(true);
+  });
+
+  it('applies an overlay budget only as a further restriction', () => {
+    const tighter = managedSource(() => overlay([], {
+      budget: { ...budget(), maxToolCalls: 4 },
+    }));
+    const looser = managedSource(() => overlay([], {
+      budget: { ...budget(), maxToolCalls: 99 },
+    }));
+
+    expect(tighter.resolveTurnSnapshot({ turnId: 't-1', principal })
+      .budget.maxToolCalls).toBe(4);
+    expect(looser.resolveTurnSnapshot({ turnId: 't-1', principal })
+      .budget.maxToolCalls).toBe(16);
+  });
+
+  it('never enables a tool the local artifact keeps disabled', () => {
+    const artifact = fixtureArtifact() as {
+      tools: Array<Record<string, unknown>>;
+    };
+    artifact.tools[1]!.operationGroup = 'needs_attention';
+    artifact.tools[1]!.enabled = false;
+    const applied = vi.fn();
+    const source = createLocalRuntimeSource(fixtureOptions({
+      setupArtifact: artifact,
+      identity: PLATFORM_IDENTITY,
+      policyOverlay: () => overlay([
+        { toolId: UI_TOOL_ID, enabled: true, requiresApproval: false },
+      ]),
+      onPolicyOverlayApplied: applied,
+    }));
+
+    const snapshot = source.resolveTurnSnapshot({ turnId: 't-1', principal });
+    const registry = materializeManifestToolRegistry({
+      snapshot,
+      bindings: fixtureBindings(),
+    });
+
+    expect(Object.keys(registry)).toEqual(['tasks_listTasks']);
+    expect(applied).toHaveBeenCalledWith({
+      revisionId: OVERLAY_REVISION_ID,
+      ignored: [{ toolId: UI_TOOL_ID, reason: 'platform-tool-not-in-code' }],
+    });
+  });
+
+  it('refuses managed mode without the Platform tenant and environment', () => {
+    expect(() => createLocalRuntimeSource(fixtureOptions({
+      policyOverlay: () => overlay([]),
+    }))).toThrow(/Platform tenantId and environmentId/);
+    expect(() => createLocalRuntimeSource(fixtureOptions({
+      identity: { tenantId: PLATFORM_IDENTITY.tenantId },
+      policyOverlay: () => overlay([]),
+    }))).toThrow(/Platform tenantId and environmentId/);
   });
 });
