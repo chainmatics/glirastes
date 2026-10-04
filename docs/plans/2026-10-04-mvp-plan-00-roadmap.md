@@ -88,7 +88,11 @@ Nach jedem Teilplan:
 | `glirastes init` schreibt immer `.glirastes/prompt-bundle.json` (Refresh verlangt es) | P05 |
 | `createToolBindings()` ohne `ctx` (Abweichung von Spec 4.3, Kontext über `ToolContext.callEndpoint`) | P11 beachten |
 | HEAD als lesendes Tool aufzählen (P03 meldet HEAD/OPTIONS als begründete Ausschlüsse) | P04 |
-| Platform-`CLAUDE.md` im Haupt-Checkout (`main`) zeigt noch auf `agentic-sdk`; Korrektur erst mit freigegebenem Merge (P01 Task 2 übersprungen) | P13 |
+| `CLAUDE.md:106` im Platform-Haupt-Checkout nennt die Foundation-Worktree- und Branch-Namen; beim Merge bzw. Entfernen der Worktrees aktualisieren (P01 Task 2 als `526fcda` auf `main` erledigt, mit Freigabe) | P13 |
+| Aegis: Batch-Test (`identity-group-e2e.spec.ts:537`) soll die Nachnamen-Kollision tatsächlich prüfen; Regressionstests für die `drawGroupSeed`-Aufrufe in `shieldResult`/`shieldResults`; Erschöpfungspfad von `drawGroupSeed` (≥ 400 Gruppen) | P08 |
+| Kanonisches Arbeitsdokument der Platform: Aegis-Flake als behoben eintragen (`18ff671`, `39f0eeb`) | P08 |
+| GID: `.planning/codebase/CONVENTIONS.md` beschreibt noch `npm run lint`/`next lint`; `eslint.config.mjs` ignoriert `.worktrees/**` nicht; `eslint-suppressions.json` beim Umstieg auf `master` neu erzeugen statt zusammenführen | P11 |
+| SDK: EPERM-Toleranz auf dem Signalpfad des Test-Cleanups ohne eigenen Test; `prepare-browser`-Import in `tests/source-driven-browser.test.mjs:97` verschluckt echte Importfehler; `typecheck:tests` hängt von frischem `dist/` ab (Mapping `glirastes/*` → `src/*` erwägen) | P13 |
 
 ## Freigaben, die unterwegs eingeholt werden
 
