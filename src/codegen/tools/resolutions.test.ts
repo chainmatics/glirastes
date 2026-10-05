@@ -95,10 +95,25 @@ describe('tool resolutions', () => {
     ['secret-looking content', { interfaceDigest: DIGEST, input: { jsonSchema: objectSchema({ title: { description: `sk-or-v1-${'a'.repeat(32)}` } }) } }],
     ['a missing interface digest', { input: { jsonSchema: objectSchema({ title: {} }) } }],
     ['both schema forms', { interfaceDigest: DIGEST, input: { jsonSchema: objectSchema({}), schemaRef: { module: 'src/a.ts', export: 'a' } } }],
+    ['pattern-matched keys beside properties', { interfaceDigest: DIGEST, input: { jsonSchema: { ...objectSchema({ title: {} }), patternProperties: { '^x-': { type: 'string' } } } } }],
+    ['pattern-matched keys without properties', { interfaceDigest: DIGEST, input: { jsonSchema: { type: 'object', patternProperties: { '^.*$': {} }, additionalProperties: false } } }],
   ])('rejects %s', (_label, raw) => {
     const result = validateResolutionEntry({ stableKey: 'PATCH /api/tasks/:id', raw, evidence });
     expect(result.entry).toBeUndefined();
     expect(result.findings.map((finding) => finding.code)).toEqual(['resolution-rejected']);
+  });
+
+  it('names patternProperties as the reason, also for an opaque body', () => {
+    const jsonSchema = { ...objectSchema({ title: {} }), patternProperties: { '^x-': { type: 'string' } } };
+    for (const bodyKeys of [['title'], 'opaque'] as const) {
+      const result = validateResolutionEntry({
+        stableKey: 'PATCH /api/tasks/:id',
+        raw: { interfaceDigest: DIGEST, input: { jsonSchema } },
+        evidence: { ...evidence, bodyKeys },
+      });
+      expect(result.entry).toBeUndefined();
+      expect(result.findings[0]?.message).toContain('input schemas may not use patternProperties');
+    }
   });
 
   it('allows any body keys when the body is opaque and accepts schema references', async () => {

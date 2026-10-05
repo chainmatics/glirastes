@@ -171,6 +171,8 @@ export function validateResolutionEntry(input: {
     if (schema.type !== 'object' || schema.additionalProperties !== false) {
       return reject('the input schema must be an object with additionalProperties false');
     }
+    // Pattern-matched keys admit names the evidence check below never sees.
+    if (schema.patternProperties !== undefined) return reject('input schemas may not use patternProperties');
     if (input.evidence.bodyKeys !== 'opaque') {
       const allowed = new Set([...input.evidence.pathParams, ...input.evidence.queryKeys, ...input.evidence.bodyKeys]);
       const keys = schema.properties && typeof schema.properties === 'object' ? Object.keys(schema.properties) : [];
