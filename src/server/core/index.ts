@@ -501,7 +501,7 @@ export function endpointToolToTool<TInput extends SchemaLike>(
     method: endpointTool.method,
     needsApproval:
       endpointTool.needsApproval ??
-      (endpointTool.method === 'GET' ? false : true),
+      (endpointTool.method === 'GET' || endpointTool.method === 'HEAD' ? false : true),
     execute: async (
       rawInput: InferSchema<TInput>,
       context: ToolContext,
@@ -520,13 +520,15 @@ export function endpointToolToTool<TInput extends SchemaLike>(
         inputPayload,
       );
 
-      const requestPath =
-        endpointTool.method === 'GET' || endpointTool.method === 'DELETE'
-          ? `${endpointPath}${buildQueryString(requestPayload)}`
-          : endpointPath;
+      const queryOnly = endpointTool.method === 'GET'
+        || endpointTool.method === 'HEAD'
+        || endpointTool.method === 'DELETE';
+      const requestPath = queryOnly
+        ? `${endpointPath}${buildQueryString(requestPayload)}`
+        : endpointPath;
 
       const requestBody =
-        endpointTool.method === 'GET' || endpointTool.method === 'DELETE'
+        queryOnly
           ? undefined
           : Object.keys(requestPayload).length > 0
             ? requestPayload
@@ -1051,8 +1053,9 @@ export function createFetchInternalApiCaller(
 
   return async (request) => {
     const url = new URL(request.path, options.baseUrl).toString();
-    const methodAllowsBody =
-      request.method !== 'GET' && request.method !== 'DELETE';
+    const methodAllowsBody = request.method !== 'GET'
+      && request.method !== 'HEAD'
+      && request.method !== 'DELETE';
 
     const headers: Record<string, string> = {
       ...(options.defaultHeaders ?? {}),

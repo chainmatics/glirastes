@@ -34,6 +34,11 @@ describe('route export diagnostics', () => {
     });
   });
 
+  it('reads a HEAD export like every other route method', () => {
+    expect(readRouteExports('export async function HEAD() { return new Response(null); }\nexport const OPTIONS = () => null;'))
+      .toEqual({ exports: [{ method: 'HEAD', body: '{ return new Response(null); }' }], findings: [] });
+  });
+
   it('reports namespace HTTP exports as unresolved', () => {
     expect(readRouteExports('export * as GET from "./handlers";')).toEqual({
       exports: [], findings: [{ exportName: 'GET', code: 'route-export-unresolved' }],

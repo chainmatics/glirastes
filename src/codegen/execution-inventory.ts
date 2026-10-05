@@ -29,7 +29,7 @@ const endpointExecution = executionBase.extend({
    */
   sourceKind: z.enum(['next-app']).optional(),
   sourceFile: z.string().trim().min(1).max(2_048),
-  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  method: z.enum(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']),
   path: z.string().startsWith('/').max(2_048),
 }).strict();
 

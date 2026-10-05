@@ -54,7 +54,7 @@ const ManifestToolBaseSchema = z.object({
 
 const ManifestEndpointToolSchema = ManifestToolBaseSchema.extend({
   executionKind: z.literal('endpoint'),
-  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  method: z.enum(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']),
   path: z.string().startsWith('/').max(2_048),
   authBindingRef: identifier,
 }).strict();

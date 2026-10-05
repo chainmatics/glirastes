@@ -106,7 +106,7 @@ export const AppSetupToolCandidateSchema = z.object({
    * facts. Optional because a UI entry has no route and an endpoint has no
    * action binding.
    */
-  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
+  method: z.enum(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
   path: z.string().startsWith('/').max(2_048).optional(),
   authBindingRef: identifier.optional(),
   actionBindingRef: identifier.optional(),

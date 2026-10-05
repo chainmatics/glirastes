@@ -42,7 +42,7 @@ export type InferSchema<TSchema> =
 // HTTP & Transport
 // ============================================================================
 
-export type EndpointMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+export type EndpointMethod = 'GET' | 'HEAD' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
 // ============================================================================
 // Runtime & Context

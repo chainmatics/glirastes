@@ -63,7 +63,7 @@ export interface ResolvedEndpointContract {
 
 export const OPAQUE_SCHEMA_DIGEST = jsonSchemaDigest(OPAQUE_JSON_SCHEMA);
 
-const READ_METHODS: ReadonlySet<EndpointMethod> = new Set(['GET', 'DELETE']);
+const READ_METHODS: ReadonlySet<EndpointMethod> = new Set(['GET', 'HEAD', 'DELETE']);
 const EFFECT_STRENGTH: Readonly<Record<DeclaredEffect, number>> = {
   read: 0, write: 1, destructive: 2, external: 2, financial: 2,
 };
