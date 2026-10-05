@@ -60,6 +60,9 @@ export function viewName(path: string): string {
   return /^[0-9]/.test(name) ? `v${name}` : name;
 }
 
+/** The inventory and `tool-contracts.json` cap a definition id at 200 characters. */
+const MAX_DEFINITION_ID_LENGTH = 200;
+
 const RESERVED_FIRST_SEGMENTS: ReadonlySet<string> = new Set(['navigate', 'filter', 'action']);
 
 /**
@@ -73,16 +76,32 @@ export function uiDefinitionIdForAction(actionId: string): string | undefined {
   const named = segments.map((segment) => (/^[0-9]/.test(segment) ? `a${segment}` : segment));
   const parts = named.length === 1 || RESERVED_FIRST_SEGMENTS.has(named[0]!) ? ['action', ...named] : named;
   const id = `ui.${parts.join('.')}`;
-  return id.length <= 200 && TOOL_NAME_PATTERN.test(id) ? id : undefined;
+  return id.length <= MAX_DEFINITION_ID_LENGTH && TOOL_NAME_PATTERN.test(id) ? id : undefined;
 }
 
-/** Same base name for two stable keys: the later key gets a digest suffix, independent of order. */
+/**
+ * `base` plus an 8-character digest of the stable key, cut so the id stays
+ * within the cap; a cut that ends on a dot drops it so the id stays a tool name.
+ */
+function suffixedDefinitionId(base: string, stableKey: string, attempt: number): string {
+  const suffix = sha256Digest(attempt === 0 ? stableKey : `${stableKey}#${attempt}`)
+    .slice(7, 15).replace(/[^A-Za-z0-9]/g, 'x');
+  return `${base.slice(0, MAX_DEFINITION_ID_LENGTH - suffix.length).replace(/\.+$/, '')}${suffix}`;
+}
+
+/**
+ * Same base name for two stable keys: the later key gets a digest suffix,
+ * independent of order. A base over the cap is cut and suffixed the same way,
+ * and no id is handed out twice.
+ */
 export function uniqueDefinitionIds(entries: ReadonlyArray<{ stableKey: string; base: string }>): Map<string, string> {
   const ids = new Map<string, string>();
   const taken = new Set<string>();
   for (const entry of [...entries].sort((left, right) => compareCodeUnits(left.stableKey, right.stableKey))) {
     let id = entry.base;
-    if (taken.has(id)) id = `${entry.base}${sha256Digest(entry.stableKey).slice(7, 15).replace(/[^A-Za-z0-9]/g, 'x')}`;
+    for (let attempt = 0; id.length > MAX_DEFINITION_ID_LENGTH || taken.has(id); attempt += 1) {
+      id = suffixedDefinitionId(entry.base, entry.stableKey, attempt);
+    }
     taken.add(id);
     ids.set(entry.stableKey, id);
   }

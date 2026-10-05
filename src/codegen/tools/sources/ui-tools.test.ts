@@ -4,6 +4,7 @@ import { createAppFixture, removeAppFixtures } from '../__tests__/app-fixture.js
 import { scanAppSources } from './app-files.js';
 import { jsonSchemaDigest } from '../canonical.js';
 import { OPAQUE_SCHEMA_DIGEST } from '../contract-tiers.js';
+import { TOOL_NAME_PATTERN } from '../../../runtime/local-tool-bindings.js';
 import {
   hasNavigationBridge,
   UI_TOOL_OUTPUT_SCHEMA,
@@ -193,5 +194,41 @@ describe('UI tool observations', () => {
     expect(ids.get('UI filter /admin-users')).toBe('ui.filter.adminUsers');
     expect(ids.get('UI filter /admin/users')).toMatch(/^ui\.filter\.adminUsers[A-Za-z0-9]{8}$/);
     expect(ids.get('UI filter /tasks')).toBe('ui.filter.tasks');
+  });
+
+  it('keeps every id a tool name of at most 200 characters, with or without a suffix', () => {
+    const tooLong = `ui.filter.${'a'.repeat(195)}`;
+    const fits = `ui.filter.${'b'.repeat(190)}`;
+    const dotted = `ui.${'c'.repeat(188)}.d.more`;
+    const ids = uniqueDefinitionIds([
+      { stableKey: 'UI filter /a', base: tooLong },
+      { stableKey: 'UI filter /b1', base: fits },
+      { stableKey: 'UI filter /b2', base: fits },
+      { stableKey: 'UI action c1', base: dotted },
+      { stableKey: 'UI action c2', base: dotted },
+    ]);
+    expect(ids.get('UI filter /b1')).toBe(fits);
+    expect(ids.get('UI action c1')).toBe(dotted);
+    expect(new Set(ids.values()).size).toBe(5);
+    for (const id of ids.values()) {
+      expect(id.length).toBeLessThanOrEqual(200);
+      expect(id).toMatch(TOOL_NAME_PATTERN);
+    }
+  });
+
+  it('never hands out an id that an earlier entry already holds', () => {
+    const suffixed = uniqueDefinitionIds([
+      { stableKey: 'k2', base: 'ui.x' },
+      { stableKey: 'k3', base: 'ui.x' },
+    ]).get('k3')!;
+    const ids = uniqueDefinitionIds([
+      { stableKey: 'k1', base: suffixed },
+      { stableKey: 'k2', base: 'ui.x' },
+      { stableKey: 'k3', base: 'ui.x' },
+    ]);
+    expect(ids.get('k1')).toBe(suffixed);
+    expect(ids.get('k2')).toBe('ui.x');
+    expect(new Set(ids.values()).size).toBe(3);
+    expect(ids.get('k3')).toMatch(TOOL_NAME_PATTERN);
   });
 });
