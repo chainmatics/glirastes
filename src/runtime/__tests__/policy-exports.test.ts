@@ -5,9 +5,10 @@ describe('glirastes/runtime policy surface', () => {
   it('exports overlay composition and binding diagnostics', () => {
     expect(typeof runtime.applyPolicyOverlay).toBe('function');
     expect(typeof runtime.policyOverlayFromRevision).toBe('function');
+    expect(typeof runtime.relaxableToolIds).toBe('function');
     expect(typeof runtime.localToolBindingMismatches).toBe('function');
     expect(runtime.applyPolicyOverlay([], []))
-      .toEqual({ policies: [], ignored: [] });
+      .toEqual({ policies: [], ignored: [], relaxations: [] });
   });
 
   // Compile-time check: typecheck:tests fails if the type is not exported.

@@ -48,7 +48,8 @@ export interface ToolPolicyEntry {
 /**
  * A signed Platform decision for one tool the deployed code reported
  * (P08b shared contract item 1): only fields an operator decided, never a
- * copy of the local value. The runtime applies it restrict-only.
+ * copy of the local value. The runtime applies its restrictions, and its
+ * `requiresApproval: false` only as the pinned D16 relaxation up to tier 2.
  */
 export const ToolOverrideDeltaSchema = ToolPolicyEntrySchema.extend({
   toolId: z.uuid(),

@@ -60,8 +60,12 @@ export {
 export {
   applyPolicyOverlay,
   policyOverlayFromRevision,
+  relaxableToolIds,
   type PolicyOverlayEntry,
   type PolicyOverlayIgnoredEntry,
+  type PolicyOverlayOptions,
+  type PolicyOverlayRelaxation,
+  type PolicyOverlayRelaxationOutcome,
   type PolicyOverlayResult,
   type VerifiedPolicyOverlay,
 } from './policy-overlay.js';
