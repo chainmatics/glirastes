@@ -5,6 +5,8 @@ import { createRoot } from 'react-dom/client';
 import {
   AiChatPanel,
   AiChatProvider,
+  FloatingChatUI,
+  createUiToolCommandProvider,
   useChatContext,
   type ChatMessage,
   type ChatTransport,
@@ -12,6 +14,7 @@ import {
   type SessionSummary,
   type SttProviderAdapter,
 } from '../../src/react/index.js';
+import { defineGlirastesChatElement, type GlirastesChatElement } from '../../src/embed/index.js';
 
 interface HarnessApi {
   sent: string[];
@@ -148,4 +151,88 @@ function SttView() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(<SttView />);
+const clarification = {
+  id: 'assistant-1',
+  role: 'assistant',
+  parts: [{
+    type: 'tool-ask_clarification',
+    toolCallId: 'call-1',
+    state: 'output-available',
+    input: { question: 'Welche Aufgabe soll ich verschieben?', target: 'object' },
+    output: {
+      success: true,
+      clarification: {
+        question: 'Welche Aufgabe soll ich verschieben?',
+        target: 'object',
+        options: [
+          { id: 'task-1', label: 'Quartalsbericht für die Geschäftsführung fertigstellen' },
+          { id: 'task-2', label: 'Release prüfen' },
+          { id: 'task-3', label: 'Kundentermin vorbereiten' },
+        ],
+        allowFreeText: true,
+      },
+    },
+  }],
+} as unknown as ChatMessage;
+
+const commands = createUiToolCommandProvider({ tools: [
+  { definitionId: 'ui.navigate.overview', label: 'Übersicht öffnen' },
+  { definitionId: 'ui.filter.done', label: 'Erledigte Aufgaben filtern' },
+] });
+
+function MobileView() {
+  const transport = useFakeTransport([
+    { id: 'user-0', role: 'user', parts: [{ type: 'text', text: 'Verschiebe die Aufgabe auf morgen' }] },
+    clarification,
+  ]);
+  const voice = useMemo(() => ({ enabled: true, adapter: speech }), []);
+  const providers = useMemo(() => [commands], []);
+  return (
+    <div style={{ display: 'flex', height: '100dvh', minWidth: 0 }}>
+      <main style={{ flex: 1, minWidth: 0 }}><h1>Native application</h1></main>
+      <AiChatProvider transport={transport} voice={voice} completionProviders={providers}>
+        <FloatingChatUI portal={false} defaultOpen keepMounted layoutControls defaultMode="sidebar" />
+      </AiChatProvider>
+    </div>
+  );
+}
+
+function EmbedView() {
+  return <main><h1>Plain host</h1><div id="embed-slot" style={{ height: 600 }} /></main>;
+}
+
+const view = new URLSearchParams(location.search).get('view') ?? 'stt';
+createRoot(document.getElementById('root')!).render(
+  view === 'mobile' ? <MobileView /> : view === 'embed' ? <EmbedView /> : <SttView />,
+);
+
+if (view === 'embed') {
+  defineGlirastesChatElement();
+  for (const type of ['ready', 'status', 'tool-result', 'error']) {
+    document.addEventListener(`glirastes-chat:${type}`, (event) => {
+      events.push({ type: event.type, detail: (event as CustomEvent).detail });
+    });
+  }
+  const mountEmbed = () => {
+    const slot = document.getElementById('embed-slot');
+    if (!slot) {
+      requestAnimationFrame(mountEmbed);
+      return;
+    }
+    const element = document.createElement('glirastes-chat') as GlirastesChatElement;
+    element.setAttribute('endpoint', '/api/chat');
+    element.setAttribute('placeholder', 'Frag deine App');
+    element.style.setProperty('--glirastes-chat-primary', '#10b981');
+    element.transport = {
+      messages: [],
+      status: 'ready',
+      error: null,
+      async sendMessage({ text }) { sent.push(text); },
+      stop() {},
+      setMessages() {},
+      addToolApprovalResponse() {},
+    };
+    slot.append(element);
+  };
+  mountEmbed();
+}

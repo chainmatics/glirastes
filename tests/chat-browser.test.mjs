@@ -263,3 +263,116 @@ describe('speech-to-text lifecycle in Chrome with a fake microphone', () => {
     }
   });
 });
+
+describe('mobile layout (375 × 812)', () => {
+  test('chat, clarification, commands and recording stay inside the viewport', async () => {
+    const { page, errors, close } = await openPage('mobile', { width: 375, height: 812 });
+    try {
+      const inside = async (locator, label) => {
+        const box = await locator.boundingBox();
+        assert.ok(box, `${label} is not rendered`);
+        assert.ok(box.x >= 0 && box.x + box.width <= 375.5, `${label} overflows horizontally`);
+        assert.ok(box.y >= 0 && box.y + box.height <= 812.5, `${label} overflows vertically`);
+      };
+      const panel = page.locator('[data-component="chat-window"]');
+      await page.locator('[data-component="clarification-card"]').waitFor();
+      const panelBox = await panel.boundingBox();
+      assert.equal(Math.round(panelBox.width), 375);
+      assert.equal(Math.round(panelBox.height), 812);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), 'page scrolls horizontally');
+
+      const card = page.locator('[data-component="clarification-card"]');
+      await inside(card, 'clarification card');
+      for (const option of await card.locator('[data-action="answer-option"]').all()) {
+        await inside(option, 'clarification option');
+      }
+      assert.ok(await card.evaluate((node) => node.scrollWidth <= node.clientWidth + 1));
+
+      const editor = page.getByRole('textbox', { name: 'Type a message...' });
+      await inside(editor, 'composer');
+      await inside(page.getByRole('button', { name: 'mic', exact: true }), 'mic button');
+      // One composer row: the editor keeps more than half the panel and the mic sits beside it.
+      const editorBox = await editor.boundingBox();
+      const micBox = await page.getByRole('button', { name: 'mic', exact: true }).boundingBox();
+      assert.ok(editorBox.width > panelBox.width / 2, `editor is squeezed to ${editorBox.width}px`);
+      assert.ok(micBox.x >= editorBox.x + editorBox.width - 0.5, 'mic must sit right of the editor');
+      assert.ok(
+        micBox.y < editorBox.y + editorBox.height && editorBox.y < micBox.y + micBox.height,
+        'editor and mic must share a row',
+      );
+      await editor.click();
+      await page.keyboard.type('/erl');
+      const dropdown = page.locator('[data-component="mention-dropdown"]');
+      await dropdown.waitFor();
+      await inside(dropdown, 'command list');
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('ControlOrMeta+A');
+      await page.keyboard.press('Backspace');
+      assert.equal(await editor.evaluate((node) => node.textContent), '', 'the command text must be cleared');
+
+      await startRecording(page);
+      const bar = page.locator('[data-component="recording-bar"]');
+      await inside(bar, 'recording bar');
+      // The transcript stays readable: not squeezed, and its newest words are not clipped.
+      const transcript = page.locator('[data-part="interim-transcript"]');
+      assert.ok((await transcript.boundingBox()).width >= 100, 'interim transcript is squeezed');
+      assert.ok(await transcript.evaluate((node) => node.scrollWidth <= node.clientWidth + 1), 'interim transcript is clipped');
+      const barBox = await bar.boundingBox();
+      const recordingEditorBox = await editor.boundingBox();
+      assert.ok(
+        barBox.y >= recordingEditorBox.y + recordingEditorBox.height - 0.5
+          || barBox.x >= recordingEditorBox.x + recordingEditorBox.width - 0.5,
+        'recording bar overlaps the editor',
+      );
+      await page.locator('[data-element="stop-button"]').click();
+      await waitForNoLiveTrack(page);
+
+      await card.getByRole('button', { name: 'Release prüfen' }).click();
+      await page.waitForFunction(() => window.harness.sent.length === 1);
+      assert.match(
+        (await page.evaluate(() => window.harness.sent))[0],
+        /^<!--glirastes:clarification \{"toolCallId":"call-1","optionId":"task-2"\}-->\nRelease prüfen$/,
+      );
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('<glirastes-chat> in a plain page', () => {
+  test('renders in shadow DOM, takes host CSS variables, sends by keyboard and unmounts cleanly', async () => {
+    const { page, errors, close } = await openPage('embed');
+    try {
+      const textarea = page.locator('glirastes-chat textarea');
+      await textarea.waitFor();
+      assert.equal(await textarea.getAttribute('placeholder'), 'Frag deine App');
+      const primary = await page.evaluate(() => {
+        const host = document.querySelector('glirastes-chat');
+        const panel = host.shadowRoot.querySelector('[data-component="ai-chat-panel"]');
+        return getComputedStyle(panel).getPropertyValue('--cm-primary').trim();
+      });
+      assert.equal(primary, '#10b981');
+      assert.equal(await page.evaluate(() => document.querySelectorAll('[data-component="ai-chat-panel"]').length), 0,
+        'the chat must live in the shadow root only');
+
+      await textarea.focus();
+      await page.keyboard.type('Zeige meine Aufgaben');
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => window.harness.sent.includes('Zeige meine Aufgaben'));
+      const types = await page.evaluate(() => window.harness.events.map((event) => event.type));
+      assert.ok(types.includes('glirastes-chat:ready'));
+
+      const remaining = await page.evaluate(async () => {
+        const host = document.querySelector('glirastes-chat');
+        host.remove();
+        await new Promise((done) => setTimeout(done, 0));
+        return host.shadowRoot.childNodes.length;
+      });
+      assert.equal(remaining, 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
