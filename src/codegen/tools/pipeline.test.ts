@@ -307,6 +307,32 @@ describe('capability report in the committed setup artifact', () => {
     });
     expect(artifact.exclusions).toEqual([{ stableKey: 'POST /api/auth/login', origin: 'default' }]);
   }, 120_000);
+
+  it('reports an explicit local confirmation as a local lock, also where the code asks anyway', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const before = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.method, tool] as const));
+    expect(before.get('POST')).toMatchObject({
+      requiresApproval: true,
+      provenance: { policyOrigin: { requiresApproval: 'code-default' } },
+    });
+
+    await fixture.write(TOOLS_PATHS.policy, JSON.stringify({
+      schemaVersion: 1,
+      tools: {
+        'GET /api/tasks': { requiresApproval: true },
+        'POST /api/tasks': { requiresApproval: true, reason: 'keep asking, whatever the dashboard says' },
+      },
+    }));
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const after = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.method, tool] as const));
+    for (const method of ['GET', 'POST'] as const) {
+      expect(after.get(method)).toMatchObject({
+        requiresApproval: true,
+        provenance: { policyOrigin: { requiresApproval: 'local-policy' } },
+      });
+    }
+  }, 120_000);
 });
 
 const PAGE = 'export default function Page() { return null; }\n';

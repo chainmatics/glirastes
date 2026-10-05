@@ -16,6 +16,7 @@ import {
   resolveToolPolicy,
   riskTier,
   type EffectiveToolPolicy,
+  type ToolPolicyEntry,
 } from '../../contracts/tool-policy.js';
 import type { AppSetupToolProvenance } from '../../contracts/index.js';
 import { FoundationDiagnosticError, isFoundationDiagnosticError } from '../../diagnostics/index.js';
@@ -160,14 +161,24 @@ function sortExcluded(excluded: ReadonlyArray<ExcludedTool>): ExcludedTool[] {
 type PolicyField = keyof EffectiveToolPolicy['origin'];
 const POLICY_FIELDS: ReadonlyArray<PolicyField> = ['enabled', 'requiresApproval', 'riskClass', 'allowedRoles', 'description'];
 
-/** A local report knows code defaults and local policy only, never a Platform origin. */
-function localPolicyOrigin(origin: EffectiveToolPolicy['origin']): NonNullable<AppSetupToolProvenance['policyOrigin']> {
-  const local: NonNullable<AppSetupToolProvenance['policyOrigin']> = {};
+/**
+ * A local report knows code defaults and local policy only, never a Platform
+ * origin. An explicit `requiresApproval: true` in tool-policy.json is a local
+ * lock even where the code default asks anyway: the report names it
+ * `local-policy`, so the Platform can tell a lock from a default and never
+ * offers to relax it (D16); the runtime keeps it either way.
+ */
+function localPolicyOrigin(
+  origin: EffectiveToolPolicy['origin'],
+  local: ToolPolicyEntry | undefined,
+): NonNullable<AppSetupToolProvenance['policyOrigin']> {
+  const reported: NonNullable<AppSetupToolProvenance['policyOrigin']> = {};
   for (const field of POLICY_FIELDS) {
     const value = origin[field];
-    if (value === 'code-default' || value === 'local-policy') local[field] = value;
+    if (value === 'code-default' || value === 'local-policy') reported[field] = value;
   }
-  return local;
+  if (local?.requiresApproval === true) reported.requiresApproval = 'local-policy';
+  return reported;
 }
 
 function policyWarningMessage(code: string, field: string | undefined): string {
@@ -468,7 +479,7 @@ async function generate(
       effective: resolved.effective,
       operationGroup: needsAttention ? 'needs_attention' : defaults.operationGroup,
       provenance: {
-        policyOrigin: localPolicyOrigin(resolved.effective.origin),
+        policyOrigin: localPolicyOrigin(resolved.effective.origin, local),
         ...(tool.contract ? { contractSource: tool.contract.source } : {}),
         descriptionSource: prose.descriptionOrigin,
         schemaSource: schemaQuality,
