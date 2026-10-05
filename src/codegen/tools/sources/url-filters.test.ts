@@ -167,6 +167,98 @@ describe('url-filters source', () => {
   }, 120_000);
 });
 
+const keysOf = (tool: ObservedTool | undefined): string[] => (
+  tool?.contract?.uiAction?.kind === 'filter' ? tool.contract.uiAction.keys.map((entry) => entry.key) : []
+);
+
+describe('url-filters source: what a view is credited with', () => {
+  const FILES_BY_BINDING: Record<string, string> = {
+    'tsconfig.json': TSCONFIG,
+    'src/components/glirastes-bridge.tsx': BRIDGE,
+    'src/components/button.tsx': 'export function Button() { return null; }\n',
+    'src/components/filters.tsx': "'use client';\nimport { parseAsString, parseAsStringLiteral, useQueryState } from 'nuqs';\n"
+      + "export function StatusFilter() {\n  const [status] = useQueryState('status', parseAsStringLiteral(['open', 'done']));\n  return <p>{status}</p>;\n}\n"
+      + "export function OwnerFilter() {\n  const [owner] = useQueryState('owner', parseAsString);\n  return <p>{owner}</p>;\n}\n",
+    'src/components/index.ts': "export * from './filters';\nexport { Button } from './button';\n",
+    'src/app/settings/page.tsx': "import { Button } from '@/components';\n"
+      + 'export default function Settings() { return <Button />; }\n',
+    'src/app/tasks/page.tsx': "import { StatusFilter } from '@/components';\n"
+      + 'export default function Tasks() { return <StatusFilter />; }\n',
+    'src/app/people/page.tsx': "import * as Filters from '@/components/filters';\n"
+      + 'export default function People() { return <Filters.OwnerFilter />; }\n',
+  };
+
+  it('credits a page only with the filters of the bindings it uses, never with a barrel or a module it merely re-exports', async () => {
+    const app = await createAppFixture(FILES_BY_BINDING);
+    const observed = await createUrlFilterSource().observe(context(app.root));
+    const tools = byKey(observed.observations);
+    // `/settings` imports only `Button` from a barrel that also re-exports the filter components.
+    expect([...tools.keys()]).toEqual(['UI filter /people', 'UI filter /tasks']);
+    expect(observed.findings).toEqual([]);
+    expect(keysOf(tools.get('UI filter /tasks'))).toEqual(['status']);
+    expect(keysOf(tools.get('UI filter /people'))).toEqual(['owner']);
+  }, 120_000);
+
+  it('credits a search params cache only to the page that references its binding', async () => {
+    const app = await createAppFixture({
+      'tsconfig.json': TSCONFIG,
+      'src/components/glirastes-bridge.tsx': BRIDGE,
+      'src/lib/search-params.ts': "import { createSearchParamsCache, parseAsInteger, parseAsStringLiteral } from 'nuqs/server';\n"
+        + "export const tasksCache = createSearchParamsCache({ status: parseAsStringLiteral(['open', 'done']) });\n"
+        + 'export const reportsCache = createSearchParamsCache({ year: parseAsInteger }, { urlKeys: { year: \'y\' } });\n'
+        + 'export const caches = {\n'
+        + "  people: createSearchParamsCache({ team: parseAsStringLiteral(['a', 'b']) }),\n"
+        + "  orders: createSearchParamsCache({ sort: parseAsStringLiteral(['asc', 'desc']) }),\n};\n",
+      'src/app/tasks/page.tsx': "import { tasksCache } from '@/lib/search-params';\n"
+        + 'export default function Tasks() { tasksCache.parse({}); return null; }\n',
+      'src/app/reports/page.tsx': "import { reportsCache } from '@/lib/search-params';\n"
+        + 'export default function Reports() { reportsCache.parse({}); return null; }\n',
+      'src/app/people/page.tsx': "import { caches } from '@/lib/search-params';\n"
+        + 'export default function People() { caches.people.parse({}); return null; }\n',
+      'src/app/orders/page.tsx': "import { caches } from '@/lib/search-params';\n"
+        + 'export default function Orders() { return <p>{String(caches.orders.parse({}))}</p>; }\n',
+    });
+    const observed = await createUrlFilterSource().observe(context(app.root));
+    const tools = byKey(observed.observations);
+    expect(keysOf(tools.get('UI filter /tasks'))).toEqual(['status']);
+    expect(keysOf(tools.get('UI filter /reports'))).toEqual(['y']);
+    expect(keysOf(tools.get('UI filter /people'))).toEqual(['team']);
+    expect(keysOf(tools.get('UI filter /orders'))).toEqual(['sort']);
+    expect(tools.get('UI filter /reports')?.contract?.input).toMatchObject({ properties: { y: { type: 'integer' } } });
+  }, 120_000);
+
+  it('follows hooks, default exports, helpers of the same file and reference cycles, and leaves unrelated exports of a module out', async () => {
+    const app = await createAppFixture({
+      'tsconfig.json': TSCONFIG,
+      'src/components/glirastes-bridge.tsx': BRIDGE,
+      'src/lib/use-filters.ts': "import { parseAsString, useQueryState } from 'nuqs';\n"
+        + "export function useOwnerFilter() { return useQueryState('owner', parseAsString); }\n"
+        + "export function useUnrelated() { return useQueryState('unrelated', parseAsString); }\n",
+      'src/components/toolbar.tsx': "import { useOwnerFilter } from '@/lib/use-filters';\n"
+        + 'function Inner() {\n  const [owner] = useOwnerFilter();\n  return <p>{owner ?? <Toolbar />}</p>;\n}\n'
+        + 'export default function Toolbar() { return <Inner />; }\n',
+      'src/components/wrapped.tsx': "import Toolbar from './toolbar';\nconst Wrapped = () => <Toolbar />;\nexport default Wrapped;\n",
+      'src/app/board/page.tsx': "import Wrapped from '@/components/wrapped';\n"
+        + 'export default function Board() { return <Wrapped />; }\n',
+    });
+    const observed = await createUrlFilterSource().observe(context(app.root));
+    const tools = byKey(observed.observations);
+    expect([...tools.keys()]).toEqual(['UI filter /board']);
+    expect(keysOf(tools.get('UI filter /board'))).toEqual(['owner']);
+  }, 120_000);
+
+  it('does not credit a filter that a page imports but never uses', async () => {
+    const app = await createAppFixture({
+      ...FILES_BY_BINDING,
+      'src/app/settings/page.tsx': "import { Button, StatusFilter } from '@/components';\n"
+        + 'export default function Settings() { return <Button />; }\n',
+    });
+    const observed = await createUrlFilterSource().observe(context(app.root));
+    expect(byKey(observed.observations).has('UI filter /settings')).toBe(false);
+    expect(observed.findings).toEqual([]);
+  }, 120_000);
+});
+
 describe('mergeDomains', () => {
   it.each([
     [{ kind: 'string' }, { kind: 'enum', values: ['a'] }, { kind: 'enum', values: ['a'] }],

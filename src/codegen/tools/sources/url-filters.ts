@@ -26,6 +26,7 @@ import {
   uniqueDefinitionIds,
   viewName,
   type ImportBindings,
+  type ImportedCall,
 } from './ui-tools.js';
 
 export interface UrlFilterSourceOptions extends PageTreeOptions {
@@ -54,6 +55,12 @@ interface Evidence {
   notes: Array<{ code: string; message: string }>;
 }
 
+/** What one declaration reads, and the other app declarations its code refers to. */
+interface Unit {
+  evidence: Evidence;
+  references: ts.Node[];
+}
+
 const NUQS_STATE = ['useQueryState', 'useQueryStates', 'createSearchParamsCache', 'createLoader', 'createSerializer'];
 const SIMPLE_PARSERS: Readonly<Record<string, FilterDomain>> = {
   parseAsString: { kind: 'string' },
@@ -73,8 +80,9 @@ const NUQS_SPECS = ['nuqs', 'nuqs/server'].map((module) => ({ module, names: NUQ
 const SEARCH_PARAMS_SPECS = [{ module: 'next/navigation', names: ['useSearchParams'] }];
 const DEFINE_SPECS = [{ module: 'glirastes/browser', names: ['defineQueryFilters'] }];
 const MAX_DEPTH = 6;
-const MAX_IMPORT_DEPTH = 4;
-const MAX_FILES_PER_VIEW = 500;
+/** How many declarations deep a page's references are followed (page → component → hook → parser …). */
+const MAX_REFERENCE_DEPTH = 8;
+const MAX_UNITS_PER_VIEW = 1_000;
 const SCALAR_KINDS: ReadonlySet<string> = new Set(['string', 'integer', 'number', 'boolean']);
 
 function unwrap(expression: ts.Expression): ts.Expression {
@@ -134,6 +142,8 @@ export function filterKeySchema(key: FilterKey): JsonSchemaLike {
 /** Reads nuqs parsers, typed `searchParams` and `useSearchParams()` through one bounded program. */
 class FilterReader {
   private readonly bindings = new Map<ts.SourceFile, ImportBindings>();
+  private readonly units = new Map<ts.Node, Unit>();
+  private readonly calls = new Map<ts.SourceFile, { nuqs: ImportedCall[]; search: ImportedCall[] }>();
 
   constructor(private readonly app: AppProgram) {}
 
@@ -150,13 +160,18 @@ class FilterReader {
     return importedName(node, this.nuqs(node.getSourceFile()));
   }
 
-  /** The expression a name stands for: a variable initializer, also across app modules. */
-  private initializerOf(node: ts.Expression): ts.Expression | undefined {
+  /** The symbol a name stands for, through imports and re-exports to the declaring module. */
+  private symbolOf(node: ts.Node): ts.Symbol | undefined {
     const checker = this.app.checker;
-    let symbol = ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+    const symbol = ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
       ? checker.getShorthandAssignmentValueSymbol(node.parent)
       : checker.getSymbolAtLocation(ts.isPropertyAccessExpression(node) ? node.name : node);
-    if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    return symbol && symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+  }
+
+  /** The expression a name stands for: a variable initializer, also across app modules. */
+  private initializerOf(node: ts.Expression): ts.Expression | undefined {
+    const symbol = this.symbolOf(node);
     const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
     if (!declaration) return undefined;
     if (ts.isVariableDeclaration(declaration) || ts.isPropertyAssignment(declaration)) return declaration.initializer;
@@ -299,8 +314,19 @@ class FilterReader {
     return keys;
   }
 
-  private nuqsKeys(file: ts.SourceFile, evidence: Evidence): void {
-    for (const { name, call } of importedCalls(file, NUQS_SPECS)) {
+  /** The calls of nuqs or `useSearchParams` that sit inside `root`. */
+  private callsWithin(root: ts.Node, kind: 'nuqs' | 'search'): ImportedCall[] {
+    const file = root.getSourceFile();
+    let cached = this.calls.get(file);
+    if (!cached) {
+      cached = { nuqs: importedCalls(file, NUQS_SPECS), search: importedCalls(file, SEARCH_PARAMS_SPECS) };
+      this.calls.set(file, cached);
+    }
+    return cached[kind].filter(({ call }) => call.pos >= root.pos && call.end <= root.end);
+  }
+
+  private nuqsKeys(root: ts.Node, evidence: Evidence): void {
+    for (const { name, call } of this.callsWithin(root, 'nuqs')) {
       if (name === 'useQueryState') {
         const key = stringLiteral(call.arguments[0]);
         if (key === undefined) {
@@ -320,8 +346,8 @@ class FilterReader {
     }
   }
 
-  private searchParamsKeys(file: ts.SourceFile, evidence: Evidence): void {
-    const calls = importedCalls(file, SEARCH_PARAMS_SPECS).map(({ call }) => call);
+  private searchParamsKeys(root: ts.Node, evidence: Evidence): void {
+    const calls = this.callsWithin(root, 'search').map(({ call }) => call);
     if (calls.length === 0) return;
     const checker = this.app.checker;
     const holders = new Set<ts.Symbol>();
@@ -349,7 +375,7 @@ class FilterReader {
       }
       ts.forEachChild(node, visit);
     };
-    visit(file);
+    visit(root);
   }
 
   private typeDomain(type: ts.Type): Omit<FilterKey, 'key'> | undefined {
@@ -390,40 +416,88 @@ class FilterReader {
     }
   }
 
-  evidenceOf(file: ts.SourceFile, page: boolean): Evidence {
-    const evidence: Evidence = { keys: [], notes: [] };
-    this.nuqsKeys(file, evidence);
-    this.searchParamsKeys(file, evidence);
-    if (page) this.typedSearchParams(file, evidence);
-    return evidence;
+  /** The app declarations (not libraries, not types) a symbol is declared by. */
+  private declarationUnits(symbol: ts.Symbol | undefined): ts.Node[] {
+    return (symbol?.declarations ?? []).flatMap((declaration) => {
+      const unit = unitRoot(declaration);
+      return unit && this.app.appRelative(unit.getSourceFile().fileName) !== undefined ? [unit] : [];
+    });
   }
 
-  /** The page file and the app modules it imports, breadth first and bounded. */
-  viewFiles(page: ts.SourceFile): ts.SourceFile[] {
-    const checker = this.app.checker;
-    const seen = new Set<ts.SourceFile>([page]);
-    let frontier = [page];
-    for (let depth = 0; depth < MAX_IMPORT_DEPTH && frontier.length > 0; depth += 1) {
-      const next: ts.SourceFile[] = [];
-      for (const file of frontier) {
-        for (const statement of file.statements) {
-          const specifier = (ts.isImportDeclaration(statement) && !statement.importClause?.isTypeOnly)
-            || (ts.isExportDeclaration(statement) && !statement.isTypeOnly)
-            ? statement.moduleSpecifier
-            : undefined;
-          if (!specifier) continue;
-          const module = checker.getSymbolAtLocation(specifier);
-          const declaration = module?.valueDeclaration ?? module?.declarations?.[0];
-          if (!declaration || !ts.isSourceFile(declaration) || seen.has(declaration)) continue;
-          if (this.app.appRelative(declaration.fileName) === undefined) continue;
-          if (seen.size >= MAX_FILES_PER_VIEW) return [...seen];
-          seen.add(declaration);
-          next.push(declaration);
+  /** The declarations outside `root` that its code refers to; imports are followed to where they are declared. */
+  private references(root: ts.Node): ts.Node[] {
+    const found = new Set<ts.Node>();
+    const file = root.getSourceFile();
+    const add = (units: ReadonlyArray<ts.Node>): void => {
+      for (const unit of units) {
+        const inside = unit.getSourceFile() === file && unit.pos >= root.pos && unit.end <= root.end;
+        if (!inside) found.add(unit);
+      }
+    };
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isImportDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)
+        || (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node))
+      ) {
+        return;
+      }
+      if (ts.isIdentifier(node)) {
+        add(this.declarationUnits(this.symbolOf(node)));
+        return;
+      }
+      if (ts.isPropertyAccessExpression(node)) {
+        const member = this.declarationUnits(this.symbolOf(node));
+        add(member);
+        // `caches.people`: the object only matters through the property the code reads.
+        if (member.length > 0 && member.every(ts.isPropertyAssignment) && isNameChain(node.expression)) return;
+        visit(node.expression);
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(root);
+    return [...found];
+  }
+
+  private unit(root: ts.Node): Unit {
+    let unit = this.units.get(root);
+    if (!unit) {
+      const evidence: Evidence = { keys: [], notes: [] };
+      this.nuqsKeys(root, evidence);
+      this.searchParamsKeys(root, evidence);
+      if (ts.isSourceFile(root)) this.typedSearchParams(root, evidence);
+      unit = { evidence, references: this.references(root) };
+      this.units.set(root, unit);
+    }
+    return unit;
+  }
+
+  /**
+   * What the page reads from the URL: its own code and the declarations it
+   * refers to (components, hooks, caches, parser maps), breadth first and
+   * bounded. A binding is resolved to where it is declared, so a barrel, a
+   * module's other exports and a cache another page uses are not credited.
+   */
+  viewEvidence(page: ts.SourceFile): Evidence {
+    const found: Evidence = { keys: [], notes: [] };
+    const seen = new Set<ts.Node>([page]);
+    let frontier: ts.Node[] = [page];
+    for (let depth = 0; frontier.length > 0; depth += 1) {
+      const next: ts.Node[] = [];
+      for (const root of frontier) {
+        const unit = this.unit(root);
+        found.keys.push(...unit.evidence.keys);
+        found.notes.push(...unit.evidence.notes);
+        if (depth === MAX_REFERENCE_DEPTH) continue;
+        for (const reference of unit.references) {
+          if (seen.has(reference) || seen.size >= MAX_UNITS_PER_VIEW) continue;
+          seen.add(reference);
+          next.push(reference);
         }
       }
       frontier = next;
     }
-    return [...seen];
+    return found;
   }
 
   /** `defineQueryFilters({ path, filters })` literals of `glirastes/browser`. */
@@ -458,6 +532,21 @@ class FilterReader {
     }
     return definitions;
   }
+}
+
+/** The node whose code a declaration stands for: the variable, function, class or property, never a type or a parameter. */
+function unitRoot(declaration: ts.Declaration): ts.Node | undefined {
+  let node: ts.Node = declaration;
+  while (ts.isBindingElement(node)) node = node.parent.parent;
+  return ts.isVariableDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)
+    || ts.isExportAssignment(node) || ts.isPropertyAssignment(node) || ts.isMethodDeclaration(node)
+    || ts.isPropertyDeclaration(node)
+    ? node
+    : undefined;
+}
+
+function isNameChain(expression: ts.Expression): boolean {
+  return ts.isIdentifier(expression) || (ts.isPropertyAccessExpression(expression) && isNameChain(expression.expression));
 }
 
 function scalarSpec(raw: ts.Expression): FilterDomain | undefined {
@@ -552,9 +641,13 @@ function filterProse(locale: string, view: View, keys: ReadonlyArray<FilterKey>)
     };
 }
 
+function addNote(view: View, note: { code: string; message: string }): void {
+  if (!view.notes.some((entry) => entry.code === note.code && entry.message === note.message)) view.notes.push(note);
+}
+
 function addKey(view: View, key: FilterKey): void {
   if (key.key === 'params') {
-    view.notes.push({ code: 'filter-key-reserved', message: 'The URL parameter params is reserved for route parameters.' });
+    addNote(view, { code: 'filter-key-reserved', message: 'The URL parameter params is reserved for route parameters.' });
     return;
   }
   const existing = view.keys.get(key.key);
@@ -565,7 +658,7 @@ function addKey(view: View, key: FilterKey): void {
   const domain = mergeDomains(existing.domain, key.domain);
   if (!domain || (existing.array ?? null) !== (key.array ?? null)) {
     view.keys.set(key.key, { key: key.key, domain: { kind: 'string' }, ...(existing.array ? { array: existing.array } : {}) });
-    view.notes.push({ code: 'filter-domain-conflict', message: `${key.key} is read with different parsers; it accepts any text.` });
+    addNote(view, { code: 'filter-domain-conflict', message: `${key.key} is read with different parsers; it accepts any text.` });
     return;
   }
   view.keys.set(key.key, { ...existing, domain });
@@ -608,29 +701,14 @@ async function observeFilters(
     }
     return view;
   };
-  const evidenceCache = new Map<ts.SourceFile, Evidence>();
-  const evidence = (file: ts.SourceFile, page: boolean): Evidence => {
-    if (page) return reader.evidenceOf(file, true);
-    let cached = evidenceCache.get(file);
-    if (!cached) {
-      cached = reader.evidenceOf(file, false);
-      evidenceCache.set(file, cached);
-    }
-    return cached;
-  };
   for (const page of tree.pages as ReadonlyArray<PageEntry>) {
     const source = app.sourceFile(join(root, page.file));
     if (!source) continue;
-    const found: Evidence = { keys: [], notes: [] };
-    for (const file of reader.viewFiles(source)) {
-      const part = evidence(file, file === source);
-      found.keys.push(...part.keys);
-      found.notes.push(...part.notes);
-    }
+    const found = reader.viewEvidence(source);
     if (found.keys.length === 0 && found.notes.length === 0) continue;
     const view = viewOf(page.path, page.params);
     for (const key of found.keys) addKey(view, key);
-    view.notes.push(...found.notes);
+    for (const note of found.notes) addNote(view, note);
   }
   const findings: ToolFinding[] = [];
   const definitionNotes: Array<{ file: string; code: string; message: string }> = [];
