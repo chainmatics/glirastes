@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { defineQueryFilters } from '../../../browser/query-filters.js';
 import { ToolPolicyFileSchema } from '../../../contracts/tool-policy.js';
 import { createAppFixture, removeAppFixtures } from '../__tests__/app-fixture.js';
 import { loadToolsConfig } from '../config.js';
+import { nextActionFor } from '../findings.js';
 import { EMPTY_CONVENTIONS } from '../resolutions.js';
 import { createSchemaProbe } from '../schema-probe.js';
 import type { ObservedTool, ToolSourceContext } from '../types.js';
-import { createUrlFilterSource, mergeDomains } from './url-filters.js';
+import { createUrlFilterSource, isFilterKeyName, mergeDomains } from './url-filters.js';
 
 afterEach(removeAppFixtures);
 
@@ -257,6 +259,82 @@ describe('url-filters source: what a view is credited with', () => {
     expect(byKey(observed.observations).has('UI filter /settings')).toBe(false);
     expect(observed.findings).toEqual([]);
   }, 120_000);
+});
+
+describe('url-filters source: tool input property names', () => {
+  const PROVIDER_SAFE_KEY = /^[A-Za-z0-9_.-]{1,64}$/;
+  const LONG = 'x'.repeat(65);
+  const FILES_BY_NAME: Record<string, string> = {
+    'tsconfig.json': TSCONFIG,
+    'src/components/glirastes-bridge.tsx': BRIDGE,
+    'src/app/tasks/page.tsx': "'use client';\nimport { useSearchParams } from 'next/navigation';\n"
+      + 'export default function Tasks() {\n  const params = useSearchParams();\n'
+      + "  return <p>{params.get('filter[status]')}{params.get('$top')}{params.get('größe')}{params.get('sort')}{params.getAll('tags[]').join()}</p>;\n}\n",
+    'src/app/reports/page.tsx': 'export default function Reports({ searchParams }: {\n'
+      + "  searchParams: { 'filter[range]'?: string; year?: string };\n}) {\n  return <p>{searchParams.year}</p>;\n}\n",
+    'src/app/people/page.tsx': "'use client';\nimport { parseAsString, useQueryStates } from 'nuqs';\n"
+      + 'export default function People() {\n'
+      + "  const [filters] = useQueryStates({ team: parseAsString, q: parseAsString }, { urlKeys: { team: 'filter[team]' } });\n"
+      + '  return <p>{filters.q}</p>;\n}\n',
+    'src/app/only-invalid/page.tsx': "'use client';\nimport { useSearchParams } from 'next/navigation';\n"
+      + `export default function OnlyInvalid() { return <p>{useSearchParams().get('a b')}{useSearchParams().get('${LONG}')}</p>; }\n`,
+    'src/views.ts': "import { defineQueryFilters } from 'glirastes/browser';\n"
+      + "export const inbox = defineQueryFilters({ path: '/inbox', filters: { 'a.b': 'string', state: ['new', 'read'] } });\n",
+  };
+
+  it('leaves out a URL parameter a model provider cannot take as a property name, with a warning', async () => {
+    const app = await createAppFixture(FILES_BY_NAME);
+    const observed = await createUrlFilterSource().observe(context(app.root));
+    const tools = byKey(observed.observations);
+    expect([...tools.keys()]).toEqual(['UI filter /inbox', 'UI filter /people', 'UI filter /reports', 'UI filter /tasks']);
+    expect(keysOf(tools.get('UI filter /tasks'))).toEqual(['sort']);
+    expect(keysOf(tools.get('UI filter /reports'))).toEqual(['year']);
+    expect(keysOf(tools.get('UI filter /people'))).toEqual(['q']);
+    expect(keysOf(tools.get('UI filter /inbox'))).toEqual(['state']);
+    for (const tool of observed.observations) {
+      const properties = Object.keys((tool.contract?.input as { properties: Record<string, unknown> }).properties);
+      expect(properties.every((name) => name === 'params' || PROVIDER_SAFE_KEY.test(name))).toBe(true);
+      expect(tool.contract?.params.query.every((name) => PROVIDER_SAFE_KEY.test(name))).toBe(true);
+    }
+    const invalid = (key: string) => tools.get(key)?.findings.filter((finding) => finding.code === 'filter-key-invalid') ?? [];
+    expect(invalid('UI filter /tasks').map((finding) => finding.message)).toEqual([
+      expect.stringContaining('"filter[status]"'),
+      expect.stringContaining('"$top"'),
+      expect.stringContaining('"größe"'),
+      expect.stringContaining('"tags[]"'),
+    ]);
+    expect(invalid('UI filter /reports')).toHaveLength(1);
+    expect(invalid('UI filter /people')).toHaveLength(1);
+    expect(invalid('UI filter /inbox')).toHaveLength(1);
+    for (const finding of invalid('UI filter /tasks')) {
+      expect(finding).toMatchObject({ severity: 'warning', subjectRef: 'UI filter /tasks' });
+      expect(finding.nextAction).toBe(nextActionFor('filter-key-invalid'));
+      expect(finding.nextAction).not.toBe(nextActionFor('no-such-code'));
+    }
+  }, 120_000);
+
+  it('reports a view whose parameters are all unusable without generating a tool for it', async () => {
+    const app = await createAppFixture(FILES_BY_NAME);
+    const observed = await createUrlFilterSource().observe(context(app.root));
+    expect(byKey(observed.observations).has('UI filter /only-invalid')).toBe(false);
+    const findings = observed.findings.filter((finding) => finding.subjectRef === 'UI filter /only-invalid');
+    expect(findings.map((finding) => finding.code)).toEqual(['filter-key-invalid', 'filter-key-invalid']);
+    expect(findings[1]?.message.length).toBeLessThan(250);
+  }, 120_000);
+
+  it('accepts exactly the names defineQueryFilters accepts at app runtime', () => {
+    const accepted = (key: string): boolean => {
+      try {
+        defineQueryFilters({ path: '/x', filters: { [key]: 'string' } });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (const key of ['status', 'a', '_x', 'sort-by', 'a_b', 'X1', 'x'.repeat(64), 'x'.repeat(65), '', '1st', 'a.b', 'filter[status]', '$top', 'größe', 'a b', 'a=b', '--x']) {
+      expect([key, isFilterKeyName(key)]).toEqual([key, accepted(key)]);
+    }
+  });
 });
 
 describe('mergeDomains', () => {

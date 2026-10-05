@@ -44,6 +44,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'filter-parser-unsupported': 'Use parseAsString, parseAsInteger, parseAsFloat, parseAsBoolean, parseAsStringLiteral or parseAsArrayOf for parameters the chat may set.',
   'filter-definition-unreadable': 'Write the filter key, path and values as literals so glirastes tools refresh can read them.',
   'filter-key-reserved': 'Rename the URL parameter; params is reserved for route parameters of the filtered page.',
+  'filter-key-invalid': 'Name the URL parameter with letters, digits, _ or - (starting with a letter or _, at most 64 characters) so the chat can set it; other names are left out of the filter tool.',
   'ui-action-payload-untyped': 'Pass a payload contract (e.g. a Zod object) as the third argument of useAiClientAction or registerAiClientAction, or type the handler parameter.',
   'ui-action-contract-conflict': 'Register the action with one payload contract wherever it is handled.',
   'ui-action-id-dynamic': 'Register client actions with a literal id so the chat can call them.',

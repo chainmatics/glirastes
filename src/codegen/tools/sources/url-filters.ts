@@ -83,6 +83,13 @@ const MAX_DEPTH = 6;
 /** How many declarations deep a page's references are followed (page → component → hook → parser …). */
 const MAX_REFERENCE_DEPTH = 8;
 const MAX_UNITS_PER_VIEW = 1_000;
+/**
+ * A name every model provider takes as a tool input property (Anthropic rejects
+ * keys outside `[a-zA-Z0-9_.-]{1,64}` with a 400 that fails the whole request),
+ * and the name `defineQueryFilters` enforces at app runtime, so a generated tool
+ * never offers a key the runtime helper would refuse.
+ */
+const FILTER_KEY_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
 const SCALAR_KINDS: ReadonlySet<string> = new Set(['string', 'integer', 'number', 'boolean']);
 
 function unwrap(expression: ts.Expression): ts.Expression {
@@ -121,6 +128,10 @@ export function mergeDomains(left: FilterDomain, right: FilterDomain): FilterDom
     return { kind: 'number-enum', values: sortedUnique([...left.values, ...right.values]) };
   }
   return left.kind === right.kind ? left : undefined;
+}
+
+export function isFilterKeyName(key: string): boolean {
+  return FILTER_KEY_NAME.test(key);
 }
 
 function scalarSchema(domain: FilterDomain): JsonSchemaLike {
@@ -648,6 +659,14 @@ function addNote(view: View, note: { code: string; message: string }): void {
 function addKey(view: View, key: FilterKey): void {
   if (key.key === 'params') {
     addNote(view, { code: 'filter-key-reserved', message: 'The URL parameter params is reserved for route parameters.' });
+    return;
+  }
+  if (!isFilterKeyName(key.key)) {
+    const shown = key.key.length > 64 ? `${key.key.slice(0, 63)}…` : key.key;
+    addNote(view, {
+      code: 'filter-key-invalid',
+      message: `The URL parameter ${JSON.stringify(shown)} is not a plain name (letters, digits, _ and -, starting with a letter or _, at most 64 characters), so the chat cannot set it.`,
+    });
     return;
   }
   const existing = view.keys.get(key.key);
