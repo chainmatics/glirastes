@@ -311,7 +311,9 @@ environment scope, and local bindings before activation. It supports push with
 polling fallback, last-known-good, stable/canary selection, pinning, health
 gates, rollback, and persisted security revocations.
 
-See [managed local runtime sync](./docs/managed-runtime-sync.md).
+See [managed local runtime sync](./docs/managed-runtime-sync.md) and
+[tool policy](./docs/tool-policy.md) for what local policy and Platform
+decisions may change, including the Platform relaxation of a confirmation.
 
 ## Agent skills
 
