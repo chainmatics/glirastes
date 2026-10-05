@@ -9,6 +9,7 @@ dist
 /stt/
 /codegen/
 /openapi/
+/embed/
 *.tsbuildinfo
 .DS_Store
 .vscode
