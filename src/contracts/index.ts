@@ -100,15 +100,18 @@ export {
   ToolPolicyFileSchema,
   ToolPolicyPinSchema,
   confirmationFloor,
+  confirmationRelaxationOutcome,
   deriveToolPolicyDefaults,
   intersectAllowedRoles,
   mostRestrictiveRiskClass,
   parseToolPolicyFile,
+  platformMayRelaxConfirmation,
   resolveToolPolicy,
   riskTier,
 } from './tool-policy.js';
 export type {
   AllowedRolesIntersection,
+  ConfirmationRelaxationOutcome,
   DeclaredEffect,
   EffectiveToolPolicy,
   PolicyOrigin,

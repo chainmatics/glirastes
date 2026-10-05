@@ -327,6 +327,243 @@
     }
   },
   {
+    "name": "relaxation/tier-3-delete-pinned-at-delete-refused",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "delete", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "delete" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "delete", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [],
+      "errors": [{ "code": "E-POLICY-002", "field": "platform.requiresApproval", "reason": "tier-3-always-requires-approval" }]
+    }
+  },
+  {
+    "name": "relaxation/tier-3-financial-pinned-at-write-lapses",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "financial", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "write" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "financial", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [{ "code": "override-lapsed-risk-raised", "field": "platform.requiresApproval" }],
+      "errors": []
+    }
+  },
+  {
+    "name": "relaxation/tier-3-external-unpinned-refused",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "external", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "external", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [],
+      "errors": [{ "code": "E-POLICY-002", "field": "platform.requiresApproval", "reason": "tier-3-always-requires-approval" }]
+    }
+  },
+  {
+    "name": "relaxation/unknown-pinned-at-write-lapses",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "unknown", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "write" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "unknown", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [{ "code": "override-lapsed-risk-raised", "field": "platform.requiresApproval" }],
+      "errors": []
+    }
+  },
+  {
+    "name": "relaxation/pin-at-unknown-refused",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "write", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "unknown" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "write", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [],
+      "errors": [{ "code": "E-POLICY-002", "field": "platform.requiresApproval", "reason": "tier-3-always-requires-approval" }]
+    }
+  },
+  {
+    "name": "relaxation/code-raised-risk-since-the-pin-lapses",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "delete", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "write" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "delete", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [{ "code": "override-lapsed-risk-raised", "field": "platform.requiresApproval" }],
+      "errors": []
+    }
+  },
+  {
+    "name": "relaxation/raise-in-the-same-decision-lapses",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "write", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "riskClass": "delete", "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "write" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "delete", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "platform", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [{ "code": "override-lapsed-risk-raised", "field": "platform.requiresApproval" }],
+      "errors": []
+    }
+  },
+  {
+    "name": "relaxation/pinned-below-the-current-class-lapses",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "write", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "read-sensitive" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "write", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [{ "code": "override-lapsed-risk-raised", "field": "platform.requiresApproval" }],
+      "errors": []
+    }
+  },
+  {
+    "name": "relaxation/local-lock-wins",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "write", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "local": { "allowedRoles": ["admin", "member"], "requiresApproval": true },
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "write" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "write", "allowedRoles": ["admin", "member"],
+        "origin": { "enabled": "code-default", "requiresApproval": "local-policy", "riskClass": "code-default", "allowedRoles": "local-policy", "description": "code-default" }
+      },
+      "warnings": [], "errors": []
+    }
+  },
+  {
+    "name": "relaxation/write-unpinned-refused",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "write", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "write", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [],
+      "errors": [{ "code": "E-POLICY-002", "field": "platform.requiresApproval", "reason": "relaxation-requires-reviewed-pin" }]
+    }
+  },
+  {
+    "name": "relaxation/pin-of-an-earlier-tool-id-lapses",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "write", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3906", "atRiskClass": "write" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": true, "riskClass": "write", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "code-default", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [{ "code": "policy-entry-orphaned", "field": "platform.pin.toolId" }],
+      "errors": []
+    }
+  },
+  {
+    "name": "relaxation/write-pinned-at-write-applies",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "write", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "local": { "allowedRoles": ["member"] },
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "write" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": false, "riskClass": "write", "allowedRoles": ["member"],
+        "origin": { "enabled": "code-default", "requiresApproval": "platform", "riskClass": "code-default", "allowedRoles": "local-policy", "description": "code-default" }
+      },
+      "warnings": [], "errors": []
+    }
+  },
+  {
+    "name": "relaxation/applies-beside-a-role-restriction",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "write", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "local": { "allowedRoles": ["admin", "member"] },
+      "platform": { "allowedRoles": ["admin"], "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "write" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": false, "riskClass": "write", "allowedRoles": ["admin"],
+        "origin": { "enabled": "code-default", "requiresApproval": "platform", "riskClass": "code-default", "allowedRoles": "platform", "description": "code-default" }
+      },
+      "warnings": [], "errors": []
+    }
+  },
+  {
+    "name": "relaxation/tier-1-pinned-applies",
+    "input": {
+      "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
+      "defaults": { "operationGroup": "update", "riskClass": "read-sensitive", "requiresApproval": true, "rulesVersion": 1 },
+      "codeEnabled": true,
+      "platform": { "requiresApproval": false, "pin": { "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905", "atRiskClass": "read-sensitive" } }
+    },
+    "expected": {
+      "effective": {
+        "enabled": true, "requiresApproval": false, "riskClass": "read-sensitive", "allowedRoles": [],
+        "origin": { "enabled": "code-default", "requiresApproval": "platform", "riskClass": "code-default", "allowedRoles": "code-default", "description": "code-default" }
+      },
+      "warnings": [], "errors": []
+    }
+  },
+  {
     "name": "roles/intersection",
     "input": {
       "toolId": "019fa9a9-d5f7-7ec3-a3c7-8899de1d3905",
