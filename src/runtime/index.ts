@@ -128,3 +128,13 @@ export {
   type GeneratedToolBinding,
   type GeneratedToolModule,
 } from './contract-bindings.js';
+export {
+  RuntimePriceTableSchema,
+  UNKNOWN_TURN_COST,
+  combineTurnCost,
+  providerReportedCostUsd,
+  rawChunkCostUsd,
+  resolveStepCost,
+  type RuntimePriceTable,
+  type StepCostInput,
+} from './metrics/cost.js';
