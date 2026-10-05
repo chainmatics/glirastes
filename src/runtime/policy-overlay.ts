@@ -43,6 +43,13 @@ export interface VerifiedPolicyOverlay {
  * risk class, narrow roles, require confirmation. `enabled: true`, a lower
  * risk class and `requiresApproval: false` are no-ops, pinned or not. Overlay
  * ids without a local policy are ignored and reported.
+ *
+ * Open (design 4.5 as amended 2026-10-05, decision D16; roadmap "P04-Nachtrag"):
+ * a signed owner/admin relaxation of confirmation pinned with
+ * `atRiskClass: 'write'` must take effect up to tier 2, an explicit local
+ * `requiresApproval: true` still winning. This runner does not implement D16
+ * and does not report it at registration, so the Platform must not show such
+ * a relaxation as effective for it.
  */
 export function applyPolicyOverlay(
   local: RuntimeToolPolicy[],
@@ -114,8 +121,9 @@ export function overlayDescriptions(
  * overlay. The entries are the signed `toolOverrides` deltas (P08b shared
  * contract item 2), never the reported `toolPolicies`: those repeat what the
  * code reported and would freeze an old local value. Composition stays
- * restrict-only, so a Platform relaxation remains a no-op without a committed
- * local entry, and the revision id keeps Platform revocations matching.
+ * restrict-only until the D16 addendum (see applyPolicyOverlay), so a Platform
+ * relaxation remains a no-op without a committed local entry, and the revision
+ * id keeps Platform revocations matching.
  */
 export function policyOverlayFromRevision(
   revision: RuntimePolicyRevision,
