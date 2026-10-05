@@ -145,6 +145,10 @@ export type {
 } from './hooks/use-drag-resize-panel.js';
 export { useDraggablePosition } from './hooks/use-draggable-position.js';
 export { useKeyboardShortcut } from './hooks/use-keyboard-shortcut.js';
+export {
+  DEFAULT_PUSH_TO_TALK_HOTKEY,
+  usePushToTalkHotkey,
+} from './hooks/use-push-to-talk-hotkey.js';
 export type { UseKeyboardShortcutOptions } from './hooks/use-keyboard-shortcut.js';
 export type {
   UseDraggablePositionOptions,
