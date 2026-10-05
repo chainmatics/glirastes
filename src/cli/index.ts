@@ -47,6 +47,7 @@ import {
 import { runSync, type SyncCommandDependencies } from './commands/sync.js';
 import { inspectSetupProject, formatSetupProjectInspection } from './commands/project-inspection.js';
 import { runAgentSetup, type AgentSetupDependencies } from './commands/agent-setup.js';
+import { runToolsCommand, type ToolsCommandDependencies } from './commands/tools/index.js';
 
 type CommandName =
   | 'init'
@@ -57,13 +58,15 @@ type CommandName =
   | 'doctor'
   | 'install'
   | 'validate'
-  | 'build';
+  | 'build'
+  | 'tools';
 
 export interface CliDependencies {
   init?: AgentSetupDependencies;
   ask?: (question: string) => Promise<string>;
   connect?: ConnectCommandDependencies;
   sync?: SyncCommandDependencies;
+  tools?: ToolsCommandDependencies;
 }
 
 function getFlagValue(args: string[], flag: string): string | undefined {
@@ -90,6 +93,7 @@ function parseCommand(args: string[]): {
     && command !== 'install'
     && command !== 'validate'
     && command !== 'build'
+    && command !== 'tools'
   ) {
     throw new Error(
       'Usage: glirastes init [--agent codex|claude] [--root] [--dry-run] [--json]\n'
@@ -111,7 +115,9 @@ function parseCommand(args: string[]): {
       + '[--dry-run]\n'
       + '       glirastes validate [--root] [--app-id]\n'
       + '       glirastes doctor [--root] [--managed] [--json] [--verbose]\n'
-      + '       glirastes build [--root] [--app-id] [--output]\n',
+      + '       glirastes build [--root] [--app-id] [--output]\n'
+      + '       glirastes tools <refresh|check|status> [options]\n'
+      + '         derive chat tools from the code, verify them or show them\n',
     );
   }
   return { command, rest };
@@ -664,6 +670,11 @@ export async function runCli(
       agent: getFlagValue(rest, '--agent'), dryRun: hasFlag(rest, '--dry-run'),
       json: hasFlag(rest, '--json'), managed: hasFlag(rest, '--managed'),
     }, { ask: terminalAsk, ...dependencies.init });
+    return;
+  }
+  if (command === 'tools') {
+    const exitCode = await runToolsCommand(rest, dependencies.tools);
+    if (exitCode !== 0) process.exitCode = exitCode;
     return;
   }
   if (command === 'connect') {

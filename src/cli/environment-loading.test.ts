@@ -10,6 +10,8 @@ describe('shouldLoadImplicitEnvironment', () => {
     ['setup', 'inspect'],
     ['setup', 'sync'],
     ['setup', '--managed'],
+    ['tools', 'refresh'],
+    ['tools', 'check', '--json'],
   ])('keeps %s credentials out of unverified implicit env files', (...args) => {
     expect(shouldLoadImplicitEnvironment(args)).toBe(false);
   });

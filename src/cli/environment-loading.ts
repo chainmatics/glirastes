@@ -5,7 +5,10 @@
  */
 export function shouldLoadImplicitEnvironment(args: string[]): boolean {
   const [command, subcommand] = args;
-  if (command === 'sync' || command === 'connect' || command === 'doctor' || command === 'init') {
+  if (
+    command === 'sync' || command === 'connect' || command === 'doctor'
+    || command === 'init' || command === 'tools'
+  ) {
     return false;
   }
   if (
