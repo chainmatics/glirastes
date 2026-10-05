@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SttProviderAdapter } from '../../react/stt/controller.js';
 import type { ChatMessage, ChatTransport } from '../../react/types.js';
 import { CHAT_STYLES } from '../chat-styles.generated.js';
 import {
@@ -24,6 +25,23 @@ function transport(messages: ChatMessage[] = []): ChatTransport {
   };
 }
 
+/** A complete AI SDK UI message stream (SSE) that answers with `text`. */
+function sseResponse(text: string): Response {
+  const chunks = [
+    { type: 'start' },
+    { type: 'start-step' },
+    { type: 'text-start', id: 't1' },
+    { type: 'text-delta', id: 't1', delta: text },
+    { type: 'text-end', id: 't1' },
+    { type: 'finish-step' },
+    { type: 'finish' },
+  ];
+  const body = `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('')}data: [DONE]\n\n`;
+  return new Response(body, {
+    headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+  });
+}
+
 async function mount(
   configure: (element: GlirastesChatElement) => void = () => {},
   tag = 'glirastes-chat',
@@ -43,6 +61,8 @@ async function mount(
 
 afterEach(async () => {
   await act(async () => { document.body.replaceChildren(); });
+  vi.unstubAllGlobals();
+  Reflect.deleteProperty(navigator, 'mediaDevices');
 });
 
 describe('<glirastes-chat>', () => {
@@ -122,6 +142,82 @@ describe('<glirastes-chat>', () => {
         result: { success: true, uiAction: { type: 'navigate', path: '/tasks' } },
       },
     });
+  });
+
+  it('posts to the endpoint attribute with the config headers and bodyExtras', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Hallo zurück'));
+    vi.stubGlobal('fetch', fetchMock);
+    const { element, events } = await mount((node) => {
+      node.setAttribute('endpoint', '/api/chat');
+      node.config = {
+        headers: () => ({ 'x-tenant': 't1' }),
+        bodyExtras: { locale: 'de' },
+      };
+    });
+    expect(element.shadowRoot!.querySelector('[data-component="ai-chat-panel"]')).toBeTruthy();
+    expect(events.map((event) => event.type)).not.toContain('glirastes-chat:error');
+
+    await act(async () => { expect(element.send('Hallo')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe('/api/chat');
+    expect(init?.method).toBe('POST');
+    expect(new Headers(init?.headers).get('x-tenant')).toBe('t1');
+    const body = JSON.parse(String(init?.body)) as {
+      locale: string;
+      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>;
+    };
+    expect(body.locale).toBe('de');
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0]).toMatchObject({
+      role: 'user',
+      parts: [{ type: 'text', text: 'Hallo' }],
+    });
+
+    await waitFor(() => expect(element.shadowRoot!.textContent).toContain('Hallo zurück'));
+    await waitFor(() => expect(events.filter((event) => event.type === 'glirastes-chat:status').pop())
+      .toMatchObject({ detail: { state: 'idle' } }));
+  });
+
+  it('maps the voice and voice-language attributes onto the composer microphone', async () => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })) },
+    });
+    const connect = vi.fn<SttProviderAdapter['connect']>(async () => ({
+      finalize: async () => {},
+      cancel: async () => {},
+      close: async () => {},
+    }));
+    const adapter: SttProviderAdapter = { connect };
+    const micOf = (element: GlirastesChatElement) =>
+      element.shadowRoot!.querySelector<HTMLButtonElement>('[data-component="voice-input-addon"]');
+
+    const silent = await mount((node) => { node.transport = transport(); });
+    expect(micOf(silent.element)).toBeNull();
+    await act(async () => { silent.element.remove(); });
+
+    const english = await mount((node) => {
+      node.setAttribute('voice', '');
+      node.setAttribute('voice-language', 'en');
+      node.transport = transport();
+      node.config = { voice: { adapter } };
+    });
+    expect(micOf(english.element)).toBeTruthy();
+    await act(async () => { fireEvent.click(micOf(english.element)!); });
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(1));
+    expect(connect.mock.calls[0]![0].language).toBe('en');
+    await act(async () => { english.element.remove(); });
+
+    const defaulted = await mount((node) => {
+      node.setAttribute('voice', '');
+      node.transport = transport();
+      node.config = { voice: { adapter } };
+    });
+    await act(async () => { fireEvent.click(micOf(defaulted.element)!); });
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(2));
+    expect(connect.mock.calls[1]![0].language).toBe('de');
   });
 
   it('reports a missing endpoint instead of rendering a broken chat', async () => {
