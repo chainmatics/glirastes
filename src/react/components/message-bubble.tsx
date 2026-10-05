@@ -3,6 +3,13 @@ import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
+import { clarificationAnswerMessage, readClarificationPart } from '../utils/clarification.js';
+import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
+import { RendererBoundary } from '../tool-renderers/renderer-boundary.js';
+import {
+  CLARIFICATION_TOOL_NAME,
+  stripClarificationMarkers,
+} from '../../contracts/clarification.js';
 import type { MessageBubbleProps, TextPart } from '../types.js';
 
 // Lazy-load react-markdown — keeps it out of the synchronous import graph so
@@ -39,6 +46,8 @@ function shouldRenderToolResult(
   // Follow-up registration is consumed by the suggestion system, not exposed
   // as a raw tool result in either supported message-part format.
   if (toolName === 'suggest_followups') return false;
+  // Clarifications render as an answerable card, never as raw output.
+  if (toolName === CLARIFICATION_TOOL_NAME) return false;
   if (mode === 'hidden') return false;
   if (mode === 'allowlist') return allowlist.includes(toolName);
   return true;
@@ -58,10 +67,47 @@ function isTextPart(part: unknown): part is TextPart {
  * Uses `data-role` attribute for styling (user/assistant/system).
  */
 export function MessageBubble({ message, className }: MessageBubbleProps) {
-  const { classNames, components, toolResults } = useChatContext();
+  const {
+    classNames,
+    components,
+    toolResults,
+    toolRendererRegistry,
+    messages,
+    send,
+    isLoading,
+  } = useChatContext();
   const MarkdownComponent = components.Markdown ?? DefaultMarkdown;
   const ToolResultComponent = components.ToolResultBlock ?? DefaultToolResult;
   const MentionChipComponent = components.MentionChip ?? DefaultMentionChip;
+  const ClarificationComponent = components.ClarificationCard ?? DefaultClarificationCard;
+  const isLatestMessage = messages?.[messages.length - 1]?.id === message.id;
+
+  const renderToolResult = (key: string, toolName: string, result: unknown) => {
+    const fallback = <ToolResultComponent key={key} toolName={toolName} result={result} />;
+    const resolved = toolRendererRegistry?.resolve(toolName, result);
+    if (!resolved) return fallback;
+    const Renderer = resolved.renderer.component;
+    return (
+      <RendererBoundary
+        key={`${key}@${resolved.renderer.schemaVersion}`}
+        fallback={<ToolResultComponent toolName={toolName} result={result} />}
+      >
+        <div
+          data-component="tool-result"
+          data-tool={toolName}
+          data-renderer={resolved.renderer.definitionId}
+          data-schema-version={resolved.renderer.schemaVersion}
+        >
+          <Renderer
+            definitionId={resolved.renderer.definitionId}
+            toolName={toolName}
+            schemaVersion={resolved.renderer.schemaVersion}
+            output={resolved.output}
+          />
+        </div>
+      </RendererBoundary>
+    );
+  };
 
   const mode = toolResults.mode ?? 'default';
   const allowlist = toolResults.allowlist ?? [];
@@ -70,7 +116,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const cleanTextParts = message.parts
     .filter(isTextPart)
     .filter((p) => p.text.trim())
-    .map((p) => stripContextBlocks(p.text))
+    .map((p) => stripClarificationMarkers(stripContextBlocks(p.text)))
     .map((text) => (
       message.role === 'assistant'
         ? extractTrailingFollowupSuggestions(text).text
@@ -115,6 +161,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   // Skip truly empty assistant messages
   if (message.role === 'assistant' && !hasTextContent && !fallbackSummary) {
     const hasVisibleToolOutput = message.parts.some(p => {
+      if (readClarificationPart(p)) return true;
       if (!isRecord(p)) return false;
       const t = typeof p.type === 'string' ? p.type : '';
       if (t.startsWith('tool-') && p.state === 'output-available') {
@@ -182,16 +229,27 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 
       {/* Render tool results via ToolResultBlock */}
       {message.parts.map((part, i) => {
+        const clarification = readClarificationPart(part);
+        if (clarification) {
+          return (
+            <ClarificationComponent
+              key={`clarification-${clarification.toolCallId}`}
+              toolCallId={clarification.toolCallId}
+              request={clarification.request}
+              interactive={clarification.ready && isLatestMessage && !isLoading}
+              onAnswer={(answer) => send(clarificationAnswerMessage({
+                toolCallId: clarification.toolCallId,
+                answer: answer.text,
+                ...(answer.optionId ? { optionId: answer.optionId } : {}),
+              }))}
+            />
+          );
+        }
+
         // Standard ToolResultPart
         if ('toolName' in part && 'result' in part && part.result !== undefined) {
           if (!shouldRenderToolResult(part.toolName, mode, allowlist)) return null;
-          return (
-            <ToolResultComponent
-              key={`tool-${i}`}
-              toolName={part.toolName}
-              result={part.result}
-            />
-          );
+          return renderToolResult(`tool-${i}`, part.toolName, part.result);
         }
 
         // AI SDK 5.x/6.x tool-{name} parts with output
@@ -200,13 +258,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
           if (partType.startsWith('tool-') && part.state === 'output-available' && part.output !== undefined) {
             const toolName = partType.replace('tool-', '');
             if (!shouldRenderToolResult(toolName, mode, allowlist)) return null;
-            return (
-              <ToolResultComponent
-                key={`tool-${i}`}
-                toolName={toolName}
-                result={part.output}
-              />
-            );
+            return renderToolResult(`tool-${i}`, toolName, part.output);
           }
         }
 

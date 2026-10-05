@@ -381,6 +381,194 @@
   color: var(--cm-text-muted);
 }
 
+/* ---------- Provider composer, '/' and '@' list ---------- */
+/* The wrapper above is flex, but the editor, mic and Send sit inside a bare
+   <form> (classNames.input is empty by default). Without this rule the form
+   shrink-wraps its contents and the editor and its list collapse to ~111px. */
+[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 0.5rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+[data-component="ai-chat-panel"] [data-component="rich-mention-input"] {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-element="editor"] {
+  box-sizing: border-box;
+  min-height: 40px;
+  max-height: 160px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 0.5rem 0.75rem;
+  background: var(--cm-bg-muted);
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  color: var(--cm-text);
+  outline: none;
+}
+[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-element="editor"]:focus {
+  border-color: var(--cm-primary);
+  box-shadow: 0 0 0 3px var(--cm-primary-ring);
+}
+[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-element="placeholder"] {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.75rem;
+  color: var(--cm-text-muted);
+  pointer-events: none;
+}
+[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-component="mention-dropdown"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.25rem);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  max-height: min(40vh, 16rem);
+  overflow-y: auto;
+  background: var(--cm-bg);
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+[data-component="ai-chat-panel"] [data-component="mention-dropdown-item"] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: none;
+  color: var(--cm-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+[data-component="ai-chat-panel"] [data-component="mention-dropdown-item"][data-selected="true"] {
+  background: var(--cm-primary-tint);
+}
+[data-component="ai-chat-panel"] [data-component="mention-dropdown-item"] [data-element="description"] {
+  font-size: 12px;
+  color: var(--cm-text-muted);
+}
+
+/* ---------- Structured clarification ---------- */
+[data-component="ai-chat-panel"] [data-component="clarification-card"] {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 100%;
+  margin: 0.375rem 0;
+  padding: 0.75rem;
+  background: var(--cm-bg);
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+}
+[data-component="clarification-card"] [data-element="question"] {
+  margin: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+[data-component="clarification-card"] [data-element="options"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+[data-component="clarification-card"] [data-action="answer-option"] {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  padding: 0.375rem 0.75rem;
+  background: var(--cm-bg-muted);
+  border: 1px solid var(--cm-border);
+  border-radius: 9999px;
+  color: var(--cm-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+[data-component="clarification-card"] [data-action="answer-option"]:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+[data-component="clarification-card"] [data-element="description"] {
+  font-size: 11px;
+  color: var(--cm-text-muted);
+}
+[data-component="clarification-card"] [data-element="free-text"] {
+  display: flex;
+  gap: 0.375rem;
+}
+[data-component="clarification-card"] [data-element="free-text"] input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.375rem 0.625rem;
+  background: var(--cm-bg-muted);
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  color: var(--cm-text);
+  font: inherit;
+}
+[data-component="clarification-card"] [data-action="answer-free-text"] {
+  padding: 0.375rem 0.75rem;
+  background: var(--cm-primary);
+  border: none;
+  border-radius: var(--cm-radius-sm);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+[data-component="clarification-card"] [data-action="answer-free-text"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Voice: mic, push-to-talk, retry, recording bar ---------- */
+[data-component="ai-chat-panel"] [data-component="voice-input-addon"],
+[data-component="ai-chat-panel"] [data-action="retry-recording"] {
+  flex-shrink: 0;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 0.625rem;
+  background: var(--cm-bg-muted);
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  color: var(--cm-text);
+  font: inherit;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+[data-component="ai-chat-panel"] [data-component="voice-input-addon"][data-state="recording"] {
+  border-color: var(--cm-danger);
+  color: var(--cm-danger);
+}
+[data-component="ai-chat-panel"] [data-component="recording-bar"] {
+  min-width: 0;
+}
+/* The inline bar is `width: 100%` (inline style). Next to the editor, mic and
+   Send it would get ~100px at 375px wide, too little for the live words. A
+   non-auto flex-basis beats that width, so the bar takes a row of its own
+   below them (form wraps; `order` moves it behind Send, which stays beside
+   the editor). The row exists only while the bar is mounted. */
+[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"] {
+  flex: 1 1 100%;
+  order: 1;
+}
+
 /* ===========================================================================
    Drop-in defaults for the floating trigger button and chat window.
    These exist so <LangGraphAiChat /> / <VercelAiChat /> "just work" with

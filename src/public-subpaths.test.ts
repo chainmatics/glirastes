@@ -15,6 +15,7 @@ describe('public foundation subpaths', () => {
       './adapter/nextjs',
       './dist/server/adapters/nextjs/index.js',
     ],
+    ['framework-neutral chat embed', './embed', './dist/embed/index.js'],
   ])('exports the independently importable %s surface', async (
     _label,
     subpath,
@@ -124,6 +125,20 @@ describe('public foundation subpaths', () => {
       expect(toolsSource).not.toMatch(/@ai-sdk\/openai|openrouter/i);
       expect(toolsSource).not.toContain("'generate'");
     }
+  });
+
+  it('ships the embed subpath with its legacy shim and fresh inlined styles', async () => {
+    const [packageJson, shims, embedSource] = await Promise.all([
+      readFile(new URL('../package.json', import.meta.url), 'utf8'),
+      readFile(new URL('../scripts/generate-subpath-shims.mjs', import.meta.url), 'utf8'),
+      readFile(new URL('./embed/index.ts', import.meta.url), 'utf8'),
+    ]);
+    const parsed = JSON.parse(packageJson) as { files?: string[]; scripts?: Record<string, string> };
+    expect(parsed.files).toContain('embed');
+    expect(parsed.scripts?.build).toContain('generate-embed-styles.mjs --check');
+    expect(shims).toContain("['embed', 'embed']");
+    expect(embedSource).toContain('defineGlirastesChatElement');
+    expect(embedSource).not.toMatch(/from ['"]\.\.\/react\/index\.js['"]/);
   });
 
   it('keeps the standalone STT surface framework-neutral', async () => {

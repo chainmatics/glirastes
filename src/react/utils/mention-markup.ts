@@ -1,7 +1,14 @@
-import type { Mention, MentionData, MentionSerializationConfig } from '../types.js';
+import type {
+  Mention,
+  MentionData,
+  MentionResult,
+  MentionSerializationConfig,
+} from '../types.js';
 
 const CONTEXT_BLOCK_RE = /<!--\s*context:[\s\S]*?-->\s*/gi;
 const MENTION_MARKER_RE = /\{\{mention:([^:}]+):([^:}]+):([^}]+)\}\}/g;
+const DEFINITION_ID_RE = /^[A-Za-z0-9_.-]{1,200}$/;
+const MAX_TOOL_ARGS_LENGTH = 2_000;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -9,6 +16,92 @@ function escapeRegex(value: string): string {
 
 export function stripContextBlocks(text: string): string {
   return text.replace(CONTEXT_BLOCK_RE, '').trimStart();
+}
+
+/**
+ * The text that tells the model which catalog definition a tool-backed
+ * command runs and with which arguments (`tool: ui.navigate, args: {...}`),
+ * or `undefined` when the definition id or the arguments cannot be sent
+ * safely. Arguments must be a JSON object of at most 2000 characters; `<` and
+ * `>` stay escaped so they can never close the surrounding context comment.
+ */
+export function describeToolReference(
+  definitionId: unknown,
+  args?: unknown,
+): string | undefined {
+  if (typeof definitionId !== 'string' || !DEFINITION_ID_RE.test(definitionId)) return undefined;
+  if (args === undefined) return `tool: ${definitionId}`;
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) return undefined;
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(args);
+  } catch {
+    return undefined;
+  }
+  if (json === undefined || json.length > MAX_TOOL_ARGS_LENGTH) return undefined;
+  const safe = json.replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  return `tool: ${definitionId}, args: ${safe}`;
+}
+
+/**
+ * The structured mention a picked completion result becomes in the composer.
+ * A tool-backed command keeps its `definitionId` and `args`, because the
+ * serializer needs them to tell the model what the command runs.
+ */
+export function mentionDataFromResult(
+  result: MentionResult,
+  token: { prefix: string; slug: string },
+): MentionData {
+  return {
+    id: result.id,
+    type: result.type,
+    label: result.label,
+    displayName: result.label,
+    slug: token.slug,
+    prefix: token.prefix,
+    ...(result.definitionId ? { definitionId: result.definitionId } : {}),
+    ...(result.args ? { args: result.args } : {}),
+  };
+}
+
+/**
+ * A mention's tool reference as chip `dataset` values, so a chip read back
+ * from the editor keeps the definition id and arguments of the command it
+ * stands for. `undefined` when the mention has none, or none the model could
+ * be given.
+ */
+export function toolReferenceToDataset(
+  mention: MentionData,
+): { definitionId: string; args?: string } | undefined {
+  if (mention.definitionId === undefined) return undefined;
+  if (describeToolReference(mention.definitionId, mention.args) === undefined) return undefined;
+  const definitionId = mention.definitionId as string;
+  return mention.args === undefined
+    ? { definitionId }
+    : { definitionId, args: JSON.stringify(mention.args) };
+}
+
+/**
+ * The inverse of `toolReferenceToDataset`: the `definitionId` (and `args`)
+ * stored in a chip's dataset, or `undefined` when there is none or it is
+ * malformed. It is validated like a reference taken from a picked result.
+ */
+export function toolReferenceFromDataset(dataset: {
+  mentionDefinitionId?: string;
+  mentionArgs?: string;
+}): { definitionId: string; args?: Record<string, unknown> } | undefined {
+  const definitionId = dataset.mentionDefinitionId;
+  if (!definitionId) return undefined;
+  let args: Record<string, unknown> | undefined;
+  if (dataset.mentionArgs !== undefined) {
+    try {
+      args = JSON.parse(dataset.mentionArgs) as Record<string, unknown>;
+    } catch {
+      return undefined;
+    }
+  }
+  if (describeToolReference(definitionId, args) === undefined) return undefined;
+  return args === undefined ? { definitionId } : { definitionId, args };
 }
 
 export function inferMentionPrefix(type: string): string {
@@ -70,6 +163,8 @@ interface SerializableMention {
   displayName?: string;
   slug?: string;
   prefix?: string;
+  /** From `describeToolReference`; only tool-backed commands have one. */
+  toolReference?: string;
 }
 
 function buildContextBlock(
@@ -80,7 +175,7 @@ function buildContextBlock(
   const summary = mentions
     .map((m) => {
       const displayName = m.displayName ?? m.label ?? m.id;
-      return `${displayName} (ID: ${m.id})`;
+      return `${displayName} (ID: ${m.id}${m.toolReference ? `, ${m.toolReference}` : ''})`;
     })
     .join(', ');
   return `<!--context:[${label}: ${summary}]--> `;
@@ -99,6 +194,20 @@ export function serializeMentionsForSend(
   const cleaned = stripContextBlocks(text);
   let nextText = cleaned;
   const serializedMentions: SerializableMention[] = [];
+
+  // One command can arrive twice: as a chip read back from the editor DOM
+  // (dataset only, so without definition id and arguments) and as the state
+  // entry that still carries them. Only the entry first in line replaces the
+  // token, so the reference is looked up per mention, not per entry.
+  const toolReferences = new Map<string, string>();
+  for (const mention of mentions) {
+    if (typeof mention.id !== 'string' || typeof mention.type !== 'string') continue;
+    if (mention.definitionId === undefined) continue;
+    const key = `${mention.type}\u0000${mention.id}`;
+    if (toolReferences.has(key)) continue;
+    const reference = describeToolReference(mention.definitionId, mention.args);
+    if (reference) toolReferences.set(key, reference);
+  }
 
   for (const mention of mentions) {
     const id = typeof mention.id === 'string' ? mention.id : '';
@@ -137,16 +246,22 @@ export function serializeMentionsForSend(
         displayName: label,
         slug,
         prefix,
+        toolReference: toolReferences.get(`${type}\u0000${id}`),
       });
     }
   }
 
-  if (options?.includeContextBlock) {
-    const contextLabel = options.contextLabel ?? 'Referenced entities';
-    const contextBlock = buildContextBlock(serializedMentions, contextLabel);
-    if (contextBlock) {
-      return `${contextBlock}${nextText}`.trim();
-    }
+  // A tool-backed command is only meaningful with its definition and
+  // arguments, so those always reach the model; other mentions need the option.
+  const contextMentions = options?.includeContextBlock
+    ? serializedMentions
+    : serializedMentions.filter((m) => m.toolReference);
+  const contextBlock = buildContextBlock(
+    contextMentions,
+    options?.contextLabel ?? 'Referenced entities',
+  );
+  if (contextBlock) {
+    return `${contextBlock}${nextText}`.trim();
   }
 
   return nextText;

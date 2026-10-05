@@ -20,6 +20,8 @@ import type {
   StepSummaryFormatter,
   SessionSummary,
 } from '../types.js';
+import type { CompletionSearch } from '../completions/completion-search.js';
+import type { ToolResultRendererRegistry } from '../tool-renderers/registry.js';
 
 type MentionTrigger = '@' | '/' | null;
 
@@ -43,6 +45,8 @@ export interface ChatContextValue {
   suggestions: SuggestionsConfig;
   toolLabels: ToolLabelConfig;
   toolResults: ToolResultDisplayConfig;
+  /** Custom result components; absent when none are configured. */
+  toolRendererRegistry?: ToolResultRendererRegistry;
   voice: VoiceInputConfig;
   mentionConfig?: MentionConfig;
   pipelineMessageTranslator?: PipelineMessageTranslator;
@@ -52,7 +56,8 @@ export interface ChatContextValue {
   messages: ChatMessage[];
   isLoading: boolean;
   error: Error | null;
-  send: (message: string) => void;
+  /** `mentions` replaces the provider's active mentions for this message. */
+  send: (message: string, options?: { mentions?: MentionData[] }) => void;
   stop: () => void;
   clear: () => void;
   loadMore: () => void;
@@ -85,6 +90,10 @@ export interface ChatContextValue {
   clearActiveMentions: () => void;
   isMentionSearching: boolean;
   hasMentions: boolean;
+
+  // Completion providers
+  completionSearch?: CompletionSearch;
+  hasCompletions: boolean;
 
   // Suggestions
   suggestionChips: string[];

@@ -72,6 +72,29 @@ describe('foundation agent skills', () => {
     expect(source).not.toMatch(/\bTTS\b|duplex voice/i);
   });
 
+  it('documents commands, mentions, clarification, renderers, embedding and push-to-talk', async () => {
+    const source = await skillSource('building-glirastes-chat-ui');
+
+    for (const surface of [
+      'completionProviders',
+      'createUiToolCommandProvider',
+      'completionContext',
+      'ClarificationCard',
+      'clarification',
+      'toolRenderers',
+      'defineToolResultRenderer',
+      'glirastes/embed',
+      'defineGlirastesChatElement',
+      '--glirastes-chat-',
+      'pushToTalk',
+      'routeKey',
+    ]) {
+      expect(source).toContain(surface);
+    }
+    expect(source).toContain('only hides entries');
+    expect(source).toContain('no automatic send on finalization');
+  });
+
   it('installs only foundation-supported skills for the all profile', async () => {
     const output: string[] = [];
     const originalLog = console.log;

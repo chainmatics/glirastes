@@ -15,13 +15,14 @@ import type {
   SchemaLike,
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
-import type { InternalApiCaller } from '../../core/index.js';
+import type { ClarificationConfig, InternalApiCaller } from '../../core/index.js';
 import type {
   Principal,
   SecurityRevocation,
 } from '../../../contracts/index.js';
 import type {
   ManagedTurnBudgetSignal,
+  ToolSearchSemanticsMap,
   TurnSnapshot,
 } from '../../../runtime/index.js';
 
@@ -178,10 +179,19 @@ export interface AiChatHandlerConfig {
   managedRuntime?: ManagedLocalRuntimeConfig;
 
   /**
-   * Enable turn-pinned local `find_tools` recovery. It requires managedRuntime
-   * and a manifest-materialized registry; false preserves static scoping.
+   * Enable local `find_tools` recovery. With managedRuntime (managed or
+   * standalone source) discovery is pinned to the turn snapshot and its
+   * authorization; without it the per-request registry is the deployed,
+   * app-authorized tool set. false preserves static scoping.
    */
   toolDiscovery?: boolean;
+
+  /**
+   * Search-only synonyms keyed by model-facing tool name (for example from
+   * generated tool semantics). They improve `find_tools` ranking and never
+   * make a tool eligible or reach the model.
+   */
+  toolSemantics?: ToolSearchSemanticsMap;
 
   /**
    * Dynamic tool loader. Used in legacy mode (without pipeline).
@@ -202,6 +212,14 @@ export interface AiChatHandlerConfig {
    * Only used with pipeline mode.
    */
   followups?: FollowupsConfig;
+
+  /**
+   * Built-in structured clarification (`ask_clarification`). The model asks
+   * one targeted question inside its normal step (no extra planner call);
+   * the turn ends after the question, and the UI's answer resumes the
+   * original request. Omit to keep the tool unavailable.
+   */
+  clarification?: ClarificationConfig;
 
   /**
    * Model or model-resolver. Optional when pipeline `ModelSelectorConfig`
@@ -368,6 +386,7 @@ export type { PromptOverride };
 
 // Re-export pipeline types for consumer convenience
 export type { AiPipeline, FollowupsConfig, PipelineResult };
+export type { ClarificationConfig };
 
 // ============================================================================
 // Server Action Helper Types

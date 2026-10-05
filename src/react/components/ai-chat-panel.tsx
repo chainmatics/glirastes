@@ -23,6 +23,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
   const {
     classNames,
     hasMentions,
+    hasCompletions,
     locale,
     isLoading,
     stop,
@@ -45,7 +46,8 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const BulkApprovalCardComponent = components.BulkApprovalCard ?? DefaultBulkApprovalCard;
   const PipelineTimelineComponent = components.PipelineTimeline ?? DefaultPipelineTimeline;
-  const InputComponent = components.ChatInput ?? (hasMentions ? MentionInput : ChatInput);
+  const InputComponent = components.ChatInput
+    ?? (hasMentions || hasCompletions ? MentionInput : ChatInput);
 
   // Group approvals by tool name for bulk operations
   const { singleApprovals, bulkGroups } = useMemo(() => {

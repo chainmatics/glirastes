@@ -1136,6 +1136,16 @@ export { zodToCompactDescription } from './zod-compact.js';
 export { createFollowupTool } from './followup-tool.js';
 
 // ============================================================================
+// Clarification Tool
+// ============================================================================
+
+export {
+  createClarificationTool,
+  ClarificationInputSchema,
+  type ClarificationConfig,
+} from './clarification-tool.js';
+
+// ============================================================================
 // Module Routing
 // ============================================================================
 

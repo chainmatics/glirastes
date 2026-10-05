@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
 } from 'react';
 import type {
@@ -15,10 +16,26 @@ import type {
   RichMentionInputHandle,
   RichMentionInputProps,
 } from '../types.js';
-import { inferMentionPrefix, normalizeMentionSlug } from '../utils/mention-markup.js';
+import {
+  inferMentionPrefix,
+  mentionDataFromResult,
+  normalizeMentionSlug,
+  toolReferenceFromDataset,
+  toolReferenceToDataset,
+} from '../utils/mention-markup.js';
 
 const DEFAULT_TRIGGERS = ['@', '/'];
 const SEARCH_DEBOUNCE_MS = 100;
+
+/**
+ * Picking a command leaves `/slug ` in the editor and picking a chip leaves a
+ * text node that starts with a space. Under the default `white-space: normal`
+ * the browser collapses that separator, so the next typed word merges into the
+ * token and its structured id is lost. This is behaviour, not theming: it is
+ * set inline so it also holds for BYOS and shadow-DOM consumers that do not
+ * load styles.css.
+ */
+const EDITOR_STYLE: CSSProperties = { whiteSpace: 'pre-wrap' };
 
 function normalizeInputValue(text: string): string {
   return text.replace(/\u00A0/g, ' ');
@@ -179,6 +196,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
               slug: el.dataset.mentionSlug,
               prefix: el.dataset.mentionPrefix,
               displayName: el.dataset.mentionLabel,
+              ...toolReferenceFromDataset(el.dataset),
             });
           }
         }
@@ -215,6 +233,13 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       chip.dataset.mentionLabel = displayName;
       chip.dataset.mentionPrefix = prefix;
       chip.dataset.size = 'inline';
+      // A command's definition id and arguments stay on its chip, so the
+      // entry read back from the editor (getMentions, drafts) still has them.
+      const toolReference = toolReferenceToDataset(mention);
+      if (toolReference) {
+        chip.dataset.mentionDefinitionId = toolReference.definitionId;
+        if (toolReference.args !== undefined) chip.dataset.mentionArgs = toolReference.args;
+      }
 
       const prefixSpan = document.createElement('span');
       prefixSpan.dataset.element = 'prefix';
@@ -337,16 +362,11 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         if (triggerPos === -1) return;
 
         const prefix = inferMentionPrefix(result.type);
-        const slug = normalizeMentionSlug(result.label);
+        const slug = typeof result.slug === 'string' && result.slug.trim().length > 0
+          ? normalizeMentionSlug(result.slug)
+          : normalizeMentionSlug(result.label);
 
-        const mentionData: MentionData = {
-          id: result.id,
-          type: result.type,
-          label: result.label,
-          displayName: result.label,
-          slug,
-          prefix,
-        };
+        const mentionData = mentionDataFromResult(result, { prefix, slug });
 
         // For command type: insert as text, no chip
         if (result.type === 'command') {
@@ -432,6 +452,25 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onChange?.(getFullValue());
     }, [hasMentionSupport, setValue, detectTrigger, performSearch, closeDropdown, onChange, getFullValue]);
 
+    /**
+     * Chips in the DOM plus text-inserted commands whose token is still
+     * present. A command that was restored as a chip (setValue) is still in
+     * the state too; the chip is its entry, so it is not listed twice.
+     */
+    const collectMentions = useCallback((text: string): MentionData[] => {
+      if (!hasMentionSupport) return [];
+      const chips = getMentionsFromDOM();
+      const chipped = new Set(chips.map((chip) => `${chip.type}\u0000${chip.id}`));
+      const tokens = new Set(text.split(/\s+/));
+      const commands = mentions.filter((mention) =>
+        mention.type === 'command'
+        && !chipped.has(`${mention.type}\u0000${mention.id}`)
+        && typeof mention.prefix === 'string'
+        && typeof mention.slug === 'string'
+        && tokens.has(`${mention.prefix}${mention.slug}`));
+      return [...chips, ...commands];
+    }, [hasMentionSupport, mentions, getMentionsFromDOM]);
+
     const submit = useCallback(() => {
       if (disabled) return;
 
@@ -441,7 +480,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
       if (!text) return;
 
-      onSubmit?.(text);
+      onSubmit?.(text, collectMentions(text));
       setValue('');
       if (hasMentionSupport) {
         setMentions([]);
@@ -449,7 +488,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       if (editableRef.current) {
         editableRef.current.innerHTML = '';
       }
-    }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue]);
+    }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions]);
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
@@ -699,7 +738,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           }
           setValue(nextValue);
         },
-        getMentions: () => (hasMentionSupport ? getMentionsFromDOM() : []),
+        getMentions: () => (hasMentionSupport ? collectMentions(getFullValue()) : []),
         addMention: (mention: MentionData) => {
           if (!hasMentionSupport || !editableRef.current) return;
           const chip = createChipElement(mention);
@@ -709,7 +748,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           setMentions((prev) => [...prev, mention]);
         },
       }),
-      [hasMentionSupport, setValue, getFullValue, getMentionsFromDOM, createChipElement, closeDropdown],
+      [hasMentionSupport, setValue, getFullValue, collectMentions, createChipElement, closeDropdown],
     );
 
     // -----------------------------------------------------------------------
@@ -756,6 +795,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         <div
           ref={editableRef}
           className={className}
+          style={EDITOR_STYLE}
           contentEditable={!disabled}
           role="textbox"
           tabIndex={0}
@@ -784,7 +824,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           >
             {searchResults.map((result, index) => (
               <DropdownItem
-                key={result.id}
+                key={result.key ?? `${result.type}:${result.id}`}
                 result={result}
                 isSelected={index === selectedIndex}
                 onClick={() => insertMention(result)}

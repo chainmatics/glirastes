@@ -131,7 +131,7 @@ describe('Glirastes UI parity components', () => {
       .toBeTruthy();
   });
 
-  it('replaces the full input width with a waveform while recording', () => {
+  it('replaces the full input width with a waveform and the live transcript while recording', () => {
     render(
       <RecordingBar
         variant="inline"
@@ -148,8 +148,67 @@ describe('Glirastes UI parity components', () => {
     );
     expect(bar?.style.width).toBe('100%');
     expect(document.querySelector('[data-element="waveform"]')).toBeTruthy();
-    expect(screen.queryByText('Interim text stays out of the editor'))
-      .toBeNull();
+    const interim = document.querySelector('[data-part="interim-transcript"]');
+    expect(interim?.textContent).toBe('Interim text stays out of the editor');
+    expect(interim?.getAttribute('aria-live')).toBe('polite');
+  });
+
+  it('shows only the newest words of a long interim transcript', () => {
+    const long = `${'alt '.repeat(40)}neueste Worte`;
+    render(
+      <RecordingBar
+        variant="inline"
+        isConnecting={false}
+        stream={null}
+        transcript={long}
+        onCancel={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    const interim = document.querySelector('[data-part="interim-transcript"]')!;
+    expect(interim.textContent!.length).toBe(80);
+    expect(interim.textContent!.startsWith('…')).toBe(true);
+    expect(interim.textContent!.endsWith('neueste Worte')).toBe(true);
+    expect(interim.getAttribute('title')).toBe(long.trim());
+  });
+
+  it('clips the oldest side of a narrow transcript slot so the newest words stay visible', () => {
+    // jsdom has no layout; real Chrome measures the result in
+    // tests/recording-bar-browser.test.mjs. Here: a Latin line runs opposite
+    // to its text, which is isolated as left-to-right so punctuation stays put.
+    render(
+      <RecordingBar
+        variant="inline"
+        isConnecting={false}
+        stream={null}
+        transcript="hallo welt aus dem browser."
+        onCancel={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    const interim = document.querySelector<HTMLElement>('[data-part="interim-transcript"]')!;
+    expect(interim.style.direction).toBe('rtl');
+    expect(interim.style.textAlign).toBe('left');
+    expect(interim.style.textOverflow).toBe('ellipsis');
+    const text = interim.querySelector('bdi');
+    expect(text?.getAttribute('dir')).toBe('ltr');
+    expect(text?.textContent).toBe('hallo welt aus dem browser.');
+  });
+
+  it('flips both directions for a right-to-left script so its newest words stay visible too', () => {
+    render(
+      <RecordingBar
+        variant="inline"
+        isConnecting={false}
+        stream={null}
+        transcript="123 مرحبا بالعالم"
+        onCancel={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    const interim = document.querySelector<HTMLElement>('[data-part="interim-transcript"]')!;
+    expect(interim.style.direction).toBe('ltr');
+    expect(interim.querySelector('bdi')?.getAttribute('dir')).toBe('rtl');
   });
 
   it('renders the active session and switches to another local session', async () => {

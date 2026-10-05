@@ -24,6 +24,13 @@ import type {
 import { serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
+import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
+import { createCompletionSearch } from '../completions/completion-search.js';
+import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
+import {
+  CLARIFICATION_MAX_ANSWER_LENGTH,
+  parseClarificationAnswer,
+} from '../../contracts/clarification.js';
 
 // ============================================================================
 // Default locale (English)
@@ -74,6 +81,9 @@ export const DEFAULT_LOCALE: ChatLocale = {
   sessionArchiveMessage: '"{title}" will be archived.',
   renameSessionAriaLabel: 'Rename conversation',
   renameSessionPlaceholder: 'Conversation title',
+  clarificationInputLabel: 'Your answer',
+  clarificationSubmitButton: 'Answer',
+  retryRecordingAriaLabel: 'Retry recording',
 };
 
 // ============================================================================
@@ -348,6 +358,10 @@ export interface AiChatProviderProps extends AiChatProviderConfig {
 export function AiChatProvider({
   transport,
   mentions,
+  completionProviders,
+  completionContext,
+  onCompletionProviderError,
+  toolRenderers,
   toolResults: userToolResults,
   voice: userVoice,
   session,
@@ -356,6 +370,7 @@ export function AiChatProvider({
   suggestions: userSuggestions,
   locale: userLocale,
   theme: userTheme,
+  themeScope = 'inline',
   onToolResult,
   onBeforeSend,
   approvalDescription: userApprovalDescription,
@@ -372,8 +387,8 @@ export function AiChatProvider({
   );
   // Resolve `theme` prop → CSS variables spread onto widget roots.
   const themeVars = useMemo<CSSProperties>(
-    () => getThemeVars(userTheme) as CSSProperties,
-    [userTheme],
+    () => (themeScope === 'inherit' ? {} : getThemeVars(userTheme)) as CSSProperties,
+    [userTheme, themeScope],
   );
   const themeEffect = useMemo(() => getThemeEffect(userTheme), [userTheme]);
   const classNames = useMemo(() => userClassNames ?? {}, [userClassNames]);
@@ -385,6 +400,12 @@ export function AiChatProvider({
   const toolResultConfig = useMemo(
     () => ({ mode: 'default' as const, allowlist: [], ...userToolResults }),
     [userToolResults],
+  );
+  const toolRendererRegistry = useMemo(
+    () => (toolRenderers && toolRenderers.length > 0
+      ? createToolResultRendererRegistry(toolRenderers)
+      : undefined),
+    [toolRenderers],
   );
   const voiceConfig = useMemo(
     () => ({
@@ -459,6 +480,19 @@ export function AiChatProvider({
   const [mentionResults, setMentionResults] = useState<MentionResult[]>([]);
   const [activeMentions, setActiveMentions] = useState<MentionData[]>([]);
   const [isMentionSearching, setIsMentionSearching] = useState(false);
+
+  const onCompletionProviderErrorRef = useRef(onCompletionProviderError);
+  onCompletionProviderErrorRef.current = onCompletionProviderError;
+  const completionSearch = useMemo(
+    () => (completionProviders && completionProviders.length > 0
+      ? createCompletionSearch(completionProviders, {
+        context: completionContext,
+        onProviderError: (providerId, error) =>
+          onCompletionProviderErrorRef.current?.(providerId, error),
+      })
+      : undefined),
+    [completionProviders, completionContext],
+  );
 
   // Refs for deduplication
   const processedToolCallsRef = useRef<Set<string>>(new Set());
@@ -807,7 +841,11 @@ export function AiChatProvider({
   }, [mentionQuery, mentionTrigger, mentions]);
 
   // Actions
-  const send = useCallback(async (message: string) => {
+  const send = useCallback(async (
+    message: string,
+    sendOptions?: { mentions?: MentionData[] },
+  ) => {
+    const mentionsForSend = sendOptions?.mentions ?? activeMentions;
     if (sessionNotReady || sessionMutationRef.current) return;
     // Clear truncation and suggestion chips on new message
     setTruncation(null);
@@ -821,12 +859,29 @@ export function AiChatProvider({
     if (mentionSerializeConfig?.enabled !== false) {
       processedMessage = serializeMentionsForSend(
         processedMessage,
-        activeMentions,
+        mentionsForSend,
         mentionSerializeConfig,
       );
     }
     if (onBeforeSend) {
-      processedMessage = onBeforeSend(processedMessage, activeMentions);
+      processedMessage = onBeforeSend(processedMessage, mentionsForSend);
+    }
+
+    // Typing into the composer while a clarification is open answers it, so
+    // the server resumes the original request instead of starting over.
+    const openClarification = findOpenClarification(
+      rawMessages as unknown as Array<{ role: string; parts: unknown[] }>,
+    );
+    if (
+      openClarification?.request.allowFreeText
+      && processedMessage.trim().length > 0
+      && processedMessage.length <= CLARIFICATION_MAX_ANSWER_LENGTH
+      && !parseClarificationAnswer(processedMessage)
+    ) {
+      processedMessage = clarificationAnswerMessage({
+        toolCallId: openClarification.toolCallId,
+        answer: processedMessage,
+      });
     }
 
     // Sanitize messages before sending to prevent AI_MissingToolResultsError
@@ -1210,6 +1265,7 @@ export function AiChatProvider({
       suggestions: suggestionsConfig,
       toolLabels,
       toolResults: toolResultConfig,
+      toolRendererRegistry,
       voice: voiceConfig,
       mentionConfig: mentions,
       pipelineMessageTranslator,
@@ -1245,6 +1301,8 @@ export function AiChatProvider({
       clearActiveMentions,
       isMentionSearching,
       hasMentions: !!mentions,
+      completionSearch,
+      hasCompletions: completionSearch !== undefined,
       suggestionChips,
       selectSuggestion,
       refreshSuggestions,
@@ -1268,6 +1326,7 @@ export function AiChatProvider({
       suggestionsConfig,
       toolLabels,
       toolResultConfig,
+      toolRendererRegistry,
       voiceConfig,
       mentions,
       pipelineMessageTranslator,
@@ -1304,6 +1363,7 @@ export function AiChatProvider({
       removeActiveMention,
       clearActiveMentions,
       isMentionSearching,
+      completionSearch,
       suggestionChips,
       selectSuggestion,
       refreshSuggestions,

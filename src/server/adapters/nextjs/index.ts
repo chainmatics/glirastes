@@ -19,8 +19,14 @@ export {
 export { executeTool } from './server-action-helper.js';
 export {
   createHybridToolDiscovery,
+  NON_DOMAIN_TOOL_NAMES,
   type HybridToolDiscovery,
 } from './tool-discovery.js';
+export {
+  applyClarificationResume,
+  resolveClarificationResume,
+  type ClarificationResume,
+} from './clarification-resume.js';
 
 // Re-export from server-node for convenience
 export { createNextInternalApiCaller } from '../../core/index.js';
@@ -44,6 +50,7 @@ export type {
   ExecuteToolResult,
   // Re-exported from glirastes
   AiPipeline,
+  ClarificationConfig,
   FollowupsConfig,
   PipelineResult,
   ManagedLocalRuntimeConfig,
