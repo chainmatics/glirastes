@@ -26,6 +26,9 @@ export interface ProbedSchema {
   description: string | null;
 }
 
+/** Contract metadata fields that were declared but are unusable, so they read as `null`. */
+export type InvalidContractField = 'effect' | 'presentation';
+
 export interface ProbedContractEntry {
   ok: true;
   kind: 'contract-entry';
@@ -37,6 +40,12 @@ export interface ProbedContractEntry {
   module: string | null;
   usageHints: string[] | null;
   presentation: ToolPresentation | null;
+  /**
+   * Set only when the entry declares an `effect` outside the known set or a
+   * `presentation` that fails its schema; names the fields, never their
+   * values, so a typo can be told apart from an absent field.
+   */
+  invalidFields?: InvalidContractField[];
   moduleDigest: string;
 }
 
@@ -151,12 +160,16 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
     presentation: presentation?.success ? presentation.data : null,
   };
   if (carriesSecret(metadata)) return CONTENT_REJECTED;
+  const invalidFields: InvalidContractField[] = [];
+  if (wire.effect !== null && metadata.effect === null) invalidFields.push('effect');
+  if (presentation && !presentation.success) invalidFields.push('presentation');
   return {
     ok: true,
     kind: 'contract-entry',
     input,
     output,
     ...metadata,
+    ...(invalidFields.length > 0 ? { invalidFields } : {}),
     moduleDigest: sha256Digest(JSON.stringify(sortKeysDeep({
       input: input.digest,
       output: output?.digest ?? null,

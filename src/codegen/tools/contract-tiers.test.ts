@@ -188,6 +188,78 @@ describe('resolveEndpointContract', () => {
     expect(result).toMatchObject({ explicitId: 'notes.add', declaredEffect: 'write', outputSchemaDigest: digest('O') });
   });
 
+  describe('invalid contract metadata', () => {
+    const codes = (result: ReturnType<typeof resolve>) => result.findings.map((finding) => [finding.code, finding.severity]);
+    const withModule = (overrides: Partial<ProbedContractEntry>, loadBearing = true) => ({
+      module: CONTRACT_MODULE, loadBearing, result: entry(overrides),
+    });
+
+    it('makes a mistyped effect visible and fails closed for the tool', () => {
+      const result = resolve({
+        evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),
+        contractModule: withModule({ effect: null, invalidFields: ['effect'] }),
+      });
+      expect(result.contract?.source).toBe('contract-module');
+      expect(result.declaredEffect).toBeUndefined();
+      expect(codes(result)).toEqual([['contract-effect-invalid', 'needs_attention']]);
+      expect(result.findings[0]?.message).toContain(CONTRACT_MODULE);
+      expect(result.findings[0]?.message).toContain('effect');
+    });
+
+    it('warns about an invalid presentation and leaves it out of the prose', () => {
+      const result = resolve({
+        evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),
+        contractModule: withModule({ presentation: null, invalidFields: ['presentation'] }),
+      });
+      expect(result.contract?.source).toBe('contract-module');
+      expect(result.prose).not.toHaveProperty('presentation');
+      expect(codes(result)).toEqual([['contract-presentation-invalid', 'warning']]);
+      expect(result.findings[0]?.message).toContain(CONTRACT_MODULE);
+    });
+
+    it('reports both fields when both are invalid', () => {
+      const result = resolve({
+        evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),
+        contractModule: withModule({ effect: null, presentation: null, invalidFields: ['effect', 'presentation'] }),
+      });
+      expect(codes(result)).toEqual([
+        ['contract-effect-invalid', 'needs_attention'], ['contract-presentation-invalid', 'warning'],
+      ]);
+    });
+
+    it('still reports them when the native schema wins over a descriptive contract module', () => {
+      const result = resolve({
+        evidence: evidence({ schemaUses: [bodyUse], readsBody: true, bodyKeys: 'opaque' }),
+        probes: probes([probeItemFor(SCHEMAS, 'input'), probed(NOTE, digest('N'))]),
+        contractModule: withModule({ effect: null, invalidFields: ['effect'] }, false),
+      });
+      expect(result.contract?.source).toBe('native');
+      expect(codes(result)).toEqual([['contract-effect-invalid', 'needs_attention']]);
+    });
+
+    it('still reports them when the contract module itself cannot be composed', () => {
+      const result = resolve({
+        stableKey: 'POST /api/notes/:id',
+        path: '/api/notes/:id',
+        pathParams: ['id'],
+        evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),
+        contractModule: withModule({ input: probed(null, digest('C')), effect: null, invalidFields: ['effect'] }),
+      });
+      expect(result.contract).toBeUndefined();
+      expect(codes(result)).toEqual([
+        ['schema-json-unavailable', 'needs_attention'], ['contract-effect-invalid', 'needs_attention'],
+      ]);
+    });
+
+    it('reports nothing for a contract module whose metadata is valid', () => {
+      const result = resolve({
+        evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),
+        contractModule: withModule({ invalidFields: [] }),
+      });
+      expect(result.findings).toEqual([]);
+    });
+  });
+
   describe('secret-looking schema content', () => {
     const rejected = { ok: false as const, reason: 'content-rejected' as const };
     const codes = (result: ReturnType<typeof resolve>) => result.findings.map((finding) => [finding.code, finding.severity]);

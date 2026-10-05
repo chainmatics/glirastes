@@ -56,6 +56,34 @@ describe('schema probe', () => {
     expect(get).toEqual({ ok: false, reason: 'missing' });
   }, 30_000);
 
+  it('flags a mistyped effect and an invalid presentation instead of silently dropping them', async () => {
+    const app = await createAppFixture({
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  GET: { input: z.object({}), effect: 'read', presentation: { locale: 'en', singular: 'note', plural: 'notes', approval: 'List notes' } },\n"
+        + "  POST: { input: z.object({}), effect: 'destructve' },\n"
+        + "  PUT: { input: z.object({}), presentation: { locale: 'en', singular: 'note' } },\n"
+        + "  PATCH: { input: z.object({}), effect: 'destructve', presentation: { locale: 'x' } },\n"
+        + '  DELETE: { input: z.object({}) },\n};\n',
+    });
+    const entry = (method: string): SchemaProbeItem => ({
+      kind: 'contract-entry', io: 'input', module: 'src/app/api/notes/contract.ts', export: 'contract', property: [method],
+    });
+    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(entry));
+    const [get, post, put, patch, del] = results.map((result) => (
+      result.ok && result.kind === 'contract-entry' ? result : undefined
+    ));
+    expect(get).toMatchObject({ effect: 'read', presentation: { singular: 'note' } });
+    expect(get).not.toHaveProperty('invalidFields');
+    expect(del).toMatchObject({ effect: null, presentation: null });
+    expect(del).not.toHaveProperty('invalidFields');
+    expect(post).toMatchObject({ effect: null, presentation: null, invalidFields: ['effect'] });
+    expect(put).toMatchObject({ effect: null, presentation: null, invalidFields: ['presentation'] });
+    expect(patch).toMatchObject({ effect: null, presentation: null, invalidFields: ['effect', 'presentation'] });
+    // Only the field names travel; the invalid value is never carried and does not change the digest.
+    expect(JSON.stringify(results)).not.toContain('destructve');
+    expect(post?.moduleDigest).toBe(del?.moduleDigest);
+  }, 30_000);
+
   it('fails closed per module and never hands app secrets to the child', async () => {
     vi.stubEnv('GLIRASTES_PROBE_SECRET', 'super-secret');
     const app = await createAppFixture({

@@ -148,6 +148,25 @@ function rejectedOutput(subject: string, label: string, outcome: SchemaProbeResu
   };
 }
 
+/**
+ * A declared `effect` can only raise the derived risk, so a typo would lose the
+ * author's hardening intent without a trace; the tool needs attention until it
+ * is fixed. A bad presentation is cosmetic and only warns. Neither message
+ * repeats the declared value.
+ */
+function invalidMetadataFindings(subject: string, module: string, entry: ProbedContractEntry): ToolFinding[] {
+  const findings: ToolFinding[] = [];
+  if (entry.invalidFields?.includes('effect')) {
+    findings.push(toolFinding('contract-effect-invalid', 'needs_attention', subject,
+      `${module} declares an effect that is not read, write, destructive, external or financial, so the declaration is ignored.`));
+  }
+  if (entry.invalidFields?.includes('presentation')) {
+    findings.push(toolFinding('contract-presentation-invalid', 'warning', subject,
+      `${module} declares a presentation that does not match the presentation schema, so it is ignored.`));
+  }
+  return findings;
+}
+
 function propertiesOf(json: JsonSchemaLike | null): Record<string, JsonSchemaLike> | undefined {
   if (!json || json.type !== 'object') return undefined;
   const value = json.properties;
@@ -390,20 +409,23 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     ...(entry?.id ? { explicitId: entry.id } : {}),
     ...(effect ? { declaredEffect: effect } : {}),
   };
-  // A contract module with secret-looking content is reported on every path, also when another tier wins.
-  const moduleRejection = input.contractModule && isContentRejected(candidate)
-    ? probeFailureFinding(subject, input.contractModule.module, candidate)
-    : undefined;
-  const withModuleRejection = (findings: ToolFinding[]): ToolFinding[] => (
-    moduleRejection && !findings.some((finding) => finding.code === moduleRejection.code && finding.message === moduleRejection.message)
-      ? [...findings, moduleRejection]
-      : findings
-  );
+  // A contract module with secret-looking content or unusable metadata is reported on every path, also when another tier wins.
+  const moduleFindings = ((): ToolFinding[] => {
+    if (!input.contractModule) return [];
+    if (isContentRejected(candidate)) return [probeFailureFinding(subject, input.contractModule.module, candidate)];
+    return entry ? invalidMetadataFindings(subject, input.contractModule.module, entry) : [];
+  })();
+  const withModuleFindings = (findings: ToolFinding[]): ToolFinding[] => [
+    ...findings,
+    ...moduleFindings.filter((extra) => !findings.some((finding) => (
+      finding.code === extra.code && finding.message === extra.message
+    ))),
+  ];
   const unresolved = (findings: ToolFinding[]): ResolvedEndpointContract => ({
     ...base,
     inputSchemaDigest: OPAQUE_SCHEMA_DIGEST,
     outputSchemaDigest: OPAQUE_SCHEMA_DIGEST,
-    findings: withModuleRejection(findings),
+    findings: withModuleFindings(findings),
   });
   const output = chooseOutput(input, entry, resolutionCurrent);
   const finish = (
@@ -431,7 +453,7 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
       },
       inputSchemaDigest: composed.digest,
       outputSchemaDigest: output.digest,
-      findings: withModuleRejection([...composed.findings, ...output.findings, ...extraFindings]),
+      findings: withModuleFindings([...composed.findings, ...output.findings, ...extraFindings]),
     };
   };
   const roleFor = (): InputRole => (READ_METHODS.has(input.method) ? 'query' : 'body');

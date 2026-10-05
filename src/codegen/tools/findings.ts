@@ -9,6 +9,8 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'schema-not-exported': 'Export the schema from an app module (for Next.js a sibling contract.ts) and import it in the handler.',
   'schema-module-unloadable': 'Make the schema module importable without side effects: no database, network or secrets at import time.',
   'schema-content-rejected': 'Remove secret-looking values (defaults, consts, descriptions, hints) from the schema or contract metadata; secrets must never reach committed outputs.',
+  'contract-effect-invalid': 'Use one of read, write, destructive, external or financial as the effect in contract.ts, then run glirastes tools refresh.',
+  'contract-presentation-invalid': 'Fix the presentation in contract.ts (locale, singular, plural and approval text, no other keys), then run glirastes tools refresh.',
   'schema-json-unavailable': 'Use zod v4 or install zod-to-json-schema so the schema can be described as JSON Schema.',
   'auth-evidence-missing': 'Call your session helper in the handler or list it in tool-resolutions.json conventions.authHelpers.',
   'contract-stale': 'Update the descriptive contract for the changed interface, then run glirastes tools refresh.',

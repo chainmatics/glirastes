@@ -26,6 +26,18 @@ describe('tool findings', () => {
       .toMatchObject({ code: 'schema-content-rejected', severity: 'needs_attention', nextAction: action });
   });
 
+  it('gives invalid contract metadata its own remediation', () => {
+    const effect = nextActionFor('contract-effect-invalid');
+    expect(effect).toContain('read, write, destructive, external or financial');
+    const presentation = nextActionFor('contract-presentation-invalid');
+    expect(presentation).toContain('presentation');
+    for (const action of [effect, presentation]) {
+      expect(action).not.toBe(nextActionFor('something-new'));
+      expect(action).toContain('glirastes tools refresh');
+    }
+    expect(effect).not.toBe(presentation);
+  });
+
   it('orders errors before attention items before warnings, then by code and subject', () => {
     const sorted = sortFindings([
       toolFinding('contract-derived', 'warning', 'GET /a', 'w'),
