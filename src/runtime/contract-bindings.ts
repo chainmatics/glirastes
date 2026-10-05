@@ -5,15 +5,11 @@ import {
   type LocalRuntimeSource,
   type LocalRuntimeSourceOptions,
 } from './local-runtime-source.js';
-import { createLocalSchemaDigest, type LocalEndpointToolBinding } from './local-tool-bindings.js';
+import { createLocalSchemaDigest, type LocalToolBinding } from './local-tool-bindings.js';
 
-/** One entry of `createToolBindings()` in the generated module. */
-export interface GeneratedToolBinding {
+interface GeneratedToolBindingBase {
   readonly toolId: string;
   readonly definitionId: string;
-  readonly executionKind: 'endpoint';
-  readonly method: EndpointMethod;
-  readonly path: string;
   readonly sourceFingerprint: string;
   readonly inputSchemaDigest: string;
   readonly outputSchemaDigest: string;
@@ -21,6 +17,21 @@ export interface GeneratedToolBinding {
   readonly outputSchema: SchemaLike;
   readonly tool: Tool;
 }
+
+export interface GeneratedEndpointToolBinding extends GeneratedToolBindingBase {
+  readonly executionKind: 'endpoint';
+  readonly method: EndpointMethod;
+  readonly path: string;
+}
+
+/** Navigation, filter and client action tools; they run in the browser. */
+export interface GeneratedUiToolBinding extends GeneratedToolBindingBase {
+  readonly executionKind: 'ui';
+  readonly actionBindingRef: string;
+}
+
+/** One entry of `createToolBindings()` in the generated module. */
+export type GeneratedToolBinding = GeneratedEndpointToolBinding | GeneratedUiToolBinding;
 
 /** The shape of `src/generated/glirastes/tools.generated.ts`. */
 export interface GeneratedToolModule {
@@ -37,12 +48,45 @@ export type ContractBindingDisabledReason =
 
 export interface ContractBindingsResult {
   setupArtifact: AppSetupArtifact;
-  bindings: LocalEndpointToolBinding[];
+  bindings: LocalToolBinding[];
   disabled: Array<{ toolId: string; reason: ContractBindingDisabledReason }>;
 }
 
 function byToolId(left: { toolId: string }, right: { toolId: string }): number {
   return left.toolId < right.toolId ? -1 : left.toolId > right.toolId ? 1 : 0;
+}
+
+type ArtifactTool = AppSetupArtifact['tools'][number];
+
+/** Same kind, same route or action binding, same fingerprint and digests. */
+function sameBinding(candidate: ArtifactTool, binding: GeneratedToolBinding): boolean {
+  if (
+    candidate.sourceFingerprint !== binding.sourceFingerprint
+    || candidate.inputSchemaDigest !== binding.inputSchemaDigest
+    || candidate.outputSchemaDigest !== binding.outputSchemaDigest
+  ) {
+    return false;
+  }
+  if (binding.executionKind === 'endpoint') {
+    return candidate.executionKind === 'endpoint'
+      && candidate.method === binding.method
+      && candidate.path === binding.path;
+  }
+  return candidate.executionKind === 'ui'
+    && candidate.actionBindingRef === binding.actionBindingRef;
+}
+
+function toLocalBinding(binding: GeneratedToolBinding): LocalToolBinding {
+  const common = {
+    toolId: binding.toolId,
+    sourceFingerprint: binding.sourceFingerprint,
+    inputSchemaDigest: binding.inputSchemaDigest,
+    outputSchemaDigest: binding.outputSchemaDigest,
+    tool: binding.tool,
+  };
+  return binding.executionKind === 'endpoint'
+    ? { ...common, executionKind: 'endpoint', method: binding.method, path: binding.path }
+    : { ...common, executionKind: 'ui', actionBindingRef: binding.actionBindingRef };
 }
 
 /**
@@ -57,7 +101,7 @@ export function createContractBindings(generated: GeneratedToolModule): Contract
     grouped.set(binding.toolId, [...grouped.get(binding.toolId) ?? [], binding]);
   }
   const disabled = new Map<string, ContractBindingDisabledReason>();
-  const bindings: LocalEndpointToolBinding[] = [];
+  const bindings: LocalToolBinding[] = [];
   for (const [toolId, entries] of grouped) {
     const candidate = candidates.get(toolId);
     if (!candidate?.enabled) continue;
@@ -66,15 +110,7 @@ export function createContractBindings(generated: GeneratedToolModule): Contract
       continue;
     }
     const binding = entries[0]!;
-    if (
-      candidate.executionKind !== 'endpoint'
-      || binding.executionKind !== 'endpoint'
-      || candidate.method !== binding.method
-      || candidate.path !== binding.path
-      || candidate.sourceFingerprint !== binding.sourceFingerprint
-      || candidate.inputSchemaDigest !== binding.inputSchemaDigest
-      || candidate.outputSchemaDigest !== binding.outputSchemaDigest
-    ) {
+    if (!sameBinding(candidate, binding)) {
       disabled.set(toolId, 'binding-mismatch');
       continue;
     }
@@ -86,16 +122,7 @@ export function createContractBindings(generated: GeneratedToolModule): Contract
       disabled.set(toolId, 'output-schema-digest-mismatch');
       continue;
     }
-    bindings.push({
-      toolId,
-      executionKind: 'endpoint',
-      method: binding.method,
-      path: binding.path,
-      sourceFingerprint: binding.sourceFingerprint,
-      inputSchemaDigest: binding.inputSchemaDigest,
-      outputSchemaDigest: binding.outputSchemaDigest,
-      tool: binding.tool,
-    });
+    bindings.push(toLocalBinding(binding));
   }
   for (const tool of artifact.tools) {
     if (tool.enabled && !grouped.has(tool.toolId)) disabled.set(tool.toolId, 'binding-missing');
@@ -113,7 +140,7 @@ export function createContractBindings(generated: GeneratedToolModule): Contract
 
 export interface GeneratedRuntimeSource {
   source: LocalRuntimeSource;
-  bindings: LocalEndpointToolBinding[];
+  bindings: LocalToolBinding[];
   disabled: ContractBindingsResult['disabled'];
 }
 

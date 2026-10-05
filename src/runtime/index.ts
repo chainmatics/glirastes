@@ -124,7 +124,9 @@ export {
   createGeneratedRuntimeSource,
   type ContractBindingDisabledReason,
   type ContractBindingsResult,
+  type GeneratedEndpointToolBinding,
   type GeneratedRuntimeSource,
   type GeneratedToolBinding,
   type GeneratedToolModule,
+  type GeneratedUiToolBinding,
 } from './contract-bindings.js';
