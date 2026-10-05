@@ -50,7 +50,7 @@
 | P09 | [Metriken (FR-7)](2026-10-05-mvp-plan-09-metrics.md): Event v2 + Senke im SDK, Ingest, Aggregation, Abfrage-API (Ansichten in P08c) | SDK `mvp-chat` (parallel zu P04) + Platform `mvp-platform` (nach P08b) | P08b | ausgeschrieben |
 | P10 | Pro: Managed Tool-Generierung (Job-API, OpenRouter-Provisioning, Skill-Runner, CI-Workflow) | Platform + SDK | P05, P08 | wird geschrieben vor Start |
 | P11 | Get It Done auf aktuellem `master` mit Foundation | GID `.worktrees/glirastes-mvp` (`codex/glirastes-mvp` von `origin/master`) | P05 (Generator + Migrations-Skill), P07 | wird geschrieben vor Start |
-| P12 | Landingpage | Platform `mvp-platform` | P11, P08 belegt | wird geschrieben vor Start |
+| P12 | Landingpage: Inhalte an das MVP anpassen (Inhaltsprüfung 2026-10-05), Preise (Entscheidung Philipp 2026-10-05): Free 0 €, Pro 49 € pro Monat, Enterprise „Talk to us“ ohne Preis, Euro statt USD, Hero-Animation als scharfe Code-Version (Prototyp in Arbeit) | Platform `mvp-platform` | P11, P08 belegt | wird geschrieben vor Start |
 | P13 | Abnahme und Release-Vorbereitung (0.5.0, CHANGELOG, Pack-Prüfung, Supportmatrix, Nutzertest-Protokoll) | alle | alle | wird geschrieben vor Start |
 
 ## Reihenfolge und Parallelität
@@ -120,6 +120,10 @@ Nach jedem Teilplan:
 | GID-Verdrahtung: Delta-Overlay (`policyOverlay`), `reportCapabilities()`, Navigation-Bridge, eine Metrik-Senke pro Prozess, generierte Formen im eigenen `uiActionSchema`; `glirastes.*`-Aktionen nicht doppelt ausführen; Live-Prüfung der OpenRouter-Kosten (`usage: { include: true }`) | P11 |
 | Transport-Probe vor dem Merge nach `main`: neon-http kann keine Transaktionen, der Branch hat 23 Transaktionsstellen; CWS nutzt ab P08d `DATABASE_TRANSPORT=neon-websocket` (nie unter Bun im Docker-Image erprobt). API-Image unter Bun mit neon-websocket gegen lokale Postgres hinter einem Neon-WebSocket-Proxy starten und eine Transaktionsroute aufrufen (z. B. `PATCH …/tools/:toolId`); der Smoke-Test prüft nur `GET /` | P13 (vor jedem Merge nach `main`) |
 | Produktion: Redis führt die neuen Repeatable-Jobs `runtime-metrics-aggregate` und `runtime-metrics-prune` aus; `0045_runtime_metrics` braucht PostgreSQL ≥ 15 (`UNIQUE NULLS NOT DISTINCT`, Philipp prüft `select version()`) | Rollout, Philipp |
+| GID-Messung 2026-10-05 ([Bewertung](2026-10-05-gid-readiness-assessment.md)): gepacktes SDK ist kaputt (`files` schließt `dist/server/lancer`, `dist/codegen/format.*`, `dist/server/pii-shield/aegis-detector.*` aus, die statisch importiert werden) — Fix plus Test auf Import-Vollständigkeit des Packs | P04b (vorgezogen aus P13) |
+| GID-Messung: `// @ai-ignore` als Ausschluss werten; Input-Schema-Wurzel muss `type: object` sein (sonst `needs_attention`); `emit.mcpCatalog` im SDK bauen (Grants nach `definitionId`, zwei alte Namen auf einer Route) | P05 |
+| GID-Messung: Anzeige-Dateien von GID (Labels, Freigabetexte, Ergebnis-Renderer, System-Prompt, i18n, MCP-Paritätstests) hängen an rund 92 alten Toolnamen — auf `definitionId` umstellen oder Zuordnung alt → neu; Tools, die die Rolle nicht aufrufen darf, vor dem Modell ausblenden (`find_tools` oder Rollenfilter); Rückmeldung nach Schreibaktionen (`uiActionOnSuccess`: Toast, Liste neu laden); Next 16 im Peer-Bereich und Browsertest; Docker-Image mit `.glirastes/` und `integrity`-Schritt | P11 (SDK-Anteile ggf. P05) |
+| GID: Einstellung `aiAutoApproveTools` (Auto-Freigabe pro Nutzer, 10 Tools, darunter `remove_team_member` auf Stufe 3) widerspricht „Stufe 3 fragt immer“ — entfernen oder auf Platform-Lockerung bis Stufe 2 abbilden | Entscheidung Philipp, vor P11 |
 | Ingest-Kontingent pro Tenant (heute nur Rate-Limit pro Key) vor breiter Öffnung der Free-Registrierung | P13 |
 | Client-Aktion zählt nur als schreibend, wenn der Handler direkt `fetch`/`axios` aufruft; Schreiben über Helfer, Server Actions oder Mutation-Hooks markiert die Skill-Arbeitsliste | P05 |
 
