@@ -36,6 +36,49 @@ export const AppSetupOperationGroupSchema = z.enum([
   'needs_attention',
 ]);
 
+const LocalPolicyOriginSchema = z.enum(['code-default', 'local-policy']);
+
+/**
+ * Optional, content-free provenance a capability report carries per tool
+ * (P08b shared contract item 5): where each local policy value came from and
+ * how description and input schema were obtained ("von Hand / aus Code /
+ * Agent / Vorlage", "Zod / OpenAPI / Agent / nur Feldnamen"). A local report
+ * never claims a Platform origin. Absent fields mean "not reported".
+ */
+export const AppSetupToolProvenanceSchema = z.object({
+  policyOrigin: z.object({
+    enabled: LocalPolicyOriginSchema,
+    requiresApproval: LocalPolicyOriginSchema,
+    riskClass: LocalPolicyOriginSchema,
+    allowedRoles: LocalPolicyOriginSchema,
+    description: LocalPolicyOriginSchema,
+  }).partial().strict().optional(),
+  contractSource: z.enum([
+    'native',
+    'contract-module',
+    'legacy-ai-tool',
+    'resolution',
+    'openapi',
+    'derived',
+    'ui-bridge',
+  ]).optional(),
+  descriptionSource: z.enum(['human', 'code', 'agent', 'template']).optional(),
+  schemaSource: z.enum(['zod', 'openapi', 'json-schema', 'agent', 'field-names', 'none'])
+    .optional(),
+}).strict();
+
+/** The Platform's strict caps on reported exclusions (P08b Task 9). */
+export const APP_SETUP_EXCLUSION_LIMITS = Object.freeze({
+  maxEntries: 5_000,
+  maxStableKeyLength: 512,
+});
+
+/** A route or page the code deliberately does not expose as a tool. */
+export const AppSetupExclusionSchema = z.object({
+  stableKey: z.string().trim().min(1).max(APP_SETUP_EXCLUSION_LIMITS.maxStableKeyLength),
+  origin: z.enum(['default', 'policy', 'code']),
+}).strict();
+
 export const AppSetupToolCandidateSchema = z.object({
   toolId: uuid,
   sourceFingerprint: digest,
@@ -63,7 +106,7 @@ export const AppSetupToolCandidateSchema = z.object({
    * facts. Optional because a UI entry has no route and an endpoint has no
    * action binding.
    */
-  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
+  method: z.enum(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
   path: z.string().startsWith('/').max(2_048).optional(),
   authBindingRef: identifier.optional(),
   actionBindingRef: identifier.optional(),
@@ -79,6 +122,7 @@ export const AppSetupToolCandidateSchema = z.object({
   requiresApproval: z.boolean(),
   inputSchemaDigest: digest,
   outputSchemaDigest: digest,
+  provenance: AppSetupToolProvenanceSchema.optional(),
 }).strict();
 
 const AppSetupPlannerMetadataSchema = z.object({
@@ -115,6 +159,9 @@ export const AppSetupArtifactSchema = z.object({
   planner: AppSetupPlannerMetadataSchema,
   prompts: AppSetupPromptMetadataSchema,
   warnings: z.array(AppSetupWarningSchema).default([]),
+  exclusions: z.array(AppSetupExclusionSchema)
+    .max(APP_SETUP_EXCLUSION_LIMITS.maxEntries)
+    .optional(),
   generatedAt: timestamp,
 }).strict().superRefine((artifact, context) => {
   const toolIds = new Set(artifact.tools.map((tool) => tool.toolId));
@@ -149,6 +196,8 @@ export type AppSetupToolCandidate = z.infer<
   typeof AppSetupToolCandidateSchema
 >;
 export type AppSetupArtifact = z.infer<typeof AppSetupArtifactSchema>;
+export type AppSetupToolProvenance = z.infer<typeof AppSetupToolProvenanceSchema>;
+export type AppSetupExclusion = z.infer<typeof AppSetupExclusionSchema>;
 
 /**
  * Strong gate used by CLI validate/setup and standalone consumers. The base

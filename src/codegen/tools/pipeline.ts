@@ -15,7 +15,9 @@ import {
   deriveToolPolicyDefaults,
   resolveToolPolicy,
   riskTier,
+  type EffectiveToolPolicy,
 } from '../../contracts/tool-policy.js';
+import type { AppSetupToolProvenance } from '../../contracts/index.js';
 import { FoundationDiagnosticError, isFoundationDiagnosticError } from '../../diagnostics/index.js';
 import {
   discoverFoundationExecutions,
@@ -29,6 +31,7 @@ import {
   renderToolContracts,
   renderToolReport,
   schemaQualityOf,
+  ToolReportFileSchema,
   type ArtifactToolInput,
   type ToolReportTool,
 } from './artifact.js';
@@ -49,6 +52,9 @@ import { resolveToolProse } from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
+import { createNextPagesSource } from './sources/next-pages.js';
+import { createReactActionSource } from './sources/react-actions.js';
+import { createUrlFilterSource } from './sources/url-filters.js';
 import {
   readPreviousToolState,
   renderInventory,
@@ -105,6 +111,30 @@ export class ToolsPipelineFailure extends FoundationDiagnosticError {
   }
 }
 
+/**
+ * One source per configured entry of `tools.json` `sources`. URL filters read
+ * the same page tree as navigation, so they inherit its folder options.
+ */
+export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
+  const sources = normalizeSources(config);
+  const pages = sources.find((source) => source.kind === 'next-pages');
+  return sources.map((source) => {
+    switch (source.kind) {
+      case 'next-app':
+        return createNextEndpointSource(source.apiDir ? { apiDir: source.apiDir } : {});
+      case 'next-pages':
+        return createNextPagesSource(source);
+      case 'url-filters':
+        return createUrlFilterSource({
+          ...(pages && pages.kind !== 'next-app' ? pages : {}),
+          ...source,
+        });
+      case 'react-actions':
+        return createReactActionSource(source);
+    }
+  });
+}
+
 const SETUP_PATHS = {
   inventory: TOOLS_PATHS.inventory,
   setupArtifact: TOOLS_PATHS.setupArtifact,
@@ -125,6 +155,19 @@ function isError(finding: ToolFinding): boolean {
 
 function sortExcluded(excluded: ReadonlyArray<ExcludedTool>): ExcludedTool[] {
   return [...excluded].sort((left, right) => compareCodeUnits(left.stableKey, right.stableKey));
+}
+
+type PolicyField = keyof EffectiveToolPolicy['origin'];
+const POLICY_FIELDS: ReadonlyArray<PolicyField> = ['enabled', 'requiresApproval', 'riskClass', 'allowedRoles', 'description'];
+
+/** A local report knows code defaults and local policy only, never a Platform origin. */
+function localPolicyOrigin(origin: EffectiveToolPolicy['origin']): NonNullable<AppSetupToolProvenance['policyOrigin']> {
+  const local: NonNullable<AppSetupToolProvenance['policyOrigin']> = {};
+  for (const field of POLICY_FIELDS) {
+    const value = origin[field];
+    if (value === 'code-default' || value === 'local-policy') local[field] = value;
+  }
+  return local;
 }
 
 function policyWarningMessage(code: string, field: string | undefined): string {
@@ -189,6 +232,50 @@ function renderDerivedOutputs(input: DerivedOutputInput): Record<string, string>
     [TOOLS_PATHS.receipt]: `${JSON.stringify(receipt, null, 2)}\n`,
     [modulePath]: renderGeneratedModule({ modulePath, artifact: input.artifact, contracts: input.contracts }),
   };
+}
+
+/**
+ * Every primary output with the schema its reader applies (the next refresh,
+ * the integrity check, `tools status`). A rendered file that its reader would
+ * reject is never written, so refresh cannot lock itself out.
+ */
+const OUTPUT_SCHEMAS: ReadonlyArray<readonly [string, z.ZodType]> = [
+  [TOOLS_PATHS.inventory, FoundationExecutionInventorySchema],
+  [TOOLS_PATHS.tombstones, ToolTombstonesFileSchema],
+  [TOOLS_PATHS.contracts, ToolContractsFileSchema],
+  [TOOLS_PATHS.report, ToolReportFileSchema],
+  [TOOLS_PATHS.setupArtifact, AppSetupArtifactSchema],
+];
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** `tools.3.contract.uiAction.keys (UI filter /wide)`: the field and the tool it belongs to. */
+function issueLocation(value: unknown, path: ReadonlyArray<PropertyKey>): string {
+  let current = value;
+  let subject: string | undefined;
+  for (const segment of path) {
+    if (!isRecord(current)) break;
+    current = current[segment];
+    if (isRecord(current) && typeof current.stableKey === 'string') subject = current.stableKey;
+  }
+  const at = path.map(String).join('.') || 'the top level';
+  if (subject === undefined) return at;
+  return `${at} (${subject.length <= 200 ? subject : `${subject.slice(0, 199)}…`})`;
+}
+
+function unreadableOutputs(outputs: Readonly<Record<string, string>>): ToolFinding[] {
+  const findings: ToolFinding[] = [];
+  for (const [path, schema] of OUTPUT_SCHEMAS) {
+    const value: unknown = JSON.parse(outputs[path]!);
+    const parsed = schema.safeParse(value);
+    if (parsed.success) continue;
+    const issue = parsed.error.issues[0]!;
+    findings.push(toolFinding('generated-output-invalid', 'error', path,
+      `${path} would not match its own schema at ${issueLocation(value, issue.path)}: ${issue.message}.`));
+  }
+  return findings;
 }
 
 async function diffOutputs(root: string, outputs: Readonly<Record<string, string>>): Promise<string[]> {
@@ -273,9 +360,7 @@ async function generate(
     previousContracts: previous.contracts,
     probe: dependencies.probe ?? createSchemaProbe(),
   };
-  const sources = dependencies.sources ?? normalizeSources(config).map((source) => (
-    createNextEndpointSource(source.apiDir ? { apiDir: source.apiDir } : {})
-  ));
+  const sources = dependencies.sources ?? createConfiguredSources(config);
   const observed: ObservedTool[] = [];
   let complete = true;
   for (const source of sources) {
@@ -335,7 +420,10 @@ async function generate(
       ...(execution.executionKind === 'endpoint' ? { method: execution.method, path: execution.path } : {}),
       definitionId: execution.definitionId,
       ...(tool.evidence.declaredEffect ? { declaredEffect: tool.evidence.declaredEffect } : {}),
-      evidence: { externalCall: tool.evidence.externalCall },
+      evidence: {
+        externalCall: tool.evidence.externalCall,
+        ...(tool.evidence.uiMutation ? { uiMutation: true } : {}),
+      },
     });
     const local = (inputs.policy.tools ?? {})[execution.stableKey];
     const acceptedRisk = (inputs.policy.acceptedRisk ?? {})[execution.stableKey];
@@ -373,11 +461,18 @@ async function generate(
         : {}),
     });
     findings.push(...prose.findings);
+    const schemaQuality = schemaQualityOf(tool.contract, resolutionOrigin(inputs.resolutions, execution.stableKey));
     artifactTools.push({
       execution,
       prose,
       effective: resolved.effective,
       operationGroup: needsAttention ? 'needs_attention' : defaults.operationGroup,
+      provenance: {
+        policyOrigin: localPolicyOrigin(resolved.effective.origin),
+        ...(tool.contract ? { contractSource: tool.contract.source } : {}),
+        descriptionSource: prose.descriptionOrigin,
+        schemaSource: schemaQuality,
+      },
     });
     contractEntries.push({
       toolId: execution.toolId,
@@ -396,7 +491,7 @@ async function generate(
       contractSource: tool.contract?.source ?? null,
       quality: {
         description: prose.descriptionOrigin,
-        schema: schemaQualityOf(tool.contract, resolutionOrigin(inputs.resolutions, execution.stableKey)),
+        schema: schemaQuality,
       },
     });
   }
@@ -420,6 +515,7 @@ async function generate(
       .map((finding) => ({ code: finding.code, subjectRef: toolIdByKey.get(finding.subjectRef)! })),
     ...(previous.artifact ? { previous: previous.artifact } : {}),
     now: options.mode === 'write' ? dependencies.now ?? (() => new Date()) : null,
+    exclusions: excluded,
   });
   assertAppSetupSemanticParity(built.artifact, inventory.executions.map((execution) => execution.definitionId));
   const inventoryRaw = renderInventory(generation.state);
@@ -448,6 +544,11 @@ async function generate(
     [TOOLS_PATHS.setupArtifact]: built.raw,
     ...derived,
   };
+  const unreadable = unreadableOutputs(outputs);
+  if (unreadable.length > 0) {
+    findings.push(...unreadable);
+    return result({ changes: generation.changes });
+  }
   const driftPaths = await diffOutputs(root, outputs);
   if (options.mode !== 'write') {
     for (const path of driftPaths) {

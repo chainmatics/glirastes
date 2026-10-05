@@ -27,6 +27,8 @@ import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestion
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
+import { dispatchToolResultUiActions } from '../../browser/client-actions.js';
+import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
   parseClarificationAnswer,
@@ -372,6 +374,7 @@ export function AiChatProvider({
   theme: userTheme,
   themeScope = 'inline',
   onToolResult,
+  uiActionBus,
   onBeforeSend,
   approvalDescription: userApprovalDescription,
   continueMessage = 'Please continue.',
@@ -501,6 +504,8 @@ export function AiChatProvider({
   // Stable refs for callbacks to avoid re-creating transport
   const onToolResultRef = useRef(onToolResult);
   onToolResultRef.current = onToolResult;
+  const uiActionBusRef = useRef(uiActionBus);
+  uiActionBusRef.current = uiActionBus;
   const approvalDescriptionRef = useRef(approvalDescriptionFn);
   approvalDescriptionRef.current = approvalDescriptionFn;
 
@@ -713,6 +718,13 @@ export function AiChatProvider({
           if (!processedToolCallsRef.current.has(toolCallId)) {
             processedToolCallsRef.current.add(toolCallId);
             onToolResultRef.current?.(toolName, toolPart.output);
+            // Generated UI tools run in the browser through the app's bridge.
+            void dispatchToolResultUiActions(
+              toolPart.output,
+              uiActionBusRef.current ?? getDefaultUiActionBus(),
+            ).catch(() => {
+              console.warn('[glirastes] A generated UI action failed');
+            });
           }
         }
       }

@@ -174,7 +174,7 @@ function reviewReasons(options: {
   if (options.externalCallEvidence.length > 0) {
     reasons.push('external-call-detected');
   }
-  if (options.method === 'GET') {
+  if (options.method === 'GET' || options.method === 'HEAD') {
     reasons.push('data-classification-unverified');
   } else if (options.method === 'DELETE') {
     reasons.push('delete-operation');
@@ -211,8 +211,13 @@ async function scanRouteCandidates(
     const imports = importBindings(source);
     const route = toRoutePath(apiDir, routeFile);
     const parsed = readRouteExports(source, sourceFile);
-    findings.push(...parsed.findings.map((finding) => ({ sourceFile, ...finding })));
-    for (const { method, body } of parsed.exports) {
+    // HEAD is a tool only for the tools generator (source discovery); the
+    // legacy scan upload keeps its five-method contract with the Platform.
+    const included = (method: EndpointMethod | undefined) => Boolean(strictSources) || method !== 'HEAD';
+    findings.push(...parsed.findings
+      .filter((finding) => included(finding.exportName))
+      .map((finding) => ({ sourceFile, ...finding })));
+    for (const { method, body } of parsed.exports.filter((entry) => included(entry.method))) {
       const authEvidence = evidence(body, AUTH_PATTERNS);
       const externalCallEvidence = evidence(body, EXTERNAL_PATTERNS);
       candidates.push({
@@ -233,7 +238,7 @@ async function scanRouteCandidates(
         riskClass:
           method === 'DELETE'
             ? 'delete'
-            : method === 'GET'
+            : method === 'GET' || method === 'HEAD'
               ? 'unknown'
               : 'write',
         autoApprovalEligible: false,

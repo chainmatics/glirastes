@@ -1,7 +1,7 @@
 import ts from 'typescript';
 import type { EndpointMethod } from '../types.js';
 
-const methods = new Set<string>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+const methods = new Set<string>(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
 
 export interface RouteExportFinding {
   code: 'route-export-unresolved' | 'route-wildcard-export-unresolved' | 'route-source-invalid';

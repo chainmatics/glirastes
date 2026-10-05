@@ -43,6 +43,13 @@ export interface VerifiedPolicyOverlay {
  * risk class, narrow roles, require confirmation. `enabled: true`, a lower
  * risk class and `requiresApproval: false` are no-ops, pinned or not. Overlay
  * ids without a local policy are ignored and reported.
+ *
+ * Open (design 4.5 as amended 2026-10-05, decision D16; roadmap "P04-Nachtrag"):
+ * a signed owner/admin relaxation of confirmation pinned with
+ * `atRiskClass: 'write'` must take effect up to tier 2, an explicit local
+ * `requiresApproval: true` still winning. This runner does not implement D16
+ * and does not report it at registration, so the Platform must not show such
+ * a relaxation as effective for it.
  */
 export function applyPolicyOverlay(
   local: RuntimeToolPolicy[],
@@ -92,19 +99,31 @@ function restrictPolicy(
 }
 
 /**
+ * Platform descriptions for tools the deployed code has (spec 4.5: Platform >
+ * local > code for prose). The last delta for a tool wins, like the policy
+ * layers; deltas for tools the code does not have are ignored.
+ */
+export function overlayDescriptions(
+  localToolIds: ReadonlySet<string>,
+  overlay: ReadonlyArray<PolicyOverlayEntry>,
+): Map<string, string> {
+  const descriptions = new Map<string, string>();
+  for (const entry of overlay) {
+    if (entry.description !== undefined && localToolIds.has(entry.toolId)) {
+      descriptions.set(entry.toolId, entry.description);
+    }
+  }
+  return descriptions;
+}
+
+/**
  * Reads a Platform policy revision the sync manager already verified as an
- * overlay. Values that copy the local base are harmless: composition is
- * restrict-only, so a copy resolves to the local value.
- *
- * TRANSITIONAL: the revision carries full `toolPolicies` copies, not a delta,
- * so every tool the Platform lists becomes an entry and a tool the Platform
- * copied at a stricter value than a later local change stays over-restricted
- * until the Platform republishes. The signed `RuntimePolicyRevision.toolOverrides`
- * delta field and its overlay adapter are owned by P08 (SDK lockstep) and land
- * before P11 wires `policyOverlay` into Get It Done; this mapping is then
- * replaced. A Platform relaxation ("Lockern") stays ineffective here: it needs
- * a committed local entry, so P08 must not present it as effective in managed
- * mode without one.
+ * overlay. The entries are the signed `toolOverrides` deltas (P08b shared
+ * contract item 2), never the reported `toolPolicies`: those repeat what the
+ * code reported and would freeze an old local value. Composition stays
+ * restrict-only until the D16 addendum (see applyPolicyOverlay), so a Platform
+ * relaxation remains a no-op without a committed local entry, and the revision
+ * id keeps Platform revocations matching.
  */
 export function policyOverlayFromRevision(
   revision: RuntimePolicyRevision,
@@ -112,13 +131,7 @@ export function policyOverlayFromRevision(
   return {
     revisionId: revision.revisionId,
     revision: revision.revision,
-    entries: revision.toolPolicies.map((policy) => ({
-      toolId: policy.toolId,
-      enabled: policy.enabled,
-      requiresApproval: policy.requiresApproval,
-      riskClass: policy.riskClass,
-      allowedRoles: [...policy.allowedRoles],
-    })),
+    entries: revision.toolOverrides.map((delta) => ({ ...delta })),
     budget: revision.budget,
   };
 }

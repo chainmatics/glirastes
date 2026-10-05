@@ -135,11 +135,11 @@ describe('next-app endpoint source', () => {
     expect(notes.prose?.contractDescription).toBe('Create a note for the caller');
   }, 60_000);
 
-  it('reports HEAD and OPTIONS exports as unsupported-method exclusions instead of dropping them', async () => {
+  it('enumerates HEAD as a read tool and reports only OPTIONS as unsupported', async () => {
     const app = await createAppFixture({
       'src/app/api/tasks/route.ts': 'declare function getSession(): Promise<unknown>;\n'
         + 'export async function GET() { await getSession(); return Response.json([]); }\n'
-        + 'export async function HEAD() { return new Response(null); }\n'
+        + 'export async function HEAD() { await getSession(); return new Response(null); }\n'
         + 'async function preflight() { return new Response(null); }\n'
         + 'export { preflight as OPTIONS };\n',
       'src/app/api/tasks/[id]/route.ts': 'export const { HEAD } = { HEAD: async () => new Response(null) };\n',
@@ -152,10 +152,18 @@ describe('next-app endpoint source', () => {
     });
     const observed = await createNextEndpointSource().observe(context(app.root));
     expect(observed.complete).toBe(true);
-    expect(observed.observations.map((tool) => tool.execution.stableKey)).toEqual(['GET /api/tasks']);
+    const tools = byKey(observed.observations);
+    expect([...tools.keys()]).toEqual(['GET /api/tasks', 'HEAD /api/tasks', 'HEAD /api/tasks/:id']);
+    expect(tools.get('HEAD /api/tasks')).toMatchObject({
+      execution: { definitionId: 'tasks.head', method: 'HEAD', path: '/api/tasks' },
+      contract: { source: 'derived' },
+      findings: expect.arrayContaining([expect.objectContaining({ code: 'contract-derived' })]),
+    });
+    expect(tools.get('HEAD /api/tasks/:id')).toMatchObject({
+      execution: { definitionId: 'tasks.check' },
+      findings: [expect.objectContaining({ code: 'handler-unresolved' })],
+    });
     expect(observed.excluded).toEqual([
-      { stableKey: 'HEAD /api/tasks', reason: 'unsupported-method', origin: 'code' },
-      { stableKey: 'HEAD /api/tasks/:id', reason: 'unsupported-method', origin: 'code' },
       { stableKey: 'OPTIONS /api/auth/login', reason: 'unsupported-method', origin: 'code' },
       { stableKey: 'OPTIONS /api/ping', reason: 'unsupported-method', origin: 'code' },
       { stableKey: 'OPTIONS /api/tasks', reason: 'unsupported-method', origin: 'code' },

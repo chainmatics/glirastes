@@ -12,6 +12,7 @@ import {
 } from '../../contracts/tool-policy.js';
 import {
   applyPolicyOverlay,
+  overlayDescriptions,
   policyOverlayFromRevision,
 } from '../policy-overlay.js';
 
@@ -165,33 +166,57 @@ describe('applyPolicyOverlay', () => {
 });
 
 describe('policyOverlayFromRevision', () => {
-  it('maps a verified policy revision to entries and keeps its identity', () => {
-    const revision: RuntimePolicyRevision = {
-      revisionId: '55555555-5555-4555-8555-555555555555',
-      revision: 7,
-      tenantId: '66666666-6666-4666-8666-666666666666',
-      environmentId: '77777777-7777-4777-8777-777777777777',
-      budget: BUDGET,
-      toolPolicies: [WRITE],
-      publishedAt: '2026-10-04T00:00:00.000Z',
-      signature: {
-        algorithm: 'Ed25519',
-        keyId: 'platform-key',
-        value: 'c2lnbmF0dXJl',
-      },
-    };
+  const revision: RuntimePolicyRevision = {
+    revisionId: '55555555-5555-4555-8555-555555555555',
+    revision: 7,
+    tenantId: '66666666-6666-4666-8666-666666666666',
+    environmentId: '77777777-7777-4777-8777-777777777777',
+    budget: BUDGET,
+    toolPolicies: [WRITE, READ],
+    toolOverrides: [],
+    publishedAt: '2026-10-04T00:00:00.000Z',
+    signature: {
+      algorithm: 'Ed25519',
+      keyId: 'platform-key',
+      value: 'c2lnbmF0dXJl',
+    },
+  };
 
-    expect(policyOverlayFromRevision(revision)).toEqual({
+  it('reads the signed decision deltas, never the reported toolPolicies copies', () => {
+    const toolOverrides = [
+      { toolId: WRITE_ID, enabled: false, description: 'Archives a task.' },
+      { toolId: REMOVED_ID, riskClass: 'delete' as const },
+    ];
+    expect(policyOverlayFromRevision({ ...revision, toolOverrides })).toEqual({
       revisionId: revision.revisionId,
       revision: 7,
       budget: BUDGET,
-      entries: [{
-        toolId: WRITE_ID,
-        enabled: true,
-        requiresApproval: true,
-        riskClass: 'write',
-        allowedRoles: ['member'],
-      }],
+      entries: toolOverrides,
     });
+  });
+
+  it('leaves the local policy untouched when the Platform decided nothing', () => {
+    const overlay = policyOverlayFromRevision(revision);
+    expect(overlay.entries).toEqual([]);
+    // A later local relaxation is no longer frozen by a copied Platform value.
+    const relaxedLocally = { ...WRITE, allowedRoles: [] };
+    expect(applyPolicyOverlay([relaxedLocally], overlay.entries).policies).toEqual([relaxedLocally]);
+  });
+});
+
+describe('overlayDescriptions', () => {
+  it('takes a Platform description only for tools the code has', () => {
+    expect(overlayDescriptions(new Set([READ_ID, WRITE_ID]), [
+      { toolId: WRITE_ID, description: 'Archives a task.' },
+      { toolId: READ_ID, enabled: false },
+      { toolId: REMOVED_ID, description: 'Never shown.' },
+    ])).toEqual(new Map([[WRITE_ID, 'Archives a task.']]));
+  });
+
+  it('lets the last delta for a tool win, like the policy layers', () => {
+    expect(overlayDescriptions(new Set([WRITE_ID]), [
+      { toolId: WRITE_ID, description: 'First.' },
+      { toolId: WRITE_ID, description: 'Second.' },
+    ]).get(WRITE_ID)).toBe('Second.');
   });
 });

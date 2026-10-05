@@ -1,71 +1,30 @@
 import { useEffect, useCallback, useRef } from 'react';
+import { registerAiClientAction, type PayloadContract } from '../browser/client-actions.js';
+import {
+  registerNavigationBridge,
+  type NavigationBridgeOptions,
+} from '../browser/navigation.js';
+import {
+  getDefaultUiActionBus,
+  UiActionBus,
+  type UiActionHandler,
+} from '../browser/ui-action-bus.js';
 import type { ActionIdRegistry } from '../types.js';
 
 // ============================================================================
-// Types
+// Types and the framework-neutral bus (glirastes/browser)
 // ============================================================================
 
-export interface UiAction {
-  type: string;
-  actionId?: string;
-  [key: string]: unknown;
-}
-
-export type UiActionHandler = (action: UiAction) => void | Promise<void>;
+export {
+  getDefaultUiActionBus,
+  UiActionBus,
+  type UiAction,
+  type UiActionHandler,
+} from '../browser/ui-action-bus.js';
 
 export interface AiClientActionEventDetail {
   actionId: string;
   payload?: Record<string, unknown>;
-}
-
-// ============================================================================
-// UiActionBus (class-based, framework-agnostic)
-// ============================================================================
-
-function addHandler(
-  map: Map<string, Set<UiActionHandler>>,
-  key: string,
-  handler: UiActionHandler,
-): () => void {
-  const handlers = map.get(key) ?? new Set<UiActionHandler>();
-  handlers.add(handler);
-  map.set(key, handlers);
-
-  return () => {
-    const current = map.get(key);
-    if (!current) return;
-    current.delete(handler);
-    if (current.size === 0) map.delete(key);
-  };
-}
-
-export class UiActionBus {
-  private handlersByType = new Map<string, Set<UiActionHandler>>();
-  private handlersById = new Map<string, Set<UiActionHandler>>();
-
-  subscribeByType(type: string, handler: UiActionHandler): () => void {
-    return addHandler(this.handlersByType, type, handler);
-  }
-
-  subscribeById(actionId: string, handler: UiActionHandler): () => void {
-    return addHandler(this.handlersById, actionId, handler);
-  }
-
-  async dispatch(action: UiAction): Promise<void> {
-    const typeHandlers = this.handlersByType.get(action.type);
-    const idHandlers = action.actionId
-      ? this.handlersById.get(action.actionId)
-      : undefined;
-
-    const allHandlers = new Set<UiActionHandler>([
-      ...(typeHandlers ? Array.from(typeHandlers) : []),
-      ...(idHandlers ? Array.from(idHandlers) : []),
-    ]);
-
-    for (const handler of allHandlers) {
-      await handler(action);
-    }
-  }
 }
 
 // ============================================================================
@@ -142,24 +101,31 @@ export function dispatchAiClientActions(
 
 /**
  * Hook to register a handler for a specific AI client action ID.
- * The handler is tracked in a global registry for dev-mode validation.
+ * The literal id and the optional contract (third argument, e.g. a Zod
+ * object) are what `glirastes tools refresh` turns into the tool
+ * `ui.<actionId>`; the contract types and validates the payload. Generated
+ * actions arrive on the default UiActionBus; `dispatchAiClientAction`
+ * window events keep working for existing callers.
  *
  * @example
  * ```tsx
  * useAiClientAction('task-details.open', (payload) => {
- *   openTaskDetails(payload?.taskId as string);
- * });
+ *   openTaskDetails(payload.taskId);
+ * }, z.object({ taskId: z.string() }));
  * ```
  */
-export function useAiClientAction(
+export function useAiClientAction<T = Record<string, unknown>>(
   actionId: string,
-  handler: (payload?: Record<string, unknown>) => void,
+  handler: (payload: T) => void | Promise<void>,
+  contract?: PayloadContract<T>,
 ): void {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
+  const contractRef = useRef(contract);
+  contractRef.current = contract;
 
   const stableHandler = useCallback(
-    (payload?: Record<string, unknown>) => handlerRef.current(payload),
+    (payload: T) => handlerRef.current(payload),
     [],
   );
 
@@ -170,15 +136,53 @@ export function useAiClientAction(
       const detail = (event as CustomEvent<AiClientActionEventDetail>)
         .detail;
       if (!detail || detail.actionId !== actionId) return;
-      stableHandler(detail.payload);
+      const validator = contractRef.current;
+      if (!validator) {
+        void stableHandler(detail.payload as T);
+        return;
+      }
+      const parsed = validator.safeParse(detail.payload ?? {});
+      if (!parsed.success) {
+        console.warn('[glirastes] A UI action payload did not match its contract');
+        return;
+      }
+      void stableHandler(parsed.data);
     };
 
     window.addEventListener(AI_CLIENT_ACTION_EVENT, handleEvent);
+    const unsubscribe = registerAiClientAction<T>(
+      actionId,
+      (payload) => stableHandler(payload),
+      {
+        safeParse: (value) => contractRef.current?.safeParse(value)
+          ?? { success: true, data: value as T },
+      },
+      { bus: getDefaultUiActionBus() },
+    );
     return () => {
       window.removeEventListener(AI_CLIENT_ACTION_EVENT, handleEvent);
+      unsubscribe();
       registeredHandlers.delete(actionId);
     };
   }, [actionId, stableHandler]);
+}
+
+/**
+ * Executes the generated `ui.navigate` and `ui.filter.<view>` tools with the
+ * app's router, e.g. `useGlirastesNavigationBridge({ push: router.push })`
+ * with Next.js `useRouter()`. Always the latest `push` is used.
+ */
+export function useGlirastesNavigationBridge(options: NavigationBridgeOptions): void {
+  const pushRef = useRef(options.push);
+  pushRef.current = options.push;
+  const bus = options.bus;
+  useEffect(
+    () => registerNavigationBridge({
+      push: (href) => pushRef.current(href),
+      ...(bus ? { bus } : {}),
+    }),
+    [bus],
+  );
 }
 
 // ============================================================================

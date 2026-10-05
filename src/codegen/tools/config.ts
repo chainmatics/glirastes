@@ -35,12 +35,32 @@ const modulePath = z.string().trim().min(1).max(512)
   .regex(/\.(?:ts|js|mjs)$/, 'The generated module must end in .ts, .js or .mjs')
   .refine(insideApp, 'Path must stay inside the app');
 
-export const ToolSourceKindSchema = z.enum(['next-app']);
+export const ToolSourceKindSchema = z.enum(['next-app', 'next-pages', 'url-filters', 'react-actions']);
+
+/** A folder name such as `[locale]`, never a path. */
+const folderName = z.string().trim().min(1).max(200)
+  .refine((value) => !/[\\/]/.test(value), 'A folder name, not a path');
 
 const SourceSchema = z.union([
   ToolSourceKindSchema,
-  z.object({ kind: ToolSourceKindSchema, apiDir: appPath.optional() }).strict(),
+  z.object({ kind: z.literal('next-app'), apiDir: appPath.optional() }).strict(),
+  z.object({
+    kind: z.literal('next-pages'),
+    appDir: appPath.optional(),
+    srcDir: appPath.optional(),
+    stripSegments: z.array(folderName).max(20).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal('url-filters'),
+    appDir: appPath.optional(),
+    srcDir: appPath.optional(),
+    stripSegments: z.array(folderName).max(20).optional(),
+  }).strict(),
+  z.object({ kind: z.literal('react-actions'), srcDir: appPath.optional() }).strict(),
 ]);
+
+/** Sources that each produce app-wide UI tools; a second copy would duplicate them. */
+const SINGLETON_SOURCES: ReadonlyArray<string> = ['next-pages', 'url-filters', 'react-actions'];
 
 export const ToolsConfigSchema = z.object({
   schemaVersion: z.literal(1),
@@ -66,6 +86,12 @@ export const ToolsConfigSchema = z.object({
     requireEnrichment: z.boolean().optional(),
   }).strict().default({}),
 }).strict().superRefine((config, context) => {
+  const kinds = config.sources.map((source) => (typeof source === 'string' ? source : source.kind));
+  for (const kind of SINGLETON_SOURCES) {
+    if (kinds.filter((candidate) => candidate === kind).length > 1) {
+      context.addIssue({ code: 'custom', path: ['sources'], message: `The ${kind} source may appear only once` });
+    }
+  }
   const sensitive = findSensitiveStringPath(config);
   if (sensitive) {
     context.addIssue({
@@ -77,10 +103,10 @@ export const ToolsConfigSchema = z.object({
 });
 
 export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
-export interface ToolSourceConfig {
-  kind: z.infer<typeof ToolSourceKindSchema>;
-  apiDir?: string;
-}
+export type ToolSourceConfig =
+  | { kind: 'next-app'; apiDir?: string }
+  | { kind: 'next-pages' | 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[] }
+  | { kind: 'react-actions'; srcDir?: string };
 
 function invalidConfig(): FoundationDiagnosticError {
   return new FoundationDiagnosticError({

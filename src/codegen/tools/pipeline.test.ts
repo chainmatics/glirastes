@@ -9,8 +9,11 @@ import { FoundationExecutionInventorySchema } from '../execution-inventory.js';
 import { canonicalJson } from './canonical.js';
 import { createAppFixture, FIXTURE_APP_ID, removeAppFixtures, SDK_ROOT, type AppFixture } from './__tests__/app-fixture.js';
 import { DEFAULT_GENERATED_MODULE, TOOLS_PATHS } from './config.js';
+import { MAX_FILTER_KEYS, ToolContractsFileSchema } from './files.js';
+import { nextActionFor } from './findings.js';
 import { runToolsPipeline, runToolsPipelineWith, ToolsPipelineFailure } from './pipeline.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
+import { uiObservation } from './sources/ui-tools.js';
 import type { ToolSource } from './types.js';
 
 const outsideDirs: string[] = [];
@@ -274,5 +277,188 @@ describe('runToolsPipeline (policy findings)', () => {
     expect(finding).toMatchObject({ severity: 'error', subjectRef: 'POST /api/tasks' });
     expect(finding?.nextAction).toContain('reviewed pin');
     await expect(fixture.read(TOOLS_PATHS.inventory)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 120_000);
+});
+
+describe('capability report in the committed setup artifact', () => {
+  it('reports provenance per tool and every exclusion', async () => {
+    const fixture = await app();
+    await fixture.write('src/app/api/auth/login/route.ts', 'export async function POST() {\n  return Response.json({});\n}\n');
+    await fixture.write('.glirastes/tool-policy.json', JSON.stringify({
+      schemaVersion: 1,
+      tools: { 'GET /api/tasks': { description: 'Lists your tasks by status.' } },
+      exclude: [{ match: 'DELETE /api/**', reason: 'no deletes from chat' }],
+      acceptedRisk: {},
+    }));
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const artifact = await artifactOf(fixture);
+    const byMethod = new Map(artifact.tools.map((tool) => [tool.method, tool] as const));
+    expect(byMethod.get('GET')?.provenance).toEqual({
+      policyOrigin: {
+        enabled: 'code-default', requiresApproval: 'code-default', riskClass: 'code-default',
+        allowedRoles: 'code-default', description: 'local-policy',
+      },
+      contractSource: 'derived',
+      descriptionSource: 'human',
+      schemaSource: 'field-names',
+    });
+    expect(byMethod.get('POST')?.provenance).toMatchObject({
+      contractSource: 'native', descriptionSource: 'template', schemaSource: 'zod',
+    });
+    expect(artifact.exclusions).toEqual([{ stableKey: 'POST /api/auth/login', origin: 'default' }]);
+  }, 120_000);
+});
+
+const PAGE = 'export default function Page() { return null; }\n';
+const BRIDGE = "'use client';\nimport { useRouter } from 'next/navigation';\n"
+  + "import { useGlirastesNavigationBridge } from 'glirastes/react';\n"
+  + 'export function GlirastesBridge() {\n  const router = useRouter();\n'
+  + '  useGlirastesNavigationBridge({ push: (href) => router.push(href) });\n  return null;\n}\n';
+
+describe('runToolsPipeline (navigation)', () => {
+  async function pagesApp(): Promise<AppFixture> {
+    return createAppFixture({
+      'src/app/page.tsx': PAGE,
+      'src/app/tasks/page.tsx': PAGE,
+      'src/components/glirastes-bridge.tsx': BRIDGE,
+    }, { toolsConfig: { sources: ['next-pages'] } });
+  }
+
+  it('generates ui.navigate as an active UI tool without confirmation, bound in the module and verified in every mode', async () => {
+    const fixture = await pagesApp();
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.changes.added).toHaveLength(1);
+    const [tool] = (await artifactOf(fixture)).tools;
+    expect(tool).toMatchObject({
+      name: 'ui.navigate', modelName: 'ui_navigate', executionKind: 'ui', actionBindingRef: 'glirastes.navigate',
+      operationGroup: 'ui', riskClass: 'safe-read', requiresApproval: false, enabled: true,
+      description: "Open a page of this app in the user's browser. Destinations: /, /tasks.",
+      provenance: { contractSource: 'ui-bridge', descriptionSource: 'code', schemaSource: 'json-schema' },
+    });
+    const contracts = JSON.parse(await fixture.read(TOOLS_PATHS.contracts)) as {
+      tools: Array<{ contract: { uiAction?: unknown } }>;
+    };
+    expect(contracts.tools[0]?.contract.uiAction).toEqual({ kind: 'navigate' });
+    expect(await fixture.read(DEFAULT_GENERATED_MODULE)).toContain("import { uiActionToolToTool } from 'glirastes/server';");
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'integrity' })).driftPaths).toEqual([]);
+  }, 120_000);
+
+  it('keeps the identity but disables navigation once the bridge is gone', async () => {
+    const fixture = await pagesApp();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const toolId = (await artifactOf(fixture)).tools[0]!.toolId;
+    await fixture.remove('src/components/glirastes-bridge.tsx');
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.changes.unchanged).toEqual([toolId]);
+    expect((await artifactOf(fixture)).tools[0]).toMatchObject({ toolId, enabled: false, operationGroup: 'needs_attention' });
+    expect(await fixture.read(TOOLS_PATHS.report)).toContain('navigation-bridge-missing');
+    expect(await fixture.read(DEFAULT_GENERATED_MODULE)).not.toContain('uiActionToolToTool');
+  }, 120_000);
+});
+
+describe('runToolsPipeline (filters)', () => {
+  it('generates one filter tool per view, inheriting the page options of next-pages', async () => {
+    const fixture = await createAppFixture({
+      'src/app/[locale]/tasks/page.tsx': "'use client';\nimport { useSearchParams } from 'next/navigation';\n"
+        + "export default function Tasks() { return useSearchParams().get('status'); }\n",
+      'src/components/glirastes-bridge.tsx': BRIDGE,
+    }, { toolsConfig: { sources: [{ kind: 'next-pages', stripSegments: ['[locale]'] }, 'url-filters'] } });
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.changes.added).toHaveLength(2);
+    const tools = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.name, tool] as const));
+    expect(tools.get('ui.navigate')?.description).toBe("Open a page of this app in the user's browser. Destinations: /tasks.");
+    expect(tools.get('ui.filter.tasks')).toMatchObject({
+      executionKind: 'ui', actionBindingRef: 'glirastes.navigate', riskClass: 'safe-read', requiresApproval: false, enabled: true,
+      description: 'Show the /tasks page with URL filters: status (text).',
+    });
+    expect(result.findings).toContainEqual(expect.objectContaining({ code: 'filter-domain-open', subjectRef: 'UI filter /tasks' }));
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+  }, 120_000);
+
+  const wideKeys = (count: number) => Array.from({ length: count }, (_, index) => `k${String(index).padStart(2, '0')}`);
+
+  it('caps the keys of a wide view so the check right after refresh reads what refresh wrote', async () => {
+    const keys = wideKeys(MAX_FILTER_KEYS + 1);
+    const fixture = await createAppFixture({
+      'src/views.ts': "import { defineQueryFilters } from 'glirastes/browser';\n"
+        + `export const wide = defineQueryFilters({ path: '/wide', filters: { ${keys.map((key) => `${key}: 'string'`).join(', ')} } });\n`,
+      'src/components/glirastes-bridge.tsx': BRIDGE,
+    }, { toolsConfig: { sources: ['url-filters'] } });
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.wrote).toBe(true);
+    expect(result.changes.added).toHaveLength(1);
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: 'filter-keys-capped', severity: 'warning', subjectRef: 'UI filter /wide',
+    }));
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    const uiAction = contracts.tools[0]?.contract?.uiAction;
+    expect(uiAction?.kind === 'filter' ? uiAction.keys.map((entry) => entry.key) : []).toEqual(keys.slice(0, MAX_FILTER_KEYS));
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'integrity' })).findings).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'write' })).wrote).toBe(false);
+  }, 120_000);
+
+  it('writes nothing when a rendered output would fail the schema its own reader applies', async () => {
+    const keys = wideKeys(MAX_FILTER_KEYS + 1);
+    const wide: ToolSource = {
+      kind: 'url-filters',
+      observe: async () => ({
+        observations: [uiObservation({
+          stableKey: 'UI filter /wide',
+          definitionId: 'ui.filter.wide',
+          actionBindingRef: 'glirastes.navigate',
+          input: {
+            type: 'object',
+            properties: Object.fromEntries(keys.map((key) => [key, { type: 'string' }])),
+            additionalProperties: false,
+          },
+          uiAction: { kind: 'filter', destination: '/wide', keys: keys.map((key) => ({ key })) },
+          params: { path: [], query: keys, body: [] },
+          facts: { keys },
+          findings: [],
+        })],
+        findings: [],
+        complete: true,
+        excluded: [],
+      }),
+    };
+    const fixture = await createAppFixture({ 'src/components/glirastes-bridge.tsx': BRIDGE });
+    for (const mode of ['write', 'frozen'] as const) {
+      const error = await failure(runToolsPipelineWith({ root: fixture.root, mode }, { sources: [wide] }));
+      const invalid = error.result.findings.filter((finding) => finding.code === 'generated-output-invalid');
+      expect(invalid).toEqual([expect.objectContaining({ severity: 'error', subjectRef: TOOLS_PATHS.contracts })]);
+      expect(invalid[0]?.message).toContain('UI filter /wide');
+      expect(invalid[0]?.message).toContain('uiAction.keys');
+      expect(invalid[0]?.nextAction).toBe(nextActionFor('generated-output-invalid'));
+      expect(invalid[0]?.nextAction).not.toBe(nextActionFor('no-such-code'));
+      expect(error.result.outputs).toEqual({});
+    }
+    for (const path of OUTPUT_PATHS) {
+      await expect(fixture.read(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  }, 120_000);
+});
+
+describe('runToolsPipeline (client actions)', () => {
+  it('runs read-only client actions directly, confirms writing ones and disables untyped ones', async () => {
+    const fixture = await createAppFixture({
+      'src/components/task-list.tsx': "'use client';\nimport { useAiClientAction } from 'glirastes/react';\n"
+        + 'export function TaskList() {\n'
+        + "  useAiClientAction('tasks.highlight', (payload: { taskId: string }) => console.log(payload.taskId));\n"
+        + "  useAiClientAction('tasks.archive', async (payload: { taskId: string }) => {\n"
+        + "    await fetch(`/api/tasks/${payload.taskId}`, { method: 'DELETE' });\n  });\n"
+        + "  useAiClientAction('tasks.select', (payload) => console.log(payload));\n  return null;\n}\n",
+    }, { toolsConfig: { sources: ['react-actions'] } });
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const tools = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.name, tool] as const));
+    expect(tools.get('ui.tasks.highlight')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'safe-read', requiresApproval: false, enabled: true, actionBindingRef: 'tasks.highlight',
+    });
+    expect(tools.get('ui.tasks.archive')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'write', requiresApproval: true, enabled: true,
+    });
+    expect(tools.get('ui.tasks.select')).toMatchObject({ enabled: false, operationGroup: 'needs_attention' });
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
   }, 120_000);
 });

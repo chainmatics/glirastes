@@ -10,6 +10,7 @@ dist
 /codegen/
 /openapi/
 /embed/
+/browser/
 *.tsbuildinfo
 .DS_Store
 .vscode

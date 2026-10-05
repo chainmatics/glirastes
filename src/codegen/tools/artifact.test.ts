@@ -4,6 +4,7 @@ import type { EffectiveToolPolicy } from '../../contracts/tool-policy.js';
 import { canonicalRuntimeJson } from '../../sync/signature-verifier.js';
 import {
   buildSetupArtifact,
+  clipExclusions,
   EPOCH,
   promptMetadata,
   renderToolContracts,
@@ -196,5 +197,75 @@ describe('tool contracts and report', () => {
     expect(schemaQualityOf({ ...contract, source: 'native' })).toBe('zod');
     expect(schemaQualityOf({ ...contract, source: 'resolution' }, 'agent')).toBe('agent');
     expect(schemaQualityOf({ ...contract, source: 'resolution' }, 'human')).toBe('json-schema');
+  });
+});
+
+describe('capability report fields', () => {
+  it('clips exclusions to the Platform caps in a stable order', () => {
+    const excluded = [
+      { stableKey: `GET /${'x'.repeat(600)}`, reason: 'policy', origin: 'policy' as const },
+      ...Array.from({ length: 5_001 }, (_, index) => ({
+        stableKey: `GET /api/hidden/${String(index).padStart(4, '0')}`, reason: 'internal', origin: 'policy' as const,
+      })),
+      { stableKey: 'GET /api/hidden/0000', reason: 'duplicate', origin: 'default' as const },
+    ];
+    const clipped = clipExclusions(excluded);
+    expect(clipped).toHaveLength(5_000);
+    expect(clipped[0]).toEqual({ stableKey: 'GET /api/hidden/0000', origin: 'policy' });
+    expect(clipped.at(-1)).toEqual({ stableKey: 'GET /api/hidden/4999', origin: 'policy' });
+    expect(clipped.some((entry) => entry.stableKey.length > 512)).toBe(false);
+  });
+
+  it('carries provenance per tool and the reasoned exclusions', () => {
+    const provenance = { descriptionSource: 'code' as const, schemaSource: 'zod' as const, contractSource: 'native' as const };
+    const plain = buildSetupArtifact({ ...base, tools: [tool(TOOL_A, 'tasks.list')], now: null });
+    const reported = buildSetupArtifact({
+      ...base,
+      tools: [{ ...tool(TOOL_A, 'tasks.list'), provenance }],
+      exclusions: [{ stableKey: 'POST /api/auth/login', reason: 'auth-route', origin: 'default' }],
+      now: null,
+    });
+    expect(reported.artifact.tools[0]?.provenance).toEqual(provenance);
+    expect(reported.artifact.exclusions).toEqual([{ stableKey: 'POST /api/auth/login', origin: 'default' }]);
+    expect(reported.artifact.artifactId).not.toBe(plain.artifact.artifactId);
+    expect(plain.artifact).not.toHaveProperty('exclusions');
+  });
+});
+
+describe('UI tool contracts', () => {
+  const uiContract: ToolContract = {
+    source: 'ui-bridge', loadBearing: true,
+    input: { type: 'object', properties: { destination: { type: 'string', enum: ['/tasks'] } }, additionalProperties: false },
+    params: { path: [], query: [], body: [] }, interfaceDigest: digest('U'),
+    runtime: {
+      input: { kind: 'json', schema: { type: 'object' } },
+      output: { kind: 'json', schema: { type: 'object' } },
+    },
+    uiAction: { kind: 'filter', destination: '/projects/:projectId/tasks', keys: [{ key: 'status' }, { key: 'tags', array: 'repeat' }] },
+  };
+  const file = (contract: unknown) => ({
+    schemaVersion: 1, appId: APP_ID,
+    tools: [{
+      toolId: '019fb007-0000-7000-8000-0000000000c1', stableKey: 'UI filter /projects/:projectId/tasks', definitionId: 'ui.filter.projectsTasks',
+      contract, defaults: { operationGroup: 'ui', riskClass: 'safe-read', requiresApproval: false, rulesVersion: 1 },
+    }],
+  });
+
+  it('keeps the UI action in tool-contracts.json so integrity mode can re-render the module', () => {
+    expect(ToolContractsFileSchema.parse(JSON.parse(renderToolContracts(APP_ID, file(uiContract).tools as never))).tools[0]?.contract)
+      .toEqual(uiContract);
+  });
+
+  it.each([
+    ['an unknown kind', { kind: 'open-dialog' }],
+    ['a filter without keys', { kind: 'filter', destination: '/tasks' }],
+    ['an unknown array format', { kind: 'filter', destination: '/tasks', keys: [{ key: 'tags', array: 'pipe' }] }],
+    ['a client action without id', { kind: 'client-action' }],
+  ])('rejects %s', (_label, uiAction) => {
+    expect(ToolContractsFileSchema.safeParse(file({ ...uiContract, uiAction })).success).toBe(false);
+  });
+
+  it('grades UI schemas read from code as JSON Schema', () => {
+    expect(schemaQualityOf(uiContract)).toBe('json-schema');
   });
 });

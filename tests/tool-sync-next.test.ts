@@ -77,12 +77,19 @@ async function passingCheck(root: string): Promise<void> {
 
 const byToolId = (left: { toolId: string }, right: { toolId: string }) => (left.toolId < right.toolId ? -1 : 1);
 
+/** The fixture also generates UI tools; endpoint assertions pick their tool by name. */
+function toolNamed(artifact: AppSetupArtifact, name: string): AppSetupArtifact['tools'][number] {
+  const tool = artifact.tools.find((candidate) => candidate.name === name);
+  if (!tool) throw new Error(`No tool ${name}`);
+  return tool;
+}
+
 describe('Next endpoint change corpus', () => {
   it('adds an endpoint: active at once with defaults, inside the user session, rejected without one', async () => {
     const root = await copyApp(NATIVE_APP);
     await runToolsPipeline({ root, mode: 'write' });
     const before = await artifactOf(root);
-    const tasksId = before.tools[0]!.toolId;
+    const tasksId = toolNamed(before, 'tasks.list').toolId;
     await mkdir(join(root, 'src/app/api/notes'), { recursive: true });
     await writeFile(join(root, 'src/app/api/notes/schemas.js'), NOTES_SCHEMAS);
     await writeFile(join(root, 'src/app/api/notes/route.js'), NOTES_ROUTE);
@@ -91,7 +98,8 @@ describe('Next endpoint change corpus', () => {
 
     const refreshed = await runToolsPipeline({ root, mode: 'write' });
     expect(refreshed.changes.added).toHaveLength(2);
-    expect(refreshed.changes.unchanged).toEqual([tasksId]);
+    expect([...refreshed.changes.unchanged].sort()).toEqual(before.tools.map((tool) => tool.toolId).sort());
+    expect(refreshed.changes.unchanged).toContain(tasksId);
     const after = await artifactOf(root);
     const byName = new Map(after.tools.map((tool) => [tool.name, tool] as const));
     expect(byName.get('tasks.list')?.toolId).toBe(tasksId);
@@ -130,7 +138,7 @@ describe('Next endpoint change corpus', () => {
   it('changes an endpoint: same identity, the new schema is enforced after refresh', async () => {
     const root = await copyApp(NATIVE_APP);
     await runToolsPipeline({ root, mode: 'write' });
-    const before = (await artifactOf(root)).tools[0]!;
+    const before = toolNamed(await artifactOf(root), 'tasks.list');
     await replaceIn(root, 'src/app/api/tasks/contract.js',
       "status: z.enum(['open', 'done']).optional()", "status: z.enum(['done']).optional()");
     await replaceIn(root, 'src/app/api/tasks/route.js', 'Write tests', 'Write verified tests');
@@ -139,7 +147,7 @@ describe('Next endpoint change corpus', () => {
 
     const refreshed = await runToolsPipeline({ root, mode: 'write' });
     expect(refreshed.changes.changed).toEqual([before.toolId]);
-    const after = (await artifactOf(root)).tools[0]!;
+    const after = toolNamed(await artifactOf(root), 'tasks.list');
     expect(after.toolId).toBe(before.toolId);
     expect(after.inputSchemaDigest).not.toBe(before.inputSchemaDigest);
     expect(after).toMatchObject({ riskClass: 'safe-read', requiresApproval: false, enabled: true });
@@ -157,7 +165,7 @@ describe('Next endpoint change corpus', () => {
   it('removes an endpoint: tombstoned, absent from the runtime, a direct call is unavailable', async () => {
     const root = await copyApp(NATIVE_APP);
     await runToolsPipeline({ root, mode: 'write' });
-    const tasksId = (await artifactOf(root)).tools[0]!.toolId;
+    const tasksId = toolNamed(await artifactOf(root), 'tasks.list').toolId;
     await rm(join(root, 'src/app/api/tasks/route.js'));
 
     expect((await failingCheck(root)).changes.removed).toEqual([tasksId]);
@@ -166,12 +174,12 @@ describe('Next endpoint change corpus', () => {
     expect(refreshed.changes.removed).toEqual([tasksId]);
     expect(JSON.parse(await readFile(join(root, '.glirastes/tool-tombstones.json'), 'utf8')).tombstones)
       .toEqual([expect.objectContaining({ toolId: tasksId, stableKey: 'GET /api/tasks' })]);
-    expect((await artifactOf(root)).tools).toEqual([]);
+    expect((await artifactOf(root)).tools.filter((tool) => tool.executionKind === 'endpoint')).toEqual([]);
     await passingCheck(root);
 
     const app = await bootApp(await copyApp(root, '.tool-sync-deploy-'));
     const turn = app.turn({ cookie: `session=${app.createSession(principal())}` });
-    expect(Object.keys(turn.registry)).toEqual([]);
+    expect(Object.keys(turn.registry)).not.toContain('tasks_list');
     await expect(turn.guard.beforeToolCall({ toolName: 'tasks_list', input: {} }))
       .rejects.toThrow('manifest_tool_unavailable');
     await expect(turn.execute('tasks_list', {})).rejects.toThrow('manifest_tool_unavailable');

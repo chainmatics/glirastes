@@ -9,9 +9,10 @@ export function testModel() {
     const text = last?.role === 'user' ? last.content.filter((part) => part.type === 'text').map((part) => part.text).join(' ') : '';
     let toolName;
     let input;
-    if (text === 'Go to overview') { toolName = 'ui_navigate'; input = { view: 'overview' }; }
-    else if (text === 'Filter done tasks') { toolName = 'ui_filter'; input = { view: 'tasks', filters: { status: 'done' } }; }
-    else if (text === 'Show done tasks') { toolName = tools.find((tool) => tool.name.startsWith('query_'))?.name; input = { status: 'done' }; }
+    if (text === 'Go to overview') { toolName = 'ui_navigate'; input = { destination: '/overview' }; }
+    else if (text === 'Filter done tasks') { toolName = 'ui_filter_tasks'; input = { status: 'done' }; }
+    else if (text === 'Highlight Write tests') { toolName = 'ui_tasks_highlight'; input = { title: 'Write tests' }; }
+    else if (text === 'Show done tasks') { toolName = tools.find((tool) => tool.name === 'tasks_list')?.name; input = { status: 'done' }; }
     const chunks = [{ type: 'stream-start', warnings: [] }];
     if (toolName) chunks.push({ type: 'tool-call', toolCallId: randomUUID(), toolName, input: JSON.stringify(input) });
     else chunks.push({ type: 'text-start', id: 'answer' }, { type: 'text-delta', id: 'answer', delta: 'Reference response complete.' }, { type: 'text-end', id: 'answer' });

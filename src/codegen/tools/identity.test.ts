@@ -17,6 +17,8 @@ describe('definition identity', () => {
     ['GET', '/api/tasks-by-date', 'tasksByDate.list'],
     ['POST', '/api/2fa/setup', 'api2faSetup.create'],
     ['GET', '/api', 'root.list'],
+    ['HEAD', '/api/tasks', 'tasks.head'],
+    ['HEAD', '/api/tasks/:id', 'tasks.check'],
   ] as const)('derives %s %s as %s', (method, path, expected) => {
     expect(deriveDefinitionId({ method, path })).toBe(expected);
   });

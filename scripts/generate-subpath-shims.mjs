@@ -37,6 +37,7 @@ const SHIMS = [
   ['react/vercel', 'react/transports/vercel'],
   ['react/langgraph', 'react/transports/langgraph'],
   ['embed', 'embed'],
+  ['browser', 'browser'],
   ['codegen', 'codegen'],
   ['openapi', 'openapi'],
 ];

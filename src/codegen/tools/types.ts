@@ -1,6 +1,7 @@
 import type { ToolPresentation } from '../../contracts/index.js';
 import type { DeclaredEffect, ToolPolicyDefaults, ToolPolicyFile } from '../../contracts/tool-policy.js';
 import type { LocalJsonSchema } from '../../runtime/json-schema.js';
+import type { GeneratedUiAction } from '../../server/core/generated-ui-tool.js';
 import type { ExecutionGenerationState, ObservedExecution } from '../inventory-generation.js';
 import type { ToolsConfig } from './config.js';
 import type { ToolResolutions } from './resolutions.js';
@@ -55,6 +56,8 @@ export interface ToolContract {
   interfaceDigest: string;
   runtime: { input: RuntimeSchemaSource; output: RuntimeSchemaSource };
   binding?: ContractBinding;
+  /** UI tools only: what the generated tool asks the app's browser bridge to do. */
+  uiAction?: GeneratedUiAction;
 }
 
 export interface ToolProseHints {
@@ -73,6 +76,8 @@ export interface ObservedTool {
     externalCall: boolean;
     declaredEffect?: DeclaredEffect;
     jsDoc?: string;
+    /** UI tools only: the handler provably writes, e.g. a non-GET fetch. */
+    uiMutation?: boolean;
   };
   findings: ToolFinding[];
   prose?: ToolProseHints;

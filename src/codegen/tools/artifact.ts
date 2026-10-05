@@ -1,10 +1,13 @@
 import { z } from 'zod';
 import {
+  APP_SETUP_EXCLUSION_LIMITS,
   AppSetupArtifactSchema,
   ToolRiskClassSchema,
   type AppSetupArtifact,
+  type AppSetupExclusion,
   type AppSetupOperationGroup,
   type AppSetupToolCandidate,
+  type AppSetupToolProvenance,
   type ToolRiskClass,
 } from '../../contracts/index.js';
 import { confirmationFloor, type EffectiveToolPolicy } from '../../contracts/tool-policy.js';
@@ -34,6 +37,8 @@ export interface ArtifactToolInput {
   prose: ToolProse;
   effective: EffectiveToolPolicy;
   operationGroup: AppSetupOperationGroup;
+  /** Content-free capability-report provenance (P08b shared contract item 5). */
+  provenance?: AppSetupToolProvenance;
 }
 
 export interface PreviousArtifact {
@@ -50,6 +55,25 @@ export interface BuildSetupArtifactInput {
   warnings: ReadonlyArray<{ code: string; subjectRef: string }>;
   previous?: PreviousArtifact;
   now: (() => Date) | null;
+  /** Reported as the artifact's `exclusions`, clipped to the Platform caps. */
+  exclusions?: ReadonlyArray<ExcludedTool>;
+}
+
+/**
+ * The Platform accepts at most 5,000 exclusions with stable keys of at most
+ * 512 characters (P08b Task 9). One oversized entry would reject the whole
+ * capability report, so longer keys are left out and the list is cut in
+ * code-unit order. `tool-report.json` keeps the complete list.
+ */
+export function clipExclusions(excluded: ReadonlyArray<ExcludedTool>): AppSetupExclusion[] {
+  const byKey = new Map<string, AppSetupExclusion>();
+  for (const entry of excluded) {
+    if (entry.stableKey.length > APP_SETUP_EXCLUSION_LIMITS.maxStableKeyLength) continue;
+    if (!byKey.has(entry.stableKey)) byKey.set(entry.stableKey, { stableKey: entry.stableKey, origin: entry.origin });
+  }
+  return [...byKey.values()]
+    .sort((left, right) => compareCodeUnits(left.stableKey, right.stableKey))
+    .slice(0, APP_SETUP_EXCLUSION_LIMITS.maxEntries);
 }
 
 export function promptMetadata(
@@ -86,6 +110,7 @@ function candidate(tool: ArtifactToolInput): AppSetupToolCandidate {
     requiresApproval: confirmationFloor(effective.riskClass, effective.requiresApproval),
     inputSchemaDigest: execution.inputSchemaDigest,
     outputSchemaDigest: execution.outputSchemaDigest,
+    ...(tool.provenance ? { provenance: tool.provenance } : {}),
   };
   if (execution.executionKind === 'endpoint') {
     return {
@@ -131,6 +156,7 @@ export function buildSetupArtifact(input: BuildSetupArtifactInput): { artifact: 
     },
     prompts: promptMetadata(input.promptBundle),
     warnings,
+    ...(input.exclusions ? { exclusions: clipExclusions(input.exclusions) } : {}),
     generatedAt: EPOCH,
   });
   const contentDigest = contentDigestOf(withoutIdentity(draft));
@@ -166,8 +192,10 @@ export function schemaQualityOf(
     case 'native':
     case 'contract-module':
     case 'legacy-ai-tool':
-    case 'ui-bridge':
       return 'zod';
+    case 'ui-bridge':
+      // Pages, URL parsers and payload types are read from code as JSON Schema.
+      return contract.runtime.input.kind === 'module-export' ? 'zod' : 'json-schema';
     case 'openapi':
       return 'openapi';
     case 'derived':

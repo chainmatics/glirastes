@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { AppSetupArtifactSchema } from '../contracts/index.js';
-import { endpointToolToTool } from '../server/core/index.js';
+import { endpointToolToTool, uiActionToolToTool } from '../server/core/index.js';
 import {
   createContractBindings,
   createGeneratedRuntimeSource,
+  type GeneratedEndpointToolBinding,
   type GeneratedToolBinding,
   type GeneratedToolModule,
+  type GeneratedUiToolBinding,
 } from './contract-bindings.js';
 import { createJsonSchemaLike } from './json-schema.js';
-import { createLocalSchemaDigest } from './local-tool-bindings.js';
+import { createLocalSchemaDigest, materializeManifestToolRegistry } from './local-tool-bindings.js';
 
 const id = (suffix: string) => `019fb007-0000-7000-8000-0000000000${suffix}`;
 const digest = (character: string) => `sha256:${character.repeat(43)}`;
@@ -50,7 +52,7 @@ const setupArtifact = AppSetupArtifactSchema.parse({
   warnings: [], generatedAt: '2026-10-04T08:00:00.000Z',
 });
 
-function binding(index: number, overrides: Partial<GeneratedToolBinding> = {}): GeneratedToolBinding {
+function binding(index: number, overrides: Partial<GeneratedEndpointToolBinding> = {}): GeneratedToolBinding {
   const entry = tools[index]!;
   const input = index === 0 ? inputSchema : jsonInput;
   return {
@@ -98,5 +100,63 @@ describe('createContractBindings', () => {
     });
     expect(snapshot.manifestRevision.tools.map((tool) => tool.toolId)).toEqual([id('a1')]);
     expect(runtime.disabled).toEqual([{ toolId: id('a2'), reason: 'binding-missing' }]);
+  });
+});
+
+describe('generated UI tool bindings', () => {
+  const navigationInput = createJsonSchemaLike({
+    type: 'object',
+    properties: { destination: { type: 'string', enum: ['/overview', '/tasks'] } },
+    required: ['destination'],
+    additionalProperties: false,
+  });
+  const uiOutput = createJsonSchemaLike({ type: 'object', properties: { success: { type: 'boolean' } }, required: ['success'] });
+  const UI_ID = id('c1');
+  const uiCandidate = {
+    toolId: UI_ID, sourceFingerprint: digest('N'), name: 'ui.navigate', description: 'Open a page of this app.',
+    modelName: 'ui_navigate', module: 'ui', sharedWith: [], usageHints: ['Open a page of this app.'],
+    presentation: { locale: 'en-US', singular: 'Navigation', plural: 'Navigation', approval: 'Open a page' },
+    executionKind: 'ui', actionBindingRef: 'glirastes.navigate', allowedRoles: [], operationGroup: 'ui',
+    riskClass: 'safe-read', enabled: true, requiresApproval: false,
+    inputSchemaDigest: createLocalSchemaDigest(navigationInput), outputSchemaDigest: createLocalSchemaDigest(uiOutput),
+  };
+  const uiArtifact = AppSetupArtifactSchema.parse({
+    ...setupArtifact,
+    tools: [uiCandidate],
+    planner: { ...setupArtifact.planner, toolIds: [UI_ID] },
+  });
+  const uiBinding = (overrides: Partial<GeneratedUiToolBinding> = {}): GeneratedToolBinding => ({
+    toolId: UI_ID, definitionId: 'ui.navigate', executionKind: 'ui', actionBindingRef: 'glirastes.navigate',
+    sourceFingerprint: uiCandidate.sourceFingerprint, inputSchemaDigest: uiCandidate.inputSchemaDigest,
+    outputSchemaDigest: uiCandidate.outputSchemaDigest, inputSchema: navigationInput, outputSchema: uiOutput,
+    tool: uiActionToolToTool({
+      id: 'ui.navigate', toolName: 'ui_navigate', description: 'Open a page of this app.',
+      inputSchema: navigationInput, needsApproval: false, action: { kind: 'navigate' },
+    }),
+    ...overrides,
+  });
+  const uiModule = (bindings: GeneratedToolBinding[]): GeneratedToolModule => ({ setupArtifact: uiArtifact, createToolBindings: () => bindings });
+
+  it('binds a UI tool and runs it through the standalone registry', async () => {
+    const runtime = createGeneratedRuntimeSource(uiModule([uiBinding()]), { localLimits: limits, identity: { tenantId: TENANT } });
+    expect(runtime.disabled).toEqual([]);
+    expect(runtime.bindings).toEqual([expect.objectContaining({ executionKind: 'ui', actionBindingRef: 'glirastes.navigate' })]);
+    const snapshot = runtime.source.resolveTurnSnapshot({
+      turnId: 'turn-ui',
+      principal: { subjectId: 'alice', tenantId: TENANT, roles: ['member'], attributes: {} },
+    });
+    const registry = materializeManifestToolRegistry({ snapshot, bindings: runtime.bindings });
+    expect(await registry.ui_navigate!.execute({ destination: '/overview' }, {} as never)).toMatchObject({
+      success: true,
+      uiAction: { type: 'glirastes.navigate', payload: { href: '/overview' } },
+    });
+  });
+
+  it('disables a UI tool whose action binding or kind differs', () => {
+    expect(createContractBindings(uiModule([uiBinding({ actionBindingRef: 'native.navigate' })])).disabled)
+      .toEqual([{ toolId: UI_ID, reason: 'binding-mismatch' }]);
+    const asEndpoint = { ...binding(0), toolId: UI_ID, sourceFingerprint: uiCandidate.sourceFingerprint };
+    expect(createContractBindings(uiModule([asEndpoint])).disabled)
+      .toEqual([{ toolId: UI_ID, reason: 'binding-mismatch' }]);
   });
 });

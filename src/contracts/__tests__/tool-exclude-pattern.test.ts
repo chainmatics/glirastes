@@ -7,6 +7,7 @@ describe('parseExcludePattern', () => {
     ['/api/admin/*', undefined, ['api', 'admin', '*']],
     ['* /api/**', undefined, ['api', '**']],
     ['  HEAD   /api/health  ', 'HEAD', ['api', 'health']],
+    ['PAGE /admin/**', 'PAGE', ['admin', '**']],
     ['GET /api/tasks/:id', 'GET', ['api', 'tasks', ':id']],
     // A catch-all stable-key segment (`*slug`) matches literally.
     ['DELETE /api/files/*slug', 'DELETE', ['api', 'files', '*slug']],

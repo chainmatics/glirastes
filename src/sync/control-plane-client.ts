@@ -1,4 +1,5 @@
 import { findForbiddenContentPath } from '../contracts/content-boundary.js';
+import { DISCOVERY_DIGEST_PATTERN } from './capability-report.js';
 import type { RuntimeSyncManager } from './sync-manager.js';
 
 export interface RuntimePushConnector {
@@ -33,25 +34,48 @@ export class RuntimeControlPlaneClient {
     environmentId: string;
     runnerKey: string;
     version: string;
+    /**
+     * Discovery digest of the running code. Sent with every registration so
+     * the Platform knows which capability report describes this runner.
+     */
+    discoveryDigest?: string;
     manager: RuntimeSyncManager;
     fetchImpl?: typeof fetch;
     push?: RuntimePushConnector;
     pollIntervalMs?: number;
     onError?: (error: unknown) => void;
-  }) {}
+  }) {
+    if (
+      options.discoveryDigest !== undefined
+      && !DISCOVERY_DIGEST_PATTERN.test(options.discoveryDigest)
+    ) {
+      throw new Error('discoveryDigest must be a sha256 digest of the running code');
+    }
+  }
 
   async register(input: {
     capabilities?: Record<string, unknown>;
     technicalMetadata?: Record<string, unknown>;
   } = {}) {
-    this.assertTechnicalMetadata(input.capabilities ?? {});
+    const capabilities = { ...input.capabilities ?? {} };
+    const digest = this.options.discoveryDigest;
+    if (digest !== undefined) {
+      if (
+        capabilities.discoveryDigest !== undefined
+        && capabilities.discoveryDigest !== digest
+      ) {
+        throw new Error('capabilities.discoveryDigest must name the running code');
+      }
+      capabilities.discoveryDigest = digest;
+    }
+    this.assertTechnicalMetadata(capabilities);
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
     return this.request('register', {
       method: 'POST',
       body: JSON.stringify({
         runnerKey: this.options.runnerKey,
         version: this.options.version,
-        capabilities: input.capabilities ?? {},
+        capabilities,
         technicalMetadata: input.technicalMetadata ?? {},
       }),
     });

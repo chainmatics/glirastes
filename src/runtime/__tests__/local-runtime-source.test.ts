@@ -434,6 +434,42 @@ describe('createLocalRuntimeSource with a verified Platform overlay', () => {
     })).rejects.toThrow(/manifest_tool_unavailable/);
   });
 
+  it('gives the model the Platform description of a tool the code has', () => {
+    const source = managedSource(() => overlay([
+      { toolId: ENDPOINT_TOOL_ID, description: 'Lists only the tasks assigned to you.' },
+      { toolId: REMOVED_TOOL_ID, description: 'Never shown.' },
+    ]));
+
+    const snapshot = source.resolveTurnSnapshot({ turnId: 't-description', principal });
+    const registry = materializeManifestToolRegistry({ snapshot, bindings: fixtureBindings() });
+
+    expect(registry.tasks_listTasks!.description).toBe('Lists only the tasks assigned to you.');
+    expect(registry.ui_navigate!.description).toBe('Navigate the app to a named view.');
+    expect(snapshot.manifestRevision.revisionId).toBe(PLATFORM_MANIFEST_REVISION_ID);
+    expect(snapshot.manifestRevision.tools.map((tool) => tool.toolId)).not.toContain(REMOVED_TOOL_ID);
+    const standalone = createLocalRuntimeSource(fixtureOptions());
+    const local = standalone.resolveTurnSnapshot({
+      turnId: 't-description',
+      principal: fixturePrincipal(standalone.identity.tenantId),
+    });
+    expect(local.manifestRevision.tools.find((tool) => tool.toolId === ENDPOINT_TOOL_ID)?.description)
+      .toBe('List the tasks the caller may see.');
+  });
+
+  it('switches to a new Platform description only for turns that start after it', () => {
+    let current = overlay([{ toolId: ENDPOINT_TOOL_ID, description: 'First Platform text.' }]);
+    const source = managedSource(() => current);
+    const first = source.resolveTurnSnapshot({ turnId: 't-first', principal });
+    current = overlay([{ toolId: ENDPOINT_TOOL_ID, description: 'Second Platform text.' }], { revision: 4 });
+    const second = source.resolveTurnSnapshot({ turnId: 't-second', principal });
+
+    const describeTool = (snapshot: typeof first) => snapshot.manifestRevision.tools
+      .find((tool) => tool.toolId === ENDPOINT_TOOL_ID)?.description;
+    expect(describeTool(first)).toBe('First Platform text.');
+    expect(describeTool(second)).toBe('Second Platform text.');
+    expect(describeTool(source.resolveTurnSnapshot({ turnId: 't-first', principal }))).toBe('First Platform text.');
+  });
+
   it('pins each turn to the overlay it started with and never calls the network', () => {
     const fetchImpl = vi.fn();
     vi.stubGlobal('fetch', fetchImpl);

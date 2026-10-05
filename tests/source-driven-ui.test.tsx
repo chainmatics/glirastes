@@ -1,142 +1,112 @@
 // @vitest-environment jsdom
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { join, resolve } from 'node:path';
-import { createElement } from 'react';
-import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { UiActionBus } from 'glirastes/react';
-import { generateReference, tenantId } from '../examples/source-driven-next/adapter.mjs';
+import { createElement, type ComponentType } from 'react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { dispatchToolResultUiActions } from 'glirastes/browser';
+import {
+  assertBuiltSdk,
+  bootApp,
+  copyApp,
+  NATIVE_APP,
+  principal,
+  refreshWithCli,
+  removeCopiedApps,
+} from './support/tool-runtime.js';
 
-const examples = resolve('examples/source-driven-next');
-const roots: string[] = [];
-const disposals: Array<() => void> = [];
-const rows = [{ title: 'Review release', status: 'open', priority: 'high' }, { title: 'Write tests', status: 'done', priority: 'low' }];
-async function fixture(config?: unknown) {
-  const root = await mkdtemp(join(examples, '.ui-proof-'));
-  roots.push(root);
-  await cp(join(examples, 'native'), root, { recursive: true });
-  await mkdir(join(root, 'node_modules'));
-  await symlink(resolve('.'), join(root, 'node_modules/glirastes'), 'dir');
-  await cp(join(examples, 'native-ui'), join(root, 'src'), { recursive: true });
-  await cp(join(examples, 'ui-bridge.js'), join(root, 'src/glirastes-ui-bridge.js'));
-  if (config) await writeFile(join(root, 'src/ui-config.json'), JSON.stringify(config));
-  const auth = await import(pathToFileURL(join(root, 'src/auth.js')).href);
-  const native = await import(pathToFileURL(join(root, 'src/ui.js')).href);
-  const { NativeUiBridge } = await import(pathToFileURL(join(root, 'src/glirastes-ui-bridge.js')).href);
-  const uiConfig = JSON.parse(await readFile(join(root, 'src/ui-config.json'), 'utf8'));
-  const container = document.createElement('div');
-  document.body.append(container);
-  const ui = native.mountNativeUi(container, uiConfig, rows);
-  const bus = new UiActionBus();
-  const mounted = render(createElement(NativeUiBridge, { bus, ui }));
-  disposals.push(() => { mounted.unmount(); ui.dispose(); container.remove(); });
-  const token = auth.createSession({ subjectId: 'alice', tenantId, roles: ['member'], attributes: {} });
-  const request = new Request('http://fixture.local/chat', { headers: { cookie: `session=${token}` } });
-  return { root, container, uiConfig, bus, mounted, request, resolvePrincipal: () => auth.resolveSession(request) };
-}
-async function invoke(app: Awaited<ReturnType<typeof fixture>>, generated: any, key: string, input: unknown) {
-  const turn = generated.createTurn(app);
-  const result = await turn.execute(key, input);
-  expect(result.success).toBe(true);
-  await app.bus.dispatch(result.uiAction);
-}
-afterEach(() => {
-  vi.restoreAllMocks();
-  for (const dispose of disposals.splice(0)) dispose();
-  cleanup();
-});
+const navigation = vi.hoisted(() => ({
+  push: vi.fn<(href: string) => void>(),
+  search: '',
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: navigation.push }),
+  useSearchParams: () => new URLSearchParams(navigation.search),
+}));
+
+const TASKS = [
+  { id: '1', title: 'Review release', status: 'open' },
+  { id: '2', title: 'Write tests', status: 'done' },
+];
+
+beforeAll(assertBuiltSdk);
 afterEach(async () => {
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+  cleanup();
+  vi.restoreAllMocks();
+  navigation.push.mockReset();
+  navigation.search = '';
+  await removeCopiedApps();
 });
 
-describe('UI-owned navigation and filters through the local runtime', () => {
-  it('changes the rendered view and filtered rows via mounted SDK handlers', async () => {
+/** A refreshed copy of the native app, its booted chat runtime and its own UI modules. */
+async function nativeApp() {
+  const root = await copyApp(NATIVE_APP, '.ui-proof-');
+  await refreshWithCli(root);
+  const app = await bootApp(root);
+  const turn = app.turn({ cookie: `session=${app.createSession(principal())}` });
+  const bridge = await import(pathToFileURL(join(root, 'src/glirastes-bridge.jsx')).href) as {
+    GlirastesBridge: ComponentType;
+  };
+  const tasksPage = await import(pathToFileURL(join(root, 'src/app/(app)/tasks/page.jsx')).href) as {
+    default: ComponentType;
+  };
+  /** What the chat does with a tool result: hand its generated UI action to the page-wide bus. */
+  const run = async (name: string, input: unknown) => {
+    const result = await turn.execute(name, input);
+    expect(result).toMatchObject({ success: true });
+    await act(async () => { await dispatchToolResultUiActions(result); });
+  };
+  return { app, turn, run, Bridge: bridge.GlirastesBridge, TasksPage: tasksPage.default };
+}
+
+describe('native UI through generated tools and the app bridge', () => {
+  it('navigates and filters with the router the app hands to its bridge', async () => {
     const network = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected network request'));
-    const app = await fixture();
-    const generated = await generateReference({ rootDir: app.root });
-    await invoke(app, generated, 'UI navigate', { view: 'overview' });
-    expect(app.container.querySelector('h1')?.textContent).toBe('Overview');
-    await invoke(app, generated, 'UI filter', { view: 'tasks', filters: { status: 'done' } });
-    expect(app.container.querySelector('h1')?.textContent).toBe('Tasks');
-    expect([...app.container.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['Write tests']);
-    expect(app.container.querySelector('select')?.value).toBe('done');
+    const native = await nativeApp();
+    expect(native.app.disabled).toEqual([]);
+    render(createElement(native.Bridge));
+    await native.run('ui_navigate', { destination: '/overview' });
+    await native.run('ui_filter_tasks', { status: 'done' });
+    expect(navigation.push.mock.calls).toEqual([['/overview'], ['/tasks?status=done']]);
+    await expect(native.turn.execute('ui_navigate', { destination: '/reports' })).rejects.toThrow('Input does not match');
+    await expect(native.turn.execute('ui_filter_tasks', { status: 'blocked' })).rejects.toThrow('Input does not match');
     expect(network).not.toHaveBeenCalled();
-  });
+  }, 120_000);
 
-  it('tracks added, renamed and removed views without a separate tool entry', async () => {
-    const first = await fixture();
-    const a = await generateReference({ rootDir: first.root });
-    const config = structuredClone(first.uiConfig);
-    config.views.push({ id: 'reports', label: 'Reports', filters: [] });
-    const second = await fixture(config);
-    const b = await generateReference({ rootDir: second.root, previous: a.state });
-    await invoke(second, b, 'UI navigate', { view: 'reports' });
-    expect(second.container.querySelector('h1')?.textContent).toBe('Reports');
-    config.views[2] = { id: 'insights', label: 'Insights', filters: [] };
-    config.views = config.views.filter((view: any) => view.id !== 'overview');
-    const third = await fixture(config);
-    const c = await generateReference({ rootDir: third.root, previous: b.state });
-    await invoke(third, c, 'UI navigate', { view: 'insights' });
-    expect(third.container.querySelector('h1')?.textContent).toBe('Insights');
-    for (const view of ['reports', 'overview']) {
-      await expect(c.createTurn(third).execute('UI navigate', { view })).rejects.toThrow('Input');
-    }
-    const uiId = (g: any) => g.state.inventory.executions.find((entry: any) => entry.stableKey === 'UI navigate').toolId;
-    expect(uiId(c)).toBe(uiId(a));
-    expect(c.changes.changed).toContain(uiId(c));
-  });
+  it('runs the page’s own client action with a validated payload and shows the URL filter', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ tasks: TASKS }));
+    navigation.search = 'status=done';
+    const native = await nativeApp();
+    render(createElement(native.TasksPage));
+    await screen.findByText('Write tests');
+    expect(screen.queryByText('Review release')).toBeNull();
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('done');
+    await native.run('ui_tasks_highlight', { title: 'Write tests' });
+    await waitFor(() => expect(screen.getByText('Write tests').getAttribute('aria-current')).toBe('true'));
+    await expect(native.turn.execute('ui_tasks_highlight', { id: '2' })).rejects.toThrow('Input does not match');
+    // The page's own Zod contract stays the last word on what its handler accepts.
+    const empty = await native.turn.execute('ui_tasks_highlight', { title: '' });
+    await expect(dispatchToolResultUiActions(empty)).rejects.toThrow('Invalid payload for UI action tasks.highlight');
+    expect(screen.getByText('Write tests').getAttribute('aria-current')).toBe('true');
+  }, 120_000);
 
-  it('tracks added and removed filters and tombstones the last filter tool', async () => {
-    const first = await fixture();
-    const a = await generateReference({ rootDir: first.root });
-    const config = structuredClone(first.uiConfig);
-    config.views[0].filters = [{ key: 'priority', label: 'Priority', values: ['high', 'low'] }];
-    const second = await fixture(config);
-    const b = await generateReference({ rootDir: second.root, previous: a.state });
-    await invoke(second, b, 'UI filter', { view: 'tasks', filters: { priority: 'high' } });
-    expect([...second.container.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['Review release']);
-    await expect(b.createTurn(second).execute('UI filter', { view: 'tasks', filters: { status: 'open' } })).rejects.toThrow('Input');
-    config.views[0].filters[0].values = ['urgent', 'low'];
-    const changed = await fixture(config);
-    const updated = await generateReference({ rootDir: changed.root, previous: b.state });
-    await invoke(changed, updated, 'UI filter', { view: 'tasks', filters: { priority: 'low' } });
-    expect([...changed.container.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['Write tests']);
-    expect([...changed.container.querySelectorAll('option')].map((item) => item.value)).toEqual(['', 'urgent', 'low']);
-    await expect(updated.createTurn(changed).execute('UI filter', { view: 'tasks', filters: { priority: 'high' } })).rejects.toThrow('Input');
-    config.views[0].filters = [];
-    const third = await fixture(config);
-    const c = await generateReference({ rootDir: third.root, previous: updated.state });
-    await expect(c.createTurn(third).execute('UI filter', { view: 'tasks', filters: {} })).rejects.toThrow('unavailable');
-    expect(c.changes.removed).toHaveLength(1);
-  });
-
-  it('rejects missing bridge/config instead of reporting a current UI inventory', async () => {
-    const app = await fixture();
-    const generated = await generateReference({ rootDir: app.root });
-    await rm(join(app.root, 'src/glirastes-ui-bridge.js'));
-    await expect(generateReference({ rootDir: app.root, previous: generated.state })).rejects.toThrow();
-    await rm(join(app.root, 'src/ui-config.json'));
-    await expect(generateReference({ rootDir: app.root, previous: generated.state })).rejects.toThrow();
-  });
-
-  it('cleans up SDK subscriptions on unmount', async () => {
-    const app = await fixture();
-    const generated = await generateReference({ rootDir: app.root });
-    app.mounted.unmount();
-    await invoke(app, generated, 'UI navigate', { view: 'overview' });
-    expect(app.container.querySelector('h1')?.textContent).toBe('Tasks');
-  });
-
-  it('uses the same configuration for ordinary app controls', async () => {
-    const app = await fixture();
-    const overview = [...app.container.querySelectorAll('button')].find((button) => button.textContent === 'Overview')!;
-    overview.click();
-    expect(app.container.querySelector('h1')?.textContent).toBe('Overview');
-    app.container.querySelector('button')!.click();
-    const select = app.container.querySelector('select')!;
+  it('uses the same filter definition for the ordinary page controls', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ tasks: TASKS }));
+    const native = await nativeApp();
+    render(createElement(native.TasksPage));
+    await screen.findByText('Review release');
+    const select = screen.getByLabelText('Status') as HTMLSelectElement;
     select.value = 'open';
     select.dispatchEvent(new Event('change', { bubbles: true }));
-    expect([...app.container.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['Review release']);
-  });
+    expect(navigation.push).toHaveBeenCalledWith('/tasks?status=open');
+  }, 120_000);
+
+  it('stops navigating once the bridge unmounts', async () => {
+    const native = await nativeApp();
+    const view = render(createElement(native.Bridge));
+    view.unmount();
+    await native.run('ui_navigate', { destination: '/overview' });
+    expect(navigation.push).not.toHaveBeenCalled();
+  }, 120_000);
 });

@@ -196,6 +196,7 @@ function managedStyleSnapshot(principal: Principal) {
       requiresApproval: fact.requiresApproval,
       allowedRoles: fact.allowedRoles,
     })),
+    toolOverrides: [],
     publishedAt: '2026-08-12T00:00:00.000Z',
   });
   return createTurnSnapshot({

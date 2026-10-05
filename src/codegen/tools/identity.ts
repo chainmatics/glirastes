@@ -6,6 +6,7 @@ import type { ToolFinding } from './types.js';
 
 const OPERATIONS: Readonly<Record<EndpointMethod, string>> = {
   GET: 'list',
+  HEAD: 'head',
   POST: 'create',
   PUT: 'update',
   PATCH: 'update',
@@ -28,7 +29,7 @@ function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
 }
 
-/** `<resource>.list|get|create|update|delete` from method and path. */
+/** `<resource>.list|get|head|check|create|update|delete` from method and path. */
 export function deriveDefinitionId(input: { method: EndpointMethod; path: string }): string {
   const segments = input.path.split('/').filter(Boolean);
   const rest = segments[0] === 'api' ? segments.slice(1) : segments;
@@ -38,7 +39,10 @@ export function deriveDefinitionId(input: { method: EndpointMethod; path: string
     resource = `api${resource.charAt(0).toUpperCase()}${resource.slice(1)}`;
   }
   const last = rest[rest.length - 1];
-  const operation = input.method === 'GET' && last?.startsWith(':') ? 'get' : OPERATIONS[input.method];
+  const item = last?.startsWith(':') === true;
+  const operation = item && input.method === 'GET' ? 'get'
+    : item && input.method === 'HEAD' ? 'check'
+      : OPERATIONS[input.method];
   return `${resource}.${operation}`;
 }
 

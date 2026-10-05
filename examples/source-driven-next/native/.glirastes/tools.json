@@ -3,6 +3,11 @@
   "appId": "019fb007-0000-7000-8000-000000000001",
   "targetAppKey": "native-query-fixture",
   "locale": "en-US",
-  "sources": [{ "kind": "next-app", "apiDir": "src/app/api" }],
+  "sources": [
+    { "kind": "next-app", "apiDir": "src/app/api" },
+    "next-pages",
+    "url-filters",
+    "react-actions"
+  ],
   "emit": { "module": "src/generated/glirastes/tools.generated.js" }
 }

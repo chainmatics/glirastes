@@ -60,4 +60,17 @@ export type { MaterializedDeploymentRevisions } from './materialize-deployment.j
 export {
   validateLocalDeploymentBindings,
 } from './local-deployment-validator.js';
+export type {
+  IgnoredPlatformTool,
+  LocalDeploymentValidation,
+} from './local-deployment-validator.js';
 export { createManagedRuntimeSync } from './managed-sync.js';
+export {
+  capabilityReportFrom,
+  DISCOVERY_DIGEST_PATTERN,
+  uploadCapabilityReport,
+} from './capability-report.js';
+export type {
+  CapabilityReport,
+  CapabilityReportResult,
+} from './capability-report.js';

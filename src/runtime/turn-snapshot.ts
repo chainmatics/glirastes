@@ -7,6 +7,7 @@ import type {
   RuntimePolicyRevision,
   SecurityRevocation,
 } from '../contracts/index.js';
+import { applyPolicyOverlay } from './policy-overlay.js';
 
 export interface TurnSnapshot {
   readonly turnId: string;
@@ -14,6 +15,12 @@ export interface TurnSnapshot {
   readonly principal: Principal;
   readonly agentRevision: AgentRevision;
   readonly manifestRevision: ManifestRevision;
+  /**
+   * The pinned policy revision. Its `toolPolicies` are the effective ones:
+   * the signed values restricted by the revision's own signed `toolOverrides`
+   * deltas (restrict-only), so every consumer of the snapshot obeys Platform
+   * decisions, whichever path built it.
+   */
   readonly policyRevision: RuntimePolicyRevision;
   readonly budget: ExecutionBudget;
   /**
@@ -82,6 +89,22 @@ function minBudget(
   };
 }
 
+/**
+ * Applies the signed `toolOverrides` deltas of a Platform policy revision to
+ * its reported `toolPolicies`, restrict-only. A revision composed by the local
+ * runtime source carries no deltas and stays as it is; one a consumer takes
+ * straight from a Platform deployment no longer runs a tool the Platform
+ * disabled. Applying the same deltas twice changes nothing.
+ */
+function withPlatformDecisions(policyRevision: RuntimePolicyRevision): RuntimePolicyRevision {
+  const deltas = policyRevision.toolOverrides ?? [];
+  if (deltas.length === 0) return policyRevision;
+  return {
+    ...policyRevision,
+    toolPolicies: applyPolicyOverlay(policyRevision.toolPolicies, deltas).policies,
+  };
+}
+
 export function createTurnSnapshot(options: {
   turnId: string;
   agentRevision: AgentRevision;
@@ -118,7 +141,7 @@ export function createTurnSnapshot(options: {
     principal: clone(principal),
     agentRevision: clone(agentRevision),
     manifestRevision: clone(manifestRevision),
-    policyRevision: clone(policyRevision),
+    policyRevision: clone(withPlatformDecisions(policyRevision)),
     budget: minBudget(options.localLimits, agentRevision.budget, policyRevision.budget),
     ...(options.promptPin ? { promptPin: clone(options.promptPin) } : {}),
   };

@@ -39,7 +39,7 @@ import type {
 export const NEXT_DEFAULT_API_DIR = 'src/app/api';
 const CONTRACT_FILE_NAMES = ['contract.ts', 'contract.tsx', 'contract.js', 'contract.mjs'];
 /** Route exports Next.js serves that the generator does not turn into tools. */
-const UNSUPPORTED_METHODS: ReadonlySet<string> = new Set(['HEAD', 'OPTIONS']);
+const UNSUPPORTED_METHODS: ReadonlySet<string> = new Set(['OPTIONS']);
 const ROUTE_FILE = /^route\.(?:ts|tsx|js|jsx)$/;
 
 interface RouteEntry {
@@ -203,8 +203,8 @@ async function enumerateRoutes(
     });
   }
 
-  // The route reader drops HEAD and OPTIONS without a trace, and a route file
-  // that exports only those yields no candidate at all: look at every route file.
+  // The route reader drops OPTIONS without a trace, and a route file that
+  // exports only OPTIONS yields no candidate at all: look at every route file.
   const unsupported = new Map<string, ExcludedTool>();
   const apiRoot = resolve(root, apiDir);
   for (const absoluteFile of (await listRouteFiles(apiRoot)).sort(compareCodeUnits)) {

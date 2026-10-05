@@ -36,6 +36,19 @@ describe('scanNextAppRoutes', () => {
     });
   });
 
+  it('keeps HEAD out of the legacy route scan upload and reports it in source discovery', async () => {
+    const rootDir = await fixture({ 'src/app/api/tasks/route.ts': `
+      export async function GET() { await getSession(); return Response.json([]); }
+      export async function HEAD() { await getSession(); return new Response(null); }
+      export const { HEAD: other } = handlers;
+    ` });
+    expect((await scanNextAppRoutes({ rootDir })).candidates.map((candidate) => candidate.method)).toEqual(['GET']);
+    const discovered = await scanNextAppRoutes({ rootDir, mode: 'source-discovery' });
+    expect(discovered.candidates.map((candidate) => [candidate.method, candidate.riskClass])).toEqual([
+      ['GET', 'unknown'], ['HEAD', 'unknown'],
+    ]);
+  });
+
   it('does not discover commented, quoted or default exports', async () => {
     const rootDir = await fixture({ 'src/app/api/tasks/route.ts': `
       // export async function GET() {}

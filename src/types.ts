@@ -42,7 +42,7 @@ export type InferSchema<TSchema> =
 // HTTP & Transport
 // ============================================================================
 
-export type EndpointMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+export type EndpointMethod = 'GET' | 'HEAD' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
 // ============================================================================
 // Runtime & Context
@@ -192,9 +192,30 @@ export function createUiActionSchema(
       { message: 'Entity action must include valid {entity}Id (UUID)' },
     );
 
+  // Results of the generated UI tools (`ui.navigate`, `ui.filter.<view>`,
+  // `ui.<actionId>`). The browser bridge checks the href again, and the app's
+  // contract checks a client action payload when it is dispatched.
+  const generatedNavigateSchema = z
+    .object({
+      type: z.literal('glirastes.navigate'),
+      actionId: z.literal('glirastes.navigate'),
+      payload: z.object({ href: z.string().startsWith('/').max(2_048) }).passthrough(),
+    })
+    .strict();
+
+  const generatedClientActionSchema = z
+    .object({
+      type: z.literal('glirastes.action'),
+      actionId: z.string().min(1).max(200),
+      payload: z.record(z.string(), z.unknown()),
+    })
+    .strict();
+
   const builtInSchema = z.union([
     runClientActionSchema,
     navigateSchema,
+    generatedNavigateSchema,
+    generatedClientActionSchema,
     entityActionSchema, // Fallback — must be last
   ]);
 

@@ -1,4 +1,5 @@
 import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent } from 'react';
+import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
 
@@ -694,6 +695,12 @@ export interface AiChatProviderConfig {
    */
   themeScope?: 'inline' | 'inherit';
   onToolResult?: OnToolResult;
+  /**
+   * Bus that receives the UI actions of generated tools (`ui.navigate`,
+   * `ui.filter.<view>`, `ui.<actionId>`) after `onToolResult`. Defaults to
+   * the page-wide bus of `glirastes/browser`.
+   */
+  uiActionBus?: UiActionBus;
   onBeforeSend?: OnBeforeSend;
   approvalDescription?: ApprovalDescriptionFn;
   continueMessage?: string;
