@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 2,
+  "base": {
+    "schemaVersion": 2,
+    "eventId": "019fb900-0000-7000-8000-000000000001",
+    "eventType": "turn.finished",
+    "occurredAt": "2026-10-05T10:15:30.000Z",
+    "appId": "019fb900-0000-7000-8000-0000000000a1",
+    "environmentId": "019fb900-0000-7000-8000-0000000000e1",
+    "buildId": "git:4f2c9e1",
+    "instanceId": "web-1",
+    "revisionId": "019fb900-0000-7000-8000-0000000000b1",
+    "model": "anthropic/claude-sonnet-5.5",
+    "status": "completed",
+    "errorCode": null,
+    "inputTokens": 1200,
+    "outputTokens": 240,
+    "cost": { "usd": 0.0048, "source": "provider-reported", "pricingVersion": null },
+    "latency": { "firstTokenMs": 420, "totalMs": 1830 },
+    "toolCallCount": 3,
+    "toolErrorCount": 1,
+    "tools": [
+      { "toolId": "019fb900-0000-7000-8000-0000000000c1", "calls": 2, "errors": 1 },
+      { "toolId": "019fb900-0000-7000-8000-0000000000c2", "calls": 1, "errors": 0 }
+    ]
+  },
+  "valid": [
+    { "name": "valid/base-provider-reported-cost", "patch": {} },
+    {
+      "name": "valid/price-table-cost",
+      "patch": { "cost": { "usd": 0.0036, "source": "price-table", "pricingVersion": "openrouter-2026-10-04" } }
+    },
+    {
+      "name": "valid/pipeline-error-before-any-model-step",
+      "patch": {
+        "status": "error", "errorCode": "pipeline_error", "model": null,
+        "inputTokens": 0, "outputTokens": 0,
+        "cost": { "usd": null, "source": null, "pricingVersion": null },
+        "latency": { "firstTokenMs": null, "totalMs": 12 },
+        "toolCallCount": 0, "toolErrorCount": 0, "tools": []
+      }
+    },
+    { "name": "valid/model-error", "patch": { "status": "error", "errorCode": "model_error" } },
+    { "name": "valid/safety-stop-budget", "patch": { "status": "safety-stop", "errorCode": "budget_exhausted" } },
+    { "name": "valid/safety-stop-steps", "patch": { "status": "safety-stop", "errorCode": "step_limit" } },
+    { "name": "valid/aborted", "patch": { "status": "aborted", "errorCode": null } },
+    { "name": "valid/standalone-without-build-or-revision", "patch": { "buildId": null, "revisionId": null } },
+    { "name": "valid/offset-timestamp", "patch": { "occurredAt": "2026-10-05T12:15:30.000+02:00" } },
+    {
+      "name": "valid/built-in-tools-only-counted",
+      "patch": { "toolCallCount": 4, "toolErrorCount": 2 }
+    }
+  ],
+  "invalid": [
+    { "name": "invalid/schema-version-1", "patch": { "schemaVersion": 1 } },
+    { "name": "invalid/unknown-event-type", "patch": { "eventType": "run.completed" } },
+    { "name": "invalid/extra-prompt-key", "patch": { "prompt": "Zeige meine Aufgaben" } },
+    { "name": "invalid/extra-metadata-key", "patch": { "metadata": { "rollout": "stable" } } },
+    { "name": "invalid/free-text-model", "patch": { "model": "show me all my tasks" } },
+    { "name": "invalid/secret-in-build-id", "patch": { "buildId": "sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789" } },
+    { "name": "invalid/bearer-in-instance-id", "patch": { "instanceId": "Bearer abcdefghijklmnopqrstuvwxyz" } },
+    { "name": "invalid/uuid-with-wrong-variant", "patch": { "eventId": "019fb900-0000-7000-0000-000000000001" } },
+    { "name": "invalid/timestamp-without-offset", "patch": { "occurredAt": "2026-10-05T10:15:30" } },
+    { "name": "invalid/negative-tokens", "patch": { "inputTokens": -1 } },
+    { "name": "invalid/fractional-tokens", "patch": { "outputTokens": 1.5 } },
+    { "name": "invalid/tokens-beyond-integer", "patch": { "inputTokens": 2147483648 } },
+    { "name": "invalid/unknown-cost-as-zero", "patch": { "cost": { "usd": 0, "source": null, "pricingVersion": null } } },
+    { "name": "invalid/source-without-amount", "patch": { "cost": { "usd": null, "source": "provider-reported", "pricingVersion": null } } },
+    { "name": "invalid/price-table-without-version", "patch": { "cost": { "usd": 0.01, "source": "price-table", "pricingVersion": null } } },
+    { "name": "invalid/provider-cost-with-version", "patch": { "cost": { "usd": 0.01, "source": "provider-reported", "pricingVersion": "v1" } } },
+    { "name": "invalid/negative-cost", "patch": { "cost": { "usd": -0.01, "source": "provider-reported", "pricingVersion": null } } },
+    { "name": "invalid/error-without-code", "patch": { "status": "error", "errorCode": null } },
+    { "name": "invalid/error-with-safety-code", "patch": { "status": "error", "errorCode": "step_limit" } },
+    { "name": "invalid/completed-with-code", "patch": { "errorCode": "model_error" } },
+    { "name": "invalid/aborted-with-code", "patch": { "status": "aborted", "errorCode": "model_error" } },
+    { "name": "invalid/first-token-after-end", "patch": { "latency": { "firstTokenMs": 2000, "totalMs": 1830 } } },
+    { "name": "invalid/latency-beyond-a-day", "patch": { "latency": { "firstTokenMs": null, "totalMs": 86400001 } } },
+    { "name": "invalid/more-errors-than-calls", "patch": { "toolCallCount": 1, "toolErrorCount": 2, "tools": [] } },
+    {
+      "name": "invalid/tool-errors-exceed-tool-calls",
+      "patch": { "tools": [{ "toolId": "019fb900-0000-7000-8000-0000000000c1", "calls": 1, "errors": 2 }] }
+    },
+    {
+      "name": "invalid/duplicate-tool",
+      "patch": { "tools": [
+        { "toolId": "019fb900-0000-7000-8000-0000000000c1", "calls": 1, "errors": 0 },
+        { "toolId": "019fb900-0000-7000-8000-0000000000c1", "calls": 1, "errors": 0 }
+      ] }
+    },
+    {
+      "name": "invalid/tools-exceed-turn-totals",
+      "patch": { "toolCallCount": 1, "toolErrorCount": 0, "tools": [{ "toolId": "019fb900-0000-7000-8000-0000000000c1", "calls": 2, "errors": 0 }] }
+    },
+    {
+      "name": "invalid/tool-arguments",
+      "patch": { "tools": [{ "toolId": "019fb900-0000-7000-8000-0000000000c1", "calls": 1, "errors": 0, "arguments": { "title": "Bericht" } }] }
+    },
+    {
+      "name": "invalid/tool-name-instead-of-id",
+      "patch": { "tools": [{ "toolId": "tasks.list", "calls": 1, "errors": 0 }] }
+    },
+    {
+      "name": "invalid/tool-without-calls",
+      "patch": { "tools": [{ "toolId": "019fb900-0000-7000-8000-0000000000c1", "calls": 0, "errors": 0 }] }
+    },
+    { "name": "invalid/unknown-error-code", "patch": { "status": "error", "errorCode": "timeout" } }
+  ]
+}

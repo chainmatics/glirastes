@@ -130,3 +130,29 @@ export {
   type GeneratedToolModule,
   type GeneratedUiToolBinding,
 } from './contract-bindings.js';
+export {
+  RuntimePriceTableSchema,
+  UNKNOWN_TURN_COST,
+  combineTurnCost,
+  providerReportedCostUsd,
+  rawChunkCostUsd,
+  resolveStepCost,
+  type RuntimePriceTable,
+  type StepCostInput,
+} from './metrics/cost.js';
+export {
+  createTurnMetricsRecorder,
+  type RuntimeMetricsIdentity,
+  type RuntimeMetricsSink,
+  type TurnMetricsOutcome,
+  type TurnMetricsRecorder,
+  type TurnMetricsRecorderOptions,
+  type TurnMetricsStep,
+} from './metrics/turn-recorder.js';
+export {
+  createRuntimeMetricsSink,
+  createRuntimeMetricsSinkFromEnv,
+  type BatchingRuntimeMetricsSink,
+  type RuntimeMetricsDropReason,
+  type RuntimeMetricsSinkOptions,
+} from './metrics/sink.js';

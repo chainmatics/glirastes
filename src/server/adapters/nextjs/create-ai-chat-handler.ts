@@ -37,10 +37,16 @@ import { PrincipalSchema } from '../../../contracts/index.js';
 import {
   createManagedTurnGuard,
   createRegistryToolDiscovery,
+  createTurnMetricsRecorder,
   createTurnToolDiscovery,
   isToolRevoked,
+  rawChunkCostUsd,
+  resolveStepCost,
+  RuntimePriceTableSchema,
   type BudgetEvaluation,
   type ManagedTurnGuard,
+  type RuntimePriceTable,
+  type TurnMetricsRecorder,
 } from '../../../runtime/index.js';
 import {
   createHybridToolDiscovery,
@@ -98,6 +104,14 @@ export interface StreamHandlerContext {
    * re-authorization, budget).
    */
   handlerBuiltinToolNames?: ReadonlyArray<string>;
+  /**
+   * Content-free metrics of this turn when the handler has `metrics`. The
+   * built-in stream handler reports every step and the outcome; a custom
+   * stream handler reports through it (`recordStep`, `finish`) itself.
+   */
+  turnMetrics?: TurnMetricsRecorder;
+  /** Price table configured on the handler (`modelPricing`). */
+  modelPricing?: RuntimePriceTable;
 }
 
 /**
@@ -186,6 +200,41 @@ export function shouldStopManagedExecution(options: {
   return options.stepCount >= options.maxSteps
     || options.budgetState === 'hard-limit'
     || (options.lastStepToolNames ?? []).includes(CLARIFICATION_TOOL_NAME);
+}
+
+/** Model id of a finished step; AI SDK 6 versions differ in where they put it. */
+function stepModelId(event: unknown): string | null {
+  const record = event as {
+    model?: { modelId?: unknown };
+    response?: { modelId?: unknown };
+  };
+  const modelId = record.model?.modelId ?? record.response?.modelId;
+  return typeof modelId === 'string' ? modelId : null;
+}
+
+/**
+ * Names of the tool calls of a step that failed: thrown errors and the
+ * `{ error }` results SDK tools return. Only names leave this function.
+ */
+function failedToolNames(content: ReadonlyArray<unknown>): string[] {
+  const names: string[] = [];
+  for (const part of content) {
+    const record = part as { type?: unknown; toolName?: unknown; output?: unknown };
+    if (typeof record?.toolName !== 'string') continue;
+    const output = record.output as { error?: unknown } | null | undefined;
+    if (
+      record.type === 'tool-error'
+      || (
+        record.type === 'tool-result'
+        && typeof output === 'object'
+        && output !== null
+        && typeof output.error === 'string'
+      )
+    ) {
+      names.push(record.toolName);
+    }
+  }
+  return names;
 }
 
 function compactToolNames(toolCalls: Array<{ toolName: string }>): string[] {
@@ -350,6 +399,8 @@ async function defaultStreamHandler(
       let totalSteps = 0;
       let finalStateWritten = false;
       let providerErrorReported = false;
+      // Cost of the running model step, read from its raw stream chunks.
+      let stepRawCostUsd: number | null = null;
 
       const writePipelineState = (
         state: PipelineStreamState,
@@ -391,6 +442,16 @@ async function defaultStreamHandler(
           ctx.managedTurn?.snapshot.budget.totalTimeoutMs,
         ),
         stopWhen: shouldStop,
+        // OpenRouter reports `usage.cost` only in the raw final chunk when the
+        // OpenAI-compatible provider is used; the UI stream drops raw chunks.
+        includeRawChunks: Boolean(ctx.managedTurn || ctx.turnMetrics),
+        onChunk: ({ chunk }) => {
+          if (chunk.type === 'raw') {
+            stepRawCostUsd = rawChunkCostUsd(chunk.rawValue) ?? stepRawCostUsd;
+            return;
+          }
+          ctx.turnMetrics?.markFirstChunk();
+        },
         // AI SDK's default logs the complete provider error, including
         // request/response content. Only the local consumer owns diagnostics.
         onError: ({ error }) => {
@@ -398,9 +459,33 @@ async function defaultStreamHandler(
           onStreamError?.(error);
         },
         onStepFinish: async (event) => {
+          const inputTokens = event.usage.inputTokens ?? 0;
+          const outputTokens = event.usage.outputTokens ?? 0;
+          const model = stepModelId(event);
+          const rawCostUsd = stepRawCostUsd;
+          stepRawCostUsd = null;
+          const cost = resolveStepCost({
+            model,
+            inputTokens,
+            outputTokens,
+            providerMetadata: event.providerMetadata,
+            usageRaw: event.usage.raw,
+            rawChunkCostUsd: rawCostUsd,
+          }, ctx.modelPricing);
+          // A known cost counts against maxEstimatedCostUsd; an unknown one
+          // is never recorded as 0.
           await ctx.managedTurn?.afterModelStep({
-            inputTokens: event.usage.inputTokens ?? 0,
-            outputTokens: event.usage.outputTokens ?? 0,
+            inputTokens,
+            outputTokens,
+            ...(cost.usd !== null ? { estimatedCostUsd: cost.usd } : {}),
+          });
+          ctx.turnMetrics?.recordStep({
+            model,
+            inputTokens,
+            outputTokens,
+            cost,
+            toolNames: event.toolCalls.map((call) => call.toolName),
+            failedToolNames: failedToolNames(event.content),
           });
           const report = buildStepReport({
             stepNumber: event.stepNumber,
@@ -426,6 +511,15 @@ async function defaultStreamHandler(
           ctx.onStepReport?.(report);
         },
         onAbort: (event) => {
+          // The runtime time budget is the only abort source of this handler,
+          // so an abort at the hard limit is a budget stop, not a user abort.
+          const abortedByBudget =
+            ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
+          ctx.turnMetrics?.finish(
+            abortedByBudget
+              ? { status: 'safety-stop', errorCode: 'budget_exhausted' }
+              : { status: 'aborted', errorCode: null },
+          );
           if (finalStateWritten) return;
           totalSteps = Math.max(totalSteps, event.steps.length);
           writePipelineState(
@@ -462,6 +556,12 @@ async function defaultStreamHandler(
                 : event.finishReason === 'error'
                   ? 'error'
                   : 'completed';
+          ctx.turnMetrics?.finish({
+            status,
+            errorCode: status === 'safety-stop'
+              ? stoppedByBudget ? 'budget_exhausted' : 'step_limit'
+              : status === 'error' ? 'model_error' : null,
+          });
 
           if (!finalStateWritten) {
             writePipelineState(
@@ -504,6 +604,7 @@ async function defaultStreamHandler(
       try {
         await result.response;
       } catch (error) {
+        ctx.turnMetrics?.finish({ status: 'error', errorCode: 'model_error' });
         if (finalStateWritten) return;
         writePipelineState(
           createPipelineState({
@@ -588,7 +689,22 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     streamHandler: customStreamHandler,
     toolDiscovery: enableToolDiscovery = false,
     toolSemantics,
+    metrics,
+    modelPricing: configuredModelPricing,
   } = config;
+
+  // The Proctor endpoint behind Lancer telemetry is not served by the
+  // Foundation control plane and its audit payloads are not content-free;
+  // the managed-local path reports through `metrics` instead.
+  if (managedRuntime && telemetry) {
+    throw new Error(
+      'createAiChatHandler: telemetry (legacy Lancer) cannot be combined with '
+      + 'managedRuntime; use metrics for content-free runtime metrics',
+    );
+  }
+  const modelPricing = configuredModelPricing
+    ? RuntimePriceTableSchema.parse(configuredModelPricing)
+    : undefined;
 
   // Report model defaults to Glirastes (fire-and-forget, once)
   let defaultsReported = false;
@@ -660,6 +776,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
   async function handler(req: Request): Promise<Response> {
     reportDefaultsOnce();
+    let turnMetrics: TurnMetricsRecorder | undefined;
     try {
       const { messages: requestMessages } = await req.json();
 
@@ -725,6 +842,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           onBudgetSignal: managedRuntime.onBudgetSignal,
         });
       }
+
+      turnMetrics = metrics
+        ? createTurnMetricsRecorder({
+            sink: metrics,
+            snapshot: managedTurn?.snapshot,
+            startedAtMs: requestStart,
+          })
+        : undefined;
 
       const buildDiscovery = async (
         registry: ToolRegistry,
@@ -951,6 +1076,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         } else if (pipelineResult.model.instance) {
           model = pipelineResult.model.instance;
         } else {
+          turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
           return new Response(
             JSON.stringify({
               error:
@@ -1055,6 +1181,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
           managedTurn,
+          turnMetrics,
+          modelPricing,
           toolDiscovery: discoveryController,
           handlerBuiltinToolNames: discoveryController
             ? [...handlerBuiltinNames, 'find_tools']
@@ -1147,6 +1275,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       // Resolve model + system prompt (legacy mode — no pipeline fallback)
       if (!modelConfig) {
+        turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
         return new Response(
           JSON.stringify({
             error:
@@ -1213,12 +1342,15 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,
         managedTurn,
+        turnMetrics,
+        modelPricing,
         toolDiscovery: discoveryController,
         handlerBuiltinToolNames: discoveryController
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,
       });
     } catch (error) {
+      turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
       onError?.(error, req);
       return new Response(
         JSON.stringify({ error: 'AI request failed' }),
