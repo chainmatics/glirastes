@@ -100,17 +100,20 @@ function requiredKeys(schema: JsonSchemaLike | undefined): Set<string> {
 }
 
 function stringOptions(schema: JsonSchemaLike | undefined): string[] | undefined {
-  const candidate = isRecord(schema) && schema.type === 'array' && isRecord(schema.items) ? schema.items : schema;
-  if (!isRecord(candidate) || !Array.isArray(candidate.enum)) return undefined;
-  if (!candidate.enum.every((value) => typeof value === 'string')) return undefined;
+  if (!isRecord(schema) || !Array.isArray(schema.enum)) return undefined;
+  if (!schema.enum.every((value) => typeof value === 'string')) return undefined;
   // A blank choice is the empty field; a choice the list cannot show drops the closed set.
-  const values = (candidate.enum as string[]).filter((value) => value.trim().length > 0);
+  const values = (schema.enum as string[]).filter((value) => value.trim().length > 0);
   return values.length > 0 && values.every((value) => value.length <= 100 && !CONTROL.test(value))
     ? values.slice(0, CHAT_INTERACTION_LIMITS.options)
     : undefined;
 }
 
-/** A value the argument form can type: a string, a string enum, or an array of string enums. */
+/**
+ * A value the argument form can type: a string or a string enum. An array
+ * (`array: 'comma' | 'repeat'` filter keys) is not typed: the form sends one
+ * scalar and the bound input schema (`{ type: 'array' }`) rejects a scalar.
+ */
 function isStringInput(schema: JsonSchemaLike | undefined): boolean {
   if (!isRecord(schema)) return false;
   if (stringOptions(schema)) return true;
@@ -150,7 +153,7 @@ function argsFor(
     if (skip.has(name)) continue;
     if (name === 'params' && isRecord(schema)) {
       const nestedRequired = requiredKeys(schema);
-      for (const [param, paramSchema] of Object.entries(properties(schema))) {
+      for (const [param, paramSchema] of Object.entries(properties(schema)).sort(([left], [right]) => compareCodeUnits(left, right))) {
         if (!isStringInput(paramSchema)) return undefined;
         result.push(argFor(`params.${param}`, paramSchema, required.has('params') || nestedRequired.has(param), entityOf));
       }

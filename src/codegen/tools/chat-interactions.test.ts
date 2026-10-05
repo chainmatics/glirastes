@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AppSetupArtifactSchema } from '../../contracts/index.js';
+import { createJsonSchemaLike } from '../../runtime/json-schema.js';
+import { canonicalJson } from './canonical.js';
 import { deriveChatInteractions, humanizeIdentifier } from './chat-interactions.js';
 import type { JsonSchemaLike, ToolContract, ToolContractsEntry } from './types.js';
 
@@ -156,7 +158,7 @@ describe('deriveChatInteractions', () => {
       commands: [
         {
           id: 'filter.tasks', label: { en: 'Filter Tasks', de: 'Tasks filtern' },
-          args: [{ name: 'labels', label: 'Labels', options: ['bug', 'idea'] }, { name: 'status', label: 'Status', options: ['done', 'open'] }],
+          args: [{ name: 'status', label: 'Status', options: ['done', 'open'] }],
           run: { kind: 'ui', tool: 'ui.filter.tasks' },
         },
         { id: 'open.home', label: { en: 'Open Home', de: 'Startseite öffnen' }, run: { kind: 'ui', tool: 'ui.navigate', args: { destination: '/' } } },
@@ -216,6 +218,58 @@ describe('deriveChatInteractions', () => {
       args: [{ name: '_', label: '_' }, { name: 'status', label: 'Status', options: ['open'] }],
       run: { kind: 'ui', tool: 'ui.filter.tasks' },
     }]);
+  });
+
+  it('never offers an array key as a single value, because the bound schema rejects a scalar', () => {
+    // The filter tool's input schema is what the runtime binds: a picked scalar would never validate.
+    const labels = { type: 'array', items: { type: 'string', enum: ['bug', 'idea'] } };
+    const bound = createJsonSchemaLike(object({ labels }));
+    expect(bound.safeParse({ labels: 'bug' }).success).toBe(false);
+    expect(bound.safeParse({ labels: ['bug'] }).success).toBe(true);
+
+    const optional = deriveChatInteractions(catalog([{
+      name: 'ui.filter.tasks', input: object({ labels, status: { type: 'string', enum: ['done', 'open'] } }),
+      uiAction: { kind: 'filter', destination: '/tasks', keys: [{ key: 'labels', array: 'repeat' }, { key: 'status' }] },
+    }]));
+    expect(optional.commands).toEqual([{
+      id: 'filter.tasks', label: { en: 'Filter Tasks', de: 'Tasks filtern' },
+      args: [{ name: 'status', label: 'Status', options: ['done', 'open'] }],
+      run: { kind: 'ui', tool: 'ui.filter.tasks' },
+    }]);
+
+    // A required array has no form the chat can fill, so its command is dropped like any untypeable required key.
+    const required = deriveChatInteractions(catalog([{
+      name: 'ui.filter.tasks', input: object({ labels }, ['labels']),
+      uiAction: { kind: 'filter', destination: '/tasks', keys: [{ key: 'labels', array: 'comma' }] },
+    }]));
+    expect(required.commands).toEqual([]);
+  });
+
+  it('derives nested params arguments in one canonical order', () => {
+    const filter = (params: Record<string, unknown>): Spec => ({
+      name: 'ui.filter.teamsMembersItem',
+      input: object({ params: object(params), status: { type: 'string', enum: ['active', 'inactive'] } }),
+      uiAction: { kind: 'filter', destination: '/teams/:teamId/members/:memberId', keys: [{ key: 'status' }] },
+    });
+    const pathOrder = deriveChatInteractions(catalog([filter({ teamId: STRING, memberId: STRING })]));
+    const fileOrder = deriveChatInteractions(catalog([filter({ memberId: STRING, teamId: STRING })]));
+    expect(pathOrder.commands[0]!.args!.map((entry) => entry.name)).toEqual(['params.memberId', 'params.teamId', 'status']);
+    expect(JSON.stringify(pathOrder)).toBe(JSON.stringify(fileOrder));
+  });
+
+  it('derives the same data from the observed contracts and from tool-contracts.json', () => {
+    // `tools refresh` renders from the observed contracts, `tools check --integrity-only` from the
+    // canonical file, whose keys are sorted; both must give byte-identical interactions.
+    const nested: Spec = {
+      name: 'ui.filter.teamsMembersItem',
+      input: object({ params: object({ teamId: STRING, memberId: STRING }), status: { type: 'string', enum: ['active', 'inactive'] } }),
+      uiAction: { kind: 'filter', destination: '/teams/:teamId/members/:memberId', keys: [{ key: 'status' }] },
+    };
+    const { artifact, contracts } = catalog([...SPECS, nested]);
+    const fromFile = JSON.parse(canonicalJson({ tools: contracts })).tools as ToolContractsEntry[];
+    const observed = deriveChatInteractions({ artifact, contracts });
+    expect(observed.commands.some((entry) => entry.id === 'filter.teamsMembersItem')).toBe(true);
+    expect(JSON.stringify(deriveChatInteractions({ artifact, contracts: fromFile }))).toBe(JSON.stringify(observed));
   });
 
   it('humanizes identifiers for default labels', () => {
