@@ -22,6 +22,8 @@ import type {
 } from '../../../contracts/index.js';
 import type {
   ManagedTurnBudgetSignal,
+  RuntimeMetricsSink,
+  RuntimePriceTable,
   ToolSearchSemanticsMap,
   TurnSnapshot,
 } from '../../../runtime/index.js';
@@ -322,12 +324,13 @@ export interface AiChatHandlerConfig {
   onAudit?: AuditEmitter;
 
   /**
-   * Remote telemetry sink for forwarding audit events to Glirastes.
+   * Legacy remote telemetry sink (Lancer, `/v1/proctor/events`).
    *
-   * Pass `lancer.telemetry` to enable monitoring on the Glirastes dashboard
-   * — works with both Free and Pro API keys. When combined with `pipeline`,
-   * Pro-tier telemetry is handled by server-pro; this field additionally
-   * forwards adapter-level session events.
+   * Not available with `managedRuntime`: the Foundation control plane does
+   * not serve the Proctor endpoint and these audit payloads are not
+   * content-free, so `createAiChatHandler` refuses the combination. Use
+   * `metrics` there. Without `managedRuntime` the legacy behaviour is
+   * unchanged:
    *
    * ```typescript
    * const lancer = createLancer({ apiKey: process.env.GLIRASTES_API_KEY! });
@@ -335,6 +338,24 @@ export interface AiChatHandlerConfig {
    * ```
    */
   telemetry?: TelemetrySink;
+
+  /**
+   * Content-free turn metrics (TechnicalRuntimeEvent v2) for the Glirastes
+   * Platform, e.g. `createRuntimeMetricsSinkFromEnv()` from
+   * `glirastes/runtime`. One event per turn (tokens, cost with provenance,
+   * latency, outcome, tool ids); never prompts, messages, arguments, results
+   * or secrets. Recording is synchronous and cheap, delivery happens later
+   * off the turn, and a failing sink never blocks or fails a turn.
+   */
+  metrics?: RuntimeMetricsSink;
+
+  /**
+   * Prices for models whose provider reports no cost (`source:
+   * 'price-table'`). A provider-reported cost (OpenRouter `usage.cost`)
+   * always wins; without either a turn's cost stays unknown (`null`), never
+   * 0. A known cost also counts against the turn's `maxEstimatedCostUsd`.
+   */
+  modelPricing?: RuntimePriceTable;
 
   /**
    * Lancer client for runtime prompt and model overrides (Pro feature).
