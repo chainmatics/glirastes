@@ -16,6 +16,8 @@ const LIB = {
     + 'export function withUser(request: Request) { return requireUser(request); }\n',
   'src/lib/outermost.ts': "import { withUser } from './outer';\n"
     + 'export function viaThree(request: Request) { return withUser(request); }\n',
+  'src/lib/runner.ts': "import { promisify } from 'node:util';\nimport { exec } from 'node:child_process';\n"
+    + 'export const run = promisify(exec);\n',
 };
 
 async function evidenceFor(
@@ -74,5 +76,41 @@ describe('collectHandlerEvidence', () => {
       + '  return Response.json({ match, ok: data.ok }); }\n', false],
   ])('flags external evidence only for child processes and dynamic code (%#)', async (source, external) => {
     expect((await evidenceFor(source, 'POST')).externalCall).toBe(external);
+  });
+
+  it.each([
+    ["import { exec } from 'node:child_process';\nimport { promisify } from 'node:util';\n"
+      + "export async function POST() { const run = promisify(exec); await run('ls'); return Response.json({}); }\n"],
+    ["import { exec } from 'node:child_process';\nimport { promisify } from 'node:util';\nconst run = promisify(exec);\n"
+      + "export async function POST() { await run('ls'); return Response.json({}); }\n"],
+    ["import * as cp from 'child_process';\nimport * as util from 'node:util';\nconst run = util.promisify(cp.execFile);\n"
+      + "export async function POST() { await run('ls'); return Response.json({}); }\n"],
+    ["import { run } from '../../../lib/runner';\nexport async function POST() { await run('ls'); return Response.json({}); }\n"],
+    ["export async function POST() { const { execSync } = require('child_process'); execSync('ls'); return Response.json({}); }\n"],
+    ["const cp = require('node:child_process');\nexport async function POST() { cp.execSync('ls'); return Response.json({}); }\n"],
+    ["export async function POST() { const cp = await import('node:child_process'); cp.execSync('ls'); return Response.json({}); }\n"],
+    ["import cp = require('child_process');\nexport async function POST() { cp.execSync('ls'); return Response.json({}); }\n"],
+    ["import { exec } from 'child_process';\nexport async function POST() { const tools = { exec }; tools.exec('ls'); return Response.json({}); }\n"],
+  ])('flags child processes reached through promisify, require, import() and bindings (%#)', async (source) => {
+    expect((await evidenceFor(source, 'POST')).externalCall).toBe(true);
+  });
+
+  it.each([
+    ["import type { ExecOptions } from 'node:child_process';\n"
+      + 'export async function POST() { const options: ExecOptions = {}; return Response.json(options); }\n'],
+    ["import { ExecOptions } from 'node:child_process';\n"
+      + 'export async function POST() { const options: ExecOptions = {}; return Response.json(options); }\n'],
+    ["import { promisify } from 'node:util';\nconst sleep = promisify(setTimeout);\n"
+      + 'export async function POST() { await sleep(1); return Response.json({}); }\n'],
+    ["export async function POST() { const exec = (value: string) => value; return Response.json({ v: exec('a') }); }\n"],
+  ])('does not flag type-only or unrelated child_process lookalikes (%#)', async (source) => {
+    expect((await evidenceFor(source, 'POST')).externalCall).toBe(false);
+  });
+
+  it('does not count auth calls in a followed binding initializer as auth evidence', async () => {
+    expect(await evidenceFor(
+      'const lookup = getSession();\n'
+      + 'export async function GET() { return Response.json(lookup()); }\n',
+    )).toEqual({ authEvidence: [], externalCall: false });
   });
 });
