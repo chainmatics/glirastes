@@ -68,6 +68,7 @@ export type {
 
 export {
   TOOL_POLICY_RULES_VERSION,
+  ToolOverrideDeltaSchema,
   ToolPolicyEntrySchema,
   ToolPolicyFileSchema,
   ToolPolicyPinSchema,
@@ -89,6 +90,7 @@ export type {
   RiskTier,
   ToolPolicyDefaults,
   ToolPolicyDefaultsInput,
+  ToolOverrideDelta,
   ToolPolicyEntry,
   ToolPolicyFile,
   ToolPolicyWarningCode,

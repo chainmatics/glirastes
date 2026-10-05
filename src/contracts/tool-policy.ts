@@ -1,8 +1,20 @@
 import { z } from 'zod';
 import { FoundationDiagnosticError } from '../diagnostics/index.js';
 import { findSensitiveStringPath } from './content-boundary.js';
-import { ToolRiskClassSchema, type ToolRiskClass } from './revisions.js';
 import { parseExcludePattern } from './tool-exclude-pattern.js';
+import {
+  ToolPolicyEntrySchema,
+  ToolRiskClassSchema,
+  type ToolPolicyEntry,
+  type ToolRiskClass,
+} from './tool-policy-entry.js';
+
+export {
+  ToolOverrideDeltaSchema,
+  ToolPolicyEntrySchema,
+  ToolPolicyPinSchema,
+} from './tool-policy-entry.js';
+export type { ToolOverrideDelta, ToolPolicyEntry } from './tool-policy-entry.js';
 
 /**
  * Version of the default table and the policy bounds below. The golden
@@ -248,32 +260,6 @@ export function deriveToolPolicyDefaults(
 
 const boundedText = (max: number) => z.string().trim().min(1).max(max);
 const stableKey = z.string().min(1).max(512);
-
-export const ToolPolicyPinSchema = z.object({
-  toolId: z.uuid(),
-  atRiskClass: ToolRiskClassSchema,
-}).strict();
-
-/** One policy layer entry: the same shape for local files and Platform deltas. */
-export const ToolPolicyEntrySchema = z.object({
-  enabled: z.boolean().optional(),
-  requiresApproval: z.boolean().optional(),
-  riskClass: ToolRiskClassSchema.optional(),
-  allowedRoles: z.array(boundedText(200)).max(100).optional(),
-  description: boundedText(4_000).optional(),
-  reason: boundedText(500).optional(),
-  pin: ToolPolicyPinSchema.optional(),
-}).strict();
-
-export interface ToolPolicyEntry {
-  enabled?: boolean;
-  requiresApproval?: boolean;
-  riskClass?: ToolRiskClass;
-  allowedRoles?: string[];
-  description?: string;
-  reason?: string;
-  pin?: { toolId: string; atRiskClass: ToolRiskClass };
-}
 
 /**
  * `.glirastes/tool-policy.json`. Written by the developer or the CLI only,

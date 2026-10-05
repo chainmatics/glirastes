@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { ExecutionBudgetSchema } from './runtime.js';
 import { findForbiddenContentPath } from './content-boundary.js';
+import { ToolOverrideDeltaSchema, ToolRiskClassSchema } from './tool-policy-entry.js';
+
+export { ToolRiskClassSchema } from './tool-policy-entry.js';
 
 const uuid = z.uuid();
 const identifier = z.string().trim().min(1).max(200);
@@ -18,16 +21,6 @@ export const LocalBindingReferenceSchema = z.object({
   kind: z.enum(['model', 'tool', 'prompt', 'store']),
   providerAlias: identifier.optional(),
 }).strict();
-
-export const ToolRiskClassSchema = z.enum([
-  'safe-read',
-  'read-sensitive',
-  'write',
-  'delete',
-  'financial',
-  'external',
-  'unknown',
-]);
 
 /**
  * Curated, locale-specific labels for operator-facing surfaces. These values
@@ -140,6 +133,25 @@ export const RuntimePolicyRevisionSchema = z.object({
   environmentId: uuid,
   budget: ExecutionBudgetSchema,
   toolPolicies: z.array(RuntimeToolPolicySchema),
+  /**
+   * Signed Platform decisions as deltas (P08b shared contract item 2): only
+   * fields an operator decided, one entry per tool. Absent on revisions
+   * without decisions, which therefore keep their bytes.
+   */
+  toolOverrides: z.array(ToolOverrideDeltaSchema).max(5_000).default([])
+    .superRefine((deltas, context) => {
+      const seen = new Set<string>();
+      deltas.forEach((delta, index) => {
+        if (seen.has(delta.toolId)) {
+          context.addIssue({
+            code: 'custom',
+            message: 'A tool has more than one Platform decision',
+            path: [index, 'toolId'],
+          });
+        }
+        seen.add(delta.toolId);
+      });
+    }),
   publishedAt,
   signature: RevisionSignatureSchema,
 }).strict();

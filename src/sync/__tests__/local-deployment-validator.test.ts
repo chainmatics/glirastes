@@ -81,6 +81,7 @@ function revisions(): MaterializedDeploymentRevisions {
         requiresApproval: false,
         allowedRoles: ['member'],
       }],
+      toolOverrides: [],
       publishedAt: '2026-07-29T00:00:00.000Z',
       signature,
     },

@@ -86,6 +86,7 @@ const policyRevision: RuntimePolicyRevision = {
     requiresApproval: false,
     allowedRoles: ['admin'],
   }],
+  toolOverrides: [],
   publishedAt: '2026-07-28T20:00:00.000Z',
   signature,
 };

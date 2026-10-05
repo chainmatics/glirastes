@@ -173,6 +173,7 @@ describe('policyOverlayFromRevision', () => {
       environmentId: '77777777-7777-4777-8777-777777777777',
       budget: BUDGET,
       toolPolicies: [WRITE],
+      toolOverrides: [],
       publishedAt: '2026-10-04T00:00:00.000Z',
       signature: {
         algorithm: 'Ed25519',
