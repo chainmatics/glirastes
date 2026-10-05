@@ -12,7 +12,7 @@ import {
   type SemanticChange,
 } from '../../contracts/index.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
-import { detectSetupProfile } from './setup-profile.js';
+import { detectSetupProfile, type SetupProfile } from './setup-profile.js';
 
 export interface SetupPlanOperation {
   kind: 'validate' | 'adopt' | 'build' | 'receipt' | 'sync';
@@ -38,6 +38,16 @@ export interface CreateSetupPlanOptions {
   inventoryPath?: string;
   promptBundlePath?: string;
   managed?: boolean;
+}
+
+export interface SetupPlanContents {
+  mode: 'standalone' | 'managed';
+  paths: SetupProfile['paths'];
+  proposed: { path: string; raw: string };
+  /** Undefined when no previous artifact exists. */
+  previousRaw?: string;
+  inventoryRaw: string;
+  promptBundleRaw: string;
 }
 
 function sha256(value: string): string {
@@ -66,28 +76,20 @@ function boundedPath(rootDir: string, path: string): {
   return { absolute, relative: local };
 }
 
-async function readArtifact(
+async function readRaw(
   rootDir: string,
   path: string,
   required: boolean,
-): Promise<{ artifact: AppSetupArtifact; path: string; digest: string } | undefined> {
+): Promise<{ raw: string; path: string } | undefined> {
   const bounded = boundedPath(rootDir, path);
-  let raw: string;
   try {
-    raw = await readFile(bounded.absolute, 'utf8');
+    return { raw: await readFile(bounded.absolute, 'utf8'), path: bounded.relative };
   } catch (error) {
     if (!required && (error as NodeJS.ErrnoException).code === 'ENOENT') {
       return undefined;
     }
     throw error;
   }
-  const artifact = AppSetupArtifactSchema.parse(JSON.parse(raw));
-  return { artifact, path: bounded.relative, digest: sha256(raw) };
-}
-
-async function digestInput(rootDir: string, path: string): Promise<string> {
-  const bounded = boundedPath(rootDir, path);
-  return sha256(await readFile(bounded.absolute, 'utf8'));
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -153,7 +155,8 @@ function classifyNewTool(tool: AppSetupToolCandidate): SemanticChange {
   };
 }
 
-function compareArtifacts(
+/** P02's classification, exported for the tools generator and the corpus tests. */
+export function compareArtifacts(
   previous: AppSetupArtifact | undefined,
   proposed: AppSetupArtifact,
 ): SemanticChange[] {
@@ -179,6 +182,48 @@ function compareArtifacts(
   return changes.sort((left, right) => left.toolId.localeCompare(right.toolId));
 }
 
+/** Pure plan core shared by file-based setup and the tools generator. */
+export function createSetupPlanFromContents(input: SetupPlanContents): SetupPlan {
+  const proposed = AppSetupArtifactSchema.parse(JSON.parse(input.proposed.raw));
+  const previous = input.previousRaw === undefined
+    ? undefined
+    : AppSetupArtifactSchema.parse(JSON.parse(input.previousRaw));
+  assertAppSetupSemanticParity(proposed, proposed.tools.map((tool) => tool.name));
+  if (previous) {
+    assertAppSetupSemanticParity(previous, previous.tools.map((tool) => tool.name));
+  }
+  const semanticChanges = compareArtifacts(previous, proposed);
+  const proposedDigest = sha256(input.proposed.raw);
+  const buildInputDigest = sha256(JSON.stringify({
+    setup: proposedDigest,
+    inventory: sha256(input.inventoryRaw),
+    promptBundle: sha256(input.promptBundleRaw),
+  }));
+  const body = {
+    schemaVersion: 1 as const,
+    mode: input.mode,
+    operations: [
+      { kind: 'validate' as const, path: input.proposed.path, digest: proposedDigest },
+      { kind: 'adopt' as const, path: input.paths.canonicalSetupArtifact, digest: proposedDigest },
+      { kind: 'build' as const, path: input.paths.buildDir, digest: buildInputDigest },
+      { kind: 'receipt' as const, path: input.paths.receipt, digest: proposedDigest },
+      ...(input.mode === 'managed' ? [{
+        kind: 'sync' as const,
+        path: input.proposed.path,
+        digest: proposedDigest,
+      }] : []),
+    ],
+    counts: {
+      tools: proposed.tools.length,
+      semanticChanges: semanticChanges.length,
+    },
+    semanticChanges,
+    diagnostics: [] as Array<{ code: string; operation: string }>,
+    requiresConfirmation: semanticChanges.some((change) => change.requiresConfirmation),
+  };
+  return { ...body, planDigest: sha256(JSON.stringify(body)) };
+}
+
 export async function createSetupPlan(
   options: CreateSetupPlanOptions,
 ): Promise<SetupPlan> {
@@ -189,11 +234,7 @@ export async function createSetupPlan(
     inventoryPath: options.inventoryPath,
     promptBundlePath: options.promptBundlePath,
   });
-  const proposed = await readArtifact(
-    options.rootDir,
-    profile.paths.setupArtifact,
-    true,
-  );
+  const proposed = await readRaw(options.rootDir, profile.paths.setupArtifact, true);
   if (!proposed) throw new Error('unreachable');
   const previousPath = await resolvePreviousArtifactPath(
     options.rootDir,
@@ -202,73 +243,21 @@ export async function createSetupPlan(
     options.previousArtifactPath,
     profile.paths.previousSetupArtifact,
   );
-  const previous = await readArtifact(
+  const previous = await readRaw(
     options.rootDir,
     previousPath ?? profile.paths.previousSetupArtifact,
     false,
   );
-  assertAppSetupSemanticParity(
-    proposed.artifact,
-    proposed.artifact.tools.map((tool) => tool.name),
-  );
-  if (previous) {
-    assertAppSetupSemanticParity(
-      previous.artifact,
-      previous.artifact.tools.map((tool) => tool.name),
-    );
-  }
-  const semanticChanges = compareArtifacts(
-    previous?.artifact,
-    proposed.artifact,
-  );
-  const buildInputDigest = sha256(JSON.stringify({
-    setup: proposed.digest,
-    inventory: await digestInput(options.rootDir, profile.paths.inventory),
-    promptBundle: await digestInput(
-      options.rootDir,
-      profile.paths.promptBundle,
-    ),
-  }));
-  const body = {
-    schemaVersion: 1 as const,
+  const inventory = await readRaw(options.rootDir, profile.paths.inventory, true);
+  const promptBundle = await readRaw(options.rootDir, profile.paths.promptBundle, true);
+  return createSetupPlanFromContents({
     mode: profile.mode,
-    operations: [
-      { kind: 'validate' as const, path: proposed.path, digest: proposed.digest },
-      {
-        kind: 'adopt' as const,
-        path: profile.paths.canonicalSetupArtifact,
-        digest: proposed.digest,
-      },
-      {
-        kind: 'build' as const,
-        path: profile.paths.buildDir,
-        digest: buildInputDigest,
-      },
-      {
-        kind: 'receipt' as const,
-        path: profile.paths.receipt,
-        digest: proposed.digest,
-      },
-      ...(profile.mode === 'managed' ? [{
-        kind: 'sync' as const,
-        path: proposed.path,
-        digest: proposed.digest,
-      }] : []),
-    ],
-    counts: {
-      tools: proposed.artifact.tools.length,
-      semanticChanges: semanticChanges.length,
-    },
-    semanticChanges,
-    diagnostics: [] as Array<{ code: string; operation: string }>,
-    requiresConfirmation: semanticChanges.some(
-      (change) => change.requiresConfirmation,
-    ),
-  };
-  return {
-    ...body,
-    planDigest: sha256(JSON.stringify(body)),
-  };
+    paths: profile.paths,
+    proposed,
+    ...(previous ? { previousRaw: previous.raw } : {}),
+    inventoryRaw: inventory!.raw,
+    promptBundleRaw: promptBundle!.raw,
+  });
 }
 
 export function assertSetupPlanConfirmation(

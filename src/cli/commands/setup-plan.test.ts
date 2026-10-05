@@ -2,8 +2,14 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { AppSetupArtifactSchema } from '../../contracts/index.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
-import { createSetupPlan, assertSetupPlanConfirmation } from './setup-plan.js';
+import {
+  assertSetupPlanConfirmation,
+  compareArtifacts,
+  createSetupPlan,
+  createSetupPlanFromContents,
+} from './setup-plan.js';
 
 const id = (suffix: string) =>
   `019fa9a9-d5f7-7ec3-a3c7-8899de30${suffix.padStart(4, '0')}`;
@@ -300,6 +306,42 @@ describe('createSetupPlan', () => {
     }]);
     expect(() => assertSetupPlanConfirmation(plan, {}))
       .toThrowError(expect.objectContaining({ code: 'E-SEMANTICS-004' }));
+  });
+
+  it('classifies tools missing from the previous artifact as added without confirmation', async () => {
+    const root = await fixture();
+    const empty = { ...artifact(), tools: [], planner: { ...artifact().planner, toolIds: [] } };
+    await writeFile(join(root, '.glirastes/previous-setup-artifact.json'), `${JSON.stringify(empty)}\n`);
+    const plan = await createSetupPlan({ rootDir: root });
+    expect(plan.semanticChanges).toEqual([{
+      toolId: id('4'), classification: 'added', fields: ['toolId'], requiresConfirmation: false,
+    }]);
+    expect(plan.requiresConfirmation).toBe(false);
+    expect(compareArtifacts(undefined, AppSetupArtifactSchema.parse(artifact())))
+      .toEqual([{ toolId: id('4'), classification: 'added', fields: ['toolId'], requiresConfirmation: false }]);
+  });
+
+  it('computes the identical plan from file contents', async () => {
+    const root = await fixture();
+    const read = (path: string) => readFile(join(root, path), 'utf8');
+    const fromFiles = await createSetupPlan({ rootDir: root });
+    const fromContents = createSetupPlanFromContents({
+      mode: 'standalone',
+      paths: {
+        inventory: '.glirastes/foundation-execution-inventory.json',
+        setupArtifact: '.glirastes/setup-artifact.json',
+        canonicalSetupArtifact: '.glirastes/setup-artifact.json',
+        previousSetupArtifact: '.glirastes/previous-setup-artifact.json',
+        promptBundle: '.glirastes/prompt-bundle.json',
+        buildDir: '.glirastes/build',
+        receipt: '.glirastes/setup-receipt.json',
+      },
+      proposed: { path: '.glirastes/setup-artifact.json', raw: await read('.glirastes/setup-artifact.json') },
+      previousRaw: await read('.glirastes/previous-setup-artifact.json'),
+      inventoryRaw: await read('.glirastes/foundation-execution-inventory.json'),
+      promptBundleRaw: await read('.glirastes/prompt-bundle.json'),
+    });
+    expect(fromContents).toEqual(fromFiles);
   });
 
   it('does not call network or mutation dependencies', async () => {
