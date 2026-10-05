@@ -5,6 +5,7 @@ import { ToolReportFileSchema } from '../../../codegen/tools/artifact.js';
 import { compareCodeUnits } from '../../../codegen/tools/canonical.js';
 import { TOOLS_PATHS } from '../../../codegen/tools/config.js';
 import { AppSetupArtifactSchema } from '../../../contracts/index.js';
+import { platformMayRelaxConfirmation } from '../../../contracts/tool-policy.js';
 import { FoundationDiagnosticError } from '../../../diagnostics/index.js';
 import { parseToolArgs } from './args.js';
 import { formatToolStatus, type ToolStatusEntry, type ToolsIo } from './format.js';
@@ -47,6 +48,7 @@ export async function readToolStatus(root: string): Promise<ToolStatusEntry[]> {
   const reported = new Map(report.tools.map((tool) => [tool.toolId, tool] as const));
   return artifact.tools.map((tool): ToolStatusEntry => {
     const entry = reported.get(tool.toolId);
+    const confirmationOrigin = tool.provenance?.policyOrigin?.requiresApproval ?? null;
     return {
       toolId: tool.toolId,
       name: tool.name,
@@ -55,6 +57,9 @@ export async function readToolStatus(root: string): Promise<ToolStatusEntry[]> {
       needsAttention: tool.operationGroup === 'needs_attention',
       riskClass: tool.riskClass,
       confirmation: tool.requiresApproval,
+      confirmationOrigin,
+      platformMayRelax: tool.requiresApproval
+        && platformMayRelaxConfirmation(tool.riskClass, confirmationOrigin ?? undefined),
       contractSource: entry?.contractSource ?? null,
       descriptionQuality: entry?.quality.description ?? 'template',
       schemaQuality: entry?.quality.schema ?? 'none',

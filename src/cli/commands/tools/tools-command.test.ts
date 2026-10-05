@@ -3,6 +3,7 @@ import { createAppFixture, removeAppFixtures } from '../../../codegen/tools/__te
 import { toolFinding } from '../../../codegen/tools/findings.js';
 import type { ToolsPipelineOptions, ToolsPipelineResult } from '../../../codegen/tools/pipeline.js';
 import { ToolsPipelineFailure } from '../../../codegen/tools/pipeline.js';
+import { formatToolStatus, type ToolStatusEntry } from './format.js';
 import { runToolsCommand } from './index.js';
 
 afterEach(removeAppFixtures);
@@ -108,13 +109,20 @@ describe('glirastes tools', () => {
     out.length = 0;
     expect(await runToolsCommand(['status'], deps)).toBe(0);
     expect(out.join('\n')).toContain('What can my chat do? 2 active tools, 0 need attention.');
+    expect(out.join('\n')).toContain('+ tasks.create  POST /api/tasks  write, asks first, Platform may relax');
     out.length = 0;
     expect(await runToolsCommand(['status', '--json'], deps)).toBe(0);
     expect(JSON.parse(out[0]!)).toMatchObject({
       schemaVersion: 1,
       tools: [
-        { name: 'tasks.create', route: 'POST /api/tasks', confirmation: true, contractSource: 'derived', schemaQuality: 'field-names' },
-        { name: 'tasks.list', route: 'GET /api/tasks', confirmation: false, contractSource: 'derived', descriptionQuality: 'template' },
+        {
+          name: 'tasks.create', route: 'POST /api/tasks', confirmation: true, confirmationOrigin: 'code-default',
+          platformMayRelax: true, contractSource: 'derived', schemaQuality: 'field-names',
+        },
+        {
+          name: 'tasks.list', route: 'GET /api/tasks', confirmation: false, confirmationOrigin: 'code-default',
+          platformMayRelax: false, contractSource: 'derived', descriptionQuality: 'template',
+        },
       ],
     });
     await fixture.write('src/app/api/tasks/route.ts', ROUTE.split('export async function POST')[0]!);
@@ -125,6 +133,37 @@ describe('glirastes tools', () => {
     expect(await runToolsCommand(['check'], deps)).toBe(0);
     expect(out.join('\n')).toContain('Tool outputs match the code.');
   }, 120_000);
+
+  it('says which confirmations a connected Platform may relax and which tool-policy.json locks', () => {
+    const entry = (name: string, extra: Partial<ToolStatusEntry>): ToolStatusEntry => ({
+      toolId: `019fb004-0000-7000-8000-00000000000${name.length}`,
+      name,
+      route: `POST /api/${name}`,
+      enabled: true,
+      needsAttention: false,
+      riskClass: 'write',
+      confirmation: true,
+      confirmationOrigin: 'code-default',
+      platformMayRelax: true,
+      contractSource: 'native',
+      descriptionQuality: 'code',
+      schemaQuality: 'zod',
+      ...extra,
+    });
+    const status = formatToolStatus([
+      entry('create', {}),
+      entry('archive', { confirmationOrigin: 'local-policy', platformMayRelax: false }),
+      entry('purge', { riskClass: 'delete', platformMayRelax: false }),
+      entry('list', { route: 'GET /api/list', riskClass: 'safe-read', confirmation: false, platformMayRelax: false }),
+    ]);
+    expect(status).toContain('+ create  POST /api/create  write, asks first, Platform may relax');
+    expect(status).toContain('+ archive  POST /api/archive  write, asks first, locked in tool-policy.json');
+    expect(status).toContain('+ purge  POST /api/purge  delete, asks first\n');
+    expect(status).toContain('+ list  GET /api/list  safe-read, runs directly');
+    expect(status).toContain('A Platform owner or admin can switch off a confirmation marked "Platform may relax"');
+    expect(formatToolStatus([entry('archive', { confirmationOrigin: 'local-policy', platformMayRelax: false })]))
+      .not.toContain('Platform may relax');
+  });
 
   it('asks for a refresh when status finds no outputs', async () => {
     const fixture = await createAppFixture();
