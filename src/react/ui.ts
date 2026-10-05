@@ -1,71 +1,21 @@
 import { useEffect, useCallback, useRef } from 'react';
+import { UiActionBus, type UiActionHandler } from '../browser/ui-action-bus.js';
 import type { ActionIdRegistry } from '../types.js';
 
 // ============================================================================
-// Types
+// Types and the framework-neutral bus (glirastes/browser)
 // ============================================================================
 
-export interface UiAction {
-  type: string;
-  actionId?: string;
-  [key: string]: unknown;
-}
-
-export type UiActionHandler = (action: UiAction) => void | Promise<void>;
+export {
+  getDefaultUiActionBus,
+  UiActionBus,
+  type UiAction,
+  type UiActionHandler,
+} from '../browser/ui-action-bus.js';
 
 export interface AiClientActionEventDetail {
   actionId: string;
   payload?: Record<string, unknown>;
-}
-
-// ============================================================================
-// UiActionBus (class-based, framework-agnostic)
-// ============================================================================
-
-function addHandler(
-  map: Map<string, Set<UiActionHandler>>,
-  key: string,
-  handler: UiActionHandler,
-): () => void {
-  const handlers = map.get(key) ?? new Set<UiActionHandler>();
-  handlers.add(handler);
-  map.set(key, handlers);
-
-  return () => {
-    const current = map.get(key);
-    if (!current) return;
-    current.delete(handler);
-    if (current.size === 0) map.delete(key);
-  };
-}
-
-export class UiActionBus {
-  private handlersByType = new Map<string, Set<UiActionHandler>>();
-  private handlersById = new Map<string, Set<UiActionHandler>>();
-
-  subscribeByType(type: string, handler: UiActionHandler): () => void {
-    return addHandler(this.handlersByType, type, handler);
-  }
-
-  subscribeById(actionId: string, handler: UiActionHandler): () => void {
-    return addHandler(this.handlersById, actionId, handler);
-  }
-
-  async dispatch(action: UiAction): Promise<void> {
-    const typeHandlers = this.handlersByType.get(action.type);
-    const idHandlers = action.actionId
-      ? this.handlersById.get(action.actionId)
-      : undefined;
-
-    const allHandlers = new Set<UiActionHandler>([
-      ...(typeHandlers ? Array.from(typeHandlers) : []),
-      ...(idHandlers ? Array.from(idHandlers) : []),
-    ]);
-
-    for (const handler of allHandlers) {
-      await handler(action);
-    }
-  }
 }
 
 // ============================================================================

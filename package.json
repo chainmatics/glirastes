@@ -175,6 +175,16 @@
       "types": "./dist/embed/index.d.ts",
       "default": "./dist/embed/index.js"
     },
+    "./browser": {
+      "import": {
+        "types": "./dist/browser/index.d.ts",
+        "default": "./dist/browser/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/browser/index.d.ts",
+        "default": "./dist/cjs/browser/index.js"
+      }
+    },
     "./codegen": {
       "types": "./dist/codegen/index.d.ts",
       "default": "./dist/codegen/index.js"
@@ -266,6 +276,7 @@
     "react",
     "!react/langgraph",
     "embed",
+    "browser",
     "codegen",
     "skills",
     "CHANGELOG.md",

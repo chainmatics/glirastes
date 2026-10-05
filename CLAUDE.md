@@ -121,7 +121,8 @@ enforces it. On the Foundation branch:
 
 `glirastes` · `/contracts` · `/runtime` · `/runtime/ai-sdk` · `/ai-sdk` ·
 `/stt` · `/sync` · `/server` · `/server/nextjs` · `/adapter/nextjs` ·
-`/server/testing` · `/react` · `/react/vercel` · `/react/styles.css` · `/codegen`
+`/server/testing` · `/react` · `/react/vercel` · `/react/styles.css` · `/embed` ·
+`/browser` · `/codegen`
 
 **Deliberately not exported here** (the confirmed pilot cut — still versioned in
 the repo, deferred from the package): NestJS, LangGraph, OpenAPI, Skill/MCP

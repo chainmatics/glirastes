@@ -16,6 +16,7 @@ describe('public foundation subpaths', () => {
       './dist/server/adapters/nextjs/index.js',
     ],
     ['framework-neutral chat embed', './embed', './dist/embed/index.js'],
+    ['framework-neutral UI bridge', './browser', './dist/browser/index.js'],
   ])('exports the independently importable %s surface', async (
     _label,
     subpath,
@@ -139,6 +140,22 @@ describe('public foundation subpaths', () => {
     expect(shims).toContain("['embed', 'embed']");
     expect(embedSource).toContain('defineGlirastesChatElement');
     expect(embedSource).not.toMatch(/from ['"]\.\.\/react\/index\.js['"]/);
+  });
+
+  it('ships glirastes/browser framework-neutral, with its legacy shim', async () => {
+    const [packageJson, shims, ...sources] = await Promise.all([
+      readFile(new URL('../package.json', import.meta.url), 'utf8'),
+      readFile(new URL('../scripts/generate-subpath-shims.mjs', import.meta.url), 'utf8'),
+      ...['index', 'ui-action-bus', 'navigation', 'client-actions', 'query-filters'].map((name) => (
+        readFile(new URL(`./browser/${name}.ts`, import.meta.url), 'utf8')
+      )),
+    ]);
+    expect((JSON.parse(packageJson) as { files?: string[] }).files).toContain('browser');
+    expect(shims).toContain("['browser', 'browser']");
+    for (const source of sources) {
+      expect(source).not.toMatch(/from ['"](?:react|react-dom|next|vue)(?:\/|['"])/);
+      expect(source).not.toMatch(/from ['"]\.\.\//);
+    }
   });
 
   it('keeps the standalone STT surface framework-neutral', async () => {
