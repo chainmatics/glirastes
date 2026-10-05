@@ -108,23 +108,48 @@ function bindings(): LocalToolBinding[] {
 
 describe('validateLocalDeploymentBindings', () => {
   it('accepts a deployment whose effective tools exactly match local bindings', () => {
-    expect(() => validateLocalDeploymentBindings({
+    expect(validateLocalDeploymentBindings({
       revisions: revisions(),
       bindings: bindings(),
-    })).not.toThrow();
+    })).toEqual({ ignored: [] });
   });
 
-  it('rejects a changed source fingerprint before activation', () => {
+  it('ignores a Platform tool the deployed code does not have instead of rejecting the deployment', () => {
+    expect(validateLocalDeploymentBindings({
+      revisions: revisions(),
+      bindings: [],
+    })).toEqual({
+      ignored: [{ toolId, reason: 'platform-tool-not-in-code' }],
+    });
+  });
+
+  it('ignores a Platform tool whose local binding changed since the Platform saw it', () => {
     const localBindings = bindings();
     localBindings[0] = {
       ...localBindings[0]!,
       sourceFingerprint: 'sha256:b3RoZXI',
     };
 
-    expect(() => validateLocalDeploymentBindings({
+    expect(validateLocalDeploymentBindings({
       revisions: revisions(),
       bindings: localBindings,
-    })).toThrow(/source fingerprint/i);
+    })).toEqual({
+      ignored: [{
+        toolId,
+        reason: 'platform-tool-binding-mismatch',
+        mismatches: ['source fingerprint'],
+      }],
+    });
+  });
+
+  it('keeps a tool allowlisted that only a Platform decision disables', () => {
+    const deployment = revisions();
+    deployment.policyRevision.toolOverrides = [{ toolId, enabled: false }];
+
+    expect(validateLocalDeploymentBindings({
+      revisions: deployment,
+      bindings: bindings(),
+    })).toEqual({ ignored: [] });
   });
 
   it('rejects an allowlisted tool without an enabled policy', () => {

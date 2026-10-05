@@ -60,4 +60,8 @@ export type { MaterializedDeploymentRevisions } from './materialize-deployment.j
 export {
   validateLocalDeploymentBindings,
 } from './local-deployment-validator.js';
+export type {
+  IgnoredPlatformTool,
+  LocalDeploymentValidation,
+} from './local-deployment-validator.js';
 export { createManagedRuntimeSync } from './managed-sync.js';
