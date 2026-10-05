@@ -52,6 +52,7 @@ import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { createNextPagesSource } from './sources/next-pages.js';
+import { createReactActionSource } from './sources/react-actions.js';
 import { createUrlFilterSource } from './sources/url-filters.js';
 import {
   readPreviousToolState,
@@ -127,6 +128,8 @@ export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
           ...(pages && pages.kind !== 'next-app' ? pages : {}),
           ...source,
         });
+      case 'react-actions':
+        return createReactActionSource(source);
     }
   });
 }

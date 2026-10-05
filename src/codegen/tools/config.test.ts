@@ -61,15 +61,21 @@ describe('tools config', () => {
     expect(config.ci.strict).toBe(true);
   });
 
-  it('accepts the next-pages and url-filters sources with their folder options', async () => {
+  it('accepts the UI sources with their folder options', async () => {
     const config = loadToolsConfig(await appWith({
       ...minimal,
-      sources: ['next-app', { kind: 'next-pages', appDir: 'src/app', srcDir: 'src', stripSegments: ['[locale]'] }, 'url-filters'],
+      sources: [
+        'next-app',
+        { kind: 'next-pages', appDir: 'src/app', srcDir: 'src', stripSegments: ['[locale]'] },
+        'url-filters',
+        { kind: 'react-actions', srcDir: 'src' },
+      ],
     }));
     expect(normalizeSources(config)).toEqual([
       { kind: 'next-app' },
       { kind: 'next-pages', appDir: 'src/app', srcDir: 'src', stripSegments: ['[locale]'] },
       { kind: 'url-filters' },
+      { kind: 'react-actions', srcDir: 'src' },
     ]);
   });
 
@@ -85,6 +91,7 @@ describe('tools config', () => {
     ['a page option on the endpoint source', { ...minimal, sources: [{ kind: 'next-app', stripSegments: [] }] }],
     ['the next-pages source twice', { ...minimal, sources: ['next-pages', { kind: 'next-pages', appDir: 'app' }] }],
     ['the url-filters source twice', { ...minimal, sources: ['url-filters', 'url-filters'] }],
+    ['a page option on the actions source', { ...minimal, sources: [{ kind: 'react-actions', appDir: 'src/app' }] }],
   ])('rejects %s', (_label, value) => {
     expect(ToolsConfigSchema.safeParse(value).success).toBe(false);
   });

@@ -373,3 +373,26 @@ describe('runToolsPipeline (filters)', () => {
     expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
   }, 120_000);
 });
+
+describe('runToolsPipeline (client actions)', () => {
+  it('runs read-only client actions directly, confirms writing ones and disables untyped ones', async () => {
+    const fixture = await createAppFixture({
+      'src/components/task-list.tsx': "'use client';\nimport { useAiClientAction } from 'glirastes/react';\n"
+        + 'export function TaskList() {\n'
+        + "  useAiClientAction('tasks.highlight', (payload: { taskId: string }) => console.log(payload.taskId));\n"
+        + "  useAiClientAction('tasks.archive', async (payload: { taskId: string }) => {\n"
+        + "    await fetch(`/api/tasks/${payload.taskId}`, { method: 'DELETE' });\n  });\n"
+        + "  useAiClientAction('tasks.select', (payload) => console.log(payload));\n  return null;\n}\n",
+    }, { toolsConfig: { sources: ['react-actions'] } });
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const tools = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.name, tool] as const));
+    expect(tools.get('ui.tasks.highlight')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'safe-read', requiresApproval: false, enabled: true, actionBindingRef: 'tasks.highlight',
+    });
+    expect(tools.get('ui.tasks.archive')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'write', requiresApproval: true, enabled: true,
+    });
+    expect(tools.get('ui.tasks.select')).toMatchObject({ enabled: false, operationGroup: 'needs_attention' });
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+  }, 120_000);
+});
