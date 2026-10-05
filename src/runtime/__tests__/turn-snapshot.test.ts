@@ -154,6 +154,44 @@ describe('createTurnSnapshot', () => {
   });
 });
 
+describe('createTurnSnapshot with signed Platform decisions', () => {
+  const toolId = agentRevision.toolAllowlist[0]!;
+  const snapshotWith = (toolOverrides: RuntimePolicyRevision['toolOverrides']) => createTurnSnapshot({
+    turnId: 'turn-decisions',
+    agentRevision,
+    manifestRevision,
+    policyRevision: { ...policyRevision, toolOverrides },
+    principal,
+    localLimits,
+  });
+
+  it('restricts the reported tool policies by the signed deltas, whatever path built the snapshot', () => {
+    const disabled = snapshotWith([{ toolId, enabled: false }]);
+    expect(disabled.policyRevision.toolPolicies).toEqual([{
+      toolId, enabled: false, riskClass: 'safe-read', requiresApproval: false, allowedRoles: ['admin'],
+    }]);
+    expect(disabled.policyRevision.toolOverrides).toEqual([{ toolId, enabled: false }]);
+    expect(disabled.policyRevision.revisionId).toBe(policyRevision.revisionId);
+
+    const raised = snapshotWith([{ toolId, riskClass: 'delete', allowedRoles: ['admin', 'owner'] }]);
+    expect(raised.policyRevision.toolPolicies[0]).toMatchObject({
+      enabled: true, riskClass: 'delete', requiresApproval: true, allowedRoles: ['admin'],
+    });
+  });
+
+  it('never loosens and ignores decisions for tools the revision does not carry', () => {
+    const snapshot = snapshotWith([
+      { toolId, enabled: true, riskClass: 'safe-read', requiresApproval: false },
+      { toolId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3aff', enabled: false },
+    ]);
+    expect(snapshot.policyRevision.toolPolicies).toEqual(policyRevision.toolPolicies);
+  });
+
+  it('keeps a revision without decisions exactly as signed', () => {
+    expect(snapshotWith([]).policyRevision).toEqual(policyRevision);
+  });
+});
+
 describe('assertPromptPinForResume', () => {
   const promptPin = {
     revisionId: '019fb003-0000-7000-8000-000000000004',
