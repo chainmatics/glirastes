@@ -83,6 +83,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   renameSessionPlaceholder: 'Conversation title',
   clarificationInputLabel: 'Your answer',
   clarificationSubmitButton: 'Answer',
+  retryRecordingAriaLabel: 'Retry recording',
 };
 
 // ============================================================================

@@ -97,6 +97,9 @@ export function ChatInput({ className, onSubmit }: ChatInputProps) {
           onError={voice.onError}
           showRecordingBar={voice.recordingBar?.enabled ?? true}
           recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
+          adapter={voice.adapter}
+          pushToTalk={voice.pushToTalk}
+          routeKey={voice.routeKey}
         />
       )}
       {InputExtra && <InputExtra />}

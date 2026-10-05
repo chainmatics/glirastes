@@ -84,6 +84,9 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
             onError={voice.onError}
             showRecordingBar={voice.recordingBar?.enabled ?? true}
             recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
+            adapter={voice.adapter}
+            pushToTalk={voice.pushToTalk}
+            routeKey={voice.routeKey}
           />
         )}
         {InputExtra && <InputExtra />}
@@ -255,6 +258,9 @@ function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
             onError={voice.onError}
             showRecordingBar={voice.recordingBar?.enabled ?? true}
             recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
+            adapter={voice.adapter}
+            pushToTalk={voice.pushToTalk}
+            routeKey={voice.routeKey}
           />
         )}
         {InputExtra && <InputExtra />}

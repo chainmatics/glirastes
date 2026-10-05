@@ -448,12 +448,38 @@ export interface ToolResultDisplayConfig {
   allowlist?: string[];
 }
 
+export interface VoicePushToTalkConfig {
+  /**
+   * Hold this combo to talk; `mod` is ⌘ on macOS and Ctrl elsewhere.
+   * Default `mod+shift+space`. `false` disables only the hotkey. Only one
+   * visible composer per page owns a combo, so it never opens two microphones.
+   */
+  hotkey?: string | false;
+  /**
+   * Holding the mic button at least this long (default 350 ms) stops on
+   * release; a shorter tap toggles recording on.
+   */
+  holdThresholdMs?: number;
+}
+
 export interface VoiceInputConfig {
   enabled?: boolean;
   language?: string;
   baseUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
   getToken?: () => string | null | undefined;
+  /**
+   * Speech provider adapter; defaults to the Deepgram speech-stream adapter.
+   * Keep its identity stable: a new adapter restarts the controller.
+   */
+  adapter?: import('./stt/controller.js').SttProviderAdapter;
+  /** Push-to-talk in addition to tap-to-toggle; `false` keeps toggle only. */
+  pushToTalk?: VoicePushToTalkConfig | false;
+  /**
+   * Pass the current route (e.g. `usePathname()`); a change stops recording
+   * and keeps the speech as editable draft. Back/forward is detected too.
+   */
+  routeKey?: string;
   recordingBar?: {
     enabled?: boolean;
     variant?: 'trigger' | 'inline';
@@ -585,6 +611,9 @@ export interface ChatLocale {
   // Structured clarification
   clarificationInputLabel: string;
   clarificationSubmitButton: string;
+
+  // Speech-to-text
+  retryRecordingAriaLabel: string;
 }
 
 // ============================================================================

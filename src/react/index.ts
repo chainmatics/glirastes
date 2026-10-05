@@ -50,6 +50,7 @@ export type {
   ToolResultDisplayMode,
   ToolResultDisplayConfig,
   VoiceInputConfig,
+  VoicePushToTalkConfig,
   // Mention chips
   Mention,
   MentionChipProps,
