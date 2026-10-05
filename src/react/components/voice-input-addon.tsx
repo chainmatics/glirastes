@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
+  type TouchEvent as ReactTouchEvent,
 } from 'react';
 import { DeepgramSttAdapter } from '../stt/deepgram.js';
 import type { SttProviderAdapter } from '../stt/controller.js';
@@ -207,16 +208,27 @@ export function VoiceInputAddon({
   holdThresholdRef.current = holdThresholdMs;
   const suppressClick = useRef(false);
   const releasedOverButton = useRef(false);
+  const suppressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartedRecording = useRef(false);
   const stopWatchingPress = useRef<(() => void) | null>(null);
   const hotkeyHeld = useRef(false);
 
+  const cancelSuppressTimer = () => {
+    if (suppressTimer.current === null) return;
+    clearTimeout(suppressTimer.current);
+    suppressTimer.current = null;
+  };
+
   const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    touchStartedRecording.current = false;
     if (!pushToTalkEnabled || disabled || activeRef.current) return;
     if (typeof event.button === 'number' && event.button !== 0) return;
     stopWatchingPress.current?.();
+    cancelSuppressTimer();
     const startedAt = nowRef.current();
     suppressClick.current = true;
     releasedOverButton.current = false;
+    touchStartedRecording.current = event.pointerType === 'touch';
     const stopWatching = () => {
       window.removeEventListener('pointerup', release);
       window.removeEventListener('pointercancel', release);
@@ -227,7 +239,18 @@ export function VoiceInputAddon({
       // A release over the button is followed by a click that handleClick
       // swallows. A release elsewhere or a cancelled pointer is followed by
       // none, and the flag would swallow the next, unrelated click instead.
-      if (!releasedOverButton.current) suppressClick.current = false;
+      if (!releasedOverButton.current) {
+        suppressClick.current = false;
+      } else {
+        // Touch capture reports every release as "over the button", even one
+        // that ends away from it with no click at all. The click of a press
+        // is dispatched in the task of its pointerup, before any timer, so
+        // the flag outlives it by no more than a timer turn.
+        suppressTimer.current = setTimeout(() => {
+          suppressTimer.current = null;
+          suppressClick.current = false;
+        }, 0);
+      }
       releasedOverButton.current = false;
       if (nowRef.current() - startedAt >= holdThresholdRef.current) {
         void stopAndSubmitRef.current();
@@ -244,7 +267,24 @@ export function VoiceInputAddon({
     releasedOverButton.current = true;
   };
 
-  useEffect(() => () => { stopWatchingPress.current?.(); }, []);
+  // The end of a finger's tap is followed by a click, which the browser
+  // hit-tests against the layout of that moment. Recording began on
+  // pointerdown and the inline recording bar has since moved its controls
+  // under the finger, so that click would press Stop and end the recording
+  // the tap just started. The press has done its work; no click is wanted.
+  const handleTouchEnd = (event: ReactTouchEvent<HTMLButtonElement>) => {
+    if (!touchStartedRecording.current) return;
+    touchStartedRecording.current = false;
+    if (event.cancelable) event.preventDefault();
+  };
+  const handleTouchCancel = () => {
+    touchStartedRecording.current = false;
+  };
+
+  useEffect(() => () => {
+    stopWatchingPress.current?.();
+    cancelSuppressTimer();
+  }, []);
 
   const handleClick = () => {
     if (suppressClick.current) {
@@ -291,6 +331,8 @@ export function VoiceInputAddon({
         type="button"
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
         onClick={handleClick}
         disabled={disabled}
         aria-busy={isConnecting}

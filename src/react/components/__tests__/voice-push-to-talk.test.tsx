@@ -31,6 +31,24 @@ function fakeAdapter(options: { failFirst?: boolean } = {}): SttProviderAdapter 
 const mic = () => screen.getByRole('button', { name: /^(mic|stop)$/ });
 const state = () => document.querySelector('[data-component="voice-input-addon"]')?.getAttribute('data-state');
 
+/**
+ * A browser dispatches the click right after the pointerup, in the same task:
+ * promise callbacks (a fast provider finishing its stop) run between the two
+ * events, timers do not. Act-wrapping would hold the React render back.
+ */
+async function releaseThenClick(release: () => void, click: () => void) {
+  const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = environment.IS_REACT_ACT_ENVIRONMENT;
+  environment.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    release();
+    for (let turn = 0; turn < 200; turn += 1) await Promise.resolve();
+    click();
+  } finally {
+    environment.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+}
+
 beforeEach(() => {
   stopTrack = vi.fn();
   getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop: stopTrack }] }));
@@ -287,17 +305,163 @@ describe('a button press never swallows an unrelated click', () => {
 
     // The stop has finished before the click arrives (a fast provider).
     clock = 600;
-    fireEvent.pointerUp(mic());
+    await releaseThenClick(
+      () => fireEvent.pointerUp(mic()),
+      () => fireEvent.click(mic(), { detail: 1 }),
+    );
     await waitFor(() => expect(received).toHaveBeenCalledExactlyOnceWith('Hallo Welt'));
     await waitFor(() => expect(state()).toBe('idle'));
-    fireEvent.click(mic());
-    await act(async () => {});
-    expect(state()).toBe('idle');
     expect(getUserMedia).toHaveBeenCalledTimes(1);
 
     // The swallowed click used up the press; the next one is a plain click.
     fireEvent.click(mic());
     await waitFor(() => expect(state()).toBe('recording'));
     expect(getUserMedia).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps recording when the click of a short tap arrives over the button', async () => {
+    let clock = 0;
+    const received = vi.fn();
+    render(<VoiceInputAddon disabled={false} language="de" adapter={fakeAdapter()}
+      onTranscript={received} now={() => clock} />);
+    fireEvent.pointerDown(mic(), { button: 0 });
+    await waitFor(() => expect(state()).toBe('recording'));
+
+    // The tap is released over the button after the recording is established.
+    clock = 120;
+    await releaseThenClick(
+      () => fireEvent.pointerUp(mic()),
+      () => fireEvent.click(mic(), { detail: 1 }),
+    );
+    await act(async () => {});
+    expect(state()).toBe('recording');
+    expect(received).not.toHaveBeenCalled();
+
+    fireEvent.click(mic(), { detail: 1 });
+    await waitFor(() => expect(received).toHaveBeenCalledExactlyOnceWith('Hallo Welt'));
+  });
+
+  it('lets a keyboard click through after a release that no click followed', async () => {
+    let clock = 0;
+    render(<VoiceInputAddon disabled={false} language="de" adapter={fakeAdapter()}
+      onTranscript={vi.fn()} now={() => clock} />);
+    fireEvent.pointerDown(mic(), { button: 0, pointerType: 'touch' });
+    await waitFor(() => expect(state()).toBe('recording'));
+
+    // Touch capture delivers pointerup to the button wherever the finger
+    // lifts. A finger dragged off it produces no click at all.
+    clock = 600;
+    fireEvent.pointerUp(mic(), { pointerType: 'touch' });
+    await waitFor(() => expect(state()).toBe('idle'));
+
+    // Enter or an assistive technology activates the focused button later.
+    // waitFor has let a macrotask pass, the browser's click would be long gone.
+    fireEvent.click(mic());
+    await waitFor(() => expect(state()).toBe('recording'));
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('a finger on the mic button', () => {
+  const touch = { button: 0, pointerType: 'touch' } as const;
+
+  /**
+   * How a browser ends a tap: unless touchend was cancelled it dispatches the
+   * compatibility click on whatever is under the finger at that moment, and
+   * that is not the element the press started on once the recording bar has
+   * moved the controls.
+   */
+  function liftFinger(from: HTMLElement, under: () => HTMLElement) {
+    fireEvent.pointerUp(from, { pointerType: 'touch' });
+    if (fireEvent.touchEnd(from)) fireEvent.click(under(), { detail: 1 });
+  }
+  const stopButton = () => document.querySelector<HTMLElement>('[data-element="stop-button"]')!;
+
+  it('keeps recording after a tap: its click must not reach the bar\'s Stop button', async () => {
+    const received = vi.fn();
+    render(<VoiceInputAddon disabled={false} language="de" adapter={fakeAdapter()}
+      onTranscript={received} />);
+    fireEvent.pointerDown(mic(), touch);
+    await waitFor(() => expect(state()).toBe('recording'));
+
+    liftFinger(mic(), stopButton);
+    await act(async () => {});
+    expect(state()).toBe('recording');
+    expect(stopTrack).not.toHaveBeenCalled();
+    expect(received).not.toHaveBeenCalled();
+
+    // A deliberate tap on Stop still ends it.
+    fireEvent.click(stopButton(), { detail: 1 });
+    await waitFor(() => expect(received).toHaveBeenCalledExactlyOnceWith('Hallo Welt'));
+  });
+
+  it('keeps recording after a tap while the bar is still connecting', async () => {
+    render(<VoiceInputAddon disabled={false} language="de" adapter={fakeAdapter()}
+      onTranscript={vi.fn()} />);
+    fireEvent.pointerDown(mic(), touch);
+    expect(state()).toBe('connecting');
+
+    liftFinger(mic(), stopButton);
+    await waitFor(() => expect(state()).toBe('recording'));
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(stopTrack).not.toHaveBeenCalled();
+  });
+
+  it('records while held and does not restart when the finger lifts', async () => {
+    let clock = 0;
+    const received = vi.fn();
+    render(<VoiceInputAddon disabled={false} language="de" adapter={fakeAdapter()}
+      onTranscript={received} now={() => clock} />);
+    fireEvent.pointerDown(mic(), touch);
+    await waitFor(() => expect(state()).toBe('recording'));
+
+    // The stop is done before the click would be dispatched; the bar is gone
+    // and the mic is back under the finger.
+    clock = 600;
+    fireEvent.pointerUp(mic(), { pointerType: 'touch' });
+    await waitFor(() => expect(received).toHaveBeenCalledExactlyOnceWith('Hallo Welt'));
+    await waitFor(() => expect(state()).toBe('idle'));
+    expect(fireEvent.touchEnd(mic())).toBe(false);
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(state()).toBe('idle');
+  });
+
+  it('leaves the touchend of a press that started nothing alone', async () => {
+    render(<VoiceInputAddon disabled={false} language="de" adapter={fakeAdapter()}
+      onTranscript={vi.fn()} />);
+    fireEvent.click(mic(), { detail: 1 });
+    await waitFor(() => expect(state()).toBe('recording'));
+
+    // The mic reads "stop" now; a tap on it starts nothing and its click
+    // must arrive to stop the recording.
+    fireEvent.pointerDown(mic(), touch);
+    liftFinger(mic(), mic);
+    await waitFor(() => expect(state()).toBe('idle'));
+  });
+
+  it('leaves the touchend alone when push-to-talk is off', async () => {
+    render(<VoiceInputAddon disabled={false} language="de" adapter={fakeAdapter()}
+      onTranscript={vi.fn()} pushToTalk={false} />);
+    fireEvent.pointerDown(mic(), touch);
+    expect(fireEvent.touchEnd(mic())).toBe(true);
+    fireEvent.click(mic(), { detail: 1 });
+    await waitFor(() => expect(state()).toBe('recording'));
+  });
+
+  it('does not cancel the touchend of a mouse press', async () => {
+    render(<VoiceInputAddon disabled={false} language="de" adapter={fakeAdapter()}
+      onTranscript={vi.fn()} />);
+    fireEvent.pointerDown(mic(), { button: 0, pointerType: 'mouse' });
+    await waitFor(() => expect(state()).toBe('recording'));
+    expect(fireEvent.touchEnd(mic())).toBe(true);
+  });
+
+  it('forgets the press when the touch is cancelled', async () => {
+    render(<VoiceInputAddon disabled={false} language="de" adapter={fakeAdapter()}
+      onTranscript={vi.fn()} />);
+    fireEvent.pointerDown(mic(), touch);
+    await waitFor(() => expect(state()).toBe('recording'));
+    fireEvent.touchCancel(mic());
+    expect(fireEvent.touchEnd(mic())).toBe(true);
   });
 });
