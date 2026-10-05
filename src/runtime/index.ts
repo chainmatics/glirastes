@@ -109,3 +109,12 @@ export {
   type ToolExecutionEvidence,
   type ToolExecutionStatus,
 } from './postgres-store.js';
+export {
+  createContractBindings,
+  createGeneratedRuntimeSource,
+  type ContractBindingDisabledReason,
+  type ContractBindingsResult,
+  type GeneratedRuntimeSource,
+  type GeneratedToolBinding,
+  type GeneratedToolModule,
+} from './contract-bindings.js';
