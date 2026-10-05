@@ -64,4 +64,17 @@ describe('locateRouteHandler', () => {
     expect(normalizedNodeText(first.located!.scope, first.sourceFile))
       .toBe(normalizedNodeText(second.located!.scope, second.sourceFile));
   });
+
+  it('normalizes quote style and trailing commas out of the handler text', () => {
+    const text = (source: string) => {
+      const { located, sourceFile } = locate(source, 'GET');
+      return normalizedNodeText(located!.scope, sourceFile);
+    };
+    const single = "export async function GET() { const a = 1; return Response.json({ a, k: 'x', list: [a, 'y'] }); }\n";
+    const formatted = 'export async function GET() {\n  // list\n  const a = 1;\n'
+      + '  return Response.json({\n    a,\n    k: "x",\n    list: [a, "y",],\n  },);\n}\n';
+    expect(text(formatted)).toBe(text(single));
+    expect(text("export async function GET() { return Response.json({ k: 'z' }); }\n"))
+      .not.toBe(text("export async function GET() { return Response.json({ k: 'x' }); }\n"));
+  });
 });

@@ -39,9 +39,40 @@ export function bindingKey(element: ts.BindingElement): string | undefined {
   return ts.isIdentifier(name) || ts.isStringLiteral(name) ? name.text : undefined;
 }
 
-/** Comment- and formatting-free text, so cosmetic edits never change a digest. */
+/** Re-creates string literals without their source quote style and drops trailing list commas. */
+function withoutCosmetics(node: ts.Node): ts.Node {
+  const { transformed, dispose } = ts.transform<ts.Node>(node, [(context) => {
+    const { factory } = context;
+    const nodesVisitor = ((
+      nodes: ts.NodeArray<ts.Node> | undefined,
+      visitor: ts.Visitor,
+      test?: (node: ts.Node) => boolean,
+      start?: number,
+      count?: number,
+    ) => {
+      const visited = ts.visitNodes(nodes, visitor, test, start, count);
+      return visited?.hasTrailingComma ? factory.createNodeArray([...visited], false) : visited;
+    }) as unknown as typeof ts.visitNodes;
+    const visit = (child: ts.Node): ts.Node => (
+      ts.isStringLiteral(child)
+        ? factory.createStringLiteral(child.text)
+        : (ts.visitEachChild(child, visit, context, nodesVisitor) ?? child)
+    );
+    return visit;
+  }]);
+  const [result] = transformed;
+  dispose();
+  return result ?? node;
+}
+
+/**
+ * Text free of comments, whitespace, string-literal quote style and trailing commas, so
+ * cosmetic and formatter edits never change a digest. Changed literal values still do.
+ */
 export function normalizedNodeText(node: ts.Node, sourceFile: ts.SourceFile): string {
-  return printer.printNode(ts.EmitHint.Unspecified, node, sourceFile).replace(/\s+/g, ' ').trim();
+  return printer.printNode(ts.EmitHint.Unspecified, withoutCosmetics(node), sourceFile)
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function hasExportModifier(node: ts.Node): boolean {
