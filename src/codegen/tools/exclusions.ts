@@ -1,3 +1,4 @@
+import { parseExcludePattern } from '../../contracts/tool-exclude-pattern.js';
 import type { ExcludedTool } from './types.js';
 
 export interface ExclusionSubject {
@@ -63,16 +64,19 @@ function globMatches(pattern: ReadonlyArray<string>, path: ReadonlyArray<string>
   return (head === '*' || head === path[0]) && globMatches(rest, path.slice(1));
 }
 
-/** `[METHOD|*] /path/glob` with `*` for one segment and `**` for any number of segments. */
+/**
+ * `[METHOD|*] /path/glob` with `*` for one segment and `**` for any number of
+ * segments. A pattern outside the grammar (see `parseExcludePattern`, which
+ * the policy file schema enforces) matches nothing.
+ */
 export function matchesExcludePattern(
   pattern: string,
   subject: Pick<ExclusionSubject, 'method' | 'path'>,
 ): boolean {
-  const match = /^(?:(GET|POST|PUT|PATCH|DELETE|HEAD|\*)\s+)?(\/\S*)$/.exec(pattern.trim());
-  if (!match) return false;
-  const [, method, glob] = match;
-  if (method && method !== '*' && method !== subject.method) return false;
-  return globMatches(glob!.split('/').filter(Boolean), subject.path.split('/').filter(Boolean));
+  const parsed = parseExcludePattern(pattern);
+  if (!parsed) return false;
+  if (parsed.method && parsed.method !== subject.method) return false;
+  return globMatches(parsed.segments, subject.path.split('/').filter(Boolean));
 }
 
 export function findExclusion(

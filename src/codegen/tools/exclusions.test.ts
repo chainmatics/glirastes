@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { findExclusion, importsChatHandler, matchesExcludePattern } from './exclusions.js';
+import type { ExcludedTool } from './types.js';
 
 const subject = (method: string, path: string, chatHandler = false) => ({
   stableKey: `${method} ${path}`, method, path, chatHandler,
@@ -54,5 +55,19 @@ describe('tool exclusions', () => {
     expect(findExclusion(subject('GET', '/api/admin/users/:id'), rules)).toBeUndefined();
     expect(matchesExcludePattern('* /api/**', { method: 'PUT', path: '/api/x' })).toBe(true);
     expect(matchesExcludePattern('not a pattern', { method: 'GET', path: '/api/x' })).toBe(false);
+  });
+
+  it('matches only patterns the policy file grammar accepts', () => {
+    const target = { method: 'GET', path: '/api/admin-users' };
+    expect(matchesExcludePattern('GET /api/admin-users', target)).toBe(true);
+    expect(matchesExcludePattern('get /api/admin-users', target)).toBe(false);
+    expect(matchesExcludePattern('GET /api/admin-*', target)).toBe(false);
+    expect(matchesExcludePattern('GET /api/**x', target)).toBe(false);
+    expect(matchesExcludePattern('/api/[id]', { method: 'GET', path: '/api/:id' })).toBe(false);
+    expect(matchesExcludePattern('/api/files/*slug', { method: 'GET', path: '/api/files/*slug' })).toBe(true);
+  });
+
+  it('admits code-detected exclusions such as unsupported methods in the origin type', () => {
+    expectTypeOf<ExcludedTool['origin']>().toEqualTypeOf<'default' | 'policy' | 'code'>();
   });
 });

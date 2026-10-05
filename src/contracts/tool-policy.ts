@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { FoundationDiagnosticError } from '../diagnostics/index.js';
 import { findSensitiveStringPath } from './content-boundary.js';
 import { ToolRiskClassSchema, type ToolRiskClass } from './revisions.js';
+import { parseExcludePattern } from './tool-exclude-pattern.js';
 
 /**
  * Version of the default table and the policy bounds below. The golden
@@ -282,7 +283,10 @@ export const ToolPolicyFileSchema = z.object({
   schemaVersion: z.literal(1),
   tools: z.record(stableKey, ToolPolicyEntrySchema).default({}),
   exclude: z.array(z.object({
-    match: boundedText(2_048),
+    // A pattern outside the grammar would exclude nothing, so it is rejected instead.
+    match: boundedText(2_048).refine((match) => parseExcludePattern(match) !== undefined, {
+      message: 'Expected "[METHOD|*] /path" with * or ** as whole segments',
+    }),
     reason: boundedText(500),
   }).strict()).max(500).default([]),
   acceptedRisk: z.record(stableKey, z.object({

@@ -82,8 +82,39 @@ describe('parseToolPolicyFile', () => {
       schemaVersion: 1,
       tools: { 'GET /api/tasks': { allowedRoles: [''] } },
     }, 'tools.GET /api/tasks.allowedRoles.0'],
+    // A pattern outside the grammar would exclude nothing, silently.
+    ['a lowercase exclude method', {
+      schemaVersion: 1,
+      exclude: [{ match: 'get /api/internal/**', reason: 'internal' }],
+    }, 'exclude.0.match'],
+    ['an exclude pattern with a stray token', {
+      schemaVersion: 1,
+      exclude: [
+        { match: 'POST /api/internal/**', reason: 'internal' },
+        { match: 'POST /api/jobs now', reason: 'internal' },
+      ],
+    }, 'exclude.1.match'],
+    ['a partial glob in an exclude pattern', {
+      schemaVersion: 1,
+      exclude: [{ match: '/api/admin-*', reason: 'admin only' }],
+    }, 'exclude.0.match'],
+    ['Next.js bracket syntax in an exclude pattern', {
+      schemaVersion: 1,
+      exclude: [{ match: 'DELETE /api/tasks/[id]', reason: 'never from chat' }],
+    }, 'exclude.0.match'],
   ])('rejects %s with E-POLICY-001', (_label, value, identifier) => {
     expectPolicyError(value, identifier);
+  });
+
+  it('keeps every documented exclude pattern form', () => {
+    const exclude = [
+      { match: 'POST /api/internal/**', reason: 'internal' },
+      { match: '/api/admin/*', reason: 'admin only' },
+      { match: '* /api/**', reason: 'everything' },
+      { match: 'GET /api/tasks/:id', reason: 'one route' },
+      { match: 'HEAD /api/files/*slug', reason: 'catch-all key' },
+    ];
+    expect(parseToolPolicyFile({ schemaVersion: 1, exclude }).exclude).toEqual(exclude);
   });
 
   it('rejects secret-like content without echoing it', () => {

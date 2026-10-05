@@ -78,7 +78,8 @@ export interface ObservedTool {
 export interface ExcludedTool {
   stableKey: string;
   reason: string;
-  origin: 'default' | 'policy';
+  /** `code`: the generator itself left the route out, e.g. an `unsupported-method` export. */
+  origin: 'default' | 'policy' | 'code';
 }
 
 export interface ToolContractsEntry {
