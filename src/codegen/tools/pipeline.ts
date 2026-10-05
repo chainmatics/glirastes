@@ -51,6 +51,7 @@ import { resolveToolProse } from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
+import { createNextPagesSource } from './sources/next-pages.js';
 import {
   readPreviousToolState,
   renderInventory,
@@ -105,6 +106,18 @@ export class ToolsPipelineFailure extends FoundationDiagnosticError {
     this.name = 'ToolsPipelineFailure';
     this.result = result;
   }
+}
+
+/** One source per configured entry of `tools.json` `sources`. */
+export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
+  return normalizeSources(config).map((source) => {
+    switch (source.kind) {
+      case 'next-app':
+        return createNextEndpointSource(source.apiDir ? { apiDir: source.apiDir } : {});
+      case 'next-pages':
+        return createNextPagesSource(source);
+    }
+  });
 }
 
 const SETUP_PATHS = {
@@ -288,9 +301,7 @@ async function generate(
     previousContracts: previous.contracts,
     probe: dependencies.probe ?? createSchemaProbe(),
   };
-  const sources = dependencies.sources ?? normalizeSources(config).map((source) => (
-    createNextEndpointSource(source.apiDir ? { apiDir: source.apiDir } : {})
-  ));
+  const sources = dependencies.sources ?? createConfiguredSources(config);
   const observed: ObservedTool[] = [];
   let complete = true;
   for (const source of sources) {

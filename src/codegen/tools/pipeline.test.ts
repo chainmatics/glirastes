@@ -305,3 +305,51 @@ describe('capability report in the committed setup artifact', () => {
     expect(artifact.exclusions).toEqual([{ stableKey: 'POST /api/auth/login', origin: 'default' }]);
   }, 120_000);
 });
+
+const PAGE = 'export default function Page() { return null; }\n';
+const BRIDGE = "'use client';\nimport { useRouter } from 'next/navigation';\n"
+  + "import { useGlirastesNavigationBridge } from 'glirastes/react';\n"
+  + 'export function GlirastesBridge() {\n  const router = useRouter();\n'
+  + '  useGlirastesNavigationBridge({ push: (href) => router.push(href) });\n  return null;\n}\n';
+
+describe('runToolsPipeline (navigation)', () => {
+  async function pagesApp(): Promise<AppFixture> {
+    return createAppFixture({
+      'src/app/page.tsx': PAGE,
+      'src/app/tasks/page.tsx': PAGE,
+      'src/components/glirastes-bridge.tsx': BRIDGE,
+    }, { toolsConfig: { sources: ['next-pages'] } });
+  }
+
+  it('generates ui.navigate as an active UI tool without confirmation, bound in the module and verified in every mode', async () => {
+    const fixture = await pagesApp();
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.changes.added).toHaveLength(1);
+    const [tool] = (await artifactOf(fixture)).tools;
+    expect(tool).toMatchObject({
+      name: 'ui.navigate', modelName: 'ui_navigate', executionKind: 'ui', actionBindingRef: 'glirastes.navigate',
+      operationGroup: 'ui', riskClass: 'safe-read', requiresApproval: false, enabled: true,
+      description: "Open a page of this app in the user's browser. Destinations: /, /tasks.",
+      provenance: { contractSource: 'ui-bridge', descriptionSource: 'code', schemaSource: 'json-schema' },
+    });
+    const contracts = JSON.parse(await fixture.read(TOOLS_PATHS.contracts)) as {
+      tools: Array<{ contract: { uiAction?: unknown } }>;
+    };
+    expect(contracts.tools[0]?.contract.uiAction).toEqual({ kind: 'navigate' });
+    expect(await fixture.read(DEFAULT_GENERATED_MODULE)).toContain("import { uiActionToolToTool } from 'glirastes/server';");
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'integrity' })).driftPaths).toEqual([]);
+  }, 120_000);
+
+  it('keeps the identity but disables navigation once the bridge is gone', async () => {
+    const fixture = await pagesApp();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const toolId = (await artifactOf(fixture)).tools[0]!.toolId;
+    await fixture.remove('src/components/glirastes-bridge.tsx');
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.changes.unchanged).toEqual([toolId]);
+    expect((await artifactOf(fixture)).tools[0]).toMatchObject({ toolId, enabled: false, operationGroup: 'needs_attention' });
+    expect(await fixture.read(TOOLS_PATHS.report)).toContain('navigation-bridge-missing');
+    expect(await fixture.read(DEFAULT_GENERATED_MODULE)).not.toContain('uiActionToolToTool');
+  }, 120_000);
+});
