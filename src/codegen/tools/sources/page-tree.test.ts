@@ -1,10 +1,14 @@
-import { mkdtemp, symlink } from 'node:fs/promises';
+import { mkdtemp, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAppFixture, removeAppFixtures, SDK_ROOT } from '../__tests__/app-fixture.js';
 import { enumeratePages } from './page-tree.js';
 
-afterEach(removeAppFixtures);
+const outsideDirs: string[] = [];
+afterEach(async () => {
+  await removeAppFixtures();
+  for (const directory of outsideDirs.splice(0)) await rm(directory, { recursive: true, force: true });
+});
 
 const PAGE = 'export default function Page() { return null; }\n';
 
@@ -91,6 +95,7 @@ describe('enumeratePages', () => {
   it('refuses a linked folder instead of skipping its pages', async () => {
     const app = await createAppFixture({ 'src/app/tasks/page.tsx': PAGE });
     const outside = await mkdtemp(join(SDK_ROOT, '.tool-fixtures', 'outside-'));
+    outsideDirs.push(outside);
     await symlink(outside, app.path('src/app/linked'), 'dir');
     expect(await enumeratePages(app.root, {}, [])).toEqual({
       complete: false,
