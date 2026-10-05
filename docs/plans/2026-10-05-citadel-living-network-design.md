@@ -1,12 +1,18 @@
 # Citadel-Redesign „Living Network v3“: Design
 
-Version: 1.1 (Gegenprüfung gegen API-Code @ `9014587`, P09-Plan und Prototyp eingearbeitet) · Stand: 2026-10-05 · Status: Entwurf zur Freigabe durch Philipp · Umsetzung: Teilplan P08c (Platform `mvp-platform`)
+Version: 1.2 (Entscheidungen Philipps vom 2026-10-05 eingearbeitet) · Stand: 2026-10-05 · Status: Entwurf zur Freigabe durch Philipp · Umsetzung: Teilplan P08c (Platform `mvp-platform`)
+
+Änderungen:
+- 1.1: Gegenprüfung gegen API-Code @ `9014587`, P09-Plan und Prototyp eingearbeitet.
+- 1.2: Philipps Entscheidungen vom 2026-10-05 (Lockern der Rückfrage bis Stufe 2 im Dashboard, Fehlerregel verbindlich, Deutsch und Englisch zum MVP, Expertenrouten zum Release ausgeblendet) und zwei Standardentscheidungen des Controllers (Versionszählung, Landing-Renderer), Abschnitt 8.3. Neu: 2.4 (Sprachen), D16 (wirksame Platform-Lockerung). Gegengeprüft gegen API @ `9014587` und SDK `codex/mvp-tools` @ `dd6c175`.
 
 Grundlage:
 - Freigegebener Prototyp `/Users/philipprollmann/Dev/chainmatics/.archives/glirastes-living-network-design-v3-landing-2026-10-05/` (`index.html`, `README.md`, `src/`, `shots/`). Philipp am 2026-10-05: „Design sieht gut aus“.
 - [MVP-Abschluss-Design v1.4](2026-10-04-mvp-completion-design.md), Abschnitte 4.2, 4.5, 4.9, 4.10, 6a, 7.
 - [Roadmap](2026-10-04-mvp-plan-00-roadmap.md), Zeilen mit Zuständigkeit P08c.
-- [P08b-Plan](2026-10-05-mvp-plan-08b-platform-backend.md), Task 14, Checkpoint Punkt 4, sowie der Code auf `codex/mvp-platform` @ `9014587` (`apps/api/src/modules/runtime-setup-v2/*`, `runtime-deployments/*`, `runtime-connect/*`, `apps/*`, `audit/*`, `stream/*`).
+- [P08b-Plan](2026-10-05-mvp-plan-08b-platform-backend.md), Task 8, Task 14, Checkpoint Punkt 4, sowie der Code auf `codex/mvp-platform` @ `9014587` (`apps/api/src/modules/runtime-setup-v2/*`, `runtime-revisions/*`, `runtime-deployments/*`, `runtime-connect/*`, `apps/*`, `audit/*`, `stream/*`).
+- SDK-Code auf `codex/glirastes-foundation-runtime` und `codex/mvp-tools` @ `dd6c175` (`src/runtime/policy-overlay.ts`, `src/runtime/turn-snapshot.ts`, `src/contracts/tool-policy.ts`, `src/codegen/tools/pipeline.ts`), [P04-Plan](2026-10-05-mvp-plan-04-navigation-filters-ui.md), Ziel 1, und Spec 4.9 und 10 Punkt 5 (für D16).
+- Entscheidungen Philipps vom 2026-10-05 (Abschnitt 8.3).
 - [P09-Plan](2026-10-05-mvp-plan-09-metrics.md), Teil B (Tasks 6–13), Checkpoint Punkt 4. Die Metrik-Endpunkte existieren auf `codex/mvp-platform` noch nicht.
 - Citadel-Code auf `codex/mvp-platform` (`apps/citadel`): Routen `/manage`, `/connect`, `/connect/pair`, `/settings/*`, Foundation-Profil `src/lib/product-profile.ts`, `components/ui/*` (shadcn `base-nova` auf Base UI), Tailwind 4, `components/landing/landing.css`.
 - Restliste der letzten Prüfung: `.superpowers/sdd/controller.md`, Abschnitt „2026-10-05 12:55“.
@@ -20,7 +26,7 @@ Dieses Dokument legt fest, wie der Prototyp in Citadel gebaut wird. Wo es vom Pr
 
 ### 1.1 Ziel
 
-Citadel beantwortet im Foundation-Profil die fünf Nutzerfragen aus Spec 7 für Nicht-Experten, in der Marke von glirastes.io: gleiche Farben, gleiche Schriften, und das Netz des Landing-Heros als Statusanzeige. Grundlage sind ausschließlich echte API-Daten. Jede Aussage auf dem Bildschirm lässt sich auf ein Feld zurückführen. Was die API nicht liefert, erscheint nicht, und das UI kündigt es auch nicht an.
+Citadel beantwortet im Foundation-Profil die fünf Nutzerfragen aus Spec 7 für Nicht-Experten, auf Deutsch und Englisch (2.4), in der Marke von glirastes.io: gleiche Farben, gleiche Schriften, und das Netz des Landing-Heros als Statusanzeige. Grundlage sind ausschließlich echte API-Daten. Jede Aussage auf dem Bildschirm lässt sich auf ein Feld zurückführen. Was die API nicht liefert, erscheint nicht, und das UI kündigt es auch nicht an.
 
 ### 1.2 Was freigegeben ist
 
@@ -31,7 +37,7 @@ Freigegeben ist der Stand v3, Runde 2, aus dem Archiv:
 | Bildsprache | Die Palette der Landingpage, Dunkel als Standard, Hell abgeleitet und nachrangig. Drei Schriften (Geist, JetBrains Mono, Instrument Serif). Radien 8/12/20. Amber-Morgenlicht, Punktraster, Glühen. Netz mit weißglühendem Kern, glühenden Hyphen, Knospen und Kometen (Abschnitt 3). |
 | Informationsarchitektur | Fünf Bildschirme (Übersicht, Was kann mein Chat?, Kosten & Nutzung, Historie & Rollback, Verbinden), Seitenleiste mit App-/Umgebungswechsel, der „Faden“ mit fünf Antworten, Ledger-Abschnitte auf einem 12-Spalten-Raster. |
 | Zustandslogik | Jeder Zustand dreifach codiert (Farbe, Form, Wort). Der schwerste Zustand gewinnt. Eine Ursache ist genau einmal rot, mit genau einer Wirkung; alles, was daraus folgt, verweist mit „Bekannt“ zurück. Zählregel „1 Fehler“ plus ein leises „+5 prüfen“. |
-| Interaktion | Drawer pro Tool (erst Behebung, dann Nutzung, dann „Strenger machen“). Riskante Bestätigungen öffnen sich auf „Abbrechen“. Ehrlicher Zwischenzustand bis zur Bestätigung durch den Runner. ⌘K-Palette, `G`-Kürzel, abschaltbare Einzeltasten. |
+| Interaktion | Drawer pro Tool (erst Behebung, dann Nutzung, dann „Strenger machen“; seit Version 1.2 dieser Spec „Regeln ändern“ mit Lockern der Rückfrage bis Stufe 2, 4.2.4). Riskante Bestätigungen öffnen sich auf „Abbrechen“. Ehrlicher Zwischenzustand bis zur Bestätigung durch den Runner. ⌘K-Palette, `G`-Kürzel, abschaltbare Einzeltasten. |
 | Qualitätsniveau | WCAG AA in beiden Themes, Forced Colors, Reduced Motion. Kein horizontales Scrollen zwischen 320 und 1440 px. Die fünfte Antwort steht im ersten Viewport. Prüfwerte der letzten Verifikation: Markentreue 9,3, Eleganz 8,8, Klarheit 9,1. |
 
 Prototyp: `/Users/philipprollmann/Dev/chainmatics/.archives/glirastes-living-network-design-v3-landing-2026-10-05/index.html`. Referenzbilder: `shots/final/showcase-1.png` … `showcase-6.png`, `showcase-3b.png` und `shots/compare-v3b-*.png`. Quelltexte: `src/tokens.mjs` (einzige Quelle der Farb-Tokens), `src/c-net.js` (Netzgeometrie), `src/d-overview.js`, `src/e-tools.js`, `src/f-views.js`, `src/g-app.js`, `src/style.css`.
@@ -86,10 +92,12 @@ Seitenleiste (264 px; ab ≤ 1180 px off-canvas)
 
 Kopfleiste (sticky, --bg mit 80 %, Blur 12 px)
   Menü-Knopf (≤ 1180) · Breadcrumb „<App> / <Seite>“ · Suche ⌘K · Theme-Schalter · Avatar
+  Avatar öffnet das Nutzermenü: E-Mail · Sprache „Deutsch“ / „English“ (Auswahl, 2.4) · Abmelden
 ```
 
 - Die aktive Seite ist eine Zeile in `--card-2` mit Radius 8, Schrift `ink` in 500, ohne Zustandsfarbe (`aria-current="page"`). Ein Zustand erscheint nur als Badge rechts: Glyphe + Zahl, der schwerste gewinnt („◆ 5“, „▲ 1“). Im Zustand stale zeigt „Was kann mein Chat?“ das hohle Still-Quadrat ohne Zahl statt des Prototyp-Badges „▲ alle“, weil über den Chat nichts bekannt ist (1.3). Die Wörter stehen im zugänglichen Namen („Was kann mein Chat?, 1 Fehler, dazu 5 prüfen“) und im Tooltip.
-- Die bisherigen Foundation-Navigationspunkte (`Connected`, `Connect`, `Approvals`, `Audit Stream` in `components/sidebar.tsx`) werden ersetzt. Die Expertenrouten `/runtime-setup`, `/rollouts`, `/revisions`, `/approvals` und `/audit-stream` bleiben im Foundation-Profil erreichbar. Sie verschwinden aus der Seitenleiste und bleiben über „Technische Details“-Links und die Palette zugänglich.
+- Die bisherigen Foundation-Navigationspunkte (`Connected`, `Connect`, `Approvals`, `Audit Stream` in `components/sidebar.tsx`) werden ersetzt.
+- **Expertenrouten sind zum Release ausgeblendet** (Philipp, 2026-10-05). `/runtime-setup`, `/rollouts`, `/revisions`, `/approvals` und `/audit-stream` sind im Foundation-Profil nicht routbar: Die Middleware leitet sie auf `/manage` um (2.2). Sie haben keinen Sidebar-Eintrag, keinen Palette-Eintrag (4.1.10) und keine Links aus Foundation-Seiten; „Technische Details“ in Drawer und Historie zeigen nur Daten, keine Links. Grund: Bis D8 kann das Promote in `/rollouts` gespeicherte Entscheidungen weglassen. Das gilt, bis P08d das Promote entscheidungserhaltend gemacht hat (D8); das Wiedereinblenden ist danach eine eigene, freizugebende Änderung.
 - Das Profil `full` behält seine Navigation. Es bekommt durch die Token-Aliase das neue Aussehen, wird aber nicht umgestaltet (Abschnitt 8).
 
 ### 2.2 Routen und Foundation-Profil
@@ -97,12 +105,13 @@ Kopfleiste (sticky, --bg mit 80 %, Blur 12 px)
 | Bildschirm | Route | Bestehende Citadel-Route | Änderung in `product-profile.ts` |
 | --- | --- | --- | --- |
 | Übersicht | `/manage` | `/manage` (ersetzt den Inhalt von `app/(dashboard)/manage/page.tsx`) | `/manage` wird Präfix statt exakter Route |
-| Was kann mein Chat? | `/manage/tools` (`?tool=<toolId>` öffnet den Drawer; Filter `q`, `view=all\|attn\|approval\|restricted\|new`, `risk=0\|1\|2\|3`, `module`) | neu; ersetzt die Tool-Ansicht in `/runtime-setup` für Nicht-Experten | durch das Präfix `/manage` abgedeckt |
+| Was kann mein Chat? | `/manage/tools` (`?tool=<toolId>` öffnet den Drawer; Filter `q`, `view=all\|attn\|approval\|changed\|new`, `risk=0\|1\|2\|3`, `module`) | neu; ersetzt im Foundation-Profil die Tool-Ansicht in `/runtime-setup` (ausgeblendet, 2.1) | durch das Präfix `/manage` abgedeckt |
 | Kosten & Nutzung | `/manage/usage` (`?range=month\|7d\|30d\|12m`, `split=tool\|environment\|revision\|model`, Filter `revision`, `model`) | neu (der Name folgt dem Prototyp-NAV) | durch das Präfix `/manage` abgedeckt |
-| Historie & Rollback | `/manage/history` (`?filter=all\|version\|restrict\|incident`) | neu; `/rollouts` bleibt Expertenansicht | durch das Präfix `/manage` abgedeckt |
+| Historie & Rollback | `/manage/history` (`?filter=all\|version\|manual\|incident`; `manual` = „Änderungen von Hand“, strenger wie gelockert, 4.4) | neu; ersetzt im Foundation-Profil `/rollouts` (ausgeblendet, 2.1) | durch das Präfix `/manage` abgedeckt |
 | Verbinden | `/connect`, `/connect/pair?user_code=XXXX-XXXX` | bestehend; `verificationUri` der API zeigt schon auf `/connect/pair?user_code=` | unverändert |
 | Einstellungen | `/settings`, `/settings/apps`, `/settings/api-keys` | bestehend | unverändert; der Optimizer-Abschnitt von `/settings` wird im Foundation-Profil ausgeblendet |
 | Team | `/settings/team` | bestehend | unverändert |
+| Expertenrouten | `/runtime-setup`, `/rollouts`, `/revisions`, `/approvals`, `/audit-stream` | bestehend | Die fünf Expertenpräfixe fallen aus `FOUNDATION_ROUTE_PREFIXES`; dort steht danach nur `/manage` (erste Zeile). `isProductRouteVisible` meldet sie im Foundation-Profil als unsichtbar, die Middleware leitet auf `dashboardLandingPath` um (2.1, bis D8). Das Profil `full` bleibt unverändert |
 
 `dashboardLandingPath('foundation')` bleibt `/manage`.
 
@@ -124,6 +133,36 @@ Die Fragen im UI sind die Kurzformen des Prototyps. Die rechte Spalte nennt die 
 
 Die Übersicht lädt fünf Anfragen parallel: `environments`, `connected-overview`, `capabilities`, `metrics` (Übersichtsfenster) und `deployments`. Danach folgen höchstens zwei abhängige Metrik-Abfragen für die Fehlerbedingung (aktive Version seit Aktivierung; die vorige Version nur, wenn die aktive über der Schwelle liegt, 4.1.3). Einmal pro Sitzung kommen `GET /v1/tenant` (Plan), `GET /v1/apps` (App-Zahl) und `GET /v1/tenant/team` (eigene Rollen, Abschnitt 4) dazu. Die Antworten berechnet ein reines View-Model, `lib/view-models/overview.ts` (Abschnitt 4.1). Netz, Faden, Hero, Ledger, Seitenleisten-Badges und Kicker lesen alle dasselbe Ergebnis. So steht jede Tatsache an genau einer Stelle und kann sich nicht widersprechen.
 
+### 2.4 Sprachen: Deutsch und Englisch
+
+Philipp am 2026-10-05: „Beides zum MVP“. Die Foundation-Oberfläche von Citadel (alle Routen aus 2.2 außer den Expertenrouten, dazu `(auth)`) erscheint zum MVP auf Deutsch und Englisch. Die Landingpage bleibt englisch.
+
+| Thema | Festlegung |
+| --- | --- |
+| Kataloge | Alle sichtbaren Texte, zugänglichen Namen, `aria-valuetext`, Tooltips, Toasts, `document.title` und Metadaten stehen in zwei typisierten Katalogen: `src/lib/copy.de.ts` (Referenz; daraus der Typ `Copy`, ohne `as const`, damit die Werte `string` sind und nicht die deutschen Literale) und `src/lib/copy.en.ts` (`export const en = { … } satisfies Copy`). `satisfies` lehnt fehlende und überzählige Schlüssel zur Compile-Zeit ab. Die Kataloge sind reine Daten: Strings mit benannten Platzhaltern (`{n}`, `{tool}`) und Pluralobjekte `{ one, other }`, die `t()` über `Intl.PluralRules` der gewählten Sprache auflöst. Keine i18n-Bibliothek. |
+| Texte dieser Spec | Die deutschen Texte in den Tabellen dieser Spec sind die Referenz für `copy.de.ts`. Die englischen Texte stehen nur in `copy.en.ts`; sie sagen dasselbe, mit denselben Platzhaltern und ohne zusätzliche Aussagen (1.1). Die Kernbegriffe legt das Glossar unten fest. |
+| View-Models | View-Models geben Textschlüssel mit Werten zurück (`CopyRef = { key, values }`), keine fertigen Sätze. Erst die Komponente macht daraus mit `t()` und `format.ts` Text in der gewählten Sprache. Die Sprache ändert also keine Logik. |
+| Umschalten | Im Nutzermenü (Avatar, 2.1) und in der Palette (4.1.10). Jede Option trägt ihren Namen in der eigenen Sprache („Deutsch“, „English“). Die Wahl wirkt sofort: Cookie setzen, `document.documentElement.lang` setzen, `router.refresh()`. Es gibt keinen Seitenwechsel und keinen Verlust von Filtern oder Drawer-Zustand. Anmelden und Registrieren (`(auth)`) haben keinen Umschalter; sie folgen dem Cookie bzw. `Accept-Language`. |
+| Speicherung | Cookie `citadel-locale` (`de` \| `en`; `Path=/`, `Max-Age` 1 Jahr, `SameSite=Lax`, in Produktion `Secure`). Die Wahl gilt damit pro Browser; eine Speicherung am Nutzerkonto gibt es zum MVP nicht. Ein Cookie statt `localStorage`, weil der Server Sprache und `<html lang>` schon beim ersten Rendern braucht (kein Aufblitzen der falschen Sprache). Andere Cookie-Werte werden ignoriert. |
+| Standard | Ohne gültiges Cookie entscheidet `Accept-Language`: Beginnt die Sprache mit dem höchsten `q`-Wert (bei Gleichstand die erste) mit `de`, gilt Deutsch, sonst Englisch. Fehlt der Header oder ist er ungültig, gilt Englisch. Eine reine Funktion `resolveLocale(cookie, acceptLanguage)` in `src/lib/i18n/locale.ts` entscheidet das. |
+| `<html lang>` | Die Gruppen `(dashboard)` und `(auth)` haben eigene Root-Layouts mit `<html lang={locale}>`; die Landing (`(marketing)`) hat ein eigenes Root-Layout mit `<html lang="en">` und bleibt statisch. `app/layout.tsx` entfällt (5.3). Der Wechsel zwischen Landing, Anmeldung und Dashboard ist damit ein voller Dokumentwechsel; das ist gewollt. Ohne gemeinsames Root-Layout braucht eine unbekannte URL eine eigene 404: `app/global-not-found.tsx` (Next 15.5, `experimental.globalNotFound`) mit eigenem `<html lang>` aus `resolveLocale`; ein Playwright-Test ruft eine unbekannte URL auf. |
+| Auslieferung | Das Server-Layout gibt nur den Katalog der gewählten Sprache an einen Client-`CopyProvider`; der andere Katalog wird nicht ausgeliefert (Budget 6.2). |
+| Formate | `src/lib/format.ts` formatiert Zahlen, Prozente, Beträge (USD), Datum, Uhrzeit und relative Zeiten über `Intl` mit `de-DE` bzw. `en-US` (Abschnitt 4). |
+| Nicht übersetzt | Tool-Namen, Beschreibungen und Bereiche aus der App (wie gemeldet; ein lokalisierter `title` nach D4 in der gewählten Sprache, sonst der vorhandene), IDs, Digests, Befehle und Codeblöcke (`translate="no"`), Versionsnummern, Produktnamen (Glirastes, Citadel, Runner). API-Fehlertexte erscheinen nie roh: Jede bekannte Antwort hat einen Katalogeintrag (4.1.6, 4.2.4, 4.5); eine unbekannte zeigt einen allgemeinen Katalogtext mit dem HTTP-Status. |
+| Kürzel | `G O`, `G T`, `G K`, `G H`, `G V`, `U`, `/`, `?`, ⌘K und ⌘Z sind in beiden Sprachen gleich (6.1). |
+
+Glossar (verbindlich für `copy.en.ts`):
+
+| Deutsch | Englisch |
+| --- | --- |
+| Übersicht · Was kann mein Chat? · Kosten & Nutzung · Historie & Rollback · Verbinden · Einstellungen · Team | Overview · What can my chat do? · Cost & usage · History & rollback · Connect · Settings · Team |
+| Ist meine App verbunden? · Gibt es eine neue Version? · Was kostet es? · Gibt es ein Problem? | Is my app connected? · Is there a new version? · What does it cost? · Is there a problem? |
+| Gesund · Bereit · Neu im Code · Prüfen · Fehler · Bekannt · Getrennt · Still | Healthy · Ready · New in code · Review · Error · Known · Disconnected · Quiet |
+| Fragt vorher · Eingeschränkt · Gelockert · Geändert · Risiko gestiegen | Asks first · Restricted · Relaxed · Changed · Risk raised |
+| Liest nur · Liest Sensibles · Ändert Daten · Löscht · Versendet / extern · Bezahlt · Nicht eingeordnet | Reads only · Reads sensitive data · Changes data · Deletes · Sends / external · Pays · Not classified |
+| Anwenden · Fortsetzen · Zurückkehren · Rückgängig machen · Regeln ändern · Auf den Code-Wert zurück | Apply · Resume · Roll back · Undo · Change rules · Back to the code value |
+| Wartet auf den Runner · Nicht angewendet · Was wir geprüft haben · Rückweg | Waiting for the runner · Not applied · What we checked · Way back |
+
 ---
 
 ## 3. Bildsprache und Tokens
@@ -136,7 +175,7 @@ Die Übersicht lädt fünf Anfragen parallel: `environments`, `connected-overvie
 
   Jede der beiden Regeln enthält alle Farb-Tokens (`COLORS`), die themenabhängigen Werte (`THEMED`) **und** alle Aliase: die shadcn-Aliase (`SHADCN`), die Landing-Aliase (`LANDING`) und `--primary-soft`. Die Aliase stehen also nicht nur einmal auf `:root`. Grund: Eine Custom Property wie `--fg: var(--ink)` wird an dem Element aufgelöst, an dem sie deklariert ist, und als fertiger Wert vererbt. Stünden die Aliase nur auf `:root`, erbte der dunkle Landing-Wrapper (`[data-theme="dark"]`) unter einem hellen `<html data-theme="light">` die hellen Werte von `--fg`, `--background` usw. Ein Playwright-Test prüft das: Landing bei `citadel-theme = light` hat für `--fg`, `--card`, `--primary` und `--border` die Dunkel-Werte.
   - Die Prototyp-Zeile `--radius: 12px; --radius-sm: 8px; --radius-lg: 20px` aus `tokenCSS()` wird **nicht** übernommen; sie kollidierte mit Tailwinds `--radius-*`. Die Radien regelt 3.4.
-- **Dunkel ist Standard.** `next-themes` mit `attribute="data-theme"`, `defaultTheme="dark"`, `enableSystem={false}`, `storageKey="citadel-theme"`. Das hart gesetzte `className="dark"` in `app/layout.tsx` entfällt. Tailwind:
+- **Dunkel ist Standard.** `next-themes` mit `attribute="data-theme"`, `defaultTheme="dark"`, `enableSystem={false}`, `storageKey="citadel-theme"`. Das hart gesetzte `className="dark"` in `app/layout.tsx` entfällt mit der Datei (Root-Layouts pro Gruppe, 2.4). Tailwind:
   - `@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));`
   - `@custom-variant light (&:where([data-theme=light], [data-theme=light] *));`
 - **Gemeinsam mit `landing.css`.** `.landing` deklariert seine Palette nicht mehr selbst, sondern liest die Tokens über die Landing-Aliase (`--fg`, `--fg-muted`, `--fg-dim`, `--card`, `--card-2`, `--border-strong`, `--primary-dim`, `--teal`, `--blue`, `--violet`, `--red`). Der Wrapper im `(marketing)`-Layout bekommt `data-theme="dark"`, damit die Landingpage dunkel bleibt, auch wenn jemand Citadel hell nutzt (das Theme liegt in `localStorage` derselben Origin). Innerhalb von `.landing` werden keine Tailwind-Varianten `dark:`/`light:` verwendet, weil dort beide Varianten zugleich passen würden (`<html data-theme="light">` als Vorfahr und der dunkle Wrapper). Die Werte im Dunkel-Theme sind identisch mit dem heutigen `landing.css`; die Landingpage ändert sich also um keinen Pixel (Screenshot-Gleichheitstest, Abschnitt 7). Die Radien der Landingpage (`--radius*`) bleiben auf `.landing` beschränkt (siehe 3.4).
@@ -284,7 +323,7 @@ Netzgewichte (`WEIGHT`, aus `c-net.js`):
 
 - Fließtext bekommt `font-feature-settings: "ss01", "cv11"`, Mono bekommt `"tnum", "zero"`. Zwischen Wert und Einheit steht immer U+00A0 („1 Fehler“, „wirkt nach Bestätigung“ ausgenommen).
 - Gewichte: 500 für Display und Betonung; 600 nur für Wortmarke, Diagnose-Kopf und Gruppennamen.
-- Schriften werden im Root-Layout über `next/font/google` geladen, mit denselben Variablen wie im `(marketing)`-Layout: `--font-geist`, `--font-jetbrains-mono`, `--font-instrument-serif`. Das `(marketing)`-Layout lädt sie danach nicht mehr selbst. Instrument Serif wird mit `preload: false` geladen. Outfit entfällt.
+- Schriften werden einmal in `src/app/fonts.ts` über `next/font/google` definiert, mit denselben Variablen wie heute im `(marketing)`-Layout: `--font-geist`, `--font-jetbrains-mono`, `--font-instrument-serif`. Alle drei Root-Layouts (2.4) setzen sie; das `(marketing)`-Layout definiert sie nicht mehr selbst. Instrument Serif wird mit `preload: false` geladen. Outfit entfällt.
 - Schriftstapel auf `:root`, wortgleich mit `.landing`: `--font-sans: var(--font-geist), "Söhne", -apple-system, BlinkMacSystemFont, "Inter", sans-serif`, `--font-serif: var(--font-instrument-serif), "Times New Roman", serif`, `--font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", Menlo, monospace`. Das heutige `@theme inline { --font-sans: var(--font-sans) }` in `globals.css` verweist auf sich selbst und wird durch `--font-sans: var(--font-geist), …` ersetzt; `.landing` deklariert die Stapel nicht mehr.
 
 Radien: Citadel definiert auf `:root` drei Werte, `--radius-control: 8px`, `--radius-card: 12px` und `--radius-overlay: 20px`. Tailwinds `@theme inline` bildet sie so ab:
@@ -394,7 +433,7 @@ Regeln:
 | Bekannt (Ursache woanders) | neutral `ink-2` | Pfeil zurück / neutrale Hyphe | Bekannt | Folge einer roten Ursache |
 | Getrennt (Produktionsumgebung) | Rot `err` | Kappe ⊣ / Stummel | Getrennt | `connection ≠ connected`, `lastSeenAt` gesetzt, Produktionsumgebung = die Umgebung mit der höchsten `promotionOrder` der App (bei Free die einzige). `kind` taugt dafür nicht: neue Umgebungen legt die API immer als `custom` an (`apps.controller.ts`), `production` gibt es nur bei Altbeständen |
 | Still (andere Umgebung) | Grau `off` | Kappe ⊣ | Still | wie oben, alle anderen Umgebungen |
-| Eingeschränkt / Fragt vorher / Geändert | `ink-2` | Schloss / Sprechblase / Mono `~` `↑` | Eingeschränkt, Fragt vorher, Geändert, Risiko gestiegen | `origin.* = platform`, `requiresApproval`, `status` |
+| Eingeschränkt / Gelockert / Fragt vorher / Geändert | `ink-2` | Schloss / offenes Schloss / Sprechblase / Mono `~` `↑` | Eingeschränkt, Gelockert, Fragt vorher, Geändert, Risiko gestiegen | `origin.* = platform` mit strengerem Wert; Gelockert: `requiresApproval = false` mit `origin.requiresApproval = platform` (4.2.4); `requiresApproval`; `status` |
 | Risiko | `ink` auf `line-2` | 1–3 steigende Pips | siehe Tabelle unten | effektive `riskClass` |
 | Nicht verfügbare Aktion | `ink-3` auf `surface-3`, ohne Rand | flacher Knopf | Grund daneben | z. B. fehlende Rolle |
 
@@ -419,11 +458,12 @@ Amber hat genau drei Aufgaben: die Marke (Logo, Kern, Kometen, Eyebrow-Strich), 
 Für alle Bildschirme gilt:
 - Clients validieren Antworten mit zod, nach dem Muster von `connected-overview-client.ts`.
 - Ein API-Fehler auf der Platform ist etwas anderes als ein Problem in der App: Er erscheint als eigenes Band „Glirastes erreicht die Platform gerade nicht“ mit „Erneut laden“. Das Netz wird dann neutral ohne Zustandsfarben und ohne Kometen gezeichnet.
-- Zeitangaben:
-  - relativ „vor 11 s“ bis 60 s, „vor N Min.“ bis 60 Min., danach „um hh:mm“
-  - Datum „3. Okt.“; Zeitzone ist die des Browsers
-- Zahlen im Format `de-DE`, Beträge in USD (`Intl.NumberFormat('de-DE', { style: 'currency', currency: 'USD' })` ergibt „15,18 $“).
-- Eine Rate steht immer mit ihrer Anzahl da: „3 von 31 Aufrufen = 9,7 %“.
+- Texte kommen aus dem Katalog der gewählten Sprache (2.4). Die Tabellen dieser Spec nennen den deutschen Text; `{hh:mm}`, `{Datum}`, `{Monat}` und Beträge darin sind Platzhalter, die `format.ts` in der gewählten Sprache füllt.
+- Zeitangaben (über `Intl` mit `de-DE` bzw. `en-US`):
+  - relativ bis 60 s (`Intl.RelativeTimeFormat`, Sekunden `narrow`): „vor 11 s“ / „11s ago“; bis 60 Min. (Minuten `short`): „vor 5 Min.“ / „5 min. ago“; danach „um 14:21“ / „at 2:21 PM“
+  - Datum „3. Okt.“ / „Oct 3“; Zeitzone ist die des Browsers
+- Zahlen und Beträge über `Intl.NumberFormat` mit `de-DE` bzw. `en-US`, Beträge in USD: „15,18 $“ / „$15.18“, Prozent „9,7 %“ / „9.7%“, Tausender „4.812“ / „4,812“.
+- Eine Rate steht immer mit ihrer Anzahl da: „3 von 31 Aufrufen = 9,7 %“ / „3 of 31 calls = 9.7%“.
 - **Kostenkalender in UTC.** P09 fasst Stunden zu UTC-Tagen zusammen (`foldIntoDays`). Alle Tages- und Monatsgrenzen der Kosten- und Fehlerreihen sind daher UTC-Grenzen; „Dieser Monat“ beginnt am 1. um 00:00 UTC. Die Kostenseite sagt das in ihrer Fußzeile („Tage und Monate in UTC“). Alle anderen Zeitangaben (Lebenszeichen, Aktivierung, Historie) stehen in der Zeitzone des Browsers.
 - **Gekürzter Zeitraum.** P09 kürzt `from` stillschweigend auf `retention.availableFrom`. Liegt `range.from` der Antwort nach dem angefragten Beginn, sagt die Ansicht „seit {Datum}“ statt des vollen Zeitraums, bei Free mit dem Zusatz „Free hält 30 Tage“.
 
@@ -432,11 +472,21 @@ Für alle Bildschirme gilt:
 | Aktion | Endpunkt | Erlaubt (API-Code) | Im Dashboard vergebbar heißt das | Text am flachen Knopf |
 | --- | --- | --- | --- | --- |
 | Tool strenger machen, Einschränkung aufheben (speichern) | `PATCH …/runs/:runId/tools/:toolId` | `owner`, `admin`, `editor`, `publisher` (`EDITING_ROLES`) | Owner, Admin | „Ändern dürfen Owner und Admins.“ |
+| Rückfrage lockern (speichern, dann anwenden) | `PATCH …/runs/:runId/tools/:toolId` mit `requiresApproval: false`, danach `POST …/configurations/:id/apply` | Speichern: `EDITING_ROLES`. Wirksam erst durch ein Anwenden, das die Sicherheitsfreigabe selbst gibt; dafür gilt dieselbe Bedingung wie für jedes Anwenden (nächste Zeile) | Owner, Admin | „Lockern dürfen Owner und Admins.“ |
 | Anwenden, Fortsetzen | `POST …/configurations/:id/apply`, `POST …/runs/:runId/apply` | eine Publisher-Rolle (`owner`, `admin`, `publisher`) **und** (`owner`/`admin` als Hauptrolle oder `security-approver`) (`assertActorCanRun`) | Owner, Admin | „Anwenden dürfen Owner und Admins.“ |
 | Zurück; Rückgängig nach Anwenden oder Zurück | `POST …/deployments/:id/rollback` | Hauptrolle `owner`, `admin` oder `publisher` | Owner, Admin | „Zurückgehen dürfen Owner und Admins.“ |
 | Gerät verbinden, ablehnen | `POST /v1/runtime-connect/pairings/authorize`, `…/deny` | Hauptrolle `owner` oder `admin` | Owner, Admin | „Geräte verbinden dürfen Owner und Admins.“ |
 
-`member`, `viewer` und ein reiner `security-approver` sehen alles, ändern aber nichts. Der Anwenden-Schritt nach dem Speichern (4.2.4) entfällt für Rollen, die speichern, aber nicht anwenden dürfen (`editor`, `publisher` ohne `security-approver`); sie sehen „Gespeichert. Anwenden dürfen Owner und Admins.“
+`member`, `viewer` und ein reiner `security-approver` sehen alles, ändern aber nichts; für sie ist das ganze Formular „Regeln ändern“ flach mit dem einen Grund „Ändern dürfen Owner und Admins.“. Der Anwenden-Schritt nach dem Speichern (4.2.4) entfällt für Rollen, die speichern, aber nicht anwenden dürfen (`editor`, `publisher` ohne `security-approver`); sie sehen „Gespeichert. Anwenden dürfen Owner und Admins.“ Lockern bietet das Formular diesen Rollen nicht an: Der Schalter „Vorher nachfragen“ steht für sie flach mit „Lockern dürfen Owner und Admins.“, weil eine Lockerung erst mit einer Sicherheitsfreigabe wirkt, die nur das Anwenden mitbringt.
+
+**Wer eine Lockerung anwenden kann** (API-Code @ `9014587`, P08b Task 8):
+- Gespeichert wird `requiresApproval: false` von `saveToolOverride` (`EDITING_ROLES`). Die API pinnt die Lockerung an die Risikoklasse, die der Code gemeldet hat (`withBaseline`: `baselineRiskClass`), und lehnt sie bei Stufe 3 oder `unknown` mit 422 `tier-3-always-requires-approval` ab (`boundToolOverride`).
+- Die Konfigurationsrevision mit der Lockerung ist sicherheitskritisch (`isSecurityCriticalChange` über `deltasLoosen`, `runtime-publication-policy.ts`). Beide Anwenden-Wege (`applyConfiguration` und `runs/:runId/apply` über `runConnected`) prüfen zuerst `assertActorCanRun` und veröffentlichen dann mit `publishBatchResumable(…, { selfApproveCritical: true })`. Die API trägt dabei eine Sicherheitsfreigabe mit dem Anwendenden als `approverId` ein; `assertPublicationAllowed` akzeptiert sie für die Hauptrolle `owner`/`admin` oder die Rolle `security-approver` (`selfApproved: true`).
+- Selbst freigegeben wird nur die Revision, die die aktuellen Entscheidungen signiert (`assertSignsCurrentDecisions`); jede andere Revision im Entwurf antwortet mit 409 (4.1.6).
+- Protokolliert wird das als `runtime.app_setup.tool_override` beim Speichern (`direction = loosening`) sowie beim Anwenden als `runtime.revision.decision` (`approvalKind = security`, `decision = approved`, `selfApproved = true`) und `runtime.revision.published` (`critical = true`, `selfApproved = true`).
+- Wer anwenden darf, darf also auch lockernd anwenden; eine zusätzliche Schranke gibt es nicht. Im Dashboard vergebbar sind das Owner und Admins. Die 403 „security approval role required“ aus `publishBatch` ist über diese Wege nicht erreichbar, weil `assertActorCanRun` dieselbe Bedingung vorher prüft.
+- Einen eigenen Freigabe-Ablauf (zweite Person) gibt es im UI nicht (8.1). Hat jemand ohne Anwenden-Recht eine Lockerung über die API gespeichert, wartet sie wie jede Entscheidung auf das Anwenden; der Anwenden-Dialog nennt sie (4.1.6), und ohne Anwenden-Recht bleibt der Knopf flach mit „Anwenden dürfen Owner und Admins.“
+- Das Anwenden signiert immer **alle** gespeicherten Entscheidungen der App (die Revision aus `ToolPolicyRevisionService.target`), nicht nur die gerade bearbeitete. Damit eine fremde oder seit einem Rollback ruhende Lockerung nicht unbemerkt mit selbst gegebener Sicherheitsfreigabe wirksam wird, wendet der Drawer nur dann direkt an, wenn außer dem bearbeiteten Tool kein Tool `decisionPending` zeigt; sonst öffnet er nach dem Speichern den Anwenden-Dialog, der alle Änderungen nennt (4.2.4, Schritt 3).
 
 **Momente.** „Angewendet“ und „Zurück“ (4.1.8) sind Zustände des Tabs, der die Aktion ausgelöst hat. Sie stehen, bis die Seite verlassen oder neu geladen wird oder die Daten einen schwereren Zustand melden; danach gilt wieder der Zustand aus den Daten.
 
@@ -463,7 +513,7 @@ Von oben nach unten:
 
 #### 4.1.2 Antworten (View-Model `lib/view-models/overview.ts`)
 
-Eingaben sind `env` (Umgebungsliste), `ov` (connected-overview), `cap` (capabilities), `met` (Metriken), `dep` (Deployments) und optional `runner` (D1). Ausgabe sind fünf Antworten `{ topic, state, word, short, meta, way? }` plus ein Hero-Modell und ein Netz-Modell. Für jedes Feld gilt die angegebene Quelle; das View-Model rät nichts dazu.
+Eingaben sind `env` (Umgebungsliste), `ov` (connected-overview), `cap` (capabilities), `met` (Metriken), `dep` (Deployments) und optional `runner` (D1). Ausgabe sind fünf Antworten `{ topic, state, word, short, meta, way? }` plus ein Hero-Modell und ein Netz-Modell; die Textfelder sind `CopyRef`s (2.4), keine fertigen Sätze. Für jedes Feld gilt die angegebene Quelle; das View-Model rät nichts dazu.
 
 | Frage | Zustand und Antwort (Auswahl in dieser Reihenfolge, die erste zutreffende gilt) | Meta-Zeile |
 | --- | --- | --- |
@@ -508,7 +558,9 @@ Jede Hyphe hat einen eigenen Zustand (`ok | new | info | attn | err | cut | off 
 
 `ov.candidate.status = failed` ist **kein** Fehler des Chats: Die aktive Version läuft weiter. Es erscheint nur als „Update fehlgeschlagen“ in der Version (4.1.2), sonst würde das UI einen Rollback der gesunden Version empfehlen.
 
-Das **Fehlerfenster** reicht von `max(activatedAt, jetzt − ERROR_WINDOW)` (auf die Stunde abgerundet) bis jetzt, mit `ERROR_WINDOW` = 24 h. Abfrage: `GET /v2/apps/:appId/metrics?environmentId=&revisionId=<agentRevisionId des aktiven Deployments>&from=<Fensterbeginn>&granularity=hour`. Schwelle, Mindestmenge und Fensterlänge sind Konstanten im View-Model; ihre Festlegung ist eine offene Produktentscheidung (8.3).
+Das **Fehlerfenster** reicht von `max(activatedAt, jetzt − ERROR_WINDOW)` (auf die Stunde abgerundet) bis jetzt, mit `ERROR_WINDOW` = 24 h. Abfrage: `GET /v2/apps/:appId/metrics?environmentId=&revisionId=<agentRevisionId des aktiven Deployments>&from=<Fensterbeginn>&granularity=hour`.
+
+**Fehlerregel (verbindlich, Philipp 2026-10-05):** Rot ab `ERROR_RATE_ALARM` = 2 % bei mindestens `ERROR_MIN_SAMPLE` = 20 Aufrufen bzw. Anfragen im Fehlerfenster `ERROR_WINDOW` = 24 h, bei einer jüngeren Version seit ihrer Aktivierung. Die drei Werte sind Konstanten im View-Model und gelten überall, wo das UI die Regel nennt (4.1.8, 4.1.9, 4.4). Das Fenster ist nötig, weil ein Fehler in einer seit Wochen laufenden Version in der Quote seit Aktivierung untergehen würde.
 
 **Ursache.**
 - Die **Version** ist Ursache, wenn sie im Fehlerfenster aktiviert wurde (`activatedAt` liegt im Fenster) und der Rückweg-Kandidat v{M} (4.1.2) in seinem letzten aktiven Zeitraum (`from = activatedAt` von v{M}, `to = activatedAt` der aktiven Version, gleiche Abfrage mit seiner `agentRevisionId`) mindestens 20 Turns hatte und unter der Schwelle lag. Dann sind Version und Chat rot, Probleme verweist zurück („Eins, durch v{N}“), und nur dann sagt der Hero „Zurück zu v{M} hilft.“.
@@ -578,9 +630,10 @@ Jede Prüfung hat ein Wort (OK, Fehler, Getrennt, Nicht prüfbar), eine Glyphe u
 
 **Anwenden.**
 - Der Base-UI-`AlertDialog` öffnet sich auf „Abbrechen“. Kopf: Badge „Neu: v{N+1}“, Frage „v{N+1} anwenden?“ (vor D2: „Neue Regeln anwenden?“), Beschreibung „Der Chat in {App} nutzt danach die Regeln aus v{N+1}, sobald der Runner sie bestätigt. v{N} bleibt gespeichert.“
-- **Zuerst die Risiken** („Was sich ändert“, links): jedes Tool mit `decisionPending`, mit dem gespeicherten Stand in Worten aus den Feldern mit `origin.* = platform` („ausgeschaltet“, „fragt vorher“, „Risiko: Löscht“, „nur Admin“). Ein Tool mit `decisionPending` ohne ein Feld mit `origin = platform` heißt „Einschränkung aufgehoben“ (die laufende Version trägt eine Entscheidung, die gespeicherte nicht mehr). Ist noch nichts veröffentlicht (`cap.comparedTo = null`), steht dort „Erste Version: {n} Tools“. Wird eine Einschränkung an einem Tool der Stufe 3 aufgehoben, steht davor ein Hinweis mit drei Pips: „{Tool} darf danach wieder {Wort aus 3.8}, {fragt vorher | ohne Rückfrage}.“
+- **Zuerst die Risiken** („Was sich ändert“, links): jedes Tool mit `decisionPending`, mit dem gespeicherten Stand in Worten aus den Feldern mit `origin.* = platform` („ausgeschaltet“, „fragt vorher“, „fragt nicht mehr vorher“, „Risiko: Löscht“, „nur Admin“). „Fragt nicht mehr vorher“ ist eine Lockerung (`requiresApproval = false` mit `origin.requiresApproval = platform`, 4.2.4); davor steht derselbe Satz wie im Formular: „Der Chat fragt dann nicht mehr nach, bevor er „{Tool}“ ausführt.“
+- Ein Tool mit `decisionPending` ohne ein Feld mit `origin = platform` heißt „Zurück auf den Code-Wert“: Die laufende Version trägt eine Entscheidung, die gespeicherte nicht mehr. Das lockert, wenn die Entscheidung einschränkte, und verschärft, wenn sie die Rückfrage abschaltete; welches von beiden, sagt die API ohne D15 nicht. Sicher lockernd ist es nur, wenn das Tool danach nicht vorher fragt (dann konnte keine Lockerung bestehen) oder Stufe 3 hat. Geht ein Tool der Stufe 3 auf den Code-Wert zurück, steht davor ein Hinweis mit drei Pips: „{Tool} darf danach wieder {Wort aus 3.8}, {fragt vorher | ohne Rückfrage}.“ Ist noch nichts veröffentlicht (`cap.comparedTo = null`), steht dort „Erste Version: {n} Tools“.
 - „Was gleich bleibt“ (rechts): „{n − k} Tools unverändert“, „Code-Stand (nur Regeln, kein neuer Code)“.
-- Lockert die Änderung etwas (mindestens ein „Einschränkung aufgehoben“), sagt der Dialog: „Lockert {k} Tool-Regeln. Das braucht eine Sicherheitsfreigabe; als Owner oder Admin gibst du sie mit dem Anwenden selbst, sie wird protokolliert.“ (`selfApproveCritical`, `runtime-revision.service.ts`).
+- Lockert die Änderung sicher etwas ({l} ≥ 1; {l} = Tools mit „fragt nicht mehr vorher“ plus sicher lockernde „Zurück auf den Code-Wert“), sagt der Dialog: „Lockert {l} Tool-Regeln. Das braucht eine Sicherheitsfreigabe; als Owner oder Admin gibst du sie mit dem Anwenden selbst, sie wird protokolliert.“ (`selfApproveCritical`, `runtime-revision.service.ts`; Rollen in Abschnitt 4). Einen zweiten Bestätigungsschritt gibt es nicht.
 - Sicherheitszeile: „Rückweg: v{N}, über Historie & Rollback.“ Keine Zeit- oder Beobachtungszusage (1.3).
 - Aufruf:
   - mit bekannter Revision (aus der `PATCH`-Antwort dieser Sitzung oder aus D3): `POST /v2/apps/:appId/runtime-setup/configurations/:configurationRevisionId/apply` mit `{ environmentId }`
@@ -590,6 +643,7 @@ Jede Prüfung hat ein Wort (OK, Fehler, Getrennt, Nicht prüfbar), eine Glyphe u
 | Fehler (Text der API) | Bedeutung | UI |
 | --- | --- | --- |
 | 403 „Publish & Deploy requires publisher and security-approver roles“ | Rolle fehlt (`assertActorCanRun`, gilt für jedes Anwenden, auch für reine Verschärfungen) | flacher Knopf „Anwenden dürfen Owner und Admins.“ (Abschnitt 4, Rollen) |
+| 403 „Revision publication was denied“ | Ein `security-approver` hat genau diese Revision über die Revisions-API abgelehnt (`assertPublicationAllowed`; im Foundation-Profil ohne UI, 2.1). Die Revisions-ID folgt aus den Entscheidungen, die Ablehnung bleibt also, bis sich eine Entscheidung ändert | „Diese Regeln wurden abgelehnt. Ändere eine Regel, um eine neue Version zu erzeugen.“; nie als Rollenfehler |
 | 409 „The app configuration is not the revision that signs the current tool decisions“ | Jemand hat inzwischen weiter entschieden | neu laden, Dialog mit dem neuen Stand erneut zeigen |
 | 409 „The app configuration can no longer be applied“ | Revision veraltet | neu laden |
 | 404 „App configuration revision not found“ | Revision unbekannt | neu laden |
@@ -612,20 +666,20 @@ Die 403 „security approval role required“ aus `publishBatchResumable` ist ü
 **Rückgängig machen** (Toast 10 s, ⌘Z, im Hero als Sekundärknopf, solange der Toast steht). Wie im freigegebenen Prototyp ohne zweiten Dialog, aber nur, wenn die Rolle die Gegenaktion erlaubt:
 - nach Anwenden: `rollback` auf das Deployment, das vor dem Anwenden aktiv war (ID beim Öffnen des Dialogs gemerkt; es ist danach `superseded` und `healthy`, also zulässig). Toast danach: „Rückgängig gemacht. v{N} ist wieder aktiv.“
 - nach Zurück: `rollback` auf das Deployment, von dem zurückgegangen wurde (`rolled_back` und `healthy`, also zulässig).
-- nach „Strenger machen“ im Drawer: `PATCH` mit der Umkehrung (jedes geänderte Feld auf seinen vorigen Platform-Wert oder `null`), danach dasselbe Anwenden. Das ist eine Lockerung und braucht das Anwenden-Recht (Owner, Admin).
+- nach „Regeln ändern“ im Drawer: `PATCH` mit der Umkehrung (jedes geänderte Feld auf seinen vorigen Platform-Wert oder `null`), danach dasselbe Anwenden. Die Umkehrung einer Verschärfung lockert; die Umkehrung einer Lockerung (`requiresApproval: null`) verschärft. Beides braucht das Anwenden-Recht (Owner, Admin).
 
 #### 4.1.7 Free und Pro
 
 | | Free (`productMode = connected_free`) | Pro (`managed`) |
 | --- | --- | --- |
 | Umgebungen | eine; kein Umgebungswechsel, der Schalter zeigt den Hinweis „Weitere Apps und Umgebungen gibt es mit Pro“ | Wechsel im Sidebar-Schalter, geordnet nach `promotionOrder` |
-| Version | Platform-Regeln anwenden | zusätzlich Info „In {Vorumgebung} aktiv: v{N+1}“, wenn eine frühere Umgebung (kleinere `promotionOrder`) eine andere `configRevisionId` aktiv hat (je Umgebung `GET …/deployments`, nur auf `/manage`). Übernehmen bietet die UI erst mit D8 an. Bis dahin verweist sie nicht auf das Promote der Expertenroute `/rollouts`, weil es gespeicherte Entscheidungen weglassen kann (P08b Task 14, Punkt 4) |
+| Version | Platform-Regeln anwenden | zusätzlich Info „In {Vorumgebung} aktiv: v{N+1}“, wenn eine frühere Umgebung (kleinere `promotionOrder`) eine andere `configRevisionId` aktiv hat (je Umgebung `GET …/deployments`, nur auf `/manage`). Übernehmen bietet die UI erst mit D8 an. Die Expertenroute `/rollouts` mit ihrem Promote, das gespeicherte Entscheidungen weglassen kann (P08b Task 14, Punkt 4), ist im Foundation-Profil ausgeblendet (2.1) |
 | Probleme-Rückweg | wie Pro | wie Free |
 | Kosten-Antwort | Monat, Umgebung | wie Free |
 
 #### 4.1.8 Hero-Texte pro Zustand
 
-Jede H1 sind genau zwei kurze Sätze (3.4, `fitHero`). Platzhalter kommen aus dem View-Model: {n} = aktivierte, nicht entfernte Tools; {p} = Größe der Prüf-Menge; {k} = Tools mit `decisionPending`; {d} = Ruhetage (4.1.2); {Tool} = Name nach 4.2.2; v{N}/v{M} = Versionsnummern nach D2 (vorher „die aktuelle Konfiguration“ bzw. „die Konfiguration vom {Datum}“). Ein in Klammern genannter Teilsatz entfällt, wenn seine Bedingung nicht gilt.
+Jede H1 sind genau zwei kurze Sätze (3.4, `fitHero`). Platzhalter kommen aus dem View-Model: {n} = aktivierte, nicht entfernte Tools; {p} = Größe der Prüf-Menge; {k} = Tools mit `decisionPending`; {l} = davon sicher lockernd (4.1.6); {d} = Ruhetage (4.1.2); {Tool} = Name nach 4.2.2; v{N}/v{M} = Versionsnummern nach D2 (vorher „die aktuelle Konfiguration“ bzw. „die Konfiguration vom {Datum}“). Ein in Klammern genannter Teilsatz entfällt, wenn seine Bedingung nicht gilt.
 
 | Zustand | H1 (Zeile 1 / Zeile 2) | Lede (Desktop, Tablet) | Kurzzeile (Telefon) | Primär | Sekundär |
 | --- | --- | --- | --- | --- | --- |
@@ -635,7 +689,7 @@ Jede H1 sind genau zwei kurze Sätze (3.4, `fitHero`). Platzhalter kommen aus de
 | Zwischenzustand Anwenden | „v{N+1} wird angewendet.“ / „Wartet auf den Runner.“ | „Glirastes verteilt v{N+1} an den Runner in {Umgebung}. Sobald er sie gesund meldet, steht es hier. v{N} bleibt gespeichert.“ | „Wartet auf den Runner · {s} s“ | Fortschrittslinie und „Wartet auf den Runner“; in fremdem Tab bei `action = resume` stattdessen „Fortsetzen“ | – |
 | Nicht angewendet | „Nicht angewendet.“ / „v{N} läuft weiter.“ | „Der Runner meldet v{N+1} als {eingeschränkt \| fehlerhaft}. Der Chat nutzt weiter v{N}.“ | „v{N+1} nicht gesund · v{N} läuft“ | „Erneut versuchen“ | „Was wir geprüft haben“ |
 | Zwischenzustand Zurück (ab D1) | „Zurück zu v{M} läuft.“ / „Wartet auf den Runner.“ | „Der Runner stellt auf v{M} um. Sobald er es bestätigt, steht es hier. v{N} bleibt gespeichert.“ | „Wartet auf den Runner · {s} s“ | Fortschrittslinie | – |
-| Moment angewendet | „v{N+1} ist aktiv.“ / „Der Runner hat sie bestätigt.“ | „{k} Tool-Regeln wirken jetzt. v{N} bleibt gespeichert, der Rückweg steht unten.“ | „v{N+1} aktiv · Rückweg v{N}“ | „Geänderte Tools ansehen“ → `/manage/tools?view=restricted` | „Rückgängig machen“, solange der Toast steht; danach „Was sich geändert hat“ |
+| Moment angewendet | „v{N+1} ist aktiv.“ / „Der Runner hat sie bestätigt.“ | „{k} Tool-Regeln wirken jetzt. v{N} bleibt gespeichert, der Rückweg steht unten.“ | „v{N+1} aktiv · Rückweg v{N}“ | „Geänderte Tools ansehen“ → `/manage/tools?view=changed` | „Rückgängig machen“, solange der Toast steht; danach „Was sich geändert hat“ |
 | Moment zurück | „Zurück auf v{M}.“ / „v{N} bleibt gespeichert.“ | vor D1: „Der Runner übernimmt v{M} beim nächsten Abgleich. Regeln, die du nach v{M} gespeichert hast, ruhen, bis du sie erneut anwendest.“ Ab D1, nach Bestätigung: „Der Chat nutzt v{M} seit {hh:mm}. …“ | „v{N} gespeichert · Regeln ruhen“ | „Historie öffnen“ → `/manage/history` | „Rückgängig machen“, solange der Toast steht |
 | error, Ursache Version | „v{N} hat ein Problem.“ / „Zurück zu v{M} hilft.“ | Tool: „Seit {hh:mm} schlagen bei „{Tool}“ {e} von {c} Aufrufen fehl.( Alle anderen Tools arbeiten normal.) v{M} lag in seiner Zeit unter 2 %.“ – „Alle anderen …“ nur, wenn `toolErrors` im Fenster gleich den Fehlern dieses Tools ist. Turns: „Seit {hh:mm} enden {e} von {n} Anfragen mit Fehler. v{M} lag in seiner Zeit unter 2 %.“ | „Nur „{Tool}“ betroffen · umkehrbar“ bzw. „{e} von {n} Anfragen · umkehrbar“ | „Zu v{M} zurückkehren…“ | „Was wir geprüft haben“ |
 | error, Ursache unbekannt | „Ein Tool schlägt fehl.“ bzw. „Anfragen schlagen fehl.“ bzw. „Die Runtime meldet Fehler.“ / „Die Ursache ist offen.“ | „Seit {hh:mm} schlagen bei „{Tool}“ {e} von {c} Aufrufen fehl. v{N} läuft seit {Datum}, der Fehler begann später.“ (Turn- und Runtime-Fall sinngemäß) | „Seit {hh:mm} · Ursache offen“ | Tool-Fall: „„{Tool}“ ansehen“ (öffnet den Drawer); sonst „Was wir geprüft haben“ | Tool-Fall: „Was wir geprüft haben“ |
@@ -664,8 +718,8 @@ Die Palette (⌘K / Ctrl K, `components/command-palette.tsx` mit shadcn `Command
 
 | Gruppe | Einträge |
 | --- | --- |
-| Springen | Übersicht (`G O`), Was kann mein Chat? (`G T`), Kosten & Nutzung (`G K`), Historie & Rollback (`G H`), Gerät verbinden (`G V`), Einstellungen, Team; „Technische Details“ mit den Expertenrouten (`/runtime-setup`, `/rollouts`, `/revisions`, `/approvals`, `/audit-stream`), solange sie im Foundation-Profil bleiben (8.3) |
-| Aktionen | „v{N+1} anwenden…“ (`U`), „Zu v{M} zurückkehren…“, „Helles Design“ / „Dunkles Design“, „Tastenkürzel anzeigen“ (`?`). Kein „Neustart-Befehl kopieren“ (1.3) |
+| Springen | Übersicht (`G O`), Was kann mein Chat? (`G T`), Kosten & Nutzung (`G K`), Historie & Rollback (`G H`), Gerät verbinden (`G V`), Einstellungen, Team. Keine Expertenrouten (2.1) |
+| Aktionen | „v{N+1} anwenden…“ (`U`), „Zu v{M} zurückkehren…“, „Helles Design“ / „Dunkles Design“, „Sprache: English“ (im Englischen „Language: Deutsch“, 2.4), „Tastenkürzel anzeigen“ (`?`). Kein „Neustart-Befehl kopieren“ (1.3) |
 | Tools | nur mit Suchtext: bis zu sechs Treffer aus `cap.tools` in Name, Titel (D4) oder `toolId`; öffnet `/manage/tools?tool=<toolId>` |
 
 Nicht verfügbare Einträge stehen grau mit Grund darunter („Keine neue Version bereit“, „Kein älterer gesunder Stand“, „Anwenden dürfen Owner und Admins.“); Enter auf einem grauen Eintrag zeigt den Grund als Toast. Fußzeile: „↑↓ auswählen · ↵ ausführen · Graue Befehle sagen dir, warum sie gerade nicht gehen.“ Leerer Treffer: „Nichts gefunden für „{q}“.“ Der Kürzel-Dialog (`?`) listet alle Kürzel aus 6.1 und enthält den Schalter „Kürzel mit einzelnen Tasten“ mit dem Hinweis „Schalte sie aus, wenn du Spracheingabe oder eine Bildschirmtastatur nutzt. ⌘K und ⌘Z bleiben.“
@@ -674,7 +728,7 @@ Nicht verfügbare Einträge stehen grau mit Grund darunter („Keine neue Versio
 
 #### 4.2.1 Kopf und Band
 
-- Seitenkopf: Kicker-Pill (Zustand der Chat-Antwort, z. B. „1 Fehler“ + „◆ +5 prüfen“), Mono-Frage, H1 „Was kann mein Chat?“, Lede „{n} Tools in {m} Bereichen, Stand v{N}. Hier kannst du jedes Tool nur strenger machen. Lockern geht nur im Code.“ (vor D4 ohne „in {m} Bereichen“) Dahinter die Platte der Tools-Hyphe.
+- Seitenkopf: Kicker-Pill (Zustand der Chat-Antwort, z. B. „1 Fehler“ + „◆ +5 prüfen“), Mono-Frage, H1 „Was kann mein Chat?“, Lede „{n} Tools in {m} Bereichen, Stand v{N}. Hier machst du jedes Tool strenger oder schaltest seine Rückfrage ab, solange es höchstens Daten ändert. Was löscht, versendet, bezahlt oder nicht eingeordnet ist, fragt immer.“ (vor D4 ohne „in {m} Bereichen“; vor D16 lautet der zweite Satz „Hier kannst du jedes Tool strenger machen.“ und der dritte entfällt) Dahinter die Platte der Tools-Hyphe.
 - Zusammenfassungsband 4/3/2/3 auf drei gemeinsamen Zeilen (Label / Zahl / Zeile). Auf dem Telefon 2 × 2, Zahlen 28 px.
 
 | Kennzahl | Quelle |
@@ -682,13 +736,13 @@ Nicht verfügbare Einträge stehen grau mit Grund darunter („Keine neue Versio
 | Risiko | Balken und Legende aus der Tier-Zählung der aktivierten Tools |
 | Brauchen einen Blick | Prüf-Menge. Im Fehlerfall „1 Fehler“ und darunter ein Pfeil-Link mit dem Namen des Tools, der den Drawer öffnet (zugänglicher Name „1 Fehler: {Tool}, Details öffnen“), dann leise „◆ +5 prüfen“ |
 | Fragen vorher | Zählung `requiresApproval = true` |
-| Von dir eingeschränkt | Tools mit mindestens einem Feld, dessen `origin = platform` ist; Untertitel „wirken nach dem Anwenden“ bzw. „{k} warten aufs Anwenden“, wenn `decisionPending` |
+| Von dir geändert | Tools mit mindestens einem Feld, dessen `origin = platform` ist; Zeile „{e} strenger · {r} gelockert“ ({r} = Tools mit `requiresApproval = false` und `origin.requiresApproval = platform`, {e} = die übrigen; ein Teil mit 0 entfällt), darunter „wirken nach dem Anwenden“ bzw. „{k} warten aufs Anwenden“, wenn `decisionPending` |
 
 #### 4.2.2 Werkzeugleiste und Tabelle
 
 - **Werkzeugleiste:**
   - Suche (`/`, kündigt „n Treffer“ an)
-  - Segmente als Base-UI-`ToggleGroup` mit stabilen Keys (der Fokus bleibt erhalten): Alle · Prüfen (bzw. Fehler) · Fragen vorher · Eingeschränkt · Neu im Code
+  - Segmente als Base-UI-`ToggleGroup` mit stabilen Keys (der Fokus bleibt erhalten): Alle · Prüfen (bzw. Fehler) · Fragen vorher · Von dir geändert (`view=changed`: mindestens ein Feld mit `origin = platform`, strenger oder gelockert) · Neu im Code
   - Auswahl Bereich (`module`, D4) und Risiko
 - **Tabelle:** rahmenlos, gruppiert nach Bereich, innerhalb der Gruppe nach Risiko absteigend.
   - Spalte 1: Name, Beschreibung, Hinweis-Badges
@@ -703,9 +757,10 @@ Nicht verfügbare Einträge stehen grau mit Grund darunter („Keine neue Versio
   - Risiko gestiegen (`risk-raised`, Violett)
   - Entfernt (`removed`, durchgestrichen, `enabled = false`, ganz unten in der Gruppe)
   - Fragt vorher
-  - Eingeschränkt (Schloss)
+  - Eingeschränkt (Schloss; ein Feld mit `origin = platform` und strengerem Wert)
+  - Gelockert (offenes Schloss, neutral; `requiresApproval = false` mit `origin.requiresApproval = platform`, ab D16)
   - Wartet aufs Anwenden (`decisionPending`, Amber)
-  - Lockerung wartet auf den Code (`relaxationPending`, neutral)
+  - Lockerung wartet auf den Code (`relaxationPending`, neutral; nach D16 nicht mehr erreichbar, 4.2.4)
 - **7 Tage:** `GET /v2/apps/:appId/metrics?environmentId=&from=<heute 00:00 UTC − 7 Tage>&granularity=day` → `tools[]` (Top 20) und `totals.toolCalls`. Ein Tool, das in `tools[]` fehlt, zeigt „0“ nur dann, wenn die Summe der `calls` in `tools[]` gleich `totals.toolCalls` ist (dann ist jeder Aufruf zugeordnet). Sonst zeigt es „–“ mit dem Tooltip „nicht unter den 20 meistgenutzten“, bis D6 geliefert ist.
 - **Ausschlüsse** (`cap.exclusions`) stehen unter der Tabelle als einklappbarer Abschnitt „Bewusst keine Tools“ mit `stableKey` (Mono) und Herkunft.
 
@@ -730,7 +785,7 @@ Der Fokus liegt auf dem Titel; Esc schließt und gibt den Fokus an den Auslöser
 
    Befehle stehen im Codeblock mit Kopierknopf. Es werden nur Befehle gezeigt, die es laut Spec 4.2 gibt; `<tool>` ist der Bezeichner, den `glirastes tools status` für dieses Tool ausgibt. `describe`, `verify` und `policy` kommen erst mit P04/P05 in die CLI (Release 0.5.0); der Drawer zeigt sie nur, wenn die Runner-Version aus D1 ≥ 0.5.0 ist, sonst nur `refresh` und `status`.
 4. **„Letzte 7 Tage“** in der aktuellen Umgebung: Aufrufe, Fehler und Fehlerquote mit Anzahl (aus `tools[]`). Die Tagesbalken kommen erst mit D6; vorher stehen nur die Summen. Eine Latenz pro Tool gibt es nicht.
-5. **„Strenger machen“** (4.2.4).
+5. **„Regeln ändern“** (4.2.4; im Prototyp „Strenger machen“).
 6. **„Technische Details“** (eingeklappt):
    - `kind` und `method path`
    - Herkunft je Feld (`origin`)
@@ -738,20 +793,22 @@ Der Fokus liegt auf dem Titel; Esc schließt und gibt den Fokus an den Auslöser
    - `warnings` als Codes
    - `codeVersion`, beschriftet als „Endpunkt-Inventar {digest kurz} · gemeldet {reportedAt}“, dazu der Satz „Dieser Stand deckt nur die Endpunkte ab; UI-Aktionen können aus einem neueren Build stammen.“ (Roadmap-Zeile zum `discoveryDigest`, bis P05/P13 den Digest über das ganze Artefakt bilden). Die lesbare Version „v{N}“ meint überall die Konfigurationsrevision, nie den Code-Stand.
 
-#### 4.2.4 Formular „Strenger machen“ (nur einschränkend, nur Abweichungen)
+#### 4.2.4 Formular „Regeln ändern“ (strenger machen, Rückfrage lockern bis Stufe 2, nur Abweichungen)
 
-Ein reines Modul `lib/view-models/override-draft.ts` beschreibt Choices und Body. Grundlage sind die wirksamen Werte aus `cap.tools[i]` und die Herkunft je Feld (`origin`).
+Philipp am 2026-10-05 zum Lockern im Dashboard: „ich würde sagen dass man das kann. Machen wir es nicht zu kompliziert.“ Das Formular macht Tools deshalb strenger und lockert genau eine Sache: Owner und Admins können die Rückfrage eines Tools abschalten, dessen wirksame Risikoklasse höchstens Stufe 2 hat (`safe-read`, `read-sensitive`, `write`). Stufe 3 (`delete`, `external`, `financial`, `unknown`) ist nie lockerbar. Die Lockerung wird als Entscheidung gespeichert und mit dem normalen Anwenden ausgerollt; einen eigenen Freigabe-Ablauf gibt es nicht (Abschnitt 4, Rollen). Das Lockern setzt D16 voraus; vorher bietet das Formular es nicht an und kündigt es auch nicht an (1.1).
+
+Ein reines Modul `lib/view-models/override-draft.ts` beschreibt Choices und Body. Grundlage sind die wirksamen Werte aus `cap.tools[i]`, die Herkunft je Feld (`origin`) und die eigenen Rollen (Abschnitt 4).
 
 Was die API **nicht** liefert, und was daraus folgt:
-- Den Code-Wert eines Felds mit `origin = platform` gibt keine Route heraus. `capabilities` liefert nur den wirksamen Wert, und `GET …/runtime-setup` überschreibt im Artefakt-Auszug die Tool-Werte ebenfalls mit den wirksamen (`artifactSummary`). Für `enabled` und `requiresApproval` ist der Code-Wert trotzdem eindeutig (die Platform kann nur aus- bzw. einschalten); für `riskClass` und `allowedRoles` ist er unbekannt.
+- Den Code-Wert eines Felds mit `origin = platform` gibt keine Route heraus. `capabilities` liefert nur den wirksamen Wert, und `GET …/runtime-setup` überschreibt im Artefakt-Auszug die Tool-Werte ebenfalls mit den wirksamen (`artifactSummary`). Für `enabled` und `requiresApproval` ist der Code-Wert trotzdem eindeutig: Die Platform kann `enabled` nur ausschalten und kehrt bei `requiresApproval` den Code-Wert nur um (einschalten oder, als Lockerung, abschalten); bei `origin = platform` ist der Code-Wert also das Gegenteil des wirksamen. Für `riskClass` und `allowedRoles` ist er unbekannt.
 - Die gespeicherte Entscheidung selbst gibt keine Route heraus. `origin = platform` heißt nur „eine gespeicherte Entscheidung ändert diesen Wert“; ein gespeichertes No-op ist unsichtbar (D9 verwirft es serverseitig).
 
-Deshalb bezieht das Formular jede Wahl auf den **wirksamen** Wert: Es bietet nur Werte an, die strenger sind als der wirksame, und für Felder mit `origin = platform` zusätzlich „Auf den Code-Wert zurück“. Weil der wirksame Wert nie unter dem Code-Wert liegt, bleibt jede Wahl über dem Code-Wert. Mit D14 kann das Formular den Code-Wert nennen und Zwischenstufen zwischen Code- und Platform-Wert anbieten.
+Deshalb bezieht das Formular jede Wahl auf den **wirksamen** Wert: Es bietet Werte an, die strenger sind als der wirksame, als einzige Lockerung das Abschalten der Rückfrage (unten) und für Felder mit `origin = platform` „Auf den Code-Wert zurück“. Außer bei der Rückfrage liegt der wirksame Wert nie unter dem Code-Wert, jede andere Wahl bleibt also über dem Code-Wert. Mit D14 kann das Formular den Code-Wert nennen und Zwischenstufen zwischen Code- und Platform-Wert anbieten.
 
 | Feld | Angebotene Wahl | Nicht angeboten (mit sichtbarem Grund) |
 | --- | --- | --- |
 | Tool ausschalten (`enabled`) | Schalter „aus“, wenn das Tool wirksam an ist | Einschalten eines im Code deaktivierten Tools („Im Code ausgeschaltet.“); entfernte Tools (`status = removed`) haben kein Formular („Nicht mehr im Code.“) |
-| Vorher nachfragen (`requiresApproval`) | einschalten, wenn es wirksam aus ist und die Stufe < 3 | ausschalten. Ist es wirksam an, weil der Code es verlangt, zeigt das Formular: „Im Code eingeschaltet. Ausschalten geht nur dort.“, bei Stufe 3 „Löscht, versendet oder bezahlt: fragt immer.“; ist es wirksam an, weil du es eingeschaltet hast (`origin = platform`), gibt es „Auf den Code-Wert zurück“ |
+| Vorher nachfragen (`requiresApproval`) | **Einschalten**, wenn es wirksam aus ist, die Stufe < 3 und `origin.requiresApproval ≠ platform` (eine gelockerte Rückfrage schaltet „Auf den Code-Wert zurück“ wieder ein, ohne eine zusätzliche Entscheidung `true` zu speichern). **Ausschalten (Lockern)**, wenn alles gilt: (a) wirksam an mit `origin.requiresApproval = code-default`; (b) wirksame Stufe ≤ 2; (c) `origin.riskClass ≠ platform`, und der Entwurf hebt das Risiko nicht an (die API pinnt die Lockerung an die gemeldete Klasse, jede Anhebung lässt sie verfallen, `override-lapsed-risk-raised`); (d) die Rolle darf anwenden (Abschnitt 4; ist die Rolle unbekannt, gilt sie als berechtigt und die API entscheidet); (e) D16 ist geliefert. **„Auf den Code-Wert zurück“**, wenn `origin.requiresApproval = platform` (an oder gelockert) und `origin.riskClass ≠ platform` | Es gilt der erste zutreffende Grund: Stufe 3: „Löscht, versendet oder bezahlt: fragt immer.“, bei `unknown`: „Nicht eingeordnet: fragt immer.“ · `origin = local-policy`: „In `tool-policy.json` eingeschaltet. Ausschalten geht nur dort.“ (eine lokale Härtung gewinnt, Spec 10 Punkt 5) · `origin = null`: „Woher die Rückfrage kommt, meldet die App nicht. Ausschalten geht hier nicht.“ · Risiko angehoben (gespeichert oder im Entwurf): „Mit angehobenem Risiko fragt das Tool immer.“; das gilt auch für „Auf den Code-Wert zurück“, weil die Platform die Rückfrage dann aus dem angehobenen Risiko ableitet (`raisedIntoConfirmation`, `origin.requiresApproval = platform` auch ohne eigene Entscheidung) und `requiresApproval: null` nichts änderte · vor D16: „Im Code eingeschaltet. Ausschalten geht nur dort.“ · Rolle ohne Anwenden-Recht: flach „Lockern dürfen Owner und Admins.“ |
 | Risiko anheben (`riskClass`) | nur Klassen mit höherer Stufe als der wirksame Wert: Stufe 1 „Liest Sensibles“ (`read-sensitive`), Stufe 2 „Ändert Daten“ (`write`), Stufe 3 einzeln „Löscht“ (`delete`), „Versendet / extern“ (`external`), „Bezahlt“ (`financial`). Darunter: „Unter „{Wort}“ senken geht nur im Code.“ | gleiche oder niedrigere Stufe (die API lehnt das gegenüber dem Code-Wert mit `risk-class-lowered` / `risk-class-relabelled` ab); bei Stufe 3 oder `unknown` gibt es nichts anzuheben |
 | Wer darf es benutzen? (`allowedRoles`) | Abwählen aus den wirksamen `allowedRoles` (bei `origin ≠ platform` sind das die vom Code gemeldeten); mindestens eine Rolle bleibt („Zum Abschalten nutze ‚Tool ausschalten‘“) | Rollen hinzufügen. Meldet der Code keine Rollen (es gilt die Autorisierung des Endpunkts), steht dort: „Es gelten die Rechte des Endpunkts. Rollen einschränken geht hier, sobald die App ihre Rollen meldet.“ (D5) |
 | Beschreibung | – | wird im MVP nicht im Dashboard bearbeitet und nie gesendet (Roadmap: Dashboard-Speichern würde signierte Beschreibungen einfrieren). Beschreibungen ändert man im Code (Skill `describing-glirastes-tools`, P05). |
@@ -762,27 +819,31 @@ Deshalb bezieht das Formular jede Wahl auf den **wirksamen** Wert: Es bietet nur
 | --- | --- |
 | Feld unberührt oder auf den angezeigten Wert zurückgestellt | nichts |
 | Feld verschärft (Entwurf strenger als der wirksame Wert) | `feld: wert` |
+| „Vorher nachfragen“ ausgeschaltet (Lockern, Bedingungen oben) | `requiresApproval: false`; die API pinnt die Lockerung an die gemeldete Risikoklasse (`baselineRiskClass`) |
 | „Auf den Code-Wert zurück“ bei `origin.feld = platform` | `feld: null` |
 | „Gespeicherte Lockerung verwerfen“ bei `relaxationPending = true` | `requiresApproval: null` |
 
 - Ist der Body leer, ist „Speichern“ deaktiviert, und es gibt keine Anfrage.
-- `description` wird nie gesendet; `requiresApproval: false` wird nie gesendet (Lockern geht nur im Code, 8.1).
+- `description` wird nie gesendet. `requiresApproval: false` wird nur als Lockern unter den Bedingungen oben gesendet, nie bei Stufe 3 (die API antwortet dort mit 422 `tier-3-always-requires-approval`) und nie zusammen mit einer Anhebung von `riskClass`.
 - Rollen werden sortiert und dedupliziert; eine Auswahl gleich den wirksamen Rollen gilt als unberührt.
+- Gespeichert wird weiterhin nur die Abweichung (Body-Regel oben, D9).
 
-**Gespeicherte Lockerung.** Zeigt ein Tool `relaxationPending` (eine früher gespeicherte Lockerung der Rückfrage, die erst mit einem committeten lokalen Eintrag wirkt), steht unter „Vorher nachfragen“: „Eine gespeicherte Lockerung wartet auf den Code. Das Tool fragt bis dahin weiter.“ und der Link „Gespeicherte Lockerung verwerfen“. Das verschärft und braucht keine Sicherheitsfreigabe.
+**Lockern.** Enthält der Body `requiresApproval: false`, steht direkt über dem Speichern-Knopf eine Zeile in `ink` mit dem offenen Schloss (am Knopf per `aria-describedby`): „Der Chat fragt dann nicht mehr nach, bevor er „{Tool}“ ausführt.“ Einen zusätzlichen Dialog gibt es nicht. Gespeichert und angewendet wird wie bei jeder Entscheidung (unten); das Anwenden gibt die Sicherheitsfreigabe selbst und protokolliert sie (Abschnitt 4, Rollen). Danach trägt das Tool das Badge „Gelockert“, die Meta-Zeile im Drawer sagt „Fragt nicht vorher (von dir gelockert)“, und unter dem Feld steht „Auf den Code-Wert zurück“ (`requiresApproval: null`, verschärft wieder). Die Historie nennt die Lockerung ab D7 (4.4).
 
-**Einschränkung aufheben.** Das ist eine gesonderte Aktion pro Feld mit `origin = platform`: „Auf den Code-Wert zurück“ sendet `feld: null`. Sie steht nicht zwischen den Verschärfungen, sondern als Link unter dem Feld, mit dem Hinweis „Lockert: braucht beim Anwenden eine Sicherheitsfreigabe.“ Das Formular bietet damit nie eine Wahl unterhalb des Code-Werts an.
+**Gespeicherte Lockerung (bis D16).** Zeigt ein Tool `relaxationPending` (eine gespeicherte Lockerung der Rückfrage, die die Runtime vor D16 nicht übernimmt), steht unter „Vorher nachfragen“: „Eine gespeicherte Lockerung wartet auf den Code. Das Tool fragt bis dahin weiter.“ und der Link „Gespeicherte Lockerung verwerfen“. Das verschärft und braucht keine Sicherheitsfreigabe. Mit D16 meldet `capabilities` eine gültige Lockerung als wirksam, `relaxationPending` ist dann `false`.
+
+**Einschränkung aufheben.** Das ist eine gesonderte Aktion pro Feld mit `origin = platform`: „Auf den Code-Wert zurück“ sendet `feld: null`. Sie steht nicht zwischen den Verschärfungen, sondern als Link unter dem Feld, mit dem Hinweis „Lockert: braucht beim Anwenden eine Sicherheitsfreigabe.“ (bei einer gelockerten Rückfrage stattdessen „Das Tool fragt danach wieder vorher.“). Eine Wahl unterhalb des Code-Werts bietet das Formular nur beim Abschalten der Rückfrage an.
 
 **Speichern** heißt „Speichern und in {Umgebung} anwenden“:
 1. `PATCH /v2/apps/:appId/runtime-setup/runs/:runId/tools/:toolId` mit dem Body. `runId` ist `cap.codeVersion.runId`; ohne Code-Bericht ist das Formular deaktiviert mit „Noch kein Code-Bericht“.
 2. Die Antwort `{ …setup, policyRevision: { configurationRevisionId, created } | null }` liefert die Revision.
-3. Ist `policyRevision` gesetzt und hat die Rolle das Anwenden-Recht (Abschnitt 4), ruft die UI direkt `POST …/configurations/:id/apply` für die gewählte Umgebung auf und zeigt den Zwischenzustand im Drawer: „Gespeichert. Wartet auf den Runner…“; danach weiter wie in 4.1.4 (Fortsetzen bei Gesundheit). Ohne Anwenden-Recht heißt der Knopf nur „Speichern“, und der Drawer sagt danach „Gespeichert. Anwenden dürfen Owner und Admins.“
+3. Ist `policyRevision` gesetzt und hat die Rolle das Anwenden-Recht (Abschnitt 4), ruft die UI direkt `POST …/configurations/:id/apply` für die gewählte Umgebung auf und zeigt den Zwischenzustand im Drawer: „Gespeichert. Wartet auf den Runner…“; danach weiter wie in 4.1.4 (Fortsetzen bei Gesundheit). Ohne Anwenden-Recht heißt der Knopf nur „Speichern“, und der Drawer sagt danach „Gespeichert. Anwenden dürfen Owner und Admins.“ Zeigte vor dem Speichern außer diesem Tool ein weiteres Tool der gewählten Umgebung `decisionPending` (eine fremde Entscheidung oder Regeln, die seit einem Rollback ruhen), wendet der Drawer nicht direkt an: Der Knopf heißt „Speichern“, und danach öffnet sich der Anwenden-Dialog (4.1.6) mit allen Änderungen, weil das Anwenden alle gespeicherten Entscheidungen signiert (Abschnitt 4, Rollen).
 4. Ist `policyRevision = null` (noch nichts veröffentlicht): „Gespeichert. Wirkt, sobald die erste Version angewendet ist.“ Die Übersicht bietet dann `action = apply` an (Kandidat `ready`, `pendingChange = unpublished-decisions`).
 5. Bei Pro bleiben weitere Umgebungen mit `decisionPending`; die Übersicht bietet dort „Anwenden“ an (D3, 4.1.6).
 
 | Fehler | UI |
 | --- | --- |
-| 422 `{ code: 'tool_override_out_of_bounds', field, reason }` (`cannot-enable-disabled-tool`, `risk-class-lowered`, `risk-class-relabelled`, `tier-3-always-requires-approval`, `relaxation-requires-reviewed-pin`) | Kann nur bei einem Wettlauf mit einem neuen Code-Bericht auftreten. Klartext am Feld, z. B. „Der Code meldet dieses Tool inzwischen mit höherem Risiko. Wir haben neu geladen.“; `capabilities` werden neu geladen |
+| 422 `{ code: 'tool_override_out_of_bounds', field, reason }` (`cannot-enable-disabled-tool`, `risk-class-lowered`, `risk-class-relabelled`, `tier-3-always-requires-approval`, `relaxation-requires-reviewed-pin`) | Kann nur bei einem Wettlauf mit einem neuen Code-Bericht auftreten (`relaxation-requires-reviewed-pin` gar nicht, weil die API beim Entscheiden der Rückfrage immer neu pinnt). Klartext am Feld, z. B. „Der Code meldet dieses Tool inzwischen mit höherem Risiko. Wir haben neu geladen.“, bei einer Lockerung mit `tier-3-always-requires-approval`: „„{Tool}“ ist inzwischen als „{Wort aus 3.8}“ gemeldet und fragt immer. Wir haben neu geladen.“; `capabilities` werden neu geladen |
 | 404 „Neither the setup run nor any environment reports that tool“ | „Dieses Tool meldet die App nicht mehr.“ |
 | 403 „Editor role required“ (`PATCH`) | flacher Knopf „Ändern dürfen Owner und Admins.“ |
 | 403 beim anschließenden Anwenden | Die Entscheidung ist gespeichert; Drawer „Gespeichert. Anwenden dürfen Owner und Admins.“, Badge „Wartet aufs Anwenden“ |
@@ -834,7 +895,7 @@ Quelle ist `GET /v2/apps/:appId/metrics` (P09) mit `environmentId`, `revisionId`
 | Zeitstrahl | `GET /v1/apps/:appId/environments/:environmentId/deployments` → pro Eintrag `status`, `activatedAt`, `createdAt`, `healthStatus`, `rolledBackFromId`, `configRevisionId`, `agentRevisionId`, `rolloutMode`; neueste oben (`activatedAt`, sonst `createdAt`). Ganz oben steht bei `ov.action = apply` ein bereiter Eintrag (Amber-Linie, gestrichelter Amber-Zweig, Nummer per D2/D3, Primär „v{N+1} anwenden…“ wie 4.1.6). Pro Eintrag: Nummer (D2; vorher „Konfiguration vom {Datum}“ und Kurz-ID in Mono), Zeitraum („aktiv seit …“ bzw. „aktiv von … bis …“, Ende = `activatedAt` des nächstjüngeren Eintrags), Badge (Aktiv · Bereit · Wartet auf Gesundheit = `pending` · Ersetzt = `superseded` · Zurückgerollt = `rolled_back` oder von einem späteren Eintrag als `rolledBackFromId` genannt). Ein Eintrag mit `rolledBackFromId ≠ null` heißt „Zurück zu v{M}“ mit „von v{N}“. Gesundheitszeile: für die aktive Version dieselbe Aussage wie in der Übersicht (gleiche Funktion); für frühere Versionen nur bei Pro aus `compare?by=revision` („{x} von {n} Anfragen ohne Fehler“), bei Free keine. „Zu v{M} zurückkehren… →“ steht nur an Einträgen, die die Rückweg-Regel aus 4.1.2 erfüllen. „Technische Details“ (eingeklappt): Deployment-ID, `configRevisionId`, `agentRevisionId`, `runtimeDigest` kurz, `rolloutMode`. Mono-Zeiten links (auf dem Telefon über jedem Eintrag, als echter Text; die Desktop-Spalte ist dann `display: none`). |
 | Schiene | eine ruhige Hyphe: 1,5 px in `ink-2` mit langer, flacher Welle (± 2 px über 420 px), die über ihre letzten 36 px zu einer Wurzelspitze unter dem ältesten Eintrag schmal wird; jeder Knoten hängt an einem Zweig, der die Schiene in einem 24-px-Bogen verlässt; der Zweig zur bereiten Version ist Amber und gestrichelt. Die aktive Version trägt eine `ink-3`-Linie, eine zurückgerollte die Pfeil-Glyphe. Gezeichnet per ResizeObserver wie `alignRoot`; `aria-hidden`. |
 | Änderungsliste pro Version | entfällt bis D15 (kein Vergleich zweier Konfigurationen). |
-| Eingriffe von Hand | `GET /v1/audit/events?type=runtime.app_setup.tool_override` (Payload `toolId`, `decidedFields`, `direction`), `runtime.deployment.rolled_back`. Ohne App-Filter für Dashboard-Nutzer ist das heute tenantweit, deshalb D7. Bis dahin zeigt die Historie nur Deployments. |
+| Eingriffe von Hand | `GET /v1/audit/events?type=runtime.app_setup.tool_override` (Payload `toolId`, `decidedFields`, `direction`), `runtime.deployment.rolled_back`, `runtime.revision.decision`, `runtime.revision.published`. Ohne App-Filter für Dashboard-Nutzer ist das heute tenantweit, deshalb D7. Bis dahin zeigt die Historie nur Deployments. Ab D7 nennt sie jede Lockerung als eigenen Eintrag: `tool_override` mit `direction = loosening` heißt „Gelockert: „{Tool}“ · {Felder}“ (`decidedFields` in Worten: Rückfrage, Risiko, Rollen, Ein/Aus; die Werte stehen nicht im Payload). Die Version, mit der eine Lockerung angewendet wurde, trägt „Sicherheitsfreigabe beim Anwenden, protokolliert“ (`runtime.revision.decision` mit `approvalKind = security`, `selfApproved = true`). Das Audit hält das immer fest; vor D7 nennen in Citadel nur der Anwenden-Dialog (4.1.6) und das Badge „Gelockert“ (4.2.2) die Lockerung. |
 | Filter | Alles · Versionen · Änderungen von Hand (ab D7; vorher deaktiviert mit „Kommt mit dem Audit pro App.“) · Vorfälle (Einträge mit `healthStatus ∈ {degraded, unhealthy}` und die aktive Version, wenn die Übersicht für sie die Fehlerbedingung meldet) |
 | „Wenn etwas schiefgeht“ (4/12) | Ziel = Rückweg-Kandidat (4.1.2). Label im Fehlerzustand „Letzte gesunde Version“ mit „v{M} lag in seiner Zeit unter 2 %.“, sonst „Rückweg, falls v{N} Probleme macht“ mit „v{N} läuft ohne Befund, du brauchst den Rückweg gerade nicht.“; ohne Kandidat „Es gibt keinen älteren gesunden Stand.“ Drei Schritte mit Mono-Zählern: 01 „Du siehst es hier zuerst. Rot wird es ab 2 % Fehlerquote bei mindestens 20 Aufrufen in 24 Stunden; die Werte sind bis zu 10 Minuten alt.“ 02 „Zurück mit einer Bestätigung. Der Chat nutzt die alte Version, sobald der Runner sie übernommen hat.“ 03 „Nichts geht verloren. v{N} bleibt gespeichert; Regeln, die du danach gespeichert hast, ruhen, bis du sie erneut anwendest.“ Im Fehlerzustand Primärknopf „Zu v{M} zurückkehren…“, sonst Pfeil-Link; ohne Recht flacher Knopf „Zurückgehen dürfen Owner und Admins.“ |
 
@@ -874,7 +935,7 @@ Die bestehenden Meldungen aus `lib/runtime-pairing-feedback.ts` werden in diese 
 
 ### 4.6 Einstellungen und Team (minimal)
 
-Diese Seiten werden nur neu eingekleidet. Neue Funktionen gibt es nicht.
+Diese Seiten werden nur neu eingekleidet. Neue Funktionen gibt es nicht; ihre Texte stehen wie alle anderen in beiden Katalogen (2.4).
 
 | Route | Inhalt | Quelle |
 | --- | --- | --- |
@@ -900,6 +961,7 @@ Alle vier Seiten nutzen Seitenkopf (Eyebrow, H1 52, Lede), `LedgerSection`, Knö
 
   Keine Bibliotheken, kein WebGL. Die Geometrie (`sCurve`, Verjüngung, `extendCurve`, `rootCurve`, Band, Platte) besteht aus reinen, deterministischen Funktionen, die auf Server und Client identisch rechnen. Das SVG wird statisch per SSR ausgeliefert; Animationen hängen erst nach der Hydration an (`data-animate`).
 - **Ein View-Model pro Bildschirm.** Es ist eine reine Funktion von API-Antworten auf Darstellungsmodelle; die Komponenten rechnen nicht selbst. Darauf zielen die Unit-Tests (Abschnitt 7).
+- **Kein Text im Markup.** Texte kommen ausschließlich aus dem Katalog der gewählten Sprache (`useCopy()` im Client, `getCopy(locale)` auf dem Server, 2.4); View-Models liefern `CopyRef`s. ESLint `react/jsx-no-literals` gilt für `components/citadel`, `components/living-network`, `components/shell`, `components/tools` und `app/(dashboard)/**`, `app/(auth)/**`, mit `allowedStrings` nur für Glyphen und Satzzeichen.
 - **shadcn/Base UI wiederverwenden statt forken.** Die Aliase aus 3.2 machen stock-Komponenten markenkonform. Abweichungen leben als Varianten in den vorhandenen `components/ui/*`-Dateien.
 
 ### 5.2 Wiederverwendete und neue Primitive
@@ -925,9 +987,11 @@ scripts/build-tokens.mjs                  tokens.mjs → src/app/tokens.css (+ -
 src/design/tokens.mjs                     einzige Quelle der Tokens (aus dem Prototyp)
 src/app/tokens.css                        generiert, eingecheckt
 src/app/globals.css                       @import tokens.css; @theme inline; Varianten dark/light; Basis-Overrides
-src/app/layout.tsx                        Fonts (Geist, JetBrains Mono, Instrument Serif), ThemeProvider; <html lang="en"> bleibt (Landing ist englisch)
-src/app/(dashboard)/layout.tsx, (auth)/layout.tsx   Wrapper lang="de"
-src/app/(marketing)/layout.tsx            Wrapper data-theme="dark"
+src/app/layout.tsx                        entfällt; jede Gruppe hat ihr Root-Layout (2.4)
+src/app/global-not-found.tsx              404 ohne gemeinsames Root-Layout (2.4)
+src/app/fonts.ts                          Geist, JetBrains Mono, Instrument Serif (next/font), von allen Root-Layouts genutzt
+src/app/(dashboard)/layout.tsx, (auth)/layout.tsx   Root-Layouts: <html lang={locale}>, Fonts, ThemeProvider, CopyProvider
+src/app/(marketing)/layout.tsx            Root-Layout: <html lang="en">, Fonts, Wrapper data-theme="dark"
 src/components/landing/landing.css        liest geteilte Tokens statt eigener Literale
 src/app/(dashboard)/manage/page.tsx       Übersicht
 src/app/(dashboard)/manage/tools/page.tsx
@@ -947,17 +1011,21 @@ src/components/citadel/
   kpi-band.tsx, go-link.tsx, diagnosis-card.tsx, in-between-status.tsx, code-block.tsx (ersetzt components/code-block.tsx)
   charts/cost-chart.tsx, charts/cumulative-chart.tsx, charts/risk-bar.tsx, charts/usage-summary.tsx
 src/components/shell/
-  citadel-sidebar.tsx, app-env-switcher.tsx, top-bar.tsx, theme-toggle.tsx, shortcuts.tsx
+  citadel-sidebar.tsx, app-env-switcher.tsx, top-bar.tsx, theme-toggle.tsx, shortcuts.tsx,
+  user-menu.tsx (Sprache, Abmelden), copy-provider.tsx ('use client'; Katalog der gewählten Sprache)
 src/components/tools/
-  tools-table.tsx, tool-drawer.tsx, restrict-form.tsx, apply-dialog.tsx, rollback-dialog.tsx
+  tools-table.tsx, tool-drawer.tsx, rules-form.tsx, apply-dialog.tsx, rollback-dialog.tsx
 src/lib/clients/capabilities-client.ts, metrics-client.ts   (zod), bestehende Clients erweitert
 src/lib/view-models/overview.ts, capabilities.ts, override-draft.ts, costs.ts, history.ts, connect.ts
-src/lib/format.ts                          de-DE, NBSP, USD, relative Zeit, ofN()
-src/lib/copy.de.ts                         alle UI-Texte als Konstanten
+src/lib/format.ts                          Intl nach Locale (de-DE | en-US), NBSP, USD, relative Zeit, ofN()
+src/lib/copy.de.ts                         alle UI-Texte Deutsch (Referenz; Typ Copy)
+src/lib/copy.en.ts                         alle UI-Texte Englisch (satisfies Copy)
+src/lib/i18n/locale.ts                     Locale = 'de' | 'en', resolveLocale(cookie, acceptLanguage), Cookie citadel-locale
+src/lib/i18n/t.ts                          t(): Platzhalter, Plural über Intl.PluralRules, CopyRef
 e2e/                                       Playwright (Abschnitt 7)
 ```
 
-`components/sidebar.tsx`, `app-management/connected-overview.tsx` und `runtime-setup/tool-override-form.tsx` bleiben für das Profil `full` bzw. die Expertenrouten bestehen. Das Foundation-Profil nutzt die neuen Komponenten.
+`components/sidebar.tsx`, `app-management/connected-overview.tsx` und `runtime-setup/tool-override-form.tsx` bleiben für das Profil `full` und dessen Expertenrouten bestehen. Das Foundation-Profil nutzt die neuen Komponenten. In `lib/product-profile.ts` enthält `FOUNDATION_ROUTE_PREFIXES` danach nur `/manage`; die Expertenpräfixe entfallen (2.2).
 
 ---
 
@@ -976,7 +1044,7 @@ e2e/                                       Playwright (Abschnitt 7)
   - Netz, Labels und Platten sind `aria-hidden`; der Faden und der Kicker tragen dieselbe Information als Text.
 - **Tastatur:**
   - ⌘K/Ctrl K öffnet die Palette, `G` gefolgt von `O/T/K/H/V` navigiert, `U` wendet an, `/` springt in die Suche, `?` zeigt alle Kürzel, ⌘Z macht rückgängig, solange der Toast steht.
-  - Einzeltasten-Kürzel sind abschaltbar (WCAG 2.1.4, `localStorage` `citadel-single-keys` in try/catch) und über `aria-keyshortcuts` ausgewiesen.
+  - Einzeltasten-Kürzel sind abschaltbar (WCAG 2.1.4, `localStorage` `citadel-single-keys` in try/catch) und über `aria-keyshortcuts` ausgewiesen. Die Kürzel sind in beiden Sprachen gleich (2.4).
   - Filter verlieren den Fokus beim Neu-Rendern nicht.
   - Tab bleibt im obersten Dialog; Esc gibt den Fokus an den Öffner zurück.
   - Die Off-canvas-Seitenleiste ist geschlossen `inert` und `visibility: hidden`; geöffnet ist `main` `inert`, der Fokus liegt auf dem aktuellen Eintrag, Esc oder ein Klick auf den Scrim schließen und geben den Fokus an den Menü-Knopf zurück.
@@ -996,7 +1064,12 @@ e2e/                                       Playwright (Abschnitt 7)
   - 44 × 44 px Ziele.
   - Alle fünf Antworten samt Rückweg im ersten Viewport bei 768×1024, 390×844, 390×664, 360×640 und 320×568 in allen Zuständen.
   - KPI-Bänder 2 × 2; kein horizontales Scrollen von 320 bis 1440 px.
-- **Sprache:** Die Landingpage ist englisch (`metadata.openGraph.locale = en_US`), deshalb bleibt `<html lang="en">`; die Layouts `(dashboard)` und `(auth)` setzen `lang="de"` an ihrem Wrapper. Ein Axe-/Playwright-Test prüft beide Sprachen. Versalien kommen aus CSS (`text-transform`), damit Screenreader normale Wörter lesen.
+- **Sprache:**
+  - Die Landingpage ist englisch (`metadata.openGraph.locale = en_US`) und hat ein eigenes Root-Layout mit `<html lang="en">`.
+  - Die Root-Layouts von `(dashboard)` und `(auth)` setzen `<html lang>` auf die gewählte Sprache (`de` | `en`, 2.4); beim Umschalten setzt der Client `document.documentElement.lang` sofort, ohne auf das Neurendern zu warten.
+  - Im Sprachmenü trägt jede Option ihren Namen in der eigenen Sprache und das passende `lang` („Deutsch“ mit `lang="de"`, „English“ mit `lang="en"`); die gewählte ist `aria-checked`.
+  - Codeblöcke, IDs und Befehle tragen `translate="no"`.
+  - Axe läuft in beiden Sprachen (Abschnitt 7). Versalien kommen aus CSS (`text-transform`), damit Screenreader normale Wörter lesen.
 
 ### 6.2 Performance-Budgets
 
@@ -1014,6 +1087,7 @@ Gemessen mit Playwright gegen `next build && next start`, API gemockt, System-Ch
 | Bildrate | ≥ 55 fps im Hero bei 1440 (Apple M1), ≥ 50 fps im Band auf einem simulierten Mittelklasse-Telefon; die Kometen pausieren außerhalb des Bildes |
 | Anfragen pro Übersicht | 5 parallel beim Laden, danach höchstens 2 abhängige Metrik-Abfragen (2.3), einmal pro Sitzung `tenant`, `apps`, `team`; Polling 15 s nur bei sichtbarer Seite, im Zwischenzustand 2 s |
 | Fonts | Geist vorgeladen; JetBrains Mono 400/500; Instrument Serif nicht vorgeladen |
+| Sprachkatalog | nur der Katalog der gewählten Sprache geht an den Client, ≤ 10 KB gzip; keine i18n-Bibliothek; Umschalten per `router.refresh()` ohne vollen Seitenwechsel (2.4) |
 
 ---
 
@@ -1023,34 +1097,38 @@ Gemessen mit Playwright gegen `next build && next start`, API gemockt, System-Ch
 | --- | --- | --- |
 | Tokens | `build-tokens.mjs --check`: `tokens.css` entspricht `tokens.mjs`. Kontrast-Test: alle Text-Paare ≥ 4,5:1 und Markierungs-Paare ≥ 3:1 in beiden Themes; oklch → sRGB als Test-Helfer, keine Laufzeitabhängigkeit; Port von `contrast2.mjs`. Gleichheit Landing dunkel: jede Landing-Variable hat denselben berechneten Wert wie vor der Umstellung. Verschachteltes Theme: unter `<html data-theme="light">` hat der Landing-Wrapper für jeden Alias (`--fg`, `--card`, `--primary`, `--border`, `--background`) den Dunkel-Wert (3.1). | Vitest + Playwright |
 | Geometrie | `geometry.ts`: Spitzenkoordinaten, Kontrollpunkte, Verjüngung, Band und Platte gegen die Prototyp-Werte (Goldene Pfade aus `c-net.js` als Fixture) | Vitest |
-| View-Models | `overview.ts`: alle Szenarien aus 4.1.3 (ok, wartet, pending, error mit Ursache Version / unbekannt / nur `unhealthy`, stale Produktion / andere Umgebung, Zwischenzustand, `action = resume`, Nicht angewendet, Momente) und alle Sonderzustände aus 4.1.4; jede Zeile der Hero-Tabelle 4.1.8 und der Ledger-Tabelle 4.1.9 als Fixture; Regel „schwerster Zustand gewinnt“; Ursache einmal rot; stale behauptet keine Wirkung auf den Chat; `candidate.status = failed` ist kein Fehlerzustand; `runtimeHealth` des wartenden Deployments löst keinen Fehler der aktiven Version aus; Version ist nur Ursache, wenn v{M} gemessen unter der Schwelle lag; Produktion = höchste `promotionOrder`; Zählregel „1 Fehler +n prüfen“; Fähigkeit pro Risikomix inkl. `unknown`; „Ruhig seit“ und Lede aus derselben Funktion (8.2.3); Rückweg-Auswahl inkl. der beiden UI-Ausschlüsse (nach Rollback nie die fehlerhafte Version, nie gleiche Konfiguration wie aktiv); Rollback-Ruhe („Regeln ruhen“) statt „Wartet auf den Runner“. `capabilities.ts`: Gruppierung, Prüf-Menge, Badges, Risiko-Abbildung 3.8. `override-draft.ts`: Tabelle aller Felder × {`origin = platform` ja/nein} × {wirksamer Wert} × {Aktion}, die genau den Body aus 4.2.4 erzeugt; leerer Body ⇒ keine Anfrage; nie `description`, nie `requiresApproval: false`; nie eine Wahl unter dem wirksamen Wert außer „Auf den Code-Wert zurück“; Stufe 3 ⇒ Rückfrage fix; Rollen nur Teilmenge, mindestens eine; „Gespeicherte Lockerung verwerfen“ ⇒ `requiresApproval: null`. `costs.ts`: `null`/unbekannt nie 0, „mind.“ bei unbekanntem Anteil, UTC-Tage und -Monate, gekürzter Zeitraum ⇒ „seit {Datum}“, Hochrechnung nur mit 7 vollständigen Tagen, Provenienz-Aufteilung, „0“ vs. „–“ für Tools außerhalb der Top 20. `history.ts`: Badges, Rückweg-Links, Vorfälle aus der Übersichtsfunktion. `connect.ts`: `localAppId` vorhanden/fehlt, alle Fehlercodes und Status → Texte. Rollen-Tabelle aus Abschnitt 4 → aktive bzw. flache Knöpfe. | Vitest |
-| Formatierer | `format.ts`: NBSP, de-DE, USD, relative Zeiten an den Grenzen (59 s, 60 s, 59 Min.), `ofN(3, 31)` = „3 von 31 Aufrufen = 9,7 %“ | Vitest |
-| Komponenten | Faden, Sidebar-Badge (zugängliche Namen), Drawer-Fokus, Restrict-Form (sendet exakt den erwarteten Body über einen Fake-Client). Zwischenzustand: nach `awaiting_health` ruft der auslösende Tab dasselbe Anwenden genau einmal erneut auf, sobald das wartende Deployment `healthy` meldet, und nie bei `degraded`/`unhealthy`; ein fremder Tab (`action = resume`) ruft nie selbst auf. Rückgängig ruft `rollback` mit der beim Öffnen gemerkten Deployment-ID auf. | Vitest + Testing-Setup wie `manage-page.test.tsx` |
-| Screenshots | **Übersicht:** {ok, ok mit Prüf-Menge, wartet, pending, stale, stale andere Umgebung, error Ursache Version, error Ursache unbekannt, keine App, App ohne Lebenszeichen, Code nicht gemeldet, Metriken fehlen, Platform-Fehler, Laden, Zwischenzustand, Nicht angewendet, Moment angewendet, Moment zurück} × {dunkel, hell} × {1440×900, 768×1024, 390×844}. **Unterseiten:** {tools, tools mit Fehler, Drawer normal, Drawer eingeschränkt, Drawer Fehler-Tool, usage, usage teilweise unbekannt, history, connect, pair, pair erledigt, settings, team} × beide Themes × drei Breiten. **Dialoge:** anwenden, lockernd anwenden, zurück, Palette (leer, mit Suchtext, mit grauem Eintrag), Kürzel-Dialog. **Pairing:** pending mit vorhandener App, pending ohne App (anlegen), bestätigt, abgelehnt, abgelaufen. **Sonderformen:** Reduced Motion (`reducedMotion: 'reduce'`) und Forced Colors (`forcedColors: 'active'`) für Übersicht/Fehler und Tools. **Landing:** Gleichheitsaufnahme glirastes.io-Route vor/nach. Animationen eingefroren (`animations: 'disabled'`, `data-still`), `document.fonts.ready` abgewartet, `maxDiffPixelRatio 0.002`. | `@playwright/test` mit `channel: 'chrome'` (neue devDependency in `apps/citadel`); API über `page.route('/v1/**', '/v2/**')` mit Fixture-Bauern, die gegen dieselben zod-Schemas validieren wie die Clients |
-| Axe | jede Seite × Zustand × Theme mit `@axe-core/playwright`, Tags `wcag2a`, `wcag2aa`, `wcag21aa`, `wcag22aa`; 0 Verstöße | Playwright |
+| View-Models | `overview.ts`: alle Szenarien aus 4.1.3 (ok, wartet, pending, error mit Ursache Version / unbekannt / nur `unhealthy`, stale Produktion / andere Umgebung, Zwischenzustand, `action = resume`, Nicht angewendet, Momente) und alle Sonderzustände aus 4.1.4; jede Zeile der Hero-Tabelle 4.1.8 und der Ledger-Tabelle 4.1.9 als Fixture; Regel „schwerster Zustand gewinnt“; Ursache einmal rot; stale behauptet keine Wirkung auf den Chat; `candidate.status = failed` ist kein Fehlerzustand; `runtimeHealth` des wartenden Deployments löst keinen Fehler der aktiven Version aus; Version ist nur Ursache, wenn v{M} gemessen unter der Schwelle lag; Produktion = höchste `promotionOrder`; Zählregel „1 Fehler +n prüfen“; Fähigkeit pro Risikomix inkl. `unknown`; „Ruhig seit“ und Lede aus derselben Funktion (8.2.3); Rückweg-Auswahl inkl. der beiden UI-Ausschlüsse (nach Rollback nie die fehlerhafte Version, nie gleiche Konfiguration wie aktiv); Rollback-Ruhe („Regeln ruhen“) statt „Wartet auf den Runner“. `capabilities.ts`: Gruppierung, Prüf-Menge, Badges, Risiko-Abbildung 3.8. `override-draft.ts`: Tabelle aller Felder × {`origin` = `code-default` / `local-policy` / `platform` / `null`} × {wirksamer Wert} × {Aktion} × {Rolle mit / ohne Anwenden-Recht} × {D16 ja/nein}, die genau den Body aus 4.2.4 erzeugt; leerer Body ⇒ keine Anfrage; nie `description`; `requiresApproval: false` genau dann, wenn das Lockern angeboten (Bedingungen a–e) und gewählt ist; nie bei Stufe 3 oder `unknown`, nie bei `local-policy` oder `origin = null`, nie mit angehobenem Risiko (gespeichert oder im selben Entwurf), nie ohne Anwenden-Recht, nie vor D16; nie eine andere Wahl unter dem wirksamen Wert als „Auf den Code-Wert zurück“ und das Abschalten der Rückfrage; Rollen nur Teilmenge, mindestens eine; „Gespeicherte Lockerung verwerfen“ und „Auf den Code-Wert zurück“ an einer gelockerten Rückfrage ⇒ `requiresApproval: null`, nie `requiresApproval: true`; bei `origin.riskClass = platform` kein „Auf den Code-Wert zurück“ an der Rückfrage; bei mehreren gleichzeitig zutreffenden Gründen erscheint der erste aus 4.2.4. Anwenden-Dialog: {l} zählt nur sichere Lockerungen (4.1.6), „Zurück auf den Code-Wert“ an Stufe-≤-2-Tools mit Rückfrage zählt nicht. `costs.ts`: `null`/unbekannt nie 0, „mind.“ bei unbekanntem Anteil, UTC-Tage und -Monate, gekürzter Zeitraum ⇒ „seit {Datum}“, Hochrechnung nur mit 7 vollständigen Tagen, Provenienz-Aufteilung, „0“ vs. „–“ für Tools außerhalb der Top 20. `history.ts`: Badges, Rückweg-Links, Vorfälle aus der Übersichtsfunktion. `connect.ts`: `localAppId` vorhanden/fehlt, alle Fehlercodes und Status → Texte. Rollen-Tabelle aus Abschnitt 4 → aktive bzw. flache Knöpfe. | Vitest |
+| Formatierer | `format.ts` in `de-DE` und `en-US`: NBSP, USD („15,18 $“ / „$15.18“), Prozent, Datum („3. Okt.“ / „Oct 3“), Uhrzeit („um 14:21“ / „at 2:21 PM“), relative Zeiten an den Grenzen (59 s, 60 s, 59 Min.), `ofN(3, 31)` = „3 von 31 Aufrufen = 9,7 %“ / „3 of 31 calls = 9.7%“ | Vitest |
+| Sprache | Kataloge: Schlüsselgleichheit zur Compile-Zeit (`satisfies Copy`, `tsc --noEmit` im Gate) und zur Laufzeit (gleiche Schlüsselpfade, gleiche Platzhaltermenge je Eintrag, Pluralobjekte mit `one` und `other`, kein leerer Wert). `resolveLocale`: gültiges Cookie gewinnt; ohne Cookie `de`, `de-DE`, `de-AT` und `en;q=0.8, de;q=0.9` ⇒ `de`; `en-GB`, `fr-FR`, `de;q=0.5, en`, fehlender oder ungültiger Header ⇒ `en`; Cookie `fr` wird ignoriert. `t()`: Platzhalter, Plural über `Intl.PluralRules`, fehlender Wert wirft im Test. ESLint `react/jsx-no-literals` grün (5.1). Playwright: Kontext `locale: 'de-DE'` ⇒ Deutsch, `'en-GB'` und `'fr-FR'` ⇒ Englisch; Umschalten im Nutzermenü ändert Texte und `<html lang>` ohne Seitenwechsel, Filter und offener Drawer bleiben, und die Wahl überlebt ein Neuladen; die Landing bleibt bei Cookie `de` auf `lang="en"`; in der englischen Übersicht und im englischen Drawer erscheint kein Wert aus `copy.de.ts` (Werte ab 12 Zeichen, die sich vom englischen Wert unterscheiden) | Vitest + Playwright |
+| Navigation und Profil | `product-profile.ts`: im Foundation-Profil sind die Expertenrouten unsichtbar und `/manage`, `/manage/tools`, `/manage/usage`, `/manage/history` sichtbar, im Profil `full` ist alles sichtbar. Playwright: `/runtime-setup`, `/rollouts`, `/revisions`, `/approvals`, `/audit-stream` leiten im Foundation-Profil auf `/manage` um; Palette, Seitenleiste und Seiten enthalten keinen Link darauf | Vitest + Playwright |
+| Komponenten | Faden, Sidebar-Badge (zugängliche Namen), Drawer-Fokus, Regeln-Formular (sendet exakt den erwarteten Body über einen Fake-Client; die Warnzeile „Der Chat fragt dann nicht mehr nach, …“ steht genau dann, wenn der Body `requiresApproval: false` enthält, und ist am Speichern-Knopf per `aria-describedby` verbunden; zeigt außer dem bearbeiteten Tool ein weiteres `decisionPending`, ruft das Speichern nur `PATCH` auf und öffnet danach den Anwenden-Dialog statt direkt anzuwenden). Zwischenzustand: nach `awaiting_health` ruft der auslösende Tab dasselbe Anwenden genau einmal erneut auf, sobald das wartende Deployment `healthy` meldet, und nie bei `degraded`/`unhealthy`; ein fremder Tab (`action = resume`) ruft nie selbst auf. Rückgängig ruft `rollback` mit der beim Öffnen gemerkten Deployment-ID auf. | Vitest + Testing-Setup wie `manage-page.test.tsx` |
+| Screenshots | **Übersicht:** {ok, ok mit Prüf-Menge, wartet, pending, stale, stale andere Umgebung, error Ursache Version, error Ursache unbekannt, keine App, App ohne Lebenszeichen, Code nicht gemeldet, Metriken fehlen, Platform-Fehler, Laden, Zwischenzustand, Nicht angewendet, Moment angewendet, Moment zurück} × {dunkel, hell} × {1440×900, 768×1024, 390×844}. **Unterseiten:** {tools, tools mit Fehler, Drawer normal, Drawer eingeschränkt, Drawer Lockern mit Warnzeile, Drawer gelockert, Drawer Lockern flach (ohne Anwenden-Recht), Drawer Fehler-Tool, usage, usage teilweise unbekannt, history, connect, pair, pair erledigt, settings, team} × beide Themes × drei Breiten. **Dialoge:** anwenden, lockernd anwenden (mit „fragt nicht mehr vorher“), zurück, Palette (leer, mit Suchtext, mit grauem Eintrag), Kürzel-Dialog, Nutzermenü mit Sprachwahl. **Sprache:** die Matrix oben auf Deutsch; zusätzlich auf Englisch die Übersicht {ok, pending, wartet, error Ursache Version, error Ursache unbekannt, stale, Zwischenzustand, Nicht angewendet} × {dunkel, hell} × {1440×900, 768×1024, 390×844} und der Drawer {normal, Fehler-Tool, Lockern mit Warnzeile, gelockert} × {dunkel, hell} × {1440×900, 390×844}. **Pairing:** pending mit vorhandener App, pending ohne App (anlegen), bestätigt, abgelehnt, abgelaufen. **Sonderformen:** Reduced Motion (`reducedMotion: 'reduce'`) und Forced Colors (`forcedColors: 'active'`) für Übersicht/Fehler und Tools. **Landing:** Gleichheitsaufnahme glirastes.io-Route vor/nach. Animationen eingefroren (`animations: 'disabled'`, `data-still`), `document.fonts.ready` abgewartet, `maxDiffPixelRatio 0.002`. | `@playwright/test` mit `channel: 'chrome'` (neue devDependency in `apps/citadel`); API über `page.route('/v1/**', '/v2/**')` mit Fixture-Bauern, die gegen dieselben zod-Schemas validieren wie die Clients |
+| Axe | jede Seite × Zustand × Theme mit `@axe-core/playwright`, Tags `wcag2a`, `wcag2aa`, `wcag21aa`, `wcag22aa`; 0 Verstöße; auf Englisch mindestens die englischen Aufnahmen aus der Zeile Screenshots | Playwright |
 | Kontrast gerendert | Port von `audit.mjs` (Quelle: `checks/` im Archiv, siehe Grundlage): Textkontrast aller sichtbaren Textknoten gegen den tatsächlichen Hintergrund, auch über dem warmen Feld; 0 Fehler | Playwright |
-| Layout | Port von `tmp/fold.mjs` (Quelle wie oben) (fünfte Antwort samt Rückweg im ersten Viewport, Größen aus 6.1) und `tmp/ovf.mjs` (kein horizontales Scrollen bei 320/360/390/641/700/768/820/834/940/1024/1280/1440); `fitHero`: H1 genau zwei Zeilen, Amber-Phrase eine Zeile bei 1440×900, 1366×657, 1280×720, 1024×768 | Playwright |
+| Layout | Port von `tmp/fold.mjs` (Quelle wie oben) (fünfte Antwort samt Rückweg im ersten Viewport, Größen aus 6.1) und `tmp/ovf.mjs` (kein horizontales Scrollen bei 320/360/390/641/700/768/820/834/940/1024/1280/1440); `fitHero`: H1 genau zwei Zeilen, Amber-Phrase eine Zeile bei 1440×900, 1366×657, 1280×720, 1024×768. Für die Übersicht in beiden Sprachen, weil die englischen Sätze andere Längen haben | Playwright |
 | Tastatur | Skip-Link → Primäraktion; `G T` → Tools; Drawer: Fokus auf Titel, Esc zurück zum Auslöser; Palette; Einzeltasten abschaltbar; Off-canvas `inert` | Playwright |
 | Performance | Budgets aus 6.2 über `PerformanceObserver` (LCP, CLS, Longtask) und Bundle-Größen aus `.next/` | Playwright + Skript |
-| Ende-zu-Ende | gegen den Get-It-Done-Piloten mit lokaler Wegwerf-Postgres (Freigabe ausstehend, Roadmap P11/P13): Tool einschränken → anwenden → Runner bestätigt → `decisionPending = false`; Rollback; Pairing mit Ablehnung | Playwright, nach P11 |
+| Ende-zu-Ende | gegen den Get-It-Done-Piloten mit lokaler Wegwerf-Postgres (Freigabe ausstehend, Roadmap P11/P13): Tool einschränken → anwenden → Runner bestätigt → `decisionPending = false`; Rückfrage eines Stufe-2-Tools lockern → anwenden → der Chat führt es ohne Rückfrage aus (nach D16); Rollback; Pairing mit Ablehnung | Playwright, nach P11 |
 
 ### 7.1 Abnahmekriterien pro Bildschirm
 
-Jedes Kriterium ist ein Test aus der Tabelle oben; ein Bildschirm ist abgenommen, wenn alle seine Kriterien in beiden Themes grün sind.
+Jedes Kriterium ist ein Test aus der Tabelle oben; ein Bildschirm ist abgenommen, wenn alle seine Kriterien in beiden Themes und, wo die Zeile Sprache oder ein Kriterium es nennt, in beiden Sprachen grün sind.
 
 | Bildschirm | Kriterien |
 | --- | --- |
-| Übersicht | (1) Für jede Fixture aus 4.1.3/4.1.4 stimmen H1, Lede, Kurzzeile, Primär und Sekundär wörtlich mit 4.1.8 überein. (2) In jedem Zustand ist höchstens eine Ursache rot und höchstens eine Wirkung. (3) Die fünf Faden-Antworten und die Sidebar-Badges kommen aus demselben View-Model-Objekt (Test vergleicht die Texte). (4) Alle fünf Antworten samt Rückweg liegen im ersten Viewport bei den Größen aus 6.1. (5) Kein Text aus der Spalte „Entfällt“ (1.3, 4.1.9) erscheint. (6) Der auslösende Tab setzt ein wartendes Anwenden genau einmal fort; bei `unhealthy` erscheint „Nicht angewendet.“ (7) LCP ≤ 2,5 s und CLS ≤ 0,02 (6.2). |
-| Was kann mein Chat? | (1) Zahlen im Band = Zählungen aus `capabilities` der gewählten Umgebung. (2) Jedes Badge aus 4.2.2 erscheint genau bei seiner Bedingung. (3) Für jedes Feld × Ausgangslage sendet „Speichern“ genau den Body aus 4.2.4, ein leerer Entwurf sendet nichts, `description` und `requiresApproval: false` werden nie gesendet. (4) Eine Wahl unter dem wirksamen Wert ist nur als „Auf den Code-Wert zurück“ erreichbar. (5) 422/404/403 zeigen die Texte aus 4.2.4 und laden `capabilities` neu. (6) Drawer: Fokus auf dem Titel, Esc zurück zum Auslöser, `?tool=` öffnet direkt. |
-| Kosten & Nutzung | (1) Kein Betrag „0,00 $“, wenn `unknownCostTurns = turns > 0`; „mind.“ bei unbekanntem Anteil. (2) Tagesgrenzen sind UTC und die Fußzeile sagt es. (3) Bei gekürztem Zeitraum steht „seit {Datum}“. (4) Free ruft `compare` nie auf; Pro zeigt alle vier Aufteilungen. (5) Tabellenansicht enthält dieselben Werte wie das Diagramm. |
-| Historie & Rollback | (1) Einträge in der Reihenfolge und mit den Badges aus 4.4. (2) „Zu v{M} zurückkehren…“ steht genau an den Einträgen, die die Rückweg-Regel erfüllen; nach einem Rollback nie an der fehlerhaften Version. (3) Der Rollback-Dialog öffnet auf „Abbrechen“ und nennt keine Zeitzusage. (4) „Änderungen von Hand“ ist vor D7 deaktiviert mit Grund. |
+| Übersicht | (1) Für jede Fixture aus 4.1.3/4.1.4 stimmen H1, Lede, Kurzzeile, Primär und Sekundär wörtlich mit 4.1.8 überein (Deutsch) bzw. mit den zugehörigen Einträgen in `copy.en.ts` (Englisch). (2) In jedem Zustand ist höchstens eine Ursache rot und höchstens eine Wirkung. (3) Die fünf Faden-Antworten und die Sidebar-Badges kommen aus demselben View-Model-Objekt (Test vergleicht die Texte). (4) Alle fünf Antworten samt Rückweg liegen im ersten Viewport bei den Größen aus 6.1. (5) Kein Text aus der Spalte „Entfällt“ (1.3, 4.1.9) erscheint. (6) Der auslösende Tab setzt ein wartendes Anwenden genau einmal fort; bei `unhealthy` erscheint „Nicht angewendet.“ (7) LCP ≤ 2,5 s und CLS ≤ 0,02 (6.2). |
+| Was kann mein Chat? | (1) Zahlen im Band = Zählungen aus `capabilities` der gewählten Umgebung. (2) Jedes Badge aus 4.2.2 erscheint genau bei seiner Bedingung. (3) Für jedes Feld × Ausgangslage sendet „Speichern“ genau den Body aus 4.2.4, ein leerer Entwurf sendet nichts, `description` wird nie gesendet. (4) `requiresApproval: false` wird nur gesendet, wenn das Lockern nach 4.2.4 angeboten und gewählt ist (wirksame Stufe ≤ 2, Herkunft `code-default`, kein angehobenes Risiko, Rolle mit Anwenden-Recht, D16); bei Stufe 3 und `unknown` ist es nie wählbar. Eine andere Wahl unter dem wirksamen Wert ist nur als „Auf den Code-Wert zurück“ erreichbar. (5) Vor dem Speichern einer Lockerung steht die Zeile „Der Chat fragt dann nicht mehr nach, bevor er „{Tool}“ ausführt.“; es gibt keinen zusätzlichen Dialog. (6) Mit Speicher-, aber ohne Anwenden-Recht ist das Lockern flach mit „Lockern dürfen Owner und Admins.“; ohne Speicherrecht ist das ganze Formular flach mit „Ändern dürfen Owner und Admins.“; vor D16 steht „Im Code eingeschaltet. Ausschalten geht nur dort.“ für jede Rolle. (7) Nach dem Anwenden trägt das Tool das Badge „Gelockert“, und die Meta-Zeile sagt „Fragt nicht vorher (von dir gelockert)“. Wird eine gespeicherte Lockerung über den Anwenden-Dialog angewendet, nennt er sie mit „fragt nicht mehr vorher“ und dem Satz zur Sicherheitsfreigabe (4.1.6). (8) Zeigt außer dem bearbeiteten Tool ein weiteres Tool `decisionPending`, wendet „Speichern“ nicht direkt an, sondern öffnet den Anwenden-Dialog mit allen Änderungen. (9) 422/404/403 zeigen die Texte aus 4.2.4 und laden `capabilities` neu. (10) Drawer: Fokus auf dem Titel, Esc zurück zum Auslöser, `?tool=` öffnet direkt. (11) Auf Englisch: Drawer ohne deutschen Katalogtext, Axe 0 Verstöße. |
+| Kosten & Nutzung | (1) Kein Betrag „0,00 $“ bzw. „$0.00“, wenn `unknownCostTurns = turns > 0`; „mind.“ bzw. der englische Katalogwert bei unbekanntem Anteil. (2) Tagesgrenzen sind UTC und die Fußzeile sagt es. (3) Bei gekürztem Zeitraum steht „seit {Datum}“. (4) Free ruft `compare` nie auf; Pro zeigt alle vier Aufteilungen. (5) Tabellenansicht enthält dieselben Werte wie das Diagramm. |
+| Historie & Rollback | (1) Einträge in der Reihenfolge und mit den Badges aus 4.4. (2) „Zu v{M} zurückkehren…“ steht genau an den Einträgen, die die Rückweg-Regel erfüllen; nach einem Rollback nie an der fehlerhaften Version. (3) Der Rollback-Dialog öffnet auf „Abbrechen“ und nennt keine Zeitzusage. (4) „Änderungen von Hand“ ist vor D7 deaktiviert mit Grund. (5) Ab D7 steht jede Lockerung als „Gelockert: „{Tool}“ · {Felder}“, und die Version, mit der sie angewendet wurde, trägt den Vermerk der selbst gegebenen Sicherheitsfreigabe (4.4). |
 | Verbinden | (1) Mit vorhandener `localAppId` ist nur diese App wählbar; ohne sie führt „anlegen“ über eine neue Umgebung zu `select`. (2) Jeder Fehlercode und Status aus 4.5 zeigt seinen Text. (3) „Verbunden.“ erscheint erst bei `connection = connected`. (4) Kopierknopf und Radio-Karten sind per Tastatur bedienbar. |
 | Einstellungen, Team | (1) Neu eingekleidet ohne neue Funktion; der Optimizer-Abschnitt fehlt im Foundation-Profil. (2) Axe 0 Verstöße. |
-| Landing | (1) Gleichheitsaufnahme dunkel vor/nach ohne Abweichung über `maxDiffPixelRatio`. (2) Bei `citadel-theme = light` bleibt die Landing dunkel (Alias-Test 3.1). (3) `<html lang="en">` auf der Landing, `lang="de"` im Dashboard. |
+| Landing | (1) Gleichheitsaufnahme dunkel vor/nach ohne Abweichung über `maxDiffPixelRatio`. (2) Bei `citadel-theme = light` bleibt die Landing dunkel (Alias-Test 3.1). (3) `<html lang="en">` auf der Landing, auch bei Cookie `citadel-locale = de`; im Dashboard `<html lang>` = gewählte Sprache. |
+| Sprache (alle Bildschirme) | (1) `copy.de.ts` und `copy.en.ts` sind schlüsselgleich (Compile-Zeit und Test). (2) Ohne Cookie folgt die Sprache `Accept-Language` (`de*` ⇒ Deutsch, sonst Englisch). (3) Das Umschalten im Nutzermenü wirkt sofort, ohne Seitenwechsel, und überlebt ein Neuladen. (4) Zahlen, Datum, Uhrzeit und Beträge folgen der gewählten Sprache (`format.ts`). (5) Übersicht und Tools-Drawer auf Englisch: kein deutscher Katalogtext, H1 genau zwei Zeilen, fünf Antworten im ersten Viewport, Axe 0 Verstöße. (6) Die Kürzel sind in beiden Sprachen gleich. |
+| Navigation und Profil | (1) Im Foundation-Profil sind die Expertenrouten nicht erreichbar (Umleitung auf `/manage`), weder in Seitenleiste noch Palette noch als Link. (2) Das Profil `full` behält alle Routen. (3) Eine unbekannte URL zeigt die 404 aus `global-not-found.tsx` mit gesetztem `<html lang>` (2.4). |
 
 ---
 
-## 8. Nicht-Ziele und offene Punkte
+## 8. Nicht-Ziele, Entscheidungen und Abhängigkeiten
 
 ### 8.1 Nicht-Ziele
 
@@ -1060,7 +1138,9 @@ Jedes Kriterium ist ein Test aus der Tabelle oben; ein Bildschirm ist abgenommen
 - Latenz pro Tool.
 - Anzeige pro Instanz bzw. Server.
 - Beschreibung oder Schema im Dashboard bearbeiten.
-- Lockern im Dashboard. Das Aufheben einer eigenen Platform-Einschränkung ist kein Lockern unter den Code-Wert und bleibt möglich (4.2.4). Hier weicht diese Spec bewusst von Spec 4.10.8 („Lockern nur bis Stufe 2 mit Hinweis auf Sicherheitsfreigabe“) ab, gedeckt durch die Roadmap-Zeile P08c („Override-Formular nur einschränkend und nur Abweichungen“) und Prinzip 11 des freigegebenen Prototyps („Restrict-only“): Lockern läuft ausschließlich über einen committeten lokalen Eintrag (`glirastes tools policy relax`). Vorhandene Lockerungen zeigt die UI als `relaxationPending`.
+- Lockern im Dashboard über das Abschalten der Rückfrage bis Stufe 2 hinaus: kein Senken oder Umbenennen der Risikoklasse, kein Hinzufügen von Rollen, kein Einschalten eines im Code ausgeschalteten Tools, kein Lockern bei Stufe 3 oder `unknown` und keins gegen eine lokale Härtung (`tool-policy.json`). Das Abschalten der Rückfrage bis Stufe 2 bietet das Formular seit Version 1.2 an (Philipp, 2026-10-05; 4.2.4). Damit folgt diese Spec Spec 4.10.8 („Lockern nur bis Stufe 2 mit Hinweis auf Sicherheitsfreigabe“): Den Hinweis auf die Sicherheitsfreigabe geben der Anwenden-Dialog (4.1.6) und ab D7 die Historie (4.4); im Drawer, der direkt anwendet, steht nach Philipps „nicht zu kompliziert“ nur die einzeilige Warnung, protokolliert wird die Freigabe immer (Abschnitt 4, Rollen). Prinzip 11 des Prototyps („Restrict-only“) gilt für alles andere weiter. Die Roadmap-Zeile P08c („Override-Formular nur einschränkend und nur Abweichungen“) ist anzupassen: „… einschränkend plus Abschalten der Rückfrage bis Stufe 2 (nach D16), nur Abweichungen“ (siehe D16). Das Aufheben einer eigenen Platform-Einschränkung bleibt möglich (4.2.4).
+- Ein eigener Freigabe-Ablauf für Lockerungen im UI (zweite Person, Anfrage an einen `security-approver`). Die Sicherheitsfreigabe gibt der Owner oder Admin mit dem Anwenden selbst; das Audit hält sie fest (Abschnitt 4, Rollen).
+- Eine Speicherung der Sprachwahl am Nutzerkonto und weitere Sprachen als Deutsch und Englisch (2.4).
 - Neugestaltung der Routen des Profils `full` und der Expertenrouten; sie übernehmen nur die Tokens.
 - Managed Tool-Generierung (P10).
 - Neugestaltung der Landingpage und ihrer Hero-Animation (P12; die Neufassung des Hero-Loops läuft als eigener Auftrag, siehe 8.5). P08c ändert an der Landingpage nur die Token-Quelle und die Schriftladung, ohne sichtbare Änderung (3.1, Gleichheitsaufnahme).
@@ -1072,17 +1152,25 @@ Jedes Kriterium ist ein Test aus der Tabelle oben; ein Bildschirm ist abgenommen
 3. **Lede und Faden sagen dasselbe.** Im ok-Zustand kommt die Ruhe-Aussage der Lede aus derselben Funktion wie die Faden-Antwort „Ruhig seit {d} Tagen“. Die Lede lautet „… und seit {d} Tagen gab es keinen Fehler.“ statt eines freien „ohne Probleme“. Sie nennt bewusst keine Version: „v{N} läuft seit {d} Tagen ohne Fehler“ wäre falsch, sobald v{N} jünger ist als der letzte Fehler. Ein Unit-Test sichert die Gleichheit.
 4. **Keine Kometenzeichen an der Verbindungsknospe.** Die Verbindungshyphe läuft nach innen. Ihre Zeichenkette lag an der Knospe und überlagerte sie. Auf dieser Hyphe läuft nur der Komet, ohne Zeichen.
 
-### 8.3 Offene Punkte (Entscheidung Philipp)
+### 8.3 Entscheidungen (2026-10-05)
 
-Nur echte Produktentscheidungen. Hell als abgeleitetes, nachrangiges Theme ist mit dem Prototyp freigegeben (1.2); die Beschriftung von `codeVersion` folgt der Roadmap und steht jetzt in 4.2.3.
+Offene Produktentscheidungen gibt es in dieser Spec keine mehr. Hell als abgeleitetes, nachrangiges Theme ist mit dem Prototyp freigegeben (1.2); die Beschriftung von `codeVersion` folgt der Roadmap und steht in 4.2.3.
 
-| Punkt | Vorschlag |
-| --- | --- |
-| Fehlerregel | Rot ab `ERROR_RATE_ALARM` = 2 % (Wert des Prototyps) bei mindestens `ERROR_MIN_SAMPLE` = 20 Aufrufen bzw. Anfragen im Fehlerfenster `ERROR_WINDOW` = 24 h (bzw. seit Aktivierung, wenn jünger). Ohne Fenster würde ein Fehler in einer seit Wochen laufenden Version in der Quote seit Aktivierung untergehen. Bestätigen oder ändern. |
-| Versionen durch Regeln | Jede gespeicherte Entscheidung erzeugt beim Anwenden eine neue Konfigurationsrevision und damit eine neue Nummer v{N+1} („nur Regeln, kein Code“). Alternativ zählt die UI nur Code-Konfigurationen und zeigt Regel-Revisionen als „v8.1“. Vorschlag: fortlaufend v{N+1}, wie die Datenbank zählt. |
-| Sprache | Der Prototyp ist deutsch, das heutige Citadel teils englisch, die Landingpage englisch. Vorschlag: Foundation-Profil auf Deutsch zum MVP; alle Texte in `copy.de.ts`, damit Englisch später ohne Umbau möglich ist. |
-| Expertenrouten | `/runtime-setup`, `/rollouts`, `/revisions`, `/approvals` und `/audit-stream` bleiben im Foundation-Profil (ohne Sidebar-Eintrag, über Palette und „Technische Details“). Ob sie zum Release ausgeblendet werden, ist zu entscheiden; bis D8 kann das Promote in `/rollouts` gespeicherte Entscheidungen weglassen. |
-| Landing-Hero und Citadel-Netz | Die Neufassung der Landing-Animation (8.5) kann denselben SVG-Renderer nutzen (`components/living-network/`, eigene Geometrie-Variante „landing“) oder eine eigene Animation bleiben, die nur Tokens und Bewegungsregeln teilt. Vorschlag: eigener Renderer-Pfad für die Landing, aber dieselben Tokens, dieselbe Kometen-Mechanik (`stroke-dasharray` auf `pathLength=100`, SMIL `startOffset` für die Zeichen) und dieselbe Reduced-Motion-Regel. So bleibt der Look, den Philipp an der Landingpage mag, und beide sprechen dieselbe Bewegungssprache. |
+**Philipp (verbindlich):**
+
+| Punkt | Entscheidung | Umgesetzt in |
+| --- | --- | --- |
+| Lockern im Dashboard | „ich würde sagen dass man das kann. Machen wir es nicht zu kompliziert.“ Owner und Admins schalten im Drawer die Rückfrage eines Tools ab, dessen wirksame Risikoklasse höchstens Stufe 2 hat; Stufe 3 (`delete`, `external`, `financial`, `unknown`) nie (die API antwortet mit 422 `tier-3-always-requires-approval`, das Formular bietet es nicht an). Die Lockerung wird als Entscheidung gespeichert und mit dem normalen Anwenden ausgerollt, das die Sicherheitsfreigabe selbst gibt. Vor dem Speichern steht eine einzeilige Warnung; Historie und Audit nennen die Lockerung. Kein eigener Freigabe-Ablauf im UI. Voraussetzung: D16 | Abschnitt 4 (Rollen), 2.2, 3.8, 4.1.6, 4.1.8, 4.2.1–4.2.4, 4.4, 7, 7.1, 8.1, D16 |
+| Fehlerregel | Bestätigt: rot ab 2 % bei mindestens 20 Aufrufen bzw. Anfragen im 24-h-Fenster, bei jüngerer Version seit Aktivierung | 4.1.3 |
+| Sprache | „Beides zum MVP“: Deutsch und Englisch, typisierte Kataloge mit Schlüsselgleichheit zur Compile-Zeit, Umschalter im Nutzermenü, Standard aus `Accept-Language`, `<html lang>` folgt im Dashboard, Formate über `Intl`, beide Sprachen in der Playwright-Matrix | 2.1, 2.4, 3.1, 3.4, 4, 4.1.10, 4.6, 5.1, 5.3, 6.1, 6.2, 7, 7.1, 8.1 |
+| Expertenrouten | Zum Release im Foundation-Profil ausgeblendet: nicht routbar, kein Palette-Eintrag, keine Links. Das gilt, bis P08d das Promote entscheidungserhaltend macht (D8) | 2.1, 2.2, 4.1.7, 4.1.10, 5.3, 7, 7.1 |
+
+**Standardentscheidungen des Controllers (Veto möglich):**
+
+| Punkt | Entscheidung | Umgesetzt in |
+| --- | --- | --- |
+| Versionen durch Regeln | Regel-Revisionen zählen fortlaufend weiter: Jede angewendete Entscheidung erzeugt eine neue Konfigurationsrevision und damit v{N+1} („nur Regeln, kein Code“), so wie die Datenbank zählt (`runtime_config_revisions.revision`, D2). Keine Unterversionen wie „v8.1“ | 1.3, 4.1.2, 4.1.6, 4.1.8, D2 |
+| Landing-Hero und Citadel-Netz | Die Neufassung der Landing-Animation (8.5) bekommt einen eigenen Renderer-Pfad und nutzt nicht `components/living-network/`. Geteilt werden die Tokens, die Kometen-Mechanik (`stroke-dasharray` auf `pathLength=100`, SMIL `startOffset` für die Zeichen) und die Reduced-Motion-Regel. So bleibt der Look, den Philipp an der Landingpage mag, und beide sprechen dieselbe Bewegungssprache | 8.5 |
 
 ### 8.4 Abhängigkeiten (was die API noch nicht liefert)
 
@@ -1094,22 +1182,23 @@ Nur echte Produktentscheidungen. Hell als abgeleitetes, nachrangiges Theme ist m
 | D4 | `module` (im Artefakt vorhanden, in `CapabilityTool` nicht) und ein lokalisierter `title` pro Tool | Gruppierung nach Bereich, lesbare Namen | `module`: P08c (API); `title`: P05 (Stufe-2-Datenmodell, Skill) + P08c (Durchreichen) | Gruppe „Ohne Bereich“; `name` in Mono + erste Zeile der Beschreibung |
 | D5 | Rollenvokabular der App im Capability-Bericht | Rollen einschränken, wenn der Code keine `allowedRoles` meldet | P05 (Vertrag) | Rollenwahl nur bei gemeldeten `allowedRoles` |
 | D6 | Tool-Filter der Metrik-Abfrage (`toolId` → Tagesreihe `calls`/`errors` aus `runtime_metric_tool_hourly`) | 7-Tage-Balken im Drawer, „–“ für Tools außerhalb der Top 20 | P08c (API, nach P09 Teil B) | Summen aus `tools[]` (Top 20) |
-| D7 | Audit-Ereignisse pro App für Dashboard-Nutzer (`targetAppId`-Filter, mehrere `type`) | Historie „Änderungen von Hand“ | P08c (API) | Historie nur aus Deployments |
-| D8 | Entscheidungserhaltendes Übernehmen (Promote) und erneutes Anwenden nach Rollback; Absicherung von `publish-and-deploy` und Promote gegen das Weglassen gespeicherter Entscheidungen | Pro-Übernahme, „Erneut anwenden“ nach Rollback | P08d (Platform-Nachtrag, in Arbeit) | UI ruft `publish-and-deploy` und `environments/:id/promote` nicht auf und bietet kein Übernehmen an; nach einem Rollback ruhen gespeicherte Regeln („{k} Regeln ruhen“) |
+| D7 | Audit-Ereignisse pro App für Dashboard-Nutzer (`targetAppId`-Filter, mehrere `type`: `runtime.app_setup.tool_override`, `runtime.deployment.rolled_back`, `runtime.revision.decision`, `runtime.revision.published`) | Historie „Änderungen von Hand“, Nennung von Lockerungen (4.4) | P08c (API) | Historie nur aus Deployments |
+| D8 | Entscheidungserhaltendes Übernehmen (Promote) und erneutes Anwenden nach Rollback; Absicherung von `publish-and-deploy` und Promote gegen das Weglassen gespeicherter Entscheidungen | Pro-Übernahme, „Erneut anwenden“ nach Rollback, Wiedereinblenden der Expertenrouten (2.1) | P08d (Platform-Nachtrag, in Arbeit) | UI ruft `publish-and-deploy` und `environments/:id/promote` nicht auf und bietet kein Übernehmen an; nach einem Rollback ruhen gespeicherte Regeln („{k} Regeln ruhen“); Expertenrouten im Foundation-Profil ausgeblendet |
 | D9 | Platform verwirft No-op-Felder serverseitig; Wettlauf beim Speichern | Absicherung zusätzlich zur Client-Regel 4.2.4 | P08d | Die Client-Regel sendet ohnehin nur Abweichungen |
 | D10 | Monatsbudget | Budget-Hinweis | Produktentscheidung, nach MVP | Abschnitt entfällt |
 | D11 | HEAD im Methoden-Enum der Platform-Schemas | HEAD-Tools in der Capability-Ansicht | P08d | – |
 | D12 | Code-Bericht der Runner (`capabilities.discoveryDigest`, Artefakt-Upload) | Was kann mein Chat? überhaupt | P04 (SDK) + P11 (GID-Verdrahtung) | Zustand „Code-Stand nicht gemeldet“ |
 | D13 | Metrik-Endpunkte `GET /v2/apps/:appId/metrics` und `/compare` | Kosten, Fehlerbedingung, Tool-Nutzung | P09 Teil B (Tasks 6–13, nach P08d) | Zustand „Noch keine Messwerte“; Fehler nur aus `healthStatus` des aktiven Deployments |
 | D14 | Code-Werte je Feld in `capabilities` (`reported { riskClass, requiresApproval, enabled, allowedRoles }`; heute liefert keine Route den Code-Wert eines Felds mit `origin = platform`) | „Code-Wert: …“ im Drawer, Zwischenstufen zwischen Code- und Platform-Wert im Formular | P08c (API, optional) | Wahl relativ zum wirksamen Wert plus „Auf den Code-Wert zurück“ (4.2.4) |
-| D15 | Vergleich zweier Konfigurationen (Tools neu, entfallen, geändert, Risiko, Regeln) | Änderungsliste pro Version in der Historie und im Rollback-Dialog | P08c (API) oder nach MVP | keine Liste; Technische Details mit `configRevisionId` |
+| D15 | Vergleich zweier Konfigurationen (Tools neu, entfallen, geändert, Risiko, Regeln) | Änderungsliste pro Version in der Historie und im Rollback-Dialog; Richtung von „Zurück auf den Code-Wert“ im Anwenden-Dialog (4.1.6) | P08c (API) oder nach MVP | keine Liste; Technische Details mit `configRevisionId`; {l} zählt nur sichere Lockerungen |
+| D16 | Wirksame Platform-Lockerung der Rückfrage bis Stufe 2. Heute ist `applyPolicyOverlay` restrict-only (`src/runtime/policy-overlay.ts`: `requiresApproval: false` ist „no-op, pinned or not“), P04 hält das als Ziel 1 fest („loosen on none“, auch im Turn-Snapshot), und die Platform meldet eine gespeicherte Lockerung deshalb als `relaxationPending` (`boundToolOverride`), also als unwirksam. Spec 4.9 („Wirksame Policy = `resolveToolPolicy(lokal wirksam, verifiziertes Platform-Overlay)`“) lässt gepinnte Lockerungen bis Stufe 2 schon zu; restrict-only war die strengere Umsetzung in P02/P04 und die Roadmap-Zeile eine Übergangsregel. D16 braucht also keine neue Produktentscheidung. Nötig: (a) SDK: Overlay und Turn-Snapshot übernehmen ein signiertes `toolOverrides`-Delta `requiresApproval: false` mit `pin { toolId = eigenes Tool, atRiskClass }` genau nach `relaxationAllowed` aus `resolveToolPolicy` (wirksame Stufe ≤ 2 und ≤ gepinnte Stufe, sonst `override-lapsed-risk-raised`; Stufe 3 nie; eine lokale Härtung gewinnt weiter). Die restrict-only-Fassung von P04 Tasks 1–3 ist auf `codex/mvp-tools` schon committet (`2d47280`, `489a124`, `584f5ae`); D16 ist dort ein Folge-Task, der sie ändert. (b) Platform: `boundToolOverride` und `capabilities` melden eine solche Lockerung als wirksam (`requiresApproval = false`, `origin.requiresApproval = platform`, `relaxationPending = false`). (c) Gleichlauf bei lokaler Härtung: Ein `requiresApproval: true` in `tool-policy.json` an einem Tool, das ohnehin fragt, meldet der Code-Bericht heute als `code-default` (`localPolicyOrigin` in `src/codegen/tools/pipeline.ts` übernimmt den aufgelösten Ursprung). Lässt die Runtime diese Härtung gewinnen (Spec 10 Punkt 5), zeigte Citadel „Gelockert“, während der Chat weiter fragt. Deshalb meldet der Code-Bericht jedes ausdrückliche lokale `requiresApproval: true` als `local-policy` (das Formular bietet dort kein Lockern an, 4.2.4), und SDK und Platform prüfen den Fall mit denselben Golden Vectors | Lockern im Dashboard (4.2.4). Ohne D16 wäre die Warnzeile „Der Chat fragt dann nicht mehr nach …“ unwahr (1.1) | SDK P04 (Folge-Task: Overlay, Turn-Snapshot, Ursprung im Code-Bericht, Golden Vectors) + Platform P08d (`boundToolOverride`, `capabilities`). Außerhalb dieser Datei anzupassen: P04 Ziel 1, die P08b-Zeile, nach der eine Lockerung ein No-op bleibt, die Roadmap-Zeile „Platform-„Lockern“ im Managed-Modus nur als wirksam anzeigen, wenn ein committeter lokaler Eintrag existiert“ und die Roadmap-Zeile P08c („Override-Formular nur einschränkend“, 8.1). Liegt D16 in SDK 0.5.0 (wie P04), braucht die UI keine Versionsweiche, weil der Code-Bericht ohnehin 0.5 voraussetzt (4.2.5); sonst meldet `capabilities` eine Lockerung nur für Umgebungen als wirksam, deren Runner D16 kann (D1), und nur dort bietet das Formular Lockern an | Das Formular bietet das Abschalten der Rückfrage nicht an; vorhandene Lockerungen erscheinen als `relaxationPending` (4.2.4) |
 
 Reihenfolge für P08c:
-1. API-Tasks D1–D4, D6 und D7 (optional D14, D15) im Worktree `mvp-platform`, nach P08d und P09 Teil B. Die Prüfskripte liegen bereits im Archiv (Grundlage).
-2. Tokens und Shell.
+1. API-Tasks D1–D4, D6 und D7 (optional D14, D15) im Worktree `mvp-platform`, nach P08d und P09 Teil B. D16 liefern P04 (SDK) und P08d; das Lockern in Schritt 5 setzt es voraus und gehört zum Release. Die Prüfskripte liegen bereits im Archiv (Grundlage).
+2. Tokens, Shell und Sprachen (Root-Layouts, Kataloge, `resolveLocale`, Nutzermenü; 2.4).
 3. Netz-Komponente.
 4. Übersicht.
-5. Tools inklusive Formular.
+5. Tools inklusive Formular „Regeln ändern“ (Lockern nach D16).
 6. Kosten.
 7. Historie.
 8. Verbinden.
@@ -1118,9 +1207,10 @@ Reihenfolge für P08c:
 
 ### 8.5 Schnittstelle zur Landing-Animation
 
-Philipps Wunsch vom 2026-10-05 („auf der Landingpage … die Animation noch etwas besser“) läuft getrennt: Er mag den heutigen Look; Probleme sind die Unschärfe des Video-Loops (`components/landing/hero.tsx` spielt `/landing/hero-loop.webm|mp4`) und die kaputten KI-Glyphen. Daraus wird eine scharfe, im Code gerenderte Neufassung in zwei Varianten (Ledger: wf_5bba2f60-248), umgesetzt in P12. Berührungspunkte mit P08c:
+Philipps Wunsch vom 2026-10-05 („auf der Landingpage … die Animation noch etwas besser“) läuft getrennt: Er mag den heutigen Look; Probleme sind die Unschärfe des Video-Loops (`components/landing/hero.tsx` spielt `/landing/hero-loop.webm|mp4`) und die kaputten KI-Glyphen. Daraus wird eine scharfe, im Code gerenderte Neufassung in zwei Varianten (Ledger: wf_5bba2f60-248), umgesetzt in P12, mit eigenem Renderer-Pfad (Standardentscheidung, 8.3). Berührungspunkte mit P08c:
 - Die neue Hero-Animation liest dieselben Tokens (3.1: `net`, `net-core`, `net-tip`, `comet`, `comet-head`, `comet-glow`, `core-hot`, `lift`, `--core-glow`, `--hy-glow`) statt eigener Literale.
 - Die Kometenzeichen sind echte Textknoten in JetBrains Mono (wie 3.6, `textPath`), keine gerenderten Glyphen; das behebt die kaputten KI-Glyphen und erfüllt Spec 8 („Hero-Glyphen als kontrollierte SVG-/Textebene lesbar“).
+- Dieselbe Kometen-Mechanik wie das Citadel-Netz (3.6, 3.7: `stroke-dasharray` auf `pathLength=100`, SMIL `startOffset` für die Zeichen).
 - Reduced Motion wie 3.7 (fertiges, stilles Bild), Pausieren außerhalb des Viewports und bei verborgenem Tab; Animationstechnik und Budgets wie 3.7 und 6.2, sofern P12 nichts anderes festlegt.
 - Wer zuerst landet, ändert `landing.css`; die Gleichheitsaufnahme in Abschnitt 7 vergleicht gegen die dann gültige Landing-Fassung.
 

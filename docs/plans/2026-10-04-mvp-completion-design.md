@@ -1,6 +1,6 @@
 # Glirastes MVP-Abschluss: Design
 
-Version: 1.4 · Stand: 2026-10-04 (Abschnitt 6a freigegeben) · Status: Entwurf zur Freigabe durch Philipp
+Version: 1.5 · Stand: 2026-10-05 (Abschnitt 6a freigegeben; 1.5: Platform-Lockerung der Rückfrage bis Stufe 2 wirksam, Entscheidung Philipp 2026-10-05) · Status: Entwurf zur Freigabe durch Philipp
 
 Grundlage: [MVP-Scope v1.2](2026-09-13-mvp-scope-and-requirements.md), [Fokussiertes MVP](2026-09-13-focused-mvp-design.md), Platform-Design [Local, Connected Free, Managed](/Users/philipprollmann/Dev/chainmatics/glirastes-platform/.worktrees/foundation-control-plane-v1/docs/plans/2026-08-14-local-connected-managed-platform-design.md). Dieses Dokument ersetzt keine dieser Quellen, sondern legt fest, wie das MVP fertiggestellt wird. Wo es abweicht, ist das ausdrücklich markiert.
 
@@ -80,7 +80,7 @@ App-Code + Eingabedateien
   → deriveToolPolicyDefaults → resolveToolPolicy (Defaults ⊕ tool-policy.json ⊕ vorheriger Stand)
   → Semantik/Prosa → AppSetupArtifact → createSetupPlan (neue Klasse „added“) → atomarer Schreibvorgang + generiertes Modul
 Laufzeit: generiertes Modul → createContractBindings (Digests beim Boot neu berechnet) → lokale Runtime
-          (managed: dieselbe lokale Basis + verifiziertes, nur einschränkendes Platform-Overlay; pro Turn gepinnt, kein Platform-Call pro Turn)
+          (managed: dieselbe lokale Basis + verifiziertes Platform-Overlay: einschränkend, dazu signierte, an die Risikoklasse gepinnte Lockerungen der Rückfrage bis Stufe 2, die eine lokale Härtung nie übersteuern; pro Turn gepinnt, kein Platform-Call pro Turn)
 ```
 
 ### 4.2 CLI
@@ -164,7 +164,7 @@ Eskalationen (nur nach oben): destruktive Tokens im Pfad (`delete`, `remove`, `d
 Grenzen (eine reine Funktion `resolveToolPolicy`, im SDK und portiert in die Platform, gemeinsame Golden Vectors):
 
 - `riskClass`: nur anheben.
-- Rückfrage: Stufe 0–1 frei; Stufe 2 (`write`) standardmäßig an, Lockerung nur per expliziten, reviewten Eintrag mit `atRiskClass:'write'`; Stufe 3 (`delete`, `financial`, `external`) **immer an**, auch die Runtime erzwingt das.
+- Rückfrage: Stufe 0–1 frei; Stufe 2 (`write`) standardmäßig an, Lockerung nur per expliziten, reviewten Eintrag mit `atRiskClass:'write'` — lokal in `tool-policy.json` oder als signierte Platform-Entscheidung eines Owners/Admins (Entscheidung Philipp 2026-10-05: „Machen wir es nicht zu kompliziert“; Citadel-Design D16); eine explizite lokale Härtung (`requiresApproval: true` in `tool-policy.json`) gewinnt immer; Stufe 3 (`delete`, `financial`, `external`) **immer an**, auch die Runtime erzwingt das.
 - `enabled`: jede Ebene darf deaktivieren; wirksam = Code ∧ lokal ∧ Platform. Nichts aktiviert ein `needs_attention`-, ausgeschlossenes oder fehlendes Tool.
 - `allowedRoles`: nur einschränken (Schnittmenge).
 - Beschreibung/Modul/Hinweise/Darstellung: frei, begrenzt, inhaltsgeprüft; Vorrang Platform > lokal > Code.
