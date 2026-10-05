@@ -353,3 +353,23 @@ describe('runToolsPipeline (navigation)', () => {
     expect(await fixture.read(DEFAULT_GENERATED_MODULE)).not.toContain('uiActionToolToTool');
   }, 120_000);
 });
+
+describe('runToolsPipeline (filters)', () => {
+  it('generates one filter tool per view, inheriting the page options of next-pages', async () => {
+    const fixture = await createAppFixture({
+      'src/app/[locale]/tasks/page.tsx': "'use client';\nimport { useSearchParams } from 'next/navigation';\n"
+        + "export default function Tasks() { return useSearchParams().get('status'); }\n",
+      'src/components/glirastes-bridge.tsx': BRIDGE,
+    }, { toolsConfig: { sources: [{ kind: 'next-pages', stripSegments: ['[locale]'] }, 'url-filters'] } });
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.changes.added).toHaveLength(2);
+    const tools = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.name, tool] as const));
+    expect(tools.get('ui.navigate')?.description).toBe("Open a page of this app in the user's browser. Destinations: /tasks.");
+    expect(tools.get('ui.filter.tasks')).toMatchObject({
+      executionKind: 'ui', actionBindingRef: 'glirastes.navigate', riskClass: 'safe-read', requiresApproval: false, enabled: true,
+      description: 'Show the /tasks page with URL filters: status (text).',
+    });
+    expect(result.findings).toContainEqual(expect.objectContaining({ code: 'filter-domain-open', subjectRef: 'UI filter /tasks' }));
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+  }, 120_000);
+});

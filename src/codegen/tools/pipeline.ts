@@ -52,6 +52,7 @@ import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { createNextPagesSource } from './sources/next-pages.js';
+import { createUrlFilterSource } from './sources/url-filters.js';
 import {
   readPreviousToolState,
   renderInventory,
@@ -108,14 +109,24 @@ export class ToolsPipelineFailure extends FoundationDiagnosticError {
   }
 }
 
-/** One source per configured entry of `tools.json` `sources`. */
+/**
+ * One source per configured entry of `tools.json` `sources`. URL filters read
+ * the same page tree as navigation, so they inherit its folder options.
+ */
 export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
-  return normalizeSources(config).map((source) => {
+  const sources = normalizeSources(config);
+  const pages = sources.find((source) => source.kind === 'next-pages');
+  return sources.map((source) => {
     switch (source.kind) {
       case 'next-app':
         return createNextEndpointSource(source.apiDir ? { apiDir: source.apiDir } : {});
       case 'next-pages':
         return createNextPagesSource(source);
+      case 'url-filters':
+        return createUrlFilterSource({
+          ...(pages && pages.kind !== 'next-app' ? pages : {}),
+          ...source,
+        });
     }
   });
 }

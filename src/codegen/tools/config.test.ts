@@ -61,14 +61,15 @@ describe('tools config', () => {
     expect(config.ci.strict).toBe(true);
   });
 
-  it('accepts the next-pages source with its folder options', async () => {
+  it('accepts the next-pages and url-filters sources with their folder options', async () => {
     const config = loadToolsConfig(await appWith({
       ...minimal,
-      sources: ['next-app', { kind: 'next-pages', appDir: 'src/app', srcDir: 'src', stripSegments: ['[locale]'] }],
+      sources: ['next-app', { kind: 'next-pages', appDir: 'src/app', srcDir: 'src', stripSegments: ['[locale]'] }, 'url-filters'],
     }));
     expect(normalizeSources(config)).toEqual([
       { kind: 'next-app' },
       { kind: 'next-pages', appDir: 'src/app', srcDir: 'src', stripSegments: ['[locale]'] },
+      { kind: 'url-filters' },
     ]);
   });
 
@@ -83,6 +84,7 @@ describe('tools config', () => {
     ['a strip segment that is a path', { ...minimal, sources: [{ kind: 'next-pages', stripSegments: ['a/b'] }] }],
     ['a page option on the endpoint source', { ...minimal, sources: [{ kind: 'next-app', stripSegments: [] }] }],
     ['the next-pages source twice', { ...minimal, sources: ['next-pages', { kind: 'next-pages', appDir: 'app' }] }],
+    ['the url-filters source twice', { ...minimal, sources: ['url-filters', 'url-filters'] }],
   ])('rejects %s', (_label, value) => {
     expect(ToolsConfigSchema.safeParse(value).success).toBe(false);
   });
