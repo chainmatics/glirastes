@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, renderHook } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_PUSH_TO_TALK_HOTKEY,
   parseHoldCombo,
@@ -72,5 +72,76 @@ describe('usePushToTalkHotkey', () => {
     const off = setup(false);
     fireEvent.keyDown(window, { ...space, ctrlKey: true, shiftKey: true });
     expect(off.onPress).not.toHaveBeenCalled();
+  });
+
+  it('ignores key-less keyboard events such as Chrome autofill dispatches', () => {
+    const errors: unknown[] = [];
+    const onError = (event: ErrorEvent) => errors.push(event.error);
+    window.addEventListener('error', onError);
+    try {
+      const { onPress, onRelease } = setup();
+      fireEvent(window, new Event('keydown', { bubbles: true }));
+      expect(onPress).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(window, { ...space, ctrlKey: true, shiftKey: true });
+      fireEvent(window, new Event('keydown', { bubbles: true }));
+      fireEvent(window, new Event('keyup', { bubbles: true }));
+      expect(onPress).toHaveBeenCalledTimes(1);
+      expect(onRelease).not.toHaveBeenCalled();
+
+      fireEvent.keyUp(window, { ...space, ctrlKey: true, shiftKey: true });
+      expect(onRelease).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('error', onError);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  describe('on macOS', () => {
+    beforeEach(() => {
+      vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('holds the default combo on Command, not Control', () => {
+      const { onPress, onRelease } = setup();
+      fireEvent.keyDown(window, { ...space, ctrlKey: true, shiftKey: true });
+      expect(onPress).not.toHaveBeenCalled();
+      fireEvent.keyDown(window, { ...space, metaKey: true, shiftKey: true });
+      expect(onPress).toHaveBeenCalledTimes(1);
+      fireEvent.keyUp(window, { key: 'Meta', shiftKey: true });
+      expect(onRelease).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['alt+m', 'µ', 'KeyM'],
+      ['alt+1', '¡', 'Digit1'],
+      ['alt+e', 'Dead', 'KeyE'],
+    ])('matches the Option combo %s through the physical key, since Option composes the character', (hotkey, key, code) => {
+      const { onPress, onRelease } = setup(hotkey);
+      fireEvent.keyDown(window, { key, code, altKey: true });
+      expect(onPress).toHaveBeenCalledTimes(1);
+      fireEvent.keyUp(window, { key, code, altKey: true });
+      expect(onRelease).toHaveBeenCalledTimes(1);
+    });
+
+    it('still matches a plain letter by its character and ignores other physical keys', () => {
+      const { onPress } = setup('alt+m');
+      fireEvent.keyDown(window, { key: 'ñ', code: 'KeyN', altKey: true });
+      expect(onPress).not.toHaveBeenCalled();
+      fireEvent.keyDown(window, { key: 'm', altKey: true });
+      expect(onPress).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets the typed letter win over the key position on other layouts', () => {
+      // AZERTY: the key labelled A sits at the QWERTY Q position and the key at the A position types q
+      const { onPress } = setup('alt+a');
+      fireEvent.keyDown(window, { key: 'q', code: 'KeyA', altKey: true });
+      expect(onPress).not.toHaveBeenCalled();
+      fireEvent.keyDown(window, { key: 'a', code: 'KeyQ', altKey: true });
+      expect(onPress).toHaveBeenCalledTimes(1);
+    });
   });
 });

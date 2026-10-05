@@ -27,8 +27,27 @@ export function parseHoldCombo(combo: string): HoldCombo | null {
   return result.key ? result : null;
 }
 
+const PLAIN_LETTER_OR_DIGIT = /^[a-z0-9]$/;
+const PHYSICAL_LETTER_OR_DIGIT = /^(?:Key([A-Z])|Digit([0-9]))$/;
+
+/** Lower-cased `event.key`; empty for key-less events, which autofill dispatches. */
 function keyName(event: KeyboardEvent): string {
-  return event.key === ' ' || event.code === 'Space' ? 'space' : event.key.toLowerCase();
+  if (event.key === ' ' || event.code === 'Space') return 'space';
+  return typeof event.key === 'string' ? event.key.toLowerCase() : '';
+}
+
+/**
+ * Whether the event is the combo's main key. A typed letter or digit wins, so
+ * AZERTY and Dvorak users get the key they see. When the event carries some
+ * other character, the physical key decides: macOS Option composes 'µ' for
+ * Option+M, and dead keys and non-Latin layouts report no ASCII letter either.
+ */
+function isComboKey(event: KeyboardEvent, key: string): boolean {
+  const name = keyName(event);
+  if (name === key) return true;
+  if (PLAIN_LETTER_OR_DIGIT.test(name) || typeof event.code !== 'string') return false;
+  const physical = PHYSICAL_LETTER_OR_DIGIT.exec(event.code);
+  return physical !== null && (physical[1] ?? physical[2]).toLowerCase() === key;
 }
 
 /**
@@ -36,7 +55,8 @@ function keyName(event: KeyboardEvent): string {
  * it is released, the window blurs or the hook unmounts. macOS does not
  * deliver keyup for other keys while ⌘ is held, so releasing ⌘ also ends
  * the hold. Fires inside text fields: the combo always has a modifier or is
- * explicitly chosen by the app.
+ * explicitly chosen by the app. A letter or digit matches the typed character,
+ * or the physical key when Option or a dead key composes another one.
  */
 export function usePushToTalkHotkey(options: {
   hotkey: string | false | undefined;
@@ -56,7 +76,7 @@ export function usePushToTalkHotkey(options: {
     let holding = false;
 
     const matches = (event: KeyboardEvent) =>
-      keyName(event) === combo.key
+      isComboKey(event, combo.key)
       && (isMac() ? event.metaKey : event.ctrlKey) === combo.mod
       && event.shiftKey === combo.shift
       && event.altKey === combo.alt;
@@ -68,7 +88,7 @@ export function usePushToTalkHotkey(options: {
     };
     const down = (event: KeyboardEvent) => {
       if (holding) {
-        if (keyName(event) === combo.key) event.preventDefault();
+        if (isComboKey(event, combo.key)) event.preventDefault();
         return;
       }
       if (event.repeat || !matches(event)) return;
@@ -80,7 +100,7 @@ export function usePushToTalkHotkey(options: {
       if (!holding) return;
       const name = keyName(event);
       if (
-        name === combo.key
+        isComboKey(event, combo.key)
         || (combo.mod && (name === 'meta' || name === 'control'))
         || (combo.shift && name === 'shift')
         || (combo.alt && name === 'alt')
