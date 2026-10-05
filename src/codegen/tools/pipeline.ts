@@ -350,7 +350,10 @@ async function generate(
       ...(execution.executionKind === 'endpoint' ? { method: execution.method, path: execution.path } : {}),
       definitionId: execution.definitionId,
       ...(tool.evidence.declaredEffect ? { declaredEffect: tool.evidence.declaredEffect } : {}),
-      evidence: { externalCall: tool.evidence.externalCall },
+      evidence: {
+        externalCall: tool.evidence.externalCall,
+        ...(tool.evidence.uiMutation ? { uiMutation: true } : {}),
+      },
     });
     const local = (inputs.policy.tools ?? {})[execution.stableKey];
     const acceptedRisk = (inputs.policy.acceptedRisk ?? {})[execution.stableKey];

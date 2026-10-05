@@ -99,8 +99,11 @@ function capitalized(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function resourceWords(definitionId: string): string {
-  const resource = definitionId.split('.')[0] ?? definitionId;
+/** The resource of an endpoint tool; everything after `ui.` for a UI tool. */
+function resourceWords(definitionId: string, operation: Operation): string {
+  const resource = operation === 'ui'
+    ? definitionId.split('.').slice(1).join(' ')
+    : definitionId.split('.')[0] ?? definitionId;
   return resource
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
@@ -175,7 +178,8 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     ? 'agent'
     : entry?.origin?.description === 'code' ? 'code' : 'human';
   const language = input.locale.toLowerCase().startsWith('de') ? 'de' : 'en';
-  const label = labelOf(language, operationOf(input.operationGroup, input.path), resourceWords(input.definitionId));
+  const operation = operationOf(input.operationGroup, input.path);
+  const label = labelOf(language, operation, resourceWords(input.definitionId, operation));
   const candidates: ReadonlyArray<readonly [string | undefined, DescriptionOrigin]> = [
     [input.policyDescription, 'human'],
     [input.jsDoc, 'code'],

@@ -23,6 +23,19 @@ const RuntimeSchemaSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('json'), schema: JsonObjectSchema }).strict(),
 ]);
 
+const GeneratedUiActionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('navigate') }).strict(),
+  z.object({
+    kind: z.literal('filter'),
+    destination: z.string().min(1).max(2_048),
+    keys: z.array(z.object({
+      key: z.string().min(1).max(64),
+      array: z.enum(['comma', 'repeat']).optional(),
+    }).strict()).max(50),
+  }).strict(),
+  z.object({ kind: z.literal('client-action'), actionId: z.string().min(1).max(200) }).strict(),
+]);
+
 export const ToolContractSchema = z.object({
   source: z.enum([
     'native', 'contract-module', 'legacy-ai-tool', 'resolution', 'openapi', 'derived', 'ui-bridge',
@@ -44,6 +57,7 @@ export const ToolContractSchema = z.object({
     interfaceDigest: digest,
     contractModuleDigest: digest,
   }).strict().optional(),
+  uiAction: GeneratedUiActionSchema.optional(),
 }).strict();
 
 const ToolPolicyDefaultsSchema = z.object({

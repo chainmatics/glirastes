@@ -125,3 +125,96 @@ describe('renderGeneratedModule', () => {
     expect(diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))).toEqual([]);
   }, 120_000);
 });
+
+describe('renderGeneratedModule with UI tools', () => {
+  const NAVIGATE = {
+    type: 'object',
+    properties: { destination: { type: 'string', enum: ['/overview', '/tasks'] } },
+    required: ['destination'],
+    additionalProperties: false,
+  };
+  const FILTER = {
+    type: 'object',
+    properties: { status: { type: 'string', enum: ['done', 'open'] } },
+    additionalProperties: false,
+  };
+  const RESULT = { type: 'object', properties: { success: { type: 'boolean' } }, required: ['success'] };
+  const uiCandidate = (toolId: string, name: string) => ({
+    toolId, sourceFingerprint: digest(name === 'ui.navigate' ? 'N' : 'L'), name, description: `Run ${name}.`,
+    modelName: name.replace(/\./g, '_'), module: 'ui', sharedWith: [], usageHints: [`Run ${name}.`],
+    presentation: { locale: 'en-US', singular: name, plural: name, approval: name },
+    executionKind: 'ui', actionBindingRef: 'glirastes.navigate', allowedRoles: [], operationGroup: 'ui',
+    riskClass: 'safe-read', enabled: true, requiresApproval: false, inputSchemaDigest: digest('I'), outputSchemaDigest: digest('O'),
+  });
+  const uiArtifact = AppSetupArtifactSchema.parse({
+    ...artifact,
+    tools: [artifact.tools[0], uiCandidate(id('c1'), 'ui.navigate'), uiCandidate(id('c2'), 'ui.filter.tasks')],
+    planner: { ...artifact.planner, toolIds: [id('a1'), id('c1'), id('c2')] },
+  });
+  const uiDefaults = { operationGroup: 'ui' as const, riskClass: 'safe-read' as const, requiresApproval: false, rulesVersion: 1 as const };
+  const uiContract = (input: Record<string, unknown>, uiAction: NonNullable<ToolContract['uiAction']>): ToolContract => ({
+    source: 'ui-bridge', loadBearing: true, input, output: RESULT, params: { path: [], query: [], body: [] },
+    interfaceDigest: digest('U'), runtime: { input: { kind: 'json', schema: input }, output: { kind: 'json', schema: RESULT } },
+    uiAction,
+  });
+  const uiContracts = (schemaModule: string): ToolContractsEntry[] => [
+    contracts(schemaModule)[0]!,
+    {
+      toolId: id('c1'), stableKey: 'UI navigate', definitionId: 'ui.navigate', defaults: uiDefaults,
+      contract: uiContract(NAVIGATE, { kind: 'navigate' }),
+    },
+    {
+      toolId: id('c2'), stableKey: 'UI filter /tasks', definitionId: 'ui.filter.tasks', defaults: uiDefaults,
+      contract: uiContract(FILTER, { kind: 'filter', destination: '/tasks', keys: [{ key: 'status' }] }),
+    },
+  ];
+
+  it('binds navigation and filter tools through uiActionToolToTool with their action', () => {
+    const text = renderGeneratedModule({
+      modulePath: 'src/generated/glirastes/tools.generated.js', artifact: uiArtifact, contracts: uiContracts('src/app/api/notes/schemas.js'),
+    });
+    expect(text).toContain("import { endpointToolToTool, uiActionToolToTool } from 'glirastes/server';");
+    expect(text).toContain('"actionBindingRef": "glirastes.navigate"');
+    expect(text).toContain('"kind": "filter"');
+    expect(text.match(/uiActionToolToTool\(\{/g)).toHaveLength(2);
+    const output = ts.transpileModule(text, { reportDiagnostics: true, compilerOptions: { module: ts.ModuleKind.ESNext } });
+    expect(output.diagnostics ?? []).toEqual([]);
+  });
+
+  it('refuses an enabled UI tool without its action instead of emitting a dead binding', () => {
+    const broken = uiContracts('src/a.ts').map((entry) => (
+      entry.toolId === id('c1') ? { ...entry, contract: { ...entry.contract!, uiAction: undefined } } : entry
+    ));
+    expect(() => renderGeneratedModule({ modulePath: 'src/generated/glirastes/tools.generated.ts', artifact: uiArtifact, contracts: broken }))
+      .toThrow('Enabled UI tool ui.navigate has no UI action to bind.');
+  });
+
+  it('type-checks UI bindings under strict TypeScript against the SDK runtime surface', async () => {
+    const generated = renderGeneratedModule({
+      modulePath: 'src/generated/glirastes/tools.generated.ts', artifact: uiArtifact, contracts: uiContracts('src/app/api/notes/schemas.ts'),
+    });
+    const app = await createAppFixture({
+      'tsconfig.json': JSON.stringify({
+        compilerOptions: {
+          strict: true, noEmit: true, target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', skipLibCheck: true,
+          paths: {
+            'glirastes/runtime': [join(SDK_ROOT, 'src/runtime/index.ts')],
+            'glirastes/server': [join(SDK_ROOT, 'src/server/index.ts')],
+          },
+        },
+      }),
+      'src/app/api/notes/schemas.ts': "import { z } from 'zod';\n"
+        + 'export const createNote = z.object({ title: z.string() }).strict();\n',
+      'src/generated/glirastes/tools.generated.ts': generated,
+      'src/consumer.ts': "import { createContractBindings } from 'glirastes/runtime';\n"
+        + "import * as generated from './generated/glirastes/tools.generated';\n"
+        + 'export const bound = createContractBindings(generated);\n',
+    });
+    const config = ts.readConfigFile(app.path('tsconfig.json'), ts.sys.readFile);
+    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, app.root);
+    const files = [app.path('src/consumer.ts'), app.path('src/generated/glirastes/tools.generated.ts')];
+    const program = ts.createProgram(files, parsed.options);
+    const diagnostics = files.flatMap((file) => program.getSemanticDiagnostics(program.getSourceFile(file)));
+    expect(diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))).toEqual([]);
+  }, 120_000);
+});

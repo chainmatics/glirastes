@@ -231,3 +231,41 @@ describe('capability report fields', () => {
     expect(plain.artifact).not.toHaveProperty('exclusions');
   });
 });
+
+describe('UI tool contracts', () => {
+  const uiContract: ToolContract = {
+    source: 'ui-bridge', loadBearing: true,
+    input: { type: 'object', properties: { destination: { type: 'string', enum: ['/tasks'] } }, additionalProperties: false },
+    params: { path: [], query: [], body: [] }, interfaceDigest: digest('U'),
+    runtime: {
+      input: { kind: 'json', schema: { type: 'object' } },
+      output: { kind: 'json', schema: { type: 'object' } },
+    },
+    uiAction: { kind: 'filter', destination: '/projects/:projectId/tasks', keys: [{ key: 'status' }, { key: 'tags', array: 'repeat' }] },
+  };
+  const file = (contract: unknown) => ({
+    schemaVersion: 1, appId: APP_ID,
+    tools: [{
+      toolId: '019fb007-0000-7000-8000-0000000000c1', stableKey: 'UI filter /projects/:projectId/tasks', definitionId: 'ui.filter.projectsTasks',
+      contract, defaults: { operationGroup: 'ui', riskClass: 'safe-read', requiresApproval: false, rulesVersion: 1 },
+    }],
+  });
+
+  it('keeps the UI action in tool-contracts.json so integrity mode can re-render the module', () => {
+    expect(ToolContractsFileSchema.parse(JSON.parse(renderToolContracts(APP_ID, file(uiContract).tools as never))).tools[0]?.contract)
+      .toEqual(uiContract);
+  });
+
+  it.each([
+    ['an unknown kind', { kind: 'open-dialog' }],
+    ['a filter without keys', { kind: 'filter', destination: '/tasks' }],
+    ['an unknown array format', { kind: 'filter', destination: '/tasks', keys: [{ key: 'tags', array: 'pipe' }] }],
+    ['a client action without id', { kind: 'client-action' }],
+  ])('rejects %s', (_label, uiAction) => {
+    expect(ToolContractsFileSchema.safeParse(file({ ...uiContract, uiAction })).success).toBe(false);
+  });
+
+  it('grades UI schemas read from code as JSON Schema', () => {
+    expect(schemaQualityOf(uiContract)).toBe('json-schema');
+  });
+});

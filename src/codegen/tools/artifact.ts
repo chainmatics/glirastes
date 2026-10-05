@@ -192,8 +192,10 @@ export function schemaQualityOf(
     case 'native':
     case 'contract-module':
     case 'legacy-ai-tool':
-    case 'ui-bridge':
       return 'zod';
+    case 'ui-bridge':
+      // Pages, URL parsers and payload types are read from code as JSON Schema.
+      return contract.runtime.input.kind === 'module-export' ? 'zod' : 'json-schema';
     case 'openapi':
       return 'openapi';
     case 'derived':

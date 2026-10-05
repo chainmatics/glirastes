@@ -37,6 +37,18 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'integrity-chain-broken': 'Regenerate the outputs with glirastes tools refresh and commit them; never edit generated files.',
   'output-path-linked': 'Replace the linked .glirastes or output folder with a real folder inside the app.',
   'setup-plan-invalid': 'Delete .glirastes/previous-setup-artifact.json left by glirastes setup; git keeps the history.',
+  'navigation-bridge-missing': 'Call useGlirastesNavigationBridge({ push: router.push }) (glirastes/react) or registerNavigationBridge({ push }) (glirastes/browser) in code that is always mounted, then run glirastes tools refresh.',
+  'page-path-duplicated': 'Keep one page per path; navigation uses the first page file in code-unit order.',
+  'filter-domain-open': 'Optional: give the URL parameter a closed domain, e.g. parseAsStringLiteral([...]) or a defineQueryFilters value list.',
+  'filter-domain-conflict': 'Read the URL parameter with one parser on the page and its components.',
+  'filter-parser-unsupported': 'Use parseAsString, parseAsInteger, parseAsFloat, parseAsBoolean, parseAsStringLiteral or parseAsArrayOf for parameters the chat may set.',
+  'filter-definition-unreadable': 'Write the filter key, path and values as literals so glirastes tools refresh can read them.',
+  'filter-key-reserved': 'Rename the URL parameter; params is reserved for route parameters of the filtered page.',
+  'ui-action-payload-untyped': 'Pass a payload contract (e.g. a Zod object) as the third argument of useAiClientAction or registerAiClientAction, or type the handler parameter.',
+  'ui-action-contract-conflict': 'Register the action with one payload contract wherever it is handled.',
+  'ui-action-id-dynamic': 'Register client actions with a literal id so the chat can call them.',
+  'ui-action-id-invalid': 'Use an action id of letters, digits, dots and dashes, e.g. tasks.highlight.',
+  'ui-action-id-reserved': 'Ids starting with glirastes. belong to the SDK; choose another action id.',
 };
 
 /**

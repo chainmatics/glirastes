@@ -161,3 +161,26 @@ describe('tool prose', () => {
     expect(partial.semantics.byName.get('tasks.create')?.description).toBe('Kept.');
   });
 });
+
+describe('tool prose for UI tools', () => {
+  it('names a client action template after its id, not after the ui namespace', () => {
+    const prose = resolveToolProse({
+      stableKey: 'UI action task-details.open',
+      definitionId: 'ui.taskDetails.open',
+      operationGroup: 'ui',
+      locale: 'en-US',
+      semantics: EMPTY_SEMANTICS,
+    });
+    expect(prose).toMatchObject({
+      description: 'Run task details open.',
+      descriptionOrigin: 'template',
+      module: 'ui',
+      presentation: { singular: 'Run task details open' },
+      findings: [expect.objectContaining({ code: 'description-templated' })],
+    });
+    expect(resolveToolProse({
+      stableKey: 'UI action tasks.highlight', definitionId: 'ui.tasks.highlight', operationGroup: 'ui',
+      locale: 'de-DE', semantics: EMPTY_SEMANTICS,
+    }).description).toBe('Tasks highlight ausführen.');
+  });
+});
