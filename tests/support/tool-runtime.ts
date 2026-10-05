@@ -1,8 +1,10 @@
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import { FoundationExecutionInventorySchema } from '../../src/codegen/execution-inventory.js';
 import type { Principal } from '../../src/contracts/index.js';
 import { createAiSdkTools, type AiSdkWrappedTool } from '../../src/runtime/ai-sdk/index.js';
@@ -22,8 +24,10 @@ import {
 } from '../../src/server/index.js';
 import type { ToolRegistry } from '../../src/types.js';
 
-export const SDK_ROOT = fileURLToPath(new URL('../../', import.meta.url));
-export const EXAMPLES = fileURLToPath(new URL('../../examples/source-driven-next/', import.meta.url));
+// Path arithmetic instead of `new URL(relative, import.meta.url)`: under jsdom that URL is http://localhost.
+const HERE = dirname(fileURLToPath(import.meta.url));
+export const SDK_ROOT = resolve(HERE, '../..');
+export const EXAMPLES = resolve(SDK_ROOT, 'examples/source-driven-next');
 export const NATIVE_APP = join(EXAMPLES, 'native');
 export const FIXTURE_TENANT_ID = '019fb007-0000-7000-8000-000000000002';
 export const GENERATED_MODULE = 'src/generated/glirastes/tools.generated.js';
@@ -51,6 +55,18 @@ export async function copyApp(from: string, prefix = '.tool-sync-'): Promise<str
   await mkdir(join(root, 'node_modules'), { recursive: true });
   await symlink(SDK_ROOT, join(root, 'node_modules/glirastes'), 'dir');
   return root;
+}
+
+/**
+ * Runs the built `glirastes tools refresh` on an app, like its `dev` script.
+ * Use it from jsdom tests: the in-process pipeline spawns its schema probe
+ * from `import.meta.url`, which jsdom rewrites to an http URL.
+ */
+export async function refreshWithCli(root: string): Promise<string> {
+  const { stdout } = await promisify(execFile)(process.execPath,
+    [join(SDK_ROOT, 'dist/cli/bin.js'), 'tools', 'refresh', '--root', root],
+    { env: { PATH: process.env.PATH ?? '' } });
+  return stdout;
 }
 
 export async function removeCopiedApps(): Promise<void> {

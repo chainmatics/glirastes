@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
@@ -99,9 +99,9 @@ test('real Next SDK chat streams native endpoint results and updates the browser
   assert.ok(process.env.PLAYWRIGHT_MODULE, 'Set PLAYWRIGHT_MODULE to an installed Playwright module (not downloaded implicitly)');
   const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
   const root = await module.prepareBrowserReference();
-  const navigationDigest = (text) => JSON.parse(text.match(/^export const generationState = (.+);$/m)[1])
-    .inventory.executions.find((entry) => entry.definitionId === 'ui.navigate').inputSchemaDigest;
-  const initialDigest = navigationDigest(await readFile(resolve(root, '.glirastes/runtime.mjs'), 'utf8'));
+  const navigationDigest = async () => JSON.parse(await readFile(resolve(root, '.glirastes/foundation-execution-inventory.json'), 'utf8'))
+    .executions.find((entry) => entry.definitionId === 'ui.navigate').inputSchemaDigest;
+  const initialDigest = await navigationDigest();
   let server;
   let browser;
   const processes = [];
@@ -115,11 +115,10 @@ test('real Next SDK chat streams native endpoint results and updates the browser
       if (failures.length) throw new AggregateError(failures.map((outcome) => outcome.reason), 'Reference cleanup failed');
     } finally { await rm(root, { recursive: true, force: true }); }
   });
-  // Prove the normal app dev/build command picks up changes AFTER setup.
-  const configFile = resolve(root, 'src/ui-config.json');
-  const config = JSON.parse(await readFile(configFile, 'utf8'));
-  config.views.push({ id: 'archive', label: 'Archive', filters: [] });
-  await writeFile(configFile, JSON.stringify(config));
+  // Prove the normal app dev/build command picks up a new page AFTER setup.
+  await mkdir(resolve(root, 'src/app/(app)/archive'), { recursive: true });
+  await writeFile(resolve(root, 'src/app/(app)/archive/page.jsx'),
+    'export default function Archive() { return <section data-testid="native-ui"><h1>Archive</h1></section>; }\n');
   const capability = randomUUID();
   const environment = { PATH: process.env.PATH, HOME: process.env.HOME,
     NEXT_TELEMETRY_DISABLED: '1', GLIRASTES_REFERENCE_TEST_MODE: '1',
@@ -149,8 +148,7 @@ test('real Next SDK chat streams native endpoint results and updates the browser
     await delay(100);
   }
   assert.match(logs, /Ready in/);
-  const generatedText = await readFile(resolve(root, '.glirastes/runtime.mjs'), 'utf8');
-  assert.notEqual(navigationDigest(generatedText), initialDigest, 'normal app command did not regenerate after native UI change');
+  assert.notEqual(await navigationDigest(), initialDigest, 'normal app command did not regenerate after a page change');
   const post = (path, body, headers = {}) => fetch(`${origin}${path}`, { method: 'POST',
     headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
   const denied = await post('/chat', message('Show done tasks'));
@@ -189,11 +187,15 @@ test('real Next SDK chat streams native endpoint results and updates the browser
   }
   await chat('Go to overview');
   await native.getByRole('heading', { name: 'Overview', exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname, '/overview');
   await chat('Filter done tasks');
   await native.getByRole('heading', { name: 'Tasks', exact: true }).waitFor();
   await native.getByText('Write tests', { exact: true }).waitFor();
   assert.equal(await native.getByText('Review release', { exact: true }).count(), 0);
   assert.equal(await native.getByLabel('Status').inputValue(), 'done');
+  assert.equal(new URL(page.url()).search, '?status=done');
+  await chat('Highlight Write tests');
+  await native.locator('li[aria-current="true"]', { hasText: 'Write tests' }).waitFor();
   if (process.env.REFERENCE_SCREENSHOT) await page.screenshot({ path: process.env.REFERENCE_SCREENSHOT, fullPage: true });
   await page.goto(`${origin}/layout-proof`);
   const layoutDraft = page.getByRole('textbox');
@@ -242,5 +244,5 @@ test('real Next SDK chat streams native endpoint results and updates the browser
   assert.equal(await layoutDraft.evaluate(element => element === document.activeElement), true, 'retained reopen must focus the actual drop-in composer');
   assert.deepEqual(errors, []);
   assert.doesNotMatch(logs, /Module not found|Error:|Warning:/);
-  t.diagnostic('Verified real Next HTTP + SSE, scoped endpoint results, SDK chat, navigation/filtering, and common desktop/mobile layout geometry and draft retention. Test model only; no LLM/STT/timing claim.');
+  t.diagnostic('Verified real Next HTTP + SSE, scoped endpoint results, generated navigation, URL filter and client action tools through the app router and bus, and common desktop/mobile layout geometry and draft retention. Test model only; no LLM/STT/timing claim.');
 });

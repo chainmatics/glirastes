@@ -1,63 +1,43 @@
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { afterEach, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
+import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { afterEach, beforeAll, expect, it } from 'vitest';
+import { runToolsPipeline, ToolsPipelineFailure } from '../src/codegen/tools/pipeline.js';
+import { assertBuiltSdk, copyApp, EXAMPLES, NATIVE_APP, removeCopiedApps } from './support/tool-runtime.js';
 
-const base = resolve('examples/source-driven-next');
 const roots: string[] = [];
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
-it('stops the normal app build before Next when source assessment fails', async () => {
+beforeAll(assertBuiltSdk);
+afterEach(async () => {
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+  await removeCopiedApps();
+});
+
+it('stops the normal app build before Next when tools refresh fails', async () => {
   const { prepareBrowserReference } = await import('../examples/source-driven-next/prepare-browser.mjs');
   const root = await prepareBrowserReference();
   roots.push(root);
-  const artifact = await readFile(resolve(root, '.glirastes/runtime.mjs'), 'utf8');
-  await writeFile(resolve(root, 'src/query.js'), 'unreviewed native wrapper');
+  const inventory = await readFile(resolve(root, '.glirastes/foundation-execution-inventory.json'), 'utf8');
+  const generated = await readFile(resolve(root, 'src/generated/glirastes/tools.generated.js'), 'utf8');
+  await writeFile(resolve(root, 'src/app/api/tasks/route.js'), "export * from './contract.js';\n");
   const result = await promisify(execFile)('bun', ['run', 'build'], { cwd: root,
-    env: { PATH: process.env.PATH, NEXT_TELEMETRY_DISABLED: '1' } }).then(() => ({ code: 0, stderr: '' }), (error) => error);
+    env: { PATH: process.env.PATH, NEXT_TELEMETRY_DISABLED: '1' } })
+    .then(() => ({ code: 0, stdout: '' }), (error: { code: number; stdout: string }) => error);
   expect(result.code).not.toBe(0);
-  expect(result.stderr).toContain('assessment required');
+  expect(result.stdout).toContain('E-INVENTORY-011');
   await expect(readFile(resolve(root, '.next/BUILD_ID'))).rejects.toMatchObject({ code: 'ENOENT' });
-  expect(await readFile(resolve(root, '.glirastes/runtime.mjs'), 'utf8')).toBe(artifact);
-}, 30_000);
-it('rejects a linked generation directory without writing outside the app', async () => {
-  const { buildReference } = await import('../examples/source-driven-next/build.mjs');
-  const root = await mkdtemp(resolve(base, '.build-proof-'));
-  const outside = await mkdtemp(resolve(base, '.build-proof-outside-'));
-  roots.push(root, outside);
-  await cp(resolve(base, 'native'), root, { recursive: true });
-  await rm(resolve(root, '.glirastes'), { recursive: true, force: true });
-  await symlink(outside, resolve(root, '.glirastes'), 'dir');
-  await expect(buildReference(root)).rejects.toThrow('app-local');
-  await expect(readFile(resolve(outside, 'runtime.mjs'))).rejects.toMatchObject({ code: 'ENOENT' });
-  await writeFile(resolve(outside, 'runtime.mjs'), 'external sentinel');
-  await expect(buildReference(root)).rejects.toThrow('app-local');
-  expect(await readFile(resolve(outside, 'runtime.mjs'), 'utf8')).toBe('external sentinel');
-});
-it('persists source identities and tombstones with a statically importable signed runtime, preserving the last good build on failure', async () => {
-  const { buildReference } = await import('../examples/source-driven-next/build.mjs');
-  expect(buildReference, 'build-time runtime emitter').toBeTypeOf('function');
-  const root = await mkdtemp(resolve(base, '.build-proof-'));
-  roots.push(root);
-  await cp(resolve(base, 'native'), root, { recursive: true });
-  await cp(resolve(base, 'native-ui'), resolve(root, 'src'), { recursive: true });
-  await cp(resolve(base, 'ui-bridge.js'), resolve(root, 'src/glirastes-ui-bridge.js'));
-  await mkdir(resolve(root, 'node_modules'));
-  await symlink(resolve('.'), resolve(root, 'node_modules/glirastes'), 'dir');
-  const output = resolve(root, '.glirastes/runtime.mjs');
-  const first = await buildReference(root);
-  const runtime = await import(pathToFileURL(output).href);
-  const principal = { subjectId: 'alice', tenantId: runtime.tenantId, roles: ['member'], attributes: {} };
-  const snapshot = runtime.source.resolveTurnSnapshot({ turnId: 'build-test', principal });
-  expect(snapshot.manifestRevision.signature.keyId).toBeTruthy();
-  expect(runtime.bindings).toHaveLength(3);
-  expect(await readFile(output, 'utf8')).not.toContain('glirastes/codegen');
-  await rm(resolve(root, 'src/app/api/tasks/route.js'));
-  const removed = await buildReference(root);
-  expect(removed.state.tombstones[0].toolId).toBe(first.state.inventory.executions.find((entry) => entry.executionKind === 'endpoint')!.toolId);
-  const valid = await readFile(output, 'utf8');
-  await writeFile(resolve(root, 'src/query.js'), 'unreviewed native wrapper');
-  await expect(buildReference(root)).rejects.toThrow('assessment');
-  expect(await readFile(output, 'utf8')).toBe(valid);
-});
+  expect(await readFile(resolve(root, '.glirastes/foundation-execution-inventory.json'), 'utf8')).toBe(inventory);
+  expect(await readFile(resolve(root, 'src/generated/glirastes/tools.generated.js'), 'utf8')).toBe(generated);
+}, 60_000);
+
+it('refuses a linked output folder without writing outside the app', async () => {
+  const root = await copyApp(NATIVE_APP, '.build-proof-');
+  const outside = await mkdtemp(resolve(EXAMPLES, '.build-proof-outside-'));
+  roots.push(outside);
+  await symlink(outside, resolve(root, 'src/generated'), 'dir');
+  const outcome = await runToolsPipeline({ root, mode: 'write' }).then(() => undefined, (error: unknown) => error);
+  expect(outcome).toBeInstanceOf(ToolsPipelineFailure);
+  expect((outcome as ToolsPipelineFailure).result.findings).toContainEqual(expect.objectContaining({ code: 'output-path-linked' }));
+  expect(await readdir(outside)).toEqual([]);
+  await expect(readFile(resolve(root, '.glirastes/setup-artifact.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+}, 60_000);
