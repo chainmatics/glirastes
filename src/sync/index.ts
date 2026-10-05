@@ -65,3 +65,12 @@ export type {
   LocalDeploymentValidation,
 } from './local-deployment-validator.js';
 export { createManagedRuntimeSync } from './managed-sync.js';
+export {
+  capabilityReportFrom,
+  DISCOVERY_DIGEST_PATTERN,
+  uploadCapabilityReport,
+} from './capability-report.js';
+export type {
+  CapabilityReport,
+  CapabilityReportResult,
+} from './capability-report.js';

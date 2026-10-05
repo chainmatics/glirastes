@@ -1,3 +1,8 @@
+import {
+  capabilityReportFrom,
+  uploadCapabilityReport,
+  type CapabilityReportResult,
+} from './capability-report.js';
 import { FetchSsePushConnector } from './fetch-sse-push.js';
 import { HttpRuntimePublicKeyProvider } from './jwks-provider.js';
 import { RuntimeRevisionVerifier } from './signature-verifier.js';
@@ -35,7 +40,20 @@ export function createManagedRuntimeSync(options: {
     revisions: MaterializedDeploymentRevisions,
   ) => void | Promise<void>;
   onError?: (error: unknown) => void;
+  /**
+   * The committed setup artifact of the running code, e.g. the generated
+   * module's `setupArtifact`. Its discovery digest goes into every runner
+   * registration, and `reportCapabilities()` uploads it as the capability
+   * report (spec 4.10.6). Content-free; it never enables a tool.
+   */
+  setupArtifact?: unknown;
 }) {
+  const report = options.setupArtifact === undefined
+    ? undefined
+    : capabilityReportFrom(options.setupArtifact);
+  if (report && report.artifact.appId !== options.appId) {
+    throw new Error('The setup artifact belongs to a different app');
+  }
   const store = options.stateStore
     ?? (options.stateFilePath
       ? new FileRuntimeStateStore(options.stateFilePath)
@@ -86,6 +104,7 @@ export function createManagedRuntimeSync(options: {
     environmentId: options.environmentId,
     runnerKey: options.runnerKey,
     version: options.version,
+    ...(report ? { discoveryDigest: report.discoveryDigest } : {}),
     manager,
     fetchImpl: options.fetchImpl,
     push: options.push === false
@@ -94,5 +113,21 @@ export function createManagedRuntimeSync(options: {
     pollIntervalMs: options.pollIntervalMs,
     onError: options.onError,
   });
-  return { client, manager, store, verifier, keys };
+  let reported: Promise<CapabilityReportResult> | undefined;
+  /** Uploads the capability report once per process; undefined without one. */
+  const reportCapabilities = async (): Promise<CapabilityReportResult | undefined> => {
+    if (!report) return undefined;
+    reported ??= uploadCapabilityReport({
+      baseUrl: options.baseUrl,
+      apiKey: options.apiKey,
+      appId: options.appId,
+      report,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    }).catch((error: unknown) => {
+      reported = undefined;
+      throw error;
+    });
+    return reported;
+  };
+  return { client, manager, store, verifier, keys, reportCapabilities };
 }
