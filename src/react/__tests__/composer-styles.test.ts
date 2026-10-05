@@ -24,13 +24,20 @@ describe('shipped styles for the new chat surfaces', () => {
     expect(form).toContain('align-items: flex-end');
   });
 
-  it('lets the inline recording bar share the provider row instead of starving the editor', () => {
+  it('gives the inline recording bar a row of its own so the live words have room', () => {
     // RecordingBar sets `width: 100%` inline; only a non-auto flex-basis on the
-    // row item beats it, so the editor keeps a usable share while recording.
+    // row item beats it. Sharing the row left the bar ~100px at 375px wide,
+    // too little for the interim transcript, so the form wraps and the bar
+    // takes the full width behind Send (real layout: recording-bar-browser).
+    const form = rule(
+      '[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form',
+    );
+    expect(form).toContain('flex-wrap: wrap');
     const bar = rule(
       '[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"]',
     );
-    expect(bar).toContain('flex: 1;');
+    expect(bar).toContain('flex: 1 1 100%;');
+    expect(bar).toContain('order: 1;');
   });
 
   it('anchors the / and @ list to the provider editor and keeps it on screen', () => {

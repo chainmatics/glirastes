@@ -391,6 +391,7 @@
   min-width: 0;
   gap: 0.5rem;
   align-items: flex-end;
+  flex-wrap: wrap;
 }
 [data-component="ai-chat-panel"] [data-component="rich-mention-input"] {
   position: relative;
@@ -558,11 +559,14 @@
 [data-component="ai-chat-panel"] [data-component="recording-bar"] {
   min-width: 0;
 }
-/* The inline bar is `width: 100%` (inline style) and, as a row item next to the
-   editor, would starve it to a sliver. A non-auto flex-basis wins over that
-   width, so the bar and the editor share the row. */
+/* The inline bar is `width: 100%` (inline style). Next to the editor, mic and
+   Send it would get ~100px at 375px wide, too little for the live words. A
+   non-auto flex-basis beats that width, so the bar takes a row of its own
+   below them (form wraps; `order` moves it behind Send, which stays beside
+   the editor). The row exists only while the bar is mounted. */
 [data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"] {
-  flex: 1;
+  flex: 1 1 100%;
+  order: 1;
 }
 
 /* ===========================================================================

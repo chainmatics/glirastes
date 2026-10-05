@@ -172,6 +172,45 @@ describe('Glirastes UI parity components', () => {
     expect(interim.getAttribute('title')).toBe(long.trim());
   });
 
+  it('clips the oldest side of a narrow transcript slot so the newest words stay visible', () => {
+    // jsdom has no layout; real Chrome measures the result in
+    // tests/recording-bar-browser.test.mjs. Here: a Latin line runs opposite
+    // to its text, which is isolated as left-to-right so punctuation stays put.
+    render(
+      <RecordingBar
+        variant="inline"
+        isConnecting={false}
+        stream={null}
+        transcript="hallo welt aus dem browser."
+        onCancel={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    const interim = document.querySelector<HTMLElement>('[data-part="interim-transcript"]')!;
+    expect(interim.style.direction).toBe('rtl');
+    expect(interim.style.textAlign).toBe('left');
+    expect(interim.style.textOverflow).toBe('ellipsis');
+    const text = interim.querySelector('bdi');
+    expect(text?.getAttribute('dir')).toBe('ltr');
+    expect(text?.textContent).toBe('hallo welt aus dem browser.');
+  });
+
+  it('flips both directions for a right-to-left script so its newest words stay visible too', () => {
+    render(
+      <RecordingBar
+        variant="inline"
+        isConnecting={false}
+        stream={null}
+        transcript="123 مرحبا بالعالم"
+        onCancel={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    const interim = document.querySelector<HTMLElement>('[data-part="interim-transcript"]')!;
+    expect(interim.style.direction).toBe('ltr');
+    expect(interim.querySelector('bdi')?.getAttribute('dir')).toBe('rtl');
+  });
+
   it('renders the active session and switches to another local session', async () => {
     render(<SessionSwitcher formatTimestamp={() => 'Zeit'} />);
 
