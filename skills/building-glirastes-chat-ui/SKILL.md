@@ -91,6 +91,39 @@ its state is how stale closures get shipped.
 can emit but nothing handles. Wire the warning during development: a silently
 dropped action looks exactly like a model that ignored the request.
 
+## Commands, mentions and clarification
+
+`completionProviders` turns the composer into provider search. Each provider
+has a stable `id`, a `trigger` (`/` or `@`) and an async `search` that gets
+the query, an abort `signal`, a `limit` and the `completionContext` (roles and
+attributes the UI knows). Arrow keys, Tab/Enter and Escape work in the list,
+and the selected item's own id reaches the model in the mention marker.
+`createUiToolCommandProvider` offers the catalog's UI tools as `/` commands.
+Role filtering only hides entries: the server and the app still authorize.
+Memoize the providers array; a new identity rebuilds the search.
+
+Enable `clarification` on `createAiChatHandler`. The model asks one targeted
+question through the built-in clarification tool inside its normal step, no
+extra planner call. `ClarificationCard` renders the options and a free-text
+answer; the answer resumes the original request, and typing into the composer
+while a question is open answers it too.
+
+## Result components
+
+`toolRenderers` maps a tool's `definitionId` and `schemaVersion` to a compact
+local component built with `defineToolResultRenderer`. Each version's
+`outputSchema` guards stored messages: when no version accepts the output or
+the component throws, the default `ToolResultBlock` renders instead.
+
+## Non-React hosts
+
+`glirastes/embed` registers `<glirastes-chat endpoint="/api/chat">` through
+`defineGlirastesChatElement()`. The React UI runs in a Shadow DOM, page CSS
+themes it with `--glirastes-chat-primary` and the other `--glirastes-chat-*`
+variables, `glirastes-chat:ready`, `:status`, `:tool-result` and `:error`
+events bubble out, and removing the element unmounts it and frees the
+microphone. The host needs `react`, `react-dom`, `@ai-sdk/react` and `ai`.
+
 ## Mentions and suggestions
 
 `mentions` supplies the sources; `MentionInput` and `RichMentionInput` render
@@ -141,8 +174,15 @@ Use the SDK STT controller as the only recording state machine:
 - merge interim and final segments without loss or duplication;
 - stop finalizes into the draft; cancel restores the previous draft;
 - let the user edit before sending;
+- no automatic send on finalization: only the user sends;
 - retry permission, provider, and reconnect failures explicitly;
 - close MediaStream tracks, sockets, timers, and audio resources on every exit.
+
+`voice.pushToTalk` adds hold-to-talk on the mic button and a hold hotkey
+(default `mod+shift+space`) next to tap-to-toggle. Pass `voice.routeKey` (for
+example the pathname) so navigation stops recording and keeps the speech as
+draft; back/forward, session switches and unmount release the microphone as
+well. `voice.adapter` plugs in another provider; keep its identity stable.
 
 `useStt` is the hook, `VoiceInputButton` and `RecordingBar` the surface. Speech
 traffic goes directly between the target app's local provider adapter and its
