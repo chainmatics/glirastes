@@ -482,6 +482,26 @@ export function normalizeResultUiAction(
 // ============================================================================
 
 /**
+ * `glirastes.*` UI actions belong to the generated UI tools (`ui.navigate`,
+ * `ui.filter.<view>`, `ui.<actionId>`), whose results the chat hands to the
+ * app's bridge without asking again. An endpoint result never carries one, so
+ * data an endpoint returns can neither navigate nor run a client action past
+ * that action's confirmation.
+ */
+function withoutReservedUiActions(
+  uiAction: Record<string, unknown> | Record<string, unknown>[] | undefined,
+): Record<string, unknown> | Record<string, unknown>[] | undefined {
+  const reserved = (action: Record<string, unknown>): boolean => (
+    typeof action.type === 'string' && action.type.startsWith('glirastes.')
+  );
+  if (Array.isArray(uiAction)) {
+    const kept = uiAction.filter((action) => !reserved(action));
+    return kept.length > 0 ? kept : undefined;
+  }
+  return uiAction && !reserved(uiAction) ? uiAction : undefined;
+}
+
+/**
  * Convert an endpoint tool definition into a Tool.
  * Uses callEndpoint from the ToolContext to execute HTTP requests.
  */
@@ -594,10 +614,13 @@ export function endpointToolToTool<TInput extends SchemaLike>(
         }
       }
 
+      // The response's own uiAction field never reaches the chat unfiltered.
+      const { uiAction: _responseUiAction, ...responseFields } = responseData;
+      const resultUiAction = withoutReservedUiActions(uiAction);
       return {
         success: true,
-        ...responseData,
-        ...(uiAction ? { uiAction } : {}),
+        ...responseFields,
+        ...(resultUiAction ? { uiAction: resultUiAction } : {}),
       };
     },
   });
@@ -1131,6 +1154,11 @@ export function createExpressInternalApiCaller(
 // ============================================================================
 
 export { zodToCompactDescription } from './zod-compact.js';
+export {
+  uiActionToolToTool,
+  type GeneratedUiAction,
+  type GeneratedUiToolDefinition,
+} from './generated-ui-tool.js';
 
 // ============================================================================
 // Followup Tool
