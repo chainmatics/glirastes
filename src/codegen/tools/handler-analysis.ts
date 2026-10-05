@@ -3,6 +3,7 @@ import type { EndpointMethod } from '../../types.js';
 import { AUTH_PATTERNS } from '../route-scanner.js';
 import { compareCodeUnits } from './canonical.js';
 import {
+  bindingKey,
   locateRouteHandler,
   normalizedNodeText,
   unwrapExpression,
@@ -272,17 +273,127 @@ function wrapperUses(
   return uses;
 }
 
-/** A write handler that hands the request to unknown code may read its body there. */
+/** Request members that expose the body (or a copy of it); every other member is body-free metadata. */
+const BODY_MEMBERS = new Set(['json', 'text', 'formData', 'arrayBuffer', 'blob', 'bytes', 'body', 'clone']);
+
+type RequestUse =
+  | { kind: 'neutral' }
+  | { kind: 'escape' }
+  | { kind: 'alias'; name: ts.Identifier; direct: boolean };
+
+const NEUTRAL: RequestUse = { kind: 'neutral' };
+const ESCAPE: RequestUse = { kind: 'escape' };
+
+/** Identifier references of a body by symbol; a shorthand property name reads the variable, not the property. */
+function referencesBySymbol(checker: ts.TypeChecker, body: ts.Node): Map<ts.Symbol, ts.Identifier[]> {
+  const references = new Map<ts.Symbol, ts.Identifier[]>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) {
+      const symbol = ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+        ? checker.getShorthandAssignmentValueSymbol(node.parent)
+        : checker.getSymbolAtLocation(node);
+      if (symbol) references.set(symbol, [...(references.get(symbol) ?? []), node]);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(body);
+  return references;
+}
+
+function isBindingSite(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  return (ts.isVariableDeclaration(parent) && parent.name === node)
+    || (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && parent.left === node);
+}
+
+/**
+ * Follows one reference of the request (or of a variable holding it) outwards through the
+ * expressions that carry the value on, and says where it ends up. `direct` is true while the
+ * value is still the request itself rather than something containing it.
+ */
+function classifyRequestUse(
+  reference: ts.Identifier,
+  direct: boolean,
+  isSafeCall: (call: ts.CallExpression) => boolean,
+): RequestUse {
+  let node: ts.Node = reference;
+  let isDirect = direct;
+  for (;;) {
+    const parent: ts.Node = node.parent;
+    if (
+      ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) || ts.isNonNullExpression(parent)
+      || ts.isSatisfiesExpression(parent) || ts.isTypeAssertionExpression(parent) || ts.isAwaitExpression(parent)
+      || (ts.isConditionalExpression(parent) && parent.condition !== node)
+      || (ts.isBinaryExpression(parent) && (
+        parent.operatorToken.kind === ts.SyntaxKind.BarBarToken
+        || parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+        || parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      ))
+    ) {
+      node = parent;
+      continue;
+    }
+    if (ts.isShorthandPropertyAssignment(parent) || ts.isPropertyAssignment(parent) || ts.isSpreadAssignment(parent)) {
+      node = parent.parent;
+      isDirect = false;
+      continue;
+    }
+    if (ts.isSpreadElement(parent) || ts.isArrayLiteralExpression(parent)) {
+      node = parent;
+      isDirect = false;
+      continue;
+    }
+    if (
+      isDirect && ts.isPropertyAccessExpression(parent) && parent.expression === node && parent.name.text === 'clone'
+      && ts.isCallExpression(parent.parent) && parent.parent.expression === parent
+    ) {
+      node = parent.parent;
+      continue;
+    }
+    if (ts.isPropertyAccessExpression(parent) && parent.expression === node) {
+      return isDirect && !BODY_MEMBERS.has(parent.name.text) ? NEUTRAL : ESCAPE;
+    }
+    if (ts.isVariableDeclaration(parent) && parent.initializer === node) {
+      if (ts.isIdentifier(parent.name)) return { kind: 'alias', name: parent.name, direct: isDirect };
+      if (!isDirect || !ts.isObjectBindingPattern(parent.name)) return ESCAPE;
+      return parent.name.elements.some((element) => {
+        const key = bindingKey(element);
+        return element.dotDotDotToken || key === undefined || BODY_MEMBERS.has(key);
+      }) ? ESCAPE : NEUTRAL;
+    }
+    if (
+      ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && parent.right === node && ts.isIdentifier(parent.left)
+    ) {
+      return { kind: 'alias', name: parent.left, direct: isDirect };
+    }
+    if (
+      (ts.isCallExpression(parent) || ts.isNewExpression(parent))
+      && parent.arguments?.some((argument) => argument === node)
+    ) {
+      return ts.isCallExpression(parent) && isSafeCall(parent) ? NEUTRAL : ESCAPE;
+    }
+    return ESCAPE;
+  }
+}
+
+/**
+ * A write handler whose request body may be consumed where the key collector cannot follow: read as
+ * text, form data or a stream, or the request (or a copy, alias or container of it) handed to unknown code.
+ */
 function requestEscapes(
   app: AppProgram,
   located: LocatedHandler,
   conventions: HandlerConventions,
 ): boolean {
   const body = located.fn?.body;
-  const name = located.requestName;
-  if (!body || !name) return false;
+  const parameter = located.fn?.parameters[0];
+  if (!body || !parameter || !ts.isIdentifier(parameter.name)) return false;
+  const requestSymbol = app.checker.getSymbolAtLocation(parameter.name);
+  if (!requestSymbol) return false;
   const safeNames = new Set([...DEFAULT_AUTH_NAMES, ...conventions.authHelpers]);
-  const isSafe = (call: ts.CallExpression): boolean => {
+  const isSafeCall = (call: ts.CallExpression): boolean => {
     const callee = unwrapExpression(call.expression);
     const calleeName = ts.isIdentifier(callee) ? callee.text
       : ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
@@ -292,20 +403,25 @@ function requestEscapes(
       entry.export === target.export && sameModule(entry.module, target.module)
     )));
   };
-  let escapes = false;
-  const visit = (node: ts.Node): void => {
-    if (escapes) return;
-    if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && (node.arguments ?? []).some((argument) => {
-      const value = unwrapExpression(argument);
-      return ts.isIdentifier(value) && value.text === name;
-    }) && !(ts.isCallExpression(node) && isSafe(node))) {
-      escapes = true;
-      return;
+  const references = referencesBySymbol(app.checker, body);
+  // Each symbol that holds the request (or something containing it), and whether it is the request itself.
+  const holders = new Map<ts.Symbol, boolean>([[requestSymbol, true]]);
+  const queue = [requestSymbol];
+  for (let symbol = queue.pop(); symbol; symbol = queue.pop()) {
+    for (const reference of references.get(symbol) ?? []) {
+      if (isBindingSite(reference)) continue;
+      const use = classifyRequestUse(reference, holders.get(symbol) === true, isSafeCall);
+      if (use.kind === 'escape') return true;
+      if (use.kind !== 'alias') continue;
+      const target = app.checker.getSymbolAtLocation(use.name);
+      if (!target) return true;
+      const direct = (holders.get(target) ?? true) && use.direct;
+      if (holders.get(target) === direct) continue;
+      holders.set(target, direct);
+      queue.push(target);
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(body);
-  return escapes;
+  }
+  return false;
 }
 
 export function analyzeRouteHandler(input: {
