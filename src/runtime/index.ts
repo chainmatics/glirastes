@@ -138,3 +138,12 @@ export {
   type RuntimePriceTable,
   type StepCostInput,
 } from './metrics/cost.js';
+export {
+  createTurnMetricsRecorder,
+  type RuntimeMetricsIdentity,
+  type RuntimeMetricsSink,
+  type TurnMetricsOutcome,
+  type TurnMetricsRecorder,
+  type TurnMetricsRecorderOptions,
+  type TurnMetricsStep,
+} from './metrics/turn-recorder.js';
