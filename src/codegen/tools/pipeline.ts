@@ -1,10 +1,15 @@
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import type { z } from 'zod';
 import { writeArtifactSetAtomically } from '../../cli/commands/atomic-artifact-write.js';
 import { createSetupPlanFromContents } from '../../cli/commands/setup-plan.js';
 import { renderManifestContents } from '../../cli/commands/validate-build.js';
-import { assertAppSetupSemanticParity, type AppSetupArtifact } from '../../contracts/index.js';
+import {
+  AppSetupArtifactSchema,
+  assertAppSetupSemanticParity,
+  type AppSetupArtifact,
+} from '../../contracts/index.js';
 import {
   confirmationFloor,
   deriveToolPolicyDefaults,
@@ -14,6 +19,7 @@ import {
 import { FoundationDiagnosticError, isFoundationDiagnosticError } from '../../diagnostics/index.js';
 import {
   discoverFoundationExecutions,
+  FoundationExecutionInventorySchema,
   type FoundationExecutionDiscovery,
   type FoundationExecutionInventory,
 } from '../execution-inventory.js';
@@ -35,8 +41,9 @@ import {
   type ToolsConfig,
 } from './config.js';
 import { renderGeneratedModule } from './emit-module.js';
+import { ToolContractsFileSchema, ToolTombstonesFileSchema, toToolContractsEntry } from './files.js';
 import { sortFindings, toolFinding, TRANSIENT_FINDING_CODES } from './findings.js';
-import { readToolInputs, type PromptBundleInput } from './inputs.js';
+import { readPromptBundle, readToolInputs, type PromptBundleInput } from './inputs.js';
 import type { ToolsMode } from './mode.js';
 import { resolveToolProse } from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
@@ -460,13 +467,122 @@ async function generate(
   return result({ changes: generation.changes, outputs, driftPaths, wrote: driftPaths.length > 0 });
 }
 
+function receiptModeOf(raw: string | undefined): 'standalone' | 'managed' {
+  try {
+    const parsed = JSON.parse(raw ?? '') as { mode?: unknown };
+    return parsed.mode === 'managed' ? 'managed' : 'standalone';
+  } catch {
+    return 'standalone';
+  }
+}
+
+/**
+ * Deploy-time check: re-renders manifests, receipt and generated module from
+ * the committed primary outputs and verifies the inventory against the route
+ * files. Never observes sources, never imports app modules, never writes.
+ */
+async function verifyIntegrity(root: string, config: ToolsConfig): Promise<ToolsPipelineResult> {
+  const findings: ToolFinding[] = [];
+  const result = (outputs: Record<string, string> = {}, driftPaths: string[] = []): ToolsPipelineResult => ({
+    mode: 'integrity',
+    changes: emptyChanges(),
+    findings,
+    excluded: [],
+    outputs,
+    driftPaths,
+    wrote: false,
+  });
+  const read = (path: string): Promise<string | undefined> => (
+    readFile(resolve(root, path), 'utf8').catch(() => undefined)
+  );
+  const parse = <T>(path: string, raw: string | undefined, schema: z.ZodType<T>): T | undefined => {
+    if (raw === undefined) {
+      findings.push(toolFinding('tool-output-invalid', 'error', path, `${path} is missing.`));
+      return undefined;
+    }
+    try {
+      const parsed = schema.safeParse(JSON.parse(raw));
+      if (parsed.success) return parsed.data;
+    } catch {
+      // Reported below like any other schema violation.
+    }
+    findings.push(toolFinding('tool-output-invalid', 'error', path, `${path} is not a valid generated file.`));
+    return undefined;
+  };
+  const broken = (path: string, message: string) => {
+    findings.push(toolFinding('integrity-chain-broken', 'error', path, message));
+  };
+
+  const inventoryRaw = await read(TOOLS_PATHS.inventory);
+  const artifactRaw = await read(TOOLS_PATHS.setupArtifact);
+  const inventory = parse(TOOLS_PATHS.inventory, inventoryRaw, FoundationExecutionInventorySchema);
+  const tombstones = parse(TOOLS_PATHS.tombstones, await read(TOOLS_PATHS.tombstones), ToolTombstonesFileSchema);
+  const contracts = parse(TOOLS_PATHS.contracts, await read(TOOLS_PATHS.contracts), ToolContractsFileSchema);
+  const artifact = parse(TOOLS_PATHS.setupArtifact, artifactRaw, AppSetupArtifactSchema);
+  const prompt = await readPromptBundle(root, config);
+  findings.push(...prompt.findings);
+  if (!inventory || !inventoryRaw || !tombstones || !contracts || !artifact || !artifactRaw || !prompt.promptBundle) {
+    return result();
+  }
+  if (tombstones.appId !== config.appId || contracts.appId !== config.appId || artifact.appId !== config.appId) {
+    broken(TOOLS_PATHS.setupArtifact, 'The generated files belong to a different app.');
+    return result();
+  }
+  let discovery: FoundationExecutionDiscovery;
+  try {
+    discovery = await discoverFoundationExecutions({ rootDir: root, inventory });
+  } catch {
+    broken(TOOLS_PATHS.inventory, 'The inventory no longer matches the route sources; run glirastes tools refresh.');
+    return result();
+  }
+  if (artifact.discoveryDigest !== discovery.inventoryDigest) {
+    broken(TOOLS_PATHS.setupArtifact, 'The setup artifact was generated from a different inventory.');
+  }
+  try {
+    assertAppSetupSemanticParity(artifact, inventory.executions.map((execution) => execution.definitionId));
+  } catch {
+    broken(TOOLS_PATHS.setupArtifact, 'The setup artifact does not match the inventory tools.');
+  }
+  const inventoryIds = inventory.executions.map((execution) => execution.toolId).sort(compareCodeUnits).join(',');
+  if (contracts.tools.map((entry) => entry.toolId).sort(compareCodeUnits).join(',') !== inventoryIds) {
+    broken(TOOLS_PATHS.contracts, 'Tool contracts do not match the inventory.');
+  }
+  if (findings.some(isError)) return result();
+
+  let derived: Record<string, string>;
+  try {
+    derived = renderDerivedOutputs({
+      config,
+      inventory,
+      inventoryRaw,
+      discovery,
+      artifact,
+      artifactRaw,
+      contracts: contracts.tools.map(toToolContractsEntry),
+      promptBundle: prompt.promptBundle,
+      receiptMode: receiptModeOf(await read(TOOLS_PATHS.receipt)),
+    });
+  } catch (error) {
+    if (error instanceof Error) {
+      broken(generatedModulePath(config), error.message);
+      return result();
+    }
+    throw error;
+  }
+  const driftPaths = await diffOutputs(root, derived);
+  for (const path of driftPaths) broken(path, `${path} does not match the committed tool outputs.`);
+  return result(derived, driftPaths);
+}
+
 export async function runToolsPipelineWith(
   options: ToolsPipelineOptions,
   dependencies: ToolsPipelineDependencies,
 ): Promise<ToolsPipelineResult> {
   const root = await realpath(resolve(options.root));
   const config = loadToolsConfig(root);
-  const raw = await generate(root, config, options, dependencies);
+  const raw = options.mode === 'integrity'
+    ? await verifyIntegrity(root, config)
+    : await generate(root, config, options, dependencies);
   const result = { ...raw, findings: sortFindings(raw.findings) };
   if (result.findings.some(isError) && !options.keepGoing) throw new ToolsPipelineFailure(result);
   return result;
