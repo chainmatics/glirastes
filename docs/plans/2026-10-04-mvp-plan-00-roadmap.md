@@ -38,7 +38,7 @@
 | P01 | [Sicherung und Hygiene](2026-10-04-mvp-plan-01-hygiene.md) | SDK, Platform, GID – jeweils bestehende Foundation-Worktrees | – | ausgeschrieben |
 | P02 | [Tool-Policy und Laufzeit-Durchsetzung](2026-10-04-mvp-plan-02-tool-policy.md) | SDK `.worktrees/mvp-tools` (`codex/mvp-tools`) | P01 | ausgeschrieben |
 | P03 | [Generator-Kern, Next.js-Endpunkte, CLI refresh/check/status](2026-10-04-mvp-plan-03-tools-generator-next.md) | SDK `mvp-tools` | P02 | ausgeschrieben |
-| P04 | Navigation, Filter, UI-Aktionen, `glirastes/browser`; SDK-Hälfte des Policy-Vertrags mit P08b (`RuntimePolicyRevision.toolOverrides` Standard `[]`, Overlay übernimmt Delta-Beschreibung, Artifact-`provenance`/`exclusions` mit Platform-Grenzen, `schemaSource`-Werte, Schema-Module ohne ESM-Zyklus) | SDK `mvp-tools` | P03 | wird geschrieben vor Start |
+| P04 | [Navigation, Filter, UI-Aktionen](2026-10-05-mvp-plan-04-navigation-filters-ui.md), `glirastes/browser`; SDK-Hälfte des Policy-Vertrags mit P08b (`RuntimePolicyRevision.toolOverrides` Standard `[]`, Overlay übernimmt Delta-Beschreibung, Artifact-`provenance`/`exclusions` mit Platform-Grenzen, `schemaSource`-Werte, Schema-Module ohne ESM-Zyklus) | SDK `mvp-tools` | P03 | ausgeschrieben |
 | P05 | Agentische Arbeit per Skills: Arbeitslisten, einheitliche Prüfung, `tools eval`, Stufe-2-Datenmodell, sieben Skills, `init`-Anpassungen | SDK `mvp-tools` | P04, P07 (Merge vorher) | wird geschrieben vor Start |
 | P06 | Referenz-Fixtures React+NestJS und Vue+FastAPI inkl. Änderungskorpus (18 Tests) | SDK `mvp-tools` | P05, P07 (Einbettung) | wird geschrieben vor Start |
 | P07 | [Routing, Suche, Rückfragen, Chat-UI, Einbettung, STT](2026-10-04-mvp-plan-07-routing-chat-stt.md) | SDK `.worktrees/mvp-chat` (`codex/mvp-chat`) | P01 | ausgeschrieben |
@@ -46,7 +46,7 @@
 | P08a | [Platform-Hygiene](2026-10-04-mvp-plan-08a-platform-hygiene.md): Migrationsjournal, API-Typecheck, Citadel-ESLint, Pairing-Key-Sicherheit, Pairing-Robustheit, Aegis-Folgepunkte | Platform `.worktrees/mvp-platform` (`codex/mvp-platform`) | P01 | ausgeschrieben |
 | P08b | [Platform-Backend](2026-10-05-mvp-plan-08b-platform-backend.md): begrenzte Overrides (0044), Deltas, Policy-only-Revisionen, richtungsabhängige Freigabe, Capability-Report und -Ansicht, Pro-Schalter, App-Scope-Lücken | Platform `mvp-platform` | P08a, P02 | ausgeschrieben |
 | P08c | Citadel-UI im Living-Network-Design (nach Mockup-Freigabe): fünf Fragen, „Was kann mein Chat?“, Kosten, Verbinden, Historie; Override-Formular nur einschränkend und nur Abweichungen | Platform `mvp-platform` | P08b, Design-Freigabe | wird geschrieben vor Start |
-| P09 | Metriken (FR-7): Event v2 + Senke im SDK, Ingest, Aggregation, Dashboard | SDK `mvp-tools` + Platform `mvp-platform` | P08 | wird geschrieben vor Start |
+| P09 | [Metriken (FR-7)](2026-10-05-mvp-plan-09-metrics.md): Event v2 + Senke im SDK, Ingest, Aggregation, Abfrage-API (Ansichten in P08c) | SDK `mvp-chat` (parallel zu P04) + Platform `mvp-platform` (nach P08b) | P08b | ausgeschrieben |
 | P10 | Pro: Managed Tool-Generierung (Job-API, OpenRouter-Provisioning, Skill-Runner, CI-Workflow) | Platform + SDK | P05, P08 | wird geschrieben vor Start |
 | P11 | Get It Done auf aktuellem `master` mit Foundation | GID `.worktrees/glirastes-mvp` (`codex/glirastes-mvp` von `origin/master`) | P05 (Generator + Migrations-Skill), P07 | wird geschrieben vor Start |
 | P12 | Landingpage | Platform `mvp-platform` | P11, P08 belegt | wird geschrieben vor Start |
@@ -78,7 +78,7 @@ Nach jedem Teilplan:
 
 | Punkt | Zuständiger Teilplan |
 | --- | --- |
-| `src/sync/local-deployment-validator.ts` lehnt eine ganze Platform-Deployment ab, wenn sie ein Tool ohne lokales Binding freischaltet; laut Spec 4.9 soll das Tool ignoriert werden (`platform-tool-not-in-code`) | P05 |
+| `src/sync/local-deployment-validator.ts` lehnt eine ganze Platform-Deployment ab, wenn sie ein Tool ohne lokales Binding freischaltet; laut Spec 4.9 soll das Tool ignoriert werden (`platform-tool-not-in-code`) | P04 (vorgezogen, der gemeinsame Vertrag hängt daran) |
 | `tools refresh --watch` | P05 |
 | Hinweis „N Tools brauchen eine bessere Beschreibung“ am Ende jedes Refresh | P05 |
 | Emit-Option für generierte `.ts`-Module mit NodeNext-Importendungen | P06 |
@@ -104,7 +104,16 @@ Nach jedem Teilplan:
 | `glirastes connect` übernimmt das Framework aus `tools.json` statt fest `nextjs` | P05 |
 | App-Scope-Prüfung für app-gebundene Keys in `/v1/audit`, `/v1/stream`, Gate-Config, Deployment-Liste | P08b |
 | Connect + Sync Ende-zu-Ende mit dem neuen Pairing-Key über den GID-Piloten (braucht Freigabe für lokale Wegwerf-Postgres) | P11/P13 |
-| Platform-UI-Redesign „Living Network“ (deutlich eleganter, Wow-Effekt), Design-Abschnitt + P08b-Plan nach Freigabe des Mockups | P08b |
+| Platform-UI-Redesign „Living Network“ (deutlich eleganter, Wow-Effekt) in Farben und Schriften der Landingpage, Design-Abschnitt + Plan nach Freigabe des Mockups | P08c |
+| Platform-Schemas für Capability-Report und `glirastes sync` akzeptieren nur GET/POST/PUT/PATCH/DELETE; seit P04 meldet das SDK HEAD als lesendes Tool | Platform-Nachtrag nach P08b, vor P11 |
+| Neuer Event-Typ `tool_contract_rejected` (Spec 4.7) im Gleichschritt mit neuen Vektoren und neuem Digest auf beiden Seiten | P05 |
+| Skill `integrating-glirastes-nextjs`: „Der normale Chat-Pfad macht keine Control-Plane-Anfrage“ braucht die Connected-Ausnahme für Metriken und den Verdrahtungsschritt (eine Senke pro Prozess) | P05 |
+| Direkte @-/-Befehle ohne Modellaufruf umgehen den Metrik-Recorder: aufzeichnen oder ausdrücklich nicht als Turn zählen; `create-ai-chat-handler.ts` wird von P09 und P07b geändert | P07b |
+| Zusammenführung `codex/mvp-chat` + `codex/mvp-tools` nach P04/P09: `src/runtime/index.ts` und `src/contracts/index.ts` als Vereinigung | Controller (Merge) |
+| P10 nimmt Migration `0046` (P09 belegt `0045_runtime_metrics`; Spec 4.10.11 nennt noch `0045_tool_generation_jobs`) | P10 |
+| GID-Verdrahtung: Delta-Overlay (`policyOverlay`), `reportCapabilities()`, Navigation-Bridge, eine Metrik-Senke pro Prozess, generierte Formen im eigenen `uiActionSchema`; `glirastes.*`-Aktionen nicht doppelt ausführen; Live-Prüfung der OpenRouter-Kosten (`usage: { include: true }`) | P11 |
+| Ingest-Kontingent pro Tenant (heute nur Rate-Limit pro Key) vor breiter Öffnung der Free-Registrierung | P13 |
+| Client-Aktion zählt nur als schreibend, wenn der Handler direkt `fetch`/`axios` aufruft; Schreiben über Helfer, Server Actions oder Mutation-Hooks markiert die Skill-Arbeitsliste | P05 |
 
 ## Freigaben, die unterwegs eingeholt werden
 
