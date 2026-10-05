@@ -308,6 +308,44 @@ describe('turn metrics in the Next chat handler', () => {
     expect(JSON.stringify(events[0])).not.toContain('provider leaked');
   });
 
+  it('records a turn stopped by the runtime time budget as a budget safety stop', async () => {
+    const { sink, events } = collectingSink();
+    const model = new MockLanguageModelV3({
+      // Starts a stream that never produces text or finishes, so only the
+      // runtime time budget can end the turn. Like a provider's fetch, the
+      // stream errors once the abort signal fires.
+      doStream: async ({ abortSignal }) => ({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'stream-start', warnings: [] });
+            abortSignal?.addEventListener('abort', () => {
+              controller.error(abortSignal.reason);
+            });
+          },
+        }),
+      }),
+    });
+    const handler = createAiChatHandler({
+      tools: registry(),
+      model,
+      systemPrompt: 'Assistant',
+      managedRuntime: managedRuntime({ ...localLimits, totalTimeoutMs: 50 }),
+      metrics: sink,
+      onError: () => undefined,
+    });
+
+    await (await handler(request())).text();
+
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(events).toHaveLength(1);
+    expect(TechnicalRuntimeEventV2Schema.parse(events[0])).toMatchObject({
+      status: 'safety-stop',
+      errorCode: 'budget_exhausted',
+      model: null,
+      toolCallCount: 0,
+    });
+  });
+
   it('records a pipeline failure before streaming as a pipeline error turn', async () => {
     const { sink, events } = collectingSink();
     const handler = createAiChatHandler({

@@ -511,7 +511,15 @@ async function defaultStreamHandler(
           ctx.onStepReport?.(report);
         },
         onAbort: (event) => {
-          ctx.turnMetrics?.finish({ status: 'aborted', errorCode: null });
+          // The runtime time budget is the only abort source of this handler,
+          // so an abort at the hard limit is a budget stop, not a user abort.
+          const abortedByBudget =
+            ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
+          ctx.turnMetrics?.finish(
+            abortedByBudget
+              ? { status: 'safety-stop', errorCode: 'budget_exhausted' }
+              : { status: 'aborted', errorCode: null },
+          );
           if (finalStateWritten) return;
           totalSteps = Math.max(totalSteps, event.steps.length);
           writePipelineState(
