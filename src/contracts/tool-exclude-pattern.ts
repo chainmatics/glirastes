@@ -5,7 +5,8 @@ export interface ExcludePattern {
   segments: string[];
 }
 
-const EXCLUDE_PATTERN = /^(?:(GET|POST|PUT|PATCH|DELETE|HEAD|\*)\s+)?(\/\S*)$/;
+// PAGE matches app pages (navigation destinations and filtered views).
+const EXCLUDE_PATTERN = /^(?:(GET|POST|PUT|PATCH|DELETE|HEAD|PAGE|\*)\s+)?(\/\S*)$/;
 
 function isValidSegment(segment: string): boolean {
   if (segment === '*' || segment === '**') return true;
