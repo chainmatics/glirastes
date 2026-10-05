@@ -1,7 +1,10 @@
 import type { ToolPresentation } from '../../contracts/index.js';
-import type { DeclaredEffect, ToolPolicyDefaults } from '../../contracts/tool-policy.js';
+import type { DeclaredEffect, ToolPolicyDefaults, ToolPolicyFile } from '../../contracts/tool-policy.js';
 import type { LocalJsonSchema } from '../../runtime/json-schema.js';
-import type { ObservedExecution } from '../inventory-generation.js';
+import type { ExecutionGenerationState, ObservedExecution } from '../inventory-generation.js';
+import type { ToolsConfig } from './config.js';
+import type { ToolResolutions } from './resolutions.js';
+import type { SchemaProbe } from './schema-probe.js';
 
 /** A plain, serializable JSON Schema object — never a compiled validator. */
 export type JsonSchemaLike = LocalJsonSchema;
@@ -88,4 +91,29 @@ export interface ToolContractsEntry {
   definitionId: string;
   contract: ToolContract | null;
   defaults: ToolPolicyDefaults;
+}
+
+export interface ToolSourceContext {
+  /** Real path of the app root. */
+  root: string;
+  config: ToolsConfig;
+  resolutions: ToolResolutions;
+  policy: ToolPolicyFile;
+  previous?: ExecutionGenerationState;
+  /** Previous contracts by stable key (descriptive bindings live here). */
+  previousContracts: ReadonlyMap<string, ToolContract>;
+  probe: SchemaProbe;
+}
+
+export interface ToolSourceObservation {
+  observations: ObservedTool[];
+  findings: ToolFinding[];
+  /** false ⇒ enumeration incomplete; the pipeline writes nothing. */
+  complete: boolean;
+  excluded?: ExcludedTool[];
+}
+
+export interface ToolSource {
+  kind: string;
+  observe(ctx: ToolSourceContext): Promise<ToolSourceObservation>;
 }
