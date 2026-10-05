@@ -7784,11 +7784,35 @@ Expected: `no watcher`; `db-build=0`; `api-typecheck=0`; API `Test Files  120 pa
 Report the 13 commits with hashes, the gate numbers above, the decisions table and the shared SDK contract from the top of this plan, and these requests and findings (none of them is executed by an agent):
 
 1. **Shared database:** `0044_bounded_tool_overrides` is additive (four `ADD COLUMN`, one with a default). The shared database first needs the P08a baseline (`packages/db/MIGRATIONS.md`, "A database that received migrations by hand"); `bun run db:migrate` then applies exactly `0044`. Approval needed.
+
+   Include two read-only queries for Philipp to run on the shared database before the first deployment (no agent runs them; both only SELECT). They find published revisions that now fail every new draft: a tool or policy revision at tier 3 (anything outside `safe-read`, `read-sensitive`, `write`) with `requiresApproval` false. The old `applyToolOverride` and the legacy setup DTO could publish such values; derivation copies them into `toolPolicies`, and `prepareDraft` now answers 422 `tier-3-always-requires-approval`, so the deployment is not created. The one exception is the reuse path, where an identical manifest and policy pair is already published in the environment under the current signing key. This fails closed (the runner floors tier 3 anyway: SDK `src/runtime/authorization.ts:73`), so it is an availability problem, not a security one.
+
+   ```sql
+   -- 1. tool revisions
+   SELECT id, target_app_id
+   FROM tool_revisions
+   WHERE status = 'published'
+     AND definition->>'riskClass' NOT IN ('safe-read', 'read-sensitive', 'write')
+     AND definition->>'requiresApproval' = 'false';
+
+   -- 2. policy revisions (one row per offending toolPolicies entry)
+   SELECT r.id, r.target_app_id, r.environment_id, p->>'toolId' AS tool_id
+   FROM runtime_policy_revisions r,
+        jsonb_array_elements(
+          CASE WHEN jsonb_typeof(r.policy->'toolPolicies') = 'array'
+               THEN r.policy->'toolPolicies' ELSE '[]'::jsonb END
+        ) AS p
+   WHERE r.status = 'published'
+     AND p->>'riskClass' NOT IN ('safe-read', 'read-sensitive', 'write')
+     AND p->>'requiresApproval' = 'false';
+   ```
+
+   Zero rows from both: nothing to do. Any row: the affected app cannot deploy a derived revision pair until it is republished. The remedy is to republish from a fresh reviewed run, because current SDK artifacts floor tier 3 (`src/codegen/tools/artifact.ts:86`, `requiresApproval: confirmationFloor(...)`), so a new tool revision carries `requiresApproval: true` and the next derivation passes. Do not edit the published rows by hand (they are signed).
 2. **First Pro tenant for P10:** after review, `cd packages/db && GLIRASTES_ADMIN_DATABASE_URL=<url> bun --no-env-file run admin:switch-plan -- --tenant <slug> --confirm <slug> --plan pro --operator <email> --reason "P10 managed tool generation"` as a dry run, then the same with `--apply`. API keys cache their tenant context for up to 300 s. Approval needed.
 3. **SDK lockstep (P04, before P11):** `RuntimePolicyRevision.toolOverrides` (default `[]`) and the overlay adapter reading it; `provenance` and `exclusions` in the SDK's strict artifact schemas; the runner registering `capabilities.discoveryDigest` and uploading its artifact once per digest with its app-bound runtime key. Until then a runner refuses a policy revision that carries decisions (it keeps the last accepted deployment), and every capability view says "code version not reported".
-4. **P08c (Citadel):** the override form must offer only restricting choices (the API now answers 422 with the reason); "Was kann mein Chat?" reads the capabilities endpoint; the overview no longer offers apply for new tools; `PATCH …/tools/:toolId` also returns `policyRevision`; the explicit apply is `POST …/configurations/:configurationRevisionId/apply`; a pending relaxation is shown as such (`relaxationPending`), and so is a saved decision the environment does not run yet (`decisionPending`).
+4. **P08c (Citadel):** the override form must offer only restricting choices (the API now answers 422 with the reason); "Was kann mein Chat?" reads the capabilities endpoint; the overview no longer offers apply for new tools; `PATCH …/tools/:toolId` also returns `policyRevision`; the explicit apply is `POST …/configurations/:configurationRevisionId/apply` and answers 409 for a draft that is not the policy-only revision of the current decisions (Task 8 fix round); a pending relaxation is shown as such (`relaxationPending`), and so is a saved decision the environment does not run yet (`decisionPending`).
 5. **Fixed here although found next to the scope:** `GET /v1/audit/export/:jobId` returned any tenant's export download URL to any management key (sequential job ids); Task 12 now compares the job's tenant.
-6. **Findings outside this plan:** `GET /v1/apps/:appId/runtime-revisions` (`listInbox`) does not compare an app-bound key's app; webhooks, billing and optimizer routes (P08a finding) and the gate write routes (`PUT /v1/gate/roles`, `PUT`/`DELETE /v1/gate/tool-access/:toolId/override…`, tenant-wide RBAC) still ignore `targetAppId`; a configuration revision that adds or removes a tool binding may switch to any already published planner revision without security approval (Task 6 exempts planner and runtime digest changes that come with binding changes; the planner revision itself was gated when published); revisions published before this plan can still carry tool values that the old `applyToolOverride` lowered or enabled (only new publications are clamped; the runtime overlay stays restrict-only); a decision stored before this plan that relaxes confirmation gets its baseline from the code reported at its next save, after which publishing it still needs a security approval (Task 6). Proposed owner: P13 or a follow-up hygiene plan.
+6. **Findings outside this plan:** `GET /v1/apps/:appId/runtime-revisions` (`listInbox`) does not compare an app-bound key's app; webhooks, billing and optimizer routes (P08a finding) and the gate write routes (`PUT /v1/gate/roles`, `PUT`/`DELETE /v1/gate/tool-access/:toolId/override…`, tenant-wide RBAC) still ignore `targetAppId`; a configuration revision that adds or removes a tool binding may switch to any already published planner revision without security approval (Task 6 exempts planner and runtime digest changes that come with binding changes; the planner revision itself was gated when published); revisions published before this plan can still carry tool values that the old `applyToolOverride` lowered or enabled (only new publications are clamped; the runtime overlay stays restrict-only; item 1's queries find the tier-3 cases that block new drafts); a decision stored before this plan that relaxes confirmation gets its baseline from the code reported at its next save, after which publishing it still needs a security approval (Task 6). Proposed owner: P13 or a follow-up hygiene plan.
 
 Do not push.
 
