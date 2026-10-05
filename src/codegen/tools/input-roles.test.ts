@@ -76,6 +76,8 @@ describe('input roles', () => {
     ['property reads', "const body = await request.json();\nreturn Response.json({ a: body.title, b: body['due'] });", { readsBody: true, keys: ['due', 'title'] }],
     ['a rest element', 'const { title, ...rest } = await request.json();\nreturn Response.json({ title, rest });', { readsBody: true, keys: 'opaque' }],
     ['a body passed on whole', 'const body = await request.json();\nreturn Response.json(save(body));\nfunction save(value: unknown) { return value; }', { readsBody: true, keys: 'opaque' }],
+    ['a body escaping through a shorthand property', 'const body = await request.json();\nreturn Response.json({ body });', { readsBody: true, keys: 'opaque' }],
+    ['a body escaping through a shorthand argument property', 'const body = await request.json();\nreturn Response.json(save({ body, owner: 1 }));\nfunction save(value: unknown) { return value; }', { readsBody: true, keys: 'opaque' }],
     ['no body read', 'return Response.json({});', { readsBody: false, keys: [] }],
   ])('derives body keys from %s', async (_label, body, expected) => {
     const { located, ctx, program } = await handler(body);

@@ -256,8 +256,14 @@ export function collectBodyKeys(
       opaque = true;
       return;
     }
+    // A shorthand property name resolves to the property symbol; the variable it reads is another lookup.
+    const referencedSymbol = (node: ts.Identifier): ts.Symbol | undefined => (
+      ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+        ? checker.getShorthandAssignmentValueSymbol(node.parent)
+        : checker.getSymbolAtLocation(node)
+    );
     const visitReferences = (node: ts.Node): void => {
-      if (ts.isIdentifier(node) && node !== name && checker.getSymbolAtLocation(node) === symbol) {
+      if (ts.isIdentifier(node) && node !== name && referencedSymbol(node) === symbol) {
         const parent = node.parent;
         if (ts.isPropertyAccessExpression(parent) && parent.expression === node) {
           keys.add(parent.name.text);
