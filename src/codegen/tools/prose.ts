@@ -13,6 +13,7 @@ export type DescriptionOrigin = 'human' | 'code' | 'agent' | 'template';
 
 const MAX_DESCRIPTION = 1_000;
 const MAX_HINT = 500;
+const MAX_LABEL = 200;
 
 const SemanticsEntrySchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
@@ -75,11 +76,18 @@ export function loadToolSemantics(root: string): { semantics: ToolSemantics; fin
   return { semantics: { byStableKey, byName }, findings };
 }
 
+/** Cut to at most `max` UTF-16 units, the unit the schema bounds count, without splitting a surrogate pair. */
+function clamp(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const end = /[\ud800-\udbff]/.test(text.charAt(max - 1)) ? max - 1 : max;
+  return text.slice(0, Math.max(0, end)).trimEnd();
+}
+
 function bounded(value: string | undefined, max: number): string | undefined {
   if (typeof value !== 'string') return undefined;
   const text = value.replace(/\s+/g, ' ').trim();
   if (!text || findSensitiveStringPath(text)) return undefined;
-  return text.slice(0, max);
+  return clamp(text, max);
 }
 
 function identifier(value: string | undefined): string | undefined {
@@ -121,6 +129,12 @@ const LABELS: Readonly<Record<'en' | 'de', Readonly<Record<Operation, (words: st
   },
 };
 
+/** The verb stays intact: only the resource words give way when the label would exceed the presentation bound. */
+function labelOf(language: 'en' | 'de', operation: Operation, words: string): string {
+  const build = LABELS[language][operation];
+  return clamp(build(clamp(words, MAX_LABEL - build('').length)), MAX_LABEL);
+}
+
 function operationOf(group: ToolPolicyDefaults['operationGroup'], path: string | undefined): Operation {
   if (group === 'read') return path && /\/:[^/]+$/.test(path) ? 'get' : 'list';
   return group;
@@ -161,7 +175,7 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     ? 'agent'
     : entry?.origin?.description === 'code' ? 'code' : 'human';
   const language = input.locale.toLowerCase().startsWith('de') ? 'de' : 'en';
-  const label = LABELS[language][operationOf(input.operationGroup, input.path)](resourceWords(input.definitionId));
+  const label = labelOf(language, operationOf(input.operationGroup, input.path), resourceWords(input.definitionId));
   const candidates: ReadonlyArray<readonly [string | undefined, DescriptionOrigin]> = [
     [input.policyDescription, 'human'],
     [input.jsDoc, 'code'],
@@ -181,7 +195,7 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     }
   }
   if (!description) {
-    description = input.method && input.path ? `${label} (${input.method} ${input.path}).` : `${label}.`;
+    description = clamp(input.method && input.path ? `${label} (${input.method} ${input.path}).` : `${label}.`, MAX_DESCRIPTION);
     findings.push(toolFinding('description-templated', 'warning', input.stableKey,
       'Only a template description is available; the model may pick this tool less reliably.'));
   }
