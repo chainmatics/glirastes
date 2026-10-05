@@ -147,3 +147,10 @@ export {
   type TurnMetricsRecorderOptions,
   type TurnMetricsStep,
 } from './metrics/turn-recorder.js';
+export {
+  createRuntimeMetricsSink,
+  createRuntimeMetricsSinkFromEnv,
+  type BatchingRuntimeMetricsSink,
+  type RuntimeMetricsDropReason,
+  type RuntimeMetricsSinkOptions,
+} from './metrics/sink.js';
