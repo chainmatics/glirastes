@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { ToolPresentationSchema, type ToolPresentation } from '../../contracts/index.js';
@@ -184,15 +185,18 @@ function runChunk(
       cwd: root,
       env: scrubbedEnvironment(),
       shell: false,
-      stdio: ['pipe', 'pipe', 'ignore'],
+      // fd 3 carries the result; stdout stays out of the protocol because the
+      // imported app code may print to it at import time.
+      stdio: ['pipe', 'ignore', 'ignore', 'pipe'],
     });
     timer = setTimeout(() => {
       child.kill('SIGKILL');
       failAll('timeout');
     }, timeoutMs);
     child.on('error', () => failAll('probe-failed'));
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
+    const resultStream = child.stdio[3] as Readable;
+    resultStream.setEncoding('utf8');
+    resultStream.on('data', (chunk: string) => {
       output += chunk;
       if (output.length > MAX_OUTPUT_CHARS) {
         child.kill('SIGKILL');
@@ -220,8 +224,9 @@ function runChunk(
         return result.kind === 'contract-entry' ? toEntry(result) : toSchema(result);
       }));
     });
-    child.stdin.on('error', () => failAll('probe-failed'));
-    child.stdin.end(JSON.stringify({ appRoot: root, items, ...sdkLocations() }));
+    const requestStream = child.stdin as Writable;
+    requestStream.on('error', () => failAll('probe-failed'));
+    requestStream.end(JSON.stringify({ appRoot: root, items, ...sdkLocations() }));
   });
 }
 

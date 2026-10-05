@@ -1,11 +1,30 @@
 // Probe child for glirastes tools: imports app schema modules with a scrubbed
-// environment and reports digests and JSON Schemas on stdout. Never used by
-// the app runtime and never contacts the network on its own.
+// environment and reports digests and JSON Schemas on a dedicated result
+// channel (file descriptor 3), so anything the imported app code prints to
+// stdout cannot corrupt the result. Never used by the app runtime and never
+// contacts the network on its own.
+import { writeSync } from 'node:fs';
 import { createRequire, register } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const MAX_TEXT = 1_000;
+const RESULT_FD = 3;
+
+// Writes the whole payload even when the pipe accepts it in pieces. A pipe
+// that is momentarily full (EAGAIN) is retried after a short sleep.
+function writeResult(payload) {
+  const buffer = Buffer.from(payload, 'utf8');
+  let offset = 0;
+  while (offset < buffer.length) {
+    try {
+      offset += writeSync(RESULT_FD, buffer, offset, buffer.length - offset);
+    } catch (error) {
+      if (error?.code !== 'EAGAIN') throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+}
 
 async function readRequest() {
   const chunks = [];
@@ -128,6 +147,9 @@ async function main() {
 }
 
 main().then(
-  (results) => { process.stdout.write(JSON.stringify({ results }), () => process.exit(0)); },
-  () => { process.stdout.write(JSON.stringify({ results: null }), () => process.exit(1)); },
+  (results) => {
+    writeResult(JSON.stringify({ results }));
+    process.exit(0);
+  },
+  () => process.exit(1),
 );

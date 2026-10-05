@@ -130,6 +130,36 @@ describe('schema probe', () => {
       .toEqual(['probe-failed', 'ok', 'invalid-entry', 'invalid-entry', 'invalid-entry']);
   }, 30_000);
 
+  it('keeps import-time stdout output of app modules out of the result channel', async () => {
+    const app = await createAppFixture({
+      'src/chatty-value.ts': "console.log('hello');\nexport const value = 42;\n",
+      'src/chatty-schema.ts': "import { z } from 'zod';\n"
+        + "console.log('startup banner');\n"
+        + "process.stdout.write('{\"results\":[]}\\n');\n"
+        + 'export const schema = z.object({ q: z.string() });\n',
+      'src/fine.ts': "import { z } from 'zod';\nexport const schema = z.object({ q: z.string() });\n",
+    });
+    const results = await createSchemaProbe().probe(app.root, [
+      schemaItem('src/chatty-value.ts', 'value'),
+      schemaItem('src/chatty-schema.ts'),
+      schemaItem('src/fine.ts'),
+    ]);
+    expect(results.map((result) => (result.ok ? 'ok' : result.reason)))
+      .toEqual(['not-a-schema', 'ok', 'ok']);
+    expect(results[1]).toEqual(results[2]);
+  }, 30_000);
+
+  it('returns a result far larger than a pipe buffer intact', async () => {
+    const app = await createAppFixture({
+      'src/large.ts': "import { z } from 'zod';\n"
+        + 'export const schema = z.enum(Array.from({ length: 40_000 }, (_, index) => `value-${index}`) as [string, ...string[]]);\n',
+    });
+    const [result] = await createSchemaProbe().probe(app.root, [schemaItem('src/large.ts')]);
+    const json = result?.ok && result.kind === 'schema' ? result.jsonSchema : null;
+    expect(result).toMatchObject({ ok: true, kind: 'schema' });
+    expect((json as { enum?: string[] } | null)?.enum).toHaveLength(40_000);
+  }, 30_000);
+
   it('times out a hanging module without losing the other modules of its batch', async () => {
     const app = await createAppFixture({
       'src/hangs.ts': 'setInterval(() => {}, 1_000);\nawait new Promise(() => {});\nexport const schema = 1;\n',
