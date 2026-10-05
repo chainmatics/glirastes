@@ -15,7 +15,9 @@ import {
   deriveToolPolicyDefaults,
   resolveToolPolicy,
   riskTier,
+  type EffectiveToolPolicy,
 } from '../../contracts/tool-policy.js';
+import type { AppSetupToolProvenance } from '../../contracts/index.js';
 import { FoundationDiagnosticError, isFoundationDiagnosticError } from '../../diagnostics/index.js';
 import {
   discoverFoundationExecutions,
@@ -125,6 +127,19 @@ function isError(finding: ToolFinding): boolean {
 
 function sortExcluded(excluded: ReadonlyArray<ExcludedTool>): ExcludedTool[] {
   return [...excluded].sort((left, right) => compareCodeUnits(left.stableKey, right.stableKey));
+}
+
+type PolicyField = keyof EffectiveToolPolicy['origin'];
+const POLICY_FIELDS: ReadonlyArray<PolicyField> = ['enabled', 'requiresApproval', 'riskClass', 'allowedRoles', 'description'];
+
+/** A local report knows code defaults and local policy only, never a Platform origin. */
+function localPolicyOrigin(origin: EffectiveToolPolicy['origin']): NonNullable<AppSetupToolProvenance['policyOrigin']> {
+  const local: NonNullable<AppSetupToolProvenance['policyOrigin']> = {};
+  for (const field of POLICY_FIELDS) {
+    const value = origin[field];
+    if (value === 'code-default' || value === 'local-policy') local[field] = value;
+  }
+  return local;
 }
 
 function policyWarningMessage(code: string, field: string | undefined): string {
@@ -373,11 +388,18 @@ async function generate(
         : {}),
     });
     findings.push(...prose.findings);
+    const schemaQuality = schemaQualityOf(tool.contract, resolutionOrigin(inputs.resolutions, execution.stableKey));
     artifactTools.push({
       execution,
       prose,
       effective: resolved.effective,
       operationGroup: needsAttention ? 'needs_attention' : defaults.operationGroup,
+      provenance: {
+        policyOrigin: localPolicyOrigin(resolved.effective.origin),
+        ...(tool.contract ? { contractSource: tool.contract.source } : {}),
+        descriptionSource: prose.descriptionOrigin,
+        schemaSource: schemaQuality,
+      },
     });
     contractEntries.push({
       toolId: execution.toolId,
@@ -396,7 +418,7 @@ async function generate(
       contractSource: tool.contract?.source ?? null,
       quality: {
         description: prose.descriptionOrigin,
-        schema: schemaQualityOf(tool.contract, resolutionOrigin(inputs.resolutions, execution.stableKey)),
+        schema: schemaQuality,
       },
     });
   }
@@ -420,6 +442,7 @@ async function generate(
       .map((finding) => ({ code: finding.code, subjectRef: toolIdByKey.get(finding.subjectRef)! })),
     ...(previous.artifact ? { previous: previous.artifact } : {}),
     now: options.mode === 'write' ? dependencies.now ?? (() => new Date()) : null,
+    exclusions: excluded,
   });
   assertAppSetupSemanticParity(built.artifact, inventory.executions.map((execution) => execution.definitionId));
   const inventoryRaw = renderInventory(generation.state);

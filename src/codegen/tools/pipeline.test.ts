@@ -276,3 +276,32 @@ describe('runToolsPipeline (policy findings)', () => {
     await expect(fixture.read(TOOLS_PATHS.inventory)).rejects.toMatchObject({ code: 'ENOENT' });
   }, 120_000);
 });
+
+describe('capability report in the committed setup artifact', () => {
+  it('reports provenance per tool and every exclusion', async () => {
+    const fixture = await app();
+    await fixture.write('src/app/api/auth/login/route.ts', 'export async function POST() {\n  return Response.json({});\n}\n');
+    await fixture.write('.glirastes/tool-policy.json', JSON.stringify({
+      schemaVersion: 1,
+      tools: { 'GET /api/tasks': { description: 'Lists your tasks by status.' } },
+      exclude: [{ match: 'DELETE /api/**', reason: 'no deletes from chat' }],
+      acceptedRisk: {},
+    }));
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const artifact = await artifactOf(fixture);
+    const byMethod = new Map(artifact.tools.map((tool) => [tool.method, tool] as const));
+    expect(byMethod.get('GET')?.provenance).toEqual({
+      policyOrigin: {
+        enabled: 'code-default', requiresApproval: 'code-default', riskClass: 'code-default',
+        allowedRoles: 'code-default', description: 'local-policy',
+      },
+      contractSource: 'derived',
+      descriptionSource: 'human',
+      schemaSource: 'field-names',
+    });
+    expect(byMethod.get('POST')?.provenance).toMatchObject({
+      contractSource: 'native', descriptionSource: 'template', schemaSource: 'zod',
+    });
+    expect(artifact.exclusions).toEqual([{ stableKey: 'POST /api/auth/login', origin: 'default' }]);
+  }, 120_000);
+});

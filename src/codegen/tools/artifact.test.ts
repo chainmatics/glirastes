@@ -4,6 +4,7 @@ import type { EffectiveToolPolicy } from '../../contracts/tool-policy.js';
 import { canonicalRuntimeJson } from '../../sync/signature-verifier.js';
 import {
   buildSetupArtifact,
+  clipExclusions,
   EPOCH,
   promptMetadata,
   renderToolContracts,
@@ -196,5 +197,37 @@ describe('tool contracts and report', () => {
     expect(schemaQualityOf({ ...contract, source: 'native' })).toBe('zod');
     expect(schemaQualityOf({ ...contract, source: 'resolution' }, 'agent')).toBe('agent');
     expect(schemaQualityOf({ ...contract, source: 'resolution' }, 'human')).toBe('json-schema');
+  });
+});
+
+describe('capability report fields', () => {
+  it('clips exclusions to the Platform caps in a stable order', () => {
+    const excluded = [
+      { stableKey: `GET /${'x'.repeat(600)}`, reason: 'policy', origin: 'policy' as const },
+      ...Array.from({ length: 5_001 }, (_, index) => ({
+        stableKey: `GET /api/hidden/${String(index).padStart(4, '0')}`, reason: 'internal', origin: 'policy' as const,
+      })),
+      { stableKey: 'GET /api/hidden/0000', reason: 'duplicate', origin: 'default' as const },
+    ];
+    const clipped = clipExclusions(excluded);
+    expect(clipped).toHaveLength(5_000);
+    expect(clipped[0]).toEqual({ stableKey: 'GET /api/hidden/0000', origin: 'policy' });
+    expect(clipped.at(-1)).toEqual({ stableKey: 'GET /api/hidden/4999', origin: 'policy' });
+    expect(clipped.some((entry) => entry.stableKey.length > 512)).toBe(false);
+  });
+
+  it('carries provenance per tool and the reasoned exclusions', () => {
+    const provenance = { descriptionSource: 'code' as const, schemaSource: 'zod' as const, contractSource: 'native' as const };
+    const plain = buildSetupArtifact({ ...base, tools: [tool(TOOL_A, 'tasks.list')], now: null });
+    const reported = buildSetupArtifact({
+      ...base,
+      tools: [{ ...tool(TOOL_A, 'tasks.list'), provenance }],
+      exclusions: [{ stableKey: 'POST /api/auth/login', reason: 'auth-route', origin: 'default' }],
+      now: null,
+    });
+    expect(reported.artifact.tools[0]?.provenance).toEqual(provenance);
+    expect(reported.artifact.exclusions).toEqual([{ stableKey: 'POST /api/auth/login', origin: 'default' }]);
+    expect(reported.artifact.artifactId).not.toBe(plain.artifact.artifactId);
+    expect(plain.artifact).not.toHaveProperty('exclusions');
   });
 });
