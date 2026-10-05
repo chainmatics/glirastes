@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import type { ToolRiskClass } from '../../contracts/index.js';
 import type { LocalToolBinding } from '../../runtime/local-tool-bindings.js';
 import type { MaterializedDeploymentRevisions } from '../materialize-deployment.js';
 import { validateLocalDeploymentBindings } from '../local-deployment-validator.js';
@@ -134,4 +135,37 @@ describe('validateLocalDeploymentBindings', () => {
       bindings: bindings(),
     })).toThrow(/policy/i);
   });
+
+  it('accepts a policy that raises the manifest risk', () => {
+    const deployment = revisions();
+    deployment.policyRevision.toolPolicies[0]!.riskClass = 'write';
+
+    expect(() => validateLocalDeploymentBindings({
+      revisions: deployment,
+      bindings: bindings(),
+    })).not.toThrow();
+  });
+
+  it('rejects a policy below the manifest risk', () => {
+    const deployment = revisions();
+    deployment.manifestRevision.tools[0]!.riskClass = 'write';
+
+    expect(() => validateLocalDeploymentBindings({
+      revisions: deployment,
+      bindings: bindings(),
+    })).toThrow(/risk below manifest/i);
+  });
+
+  it.each(['Delete', 'constructor'])(
+    'rejects a manifest risk class %j that is out of enum above its policy',
+    (label) => {
+      const deployment = revisions();
+      deployment.manifestRevision.tools[0]!.riskClass = label as ToolRiskClass;
+
+      expect(() => validateLocalDeploymentBindings({
+        revisions: deployment,
+        bindings: bindings(),
+      })).toThrow(/risk below manifest/i);
+    },
+  );
 });

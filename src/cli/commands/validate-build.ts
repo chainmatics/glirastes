@@ -11,12 +11,12 @@ import {
   FoundationExecutionInventorySchema,
   discoverFoundationExecutions,
 } from '../../codegen/execution-inventory.js';
-import { assertAppSetupSemanticParity } from '../../contracts/app-setup.js';
+import { assertAppSetupSemanticParity, type AppSetupArtifact } from '../../contracts/app-setup.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 
 const identifier = z.string().trim().min(1).max(200);
 
-const LocalPromptBundleSchema = z.object({
+export const LocalPromptBundleSchema = z.object({
   schemaVersion: z.literal(1),
   appId: z.uuid(),
   artifactRef: z.string().trim().min(1).max(2_048),
@@ -55,6 +55,7 @@ export interface ValidatedWorkspace {
   >['executions'];
   inventoryDigest: string;
   promptBundle: LocalPromptBundle;
+  setupArtifact?: AppSetupArtifact;
 }
 
 /**
@@ -122,6 +123,7 @@ export async function validateWorkspace(options: {
     options.rootDir,
     options.setupArtifactPath ?? '.glirastes/setup-artifact.json',
   );
+  let parsedArtifact: AppSetupArtifact | undefined;
   if (existsSync(setupArtifactPath)) {
     const setupArtifact = JSON.parse(readFileSync(setupArtifactPath, 'utf8'));
     const parsed = assertAppSetupSemanticParity(
@@ -134,6 +136,7 @@ export async function validateWorkspace(options: {
     if (parsed.discoveryDigest !== discovery.inventoryDigest) {
       throw new Error('Local setup artifact does not match the execution inventory');
     }
+    parsedArtifact = parsed;
   }
 
   const promptBundlePath = resolve(
@@ -162,6 +165,7 @@ export async function validateWorkspace(options: {
     executions: discovery.executions,
     inventoryDigest: discovery.inventoryDigest,
     promptBundle,
+    ...(parsedArtifact ? { setupArtifact: parsedArtifact } : {}),
   };
 }
 
@@ -187,13 +191,40 @@ export interface RenderManifestOptions {
   setupArtifactPath?: string;
 }
 
-/** Render the complete build outputs in memory for an atomic caller. */
-export async function renderManifests(
-  options: RenderManifestOptions,
-): Promise<RenderedManifests> {
-  const workspace = await validateWorkspace(options);
+/** Digest of the effective, security-relevant policy per tool. */
+export function computePolicyDigest(artifact: AppSetupArtifact): string {
+  return digestOf({
+    tools: [...artifact.tools]
+      .map((tool) => ({
+        toolId: tool.toolId,
+        enabled: tool.enabled,
+        requiresApproval: tool.requiresApproval,
+        riskClass: tool.riskClass,
+        allowedRoles: [...tool.allowedRoles ?? []].sort(),
+      }))
+      .sort((left, right) => left.toolId.localeCompare(right.toolId)),
+  });
+}
 
-  const executions = [...workspace.executions]
+export interface ManifestRenderInput {
+  appId: string;
+  targetAppKey: string;
+  inventoryDigest: string;
+  executions: ReadonlyArray<{
+    toolId: string;
+    stableKey: string;
+    executionKind: 'endpoint' | 'ui';
+    sourceFingerprint: string;
+    inputSchemaDigest: string;
+    outputSchemaDigest: string;
+  }>;
+  promptBundle: LocalPromptBundle;
+  setupArtifact?: AppSetupArtifact;
+}
+
+/** Pure manifest rendering shared by build, setup, doctor and the tools generator. */
+export function renderManifestContents(input: ManifestRenderInput): RenderedManifests {
+  const executions = [...input.executions]
     .map((execution) => ({
       toolId: execution.toolId,
       stableKey: execution.stableKey,
@@ -205,17 +236,18 @@ export async function renderManifests(
     .sort((left, right) => left.toolId.localeCompare(right.toolId));
   const runtimeBody = {
     schemaVersion: 1 as const,
-    appId: workspace.appId,
-    targetAppKey: workspace.inventory.targetAppKey,
-    inventoryDigest: workspace.inventoryDigest,
+    appId: input.appId,
+    targetAppKey: input.targetAppKey,
+    inventoryDigest: input.inventoryDigest,
     executions,
+    ...(input.setupArtifact ? { policyDigest: computePolicyDigest(input.setupArtifact) } : {}),
   };
   const runtimeManifest = {
     ...runtimeBody,
     runtimeDigest: digestOf(runtimeBody),
   };
 
-  const { sections } = workspace.promptBundle;
+  const { sections } = input.promptBundle;
   const groupDigests: Record<string, string> = {
     planner: digestOf(sections.planner),
     appBehavior: digestOf(sections.appBehavior),
@@ -227,8 +259,8 @@ export async function renderManifests(
   };
   const promptBody = {
     schemaVersion: 1 as const,
-    appId: workspace.appId,
-    artifactRef: workspace.promptBundle.artifactRef,
+    appId: input.appId,
+    artifactRef: input.promptBundle.artifactRef,
     groupDigests,
   };
   const promptManifest = {
@@ -241,6 +273,21 @@ export async function renderManifests(
     runtimeDigest: runtimeManifest.runtimeDigest,
     promptDigest: promptManifest.promptDigest,
   };
+}
+
+/** Render the complete build outputs in memory for an atomic caller. */
+export async function renderManifests(
+  options: RenderManifestOptions,
+): Promise<RenderedManifests> {
+  const workspace = await validateWorkspace(options);
+  return renderManifestContents({
+    appId: workspace.appId,
+    targetAppKey: workspace.inventory.targetAppKey,
+    inventoryDigest: workspace.inventoryDigest,
+    executions: workspace.executions,
+    promptBundle: workspace.promptBundle,
+    ...(workspace.setupArtifact ? { setupArtifact: workspace.setupArtifact } : {}),
+  });
 }
 
 /**

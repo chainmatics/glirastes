@@ -99,7 +99,7 @@ describe('public foundation subpaths', () => {
       expect(source).not.toContain(`'${command}'`);
     }
     for (const command of [
-      'scan', 'setup', 'connect', 'doctor', 'install', 'validate', 'build',
+      'scan', 'setup', 'connect', 'doctor', 'install', 'validate', 'build', 'tools',
     ]) {
       expect(source).toContain(`| '${command}'`);
     }
@@ -112,6 +112,18 @@ describe('public foundation subpaths', () => {
     );
     expect(wizardSource).toContain("return rest[0] === 'guided';");
     expect(source).toContain('if (isWizardInvocation(rest))');
+
+    // Tool generation stays model-free: no provider SDK in the CLI or pipeline.
+    for (const file of [
+      './cli/commands/tools/index.ts',
+      './cli/commands/tools/refresh.ts',
+      './cli/commands/tools/check.ts',
+      './codegen/tools/pipeline.ts',
+    ]) {
+      const toolsSource = await readFile(new URL(file, import.meta.url), 'utf8');
+      expect(toolsSource).not.toMatch(/@ai-sdk\/openai|openrouter/i);
+      expect(toolsSource).not.toContain("'generate'");
+    }
   });
 
   it('keeps the standalone STT surface framework-neutral', async () => {

@@ -60,7 +60,7 @@ export interface WriteNextAppRouteScanOptions
   now?: () => Date;
 }
 
-const AUTH_PATTERNS: Array<[string, RegExp]> = [
+export const AUTH_PATTERNS: Array<[string, RegExp]> = [
   ['resolvePrincipal', /\bresolvePrincipal\s*\(/],
   ['resolveUser', /\bresolveUser\s*\(/],
   ['getServerSession', /\bgetServerSession\s*\(/],
@@ -78,7 +78,7 @@ function toSourceFile(rootDir: string, absolutePath: string): string {
   return relative(rootDir, absolutePath).split(sep).join('/');
 }
 
-function toRoutePath(
+export function toRoutePath(
   apiDir: string,
   routeFile: string,
 ): { path: string; pathParams: string[] } {

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   discoverFoundationExecutions,
+  FoundationExecutionInventorySchema,
   type FoundationExecutionInventory,
 } from './execution-inventory.js';
 import { createRouteSourceFingerprint } from './route-scanner.js';
@@ -360,5 +361,45 @@ describe('resolving a UI action to its handler', () => {
     expect(discovery.executions[0].sourceLocator).toMatchObject({
       actionBindingRef: 'ui.taskDetails.open',
     });
+  });
+});
+
+describe('endpoint source kinds', () => {
+  it('verifies a wrapper-exported handler the route reader cannot resolve to a body', async () => {
+    const source = 'import { withAuth } from "@/lib/auth";\n'
+      + 'export const GET = withAuth(async () => Response.json([]));\n';
+    const rootDir = await fixture({ 'src/app/api/tasks/route.ts': source });
+    const base = endpoint({ source });
+    if (base.executionKind !== 'endpoint') throw new Error('expected endpoint');
+    const result = await discoverFoundationExecutions({
+      rootDir,
+      inventory: {
+        schemaVersion: 2,
+        targetAppKey: 'fixture',
+        executions: [{ ...base, sourceKind: 'next-app' as const }],
+      },
+    });
+    expect(result.executions[0]).toMatchObject({
+      sourceKind: 'next-app',
+      sourceLocator: { exportName: 'GET' },
+    });
+  });
+
+  it('still rejects a method the route does not declare', async () => {
+    const source = 'export const POST = withAuth(async () => Response.json([]));\n';
+    const rootDir = await fixture({ 'src/app/api/tasks/route.ts': source });
+    await expect(discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [endpoint({ source })] },
+    })).rejects.toThrow(/missing route export/);
+  });
+
+  it('rejects unknown endpoint source kinds', () => {
+    const parsed = FoundationExecutionInventorySchema.safeParse({
+      schemaVersion: 2,
+      targetAppKey: 'fixture',
+      executions: [{ ...endpoint({ source: 'x' }), sourceKind: 'rails' }],
+    });
+    expect(parsed.success).toBe(false);
   });
 });

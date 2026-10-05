@@ -1,4 +1,5 @@
 import type { ToolPresentation } from '../contracts/index.js';
+import { riskTier } from '../contracts/tool-policy.js';
 import type { ToolRegistry } from '../types.js';
 import { authorizeToolCall } from './authorization.js';
 import { modelFacingToolName } from './local-tool-bindings.js';
@@ -129,7 +130,7 @@ export function createTurnToolDiscovery(
       || !binding
       || binding.id !== manifestTool.toolId
       || !policy
-      || policy.riskClass !== manifestTool.riskClass
+      || riskTier(policy.riskClass) < riskTier(manifestTool.riskClass)
       || !authorization.allowed
     ) {
       continue;

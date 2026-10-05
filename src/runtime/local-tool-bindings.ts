@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type {
   ManifestTool,
 } from '../contracts/revisions.js';
+import { confirmationFloor, riskTier } from '../contracts/tool-policy.js';
 import type {
   EndpointMethod,
   SchemaLike,
@@ -116,10 +117,14 @@ export type LocalToolBinding =
   | LocalEndpointToolBinding
   | LocalUiToolBinding;
 
-export function assertLocalToolBindingMatches(
+/**
+ * Names of the technical facts on which a local binding disagrees with its
+ * signed manifest entry. Names only, never values or content.
+ */
+export function localToolBindingMismatches(
   binding: LocalToolBinding,
   manifestTool: ManifestTool,
-): void {
+): string[] {
   const mismatches: string[] = [];
   if (binding.executionKind !== manifestTool.executionKind) {
     mismatches.push('execution kind');
@@ -147,6 +152,14 @@ export function assertLocalToolBindingMatches(
   ) {
     mismatches.push('action binding');
   }
+  return mismatches;
+}
+
+export function assertLocalToolBindingMatches(
+  binding: LocalToolBinding,
+  manifestTool: ManifestTool,
+): void {
+  const mismatches = localToolBindingMismatches(binding, manifestTool);
   if (mismatches.length > 0) {
     throw new Error(
       `Local tool binding mismatch (${manifestTool.toolId}): `
@@ -172,10 +185,31 @@ export function modelFacingToolName(manifestName: string): string {
   return manifestName.replace(/\./g, '_');
 }
 
+export type ToolRegistryDiagnosticReason =
+  | 'local-binding-missing'
+  | 'local-binding-mismatch'
+  | 'runtime-policy-missing'
+  | 'runtime-policy-risk-below-manifest';
+
+export interface ToolRegistryDiagnostic {
+  code: 'E-BINDING-010' | 'E-BINDING-011' | 'E-POLICY-010' | 'E-POLICY-011';
+  reason: ToolRegistryDiagnosticReason;
+  toolId: string;
+  /** Names of mismatched technical facts; never values or content. */
+  mismatches?: string[];
+}
+
+function reportUnavailableTool(diagnostic: ToolRegistryDiagnostic): void {
+  console.warn('[glirastes] tool disabled for this turn', diagnostic);
+}
+
 export function materializeManifestToolRegistry(options: {
   snapshot: TurnSnapshot;
   bindings: ReadonlyArray<LocalToolBinding>;
+  /** Receives one content-free diagnostic per tool that stays unavailable. */
+  onToolUnavailable?: (diagnostic: ToolRegistryDiagnostic) => void;
 }): ToolRegistry {
+  const report = options.onToolUnavailable ?? reportUnavailableTool;
   const bindingsByToolId = new Map<string, LocalToolBinding>();
   for (const binding of options.bindings) {
     if (bindingsByToolId.has(binding.toolId)) {
@@ -202,22 +236,41 @@ export function materializeManifestToolRegistry(options: {
     ) {
       continue;
     }
+    const toolId = manifestTool.toolId;
 
-    const policy = policiesByToolId.get(manifestTool.toolId);
+    // Each failure below disables only this tool; the rest keep working.
+    const policy = policiesByToolId.get(toolId);
     if (!policy) {
-      throw new Error(`Missing runtime tool policy: ${manifestTool.toolId}`);
+      report({ code: 'E-POLICY-010', reason: 'runtime-policy-missing', toolId });
+      continue;
     }
     if (!policy.enabled) continue;
-    if (policy.riskClass !== manifestTool.riskClass) {
-      throw new Error(`Runtime tool policy mismatch: ${manifestTool.toolId}`);
+    // A policy may raise the manifest risk (overlay), never lower it.
+    if (riskTier(policy.riskClass) < riskTier(manifestTool.riskClass)) {
+      report({
+        code: 'E-POLICY-011',
+        reason: 'runtime-policy-risk-below-manifest',
+        toolId,
+      });
+      continue;
     }
 
-    const binding = bindingsByToolId.get(manifestTool.toolId);
+    const binding = bindingsByToolId.get(toolId);
     if (!binding) {
-      throw new Error(`Missing local tool binding: ${manifestTool.toolId}`);
+      report({ code: 'E-BINDING-010', reason: 'local-binding-missing', toolId });
+      continue;
+    }
+    const mismatches = localToolBindingMismatches(binding, manifestTool);
+    if (mismatches.length > 0) {
+      report({
+        code: 'E-BINDING-011',
+        reason: 'local-binding-mismatch',
+        toolId,
+        mismatches,
+      });
+      continue;
     }
 
-    assertLocalToolBindingMatches(binding, manifestTool);
     const modelName = modelFacingToolName(manifestTool.name);
     if (registry[modelName]) {
       throw new Error(
@@ -227,12 +280,12 @@ export function materializeManifestToolRegistry(options: {
 
     registry[modelName] = {
       ...binding.tool,
-      id: manifestTool.toolId,
+      id: toolId,
       description: manifestTool.description,
       method: manifestTool.executionKind === 'endpoint'
         ? manifestTool.method
         : undefined,
-      needsApproval: policy.requiresApproval,
+      needsApproval: confirmationFloor(policy.riskClass, policy.requiresApproval),
     };
   }
 

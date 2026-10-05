@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
+import type { ToolRiskClass } from '../revisions.js';
 import { classifyToolSemanticChange } from '../semantic-change.js';
 
 const base = {
@@ -90,21 +91,51 @@ describe('classifyToolSemanticChange', () => {
   });
 
   it.each([
-    ['unknown risk', { riskClass: 'unknown' as const }],
-    ['incomparable risk', { riskClass: 'external' as const }, {
-      ...base,
-      riskClass: 'delete' as const,
-    }],
-    ['incomparable roles', { allowedRoles: ['editor'] }, {
-      ...base,
-      allowedRoles: ['admin'],
-    }],
-  ])('fails closed for %s', (_label, update, before = base) => {
-    expect(() => classifyToolSemanticChange(before, { ...base, ...update }))
-      .toThrowError(expect.objectContaining<Partial<FoundationDiagnosticError>>({
-        code: 'E-SEMANTICS-003',
-        operation: 'setup.semantic-change',
-      }));
+    ['safe-read', 'unknown', 'hardening', false],
+    ['unknown', 'write', 'loosening', true],
+    ['delete', 'external', 'neutral', false],
+    ['unknown', 'delete', 'neutral', false],
+  ] as const)('classifies risk %s -> %s as %s', (
+    beforeRisk,
+    afterRisk,
+    classification,
+    requiresConfirmation,
+  ) => {
+    expect(classifyToolSemanticChange(
+      { ...base, riskClass: beforeRisk },
+      { ...base, riskClass: afterRisk },
+    )).toEqual({
+      toolId: base.toolId,
+      classification,
+      fields: ['riskClass'],
+      requiresConfirmation,
+    });
+  });
+
+  it('still fails closed for incomparable role sets', () => {
+    expect(() => classifyToolSemanticChange(
+      { ...base, allowedRoles: ['admin'] },
+      { ...base, allowedRoles: ['editor'] },
+    )).toThrowError(expect.objectContaining<Partial<FoundationDiagnosticError>>({
+      code: 'E-SEMANTICS-003',
+      operation: 'setup.semantic-change',
+    }));
+  });
+
+  it.each([
+    ['write', 'Delete'],
+    ['Delete', 'write'],
+    ['Delete', 'Remove'],
+    ['delete', 'constructor'],
+  ])('fails closed for the out-of-enum risk change %s -> %s', (beforeRisk, afterRisk) => {
+    expect(() => classifyToolSemanticChange(
+      { ...base, riskClass: beforeRisk as ToolRiskClass },
+      { ...base, riskClass: afterRisk as ToolRiskClass },
+    )).toThrowError(expect.objectContaining<Partial<FoundationDiagnosticError>>({
+      code: 'E-SEMANTICS-003',
+      operation: 'setup.semantic-change',
+      identifier: base.toolId,
+    }));
   });
 
   it('lets loosening dominate simultaneous neutral and hardening changes', () => {

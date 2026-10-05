@@ -1,0 +1,70 @@
+import {
+  runToolsPipeline,
+  ToolsPipelineFailure,
+  type ToolsPipelineOptions,
+  type ToolsPipelineResult,
+} from '../../../codegen/tools/pipeline.js';
+import { isFoundationDiagnosticError } from '../../../diagnostics/index.js';
+import { ToolsUsageError } from './args.js';
+import { runToolsCheck } from './check.js';
+import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
+import { runToolsRefresh } from './refresh.js';
+import { runToolsStatus } from './status.js';
+
+export interface ToolsCommandDependencies {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  log?: (line: string) => void;
+  error?: (line: string) => void;
+  runPipeline?: (options: ToolsPipelineOptions) => Promise<ToolsPipelineResult>;
+}
+
+export const TOOLS_USAGE = [
+  'Usage: glirastes tools refresh [--root <dir>] [--mode write|frozen|integrity] [--keep-going] [--adopt <inventory>] [--json]',
+  '         derive tools from the code (writes locally, checks in CI, verifies in Docker)',
+  '       glirastes tools check [--root <dir>] [--strict] [--integrity-only] [--json]',
+  '         verify the committed tool outputs without writing, models or network',
+  '       glirastes tools status [--root <dir>] [--json]',
+  '         show what your chat can do',
+].join('\n');
+
+/** Subcommand parsing lives here so src/cli/index.ts only dispatches `tools`. */
+export async function runToolsCommand(argv: string[], deps: ToolsCommandDependencies = {}): Promise<number> {
+  const io: ToolsIo = {
+    cwd: deps.cwd ?? process.cwd(),
+    env: deps.env ?? process.env,
+    log: deps.log ?? ((line) => { console.log(line); }),
+    error: deps.error ?? ((line) => { console.error(line); }),
+    runPipeline: deps.runPipeline ?? runToolsPipeline,
+  };
+  const [subcommand, ...rest] = argv;
+  const json = rest.includes('--json');
+  try {
+    switch (subcommand) {
+      case 'refresh':
+        return await runToolsRefresh(rest, io);
+      case 'check':
+        return await runToolsCheck(rest, io);
+      case 'status':
+        return await runToolsStatus(rest, io);
+      default:
+        io.error(TOOLS_USAGE);
+        return 2;
+    }
+  } catch (error) {
+    if (error instanceof ToolsUsageError) {
+      io.error(`${error.message}\n${TOOLS_USAGE}`);
+      return 2;
+    }
+    if (error instanceof ToolsPipelineFailure) {
+      io.log(json ? formatToolsJson(error.result) : formatToolsHuman(error.result));
+      return 1;
+    }
+    if (isFoundationDiagnosticError(error)) {
+      if (json) io.log(JSON.stringify(error.toJSON()));
+      else io.error(`${error.code}: ${error.message}`);
+      return 1;
+    }
+    throw error;
+  }
+}

@@ -37,6 +37,7 @@ export {
   type LocalRuntimeSource,
   type LocalRuntimeSourceIdentity,
   type LocalRuntimeSourceOptions,
+  type PlatformRevisionRefs,
 } from './local-runtime-source.js';
 export {
   createManagedTurnGuard,
@@ -47,12 +48,23 @@ export {
 export {
   assertLocalToolBindingMatches,
   createLocalSchemaDigest,
+  localToolBindingMismatches,
   materializeManifestToolRegistry,
   modelFacingToolName,
   type LocalEndpointToolBinding,
   type LocalToolBinding,
   type LocalUiToolBinding,
+  type ToolRegistryDiagnostic,
+  type ToolRegistryDiagnosticReason,
 } from './local-tool-bindings.js';
+export {
+  applyPolicyOverlay,
+  policyOverlayFromRevision,
+  type PolicyOverlayEntry,
+  type PolicyOverlayIgnoredEntry,
+  type PolicyOverlayResult,
+  type VerifiedPolicyOverlay,
+} from './policy-overlay.js';
 export {
   createTurnToolDiscovery,
   type ToolDiscoveryResult,
@@ -97,3 +109,12 @@ export {
   type ToolExecutionEvidence,
   type ToolExecutionStatus,
 } from './postgres-store.js';
+export {
+  createContractBindings,
+  createGeneratedRuntimeSource,
+  type ContractBindingDisabledReason,
+  type ContractBindingsResult,
+  type GeneratedRuntimeSource,
+  type GeneratedToolBinding,
+  type GeneratedToolModule,
+} from './contract-bindings.js';

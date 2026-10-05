@@ -178,4 +178,37 @@ describe('createManagedTurnGuard', () => {
       input: {},
     })).resolves.toBe(true);
   });
+
+  it('confirms a tier-3 call even if its pinned policy says no', async () => {
+    const snapshot = createTurnSnapshot({
+      turnId: 'turn-tier-3',
+      agentRevision,
+      manifestRevision: {
+        ...manifestRevision,
+        tools: manifestRevision.tools.map((tool) => ({
+          ...tool,
+          riskClass: 'delete' as const,
+        })),
+      },
+      policyRevision: {
+        ...policyRevision,
+        toolPolicies: policyRevision.toolPolicies.map((policy) => ({
+          ...policy,
+          riskClass: 'delete' as const,
+          requiresApproval: false,
+        })),
+      },
+      principal,
+      localLimits,
+    });
+    const guard = createManagedTurnGuard({
+      snapshot,
+      resolvePrincipal: async () => principal,
+    });
+
+    await expect(guard.resolveApproval({
+      toolName: 'list_tasks',
+      input: {},
+    })).resolves.toBe(true);
+  });
 });

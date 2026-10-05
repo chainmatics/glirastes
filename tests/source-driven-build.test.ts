@@ -27,6 +27,7 @@ it('rejects a linked generation directory without writing outside the app', asyn
   const outside = await mkdtemp(resolve(base, '.build-proof-outside-'));
   roots.push(root, outside);
   await cp(resolve(base, 'native'), root, { recursive: true });
+  await rm(resolve(root, '.glirastes'), { recursive: true, force: true });
   await symlink(outside, resolve(root, '.glirastes'), 'dir');
   await expect(buildReference(root)).rejects.toThrow('app-local');
   await expect(readFile(resolve(outside, 'runtime.mjs'))).rejects.toMatchObject({ code: 'ENOENT' });

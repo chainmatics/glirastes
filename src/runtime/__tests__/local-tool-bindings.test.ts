@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { z as z3 } from 'zod-v3';
+import type { ToolRiskClass } from '../../contracts/index.js';
 import { defineTool } from '../../types.js';
 import {
   agentRevision,
@@ -14,6 +15,7 @@ import {
   createLocalSchemaDigest,
   materializeManifestToolRegistry,
   type LocalToolBinding,
+  type ToolRegistryDiagnostic,
 } from '../local-tool-bindings.js';
 
 const localTool = defineTool({
@@ -132,13 +134,21 @@ describe('materializeManifestToolRegistry', () => {
       description: endpointManifestTool.description,
     });
     expect(registry.open_task_details?.method).toBeUndefined();
-    expect(() => materializeManifestToolRegistry({
+    const diagnostics: ToolRegistryDiagnostic[] = [];
+    expect(materializeManifestToolRegistry({
       snapshot: uiSnapshot,
       bindings: [{
         ...uiBinding,
         actionBindingRef: 'task-details.wrong',
       }],
-    })).toThrow(/local tool binding mismatch/i);
+      onToolUnavailable: (diagnostic) => diagnostics.push(diagnostic),
+    })).toEqual({});
+    expect(diagnostics).toEqual([{
+      code: 'E-BINDING-011',
+      reason: 'local-binding-mismatch',
+      toolId: endpointManifestTool.toolId,
+      mismatches: ['action binding'],
+    }]);
   });
 
   it.each([
@@ -147,11 +157,19 @@ describe('materializeManifestToolRegistry', () => {
     ['path', { path: '/api/other' }],
     ['input schema digest', { inputSchemaDigest: 'sha256:changed' }],
     ['output schema digest', { outputSchemaDigest: 'sha256:changed' }],
-  ])('fails closed on a mismatched %s', (_label, override) => {
-    expect(() => materializeManifestToolRegistry({
+  ])('disables only the tool with a mismatched %s', (label, override) => {
+    const diagnostics: ToolRegistryDiagnostic[] = [];
+    expect(materializeManifestToolRegistry({
       snapshot: snapshot(),
       bindings: [{ ...binding, ...override }],
-    })).toThrow(/local tool binding mismatch/i);
+      onToolUnavailable: (diagnostic) => diagnostics.push(diagnostic),
+    })).toEqual({});
+    expect(diagnostics).toEqual([{
+      code: 'E-BINDING-011',
+      reason: 'local-binding-mismatch',
+      toolId: binding.toolId,
+      mismatches: [label],
+    }]);
   });
 
   it('encodes dotted manifest names into model-safe registry keys', () => {
@@ -212,12 +230,236 @@ describe('materializeManifestToolRegistry', () => {
     })).toThrow(/collide/i);
   });
 
-  it('fails closed when an enabled manifest tool has no local binding', () => {
-    expect(() => materializeManifestToolRegistry({
+  it('disables a tool without a local binding and reports it', () => {
+    const diagnostics: ToolRegistryDiagnostic[] = [];
+    expect(materializeManifestToolRegistry({
       snapshot: snapshot(),
       bindings: [],
-    })).toThrow(/missing local tool binding/i);
+      onToolUnavailable: (diagnostic) => diagnostics.push(diagnostic),
+    })).toEqual({});
+    expect(diagnostics).toEqual([{
+      code: 'E-BINDING-010',
+      reason: 'local-binding-missing',
+      toolId: binding.toolId,
+    }]);
   });
+
+  it('keeps every other tool when one binding is missing', () => {
+    const base = snapshot();
+    const first = base.manifestRevision.tools[0]!;
+    const secondToolId = '019fa9a9-d5f7-7ec3-a3c7-8899de1d3a10';
+    const twoTools = {
+      ...base,
+      agentRevision: {
+        ...base.agentRevision,
+        toolAllowlist: [first.toolId, secondToolId],
+      },
+      manifestRevision: {
+        ...base.manifestRevision,
+        tools: [first, { ...first, toolId: secondToolId, name: 'archive_tasks' }],
+      },
+      policyRevision: {
+        ...base.policyRevision,
+        toolPolicies: [
+          ...base.policyRevision.toolPolicies,
+          { ...base.policyRevision.toolPolicies[0]!, toolId: secondToolId },
+        ],
+      },
+    };
+    const diagnostics: ToolRegistryDiagnostic[] = [];
+
+    const registry = materializeManifestToolRegistry({
+      snapshot: twoTools,
+      bindings: [binding],
+      onToolUnavailable: (diagnostic) => diagnostics.push(diagnostic),
+    });
+
+    expect(Object.keys(registry)).toEqual(['list_tasks']);
+    expect(diagnostics).toEqual([{
+      code: 'E-BINDING-010',
+      reason: 'local-binding-missing',
+      toolId: secondToolId,
+    }]);
+  });
+
+  it('disables a tool without a runtime policy and reports it', () => {
+    const base = snapshot();
+    const unpolicied = {
+      ...base,
+      policyRevision: { ...base.policyRevision, toolPolicies: [] },
+    };
+    const diagnostics: ToolRegistryDiagnostic[] = [];
+    expect(materializeManifestToolRegistry({
+      snapshot: unpolicied,
+      bindings: [binding],
+      onToolUnavailable: (diagnostic) => diagnostics.push(diagnostic),
+    })).toEqual({});
+    expect(diagnostics).toEqual([{
+      code: 'E-POLICY-010',
+      reason: 'runtime-policy-missing',
+      toolId: binding.toolId,
+    }]);
+  });
+
+  it('accepts a policy that raises the manifest risk and confirms it', () => {
+    const base = snapshot();
+    const raised = {
+      ...base,
+      policyRevision: {
+        ...base.policyRevision,
+        toolPolicies: [{
+          ...base.policyRevision.toolPolicies[0]!,
+          riskClass: 'delete' as const,
+          requiresApproval: false,
+        }],
+      },
+    };
+    expect(materializeManifestToolRegistry({
+      snapshot: raised,
+      bindings: [binding],
+    }).list_tasks?.needsApproval).toBe(true);
+  });
+
+  it('disables a tool whose policy sits below the manifest risk', () => {
+    const base = snapshot();
+    const lowered = {
+      ...base,
+      manifestRevision: {
+        ...base.manifestRevision,
+        tools: [{ ...base.manifestRevision.tools[0]!, riskClass: 'write' as const }],
+      },
+    };
+    const diagnostics: ToolRegistryDiagnostic[] = [];
+    expect(materializeManifestToolRegistry({
+      snapshot: lowered,
+      bindings: [binding],
+      onToolUnavailable: (diagnostic) => diagnostics.push(diagnostic),
+    })).toEqual({});
+    expect(diagnostics).toEqual([{
+      code: 'E-POLICY-011',
+      reason: 'runtime-policy-risk-below-manifest',
+      toolId: binding.toolId,
+    }]);
+  });
+
+  it('reports an unavailable tool through console.warn by default without content', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(materializeManifestToolRegistry({
+        snapshot: snapshot(),
+        bindings: [],
+      })).toEqual({});
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        '[glirastes] tool disabled for this turn',
+        {
+          code: 'E-BINDING-010',
+          reason: 'local-binding-missing',
+          toolId: binding.toolId,
+        },
+      );
+      expect(JSON.stringify(warn.mock.calls))
+        .not.toMatch(/description|schema|execute/i);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('confirms tier-3 tools even when the policy does not ask for it', () => {
+    const base = snapshot();
+    const tierThree = {
+      ...base,
+      manifestRevision: {
+        ...base.manifestRevision,
+        tools: [{ ...base.manifestRevision.tools[0]!, riskClass: 'delete' as const }],
+      },
+      policyRevision: {
+        ...base.policyRevision,
+        toolPolicies: [{
+          ...base.policyRevision.toolPolicies[0]!,
+          riskClass: 'delete' as const,
+          requiresApproval: false,
+        }],
+      },
+    };
+    expect(materializeManifestToolRegistry({
+      snapshot: tierThree,
+      bindings: [binding],
+    }).list_tasks?.needsApproval).toBe(true);
+  });
+
+  it('keeps a reviewed write relaxation unconfirmed', () => {
+    const base = snapshot();
+    const relaxedWrite = {
+      ...base,
+      manifestRevision: {
+        ...base.manifestRevision,
+        tools: [{ ...base.manifestRevision.tools[0]!, riskClass: 'write' as const }],
+      },
+      policyRevision: {
+        ...base.policyRevision,
+        toolPolicies: [{
+          ...base.policyRevision.toolPolicies[0]!,
+          riskClass: 'write' as const,
+          requiresApproval: false,
+        }],
+      },
+    };
+    expect(materializeManifestToolRegistry({
+      snapshot: relaxedWrite,
+      bindings: [binding],
+    }).list_tasks?.needsApproval).toBe(false);
+  });
+
+  it.each(['Delete', 'constructor'])(
+    'disables a tool whose manifest risk class %j is out of enum above its policy',
+    (label) => {
+      const base = snapshot();
+      const unassessed = {
+        ...base,
+        manifestRevision: {
+          ...base.manifestRevision,
+          tools: [{
+            ...base.manifestRevision.tools[0]!,
+            riskClass: label as ToolRiskClass,
+          }],
+        },
+      };
+      const diagnostics: ToolRegistryDiagnostic[] = [];
+      expect(materializeManifestToolRegistry({
+        snapshot: unassessed,
+        bindings: [binding],
+        onToolUnavailable: (diagnostic) => diagnostics.push(diagnostic),
+      })).toEqual({});
+      expect(diagnostics).toEqual([{
+        code: 'E-POLICY-011',
+        reason: 'runtime-policy-risk-below-manifest',
+        toolId: binding.toolId,
+      }]);
+    },
+  );
+
+  it.each(['Delete', 'constructor'])(
+    'confirms a tool whose policy risk class %j is out of enum',
+    (label) => {
+      const base = snapshot();
+      const unassessed = {
+        ...base,
+        policyRevision: {
+          ...base.policyRevision,
+          toolPolicies: [{
+            ...base.policyRevision.toolPolicies[0]!,
+            riskClass: label as ToolRiskClass,
+            requiresApproval: false,
+          }],
+        },
+      };
+      expect(materializeManifestToolRegistry({
+        snapshot: unassessed,
+        bindings: [binding],
+      }).list_tasks?.needsApproval).toBe(true);
+    },
+  );
 });
 
 describe('createLocalSchemaDigest', () => {

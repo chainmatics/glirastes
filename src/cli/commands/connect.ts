@@ -22,7 +22,12 @@ import {
   type ConnectionEnvironmentTargets,
   type MaterializeConnectionEnvironmentOptions,
 } from './connection-environment.js';
-import { createSetupPlan, type SetupPlan } from './setup-plan.js';
+import {
+  acceptsReceiptPlanDigest,
+  createSelfSetupPlan,
+  createSetupPlan,
+  type SetupPlan,
+} from './setup-plan.js';
 
 const execFileAsync = promisify(execFile);
 const digest = z.string().regex(
@@ -61,6 +66,7 @@ export interface ConnectCommandOptions {
 
 export interface ConnectCommandDependencies {
   createPlan?: (options: { rootDir: string }) => Promise<SetupPlan>;
+  createSelfPlan?: (options: { rootDir: string }) => Promise<SetupPlan>;
   preflight?: (options: {
     projectRoot: string;
     framework: 'nextjs';
@@ -146,6 +152,7 @@ export async function runConnect(
   const rootDir = resolve(options.rootDir);
   const baseUrl = requiredBaseUrl(options.baseUrl);
   const createPlan = dependencies.createPlan ?? createSetupPlan;
+  const createSelfPlan = dependencies.createSelfPlan ?? createSelfSetupPlan;
   const plan = await createPlan({ rootDir });
   if (plan.diagnostics.length > 0) {
     throw connectError(
@@ -186,9 +193,15 @@ export async function runConnect(
   );
   const currentArtifactDigest = `sha256:${createHash('sha256')
     .update(artifactRaw).digest('base64url')}`;
+  const receiptCurrent = receipt.success
+    && await acceptsReceiptPlanDigest(
+      receipt.data.planDigest,
+      plan,
+      () => createSelfPlan({ rootDir }),
+    );
   if (
     !receipt.success
-    || receipt.data.planDigest !== plan.planDigest
+    || !receiptCurrent
     || !packageJson.success
     || !artifactIdentity.success
     || artifactIdentity.data.appId !== receipt.data.appId

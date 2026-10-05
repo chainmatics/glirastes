@@ -4,7 +4,11 @@ import { z } from 'zod';
 import { isFoundationDiagnosticError } from '../../diagnostics/index.js';
 import type { RenderedManifests } from './validate-build.js';
 import { detectSetupProfile } from './setup-profile.js';
-import { createSetupPlan } from './setup-plan.js';
+import {
+  acceptsReceiptPlanDigest,
+  createSelfSetupPlan,
+  createSetupPlan,
+} from './setup-plan.js';
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 export { formatDoctorReport } from './doctor-presentation.js';
 import {
@@ -169,7 +173,14 @@ export async function createDoctorReport(
         resolve(rootDir, profile.paths.receipt),
         'utf8',
       )));
-      const current = receipt.planDigest === plan.planDigest
+      // `glirastes setup` records the plan against the previous artifact; the
+      // tools generator records the self-plan from committed outputs only.
+      const planCurrent = await acceptsReceiptPlanDigest(
+        receipt.planDigest,
+        plan,
+        () => createSelfSetupPlan({ rootDir, managed: options.managed }),
+      );
+      const current = planCurrent
         && receipt.mode === profile.mode
         && receipt.appId === profile.appId
         && receipt.toolCount === profile.toolCount
