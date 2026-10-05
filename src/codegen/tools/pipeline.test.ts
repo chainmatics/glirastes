@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { renderCurrentSetupManifests } from '../../cli/commands/current-setup-manifests.js';
+import { createDoctorReport } from '../../cli/commands/doctor.js';
 import { createSetupPlan } from '../../cli/commands/setup-plan.js';
 import { AppSetupArtifactSchema } from '../../contracts/index.js';
 import { FoundationExecutionInventorySchema } from '../execution-inventory.js';
@@ -212,6 +213,37 @@ describe('runToolsPipeline (committed outputs only)', () => {
     await expect(fixture.read(TOOLS_PATHS.previousSetupArtifact)).rejects.toMatchObject({ code: 'ENOENT' });
     const receipt = JSON.parse(await fixture.read(TOOLS_PATHS.receipt)) as { planDigest: string };
     expect(receipt.planDigest).toBe((await createSetupPlan({ rootDir: fixture.root })).planDigest);
+  }, 120_000);
+
+  it('keeps the generated receipt current for doctor when setup leaves a previous artifact again', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const artifact = await artifactOf(fixture);
+    const earlier = {
+      ...artifact,
+      tools: artifact.tools.map((tool) => (tool.method === 'POST'
+        ? { ...tool, riskClass: 'safe-read', requiresApproval: false }
+        : tool)),
+    };
+    await fixture.write(TOOLS_PATHS.previousSetupArtifact, `${JSON.stringify(earlier)}\n`);
+    const receipt = JSON.parse(await fixture.read(TOOLS_PATHS.receipt)) as { planDigest: string };
+    // The file-based plan now compares against the leftover, so only the self-plan matches.
+    expect((await createSetupPlan({ rootDir: fixture.root })).planDigest).not.toBe(receipt.planDigest);
+
+    const report = await createDoctorReport({ rootDir: fixture.root, env: {} });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({ name: 'receipt', status: 'pass', code: 'E-SETUP-105' }));
+  }, 120_000);
+
+  it('still fails doctor for a receipt digest that is neither the plan nor the self-plan', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const receipt = JSON.parse(await fixture.read(TOOLS_PATHS.receipt)) as Record<string, unknown>;
+    await fixture.write(TOOLS_PATHS.receipt, `${JSON.stringify({ ...receipt, planDigest: `sha256:${'A'.repeat(43)}` })}\n`);
+
+    const report = await createDoctorReport({ rootDir: fixture.root, env: {} });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({ name: 'receipt', status: 'fail', code: 'E-SETUP-010' }));
   }, 120_000);
 
   it('disables a tool whose source reported no contract instead of crashing the module renderer', async () => {

@@ -317,6 +317,31 @@ describe('runSync', () => {
     expect(deps.clientFactory).not.toHaveBeenCalled();
   });
 
+  it('accepts the self-plan digest of a tools-generated receipt', async () => {
+    const selfDigest = digest('Q');
+    const rootDir = await fixture({ receiptPlanDigest: selfDigest });
+    const createSelfPlan = vi.fn().mockResolvedValue({ ...plan(), planDigest: selfDigest });
+    const deps = dependencies({ createSelfPlan });
+
+    await runSync({ rootDir, quiet: true }, deps.value);
+
+    expect(createSelfPlan).toHaveBeenCalledWith({ rootDir, managed: false });
+    expect(deps.uploadArtifact).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a receipt that matches neither the plan nor the self-plan', async () => {
+    const rootDir = await fixture({ receiptPlanDigest: digest('Z') });
+    const deps = dependencies({
+      createSelfPlan: vi.fn().mockResolvedValue({ ...plan(), planDigest: digest('Q') }),
+    });
+
+    await expect(runSync({ rootDir }, deps.value)).rejects.toMatchObject({
+      code: 'E-SYNC-SETUP-STALE',
+    });
+
+    expect(deps.clientFactory).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['runtime', { receiptRuntimeDigest: digest('Z') }],
     ['prompt', { receiptPromptDigest: digest('Z') }],

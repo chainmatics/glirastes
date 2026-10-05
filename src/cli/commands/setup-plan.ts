@@ -224,8 +224,30 @@ export function createSetupPlanFromContents(input: SetupPlanContents): SetupPlan
   return { ...body, planDigest: sha256(JSON.stringify(body)) };
 }
 
-export async function createSetupPlan(
+async function readLeftoverArtifact(
   options: CreateSetupPlanOptions,
+  profile: SetupProfile,
+  proposedPath: string,
+): Promise<string | undefined> {
+  const previousPath = await resolvePreviousArtifactPath(
+    options.rootDir,
+    proposedPath,
+    profile.paths.canonicalSetupArtifact,
+    options.previousArtifactPath,
+    profile.paths.previousSetupArtifact,
+  );
+  const previous = await readRaw(
+    options.rootDir,
+    previousPath ?? profile.paths.previousSetupArtifact,
+    false,
+  );
+  return previous?.raw;
+}
+
+/** `leftover` compares with the previous artifact on disk; `self` with the proposal itself. */
+async function createFileBasedSetupPlan(
+  options: CreateSetupPlanOptions,
+  previousSource: 'leftover' | 'self',
 ): Promise<SetupPlan> {
   const profile = await detectSetupProfile({
     rootDir: options.rootDir,
@@ -236,28 +258,55 @@ export async function createSetupPlan(
   });
   const proposed = await readRaw(options.rootDir, profile.paths.setupArtifact, true);
   if (!proposed) throw new Error('unreachable');
-  const previousPath = await resolvePreviousArtifactPath(
-    options.rootDir,
-    proposed.path,
-    profile.paths.canonicalSetupArtifact,
-    options.previousArtifactPath,
-    profile.paths.previousSetupArtifact,
-  );
-  const previous = await readRaw(
-    options.rootDir,
-    previousPath ?? profile.paths.previousSetupArtifact,
-    false,
-  );
+  const previousRaw = previousSource === 'self'
+    ? proposed.raw
+    : await readLeftoverArtifact(options, profile, proposed.path);
   const inventory = await readRaw(options.rootDir, profile.paths.inventory, true);
   const promptBundle = await readRaw(options.rootDir, profile.paths.promptBundle, true);
   return createSetupPlanFromContents({
     mode: profile.mode,
     paths: profile.paths,
     proposed,
-    ...(previous ? { previousRaw: previous.raw } : {}),
+    ...(previousRaw === undefined ? {} : { previousRaw }),
     inventoryRaw: inventory!.raw,
     promptBundleRaw: promptBundle!.raw,
   });
+}
+
+export async function createSetupPlan(
+  options: CreateSetupPlanOptions,
+): Promise<SetupPlan> {
+  return createFileBasedSetupPlan(options, 'leftover');
+}
+
+/**
+ * The plan the tools generator records in `setup-receipt.json`: the committed
+ * artifact compared with itself, so the digest depends on committed outputs
+ * only and never on a previous artifact that `glirastes setup` left behind.
+ */
+export async function createSelfSetupPlan(
+  options: Omit<CreateSetupPlanOptions, 'previousArtifactPath'>,
+): Promise<SetupPlan> {
+  return createFileBasedSetupPlan(options, 'self');
+}
+
+/**
+ * A receipt is current when its digest is the plan digest (written by
+ * `glirastes setup`) or the self-plan digest (written by `glirastes tools
+ * refresh`). The self-plan is computed only when the first comparison fails and
+ * an uncomputable self-plan rejects the receipt.
+ */
+export async function acceptsReceiptPlanDigest(
+  receiptPlanDigest: string,
+  plan: SetupPlan,
+  createSelfPlan: () => Promise<SetupPlan>,
+): Promise<boolean> {
+  if (receiptPlanDigest === plan.planDigest) return true;
+  try {
+    return receiptPlanDigest === (await createSelfPlan()).planDigest;
+  } catch {
+    return false;
+  }
 }
 
 export function assertSetupPlanConfirmation(

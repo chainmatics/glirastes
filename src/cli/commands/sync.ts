@@ -16,7 +16,12 @@ import {
 import { connectionDescriptorPath } from './connection-descriptor.js';
 import { preflightConnectionEnvironment } from './connection-environment.js';
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
-import { createSetupPlan, type SetupPlan } from './setup-plan.js';
+import {
+  acceptsReceiptPlanDigest,
+  createSelfSetupPlan,
+  createSetupPlan,
+  type SetupPlan,
+} from './setup-plan.js';
 
 const digest = z.string().regex(
   /^sha256:(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9+/]{43}=)$/,
@@ -71,6 +76,10 @@ interface AppSetupSyncClient {
 export interface SyncCommandDependencies {
   env?: NodeJS.ProcessEnv;
   createPlan?: (options: {
+    rootDir: string;
+    managed: boolean;
+  }) => Promise<SetupPlan>;
+  createSelfPlan?: (options: {
     rootDir: string;
     managed: boolean;
   }) => Promise<SetupPlan>;
@@ -308,6 +317,7 @@ export async function runSync(
 
   const managed = receipt.data.mode === 'managed';
   const createPlan = dependencies.createPlan ?? createSetupPlan;
+  const createSelfPlan = dependencies.createSelfPlan ?? createSelfSetupPlan;
   const currentManifestDigests = dependencies.currentManifestDigests
     ?? renderCurrentSetupManifests;
   const [currentPlan, rendered] = await Promise.all([
@@ -317,9 +327,14 @@ export async function runSync(
   const adopt = currentPlan.operations.find(({ kind }) => kind === 'adopt');
   const currentArtifactDigest = `sha256:${createHash('sha256')
     .update(artifactRaw).digest('base64url')}`;
+  const planCurrent = await acceptsReceiptPlanDigest(
+    receipt.data.planDigest,
+    currentPlan,
+    () => createSelfPlan({ rootDir, managed }),
+  );
   if (
     currentPlan.diagnostics.length > 0
-    || currentPlan.planDigest !== receipt.data.planDigest
+    || !planCurrent
     || !adopt
     || adopt.digest !== currentArtifactDigest
     || receipt.data.runtimeDigest !== rendered.runtimeDigest

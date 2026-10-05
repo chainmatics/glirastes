@@ -5,10 +5,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { AppSetupArtifactSchema } from '../../contracts/index.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import {
+  acceptsReceiptPlanDigest,
   assertSetupPlanConfirmation,
   compareArtifacts,
+  createSelfSetupPlan,
   createSetupPlan,
   createSetupPlanFromContents,
+  type SetupPlan,
 } from './setup-plan.js';
 
 const id = (suffix: string) =>
@@ -359,5 +362,71 @@ describe('createSetupPlan', () => {
       'utf8',
     )).toBe(before);
     vi.unstubAllGlobals();
+  });
+});
+
+describe('createSelfSetupPlan', () => {
+  it('compares the committed artifact with itself whatever a previous artifact holds', async () => {
+    const root = await fixture();
+    try {
+      await writeFile(
+        join(root, '.glirastes/previous-setup-artifact.json'),
+        `${JSON.stringify(artifact({ requiresApproval: true }))}\n`,
+      );
+      const withLeftover = await createSetupPlan({ rootDir: root });
+      const self = await createSelfSetupPlan({ rootDir: root });
+
+      expect(withLeftover.requiresConfirmation).toBe(true);
+      expect(self.requiresConfirmation).toBe(false);
+      expect(self.planDigest).not.toBe(withLeftover.planDigest);
+
+      // Without a leftover the file-based plan already is the self-plan, which is
+      // the digest the tools generator records from committed outputs only.
+      await rm(join(root, '.glirastes/previous-setup-artifact.json'));
+      expect(self).toEqual(await createSetupPlan({ rootDir: root }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the Managed sync operation', async () => {
+    const root = await fixture();
+    try {
+      const standalone = await createSelfSetupPlan({ rootDir: root });
+      const managed = await createSelfSetupPlan({ rootDir: root, managed: true });
+
+      expect(standalone.operations.some(({ kind }) => kind === 'sync')).toBe(false);
+      expect(managed.operations.at(-1)?.kind).toBe('sync');
+      expect(managed.planDigest).not.toBe(standalone.planDigest);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('acceptsReceiptPlanDigest', () => {
+  const plan = { planDigest: digest('P') } as SetupPlan;
+  const selfPlan = { planDigest: digest('S') } as SetupPlan;
+
+  it('accepts the current plan digest without computing the self-plan', async () => {
+    const compute = vi.fn();
+    await expect(acceptsReceiptPlanDigest(digest('P'), plan, compute)).resolves.toBe(true);
+    expect(compute).not.toHaveBeenCalled();
+  });
+
+  it('accepts the self-plan digest of a tools-generated receipt', async () => {
+    const compute = vi.fn().mockResolvedValue(selfPlan);
+    await expect(acceptsReceiptPlanDigest(digest('S'), plan, compute)).resolves.toBe(true);
+    expect(compute).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a digest that matches neither plan', async () => {
+    const compute = vi.fn().mockResolvedValue(selfPlan);
+    await expect(acceptsReceiptPlanDigest(digest('Z'), plan, compute)).resolves.toBe(false);
+  });
+
+  it('fails closed when the self-plan cannot be computed', async () => {
+    const compute = vi.fn().mockRejectedValue(new Error('inventory missing'));
+    await expect(acceptsReceiptPlanDigest(digest('S'), plan, compute)).resolves.toBe(false);
   });
 });

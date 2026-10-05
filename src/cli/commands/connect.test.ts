@@ -38,6 +38,12 @@ async function fixture(): Promise<string> {
   return root;
 }
 
+async function recordReceiptPlanDigest(root: string, planDigest: string): Promise<void> {
+  const path = join(root, '.glirastes/setup-receipt.json');
+  const receipt = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  await writeFile(path, JSON.stringify({ ...receipt, planDigest }));
+}
+
 function plan() {
   return {
     schemaVersion: 1 as const,
@@ -186,6 +192,39 @@ describe('glirastes connect command', () => {
     })).rejects.toMatchObject({ code: 'E-CONNECT-SETUP-STALE' });
     expect(client.startPairing).not.toHaveBeenCalled();
     expect(client.pollForConnection).not.toHaveBeenCalled();
+  });
+
+  it('accepts the self-plan digest of a tools-generated receipt', async () => {
+    const rootDir = await fixture();
+    const selfDigest = `sha256:${'S'.repeat(43)}`;
+    await recordReceiptPlanDigest(rootDir, selfDigest);
+    const client = connectedClient();
+    const createSelfPlan = vi.fn().mockResolvedValue({ ...plan(), planDigest: selfDigest });
+    await runConnect({ rootDir, baseUrl: 'https://control.example', json: true }, {
+      createPlan: vi.fn().mockResolvedValue(plan()),
+      createSelfPlan,
+      preflight: vi.fn().mockResolvedValue({}),
+      clientFactory: vi.fn(() => client),
+      openBrowser: vi.fn(),
+      materialize: vi.fn().mockResolvedValue({}),
+      createRunnerKey: () => 'local-runner',
+      log: vi.fn(),
+    });
+    expect(createSelfPlan).toHaveBeenCalledWith({ rootDir });
+    expect(client.startPairing).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a receipt that matches neither the plan nor the self-plan', async () => {
+    const rootDir = await fixture();
+    await recordReceiptPlanDigest(rootDir, `sha256:${'S'.repeat(43)}`);
+    const client = connectedClient();
+    await expect(runConnect({ rootDir, baseUrl: 'https://control.example' }, {
+      createPlan: vi.fn().mockResolvedValue(plan()),
+      createSelfPlan: vi.fn().mockResolvedValue({ ...plan(), planDigest: `sha256:${'Q'.repeat(43)}` }),
+      clientFactory: vi.fn(() => client),
+      preflight: vi.fn(),
+    })).rejects.toMatchObject({ code: 'E-CONNECT-SETUP-STALE' });
+    expect(client.startPairing).not.toHaveBeenCalled();
   });
 
   it('fails closed on unreadable local setup identity before pairing', async () => {
