@@ -34,7 +34,7 @@ From the SDK worktree, with its dependencies already installed:
 
 ```sh
 bun run build
-bunx vitest run tests/source-driven-next.test.ts tests/source-driven-ui.test.tsx tests/source-driven-build.test.ts tests/tool-sync-next.test.ts
+bunx vitest run tests/source-driven-next.test.ts tests/source-driven-ui.test.tsx tests/source-driven-build.test.ts tests/tool-sync-next.test.ts tests/tool-sync-next-ui.test.ts
 ```
 
 The endpoint test copies only the native app to isolated temporary directories
@@ -56,7 +56,8 @@ CLI, boots the runtime, runs `ui_navigate`, `ui_filter_tasks` and
 the chat does. The app's own bridge receives the router pushes; the real tasks
 page shows the URL filter and runs its own handler, whose Zod contract still
 rejects a payload that the generated JSON Schema lets through. The change
-corpus (`tests/tool-sync-next.test.ts`) adds, changes and removes an endpoint.
+corpus (`tests/tool-sync-next.test.ts`, `tests/tool-sync-next-ui.test.ts`)
+adds, changes and removes an endpoint, a page and a filter.
 
 ## Real Next and browser test
 
