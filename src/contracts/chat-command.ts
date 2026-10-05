@@ -14,6 +14,13 @@ export const CHAT_COMMAND_TOOL_PATTERN = /^[A-Za-z0-9_.-]{1,200}$/;
 /** Serialized JSON of the arguments, after escaping. */
 export const CHAT_COMMAND_MAX_ARGS_LENGTH = 2_000;
 export const CHAT_COMMAND_MAX_LABEL_LENGTH = 200;
+/**
+ * Longest message text read as a command. A formatted command is below 2,700
+ * characters (marker payload at most 2,434, framing about 30, label at most
+ * 200); the parser sees unauthenticated, unbounded user text before any
+ * guardrail runs, so anything longer is not parsed at all.
+ */
+export const CHAT_COMMAND_MAX_MESSAGE_LENGTH = 4_096;
 /** Tool call ids of direct commands start with this prefix. */
 export const CHAT_COMMAND_TOOL_CALL_PREFIX = 'glirastes-command-';
 
@@ -30,7 +37,9 @@ export interface ParsedChatCommandMessage {
   readonly label: string;
 }
 
-const MARKER = /^\s*<!--glirastes:command (\{[^\n]{2,2600}\})-->(?:\n([^\n]*))?\s*$/;
+// No trailing `\s*`: it overlaps `[^\n]*` and backtracks quadratically on a padded label.
+// `parseChatCommandMessage` trims the end of the text first instead.
+const MARKER = /^\s*<!--glirastes:command (\{[^\n]{2,2600}\})-->(?:\n([^\n]*))?$/;
 const MARKERS = /<!--glirastes:command \{[^\n]{0,2600}?\}-->[ \t]*\n?/g;
 const KEYS = new Set(['commandId', 'tool', 'args']);
 
@@ -83,11 +92,12 @@ export function formatChatCommandMessage(input: {
 
 /**
  * Reads a message that consists of exactly one command marker (and its
- * label line). Anything else, including a malformed or oversized payload, is
- * not a command.
+ * label line). Anything else, including a malformed or oversized payload or
+ * a message longer than `CHAT_COMMAND_MAX_MESSAGE_LENGTH`, is not a command.
  */
 export function parseChatCommandMessage(text: string): ParsedChatCommandMessage | undefined {
-  const match = MARKER.exec(text);
+  if (text.length > CHAT_COMMAND_MAX_MESSAGE_LENGTH) return undefined;
+  const match = MARKER.exec(text.trimEnd());
   if (!match) return undefined;
   const payload = match[1]!;
   if (/[<>]/.test(payload)) return undefined;
