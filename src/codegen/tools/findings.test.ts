@@ -16,6 +16,16 @@ describe('tool findings', () => {
     expect(nextActionFor('constructor')).toContain('glirastes tools refresh');
   });
 
+  it('gives a rejected schema its own remediation instead of the unloadable-module text', () => {
+    const action = nextActionFor('schema-content-rejected');
+    expect(action).toContain('secret-looking');
+    expect(action).toContain('never reach committed outputs');
+    expect(action).not.toBe(nextActionFor('schema-module-unloadable'));
+    expect(action).not.toBe(nextActionFor('something-new'));
+    expect(toolFinding('schema-content-rejected', 'needs_attention', 'POST /api/x', 'Schema carries a secret-looking value.'))
+      .toMatchObject({ code: 'schema-content-rejected', severity: 'needs_attention', nextAction: action });
+  });
+
   it('orders errors before attention items before warnings, then by code and subject', () => {
     const sorted = sortFindings([
       toolFinding('contract-derived', 'warning', 'GET /a', 'w'),
