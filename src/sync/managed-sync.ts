@@ -44,7 +44,10 @@ export function createManagedRuntimeSync(options: {
    * The committed setup artifact of the running code, e.g. the generated
    * module's `setupArtifact`. Its discovery digest goes into every runner
    * registration, and `reportCapabilities()` uploads it as the capability
-   * report (spec 4.10.6). Content-free; it never enables a tool.
+   * report (spec 4.10.6). Content-free; it never enables a tool. With it the
+   * runner also reports `policyRelaxations` (D16): compose the turns from
+   * the same artifact (`createLocalRuntimeSource`, or `createTurnSnapshot`
+   * with `relaxableToolIds(setupArtifact)`).
    */
   setupArtifact?: unknown;
 }) {
@@ -105,6 +108,7 @@ export function createManagedRuntimeSync(options: {
     runnerKey: options.runnerKey,
     version: options.version,
     ...(report ? { discoveryDigest: report.discoveryDigest } : {}),
+    policyRelaxations: report !== undefined,
     manager,
     fetchImpl: options.fetchImpl,
     push: options.push === false

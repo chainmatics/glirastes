@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   capabilityReportFrom,
+  POLICY_RELAXATIONS_VERSION,
   uploadCapabilityReport,
 } from '../capability-report.js';
 import { RuntimeControlPlaneClient } from '../control-plane-client.js';
@@ -99,6 +100,54 @@ describe('runner registration with the code version', () => {
     });
     await expect(client.register({ capabilities: { discoveryDigest: digest('Z') } }))
       .rejects.toThrow(/discoveryDigest/);
+  });
+
+  // Refusal first: the Platform shows a relaxation as effective only for a
+  // runner that reports D16 support, so nothing may claim it by accident.
+  it('never reports relaxation support without the code report, nor lets a caller claim it', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ runnerId: id('7') })));
+    const runtime = createManagedRuntimeSync({
+      baseUrl: 'https://control.example',
+      apiKey: 'runtime-key',
+      appId: APP_ID,
+      environmentId: ENVIRONMENT_ID,
+      runnerKey: 'runner-a',
+      version: '1.0.0',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      push: false,
+    });
+
+    await runtime.client.register({ capabilities: { engine: 'vercel-ai-sdk' } });
+    await expect(runtime.client.register({ capabilities: { policyRelaxations: 1 } }))
+      .rejects.toThrow(/policyRelaxations/);
+
+    expect(requests(fetchImpl).map((request) => request.body))
+      .toEqual([expect.objectContaining({ capabilities: { engine: 'vercel-ai-sdk' } })]);
+  });
+
+  it('reports relaxation support next to the code version once the sync has the setup artifact', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ runnerId: id('7') })));
+    const runtime = createManagedRuntimeSync({
+      baseUrl: 'https://control.example',
+      apiKey: 'runtime-key',
+      appId: APP_ID,
+      environmentId: ENVIRONMENT_ID,
+      runnerKey: 'runner-a',
+      version: '1.0.0',
+      setupArtifact: artifact,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      push: false,
+    });
+
+    await runtime.client.register({ capabilities: { policyRelaxations: POLICY_RELAXATIONS_VERSION } });
+    await expect(runtime.client.register({ capabilities: { policyRelaxations: 2 } }))
+      .rejects.toThrow(/policyRelaxations/);
+
+    expect(POLICY_RELAXATIONS_VERSION).toBe(1);
+    expect(requests(fetchImpl)[0]?.body).toMatchObject({
+      capabilities: { discoveryDigest: DISCOVERY_DIGEST, policyRelaxations: 1 },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a code version that is not a sha256 digest', () => {
