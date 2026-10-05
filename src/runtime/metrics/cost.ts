@@ -69,11 +69,20 @@ export function rawChunkCostUsd(rawValue: unknown): number | null {
 }
 
 /**
- * The cost the provider reported for one model step, in USD: OpenRouter's
- * official provider puts it at `providerMetadata.openrouter.usage.cost`,
- * providers that keep unknown usage fields at `usage.raw.cost`, and the
- * OpenAI-compatible provider (`createOpenAI({ baseURL: 'https://openrouter.ai/api/v1' })`)
- * only in the raw stream chunk.
+ * The cost the provider reported for one model step, in USD. Three locations
+ * are read in this order, and they are not equally verified:
+ *
+ * - `providerMetadata.openrouter.usage.cost`, where OpenRouter's official
+ *   provider is documented to put it. Modelled, not measured:
+ *   `@openrouter/ai-sdk-provider` is not a dependency of this package and
+ *   no test runs against it, only hand-written metadata objects.
+ * - `usage.raw.cost`, for a provider that keeps unknown usage fields. Also
+ *   modelled. The OpenAI-compatible provider is not such a provider.
+ * - the raw stream chunk (`rawChunkCostUsd`), the path
+ *   `createOpenAI({ baseURL: 'https://openrouter.ai/api/v1' })` needs.
+ *   Measured in the source of `@ai-sdk/openai` 3.0.53, whose chunk schema
+ *   strips `cost` from `usage.raw`. Whether a live OpenRouter response sends
+ *   `usage.cost` in the final chunk is not verified here.
  */
 export function providerReportedCostUsd(input: {
   providerMetadata?: unknown;

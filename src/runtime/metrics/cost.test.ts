@@ -35,14 +35,17 @@ describe('rawChunkCostUsd', () => {
   });
 });
 
+// The provider metadata and usage.raw shapes below are modelled on OpenRouter's
+// documentation with hand-written objects: @openrouter/ai-sdk-provider is not
+// installed, so the real package's metadata is not checked here.
 describe('providerReportedCostUsd', () => {
-  it('reads OpenRouter usage.cost from provider metadata', () => {
+  it('reads usage.cost from the modelled official provider metadata shape', () => {
     expect(providerReportedCostUsd({
       providerMetadata: { openrouter: { usage: { cost: 0.0042, totalTokens: 10 } } },
     })).toBe(0.0042);
   });
 
-  it('reads cost from the raw provider usage', () => {
+  it('reads cost from a modelled raw provider usage object', () => {
     expect(providerReportedCostUsd({ usageRaw: { prompt_tokens: 10, cost: 0.001 } }))
       .toBe(0.001);
   });
