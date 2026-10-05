@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "appId": "019fb007-0000-7000-8000-000000000001",
+  "artifactRef": "local://native-query-fixture/prompts",
+  "sections": {
+    "planner": "Use only the available native queries; ask when the target is unclear.",
+    "appBehavior": "Answer questions about the caller's own tasks and notes.",
+    "responseStyle": "Be concise.",
+    "capabilityFragments": {}
+  }
+}
