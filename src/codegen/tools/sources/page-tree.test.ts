@@ -97,4 +97,22 @@ describe('enumeratePages', () => {
       reason: 'src/app/linked is a link; pages behind it cannot be enumerated.',
     });
   });
+
+  it('ignores a link that is no folder and no page file', async () => {
+    const app = await createAppFixture({ 'src/app/tasks/page.tsx': PAGE, 'src/app/README.md': 'x' });
+    await symlink(app.path('src/app/README.md'), app.path('src/app/tasks/NOTES.md'), 'file');
+    expect(await enumeratePages(app.root, {}, [])).toMatchObject({
+      complete: true,
+      pages: [{ path: '/tasks', file: 'src/app/tasks/page.tsx' }],
+    });
+  });
+
+  it('refuses a linked page file instead of skipping its page', async () => {
+    const app = await createAppFixture({ 'src/app/tasks/page.tsx': PAGE });
+    await symlink(app.path('src/app/tasks/page.tsx'), app.path('src/app/page.tsx'), 'file');
+    expect(await enumeratePages(app.root, {}, [])).toEqual({
+      complete: false,
+      reason: 'src/app/page.tsx is a link; pages behind it cannot be enumerated.',
+    });
+  });
 });

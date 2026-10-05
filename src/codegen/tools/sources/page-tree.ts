@@ -4,6 +4,7 @@ import { join, relative, sep } from 'node:path';
 import { compareCodeUnits } from '../canonical.js';
 import { matchesExcludePattern, type PolicyExcludeRule } from '../exclusions.js';
 import { toolFinding } from '../findings.js';
+import { linkHidesFiles } from './app-files.js';
 import type { ExcludedTool, ToolFinding } from '../types.js';
 
 const PAGE_FILE = /^page\.(?:tsx|ts|jsx|js|mdx|md)$/;
@@ -132,7 +133,12 @@ export async function enumeratePages(
       const absolute = join(directory, entry.name);
       const local = relative(root, absolute).split(sep).join('/');
       if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
-      if (entry.isSymbolicLink()) return `${local} is a link; pages behind it cannot be enumerated.`;
+      if (entry.isSymbolicLink()) {
+        if (await linkHidesFiles(absolute, PAGE_FILE.test(entry.name))) {
+          return `${local} is a link; pages behind it cannot be enumerated.`;
+        }
+        continue;
+      }
       if (entry.isDirectory()) {
         if (entry.name.startsWith('_')) continue;
         if (segments.length === 0 && entry.name === 'api') continue;

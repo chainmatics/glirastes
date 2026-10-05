@@ -82,6 +82,59 @@ describe('scanAppSources', () => {
       reason: 'src/lib is a link; its sources cannot be enumerated.',
     });
   });
+
+  it('refuses a linked source file but not a link to something that is no source', async () => {
+    const app = await createAppFixture({ 'src/a.tsx': 'x', 'src/notes.md': 'x' });
+    await symlink(app.path('src/notes.md'), app.path('src/notes-link.md'), 'file');
+    expect(await scanAppSources(app.root, { matches: () => true })).toEqual({
+      complete: true,
+      files: [expect.objectContaining({ path: 'src/a.tsx' })],
+    });
+    await symlink(app.path('src/a.tsx'), app.path('src/b.tsx'), 'file');
+    expect(await scanAppSources(app.root, { matches: () => true })).toEqual({
+      complete: false,
+      reason: 'src/b.tsx is a link; its sources cannot be enumerated.',
+    });
+  });
+
+  it('scans an app without src although its root holds an agent-instructions link', async () => {
+    const app = await createAppFixture({ 'AGENTS.md': 'x', 'a.tsx': 'useAiClientAction();' });
+    await symlink(app.path('AGENTS.md'), app.path('CLAUDE.md'), 'file');
+    const scan = await scanAppSources(app.root, { matches: (source) => source.includes('useAiClientAction') });
+    expect(scan).toEqual({ complete: true, files: [expect.objectContaining({ path: 'a.tsx' })] });
+  });
+
+  it('ignores a dangling or looping link unless its name is a source file', async () => {
+    const app = await createAppFixture({ 'src/a.tsx': 'x' });
+    await symlink(app.path('src/missing.md'), app.path('src/stale.md'), 'file');
+    await symlink('loop.md', app.path('src/loop.md'), 'file');
+    expect(await scanAppSources(app.root, { matches: () => true })).toMatchObject({ complete: true });
+    await symlink(app.path('src/missing.tsx'), app.path('src/old.tsx'), 'file');
+    expect(await scanAppSources(app.root, { matches: () => true })).toEqual({
+      complete: false,
+      reason: 'src/old.tsx is a link; its sources cannot be enumerated.',
+    });
+  });
+
+  it('leaves out tests, stories and their output because they never register app handlers', async () => {
+    const app = await createAppFixture({
+      'src/a.tsx': 'x',
+      'src/latest.tsx': 'x',
+      'src/a.testing.tsx': 'x',
+      'src/spec.ts': 'x',
+      'src/a.test.tsx': 'x',
+      'src/a.spec.ts': 'x',
+      'src/Button.stories.tsx': 'x',
+      'src/__tests__/b.tsx': 'x',
+      'src/e2e/c.ts': 'x',
+      'src/storybook-static/chunk.js': 'x',
+    });
+    const scan = await scanAppSources(app.root, { matches: () => true });
+    expect(scan).toMatchObject({ complete: true });
+    expect(scan.complete && scan.files.map((entry) => entry.path)).toEqual([
+      'src/a.testing.tsx', 'src/a.tsx', 'src/latest.tsx', 'src/spec.ts',
+    ]);
+  });
 });
 
 describe('UI tool observations', () => {

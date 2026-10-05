@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { compareCodeUnits } from '../canonical.js';
 
@@ -7,9 +7,16 @@ export const MAX_APP_SOURCE_FILES = 20_000;
 export const MAX_APP_SOURCE_BYTES = 2_000_000;
 
 const SOURCE_FILE = /\.(?:tsx?|jsx?|mjs|cjs)$/;
-/** Dependencies, build output and generated code never register app handlers. */
+/** `a.test.tsx`, `a.spec.ts`, `Button.stories.tsx`: test and story files, not app code. */
+const TEST_FILE = /\.(?:test|spec|stories)\.[^.]+$/;
+/**
+ * Dependencies, build output, generated code, tests and story output never
+ * register app handlers. A client action or navigation bridge that exists only
+ * in a test harness or a story must not enable a tool.
+ */
 const SKIPPED_DIRECTORIES = new Set([
   'node_modules', 'dist', 'build', 'out', 'coverage', 'generated',
+  '__tests__', 'e2e', 'storybook-static',
 ]);
 
 export interface AppSourceFile {
@@ -32,10 +39,30 @@ function appRelative(root: string, absolute: string): string {
   return relative(root, absolute).split(sep).join('/');
 }
 
+/** A source file the scan reads: not a declaration file, not a test or story. */
+function isScannedSource(name: string): boolean {
+  return SOURCE_FILE.test(name) && !name.endsWith('.d.ts') && !TEST_FILE.test(name);
+}
+
 /**
- * Bounded walk over the app's own source files. A link, an oversized file
- * or too many files make the scan incomplete instead of silently skipping
- * code that could register a UI action.
+ * Whether a link could hide files a walk must enumerate: a folder, or a file
+ * the walk would read. A link to anything else (`CLAUDE.md -> AGENTS.md`, an
+ * image, a link that points nowhere) holds no source and is ignored.
+ */
+export async function linkHidesFiles(absolute: string, wantedFile: boolean): Promise<boolean> {
+  if (wantedFile) return true;
+  try {
+    return (await stat(absolute)).isDirectory();
+  } catch (error) {
+    return !['ENOENT', 'ELOOP', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '');
+  }
+}
+
+/**
+ * Bounded walk over the app's own source files. A linked folder, a linked
+ * source file, an oversized file or too many files make the scan incomplete
+ * instead of silently skipping code that could register a UI action. Links to
+ * anything else are ignored.
  */
 export async function scanAppSources(root: string, options: {
   srcDir?: string;
@@ -51,13 +78,18 @@ export async function scanAppSources(root: string, options: {
     for (const entry of entries) {
       if (entry.name.startsWith('.') || SKIPPED_DIRECTORIES.has(entry.name)) continue;
       const absolute = join(directory, entry.name);
-      if (entry.isSymbolicLink()) return `${appRelative(root, absolute)} is a link; its sources cannot be enumerated.`;
+      if (entry.isSymbolicLink()) {
+        if (await linkHidesFiles(absolute, isScannedSource(entry.name))) {
+          return `${appRelative(root, absolute)} is a link; its sources cannot be enumerated.`;
+        }
+        continue;
+      }
       if (entry.isDirectory()) {
         const failure = await walk(absolute);
         if (failure) return failure;
         continue;
       }
-      if (!entry.isFile() || !SOURCE_FILE.test(entry.name) || entry.name.endsWith('.d.ts')) continue;
+      if (!entry.isFile() || !isScannedSource(entry.name)) continue;
       visited += 1;
       if (visited > MAX_APP_SOURCE_FILES) return 'The app has too many source files to enumerate UI actions.';
       if ((await lstat(absolute)).size > MAX_APP_SOURCE_BYTES) {
