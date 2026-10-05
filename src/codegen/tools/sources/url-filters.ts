@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import ts from 'typescript';
 import { compareCodeUnits } from '../canonical.js';
+import { MAX_FILTER_KEYS } from '../files.js';
 import { toolFinding } from '../findings.js';
 import { createAppProgram, type AppProgram } from '../program.js';
 import type {
@@ -683,6 +684,15 @@ function addKey(view: View, key: FilterKey): void {
   view.keys.set(key.key, { ...existing, domain });
 }
 
+/** How many left-out keys `filter-keys-capped` names before it only counts them. */
+const SHOWN_CAPPED_KEYS = 10;
+
+function cappedKeysMessage(total: number, leftOut: ReadonlyArray<string>): string {
+  const shown = leftOut.slice(0, SHOWN_CAPPED_KEYS).join(', ');
+  const more = leftOut.length > SHOWN_CAPPED_KEYS ? ` and ${leftOut.length - SHOWN_CAPPED_KEYS} more` : '';
+  return `The view reads ${total} URL parameters; a filter tool takes at most ${MAX_FILTER_KEYS}, so the chat cannot set ${shown}${more}.`;
+}
+
 function pathParams(path: string): string[] {
   return path.split('/').filter((segment) => segment.startsWith(':')).map((segment) => segment.slice(1));
 }
@@ -766,10 +776,16 @@ async function observeFilters(
   })));
   const observations = withKeys.map((view) => {
     const stableKey = filterStableKey(view.path);
-    const keys = [...view.keys.values()].sort((left, right) => compareCodeUnits(left.key, right.key));
+    const sorted = [...view.keys.values()].sort((left, right) => compareCodeUnits(left.key, right.key));
+    // The committed contract takes at most MAX_FILTER_KEYS keys; the rest are reported, never written.
+    const keys = sorted.slice(0, MAX_FILTER_KEYS);
+    const leftOut = sorted.slice(MAX_FILTER_KEYS).map((key) => key.key);
     const open = keys.filter((key) => key.domain.kind === 'string').map((key) => key.key);
     const toolFindings: ToolFinding[] = [
       ...view.notes.map((note) => toolFinding(note.code, 'warning', stableKey, note.message)),
+      ...(leftOut.length > 0
+        ? [toolFinding('filter-keys-capped', 'warning', stableKey, cappedKeysMessage(sorted.length, leftOut))]
+        : []),
       ...(open.length > 0
         ? [toolFinding('filter-domain-open', 'warning', stableKey, `${open.join(', ')} accept any text.`)]
         : []),

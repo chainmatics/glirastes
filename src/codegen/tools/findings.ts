@@ -1,4 +1,5 @@
 import { compareCodeUnits } from './canonical.js';
+import { MAX_FILTER_KEYS } from './files.js';
 import type { ToolFinding, ToolFindingSeverity } from './types.js';
 
 const NEXT_ACTIONS: Readonly<Record<string, string>> = {
@@ -34,6 +35,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'policy-entry-orphaned': 'Remove the entry from .glirastes/tool-policy.json or restore the tool.',
   'tool-outputs-drift': 'Run glirastes tools refresh locally and commit .glirastes together with the generated module.',
   'tool-output-invalid': 'Regenerate the outputs with glirastes tools refresh; never edit generated files.',
+  'generated-output-invalid': 'Nothing was written: the code produced a value past a limit of the generated file (a name, path or list the message names). Shorten or split it in the code, then rerun glirastes tools refresh; if the code is within reason, report it as a Glirastes bug.',
   'integrity-chain-broken': 'Regenerate the outputs with glirastes tools refresh and commit them; never edit generated files.',
   'output-path-linked': 'Replace the linked .glirastes or output folder with a real folder inside the app.',
   'setup-plan-invalid': 'Delete .glirastes/previous-setup-artifact.json left by glirastes setup; git keeps the history.',
@@ -45,6 +47,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'filter-definition-unreadable': 'Write the filter key, path and values as literals so glirastes tools refresh can read them.',
   'filter-key-reserved': 'Rename the URL parameter; params is reserved for route parameters of the filtered page.',
   'filter-key-invalid': 'Name the URL parameter with letters, digits, _ or - (starting with a letter or _, at most 64 characters) so the chat can set it; other names are left out of the filter tool.',
+  'filter-keys-capped': `A filter tool takes at most ${MAX_FILTER_KEYS} URL parameters per view, the first in code-unit order. Read fewer URL parameters on the page and the components it renders, or move the others to another page, if the chat must set them.`,
   'ui-action-payload-untyped': 'Pass a payload contract (e.g. a Zod object) as the third argument of useAiClientAction or registerAiClientAction, or type the handler parameter.',
   'ui-action-contract-conflict': 'Register the action with one payload contract wherever it is handled.',
   'ui-action-id-dynamic': 'Register client actions with a literal id so the chat can call them.',

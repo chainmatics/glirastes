@@ -23,6 +23,13 @@ const RuntimeSchemaSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('json'), schema: JsonObjectSchema }).strict(),
 ]);
 
+/**
+ * URL parameters one `ui.filter.<view>` tool takes. The `url-filters` source
+ * keeps the first ones in code-unit order and reports the rest
+ * (`filter-keys-capped`), so refresh never writes a file this schema rejects.
+ */
+export const MAX_FILTER_KEYS = 50;
+
 const GeneratedUiActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('navigate') }).strict(),
   z.object({
@@ -31,7 +38,7 @@ const GeneratedUiActionSchema = z.discriminatedUnion('kind', [
     keys: z.array(z.object({
       key: z.string().min(1).max(64),
       array: z.enum(['comma', 'repeat']).optional(),
-    }).strict()).max(50),
+    }).strict()).max(MAX_FILTER_KEYS),
   }).strict(),
   z.object({ kind: z.literal('client-action'), actionId: z.string().min(1).max(200) }).strict(),
 ]);

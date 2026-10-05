@@ -9,8 +9,11 @@ import { FoundationExecutionInventorySchema } from '../execution-inventory.js';
 import { canonicalJson } from './canonical.js';
 import { createAppFixture, FIXTURE_APP_ID, removeAppFixtures, SDK_ROOT, type AppFixture } from './__tests__/app-fixture.js';
 import { DEFAULT_GENERATED_MODULE, TOOLS_PATHS } from './config.js';
+import { MAX_FILTER_KEYS, ToolContractsFileSchema } from './files.js';
+import { nextActionFor } from './findings.js';
 import { runToolsPipeline, runToolsPipelineWith, ToolsPipelineFailure } from './pipeline.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
+import { uiObservation } from './sources/ui-tools.js';
 import type { ToolSource } from './types.js';
 
 const outsideDirs: string[] = [];
@@ -371,6 +374,69 @@ describe('runToolsPipeline (filters)', () => {
     });
     expect(result.findings).toContainEqual(expect.objectContaining({ code: 'filter-domain-open', subjectRef: 'UI filter /tasks' }));
     expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+  }, 120_000);
+
+  const wideKeys = (count: number) => Array.from({ length: count }, (_, index) => `k${String(index).padStart(2, '0')}`);
+
+  it('caps the keys of a wide view so the check right after refresh reads what refresh wrote', async () => {
+    const keys = wideKeys(MAX_FILTER_KEYS + 1);
+    const fixture = await createAppFixture({
+      'src/views.ts': "import { defineQueryFilters } from 'glirastes/browser';\n"
+        + `export const wide = defineQueryFilters({ path: '/wide', filters: { ${keys.map((key) => `${key}: 'string'`).join(', ')} } });\n`,
+      'src/components/glirastes-bridge.tsx': BRIDGE,
+    }, { toolsConfig: { sources: ['url-filters'] } });
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.wrote).toBe(true);
+    expect(result.changes.added).toHaveLength(1);
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: 'filter-keys-capped', severity: 'warning', subjectRef: 'UI filter /wide',
+    }));
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    const uiAction = contracts.tools[0]?.contract?.uiAction;
+    expect(uiAction?.kind === 'filter' ? uiAction.keys.map((entry) => entry.key) : []).toEqual(keys.slice(0, MAX_FILTER_KEYS));
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'integrity' })).findings).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'write' })).wrote).toBe(false);
+  }, 120_000);
+
+  it('writes nothing when a rendered output would fail the schema its own reader applies', async () => {
+    const keys = wideKeys(MAX_FILTER_KEYS + 1);
+    const wide: ToolSource = {
+      kind: 'url-filters',
+      observe: async () => ({
+        observations: [uiObservation({
+          stableKey: 'UI filter /wide',
+          definitionId: 'ui.filter.wide',
+          actionBindingRef: 'glirastes.navigate',
+          input: {
+            type: 'object',
+            properties: Object.fromEntries(keys.map((key) => [key, { type: 'string' }])),
+            additionalProperties: false,
+          },
+          uiAction: { kind: 'filter', destination: '/wide', keys: keys.map((key) => ({ key })) },
+          params: { path: [], query: keys, body: [] },
+          facts: { keys },
+          findings: [],
+        })],
+        findings: [],
+        complete: true,
+        excluded: [],
+      }),
+    };
+    const fixture = await createAppFixture({ 'src/components/glirastes-bridge.tsx': BRIDGE });
+    for (const mode of ['write', 'frozen'] as const) {
+      const error = await failure(runToolsPipelineWith({ root: fixture.root, mode }, { sources: [wide] }));
+      const invalid = error.result.findings.filter((finding) => finding.code === 'generated-output-invalid');
+      expect(invalid).toEqual([expect.objectContaining({ severity: 'error', subjectRef: TOOLS_PATHS.contracts })]);
+      expect(invalid[0]?.message).toContain('UI filter /wide');
+      expect(invalid[0]?.message).toContain('uiAction.keys');
+      expect(invalid[0]?.nextAction).toBe(nextActionFor('generated-output-invalid'));
+      expect(invalid[0]?.nextAction).not.toBe(nextActionFor('no-such-code'));
+      expect(error.result.outputs).toEqual({});
+    }
+    for (const path of OUTPUT_PATHS) {
+      await expect(fixture.read(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
   }, 120_000);
 });
 

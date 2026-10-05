@@ -3,6 +3,7 @@ import { defineQueryFilters } from '../../../browser/query-filters.js';
 import { ToolPolicyFileSchema } from '../../../contracts/tool-policy.js';
 import { createAppFixture, removeAppFixtures } from '../__tests__/app-fixture.js';
 import { loadToolsConfig } from '../config.js';
+import { MAX_FILTER_KEYS, ToolContractSchema } from '../files.js';
 import { nextActionFor } from '../findings.js';
 import { EMPTY_CONVENTIONS } from '../resolutions.js';
 import { createSchemaProbe } from '../schema-probe.js';
@@ -335,6 +336,34 @@ describe('url-filters source: tool input property names', () => {
       expect([key, isFilterKeyName(key)]).toEqual([key, accepted(key)]);
     }
   });
+});
+
+describe('url-filters source: keys per view', () => {
+  it('keeps the first keys a filter tool can take in code-unit order and names the rest in a warning', async () => {
+    const keys = Array.from({ length: MAX_FILTER_KEYS + 25 }, (_, index) => `k${String(index).padStart(2, '0')}`);
+    const app = await createAppFixture({
+      'tsconfig.json': TSCONFIG,
+      'src/components/glirastes-bridge.tsx': BRIDGE,
+      'src/views.ts': "import { defineQueryFilters } from 'glirastes/browser';\n"
+        + `export const wide = defineQueryFilters({ path: '/wide', filters: { ${keys.map((key) => `${key}: 'string'`).join(', ')} } });\n`,
+    });
+    const observed = await createUrlFilterSource().observe(context(app.root));
+    expect(observed.observations).toHaveLength(1);
+    const [tool] = observed.observations;
+    const kept = keys.slice(0, MAX_FILTER_KEYS);
+    expect(keysOf(tool)).toEqual(kept);
+    expect(tool?.contract?.params.query).toEqual(kept);
+    expect(Object.keys((tool?.contract?.input as { properties: Record<string, unknown> }).properties)).toEqual(kept);
+    expect(ToolContractSchema.safeParse(tool?.contract).success).toBe(true);
+    const capped = tool?.findings.filter((finding) => finding.code === 'filter-keys-capped') ?? [];
+    expect(capped).toEqual([expect.objectContaining({ severity: 'warning', subjectRef: 'UI filter /wide' })]);
+    expect(capped[0]?.message).toContain(`${keys.length} URL parameters`);
+    expect(capped[0]?.message).toContain('k50, k51');
+    expect(capped[0]?.message).toContain('15 more');
+    expect(capped[0]?.message).not.toContain('k74');
+    expect(capped[0]?.nextAction).toBe(nextActionFor('filter-keys-capped'));
+    expect(capped[0]?.nextAction).not.toBe(nextActionFor('no-such-code'));
+  }, 120_000);
 });
 
 describe('mergeDomains', () => {

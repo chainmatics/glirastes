@@ -31,6 +31,7 @@ import {
   renderToolContracts,
   renderToolReport,
   schemaQualityOf,
+  ToolReportFileSchema,
   type ArtifactToolInput,
   type ToolReportTool,
 } from './artifact.js';
@@ -231,6 +232,50 @@ function renderDerivedOutputs(input: DerivedOutputInput): Record<string, string>
     [TOOLS_PATHS.receipt]: `${JSON.stringify(receipt, null, 2)}\n`,
     [modulePath]: renderGeneratedModule({ modulePath, artifact: input.artifact, contracts: input.contracts }),
   };
+}
+
+/**
+ * Every primary output with the schema its reader applies (the next refresh,
+ * the integrity check, `tools status`). A rendered file that its reader would
+ * reject is never written, so refresh cannot lock itself out.
+ */
+const OUTPUT_SCHEMAS: ReadonlyArray<readonly [string, z.ZodType]> = [
+  [TOOLS_PATHS.inventory, FoundationExecutionInventorySchema],
+  [TOOLS_PATHS.tombstones, ToolTombstonesFileSchema],
+  [TOOLS_PATHS.contracts, ToolContractsFileSchema],
+  [TOOLS_PATHS.report, ToolReportFileSchema],
+  [TOOLS_PATHS.setupArtifact, AppSetupArtifactSchema],
+];
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** `tools.3.contract.uiAction.keys (UI filter /wide)`: the field and the tool it belongs to. */
+function issueLocation(value: unknown, path: ReadonlyArray<PropertyKey>): string {
+  let current = value;
+  let subject: string | undefined;
+  for (const segment of path) {
+    if (!isRecord(current)) break;
+    current = current[segment];
+    if (isRecord(current) && typeof current.stableKey === 'string') subject = current.stableKey;
+  }
+  const at = path.map(String).join('.') || 'the top level';
+  if (subject === undefined) return at;
+  return `${at} (${subject.length <= 200 ? subject : `${subject.slice(0, 199)}…`})`;
+}
+
+function unreadableOutputs(outputs: Readonly<Record<string, string>>): ToolFinding[] {
+  const findings: ToolFinding[] = [];
+  for (const [path, schema] of OUTPUT_SCHEMAS) {
+    const value: unknown = JSON.parse(outputs[path]!);
+    const parsed = schema.safeParse(value);
+    if (parsed.success) continue;
+    const issue = parsed.error.issues[0]!;
+    findings.push(toolFinding('generated-output-invalid', 'error', path,
+      `${path} would not match its own schema at ${issueLocation(value, issue.path)}: ${issue.message}.`));
+  }
+  return findings;
 }
 
 async function diffOutputs(root: string, outputs: Readonly<Record<string, string>>): Promise<string[]> {
@@ -499,6 +544,11 @@ async function generate(
     [TOOLS_PATHS.setupArtifact]: built.raw,
     ...derived,
   };
+  const unreadable = unreadableOutputs(outputs);
+  if (unreadable.length > 0) {
+    findings.push(...unreadable);
+    return result({ changes: generation.changes });
+  }
   const driftPaths = await diffOutputs(root, outputs);
   if (options.mode !== 'write') {
     for (const path of driftPaths) {
