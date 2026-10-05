@@ -51,11 +51,14 @@ export { TechnicalRuntimeEventSchema } from './events.js';
 export type { TechnicalRuntimeEvent } from './events.js';
 
 export {
+  APP_SETUP_EXCLUSION_LIMITS,
   AppSetupArtifactSchema,
   AppSetupAssessmentModeSchema,
+  AppSetupExclusionSchema,
   AppSetupOperationGroupSchema,
   AppSetupStatusSchema,
   AppSetupToolCandidateSchema,
+  AppSetupToolProvenanceSchema,
   assertAppSetupSemanticParity,
 } from './app-setup.js';
 
@@ -98,9 +101,11 @@ export type {
 export type {
   AppSetupArtifact,
   AppSetupAssessmentMode,
+  AppSetupExclusion,
   AppSetupOperationGroup,
   AppSetupStatus,
   AppSetupToolCandidate,
+  AppSetupToolProvenance,
 } from './app-setup.js';
 
 export {
