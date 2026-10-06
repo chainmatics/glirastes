@@ -176,6 +176,37 @@ describe('glirastes tools', () => {
     });
   });
 
+  it('checks the routing of committed example sentences without a model and fails only when strict', async () => {
+    const fixture = await createAppFixture({ 'src/app/api/tasks/route.ts': ROUTE });
+    await fixture.write('.glirastes/tool-semantics.json', `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'GET /api/tasks', examples: { en: ['list my tasks', 'which tasks do I have', 'tasks overview'] } },
+        { stableKey: 'POST /api/tasks', examples: { en: ['create a task', 'add a task called report', 'new task'] }, synonyms: { en: ['add'] } },
+      ],
+    })}\n`);
+    const out: string[] = [];
+    const deps = { cwd: fixture.root, env: {}, log: (line: string) => { out.push(line); }, error: () => undefined };
+    expect(await runToolsCommand(['refresh'], deps)).toBe(0);
+    out.length = 0;
+    expect(await runToolsCommand(['eval'], deps)).toBe(0);
+    expect(out.join('\n')).toContain('Routing check (top 3): 6 of 6 example sentences find their tool.');
+    out.length = 0;
+    expect(await runToolsCommand(['eval', '--json', '--top', '1'], deps)).toBe(0);
+    expect(JSON.parse(out[0]!)).toMatchObject({
+      top: 1,
+      summary: { sentences: 6, passed: 4, failed: 2 },
+      tools: [
+        { tool: 'tasks.create', failures: [] },
+        { tool: 'tasks.list', failures: [{ sentence: 'tasks overview', rank: 2, competitors: ['tasks.create'] }, expect.anything()] },
+      ],
+    });
+    out.length = 0;
+    expect(await runToolsCommand(['eval', '--strict', '--top', '1'], deps)).toBe(1);
+    expect(out.join('\n')).toContain('! tasks.list  "tasks overview": rank 2; ahead: tasks.create  (routing-ambiguous)');
+    expect(await runToolsCommand(['eval', '--top', '0'], deps)).toBe(2);
+  }, 120_000);
+
   it('asks for a refresh when status finds no outputs', async () => {
     const fixture = await createAppFixture();
     const err: string[] = [];

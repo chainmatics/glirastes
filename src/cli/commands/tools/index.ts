@@ -7,6 +7,7 @@ import {
 import { isFoundationDiagnosticError } from '../../../diagnostics/index.js';
 import { ToolsUsageError } from './args.js';
 import { runToolsCheck } from './check.js';
+import { runToolsEval } from './eval.js';
 import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
 import { runToolsRefresh } from './refresh.js';
 import { runToolsResolve } from './resolve.js';
@@ -29,6 +30,8 @@ export const TOOLS_USAGE = [
   '         show what your chat can do',
   '       glirastes tools resolve --print [--root <dir>] [--json]',
   '         print the open stage-1 findings as a work list for your coding agent',
+  '       glirastes tools eval [--root <dir>] [--top <n>] [--strict] [--json]',
+  '         check that every example sentence finds its tool (no model, CI-ready)',
 ].join('\n');
 
 /** Subcommand parsing lives here so src/cli/index.ts only dispatches `tools`. */
@@ -52,6 +55,8 @@ export async function runToolsCommand(argv: string[], deps: ToolsCommandDependen
         return await runToolsStatus(rest, io);
       case 'resolve':
         return await runToolsResolve(rest, io);
+      case 'eval':
+        return await runToolsEval(rest, io);
       default:
         io.error(TOOLS_USAGE);
         return 2;
