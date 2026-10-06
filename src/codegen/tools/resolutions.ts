@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import { riskTier, type DeclaredEffect } from '../../contracts/tool-policy.js';
+import { declaredEffectRiskClass, riskTier } from '../../contracts/tool-policy.js';
 import type { ToolRiskClass } from '../../contracts/index.js';
 import {
   AGENT_MODEL_PATTERN,
@@ -149,14 +149,6 @@ export interface ResolutionEvidence {
   bodyKeys: ReadonlyArray<string> | 'opaque';
 }
 
-const EFFECT_RISK: Readonly<Record<DeclaredEffect, ToolRiskClass>> = {
-  read: 'safe-read',
-  write: 'write',
-  destructive: 'delete',
-  external: 'external',
-  financial: 'financial',
-};
-
 /**
  * Keys an input schema may name and must keep: every name needs code
  * evidence (path, query or a closed body), and no evidenced query or body
@@ -221,7 +213,7 @@ export function validateResolutionEntry(input: {
     return reject('it was changed after review; restore it from git, or review it and run glirastes tools verify');
   }
   if (entry.effect && input.codeRiskClass
-    && riskTier(EFFECT_RISK[entry.effect]) < riskTier(input.codeRiskClass)) {
+    && riskTier(declaredEffectRiskClass(entry.effect)) < riskTier(input.codeRiskClass)) {
     return reject(`its effect ${entry.effect} would lower the risk below ${input.codeRiskClass}; effects may only raise it`);
   }
   const specs = [['input', entry.input], ['output', entry.output]] as const;

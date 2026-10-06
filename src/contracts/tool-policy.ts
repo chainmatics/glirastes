@@ -219,6 +219,15 @@ const DECLARED_EFFECT_RISK: Readonly<Record<DeclaredEffect, AssessedRiskClass>> 
   financial: 'financial',
 };
 
+/**
+ * The risk class a declared effect stands for. `deriveToolPolicyDefaults`
+ * raises to it, and anything that checks an effect against the code's class
+ * (the agent resolution gate) must read it here, never from a copy.
+ */
+export function declaredEffectRiskClass(effect: DeclaredEffect): AssessedRiskClass {
+  return DECLARED_EFFECT_RISK[effect];
+}
+
 function segmentWords(segment: string): string[] {
   return segment
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')

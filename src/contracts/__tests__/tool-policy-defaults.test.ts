@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   TOOL_POLICY_RULES_VERSION,
+  declaredEffectRiskClass,
   deriveToolPolicyDefaults,
+  type DeclaredEffect,
   type ToolPolicyDefaults,
   type ToolPolicyDefaultsInput,
 } from '../tool-policy.js';
@@ -148,4 +150,27 @@ describe('deriveToolPolicyDefaults', () => {
       expect(deriveToolPolicyDefaults(input).riskClass).not.toBe('unknown');
     }
   });
+});
+
+describe('declaredEffectRiskClass', () => {
+  const EFFECTS: ReadonlyArray<[DeclaredEffect, ToolPolicyDefaults['riskClass']]> = [
+    ['read', 'safe-read'],
+    ['write', 'write'],
+    ['destructive', 'delete'],
+    ['external', 'external'],
+    ['financial', 'financial'],
+  ];
+
+  it.each(EFFECTS)('maps %s to %s', (effect, riskClass) => {
+    expect(declaredEffectRiskClass(effect)).toBe(riskClass);
+  });
+
+  it.each(EFFECTS)(
+    'is the class deriveToolPolicyDefaults raises a read to for %s',
+    (effect) => {
+      expect(deriveToolPolicyDefaults(
+        endpoint('GET', '/api/things', 'things.list', { declaredEffect: effect }),
+      ).riskClass).toBe(declaredEffectRiskClass(effect));
+    },
+  );
 });
