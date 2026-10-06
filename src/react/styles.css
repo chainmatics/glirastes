@@ -459,6 +459,148 @@
   color: var(--cm-text-muted);
 }
 
+/* ---------- Chat interactions: entity actions and command arguments ---------- */
+[data-component="ai-chat-panel"] [data-component="mention-dropdown"] [data-element="result-row"] {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-right: 0.5rem;
+}
+[data-component="ai-chat-panel"] [data-element="result-row"] > [data-component="mention-dropdown-item"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+[data-component="ai-chat-panel"] [data-element="entity-actions"] {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+[data-component="ai-chat-panel"] [data-component="mention-action"] {
+  padding: 0.125rem 0.5rem;
+  background: var(--cm-bg-muted);
+  border: 1px solid var(--cm-border);
+  border-radius: 999px;
+  color: var(--cm-text);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+[data-component="ai-chat-panel"] [data-component="mention-action"][data-selected="true"] {
+  background: var(--cm-primary-tint);
+  border-color: var(--cm-primary);
+}
+[data-component="ai-chat-panel"] [data-component="command-arguments"] {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  max-width: 100%;
+  margin: 0 0 0.5rem;
+  padding: 0.75rem;
+  background: var(--cm-bg);
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+}
+/* The composer wrapper is one flex row and its `> form` rule (flex: 1) outranks the rule above,
+   which would park the argument form beside the editor. The wrapper wraps and the form takes
+   the full first row; the wrapper's gap supplies the space below it. */
+[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] {
+  flex-wrap: wrap;
+}
+[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form[data-component="command-arguments"] {
+  flex: 1 1 100%;
+  margin: 0;
+}
+[data-component="command-arguments"] [data-element="title"] {
+  flex: 1 1 100%;
+  margin: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+[data-component="command-arguments"] [data-element="error"] {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--cm-danger);
+  font-size: 12px;
+}
+[data-component="command-arguments"] [data-element="field"] {
+  position: relative;
+  display: flex;
+  flex: 1 1 10rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  color: var(--cm-text-muted);
+  font-size: 12px;
+}
+[data-component="command-arguments"] input,
+[data-component="command-arguments"] select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  background: var(--cm-bg-muted);
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  color: var(--cm-text);
+  font: inherit;
+  font-size: 14px;
+}
+[data-component="command-arguments"] input:focus,
+[data-component="command-arguments"] select:focus {
+  outline: none;
+  border-color: var(--cm-primary);
+  box-shadow: 0 0 0 3px var(--cm-primary-ring);
+}
+[data-component="command-arguments"] [data-element="options"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.25rem);
+  z-index: 20;
+  max-height: 12rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--cm-bg);
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+[data-component="command-arguments"] [data-element="options"] [role="option"] {
+  padding: 0.375rem 0.5rem;
+  color: var(--cm-text);
+  cursor: pointer;
+}
+[data-component="command-arguments"] [data-element="options"] [role="option"][data-selected="true"] {
+  background: var(--cm-primary-tint);
+}
+[data-component="command-arguments"] [data-element="actions"] {
+  display: flex;
+  gap: 0.375rem;
+}
+[data-component="command-arguments"] [data-action="run"],
+[data-component="command-arguments"] [data-action="cancel"] {
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--cm-radius-sm);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+[data-component="command-arguments"] [data-action="run"] {
+  background: var(--cm-primary);
+  border: 1px solid var(--cm-primary);
+  color: #ffffff;
+}
+[data-component="command-arguments"] [data-action="cancel"] {
+  background: transparent;
+  border: 1px solid var(--cm-border);
+  color: var(--cm-text);
+}
+
 /* ---------- Structured clarification ---------- */
 [data-component="ai-chat-panel"] [data-component="clarification-card"] {
   box-sizing: border-box;
