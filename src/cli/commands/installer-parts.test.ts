@@ -81,7 +81,7 @@ describe('part resolution', () => {
     expect(resolvePartSkills(['tools'], { stack: 'nextjs' }))
       .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools']);
     expect(resolvePartSkills(['setup'], { stack: 'nextjs' }))
-      .toEqual(['setting-up-glirastes']);
+      .toEqual(['setting-up-glirastes', 'migrating-to-glirastes']);
   });
 
   it('yields no skills for a part that was declined', () => {

@@ -103,6 +103,7 @@ describe('a fresh app reaches a synced setup run', () => {
         'describing-glirastes-tools',
         'integrating-glirastes-nextjs',
         'maintaining-glirastes-tools',
+        'migrating-to-glirastes',
         'setting-up-glirastes',
       ]);
     await access(join(
