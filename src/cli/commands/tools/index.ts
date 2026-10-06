@@ -10,6 +10,7 @@ import { runToolsCheck } from './check.js';
 import { runToolsDescribe } from './describe.js';
 import { runToolsEval } from './eval.js';
 import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
+import { POLICY_USAGE, runToolsPolicy } from './policy.js';
 import { runToolsRefresh } from './refresh.js';
 import { runToolsResolve } from './resolve.js';
 import { runToolsStatus } from './status.js';
@@ -37,6 +38,8 @@ export const TOOLS_USAGE = [
   '         print descriptions, schemas, synonyms and examples to write as a work list for your coding agent',
   '       glirastes tools eval [--root <dir>] [--top <n>] [--strict] [--json]',
   '         check that every example sentence finds its tool (no model, CI-ready)',
+  '       glirastes tools policy <show|disable|enable|confirm|relax|raise|roles|describe|exclude|include|accept|reset> ...',
+  '         change the local tool policy (glirastes tools policy for details)',
 ].join('\n');
 
 /** Subcommand parsing lives here so src/cli/index.ts only dispatches `tools`. */
@@ -66,13 +69,15 @@ export async function runToolsCommand(argv: string[], deps: ToolsCommandDependen
         return await runToolsDescribe(rest, io);
       case 'eval':
         return await runToolsEval(rest, io);
+      case 'policy':
+        return await runToolsPolicy(rest, io);
       default:
         io.error(TOOLS_USAGE);
         return 2;
     }
   } catch (error) {
     if (error instanceof ToolsUsageError) {
-      io.error(`${error.message}\n${TOOLS_USAGE}`);
+      io.error(`${error.message}\n${subcommand === 'policy' ? POLICY_USAGE : TOOLS_USAGE}`);
       return 2;
     }
     if (error instanceof ToolsPipelineFailure) {

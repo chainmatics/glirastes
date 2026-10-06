@@ -146,7 +146,10 @@ export function formatToolsHuman(result: ToolsPipelineResult): string {
   return lines.join('\n');
 }
 
-function confirmationLabel(entry: ToolStatusEntry): string {
+/** The confirmation label `tools status` and `tools policy show` share (D16). */
+export function confirmationLabel(
+  entry: Pick<ToolStatusEntry, 'confirmation' | 'confirmationOrigin' | 'platformMayRelax' | 'riskClass'>,
+): string {
   if (!entry.confirmation) return 'runs directly';
   if (entry.platformMayRelax) return 'asks first, Platform may relax';
   if (entry.confirmationOrigin === 'local-policy' && riskTier(entry.riskClass) <= 2) {
@@ -197,7 +200,7 @@ export function formatToolStatus(entries: ReadonlyArray<ToolStatusEntry>): strin
     lines.push(
       '',
       'A Platform owner or admin can switch off a confirmation marked "Platform may relax" for a connected app.',
-      'To keep one, set "requiresApproval": true for the tool in .glirastes/tool-policy.json.',
+      'To keep one, run glirastes tools policy confirm <tool>; it writes "requiresApproval": true to .glirastes/tool-policy.json.',
     );
   }
   return lines.join('\n');
