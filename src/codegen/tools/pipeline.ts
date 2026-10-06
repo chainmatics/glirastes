@@ -9,6 +9,7 @@ import {
   AppSetupArtifactSchema,
   assertAppSetupSemanticParity,
   type AppSetupArtifact,
+  type ToolRiskClass,
 } from '../../contracts/index.js';
 import {
   confirmationFloor,
@@ -16,10 +17,12 @@ import {
   resolveToolPolicy,
   riskTier,
   type EffectiveToolPolicy,
+  type ToolPolicyDefaults,
   type ToolPolicyEntry,
 } from '../../contracts/tool-policy.js';
 import type { AppSetupToolProvenance } from '../../contracts/index.js';
 import { FoundationDiagnosticError, isFoundationDiagnosticError } from '../../diagnostics/index.js';
+import { modelFacingToolName } from '../../runtime/local-tool-bindings.js';
 import {
   discoverFoundationExecutions,
   FoundationExecutionInventorySchema,
@@ -34,6 +37,7 @@ import {
   schemaQualityOf,
   ToolReportFileSchema,
   type ArtifactToolInput,
+  type SchemaQuality,
   type ToolReportTool,
 } from './artifact.js';
 import { compareCodeUnits } from './canonical.js';
@@ -49,9 +53,17 @@ import { ToolContractsFileSchema, ToolTombstonesFileSchema, toToolContractsEntry
 import { sortFindings, toolFinding, TRANSIENT_FINDING_CODES } from './findings.js';
 import { readPromptBundle, readToolInputs, type PromptBundleInput } from './inputs.js';
 import type { ToolsMode } from './mode.js';
-import { resolveToolProse } from './prose.js';
+import { lookupSemantics, resolveToolProse, type DescriptionOrigin } from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
+import {
+  requiredLanguages,
+  semanticsFacts,
+  semanticsSearch,
+  validateSemanticsEntry,
+  type SemanticsCheck,
+  type SemanticsFacts,
+} from './semantics.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { createNextPagesSource } from './sources/next-pages.js';
 import { createReactActionSource } from './sources/react-actions.js';
@@ -66,11 +78,42 @@ import {
 import type {
   ExcludedTool,
   ObservedTool,
+  ToolContract,
   ToolContractsEntry,
   ToolFinding,
   ToolSource,
   ToolSourceContext,
 } from './types.js';
+
+/**
+ * What the generator knows about one tool, in memory only: the work lists of
+ * `tools resolve --print` and `tools describe --print` are built from it.
+ */
+export interface ToolsPipelineTool {
+  toolId: string;
+  stableKey: string;
+  definitionId: string;
+  modelName: string;
+  executionKind: 'endpoint' | 'ui';
+  /** `POST /api/tasks` or `UI tasks.highlight`. */
+  route: string;
+  files: string[];
+  contract: ToolContract | null;
+  interfaceDigest: string | null;
+  params: ToolContract['params'] | null;
+  defaults: ToolPolicyDefaults;
+  enabled: boolean;
+  riskClass: ToolRiskClass;
+  requiresApproval: boolean;
+  /** `.glirastes/tool-policy.json` has an entry for this tool. */
+  localPolicy: boolean;
+  module: string;
+  description: string;
+  descriptionOrigin: DescriptionOrigin;
+  schemaQuality: SchemaQuality;
+  semantics: SemanticsFacts & { stale: boolean; rejected: boolean };
+  findings: ToolFinding[];
+}
 
 export interface ToolsPipelineResult {
   mode: ToolsMode;
@@ -80,6 +123,8 @@ export interface ToolsPipelineResult {
   outputs: Record<string, string>;
   driftPaths: string[];
   wrote: boolean;
+  /** Every tool of the refreshed inventory; empty when the refresh stopped early or verified integrity. */
+  tools?: ToolsPipelineTool[];
 }
 
 export interface ToolsPipelineOptions {
@@ -335,6 +380,7 @@ async function generate(
 ): Promise<ToolsPipelineResult> {
   const findings: ToolFinding[] = [];
   const excluded: ExcludedTool[] = [];
+  const toolViews: ToolsPipelineTool[] = [];
   const result = (extra: Partial<ToolsPipelineResult> = {}): ToolsPipelineResult => ({
     mode: options.mode,
     changes: emptyChanges(),
@@ -343,6 +389,7 @@ async function generate(
     outputs: {},
     driftPaths: [],
     wrote: false,
+    tools: toolViews,
     ...extra,
   });
 
@@ -415,6 +462,7 @@ async function generate(
   const artifactTools: ArtifactToolInput[] = [];
   const contractEntries: ToolContractsEntry[] = [];
   const reportTools: ToolReportTool[] = [];
+  const languages = requiredLanguages(config.locale);
 
   for (const execution of inventory.executions) {
     const tool = observedByKey.get(execution.stableKey);
@@ -458,6 +506,19 @@ async function generate(
         `Risk raised from ${previousRisk} to ${resolved.effective.riskClass}; confirmation follows automatically.`));
     }
     findings.push(...tool.findings);
+    const semanticsEntry = lookupSemantics(inputs.semantics, execution.stableKey, execution.definitionId);
+    const semantics: SemanticsCheck = semanticsEntry
+      ? validateSemanticsEntry(semanticsEntry, {
+        stableKey: execution.stableKey,
+        ...(tool.interface ? { interfaceDigest: tool.interface.digest } : {}),
+        ...(tool.contract ? { input: tool.contract.input } : {}),
+      })
+      : { findings: [], stale: false };
+    findings.push(...semantics.findings);
+    if (semantics.stale) {
+      findings.push(toolFinding('semantics-stale', 'warning', execution.stableKey,
+        'The handler interface changed after an agent described this tool; the description stays in use until it is renewed.'));
+    }
     const prose = resolveToolProse({
       stableKey: execution.stableKey,
       definitionId: execution.definitionId,
@@ -467,6 +528,7 @@ async function generate(
       ...(tool.evidence.jsDoc ? { jsDoc: tool.evidence.jsDoc } : {}),
       ...(tool.prose ? { hints: tool.prose } : {}),
       semantics: inputs.semantics,
+      entry: semantics.entry ?? null,
       ...(resolved.effective.description && resolved.effective.origin.description !== 'code-default'
         ? { policyDescription: resolved.effective.description }
         : {}),
@@ -485,12 +547,51 @@ async function generate(
         schemaSource: schemaQuality,
       },
     });
+    const search = semanticsSearch(semantics.entry);
     contractEntries.push({
       toolId: execution.toolId,
       stableKey: execution.stableKey,
       definitionId: execution.definitionId,
       contract: tool.contract ?? null,
       defaults,
+      ...(search.synonyms.length > 0 || search.examples.length > 0
+        ? {
+          search: {
+            ...(search.synonyms.length > 0 ? { synonyms: search.synonyms } : {}),
+            ...(search.examples.length > 0 ? { examples: search.examples } : {}),
+          },
+        }
+        : {}),
+    });
+    const requiresApproval = confirmationFloor(resolved.effective.riskClass, resolved.effective.requiresApproval);
+    toolViews.push({
+      toolId: execution.toolId,
+      stableKey: execution.stableKey,
+      definitionId: execution.definitionId,
+      modelName: modelFacingToolName(execution.definitionId),
+      executionKind: execution.executionKind,
+      route: execution.executionKind === 'endpoint'
+        ? `${execution.method} ${execution.path}`
+        : `UI ${execution.actionBindingRef}`,
+      files: tool.files ?? (execution.executionKind === 'endpoint' ? [execution.sourceFile] : []),
+      contract: tool.contract ?? null,
+      interfaceDigest: tool.interface?.digest ?? null,
+      params: tool.interface?.params ?? null,
+      defaults,
+      enabled: resolved.effective.enabled,
+      riskClass: resolved.effective.riskClass,
+      requiresApproval,
+      localPolicy: local !== undefined,
+      module: prose.module,
+      description: prose.description,
+      descriptionOrigin: prose.descriptionOrigin,
+      schemaQuality,
+      semantics: {
+        ...semanticsFacts(semantics.entry, languages),
+        stale: semantics.stale,
+        rejected: semanticsEntry !== undefined && semantics.entry === undefined,
+      },
+      findings: [],
     });
     reportTools.push({
       toolId: execution.toolId,
@@ -498,7 +599,7 @@ async function generate(
       definitionId: execution.definitionId,
       enabled: resolved.effective.enabled,
       riskClass: resolved.effective.riskClass,
-      requiresApproval: confirmationFloor(resolved.effective.riskClass, resolved.effective.requiresApproval),
+      requiresApproval,
       contractSource: tool.contract?.source ?? null,
       quality: {
         description: prose.descriptionOrigin,
@@ -511,6 +612,9 @@ async function generate(
       findings.push(toolFinding('policy-entry-orphaned', 'warning', key,
         'This tool-policy.json entry matches no tool in the current code.'));
     }
+  }
+  for (const view of toolViews) {
+    view.findings = sortFindings(findings.filter((finding) => finding.subjectRef === view.stableKey));
   }
   if (findings.some(isError)) return result({ changes: generation.changes });
 

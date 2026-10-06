@@ -61,6 +61,12 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     }
     return { tool, contract };
   });
+  // Search-only synonyms of the enabled tools, keyed like `toolSemantics` of createAiChatHandler.
+  const searchSemantics = Object.fromEntries(tools
+    .map((tool) => [catalogEntry(tool).modelName as string, contractsById.get(tool.toolId)?.search?.synonyms] as const)
+    .filter((entry): entry is readonly [string, string[]] => (entry[1]?.length ?? 0) > 0)
+    .sort(([left], [right]) => compareCodeUnits(left, right))
+    .map(([modelName, synonyms]) => [modelName, { synonyms }]));
   const modules = [...new Set(bound
     .flatMap(({ contract }) => [contract.runtime.input, contract.runtime.output])
     .flatMap((source) => (source.kind === 'module-export' ? [source.module] : [])))]
@@ -98,6 +104,11 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
       ? tools.map((tool) => JSON.stringify(tool.toolId)).join(' | ')
       : 'never'};`, '');
   }
+  lines.push(
+    '/** Pass as `toolSemantics` to createAiChatHandler: synonyms help find_tools, they never grant a tool. */',
+    `export const toolSearchSemantics = ${literal(searchSemantics)}${typescript ? ' as const' : ''};`,
+    '',
+  );
   lines.push('export function createToolBindings() {');
   if (bound.length === 0) {
     lines.push('  return [];');

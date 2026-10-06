@@ -86,10 +86,22 @@ describe('renderGeneratedModule', () => {
     expect(text).not.toContain('export type');
   });
 
+  it('exports the synonyms of enabled tools for find_tools, keyed by model-facing name', () => {
+    const searched = contracts('src/app/api/notes/schemas.ts').map((entry) => (
+      entry.toolId === id('a2') ? { ...entry, search: { synonyms: ['Notizen', 'memos'], examples: ['Show my notes'] } }
+        : entry.toolId === id('a3') ? { ...entry, search: { synonyms: ['archive'] } } : entry
+    ));
+    const text = renderGeneratedModule({ modulePath: 'src/generated/glirastes/tools.generated.js', artifact, contracts: searched });
+    expect(text).toContain('export const toolSearchSemantics = {\n  "notes_list": {\n    "synonyms": [\n      "Notizen",\n      "memos"\n    ]\n  }\n};');
+    expect(text).not.toContain('"notes_archive": {');
+    expect(text).not.toContain('Show my notes');
+  });
+
   it('emits an empty module when no tool is enabled', () => {
     const empty = AppSetupArtifactSchema.parse({ ...artifact, tools: [artifact.tools[2]], planner: { ...artifact.planner, toolIds: [] } });
     const text = renderGeneratedModule({ modulePath: 'src/generated/glirastes/tools.generated.ts', artifact: empty, contracts: contracts('src/a.ts') });
     expect(text).toContain('export type GeneratedToolId = never;');
+    expect(text).toContain('export const toolSearchSemantics = {} as const;');
     expect(text).toContain('  return [];');
     expect(text).not.toContain('glirastes/server');
   });
@@ -114,8 +126,10 @@ describe('renderGeneratedModule', () => {
       'src/generated/glirastes/tools.generated.ts': generated,
       'src/consumer.ts': "import { createContractBindings } from 'glirastes/runtime';\n"
         + "import * as generated from './generated/glirastes/tools.generated';\n"
+        + "import type { ToolSearchSemanticsMap } from 'glirastes/runtime';\n"
         + 'export const bound = createContractBindings(generated);\n'
-        + 'export const ids: generated.GeneratedToolId[] = generated.toolCatalog.map((entry) => entry.toolId);\n',
+        + 'export const ids: generated.GeneratedToolId[] = generated.toolCatalog.map((entry) => entry.toolId);\n'
+        + 'export const semantics: ToolSearchSemanticsMap = generated.toolSearchSemantics;\n',
     });
     const config = ts.readConfigFile(app.path('tsconfig.json'), ts.sys.readFile);
     const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, app.root);

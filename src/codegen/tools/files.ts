@@ -74,6 +74,12 @@ const ToolPolicyDefaultsSchema = z.object({
   rulesVersion: z.literal(TOOL_POLICY_RULES_VERSION),
 }).strict();
 
+/** Synonyms bounded like the runtime index; examples are 3–5 sentences in each of two languages. */
+const ToolSearchFactsSchema = z.object({
+  synonyms: z.array(z.string().min(1).max(100)).min(1).max(20).optional(),
+  examples: z.array(z.string().min(1).max(200)).min(1).max(10).optional(),
+}).strict();
+
 export const ToolContractsFileSchema = z.object({
   schemaVersion: z.literal(1),
   appId: z.uuid(),
@@ -83,6 +89,7 @@ export const ToolContractsFileSchema = z.object({
     definitionId: z.string().min(1).max(200),
     contract: ToolContractSchema.nullable(),
     defaults: ToolPolicyDefaultsSchema,
+    search: ToolSearchFactsSchema.optional(),
   }).strict()).max(5_000),
 }).strict();
 

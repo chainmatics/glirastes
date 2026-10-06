@@ -21,6 +21,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'output-contract-opaque': 'Optional: return a typed object or validate the response with an exported schema.',
   'resolution-rejected': 'Fix or remove the tool-resolutions.json or tool-semantics.json entry the message names; the tool keeps its fallback meanwhile.',
   'enrichment-stale': 'Optional: describe the changed tool again (glirastes tools describe --print <tool>); it uses the contract derived from code meanwhile.',
+  'semantics-stale': 'Optional: describe the changed tool again (glirastes tools describe --print <tool>); the earlier agent description stays in use meanwhile.',
   'definition-id-invalid': 'Use a contract id like resource.action (letters and digits, dot-separated).',
   'definition-id-conflict': 'Give one of the tools a distinct contract id.',
   'tool-semantics-invalid': 'Fix .glirastes/tool-semantics.json; descriptions fall back to code and templates meanwhile.',

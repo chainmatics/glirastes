@@ -488,3 +488,80 @@ describe('runToolsPipeline (client actions)', () => {
     expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
   }, 120_000);
 });
+
+describe('runToolsPipeline (stage-2 semantics)', () => {
+  const EXAMPLES = ['Show my tasks', 'Which tasks are still open?', 'List the finished tasks'];
+
+  async function interfaceOf(fixture: AppFixture, stableKey: string): Promise<string> {
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    return contracts.tools.find((entry) => entry.stableKey === stableKey)!.contract!.interfaceDigest;
+  }
+
+  it('carries checked synonyms and examples into the contracts file, the module and the tool view', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const interfaceDigest = await interfaceOf(fixture, 'GET /api/tasks');
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [{
+        stableKey: 'GET /api/tasks',
+        description: 'Lists the caller\'s tasks, optionally by status. Use tasks.create to add one.',
+        synonyms: { en: ['to-dos', 'my work'] },
+        examples: { en: EXAMPLES },
+        exampleCalls: [{ sentence: 'List the finished tasks', input: { status: ['done'] } }],
+        origin: { description: 'agent', synonyms: 'agent', examples: 'agent', exampleCalls: 'agent' },
+        agent: { model: 'claude-code', interfaceDigest },
+      }],
+    })}\n`);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const entry = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)))
+      .tools.find((tool) => tool.stableKey === 'GET /api/tasks');
+    expect(entry?.search).toEqual({ synonyms: ['my work', 'to-dos'], examples: [...EXAMPLES].sort() });
+    const module = await fixture.read(DEFAULT_GENERATED_MODULE);
+    expect(module).toContain('export const toolSearchSemantics = {\n  "tasks_list": {\n    "synonyms": [\n      "my work",');
+    const view = result.tools?.find((tool) => tool.stableKey === 'GET /api/tasks');
+    expect(view).toMatchObject({
+      definitionId: 'tasks.list',
+      modelName: 'tasks_list',
+      route: 'GET /api/tasks',
+      files: ['src/app/api/tasks/route.ts', 'src/lib/schemas.ts', 'src/lib/session.ts'],
+      interfaceDigest,
+      params: { path: [], query: ['status'], body: [] },
+      descriptionOrigin: 'agent',
+      schemaQuality: 'field-names',
+      semantics: { protectedFields: [], hasSynonyms: true, missingExamples: [], stale: false, rejected: false },
+    });
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+  }, 120_000);
+
+  it('ignores a rejected agent entry and keeps a stale one in use until it is renewed', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const interfaceDigest = await interfaceOf(fixture, 'GET /api/tasks');
+    const agent = { model: 'codex', interfaceDigest };
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'GET /api/tasks', description: 'Lists tasks by status.', origin: { description: 'agent' }, agent },
+        {
+          stableKey: 'POST /api/tasks', description: 'Creates a task.', examples: { en: ['Mail bob@corp.example.org', 'b', 'c'] },
+          origin: { description: 'agent', examples: 'agent' }, agent,
+        },
+      ],
+    })}\n`);
+    const first = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const post = first.tools?.find((tool) => tool.stableKey === 'POST /api/tasks');
+    expect(post).toMatchObject({ descriptionOrigin: 'template', semantics: { rejected: true } });
+    expect(post?.findings.map((finding) => finding.code)).toContain('resolution-rejected');
+    await fixture.write('src/app/api/tasks/route.ts', `${IMPORTS}${GET_HANDLER.replace(
+      "searchParams.getAll('status')", "searchParams.getAll('status'), q: searchParams.get('q')",
+    )}${POST_HANDLER}`);
+    const changed = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const get = changed.tools?.find((tool) => tool.stableKey === 'GET /api/tasks');
+    expect(get).toMatchObject({ description: 'Lists tasks by status.', descriptionOrigin: 'agent', semantics: { stale: true } });
+    expect(get?.findings.map((finding) => [finding.code, finding.severity])).toContainEqual(['semantics-stale', 'warning']);
+    expect(JSON.parse(await fixture.read(TOOLS_PATHS.report)).findings).toContainEqual(expect.objectContaining({
+      code: 'semantics-stale', subjectRef: 'GET /api/tasks',
+    }));
+  }, 120_000);
+});

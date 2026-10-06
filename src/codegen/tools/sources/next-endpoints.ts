@@ -65,6 +65,8 @@ interface RoutePiece {
   resolved?: ResolvedEndpointContract;
   findings: ToolFinding[];
   evidence: ObservedTool['evidence'];
+  interface?: ObservedTool['interface'];
+  files: string[];
 }
 
 interface EnumeratedRoutes {
@@ -243,12 +245,18 @@ function observeRoute(
   resolution: ResolutionEntry | undefined,
 ): RoutePiece {
   const { entry, analysis, contractModule } = route;
+  const files = [...new Set([
+    entry.sourceFile,
+    ...(contractModule ? [contractModule] : []),
+    ...(analysis?.importedModules ?? []),
+  ])].sort(compareCodeUnits);
   if (!analysis?.located?.fn) {
     return {
       entry,
       findings: [toolFinding('handler-unresolved', 'needs_attention', entry.stableKey,
         `The ${entry.method} export of ${entry.sourceFile} is not a function the generator can read.`)],
       evidence: { authEvidence: false, externalCall: false },
+      files,
     };
   }
   const located = analysis.located;
@@ -298,6 +306,15 @@ function observeRoute(
       ...(resolved.declaredEffect ? { declaredEffect: resolved.declaredEffect } : {}),
       ...(located.jsDoc ? { jsDoc: located.jsDoc } : {}),
     },
+    interface: {
+      digest: resolved.interfaceDigest,
+      params: resolved.contract?.params ?? {
+        path: [...entry.pathParams],
+        query: [...analysis.queryKeys],
+        body: analysis.bodyKeys === 'opaque' ? 'opaque' : [...analysis.bodyKeys],
+      },
+    },
+    files,
   };
 }
 
@@ -317,6 +334,8 @@ function toObserved(piece: RoutePiece, definitionId: string): ObservedTool {
       outputSchemaDigest: resolved?.outputSchemaDigest ?? OPAQUE_SCHEMA_DIGEST,
     },
     ...(resolved?.contract ? { contract: resolved.contract } : {}),
+    ...(piece.interface ? { interface: piece.interface } : {}),
+    files: piece.files,
     evidence: piece.evidence,
     findings: piece.findings,
     ...(resolved && Object.keys(resolved.prose).length > 0 ? { prose: resolved.prose } : {}),

@@ -269,6 +269,7 @@ async function observeActions(root: string, options: ReactActionSourceOptions): 
           uiMutation,
         },
         findings: toolFindings,
+        files: [...new Set(registrations.map((registration) => registration.file))].sort(compareCodeUnits),
         ...(jsDoc ? { jsDoc } : {}),
         ...(uiMutation ? { uiMutation } : {}),
       });

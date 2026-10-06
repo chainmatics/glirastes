@@ -68,9 +68,19 @@ export interface ToolProseHints {
   presentation?: ToolPresentation;
 }
 
+/** The interface a tool has now, also when no contract could be resolved. */
+export interface ObservedInterface {
+  digest: string;
+  params: ToolContract['params'];
+}
+
 export interface ObservedTool {
   execution: ObservedExecution;
   contract?: ToolContract;
+  /** Endpoints always; UI tools when their payload is typed. Read by the work lists. */
+  interface?: ObservedInterface;
+  /** App-relative files a coding agent reads to resolve or describe this tool. */
+  files?: string[];
   evidence: {
     authEvidence: boolean;
     externalCall: boolean;
@@ -90,12 +100,19 @@ export interface ExcludedTool {
   origin: 'default' | 'policy' | 'code';
 }
 
+/** Checked stage-2 search data: synonyms reach `find_tools`, examples feed `tools eval`. */
+export interface ToolSearchFacts {
+  synonyms?: string[];
+  examples?: string[];
+}
+
 export interface ToolContractsEntry {
   toolId: string;
   stableKey: string;
   definitionId: string;
   contract: ToolContract | null;
   defaults: ToolPolicyDefaults;
+  search?: ToolSearchFacts;
 }
 
 export interface ToolSourceContext {
