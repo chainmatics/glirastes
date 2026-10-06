@@ -48,7 +48,7 @@ second, hand-maintained catalogue.
    import {
      createGeneratedRuntimeSource, createRuntimeMetricsSinkFromEnv, materializeManifestToolRegistry,
    } from 'glirastes/runtime';
-   import { createAiChatHandler } from 'glirastes/server/nextjs';
+   import { createAiChatHandler, type ManagedLocalRuntimeConfig } from 'glirastes/server/nextjs';
    import * as generated from '@/generated/glirastes/tools.generated';
    import { resolvePrincipal } from '@/lib/glirastes-principal';
 
@@ -64,9 +64,15 @@ second, hand-maintained catalogue.
    const metrics = createRuntimeMetricsSinkFromEnv();
    const openrouter = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY });
 
+   // One object for every handler of this route (see below).
+   const managedRuntime: ManagedLocalRuntimeConfig = {
+     resolvePrincipal,
+     resolveTurnSnapshot: (context) => glirastes.source.resolveTurnSnapshot(context),
+   };
+
    export const runtime = 'nodejs';
    export const POST = createAiChatHandler({
-     managedRuntime: { resolvePrincipal, resolveTurnSnapshot: (context) => glirastes.source.resolveTurnSnapshot(context) },
+     managedRuntime,
      // With managedRuntime the handler always pins a snapshot; without one no tool is offered.
      loadTools: ({ turnSnapshot }) => (turnSnapshot
        ? materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: glirastes.bindings })
@@ -82,6 +88,10 @@ second, hand-maintained catalogue.
    Use `.chat(model)`: `createOpenAI(...)(model)` talks to the Responses API,
    whose usage the handler does not read, so turn costs would stay unknown.
    `managedRuntime` names the shared turn guard, not a Platform purchase.
+   Keep it a shared `const` at module scope: when the route also serves the
+   chat's `@` and `/` list with a GET (`createChatInteractionsHandler`, see
+   `building-glirastes-chat-ui`), pass that same object to the POST and the
+   GET, so the list and the turn decide with one principal and one snapshot.
    `toolDiscovery: true` offers `find_tools`, and `toolSemantics` gives it the
    checked synonyms; neither grants a tool. With `metrics`, an endpoint that
    refuses a call its schema accepted (400 or 422) is reported as

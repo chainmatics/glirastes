@@ -152,8 +152,11 @@ unchanged (the result stays in the history the model reads on later turns,
 so it is pseudonymized like a model call's result). A tool that needs
 confirmation answers with the normal approval card; the approval round trip
 runs it. Every such request records one metric event: `model: null`, tokens 0,
-cost unknown (`null`), the executed call as tool count. `directCommands: false`
-on `createAiChatHandler` turns this off; the message then goes to the model.
+cost unknown (`null`), the executed call as tool count. An endpoint that
+refuses the command's schema-valid call with 400 or 422 also records a
+`tool_contract_rejected` event, without content, exactly as for a model call.
+`directCommands: false` on `createAiChatHandler` turns this off; the message
+then goes to the model.
 
 ## Keyboard and screen readers
 

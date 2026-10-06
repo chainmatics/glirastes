@@ -11,7 +11,7 @@ lists, the skills tell the agent how to work through them.
 | [`integrating-glirastes-web`](./integrating-glirastes-web/SKILL.md) | A separate backend, a non-React frontend or a Node sidecar |
 | [`maintaining-glirastes-tools`](./maintaining-glirastes-tools/SKILL.md) | Resolving `glirastes tools resolve --print` findings and policy proposals |
 | [`describing-glirastes-tools`](./describing-glirastes-tools/SKILL.md) | Writing descriptions, schemas, synonyms and examples from `glirastes tools describe --print` |
-| [`building-glirastes-chat-ui`](./building-glirastes-chat-ui/SKILL.md) | Chat UI, `/` and `@` providers, result components, approvals and STT |
+| [`building-glirastes-chat-ui`](./building-glirastes-chat-ui/SKILL.md) | Chat UI, the derived `@` entities and `/` commands (served by `createChatInteractionsHandler`, with direct commands), providers, result components, approvals and STT |
 | [`migrating-to-glirastes`](./migrating-to-glirastes/SKILL.md) | Moving off `@chainmatics/agentic-*` and `ai-tool.ts` |
 
 Install project-local copies with:

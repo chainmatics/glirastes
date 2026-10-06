@@ -1,6 +1,6 @@
 ---
 name: building-glirastes-chat-ui
-description: Use when integrating or customizing the Glirastes React chat, tool cards, approvals, sessions, mentions and slash commands, suggestions, UI actions, themes, floating window behavior, or speech-to-text.
+description: Use when integrating or customizing the Glirastes React chat, tool cards, approvals, sessions, mentions and slash commands (derived `@` entities and `/` commands, direct commands), suggestions, UI actions, themes, floating window behavior, or speech-to-text.
 ---
 
 # Building the Glirastes Chat UI
@@ -129,18 +129,32 @@ and checked before the handler runs.
 ## `@` entities and `/` commands
 
 `glirastes tools refresh` derives them from the enabled tools and writes
-`chatInteractions` into the generated module: `/` commands from navigation,
-filters and client actions, `@` entities from read endpoints with a search
-parameter, context actions ("Complete", "Open") from item endpoints and
-pages. `docs/chat-interactions.md` in the Glirastes repository has the
-derivation table, the override format and the keyboard model.
+`chatInteractions` into the generated module. A disabled, `needs_attention` or
+excluded tool derives nothing, and only string arguments are derived (an
+optional key of another type is left out of the form; a required one hides
+the command or action).
+
+| Derived from | Becomes |
+| --- | --- |
+| A page without parameters (`ui.navigate`) | `/` command `open.<path>`, segments joined by dots (`/settings/profile` is `open.settings.profile`, `/` is `open.home`) |
+| A URL filter (`ui.filter.<view>`) | `/` command `filter.<view>`; enums become choices |
+| A client action (`ui.<actionId>`) | `/` command `<actionId>` |
+| A read endpoint with `search`, `q`, `query` or `term` that lists objects with an `id` and a `title`, `name`, `label`, `subject` or `email` (`GET /api/tasks?search=`) | `@` entity `task` |
+| An endpoint with one path parameter below that collection, or a page with one parameter of that entity | Context action of the entity ("Complete", id `task.tasks.complete`; "Open") |
+
+Labels are English words built from identifiers. `docs/chat-interactions.md`
+in the Glirastes repository (not shipped in the package) has the same table
+with the override format.
 
 - Serve them with a GET next to the chat POST:
   `export const GET = createChatInteractionsHandler({ interactions: generated.chatInteractions, overrides, managedRuntime })`
   from `glirastes/server/nextjs`, with `overrides` the parsed
   `.glirastes/chat-interactions.json` when the app has one. With
   `managedRuntime` the list is per user and leaves out what this user may
-  not run; without it every caller gets the same list.
+  not run; without it every caller gets the same list. Define
+  `managedRuntime` once as a `const` at module scope and pass that same
+  object to the POST and the GET; two hand-written copies drift apart, and
+  the list then shows commands the POST refuses or hides ones it would run.
 - In React, load them with `useChatInteractionsData('/api/chat')` and pass a
   memoized `chatInteractions={{ data, entities, commands, locale }}` to
   `VercelAiChat`. `defineChatEntity` and `defineChatCommand` add what the
@@ -160,8 +174,16 @@ derivation table, the override format and the keyboard model.
 - Better labels, synonyms (`keywords`) and icons go into
   `.glirastes/chat-interactions.json` (`describing-glirastes-tools`).
   `hidden` there only shapes the list; the server still authorizes.
-- A custom `components.DropdownItem` must spread its `optionProps`, or the
-  listbox loses its active option for screen readers.
+- `VercelAiChat` has no slot for the suggestion item. Only a hand-composed
+  `RichMentionInput` takes `components={{ DropdownItem }}`; that item must
+  spread its `optionProps`, or the listbox loses its active option for screen
+  readers.
+- Keyboard model of the `/` and `@` list: the editor is a `textbox` that
+  controls the suggestion `listbox`; ArrowUp and ArrowDown move between
+  results, ArrowRight and ArrowLeft between an entity and its actions, Enter
+  or Tab picks, Escape closes. The argument form starts at the first empty
+  required field, entity fields are ARIA 1.2 comboboxes, and Escape closes an
+  open list before it cancels the form.
 
 ## Commands, mentions and clarification
 

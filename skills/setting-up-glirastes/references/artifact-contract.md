@@ -14,6 +14,7 @@ byte-checked by `glirastes tools check`. Never write an output by hand: rerun
 | `.glirastes/tool-policy.json` | the developer, through `glirastes tools policy` | Overrides and exclusions. It can only restrict what the code allows, except a reviewed, pinned confirmation relaxation of a write tool. You never write it. |
 | `.glirastes/tool-resolutions.json` | you or the developer | `conventions` (`handlerWrappers`, `bodyReaders`, `authHelpers`, `filterValues`) and per-tool contracts bound to an `interfaceDigest`. Data only. |
 | `.glirastes/tool-semantics.json` | you or the developer | Descriptions, titles, synonyms, examples and hints per `stableKey`, with an origin per field. Human and locked fields are never replaced by agent output. |
+| `.glirastes/chat-interactions.json` | you or the developer, only for an app with a chat | `schemaVersion: 1` and per id patches of the derived `@` entities and `/` commands (`commands`, `entities`): `label`, `description`, `keywords`, `icon`, and `hidden`, `run`, `args`, `search` or complete new entries for the developer. Not read by `glirastes tools refresh`; the chat route reads it through `createChatInteractionsHandler`, ignores a patch for an id the generator no longer derives (with a console warning) and fails to load on an invalid entry. It shapes the lists only and grants nothing. |
 | `.glirastes/mcp-tool-names.json` | you or the developer, only for an app with an MCP server | Per endpoint `stableKey` the grant ids and MCP names its clients keep; read when `emit.mcpCatalog` is set. Never used by the chat. |
 
 ## Outputs
@@ -26,7 +27,7 @@ byte-checked by `glirastes tools check`. Never write an output by hand: rerun
 | `.glirastes/tool-report.json` | Content-free findings, quality and exclusions per tool. |
 | `.glirastes/setup-artifact.json` | `AppSetupArtifactSchema`; also the content-free capability report a connected runner uploads. |
 | `.glirastes/build/runtime-manifest.json`, `.glirastes/build/prompt-manifest.json`, `.glirastes/setup-receipt.json` | Digest chain the Docker build verifies with `GLIRASTES_TOOLS_MODE=integrity`. |
-| The generated module (`src/generated/glirastes/tools.generated.ts` by default) | `setupArtifact`, `toolCatalog`, `createToolBindings()`, `toolSearchSemantics`, `GeneratedToolId`. |
+| The generated module (`src/generated/glirastes/tools.generated.ts` by default) | `setupArtifact`, `toolCatalog`, `chatInteractions` (the derived `@` entities and `/` commands), `createToolBindings()`, `toolSearchSemantics`, `GeneratedToolId`, and with `emit.mcpCatalog` set in `tools.json` also `createMcpEndpointCatalog()` for the app's MCP server. |
 
 ## Principal
 

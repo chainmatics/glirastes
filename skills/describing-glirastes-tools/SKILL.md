@@ -93,10 +93,23 @@ in each description which neighbour fits better for which request.
 ## Chat entities and commands
 
 When the app has a chat, `glirastes tools refresh` also derives its `@`
-entities and `/` commands from the tools (`chatInteractions` in the generated
-module; `docs/chat-interactions.md` in the Glirastes repository). Their
-default labels are English words built from identifiers. Give them stage-2 texts in
-`.glirastes/chat-interactions.json`, in the same languages as the synonyms:
+entities and `/` commands from the enabled tools (`chatInteractions` in the
+generated module; `docs/chat-interactions.md` in the Glirastes repository,
+which is not shipped in the package). The ids you patch follow the code:
+
+- A page without parameters is the command `open.<path>`, segments joined by
+  dots (`/settings/profile` is `open.settings.profile`, `/` is `open.home`); a
+  URL filter is `filter.<view>`; a client action is `<actionId>`.
+- A read endpoint with a `search`, `q`, `query` or `term` parameter that lists
+  objects with an `id` and a title-like field is the entity type `task` (from
+  `GET /api/tasks?search=`); an item endpoint or page below it is a context
+  action of that entity, id `task.tasks.complete`.
+- Only string arguments are derived; a disabled, `needs_attention` or
+  excluded tool derives nothing.
+
+Their default labels are English words built from identifiers. Give them
+stage-2 texts in `.glirastes/chat-interactions.json`, in the same languages as
+the synonyms:
 
 - Patch only ids and types the generated `chatInteractions` lists:
   `commands["<id>"]` with `label`, `description`, `keywords` (up to 20, the
@@ -105,13 +118,18 @@ default labels are English words built from identifiers. Give them stage-2 texts
   `actions["<id>"]` with `label`.
 - A patch replaces each field it names, so a `keywords` patch lists every
   keyword to keep.
+- A patch for an id the generated list no longer has is stale, unless the
+  developer wrote it as a complete new entry: the chat route ignores it and
+  logs one console warning naming it. Remove stale patches; after every
+  refresh, compare the file with the ids the new `chatInteractions` lists.
 - Leave `hidden`, `run`, `args`, `search` and new entries to the developer:
   they decide what the chat offers. `hidden` is no permission either; the
   tool policy and the endpoints decide what a user may run.
-- `glirastes tools refresh` does not read this file; the chat route checks it
+- `glirastes tools refresh` does not read this file; the chat route reads it
   when it creates its `createChatInteractionsHandler` and fails to load on an
-  invalid entry. Load the chat route once (the app's tests or dev server)
-  after editing it.
+  invalid entry (an unknown field or a wrong type). Load the chat route once
+  (the app's tests or dev server) after editing the file and after every
+  refresh, and read its console for the stale-patch warning.
 
 ```json
 {
@@ -153,5 +171,6 @@ glirastes tools verify <tool>
 - `glirastes tools status` shows `description: agent` (or `human` after
   verify) and `schema: agent` or better for the tools you described.
 - `glirastes tools check` still passes in CI.
-- The chat route still loads after an edit of `.glirastes/chat-interactions.json`,
-  and the `/` and `@` lists show your labels.
+- The chat route still loads after an edit of `.glirastes/chat-interactions.json`
+  and after every refresh, logs no stale-patch warning, and the `/` and `@`
+  lists show your labels.
