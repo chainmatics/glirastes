@@ -21,11 +21,16 @@ import type {
   PipelineStepReport,
   SessionSummary,
 } from '../types.js';
-import { serializeMentionsForSend } from '../utils/mention-markup.js';
+import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
+import { toChatEntityItem } from '../interactions/definitions.js';
+import {
+  createChatInteractionRegistry,
+  type PendingChatCommand,
+} from '../interactions/registry.js';
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import { dispatchToolResultUiActions } from '../../browser/client-actions.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
@@ -363,6 +368,7 @@ export function AiChatProvider({
   completionProviders,
   completionContext,
   onCompletionProviderError,
+  chatInteractions,
   toolRenderers,
   toolResults: userToolResults,
   voice: userVoice,
@@ -486,16 +492,29 @@ export function AiChatProvider({
 
   const onCompletionProviderErrorRef = useRef(onCompletionProviderError);
   onCompletionProviderErrorRef.current = onCompletionProviderError;
+  // Declarative `@` entities and `/` commands join the app's own providers.
+  const interactionRegistry = useMemo(
+    () => (chatInteractions
+      ? createChatInteractionRegistry({ ...chatInteractions, context: completionContext })
+      : undefined),
+    [chatInteractions, completionContext],
+  );
+  const allCompletionProviders = useMemo(
+    () => [...(completionProviders ?? []), ...(interactionRegistry?.providers ?? [])],
+    [completionProviders, interactionRegistry],
+  );
   const completionSearch = useMemo(
-    () => (completionProviders && completionProviders.length > 0
-      ? createCompletionSearch(completionProviders, {
+    () => (allCompletionProviders.length > 0
+      ? createCompletionSearch(allCompletionProviders, {
         context: completionContext,
         onProviderError: (providerId, error) =>
           onCompletionProviderErrorRef.current?.(providerId, error),
       })
       : undefined),
-    [completionProviders, completionContext],
+    [allCompletionProviders, completionContext],
   );
+  const [pendingCommand, setPendingCommand] = useState<PendingChatCommand | null>(null);
+  const [composerMentions, setComposerMentions] = useState<MentionData[]>([]);
 
   // Refs for deduplication
   const processedToolCallsRef = useRef<Set<string>>(new Set());
@@ -853,48 +872,13 @@ export function AiChatProvider({
   }, [mentionQuery, mentionTrigger, mentions]);
 
   // Actions
-  const send = useCallback(async (
-    message: string,
-    sendOptions?: { mentions?: MentionData[] },
-  ) => {
-    const mentionsForSend = sendOptions?.mentions ?? activeMentions;
-    if (sessionNotReady || sessionMutationRef.current) return;
+  // The shared tail of every send: transport hygiene, then the transport.
+  const deliver = useCallback(async (processedMessage: string) => {
     // Clear truncation and suggestion chips on new message
     setTruncation(null);
     setSuggestionChips([]);
     setPipelineSteps([]);
     setPipelineState(null);
-
-    // Preprocess message
-    let processedMessage = message;
-    const mentionSerializeConfig = mentions?.serialize;
-    if (mentionSerializeConfig?.enabled !== false) {
-      processedMessage = serializeMentionsForSend(
-        processedMessage,
-        mentionsForSend,
-        mentionSerializeConfig,
-      );
-    }
-    if (onBeforeSend) {
-      processedMessage = onBeforeSend(processedMessage, mentionsForSend);
-    }
-
-    // Typing into the composer while a clarification is open answers it, so
-    // the server resumes the original request instead of starting over.
-    const openClarification = findOpenClarification(
-      rawMessages as unknown as Array<{ role: string; parts: unknown[] }>,
-    );
-    if (
-      openClarification?.request.allowFreeText
-      && processedMessage.trim().length > 0
-      && processedMessage.length <= CLARIFICATION_MAX_ANSWER_LENGTH
-      && !parseClarificationAnswer(processedMessage)
-    ) {
-      processedMessage = clarificationAnswerMessage({
-        toolCallId: openClarification.toolCallId,
-        answer: processedMessage,
-      });
-    }
 
     // Sanitize messages before sending to prevent AI_MissingToolResultsError
     const currentMessages = rawMessages;
@@ -924,16 +908,128 @@ export function AiChatProvider({
     setMentionResults([]);
     setIsMentionSearching(false);
   }, [
-    sessionNotReady,
     rawMessages,
     setMessages,
     sendMessage,
     addToolApprovalResponse,
     pendingApprovalsMap,
+  ]);
+
+  const send = useCallback(async (
+    message: string,
+    sendOptions?: { mentions?: MentionData[] },
+  ) => {
+    const mentionsForSend = sendOptions?.mentions ?? activeMentions;
+    if (sessionNotReady || sessionMutationRef.current) return;
+
+    // A `/` command alone runs without the model; missing arguments open its form.
+    const plan = interactionRegistry?.planMessage(message, mentionsForSend);
+    if (plan?.status === 'needs-args') {
+      setPendingCommand(plan.request);
+      return;
+    }
+    if (plan?.status === 'send') {
+      setPendingCommand(null);
+      await deliver(plan.text);
+      return;
+    }
+
+    // Preprocess message
+    let processedMessage = plan?.status === 'prompt' ? plan.text : message;
+    const mentionSerializeConfig = mentions?.serialize;
+    if (mentionSerializeConfig?.enabled !== false) {
+      processedMessage = serializeMentionsForSend(
+        processedMessage,
+        mentionsForSend,
+        mentionSerializeConfig,
+      );
+    }
+    if (onBeforeSend) {
+      processedMessage = onBeforeSend(processedMessage, mentionsForSend);
+    }
+
+    // Typing into the composer while a clarification is open answers it, so
+    // the server resumes the original request instead of starting over.
+    const openClarification = findOpenClarification(
+      rawMessages as unknown as Array<{ role: string; parts: unknown[] }>,
+    );
+    if (
+      openClarification?.request.allowFreeText
+      && processedMessage.trim().length > 0
+      && processedMessage.length <= CLARIFICATION_MAX_ANSWER_LENGTH
+      && !parseClarificationAnswer(processedMessage)
+    ) {
+      processedMessage = clarificationAnswerMessage({
+        toolCallId: openClarification.toolCallId,
+        answer: processedMessage,
+      });
+    }
+
+    await deliver(processedMessage);
+  }, [
+    sessionNotReady,
+    rawMessages,
+    deliver,
+    interactionRegistry,
     mentions,
     onBeforeSend,
     activeMentions,
   ]);
+
+  const submitPendingCommand = useCallback((
+    values: Readonly<Record<string, string>>,
+    valueLabels?: Readonly<Record<string, string>>,
+  ) => {
+    if (!pendingCommand || !interactionRegistry || sessionNotReady || sessionMutationRef.current) return;
+    const plan = interactionRegistry.completeCommand(pendingCommand, values, valueLabels);
+    if (plan.status !== 'send') {
+      setPendingCommand(plan.status === 'needs-args' ? plan.request : null);
+      return;
+    }
+    setPendingCommand(null);
+    void deliver(plan.text);
+  }, [pendingCommand, interactionRegistry, sessionNotReady, deliver]);
+
+  const cancelPendingCommand = useCallback(() => setPendingCommand(null), []);
+
+  const runEntityAction = useCallback((
+    entity: { type: string; id: string; label: string },
+    actionId: string,
+  ) => {
+    if (sessionNotReady || sessionMutationRef.current) return;
+    const plan = interactionRegistry?.planAction(entity, actionId);
+    if (!plan) return;
+    if (plan.status === 'needs-args') {
+      setPendingCommand(plan.request);
+      return;
+    }
+    setPendingCommand(null);
+    void deliver(plan.text);
+  }, [interactionRegistry, sessionNotReady, deliver]);
+
+  const mentionEntity = useCallback(async (type: string, id: string): Promise<boolean> => {
+    const entity = interactionRegistry?.entity(type);
+    if (!entity?.resolve) return false;
+    let item;
+    try {
+      item = toChatEntityItem(await entity.resolve(id));
+    } catch {
+      return false;
+    }
+    if (!item) return false;
+    const resolved = item;
+    setComposerMentions((previous) => [...previous, {
+      id: resolved.id,
+      type,
+      label: resolved.label,
+      displayName: resolved.label,
+      prefix: '@',
+      slug: normalizeMentionSlug(resolved.label),
+    }]);
+    return true;
+  }, [interactionRegistry]);
+
+  const consumeComposerMentions = useCallback(() => setComposerMentions([]), []);
 
   const stop = useCallback(() => {
     setPipelineState((prev) => ({
@@ -963,6 +1059,7 @@ export function AiChatProvider({
     setMentionResults([]);
     setActiveMentions([]);
     setIsMentionSearching(false);
+    setPendingCommand(null);
     setSuggestionChips(suggestionsConfig.staticChips ?? []);
   }, [setMessages, activeSessionId, suggestionsConfig.staticChips]);
 
@@ -1315,6 +1412,14 @@ export function AiChatProvider({
       hasMentions: !!mentions,
       completionSearch,
       hasCompletions: completionSearch !== undefined,
+      interactions: interactionRegistry,
+      pendingCommand,
+      submitPendingCommand,
+      cancelPendingCommand,
+      runEntityAction,
+      mentionEntity,
+      composerMentions,
+      consumeComposerMentions,
       suggestionChips,
       selectSuggestion,
       refreshSuggestions,
@@ -1376,6 +1481,14 @@ export function AiChatProvider({
       clearActiveMentions,
       isMentionSearching,
       completionSearch,
+      interactionRegistry,
+      pendingCommand,
+      submitPendingCommand,
+      cancelPendingCommand,
+      runEntityAction,
+      mentionEntity,
+      composerMentions,
+      consumeComposerMentions,
       suggestionChips,
       selectSuggestion,
       refreshSuggestions,

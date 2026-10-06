@@ -21,6 +21,7 @@ import type {
   SessionSummary,
 } from '../types.js';
 import type { CompletionSearch } from '../completions/completion-search.js';
+import type { ChatInteractionRegistry, PendingChatCommand } from '../interactions/registry.js';
 import type { ToolResultRendererRegistry } from '../tool-renderers/registry.js';
 
 type MentionTrigger = '@' | '/' | null;
@@ -94,6 +95,28 @@ export interface ChatContextValue {
   // Completion providers
   completionSearch?: CompletionSearch;
   hasCompletions: boolean;
+
+  // Declarative chat interactions (`chatInteractions`)
+  /** `@` entities and `/` commands; absent without `chatInteractions`. */
+  interactions?: ChatInteractionRegistry;
+  /** A command or entity action waiting for arguments; the composer shows its form. */
+  pendingCommand: PendingChatCommand | null;
+  /** Runs the pending command with the form values (and picked entity labels), or keeps asking. */
+  submitPendingCommand: (
+    values: Readonly<Record<string, string>>,
+    valueLabels?: Readonly<Record<string, string>>,
+  ) => void;
+  cancelPendingCommand: () => void;
+  /** Runs an entity action picked from the `@` list, without the model. */
+  runEntityAction: (entity: { type: string; id: string; label: string }, actionId: string) => void;
+  /**
+   * Adds a reference to one entity to the composer, looked up by id through
+   * its definition's `resolve`. False when the entity is unknown or refused.
+   */
+  mentionEntity: (type: string, id: string) => Promise<boolean>;
+  /** References queued by `mentionEntity`, for the composer to insert. */
+  composerMentions: MentionData[];
+  consumeComposerMentions: () => void;
 
   // Suggestions
   suggestionChips: string[];

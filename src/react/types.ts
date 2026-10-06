@@ -2,6 +2,7 @@ import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEv
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
+import type { ChatInteractionsConfig } from './interactions/registry.js';
 
 export type {
   ClarificationOption,
@@ -673,6 +674,14 @@ export interface AiChatProviderConfig {
   completionProviders?: ReadonlyArray<ChatCompletionProvider>;
   completionContext?: CompletionPermissionContext;
   onCompletionProviderError?: (providerId: string, error: unknown) => void;
+  /**
+   * Declarative `@` entities and `/` commands: derived `data` (from
+   * `useChatInteractionsData` or the generated module) plus app definitions
+   * (`defineChatEntity`, `defineChatCommand`). Memoize the object. A `/`
+   * command sent alone runs its tool without the model, through the server's
+   * normal authorization and confirmation.
+   */
+  chatInteractions?: ChatInteractionsConfig;
   toolResults?: ToolResultDisplayConfig;
   voice?: VoiceInputConfig;
   session?: SessionConfig;

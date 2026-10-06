@@ -10,6 +10,7 @@ import {
   CLARIFICATION_TOOL_NAME,
   stripClarificationMarkers,
 } from '../../contracts/clarification.js';
+import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
 import type { MessageBubbleProps, TextPart } from '../types.js';
 
 // Lazy-load react-markdown — keeps it out of the synchronous import graph so
@@ -116,7 +117,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const cleanTextParts = message.parts
     .filter(isTextPart)
     .filter((p) => p.text.trim())
-    .map((p) => stripClarificationMarkers(stripContextBlocks(p.text)))
+    .map((p) => stripChatCommandMarkers(stripClarificationMarkers(stripContextBlocks(p.text))))
     .map((text) => (
       message.role === 'assistant'
         ? extractTrailingFollowupSuggestions(text).text
