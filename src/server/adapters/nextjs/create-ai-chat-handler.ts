@@ -237,6 +237,15 @@ function failedToolNames(content: ReadonlyArray<unknown>): string[] {
   return names;
 }
 
+/** Hands endpoint contract rejections to the turn's metrics, when the app reports metrics. */
+function contractRejectionReporter(
+  turnMetrics: TurnMetricsRecorder | undefined,
+): { onContractRejected?: (rejection: { toolName: string; status: 400 | 422 }) => void } {
+  return turnMetrics
+    ? { onContractRejected: ({ toolName, status }) => { turnMetrics.recordToolContractRejected(toolName, status); } }
+    : {};
+}
+
 function compactToolNames(toolCalls: Array<{ toolName: string }>): string[] {
   const unique = new Set<string>();
   for (const call of toolCalls) {
@@ -949,6 +958,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ...(managedTurn
             ? { turnSnapshot: managedTurn.snapshot }
             : {}),
+          ...contractRejectionReporter(turnMetrics),
         };
 
         // Get tools (static or dynamic)
@@ -1217,6 +1227,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         ...(managedTurn
           ? { turnSnapshot: managedTurn.snapshot }
           : {}),
+        ...contractRejectionReporter(turnMetrics),
       };
 
       // Load tools
