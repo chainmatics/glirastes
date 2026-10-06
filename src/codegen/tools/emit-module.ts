@@ -7,6 +7,8 @@ export interface RenderGeneratedModuleInput {
   modulePath: string;
   artifact: AppSetupArtifact;
   contracts: ReadonlyArray<ToolContractsEntry>;
+  /** `emit.mcpCatalog`: also export `createMcpEndpointCatalog()` for the app's MCP server. */
+  mcpCatalog?: boolean;
 }
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
@@ -156,5 +158,45 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     lines.push('  ];');
   }
   lines.push('}', '');
+  if (input.mcpCatalog === true) {
+    // MCP only (spec 5.6): enabled endpoint tools under the names MCP clients keep; UI tools stay out.
+    const mcpEntries = bound
+      .flatMap(({ tool, contract }) => {
+        if (tool.executionKind !== 'endpoint') return [];
+        const entry = catalogEntry(tool);
+        const names = contractsById.get(tool.toolId)?.mcp ?? [{ id: tool.name, name: entry.modelName as string }];
+        return names.map((name) => ({ name, tool, contract, entry }));
+      })
+      .sort((left, right) => compareCodeUnits(left.name.name, right.name.name));
+    lines.push(
+      '/** For the app\'s MCP server only (`emit.mcpCatalog`): endpoint tools under their MCP grant ids and names. */',
+      'export function createMcpEndpointCatalog() {',
+    );
+    if (mcpEntries.length === 0) {
+      lines.push('  return [];');
+    } else {
+      lines.push('  return [');
+      for (const { name, tool, contract, entry } of mcpEntries) {
+        const data = literal({
+          id: name.id,
+          name: name.name,
+          toolId: tool.toolId,
+          definitionId: tool.name,
+          method: entry.method,
+          path: entry.path,
+          description: entry.description,
+          riskClass: tool.riskClass,
+          requiresApproval: tool.requiresApproval,
+          allowedRoles: tool.allowedRoles,
+          inputJsonSchema: contract.input,
+        }, 4);
+        const schema = expression(contract.runtime.input).replace(/\n/g, '\n    ');
+        // A replacer function: `$$`, `$&` or `$'` inside the schema text must not be read as replacement patterns.
+        lines.push(`    ${data.replace(/\n {4}\}$/, () => `,\n      "inputSchema": ${schema}\n    }`)},`);
+      }
+      lines.push('  ];');
+    }
+    lines.push('}', '');
+  }
   return lines.join('\n');
 }

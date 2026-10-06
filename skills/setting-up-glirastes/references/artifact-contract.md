@@ -14,6 +14,7 @@ byte-checked by `glirastes tools check`. Never write an output by hand: rerun
 | `.glirastes/tool-policy.json` | the developer, through `glirastes tools policy` | Overrides and exclusions. It can only restrict what the code allows, except a reviewed, pinned confirmation relaxation of a write tool. You never write it. |
 | `.glirastes/tool-resolutions.json` | you or the developer | `conventions` (`handlerWrappers`, `bodyReaders`, `authHelpers`, `filterValues`) and per-tool contracts bound to an `interfaceDigest`. Data only. |
 | `.glirastes/tool-semantics.json` | you or the developer | Descriptions, titles, synonyms, examples and hints per `stableKey`, with an origin per field. Human and locked fields are never replaced by agent output. |
+| `.glirastes/mcp-tool-names.json` | you or the developer, only for an app with an MCP server | Per endpoint `stableKey` the grant ids and MCP names its clients keep; read when `emit.mcpCatalog` is set. Never used by the chat. |
 
 ## Outputs
 

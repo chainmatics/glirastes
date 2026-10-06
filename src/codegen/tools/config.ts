@@ -11,6 +11,8 @@ export const TOOLS_PATHS = {
   resolutions: '.glirastes/tool-resolutions.json',
   semantics: '.glirastes/tool-semantics.json',
   promptBundle: '.glirastes/prompt-bundle.json',
+  /** MCP only: the names and grant ids an app's MCP server keeps (spec 5.2). */
+  mcpToolNames: '.glirastes/mcp-tool-names.json',
   inventory: '.glirastes/foundation-execution-inventory.json',
   tombstones: '.glirastes/tool-tombstones.json',
   contracts: '.glirastes/tool-contracts.json',
@@ -71,7 +73,7 @@ export const ToolsConfigSchema = z.object({
   sources: z.array(SourceSchema).min(1).max(20),
   emit: z.object({
     module: modulePath.optional(),
-    /** Accepted now; emitted by the MCP catalogue work in P11. */
+    /** Also emit `createMcpEndpointCatalog()` for the app's MCP server (names from mcp-tool-names.json). */
     mcpCatalog: z.boolean().optional(),
   }).strict().default({}),
   /** Accepted now; consumed by the agentic plans P05 and P10. */

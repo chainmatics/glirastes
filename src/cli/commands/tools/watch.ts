@@ -31,6 +31,7 @@ const OUTPUT_FOLDERS: ReadonlySet<string> = new Set(['dist', 'build', 'out', 'co
 /** Inputs under .glirastes that change tools; every other file there belongs to the generator or the CLI. */
 const WATCHED_INPUTS: ReadonlySet<string> = new Set([
   TOOLS_PATHS.config, TOOLS_PATHS.policy, TOOLS_PATHS.resolutions, TOOLS_PATHS.semantics, TOOLS_PATHS.promptBundle,
+  TOOLS_PATHS.mcpToolNames,
 ]);
 
 /**

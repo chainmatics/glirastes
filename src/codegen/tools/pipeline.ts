@@ -286,7 +286,9 @@ function renderDerivedOutputs(input: DerivedOutputInput): Record<string, string>
     [TOOLS_PATHS.runtimeManifest]: manifests.runtimeContent,
     [TOOLS_PATHS.promptManifest]: manifests.promptContent,
     [TOOLS_PATHS.receipt]: `${JSON.stringify(receipt, null, 2)}\n`,
-    [modulePath]: renderGeneratedModule({ modulePath, artifact: input.artifact, contracts: input.contracts }),
+    [modulePath]: renderGeneratedModule({
+      modulePath, artifact: input.artifact, contracts: input.contracts, mcpCatalog: input.config.emit.mcpCatalog === true,
+    }),
   };
 }
 
@@ -554,12 +556,14 @@ async function generate(
       },
     });
     const search = semanticsSearch(semantics.entry);
+    const mcp = execution.executionKind === 'endpoint' ? inputs.mcpNames?.get(execution.stableKey) : undefined;
     contractEntries.push({
       toolId: execution.toolId,
       stableKey: execution.stableKey,
       definitionId: execution.definitionId,
       contract: tool.contract ?? null,
       defaults,
+      ...(mcp ? { mcp: [...mcp] } : {}),
       ...(search.synonyms.length > 0 || search.examples.length > 0
         ? {
           search: {
@@ -624,6 +628,11 @@ async function generate(
   };
   for (const key of Object.keys(inputs.policy.tools ?? {})) orphaned(key, 'tools');
   for (const key of Object.keys(inputs.policy.acceptedRisk ?? {})) orphaned(key, 'acceptedRisk');
+  for (const key of inputs.mcpNames?.keys() ?? []) {
+    if (observedByKey.get(key)?.execution.executionKind === 'endpoint') continue;
+    findings.push(toolFinding('mcp-tool-names-invalid', 'warning', key,
+      'This mcp-tool-names.json entry names no endpoint tool in the current code and is ignored.'));
+  }
   for (const view of toolViews) {
     view.findings = sortFindings(findings.filter((finding) => finding.subjectRef === view.stableKey));
   }

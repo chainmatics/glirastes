@@ -97,6 +97,44 @@ describe('renderGeneratedModule', () => {
     expect(text).not.toContain('Show my notes');
   });
 
+  it('emits the MCP catalog of enabled endpoint tools on request, under the names MCP keeps', () => {
+    const named = contracts('src/app/api/notes/schemas.ts').map((entry) => (
+      entry.toolId === id('a1') ? { ...entry, mcp: [{ id: 'notes.create', name: 'create_note' }, { id: 'notes.quickAdd', name: 'quick_note' }] }
+        : entry.toolId === id('a3') ? { ...entry, mcp: [{ id: 'notes.archive', name: 'archive_note' }] } : entry
+    ));
+    const input = { modulePath: 'src/generated/glirastes/tools.generated.ts', artifact, contracts: named };
+    expect(renderGeneratedModule(input)).not.toContain('createMcpEndpointCatalog');
+    const text = renderGeneratedModule({ ...input, mcpCatalog: true });
+    expect(text.startsWith(renderGeneratedModule(input))).toBe(true);
+    const catalog = text.slice(text.indexOf('export function createMcpEndpointCatalog() {'));
+    expect(catalog.match(/"name": "\w+"/g)).toEqual(['"name": "create_note"', '"name": "notes_list"', '"name": "quick_note"']);
+    expect(catalog).toContain('"id": "notes.quickAdd"');
+    expect(catalog).toContain('"allowedRoles": []');
+    expect(catalog).toContain('"inputSchema": m0.createNote');
+    expect(catalog).toContain('"inputSchema": createJsonSchemaLike(');
+    expect(catalog).not.toContain('archive_note');
+    const output = ts.transpileModule(text, { reportDiagnostics: true, compilerOptions: { module: ts.ModuleKind.ESNext } });
+    expect(output.diagnostics ?? []).toEqual([]);
+  });
+
+  it('inlines a JSON Schema into the MCP catalog byte for byte, also with $ sequences in it', () => {
+    const schema = {
+      type: 'object',
+      properties: { code: { type: 'string', pattern: '^[A-Z]+\\$$', description: "Costs $& and $' extra" } },
+      additionalProperties: false,
+    };
+    const patched = contracts('src/app/api/notes/schemas.ts').map((entry) => (
+      entry.toolId === id('a2') && entry.contract
+        ? { ...entry, contract: { ...entry.contract, input: schema, runtime: { ...entry.contract.runtime, input: { kind: 'json' as const, schema } } } }
+        : entry
+    ));
+    const text = renderGeneratedModule({ modulePath: 'src/generated/glirastes/tools.generated.ts', artifact, contracts: patched, mcpCatalog: true });
+    const catalog = text.slice(text.indexOf('export function createMcpEndpointCatalog() {'));
+    // Once as `inputJsonSchema`, once inside the `inputSchema` validator.
+    expect(catalog.split('"pattern": "^[A-Z]+\\\\$$"')).toHaveLength(3);
+    expect(catalog.split('"description": "Costs $& and $\' extra"')).toHaveLength(3);
+  });
+
   it('emits an empty module when no tool is enabled', () => {
     const empty = AppSetupArtifactSchema.parse({ ...artifact, tools: [artifact.tools[2]], planner: { ...artifact.planner, toolIds: [] } });
     const text = renderGeneratedModule({ modulePath: 'src/generated/glirastes/tools.generated.ts', artifact: empty, contracts: contracts('src/a.ts') });
@@ -108,7 +146,7 @@ describe('renderGeneratedModule', () => {
 
   it('type-checks under strict TypeScript against the SDK runtime surface', async () => {
     const generated = renderGeneratedModule({
-      modulePath: 'src/generated/glirastes/tools.generated.ts', artifact, contracts: contracts('src/app/api/notes/schemas.ts'),
+      modulePath: 'src/generated/glirastes/tools.generated.ts', artifact, contracts: contracts('src/app/api/notes/schemas.ts'), mcpCatalog: true,
     });
     const app = await createAppFixture({
       'tsconfig.json': JSON.stringify({
@@ -129,7 +167,9 @@ describe('renderGeneratedModule', () => {
         + "import type { ToolSearchSemanticsMap } from 'glirastes/runtime';\n"
         + 'export const bound = createContractBindings(generated);\n'
         + 'export const ids: generated.GeneratedToolId[] = generated.toolCatalog.map((entry) => entry.toolId);\n'
-        + 'export const semantics: ToolSearchSemanticsMap = generated.toolSearchSemantics;\n',
+        + 'export const semantics: ToolSearchSemanticsMap = generated.toolSearchSemantics;\n'
+        + 'export const mcp: ReadonlyArray<{ id: string; name: string; method: string; path: string;'
+        + ' allowedRoles: readonly string[]; inputSchema: unknown }> = generated.createMcpEndpointCatalog();\n',
     });
     const config = ts.readConfigFile(app.path('tsconfig.json'), ts.sys.readFile);
     const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, app.root);

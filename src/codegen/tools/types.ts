@@ -106,6 +106,14 @@ export interface ToolSearchFacts {
   examples?: string[];
 }
 
+/** A name an app's MCP server keeps for an endpoint tool (`.glirastes/mcp-tool-names.json`). */
+export interface McpToolName {
+  /** The id MCP grants and the app's classification refer to. */
+  id: string;
+  /** The MCP tool name its clients call. */
+  name: string;
+}
+
 export interface ToolContractsEntry {
   toolId: string;
   stableKey: string;
@@ -113,6 +121,7 @@ export interface ToolContractsEntry {
   contract: ToolContract | null;
   defaults: ToolPolicyDefaults;
   search?: ToolSearchFacts;
+  mcp?: McpToolName[];
 }
 
 export interface ToolSourceContext {

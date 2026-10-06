@@ -33,6 +33,7 @@ describe('tools refresh --watch', () => {
     ['app/(app)/tasks/page.tsx', true],
     ['.glirastes/tool-semantics.json', true],
     ['.glirastes/tool-policy.json', true],
+    ['.glirastes/mcp-tool-names.json', true],
     ['.glirastes/setup-artifact.json', false],
     ['.glirastes/build/runtime-manifest.json', false],
     [MODULE, false],

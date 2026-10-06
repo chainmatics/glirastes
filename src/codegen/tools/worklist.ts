@@ -224,6 +224,10 @@ function resolveItem(finding: ToolFinding, tool: ToolsPipelineTool | undefined):
   if (code === 'resolution-rejected' || code === 'tool-semantics-invalid') {
     return { ...base, owner: 'agent', target: entryTarget(finding) };
   }
+  if (code === 'mcp-tool-names-invalid') {
+    const key = finding.subjectRef.startsWith('.glirastes/') ? finding.subjectRef : toolKey(finding.subjectRef);
+    return { ...base, owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.mcpToolNames, key } };
+  }
   if (code === 'auth-evidence-missing') {
     return {
       ...base,

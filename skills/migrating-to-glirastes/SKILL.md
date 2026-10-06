@@ -71,8 +71,13 @@ reference until parity is proven.
    when it passes, remove the old packages, registries, generated bindings and
    their scripts, and replace the old build hooks with the `predev` and
    `prebuild` refresh scripts.
-9. MCP: let the MCP server take its endpoint list from the generated module
-   and keep the old names in the MCP-only name map; UI tools stay out of MCP.
+9. MCP: set `"emit": { "mcpCatalog": true }` in `.glirastes/tools.json` and
+   keep the old grant ids and MCP names in `.glirastes/mcp-tool-names.json`
+   (`{ "schemaVersion": 1, "tools": { "<stableKey>": [{ "id": "<old id>",
+   "name": "<old MCP name>" }] } }`; two old names may share one route). The
+   MCP server takes `createMcpEndpointCatalog()` from the generated module,
+   with roles and confirmation from the effective policy; UI tools stay out
+   of MCP.
 
 ## Commands
 

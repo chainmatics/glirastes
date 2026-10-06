@@ -631,3 +631,40 @@ describe('runToolsPipeline (input schema root)', () => {
     expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
   }, 120_000);
 });
+
+describe('runToolsPipeline (MCP endpoint catalog)', () => {
+  it('emits the catalog under the names mcp-tool-names.json keeps and re-renders it in integrity mode', async () => {
+    const fixture = await createAppFixture({
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      'src/lib/session.ts': SESSION,
+      'src/lib/schemas.ts': SCHEMAS,
+      'src/app/api/tasks/route.ts': `${IMPORTS}${GET_HANDLER}${POST_HANDLER}`,
+    }, { toolsConfig: { emit: { mcpCatalog: true } } });
+    await fixture.write(TOOLS_PATHS.mcpToolNames, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: {
+        'POST /api/tasks': [{ id: 'tasks.create', name: 'create_task' }, { id: 'tasks.quickAdd', name: 'quick_add_task' }],
+        'GET /api/gone': [{ id: 'gone.list', name: 'list_gone' }],
+      },
+    })}\n`);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.findings.filter((finding) => finding.code === 'mcp-tool-names-invalid').map((finding) => finding.subjectRef))
+      .toEqual(['GET /api/gone']);
+    expect(buildResolveWorklist(result).items).toContainEqual(expect.objectContaining({
+      code: 'mcp-tool-names-invalid', owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.mcpToolNames, key: 'tools["GET /api/gone"]' },
+    }));
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    expect(contracts.tools.find((tool) => tool.stableKey === 'POST /api/tasks')?.mcp)
+      .toEqual([{ id: 'tasks.create', name: 'create_task' }, { id: 'tasks.quickAdd', name: 'quick_add_task' }]);
+    const module = await fixture.read(DEFAULT_GENERATED_MODULE);
+    const catalog = module.slice(module.indexOf('export function createMcpEndpointCatalog() {'));
+    expect(catalog.match(/"name": "\w+"/g)).toEqual(['"name": "create_task"', '"name": "quick_add_task"', '"name": "tasks_list"']);
+    expect(catalog).toContain('"inputSchema": m0.createTask');
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'integrity' })).driftPaths).toEqual([]);
+    await fixture.write(TOOLS_PATHS.mcpToolNames, JSON.stringify({ schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'x', name: 'two words' }] } }));
+    const invalid = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(invalid.findings.map((finding) => [finding.code, finding.subjectRef])).toContainEqual(['mcp-tool-names-invalid', TOOLS_PATHS.mcpToolNames]);
+    expect(await fixture.read(DEFAULT_GENERATED_MODULE)).toContain('"name": "tasks_create"');
+  }, 180_000);
+});

@@ -11,6 +11,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'schema-module-unloadable': 'Make the schema module importable without side effects: no database, network or secrets at import time.',
   'schema-content-rejected': 'Remove secret-looking values (defaults, consts, descriptions, hints) from the schema or contract metadata; secrets must never reach committed outputs.',
   'input-schema-not-object': 'Give the tool an object input schema (one object with optional fields, or one field that holds the variants); an internal route can be excluded by the developer instead (glirastes tools policy exclude).',
+  'mcp-tool-names-invalid': 'Fix .glirastes/mcp-tool-names.json: per endpoint stable key a list of { id, name }, every id and MCP name (letters, digits, _ and -, at most 64) used once; MCP clients see the generated names meanwhile.',
   'contract-effect-invalid': 'Use one of read, write, destructive, external or financial as the effect in contract.ts, then run glirastes tools refresh.',
   'contract-presentation-invalid': 'Fix the presentation in contract.ts (locale, singular, plural and approval text, no other keys), then run glirastes tools refresh.',
   'schema-json-unavailable': 'Use zod v4 or install zod-to-json-schema so the schema can be described as JSON Schema.',
