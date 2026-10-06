@@ -45,6 +45,20 @@ const VISUALLY_HIDDEN: CSSProperties = {
   clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
 };
 
+/**
+ * The selection inside the editor's own tree. In a shadow root (the
+ * `<glirastes-chat>` element) Chromium retargets `window.getSelection()` to
+ * the host, so the caret position would be lost; its `ShadowRoot.getSelection()`
+ * keeps the real nodes.
+ */
+function editorSelection(editor: HTMLElement | null): Selection | null {
+  const root = editor?.getRootNode() as (Node & { getSelection?: () => Selection | null }) | undefined;
+  if (root && root !== editor?.ownerDocument && typeof root.getSelection === 'function') {
+    return root.getSelection() ?? window.getSelection();
+  }
+  return window.getSelection();
+}
+
 function normalizeInputValue(text: string): string {
   return text.replace(/\u00A0/g, ' ');
 }
@@ -323,7 +337,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       query: string;
       triggerPos: number;
     } | null => {
-      const selection = window.getSelection();
+      const selection = editorSelection(editableRef.current);
       if (!selection || selection.rangeCount === 0) return null;
 
       const range = selection.getRangeAt(0);
@@ -354,7 +368,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       (result: MentionResult) => {
         if (!editableRef.current) return;
 
-        const selection = window.getSelection();
+        const selection = editorSelection(editableRef.current);
         if (!selection || selection.rangeCount === 0) return;
 
         const range = selection.getRangeAt(0);
@@ -444,7 +458,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     /** Removes the `@query` being typed and runs one of the result's entity actions instead. */
     const runAction = useCallback(
       (result: MentionResult, actionId: string) => {
-        const selection = window.getSelection();
+        const selection = editorSelection(editableRef.current);
         const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
         if (range && range.startContainer.nodeType === Node.TEXT_NODE) {
           const textNode = range.startContainer as Text;
@@ -592,7 +606,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
         // Backspace: delete chip at cursor boundary (mention mode)
         if (hasMentionSupport && event.key === 'Backspace') {
-          const selection = window.getSelection();
+          const selection = editorSelection(editableRef.current);
           if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
             if (range.collapsed && range.startOffset === 0) {
@@ -634,7 +648,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         const plainText = e.clipboardData.getData('text/plain');
         if (!plainText) return;
 
-        const selection = window.getSelection();
+        const selection = editorSelection(editableRef.current);
         if (!selection || selection.rangeCount === 0) return;
 
         const range = selection.getRangeAt(0);
@@ -727,7 +741,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       requestAnimationFrame(() => {
         if (editableRef.current) {
           const range = document.createRange();
-          const selection = window.getSelection();
+          const selection = editorSelection(editableRef.current);
           range.selectNodeContents(editableRef.current);
           range.collapse(false);
           selection?.removeAllRanges();
