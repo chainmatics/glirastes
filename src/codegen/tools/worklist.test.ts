@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createAppFixture, removeAppFixtures, type AppFixture } from './__tests__/app-fixture.js';
 import { TOOLS_PATHS } from './config.js';
 import { runToolsPipeline } from './pipeline.js';
-import { buildResolveWorklist, MODEL_PLACEHOLDER, type ResolveWorkItem } from './worklist.js';
+import { buildDescribeWorklist, buildResolveWorklist, MODEL_PLACEHOLDER, type ResolveWorkItem } from './worklist.js';
 
 afterEach(removeAppFixtures);
 
@@ -134,4 +134,126 @@ describe('tools resolve work list', () => {
       owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.semantics, key: '.glirastes/tool-semantics.json#1' },
     });
   }, 120_000);
+});
+
+const TASKS_ROUTE = "import { getSession } from '@/lib/session';\nimport { createTask } from '@/lib/schemas';\n"
+  + 'export async function GET(request: Request) {\n  await getSession(request);\n'
+  + "  const { searchParams } = new URL(request.url);\n  return Response.json({ status: searchParams.getAll('status') });\n}\n"
+  + 'export async function POST(request: Request) {\n  await getSession(request);\n'
+  + '  const input = createTask.parse(await request.json());\n'
+  + "  return Response.json({ id: '1', title: input.title }, { status: 201 });\n}\n";
+
+async function tasksApp(): Promise<AppFixture> {
+  return createAppFixture({
+    'tsconfig.json': FILES['tsconfig.json']!,
+    'src/lib/session.ts': SESSION,
+    'src/lib/schemas.ts': "import { z } from 'zod';\nexport const createTask = z.object({ title: z.string().min(1) }).strict();\n",
+    'src/app/api/tasks/route.ts': TASKS_ROUTE,
+    'src/app/api/notes/route.ts': FILES['src/app/api/notes/route.ts']!,
+  }, { toolsConfig: { locale: 'de-DE' } });
+}
+
+const describeOptions = (root: string, extra: Partial<Parameters<typeof buildDescribeWorklist>[1]> = {}) => ({
+  root, locale: 'de-DE', languages: ['de', 'en'] as Array<'de' | 'en'>, ...extra,
+});
+
+describe('tools describe work list', () => {
+  it('lists the stage-2 gaps per module with the entries to write and leaves unresolved tools to resolve', async () => {
+    const fixture = await tasksApp();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const list = buildDescribeWorklist(await runToolsPipeline({ root: fixture.root, mode: 'frozen', keepGoing: true }), describeOptions(fixture.root));
+    expect(list).toMatchObject({ kind: 'describe', outputsCurrent: true, languages: ['de', 'en'], writeContracts: false });
+    expect(list.modules).toEqual([{ module: 'tasks', tools: ['tasks.create', 'tasks.list'] }]);
+    const [create, listTool] = list.items;
+    expect(create).toMatchObject({
+      tool: 'tasks.create',
+      gaps: ['description-templated', 'synonyms-missing', 'examples-missing'],
+      protectedFields: [],
+      missingExamples: ['de', 'en'],
+      targets: { semantics: { file: TOOLS_PATHS.semantics, key: 'tools[stableKey="POST /api/tasks"]' } },
+    });
+    expect(create?.targets.schema).toBeUndefined();
+    expect(create?.targets.semantics.expected).toMatchObject({
+      stableKey: 'POST /api/tasks',
+      examples: { de: ['<3 to 5 sentences a user would type>'], en: ['<3 to 5 sentences a user would type>'] },
+      approvalHint: '<when asking first matters most for this tool>',
+      origin: { description: 'agent', examples: 'agent', synonyms: 'agent' },
+      agent: { model: MODEL_PLACEHOLDER, interfaceDigest: create?.evidence.interfaceDigest },
+    });
+    expect(listTool).toMatchObject({
+      tool: 'tasks.list',
+      gaps: ['description-templated', 'contract-derived', 'synonyms-missing', 'examples-missing'],
+      targets: {
+        schema: {
+          file: TOOLS_PATHS.resolutions,
+          key: 'tools["GET /api/tasks"]',
+          expected: { origin: 'agent', input: { jsonSchema: { properties: { status: {} }, additionalProperties: false } } },
+        },
+      },
+    });
+    expect(listTool?.targets.semantics.expected).not.toHaveProperty('approvalHint');
+  }, 180_000);
+
+  it('keeps human fields, writes contract modules on request and drops a tool once it is described', async () => {
+    const fixture = await tasksApp();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const frozen = () => runToolsPipeline({ root: fixture.root, mode: 'frozen', keepGoing: true });
+    const first = buildDescribeWorklist(await frozen(), describeOptions(fixture.root, { tools: ['tasks.list'], writeContracts: true }));
+    expect(first.items.map((item) => item.tool)).toEqual(['tasks.list']);
+    expect(first.items[0]?.targets.contract?.file).toBe('src/app/api/tasks/contract.ts');
+    expect(first.items[0]?.targets.contract?.expected).toContain('  GET: {');
+    expect(first.items[0]?.targets.contract?.expected).toContain('"status": z.unknown()');
+    const interfaceDigest = first.items[0]!.evidence.interfaceDigest!;
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [{
+        stableKey: 'GET /api/tasks',
+        description: 'Listet die Aufgaben des Nutzers, auf Wunsch nach Status gefiltert.',
+        synonyms: { de: ['Aufgabenliste', 'offene Aufgaben'], en: ['to-dos'] },
+        examples: {
+          de: ['Zeig meine offenen Aufgaben', 'Welche Aufgaben sind erledigt?', 'Liste alle Aufgaben'],
+          en: ['list my open tasks', 'which tasks are done', 'show the task list'],
+        },
+        origin: { synonyms: 'agent', examples: 'agent' },
+        agent: { model: 'claude-code', interfaceDigest },
+      }],
+    }, null, 2)}\n`);
+    await fixture.write(TOOLS_PATHS.resolutions, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: {
+        'GET /api/tasks': {
+          origin: 'agent',
+          model: 'claude-code',
+          interfaceDigest,
+          input: { jsonSchema: { type: 'object', properties: { status: { type: 'array', items: { type: 'string', enum: ['open', 'done'] } } }, additionalProperties: false } },
+        },
+      },
+    }, null, 2)}\n`);
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const after = buildDescribeWorklist(await frozen(), describeOptions(fixture.root));
+    expect(after.items.map((item) => item.tool)).toEqual(['tasks.create']);
+    const named = buildDescribeWorklist(await frozen(), describeOptions(fixture.root, { tools: ['GET /api/tasks'] }));
+    expect(named.items[0]).toMatchObject({ gaps: ['requested'], protectedFields: ['description'] });
+    expect(named.items[0]?.targets.semantics.expected).not.toHaveProperty('description');
+    const all = buildDescribeWorklist(await frozen(), describeOptions(fixture.root, { all: true }));
+    expect(all.items.map((item) => item.tool)).toEqual(['tasks.create', 'tasks.list']);
+  }, 240_000);
+
+  it('lists a tool whose example sentences do not find it as routing-ambiguous', async () => {
+    const fixture = await tasksApp();
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [{
+        stableKey: 'GET /api/tasks',
+        description: 'Listet Aufgaben.',
+        synonyms: { de: ['Aufgabenliste'] },
+        examples: { de: ['Was steht an?', 'Liste alle Aufgaben', 'Aufgabenliste bitte'], en: ['what is up', 'list all tasks', 'task list please'] },
+      }],
+    })}\n`);
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const list = buildDescribeWorklist(await runToolsPipeline({ root: fixture.root, mode: 'frozen', keepGoing: true }), describeOptions(fixture.root));
+    const item = list.items.find((entry) => entry.tool === 'tasks.list');
+    expect(item?.gaps).toContain('routing-ambiguous');
+    expect(item?.routing.map((failure) => failure.sentence)).toEqual(['Was steht an?', 'what is up']);
+  }, 180_000);
 });

@@ -176,6 +176,23 @@ describe('glirastes tools', () => {
     });
   });
 
+  it('prints the describe work list for named tools, all tools or every gap, never without --print', async () => {
+    const fixture = await createAppFixture({ 'src/app/api/tasks/route.ts': ROUTE }, { toolsConfig: { enrich: { writeContracts: true } } });
+    const out: string[] = [];
+    const err: string[] = [];
+    const deps = { cwd: fixture.root, env: {}, log: (line: string) => { out.push(line); }, error: (line: string) => { err.push(line); } };
+    expect(await runToolsCommand(['refresh'], deps)).toBe(0);
+    expect(await runToolsCommand(['describe'], deps)).toBe(2);
+    expect(await runToolsCommand(['describe', '--print', '--all', 'tasks.list'], deps)).toBe(2);
+    expect(await runToolsCommand(['describe', '--print', 'tasks.missing'], deps)).toBe(2);
+    expect(err.join('\n')).toContain('Unknown tool tasks.missing; glirastes tools status lists the names.');
+    out.length = 0;
+    expect(await runToolsCommand(['describe', '--print', 'tasks.create'], deps)).toBe(0);
+    const list = JSON.parse(out.join('\n')) as { kind: string; languages: string[]; writeContracts: boolean; items: Array<{ tool: string; targets: { contract?: { file: string } } }> };
+    expect(list).toMatchObject({ kind: 'describe', languages: ['en'], writeContracts: true });
+    expect(list.items.map((item) => [item.tool, item.targets.contract?.file])).toEqual([['tasks.create', 'src/app/api/tasks/contract.ts']]);
+  }, 120_000);
+
   it('checks the routing of committed example sentences without a model and fails only when strict', async () => {
     const fixture = await createAppFixture({ 'src/app/api/tasks/route.ts': ROUTE });
     await fixture.write('.glirastes/tool-semantics.json', `${JSON.stringify({
