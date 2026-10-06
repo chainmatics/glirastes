@@ -20,11 +20,13 @@ export interface ToolsCommandDependencies {
   log?: (line: string) => void;
   error?: (line: string) => void;
   runPipeline?: (options: ToolsPipelineOptions) => Promise<ToolsPipelineResult>;
+  watch?: ToolsIo['watch'];
+  signal?: AbortSignal;
 }
 
 export const TOOLS_USAGE = [
-  'Usage: glirastes tools refresh [--root <dir>] [--mode write|frozen|integrity] [--keep-going] [--adopt <inventory>] [--json]',
-  '         derive tools from the code (writes locally, checks in CI, verifies in Docker)',
+  'Usage: glirastes tools refresh [--root <dir>] [--mode write|frozen|integrity] [--keep-going] [--adopt <inventory>] [--watch] [--json]',
+  '         derive tools from the code (writes locally, checks in CI, verifies in Docker; --watch keeps refreshing)',
   '       glirastes tools check [--root <dir>] [--strict] [--integrity-only] [--json]',
   '         verify the committed tool outputs without writing, models or network',
   '       glirastes tools status [--root <dir>] [--json]',
@@ -45,6 +47,8 @@ export async function runToolsCommand(argv: string[], deps: ToolsCommandDependen
     log: deps.log ?? ((line) => { console.log(line); }),
     error: deps.error ?? ((line) => { console.error(line); }),
     runPipeline: deps.runPipeline ?? runToolsPipeline,
+    ...(deps.watch ? { watch: deps.watch } : {}),
+    ...(deps.signal ? { signal: deps.signal } : {}),
   };
   const [subcommand, ...rest] = argv;
   const json = rest.includes('--json');

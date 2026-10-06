@@ -6,6 +6,7 @@ import type { ToolsPipelineOptions, ToolsPipelineResult } from '../../../codegen
 import type { DescriptionOrigin } from '../../../codegen/tools/prose.js';
 import type { ContractSource, ToolFinding } from '../../../codegen/tools/types.js';
 import { buildResolveWorklist, describeGaps } from '../../../codegen/tools/worklist.js';
+import type { ToolsWatchFactory } from './watch.js';
 import { AppSetupArtifactSchema, type ToolRiskClass } from '../../../contracts/index.js';
 import { riskTier } from '../../../contracts/tool-policy.js';
 
@@ -15,6 +16,9 @@ export interface ToolsIo {
   log(line: string): void;
   error(line: string): void;
   runPipeline(options: ToolsPipelineOptions): Promise<ToolsPipelineResult>;
+  /** `tools refresh --watch`: file watching and the stop signal (tests inject both). */
+  watch?: ToolsWatchFactory;
+  signal?: AbortSignal;
 }
 
 export interface ToolStatusEntry {
