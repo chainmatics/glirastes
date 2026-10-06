@@ -1,6 +1,6 @@
 ---
 name: describing-glirastes-tools
-description: Use when glirastes tools refresh says tools need a better description, tools have template descriptions or field-name schemas, glirastes tools eval reports ambiguous routing, or an endpoint rejected calls its schema accepted.
+description: Use when glirastes tools refresh says tools need a better description, tools have template descriptions or field-name schemas, glirastes tools eval reports ambiguous routing, an endpoint rejected calls its schema accepted, or the chat's derived entities and commands need better labels.
 ---
 
 # Describing Glirastes Tools
@@ -15,10 +15,10 @@ fallback. Tools stay active without stage 2, only less well described.
 
 ## Boundaries
 
-- Write only `.glirastes/tool-semantics.json`, `.glirastes/tool-resolutions.json`
-  and, with `--write-contracts`, new `contract.ts` files next to route
-  handlers. Never change a handler, `.glirastes/tool-policy.json` or a
-  generated file.
+- Write only `.glirastes/tool-semantics.json`, `.glirastes/tool-resolutions.json`,
+  the chat texts in `.glirastes/chat-interactions.json` (section below) and,
+  with `--write-contracts`, new `contract.ts` files next to route handlers.
+  Never change a handler, `.glirastes/tool-policy.json` or a generated file.
 - Fill only open fields and replace only your own earlier output. Fields in
   `protectedFields` (written by a human, supplied by the code or locked by a
   review) stay exactly as they are.
@@ -90,6 +90,45 @@ in each description which neighbour fits better for which request.
 }
 ```
 
+## Chat entities and commands
+
+When the app has a chat, `glirastes tools refresh` also derives its `@`
+entities and `/` commands from the tools (`chatInteractions` in the generated
+module; `docs/chat-interactions.md` in the Glirastes repository). Their
+default labels are English words built from identifiers. Give them stage-2 texts in
+`.glirastes/chat-interactions.json`, in the same languages as the synonyms:
+
+- Patch only ids and types the generated `chatInteractions` lists:
+  `commands["<id>"]` with `label`, `description`, `keywords` (up to 20, the
+  synonyms a user types after `/`) and `icon` (lowercase name, digits and
+  `-`); `entities["<type>"]` with `label` and `icon`, and its
+  `actions["<id>"]` with `label`.
+- A patch replaces each field it names, so a `keywords` patch lists every
+  keyword to keep.
+- Leave `hidden`, `run`, `args`, `search` and new entries to the developer:
+  they decide what the chat offers. `hidden` is no permission either; the
+  tool policy and the endpoints decide what a user may run.
+- `glirastes tools refresh` does not read this file; the chat route checks it
+  when it creates its `createChatInteractionsHandler` and fails to load on an
+  invalid entry. Load the chat route once (the app's tests or dev server)
+  after editing it.
+
+```json
+{
+  "schemaVersion": 1,
+  "commands": {
+    "open.overview": { "label": { "de": "Übersicht öffnen", "en": "Open overview" }, "keywords": ["start", "dashboard"] },
+    "filter.tasks": { "label": { "de": "Aufgaben filtern", "en": "Filter tasks" }, "icon": "filter" }
+  },
+  "entities": {
+    "task": {
+      "label": { "de": "Aufgabe", "en": "Task" },
+      "actions": { "task.tasks.complete": { "label": { "de": "Erledigen", "en": "Complete" } } }
+    }
+  }
+}
+```
+
 ## Commands
 
 ```bash
@@ -114,3 +153,5 @@ glirastes tools verify <tool>
 - `glirastes tools status` shows `description: agent` (or `human` after
   verify) and `schema: agent` or better for the tools you described.
 - `glirastes tools check` still passes in CI.
+- The chat route still loads after an edit of `.glirastes/chat-interactions.json`,
+  and the `/` and `@` lists show your labels.

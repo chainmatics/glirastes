@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parseChatInteractionOverrides } from '../../contracts/chat-interactions.js';
 import { findPackageSkillsDir } from './install-skills.js';
 
 describe('bundled local-first setup workflow', () => {
@@ -64,5 +65,19 @@ describe('bundled local-first setup workflow', () => {
     for (const example of examples) expect(example).toContain('endpoint=');
     expect(source).not.toContain('| `transport` | required;');
     expect(source).not.toContain('| `primary`, `primarySoft` |');
+  });
+
+  it('teaches chat entities and commands in the chat UI and the describing skill', async () => {
+    const chatUi = await readFile(join(findPackageSkillsDir(), 'building-glirastes-chat-ui/SKILL.md'), 'utf8');
+    for (const text of ['docs/chat-interactions.md', 'createChatInteractionsHandler', 'useChatInteractionsData', 'directCommands: false']) {
+      expect(chatUi).toContain(text);
+    }
+    const describing = await readFile(join(findPackageSkillsDir(), 'describing-glirastes-tools/SKILL.md'), 'utf8');
+    expect(describing).toContain('.glirastes/chat-interactions.json');
+    expect(describing).toContain('`hidden` is no permission');
+    // The example is a file the chat route accepts.
+    const example = /```json\n(\{\n {2}"schemaVersion": 1,\n {2}"commands"[\s\S]*?)```/.exec(describing)?.[1];
+    expect(example).toBeDefined();
+    expect(() => parseChatInteractionOverrides(JSON.parse(example!))).not.toThrow();
   });
 });

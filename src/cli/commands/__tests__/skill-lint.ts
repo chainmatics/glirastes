@@ -13,6 +13,8 @@ const KNOWN_PATHS = new Set<string>([
   '.glirastes/platform-connection.json',
   '.glirastes/installed-skills.json',
   '.glirastes/mcp-tool-names.json',
+  // Chat entity and command overrides, read by createChatInteractionsHandler (P07b).
+  '.glirastes/chat-interactions.json',
 ]);
 const FORBIDDEN: ReadonlyArray<readonly [RegExp, string]> = [
   [/--force\b/, 'never teaches --force'],

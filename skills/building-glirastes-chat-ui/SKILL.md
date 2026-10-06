@@ -1,6 +1,6 @@
 ---
 name: building-glirastes-chat-ui
-description: Use when integrating or customizing the Glirastes React chat, tool cards, approvals, sessions, mentions, suggestions, UI actions, themes, floating window behavior, or speech-to-text.
+description: Use when integrating or customizing the Glirastes React chat, tool cards, approvals, sessions, mentions and slash commands, suggestions, UI actions, themes, floating window behavior, or speech-to-text.
 ---
 
 # Building the Glirastes Chat UI
@@ -21,7 +21,8 @@ chat route uses the app's own model access.
 - Speech traffic goes directly between the app's provider adapter and its
   provider, never through the Glirastes Control Plane.
 - Never edit `.glirastes/tool-policy.json` or generated files to change what
-  the UI shows; UI tools come from `glirastes tools refresh`.
+  the UI shows; UI tools, `@` entities and `/` commands come from
+  `glirastes tools refresh`.
 
 ## Workflow
 
@@ -31,8 +32,10 @@ chat route uses the app's own model access.
    with a payload contract, and mount the navigation bridge
    (`useGlirastesNavigationBridge`) once. Run `glirastes tools refresh` and
    check with `glirastes tools status` that the UI tools are active.
-3. Add `completionProviders` for `/` commands and `@` mentions, the
-   clarification card, result renderers and sessions as the product needs.
+3. Serve the derived `@` entities and `/` commands next to the chat route and
+   pass them as `chatInteractions` (section below); add `completionProviders`
+   only for sources they do not cover, plus the clarification card, result
+   renderers and sessions as the product needs.
 4. Wire speech-to-text through the SDK controller (gate below).
 5. Prove it in a real browser: keyboard, mobile layout, approvals, STT
    cleanup.
@@ -122,6 +125,43 @@ through `useGlirastesNavigationBridge({ push })`; without the bridge they stay
 disabled. A client action becomes the tool `ui.<actionId>`; pass its payload
 contract as the third argument of `useAiClientAction` so the payload is typed
 and checked before the handler runs.
+
+## `@` entities and `/` commands
+
+`glirastes tools refresh` derives them from the enabled tools and writes
+`chatInteractions` into the generated module: `/` commands from navigation,
+filters and client actions, `@` entities from read endpoints with a search
+parameter, context actions ("Complete", "Open") from item endpoints and
+pages. `docs/chat-interactions.md` in the Glirastes repository has the
+derivation table, the override format and the keyboard model.
+
+- Serve them with a GET next to the chat POST:
+  `export const GET = createChatInteractionsHandler({ interactions: generated.chatInteractions, overrides, managedRuntime })`
+  from `glirastes/server/nextjs`, with `overrides` the parsed
+  `.glirastes/chat-interactions.json` when the app has one. With
+  `managedRuntime` the list is per user and leaves out what this user may
+  not run; without it every caller gets the same list.
+- In React, load them with `useChatInteractionsData('/api/chat')` and pass a
+  memoized `chatInteractions={{ data, entities, commands, locale }}` to
+  `VercelAiChat`. `defineChatEntity` and `defineChatCommand` add what the
+  code does not show (people from another service, a prepared prompt) and
+  replace a derived entry with the same type or id. Key the chat by user
+  when the identity can change without a reload, so the list follows.
+- `chatInteractions` already offers the generated UI tools as `/` commands;
+  drop an earlier `createUiToolCommandProvider`, or the list shows them twice.
+- `<glirastes-chat endpoint="/api/chat" interactions>` loads the same list
+  and offers `defineEntity`, `defineCommand` and `mentionEntity`. Its GET
+  sends no app headers: a host that authenticates by header sets the
+  `interactions` property instead.
+- A `/` command sent alone runs its tool on the server without a model
+  call, under the same guard, confirmation, audit and PII shield as a model
+  call; missing arguments open a form first. `directCommands: false` on
+  `createAiChatHandler` turns this off.
+- Better labels, synonyms (`keywords`) and icons go into
+  `.glirastes/chat-interactions.json` (`describing-glirastes-tools`).
+  `hidden` there only shapes the list; the server still authorizes.
+- A custom `components.DropdownItem` must spread its `optionProps`, or the
+  listbox loses its active option for screen readers.
 
 ## Commands, mentions and clarification
 
@@ -239,4 +279,7 @@ quality plus p50/p95 finalization latency against the product baseline.
 Assert that hidden and non-allowlisted tool output cannot escape through either
 result blocks or an assistant fallback summary, and that a raw transport error
 never reaches rendered state. `glirastes tools status` lists the UI tools the
-chat can run, and a navigation or filter request changes the page.
+chat can run, and a navigation or filter request changes the page. A derived
+`/` command runs without a model call (also through `<glirastes-chat>`), a
+command whose tool asks first still shows the approval card, and an `@`
+search returns only what the user's own session may read.
