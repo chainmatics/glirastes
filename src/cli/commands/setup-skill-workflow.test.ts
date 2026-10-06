@@ -4,14 +4,15 @@ import { describe, expect, it } from 'vitest';
 import { findPackageSkillsDir } from './install-skills.js';
 
 describe('bundled local-first setup workflow', () => {
-  it('bridges fresh code to the positive inventory before attempting setup scan', async () => {
+  it('derives tools with refresh and works through the agent work lists before wiring the chat', async () => {
     const source = await readFile(join(findPackageSkillsDir(), 'setting-up-glirastes/SKILL.md'), 'utf8');
     expect(source).toContain('glirastes setup inspect --json');
-    expect(source.indexOf('Generate the local execution inventory')).toBeGreaterThan(0);
-    expect(source.indexOf('Generate the local execution inventory')).toBeLessThan(source.indexOf('glirastes setup scan'));
-    expect(source).toContain('glirastes setup --dry-run --json');
+    expect(source.indexOf('glirastes tools refresh')).toBeGreaterThan(0);
+    expect(source.indexOf('glirastes tools refresh')).toBeLessThan(source.indexOf('glirastes tools resolve --print'));
+    expect(source.indexOf('glirastes tools resolve --print')).toBeLessThan(source.indexOf('glirastes tools describe --print'));
     expect(source).toContain('Standalone');
     expect(source).toContain('existing coding agent');
+    expect(source).not.toContain('glirastes setup scan');
     expect(source).not.toContain('glirastes setup sync --artifact');
     expect(source).not.toContain('Ask the user to choose exactly one mode');
   });
