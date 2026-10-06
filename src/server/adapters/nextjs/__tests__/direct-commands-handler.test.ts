@@ -2,7 +2,8 @@ import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { formatChatCommandMessage } from '../../../../contracts/chat-command.js';
-import { defineTool, type PiiShield, type ToolRegistry } from '../../../../types.js';
+import { createPiiShield } from '../../../pii-shield/index.js';
+import { defineTool, type PiiDetector, type PiiShield, type ToolRegistry } from '../../../../types.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
 import { collectingSink, principal, snapshot, streamChunks } from './command-fixtures.js';
 
@@ -205,6 +206,85 @@ describe('direct commands in createAiChatHandler', () => {
     expect(prompt).toContain('glirastes-command-0123456789abcdef0123');
     expect(prompt).toContain('Release prüfen');
     expect(prompt).not.toContain('glirastes:command');
+  });
+
+  describe('with a PII shield, the arguments of an earlier command', () => {
+    const NAME = 'Max Müller';
+    const detector: PiiDetector = {
+      detect: (text) => {
+        const start = text.indexOf(NAME);
+        return start === -1 ? [] : [{ type: 'person', start, end: start + NAME.length, score: 1, text: NAME }];
+      },
+    };
+    const personCommand = formatChatCommandMessage({
+      commandId: 'tasks.list', tool: 'tasks.list', args: { query: NAME }, label: `/Search tasks ${NAME}`,
+    });
+    const commandCall = (input: unknown, extra: Record<string, unknown> = {}) => ({
+      id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, {
+        type: 'tool-tasks_list', toolCallId: 'glirastes-command-0123456789abcdef0123', state: 'output-available',
+        input, output: { tasks: [{ id: 't1', title: '<PERSON_1>' }] }, ...extra,
+      }],
+    });
+
+    it('reach the model pseudonymized, like the label of the same message', async () => {
+      const languageModel = model();
+      const { registry } = tools();
+      const piiShield = createPiiShield({ locale: 'de', detector });
+      const handler = createAiChatHandler({ tools: registry, model: languageModel, systemPrompt: 'Assistant', piiShield });
+      const history = [
+        user(personCommand, 'u1'),
+        commandCall({ query: NAME, filter: { owners: [NAME, 'unknown'], limit: 5 } }),
+        user('Which one is due first?', 'u2'),
+      ];
+      await (await handler(post(history))).text();
+      expect(languageModel.doStreamCalls).toHaveLength(1);
+      const prompt = JSON.stringify(languageModel.doStreamCalls[0]!.prompt);
+      expect(prompt).not.toContain('Müller');
+      expect(prompt).toContain('/Search tasks');
+      // Label and arguments are one session: the model reads one pseudonym for the person everywhere.
+      const pseudonym = /\/Search tasks ([^"\\]+)"/.exec(prompt)![1]!;
+      expect(prompt.split(pseudonym).length - 1).toBe(3);
+      // Only strings are rewritten.
+      expect(prompt).toContain('"limit":5');
+      expect(prompt).toContain('"unknown"');
+    });
+
+    it('are pseudonymized in a failed call as well, where the model copy falls back to the raw input', async () => {
+      const languageModel = model();
+      const { registry } = tools();
+      const piiShield = createPiiShield({ locale: 'de', detector });
+      const handler = createAiChatHandler({ tools: registry, model: languageModel, systemPrompt: 'Assistant', piiShield });
+      const failed = {
+        id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, {
+          type: 'tool-tasks_list', toolCallId: 'glirastes-command-0123456789abcdef0123', state: 'output-error',
+          rawInput: { query: NAME }, errorText: 'command_input_invalid',
+        }],
+      };
+      await (await handler(post([user(personCommand, 'u1'), failed, user('Why did it fail?', 'u2')]))).text();
+      expect(languageModel.doStreamCalls).toHaveLength(1);
+      const prompt = JSON.stringify(languageModel.doStreamCalls[0]!.prompt);
+      expect(prompt).toContain('glirastes-command-0123456789abcdef0123');
+      expect(prompt).not.toContain('Müller');
+    });
+
+    it('leave the input of a model-written call alone, which is pseudonymized already', async () => {
+      const languageModel = model();
+      const { registry } = tools();
+      const outbound = vi.fn(async (text: string) => text);
+      const piiShield = {
+        outbound, inbound: (text: string) => text, rehydrateArgs: (args: Record<string, unknown>) => args,
+        anonymizeResult: async (result: unknown) => result, getComplianceSummary: vi.fn(), clearSession: vi.fn(),
+      } as unknown as PiiShield;
+      const handler = createAiChatHandler({ tools: registry, model: languageModel, systemPrompt: 'Assistant', piiShield });
+      const modelCall = {
+        id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, {
+          type: 'tool-tasks_list', toolCallId: 'call_model_1', state: 'output-available',
+          input: { query: '<PERSON_1>' }, output: { tasks: [] },
+        }],
+      };
+      await (await handler(post([user('Find <PERSON_1> tasks', 'u1'), modelCall, user('And now?', 'u2')]))).text();
+      expect(outbound.mock.calls.map(([text]) => text)).not.toContain('<PERSON_1>');
+    });
   });
 
   it('hands a command message to the model as text when direct commands are off', async () => {

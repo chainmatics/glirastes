@@ -10,6 +10,7 @@ import {
 } from './clarification-resume.js';
 import { scopePipelineTools } from './scope-pipeline-tools.js';
 import {
+  pseudonymizeCommandToolInputs,
   resolveDirectCommand,
   runDirectCommand,
   stripChatCommandMessages,
@@ -1456,9 +1457,10 @@ async function anonymizeMessages(
 
     const record = msg as Record<string, unknown>;
 
-    // Only anonymize user messages
+    // Only user messages carry text to anonymize; of the others, only the
+    // arguments of a direct command's tool call are the user's own words.
     if (record.role !== 'user') {
-      result.push(msg);
+      result.push(await pseudonymizeCommandToolInputs(record, shield, sessionId));
       continue;
     }
 

@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { formatChatCommandMessage } from '../../../../contracts/chat-command.js';
 import { createManagedTurnGuard } from '../../../../runtime/managed-turn.js';
 import { createTurnMetricsRecorder } from '../../../../runtime/metrics/turn-recorder.js';
-import { defineTool, type ToolRegistry } from '../../../../types.js';
+import { defineTool, type PiiShield, type ToolRegistry } from '../../../../types.js';
 import { toolsToAiTools } from '../../../core/index.js';
 import {
+  pseudonymizeCommandToolInputs,
   resolveCommandToolName,
   resolveDirectCommand,
   runDirectCommand,
@@ -72,6 +73,38 @@ describe('stripChatCommandMessages', () => {
       { role: 'user', content: '/Search tasks' },
       { role: 'assistant', content: listCommand },
     ]);
+  });
+});
+
+describe('pseudonymizeCommandToolInputs', () => {
+  const shield = { outbound: async (text: string) => text.replace('Max', '<PERSON_1>') } as unknown as PiiShield;
+  const commandPart = (input: unknown) => ({
+    type: 'tool-tasks_list', toolCallId: 'glirastes-command-0123456789abcdef0123', state: 'output-available', input, output: {},
+  });
+  const assistant = (...parts: unknown[]) => ({ id: 'a1', role: 'assistant', parts });
+
+  it('rewrites the strings of a command call and keeps everything else', async () => {
+    const message = assistant({ type: 'step-start' }, commandPart({ query: 'Max', ids: ['Max', 7], nested: { flag: true, none: null } }));
+    expect(await pseudonymizeCommandToolInputs(message, shield, 's1')).toEqual(
+      assistant({ type: 'step-start' }, commandPart({ query: '<PERSON_1>', ids: ['<PERSON_1>', 7], nested: { flag: true, none: null } })),
+    );
+  });
+
+  it('returns the message itself when it holds no command call or the call has no input', async () => {
+    const modelCall = assistant({ type: 'tool-tasks_list', toolCallId: 'call_1', state: 'output-available', input: { query: 'Max' } });
+    expect(await pseudonymizeCommandToolInputs(modelCall, shield, 's1')).toBe(modelCall);
+    const noInput = assistant({ type: 'tool-tasks_list', toolCallId: 'glirastes-command-0123456789abcdef0123', state: 'input-streaming' });
+    expect(await pseudonymizeCommandToolInputs(noInput, shield, 's1')).toBe(noInput);
+    const text = { id: 'a2', role: 'assistant', content: 'Max' };
+    expect(await pseudonymizeCommandToolInputs(text, shield, 's1')).toBe(text);
+  });
+
+  it('replaces nesting beyond the depth cap instead of passing it on unchecked', async () => {
+    let deep: unknown = { query: 'Max' };
+    for (let level = 0; level < 20; level += 1) deep = { next: deep };
+    const [, part] = ((await pseudonymizeCommandToolInputs(assistant({ type: 'step-start' }, commandPart(deep)), shield, 's1')).parts as Array<Record<string, unknown>>);
+    expect(JSON.stringify(part!.input)).toContain('[redacted]');
+    expect(JSON.stringify(part!.input)).not.toContain('Max');
   });
 });
 

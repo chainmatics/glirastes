@@ -12,7 +12,7 @@ import { modelFacingToolName } from '../../../runtime/local-tool-bindings.js';
 import type { ManagedTurnGuard } from '../../../runtime/managed-turn.js';
 import { UNKNOWN_TURN_COST } from '../../../runtime/metrics/cost.js';
 import type { TurnMetricsRecorder } from '../../../runtime/metrics/turn-recorder.js';
-import type { ToolRegistry } from '../../../types.js';
+import type { PiiShield, ToolRegistry } from '../../../types.js';
 import { NON_DOMAIN_TOOL_NAMES } from './tool-discovery.js';
 
 /** A direct command in the latest user message, and where its turn stands. */
@@ -83,6 +83,60 @@ export function stripChatCommandMessages(messages: ReadonlyArray<unknown>): unkn
     });
     return changed ? { ...message, parts } : message;
   });
+}
+
+/** Nesting deeper than this is not walked: it is replaced instead of reaching the model unchecked. */
+const MAX_PSEUDONYMIZED_DEPTH = 8;
+const REDACTED = '[redacted]';
+
+/** Pseudonymizes every string of a value in order; numbers, booleans and null stay. */
+async function pseudonymizeStrings(value: unknown, shield: PiiShield, sessionId: string, depth = 0): Promise<unknown> {
+  if (typeof value === 'string') return shield.outbound(value, sessionId);
+  if (typeof value !== 'object' || value === null) return value;
+  if (depth >= MAX_PSEUDONYMIZED_DEPTH) return REDACTED;
+  if (Array.isArray(value)) {
+    const items: unknown[] = [];
+    for (const item of value) items.push(await pseudonymizeStrings(item, shield, sessionId, depth + 1));
+    return items;
+  }
+  const entries: Array<[string, unknown]> = [];
+  for (const [key, entry] of Object.entries(value)) {
+    entries.push([key, await pseudonymizeStrings(entry, shield, sessionId, depth + 1)]);
+  }
+  return Object.fromEntries(entries);
+}
+
+/**
+ * The model's copy of a message with the arguments of its direct-command
+ * tool parts pseudonymized. A model-written call is pseudonymized already
+ * (it is rehydrated only at execution), but a command's arguments are what
+ * the user typed, and later model turns replay the call to the provider.
+ * The same session as the user messages' labels, so one value gets one
+ * pseudonym everywhere.
+ */
+export async function pseudonymizeCommandToolInputs(
+  message: Record<string, unknown>,
+  shield: PiiShield,
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  if (!Array.isArray(message.parts)) return message;
+  let changed = false;
+  const parts: unknown[] = [];
+  for (const part of message.parts) {
+    if (!isRecord(part) || !isChatCommandToolCallId(part.toolCallId)) {
+      parts.push(part);
+      continue;
+    }
+    // `rawInput` stands in for `input` when a call failed validation.
+    const next: MessageRecord = { ...part };
+    for (const key of ['input', 'rawInput']) {
+      if (part[key] === undefined) continue;
+      next[key] = await pseudonymizeStrings(part[key], shield, sessionId);
+      changed = true;
+    }
+    parts.push(next);
+  }
+  return changed ? { ...message, parts } : message;
 }
 
 /**
