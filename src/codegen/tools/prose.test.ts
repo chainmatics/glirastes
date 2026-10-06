@@ -154,6 +154,31 @@ describe('tool prose', () => {
     });
   });
 
+  it('reports an agent entry that does not parse as rejected agent output', async () => {
+    const loaded = await semanticsFile(JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'POST /api/tasks', description: 'x', origin: { description: 'agent' }, agent: { model: 'codex' } },
+        { stableKey: 'GET /api/tasks', description: 'y', mood: 'happy' },
+      ],
+    }));
+    expect(loaded.findings.map((finding) => [finding.code, finding.subjectRef, finding.message])).toEqual([
+      ['resolution-rejected', '.glirastes/tool-semantics.json#0', 'Entry 0 of tool-semantics.json is invalid at agent.interfaceDigest and is ignored.'],
+      ['tool-semantics-invalid', '.glirastes/tool-semantics.json#1', 'Entry 1 of tool-semantics.json is invalid and is ignored.'],
+    ]);
+  });
+
+  it('uses the entry the pipeline checked and adds its approval hint to the usage hints', async () => {
+    const { semantics } = await semanticsFile(JSON.stringify({
+      schemaVersion: 1,
+      tools: [{ stableKey: 'POST /api/tasks', description: 'From semantics.', approvalHint: 'Confirm when the task is shared with a team.' }],
+    }));
+    const prose = resolveToolProse({ ...base, semantics });
+    expect(prose.usageHints).toEqual(['Confirm when the task is shared with a team.']);
+    const rejected = resolveToolProse({ ...base, semantics, entry: null });
+    expect(rejected).toMatchObject({ descriptionOrigin: 'template', description: 'Create tasks (POST /api/tasks).' });
+  });
+
   it('reports malformed semantics files and entries without failing', async () => {
     expect((await semanticsFile('{')).findings.map((finding) => finding.code)).toEqual(['tool-semantics-invalid']);
     const partial = await semanticsFile(JSON.stringify({ schemaVersion: 1, tools: [{ description: 'no key' }, { name: 'tasks.create', description: 'Kept.' }] }));
