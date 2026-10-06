@@ -5,6 +5,7 @@ import { nextActionFor } from '../../../codegen/tools/findings.js';
 import type { ToolsPipelineOptions, ToolsPipelineResult } from '../../../codegen/tools/pipeline.js';
 import type { DescriptionOrigin } from '../../../codegen/tools/prose.js';
 import type { ContractSource, ToolFinding } from '../../../codegen/tools/types.js';
+import { buildResolveWorklist, describeGaps } from '../../../codegen/tools/worklist.js';
 import { AppSetupArtifactSchema, type ToolRiskClass } from '../../../contracts/index.js';
 import { riskTier } from '../../../contracts/tool-policy.js';
 
@@ -148,6 +149,30 @@ function confirmationLabel(entry: ToolStatusEntry): string {
     return 'asks first, locked in tool-policy.json';
   }
   return 'asks first';
+}
+
+function tools(count: number, verb: [string, string]): string {
+  return `${count} tool${count === 1 ? '' : 's'} ${count === 1 ? verb[0] : verb[1]}`;
+}
+
+/**
+ * The closing sentences of a refresh (spec 4.6): what the developer's own
+ * coding agent can still do, with the command that prints its work list.
+ */
+export function agentWorkNotes(result: ToolsPipelineResult): string[] {
+  const views = result.tools ?? [];
+  const attention = new Set(buildResolveWorklist(result).items
+    .filter((item) => item.owner === 'agent' && item.toolId !== null)
+    .map((item) => item.stableKey)).size;
+  const describe = views.filter((tool) => tool.contract !== null && describeGaps(tool).length > 0).length;
+  const notes: string[] = [];
+  if (attention > 0) {
+    notes.push(`${tools(attention, ['needs', 'need'])} attention – your coding agent can resolve this with \`glirastes tools resolve --print\`.`);
+  }
+  if (describe > 0) {
+    notes.push(`${tools(describe, ['needs', 'need'])} a better description – your coding agent can do this with \`glirastes tools describe --print\`.`);
+  }
+  return notes;
 }
 
 export function formatToolStatus(entries: ReadonlyArray<ToolStatusEntry>): string {

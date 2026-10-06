@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { isToolsMode, resolveToolsMode } from '../../../codegen/tools/mode.js';
 import { parseToolArgs, ToolsUsageError } from './args.js';
-import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
+import { agentWorkNotes, formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
 
 export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo): Promise<number> {
   const args = parseToolArgs(argv, { flags: ['--keep-going', '--json'], values: ['--root', '--mode', '--adopt'] });
@@ -18,6 +18,11 @@ export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo):
     ...(keepGoing ? { keepGoing } : {}),
     ...(adoptInventoryPath ? { adoptInventoryPath } : {}),
   });
-  io.log(args.flags.has('--json') ? formatToolsJson(result) : formatToolsHuman(result));
+  if (args.flags.has('--json')) {
+    io.log(formatToolsJson(result));
+    return 0;
+  }
+  const notes = agentWorkNotes(result);
+  io.log(notes.length > 0 ? `${formatToolsHuman(result)}\n\n${notes.join('\n')}` : formatToolsHuman(result));
   return 0;
 }

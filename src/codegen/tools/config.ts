@@ -82,7 +82,7 @@ export const ToolsConfigSchema = z.object({
   }).strict().default({}),
   ci: z.object({
     strict: z.boolean().optional(),
-    /** Accepted now; enforced by P05. */
+    /** `tools check` fails while an enabled tool has only a template description or field names. */
     requireEnrichment: z.boolean().optional(),
   }).strict().default({}),
 }).strict().superRefine((config, context) => {

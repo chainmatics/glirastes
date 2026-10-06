@@ -125,6 +125,8 @@ describe('glirastes tools', () => {
         },
       ],
     });
+    expect(refresh).toContain('2 tools need a better description – your coding agent can do this with `glirastes tools describe --print`.');
+    expect(refresh).not.toContain('need attention');
     await fixture.write('src/app/api/tasks/route.ts', ROUTE.split('export async function POST')[0]!);
     out.length = 0;
     expect(await runToolsCommand(['refresh'], deps)).toBe(0);
@@ -164,6 +166,24 @@ describe('glirastes tools', () => {
     expect(formatToolStatus([entry('archive', { confirmationOrigin: 'local-policy', platformMayRelax: false })]))
       .not.toContain('Platform may relax');
   });
+
+  it('names open stage-1 work after a refresh and enforces ci.requireEnrichment in check', async () => {
+    const fixture = await createAppFixture({
+      'src/app/api/tasks/route.ts': ROUTE,
+      'src/app/api/raw/route.ts': 'declare function getSession(): Promise<unknown>;\ndeclare function save(value: unknown): Promise<unknown>;\n'
+        + 'export async function POST(request: Request) { await getSession(); return Response.json(await save(await request.json())); }\n',
+    }, { toolsConfig: { ci: { requireEnrichment: true } } });
+    const out: string[] = [];
+    const deps = { cwd: fixture.root, env: {}, log: (line: string) => { out.push(line); }, error: () => undefined };
+    expect(await runToolsCommand(['refresh'], deps)).toBe(0);
+    expect(out.join('\n')).toContain('1 tool needs attention – your coding agent can resolve this with `glirastes tools resolve --print`.');
+    out.length = 0;
+    expect(await runToolsCommand(['check'], deps)).toBe(1);
+    expect(out.join('\n')).toContain('Enrichment required: 2 tool(s) have only a template description or field names (tasks.create, tasks.list).');
+    out.length = 0;
+    expect(await runToolsCommand(['refresh', '--json'], deps)).toBe(0);
+    expect(out.join('\n')).not.toContain('coding agent');
+  }, 120_000);
 
   it('prints the resolve work list from a frozen read and refuses to run without --print', async () => {
     const h = harness(emptyResult({ mode: 'frozen' }));
