@@ -12,6 +12,7 @@ import { DEFAULT_GENERATED_MODULE, TOOLS_PATHS } from './config.js';
 import { MAX_FILTER_KEYS, ToolContractsFileSchema } from './files.js';
 import { nextActionFor } from './findings.js';
 import { runToolsPipeline, runToolsPipelineWith, ToolsPipelineFailure } from './pipeline.js';
+import { ResolutionEntrySchema, resolutionLockDigest } from './resolutions.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { uiObservation } from './sources/ui-tools.js';
 import type { ToolSource } from './types.js';
@@ -654,9 +655,13 @@ describe('runToolsPipeline (stale tool-resolutions.json entries)', () => {
     expect(view(result, 'POST /api/memos')).toMatchObject({ enabled: false, contract: null });
     expect(codes('POST /api/notes')).toContainEqual(['enrichment-stale', 'warning']);
     expect(view(result, 'POST /api/notes')).toMatchObject({ enabled: true, contract: { source: 'derived' } });
-    expect(buildResolveWorklist(result).items).toContainEqual(expect.objectContaining({
-      code: 'contract-stale', tool: 'memos.create', target: { kind: 'file', file: TOOLS_PATHS.resolutions, key: 'tools["POST /api/memos"]' },
-    }));
+    // A person wrote the stale entry: the agent leaves it and reports it, no agent template replaces it.
+    const stale = buildResolveWorklist(result).items.find((item) => item.code === 'contract-stale' && item.tool === 'memos.create');
+    expect(stale).toMatchObject({
+      owner: 'developer', target: { kind: 'review', file: TOOLS_PATHS.resolutions, key: 'tools["POST /api/memos"]' },
+    });
+    expect(stale).not.toHaveProperty('expected');
+    expect(stale?.nextAction).toContain('leave it unchanged and report it for review');
     const describe = buildDescribeWorklist(result, { root: fixture.root, locale: 'en', languages: ['en'] });
     expect(describe.items.find((item) => item.tool === 'notes.create')?.gaps).toContain('enrichment-stale');
   }, 180_000);
@@ -670,9 +675,16 @@ describe('runToolsPipeline (stale tool-resolutions.json entries)', () => {
     await runToolsPipeline({ root: fixture.root, mode: 'write' });
     const digestOf = await digests(fixture);
     const stableKeys = ['POST /api/drafts', 'POST /api/memos', 'POST /api/tasks'];
+    // The task entry was reviewed and locked by glirastes tools verify.
+    const entry = (stableKey: string) => {
+      const content = { origin: 'human', interfaceDigest: digestOf(stableKey), effect: 'financial' };
+      return stableKey === 'POST /api/tasks'
+        ? { ...content, locked: resolutionLockDigest(ResolutionEntrySchema.parse(content)) }
+        : content;
+    };
     await fixture.write(TOOLS_PATHS.resolutions, `${JSON.stringify({
       schemaVersion: 1,
-      tools: Object.fromEntries(stableKeys.map((stableKey) => [stableKey, { interfaceDigest: digestOf(stableKey), effect: 'financial' }])),
+      tools: Object.fromEntries(stableKeys.map((stableKey) => [stableKey, entry(stableKey)])),
     })}\n`);
     const current = await runToolsPipeline({ root: fixture.root, mode: 'write' });
     for (const stableKey of stableKeys) {
@@ -693,14 +705,18 @@ describe('runToolsPipeline (stale tool-resolutions.json entries)', () => {
         code: 'contract-stale', severity: 'needs_attention', message: 'The handler interface changed after its tool-resolutions.json entry was written.',
       }));
     }
-    // The stale contract.ts is fixed in app code, every stale entry in tool-resolutions.json.
-    expect(buildResolveWorklist(result).items.filter((item) => item.code === 'contract-stale')
-      .map((item) => [item.stableKey, item.target.kind === 'file' ? item.target.key : item.target.kind])).toEqual([
-      ['POST /api/drafts', 'app-code'],
-      ['POST /api/drafts', 'tools["POST /api/drafts"]'],
-      ['POST /api/memos', 'tools["POST /api/memos"]'],
-      ['POST /api/tasks', 'tools["POST /api/tasks"]'],
+    // The agent fixes the stale contract.ts in app code; it leaves every stale human or locked
+    // tool-resolutions.json entry as it is and reports it for review.
+    const staleItems = buildResolveWorklist(result).items.filter((item) => item.code === 'contract-stale');
+    expect(staleItems.map((item) => [
+      item.stableKey, item.owner, item.target.kind, item.target.kind === 'review' ? item.target.key : null,
+    ])).toEqual([
+      ['POST /api/drafts', 'agent', 'app-code', null],
+      ['POST /api/drafts', 'developer', 'review', 'tools["POST /api/drafts"]'],
+      ['POST /api/memos', 'developer', 'review', 'tools["POST /api/memos"]'],
+      ['POST /api/tasks', 'developer', 'review', 'tools["POST /api/tasks"]'],
     ]);
+    expect(staleItems.filter((item) => 'expected' in item)).toEqual([]);
   }, 180_000);
 });
 

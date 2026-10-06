@@ -28,7 +28,12 @@ export type WorklistTarget =
   /** The agent changes app code (never a route handler's logic, never generated files). */
   | { kind: 'app-code'; files: string[] }
   /** Only the developer may do this; the agent shows the command and stops. */
-  | { kind: 'developer'; command: string };
+  | { kind: 'developer'; command: string }
+  /**
+   * An entry a person wrote or reviewed (human or locked): the agent leaves
+   * it exactly as it is and reports it, with `message`, for human review.
+   */
+  | { kind: 'review'; file: string; key: string };
 
 export interface WorklistEvidence {
   route: string;
@@ -121,6 +126,10 @@ const DEVELOPER_CODES: ReadonlySet<string> = new Set([
   'override-lapsed-risk-raised',
   'E-POLICY-002',
 ]);
+
+/** What the agent does with a stale entry a person wrote or reviewed. */
+const STALE_HUMAN_ENTRY_ACTION = 'A person wrote or reviewed this tool-resolutions.json entry: leave it unchanged and report it for review. '
+  + 'The developer renews it for the changed interface (evidence.interfaceDigest) or removes it, then runs glirastes tools refresh.';
 
 /** Drift of the committed outputs is reported by `outputsCurrent`, so it is no blocking finding. */
 const IGNORED_FOR_LISTS: ReadonlySet<string> = new Set(['tool-outputs-drift']);
@@ -243,10 +252,19 @@ function resolveItem(finding: ToolFinding, tool: ToolsPipelineTool | undefined):
   }
   if (!tool) return undefined;
   if (code === 'contract-stale') {
-    // A stale descriptive contract.ts is renewed in app code; a stale resolution entry in its file.
-    return tool.contract?.source === 'contract-module' && !finding.message.includes('tool-resolutions.json')
-      ? { ...base, owner: 'agent', target: { kind: 'app-code', files: tool.files } }
-      : { ...base, owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.resolutions, key: toolKey(tool.stableKey) }, expected: resolutionEntryTemplate(tool) };
+    // A stale descriptive contract.ts is renewed in app code.
+    if (tool.contract?.source === 'contract-module' && !finding.message.includes('tool-resolutions.json')) {
+      return { ...base, owner: 'agent', target: { kind: 'app-code', files: tool.files } };
+    }
+    // Only a human (or reviewed and locked) tool-resolutions.json entry turns
+    // contract-stale; a stale agent entry is `enrichment-stale`. No agent
+    // template may replace it: the person who wrote it renews or removes it.
+    return {
+      ...base,
+      owner: 'developer',
+      target: { kind: 'review', file: TOOLS_PATHS.resolutions, key: toolKey(tool.stableKey) },
+      nextAction: STALE_HUMAN_ENTRY_ACTION,
+    };
   }
   if (RESOLUTION_CODES.has(code)) {
     return {

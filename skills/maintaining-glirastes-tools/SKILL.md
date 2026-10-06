@@ -49,6 +49,9 @@ keeps its fallback.
      contract as third argument of `useAiClientAction`, mount the navigation
      bridge, rename a colliding parameter).
    - `owner: "developer"`: show `target.command` and why; stop there.
+     With `target.kind: "review"` a person wrote or reviewed the entry at
+     `target.key` of `target.file` (human or locked): leave it exactly as it
+     is and report it with its `message` for review.
    - `blocking`: fix these first (for example `export *` in a route file,
      a linked source folder, an invalid `tool-policy.json`); nothing is
      written until they are gone.
@@ -68,7 +71,7 @@ keeps its fallback.
 | --- | --- |
 | `input-contract-unresolved`, `input-role-unclear`, `input-role-unsupported`, `schema-json-unavailable` | a `tool-resolutions.json` entry (JSON Schema, or `schemaRef` to an exported Zod schema), or validation with an exported schema in a sibling `contract.ts` |
 | `auth-evidence-missing` | the name of the session helper the handler really calls, in `conventions.authHelpers`; never a helper that does not check the session |
-| `contract-stale` | update the entry or `contract.ts` for the changed interface |
+| `contract-stale` | a stale `contract.ts`: update it for the changed interface; a stale `tool-resolutions.json` entry (always written or reviewed by a person): developer, who renews or removes it |
 | `schema-not-exported`, `schema-module-unloadable`, `schema-content-rejected`, `parameter-collision`, `contract-effect-invalid` | the app code the message names; a schema moves into a side-effect-free module (a sibling `contract.ts` or a schema file) that the handler imports, never into a new export of `route.ts`, whose exports Next.js type-checks |
 | `ui-action-id-dynamic`, `ui-action-id-invalid`, `ui-action-id-reserved`, `definition-id-invalid`, `contract-presentation-invalid` | the registration or contract in `target.files`: a literal action id, a valid contract id or presentation |
 | `tool-semantics-invalid` | the entry `target.key` names in `.glirastes/tool-semantics.json`; keep its human text, fix only the shape |
