@@ -138,6 +138,54 @@ describe('resolveEndpointContract', () => {
     expect(stale.findings.map((finding) => finding.code)).toEqual(['contract-stale']);
   });
 
+  it('checks the keys of a JSON Schema entry against the code only once its interface is current', () => {
+    const derived = evidence({ readsBody: true, bodyKeys: ['title', 'due'] });
+    const current = resolve({ evidence: derived });
+    const entryWith = (origin: 'human' | 'agent', interfaceDigest: string, keys: ReadonlyArray<string>) => ({
+      origin,
+      ...(origin === 'agent' ? { model: 'codex' } : {}),
+      interfaceDigest,
+      input: { jsonSchema: { type: 'object', properties: Object.fromEntries(keys.map((key) => [key, {}])), additionalProperties: false } },
+    });
+    for (const origin of ['human', 'agent'] as const) {
+      for (const [keys, reason] of [[['title'], 'drops parameters the handler reads: due'], [['title', 'due', 'tag'], 'input keys without code evidence: tag']] as const) {
+        const rejected = resolve({ evidence: derived, resolution: entryWith(origin, current.interfaceDigest, keys) });
+        expect(rejected.contract?.source).toBe('derived');
+        expect(rejected.findings.find((finding) => finding.code === 'resolution-rejected')?.message).toContain(reason);
+      }
+    }
+    // Written for another interface, the same entries are stale before their keys are judged.
+    const human = resolve({ evidence: derived, resolution: entryWith('human', digest('S'), ['title']) });
+    expect(human.contract).toBeUndefined();
+    expect(human.findings.map((finding) => [finding.code, finding.severity])).toEqual([['contract-stale', 'needs_attention']]);
+    const agent = resolve({ evidence: derived, resolution: entryWith('agent', digest('S'), ['title', 'due', 'tag']) });
+    expect(agent.contract?.source).toBe('derived');
+    expect(agent.findings.map((finding) => finding.code)).toEqual(['output-contract-opaque', 'contract-derived', 'enrichment-stale']);
+  });
+
+  it('reports a stale human entry without an input schema on every tier and drops its effect', () => {
+    const stale = { origin: 'human' as const, interfaceDigest: digest('S'), effect: 'financial' as const };
+    const derived = resolve({ evidence: evidence({ readsBody: true, bodyKeys: ['title'] }), resolution: stale });
+    const native = resolve({
+      evidence: evidence({ schemaUses: [bodyUse], readsBody: true, bodyKeys: 'opaque' }),
+      probes: probes([probeItemFor(SCHEMAS, 'input'), probed(NOTE, digest('N'))]),
+      resolution: stale,
+    });
+    const module = resolve({
+      evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),
+      contractModule: { module: CONTRACT_MODULE, loadBearing: true, result: entry({ effect: null }) },
+      resolution: stale,
+    });
+    for (const [result, source] of [[derived, 'derived'], [native, 'native'], [module, 'contract-module']] as const) {
+      expect(result.contract?.source).toBe(source);
+      expect(result.declaredEffect).toBeUndefined();
+      expect(result.findings).toContainEqual(expect.objectContaining({
+        code: 'contract-stale', severity: 'needs_attention',
+        message: 'The handler interface changed after its tool-resolutions.json entry was written.',
+      }));
+    }
+  });
+
   it('falls back to the code contract when an agent entry is stale, and says so', () => {
     const derived = evidence({ readsBody: true, bodyKeys: ['title'] });
     const typed = { ...NOTE, properties: { title: { type: 'string', minLength: 1 } } };

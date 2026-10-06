@@ -189,15 +189,17 @@ function firstIssuePath(error: z.ZodError): string {
 }
 
 /**
- * The unified check of one entry (spec 4.6): strict parse, content limits, an
- * intact lock, effects that only raise the risk, strict JSON Schema of at
- * most 32 KB, and input keys that match the code evidence. An invalid entry
- * is ignored with `resolution-rejected`; the tool keeps its fallback.
+ * The unified check of one entry (spec 4.6) on what the entry says by itself:
+ * strict parse, content limits, an intact lock, effects that only raise the
+ * risk and strict JSON Schema of at most 32 KB. An invalid entry is ignored
+ * with `resolution-rejected`; the tool keeps its fallback. The input keys are
+ * checked against the code evidence later (`assessResolution` in
+ * contract-tiers.ts), once `interfaceDigest` shows the entry is current: an
+ * entry written for an earlier interface is stale, not rejected (spec 4.4).
  */
 export function validateResolutionEntry(input: {
   stableKey: string;
   raw: unknown;
-  evidence: ResolutionEvidence;
   /** The risk class the code alone derives; an effect below it is refused. */
   codeRiskClass?: ToolRiskClass;
 }): { entry?: ResolutionEntry; findings: ToolFinding[] } {
@@ -219,12 +221,8 @@ export function validateResolutionEntry(input: {
   const specs = [['input', entry.input], ['output', entry.output]] as const;
   for (const [role, spec] of specs) {
     if (!spec?.jsonSchema) continue;
-    const schema = withoutMetaSchema(spec.jsonSchema);
-    const problem = strictSchemaProblem(schema, role);
+    const problem = strictSchemaProblem(withoutMetaSchema(spec.jsonSchema), role);
     if (problem) return reject(problem);
-    if (role !== 'input') continue;
-    const evidence = inputEvidenceProblem(schema, input.evidence);
-    if (evidence) return reject(evidence);
   }
   return {
     entry: {

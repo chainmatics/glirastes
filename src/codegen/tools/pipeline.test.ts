@@ -15,7 +15,7 @@ import { runToolsPipeline, runToolsPipelineWith, ToolsPipelineFailure } from './
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { uiObservation } from './sources/ui-tools.js';
 import type { ToolSource } from './types.js';
-import { buildResolveWorklist } from './worklist.js';
+import { buildDescribeWorklist, buildResolveWorklist } from './worklist.js';
 
 const outsideDirs: string[] = [];
 afterEach(async () => {
@@ -605,6 +605,103 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
       expect(module).toContain(JSON.stringify(synonym));
     }
   }, 120_000);
+});
+
+describe('runToolsPipeline (stale tool-resolutions.json entries)', () => {
+  const memo = (route: string, keys: string) => [
+    `src/app/api/${route}/route.ts`,
+    "import { getSession } from '@/lib/session';\n"
+      + 'export async function POST(request: Request) {\n  await getSession(request);\n'
+      + `  const { ${keys} } = await request.json();\n  return Response.json({ id: '1', title }, { status: 201 });\n}\n`,
+  ] as const;
+  const schema = (keys: ReadonlyArray<string>) => ({
+    type: 'object',
+    properties: Object.fromEntries(keys.map((key) => [key, { type: 'string' }])),
+    additionalProperties: false,
+  });
+  async function digests(fixture: AppFixture): Promise<(stableKey: string) => string> {
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    return (stableKey) => contracts.tools.find((entry) => entry.stableKey === stableKey)!.contract!.interfaceDigest;
+  }
+  const view = (result: Awaited<ReturnType<typeof runToolsPipeline>>, stableKey: string) => (
+    result.tools?.find((tool) => tool.stableKey === stableKey)
+  );
+
+  it.each([
+    ['an added key', 'title, note, amount'],
+    ['a removed key', 'title'],
+  ])('compares the interface before the keys after %s: a human entry turns contract-stale, an agent one enrichment-stale', async (_label, changed) => {
+    const fixture = await app();
+    for (const route of ['memos', 'notes']) await fixture.write(...memo(route, 'title, note'));
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const digestOf = await digests(fixture);
+    await fixture.write(TOOLS_PATHS.resolutions, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: {
+        'POST /api/memos': { interfaceDigest: digestOf('POST /api/memos'), input: { jsonSchema: schema(['note', 'title']) }, effect: 'financial' },
+        'POST /api/notes': { origin: 'agent', model: 'codex', interfaceDigest: digestOf('POST /api/notes'), input: { jsonSchema: schema(['note', 'title']) } },
+      },
+    })}\n`);
+    const current = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(view(current, 'POST /api/memos')).toMatchObject({ enabled: true, riskClass: 'financial', contract: { source: 'resolution' } });
+    expect(view(current, 'POST /api/notes')).toMatchObject({ enabled: true, contract: { source: 'resolution' } });
+
+    for (const route of ['memos', 'notes']) await fixture.write(...memo(route, changed));
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const codes = (stableKey: string) => view(result, stableKey)?.findings.map((finding) => [finding.code, finding.severity]);
+    expect(result.findings.filter((finding) => finding.code === 'resolution-rejected')).toEqual([]);
+    expect(codes('POST /api/memos')).toContainEqual(['contract-stale', 'needs_attention']);
+    expect(view(result, 'POST /api/memos')).toMatchObject({ enabled: false, contract: null });
+    expect(codes('POST /api/notes')).toContainEqual(['enrichment-stale', 'warning']);
+    expect(view(result, 'POST /api/notes')).toMatchObject({ enabled: true, contract: { source: 'derived' } });
+    expect(buildResolveWorklist(result).items).toContainEqual(expect.objectContaining({
+      code: 'contract-stale', tool: 'memos.create', target: { kind: 'file', file: TOOLS_PATHS.resolutions, key: 'tools["POST /api/memos"]' },
+    }));
+    const describe = buildDescribeWorklist(result, { root: fixture.root, locale: 'en', languages: ['en'] });
+    expect(describe.items.find((item) => item.tool === 'notes.create')?.gaps).toContain('enrichment-stale');
+  }, 180_000);
+
+  it('reports a stale human entry without an input schema on every tier instead of dropping its effect', async () => {
+    const fixture = await app();
+    await fixture.write(...memo('memos', 'title, note'));
+    await fixture.write(...memo('drafts', 'title'));
+    await fixture.write('src/app/api/drafts/contract.ts', "import { z } from 'zod';\n"
+      + "export const contract = { POST: { input: z.object({ title: z.string() }).strict(), description: 'Saves a draft.' } };\n");
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const digestOf = await digests(fixture);
+    const stableKeys = ['POST /api/drafts', 'POST /api/memos', 'POST /api/tasks'];
+    await fixture.write(TOOLS_PATHS.resolutions, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: Object.fromEntries(stableKeys.map((stableKey) => [stableKey, { interfaceDigest: digestOf(stableKey), effect: 'financial' }])),
+    })}\n`);
+    const current = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    for (const stableKey of stableKeys) {
+      expect(view(current, stableKey)).toMatchObject({ enabled: true, riskClass: 'financial' });
+    }
+
+    // The derived memo loses a key, the descriptive draft gains one, the native task handler reads a query key.
+    await fixture.write(...memo('memos', 'title'));
+    await fixture.write(...memo('drafts', 'title, note'));
+    await fixture.write('src/app/api/tasks/route.ts', `${IMPORTS}${GET_HANDLER}${POST_HANDLER.replace(
+      '  const input = createTask.parse', "  const source = new URL(request.url).searchParams.get('source');\n  const input = createTask.parse",
+    ).replace('title: input.title', 'title: input.title, source')}`);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.findings.filter((finding) => finding.code === 'resolution-rejected')).toEqual([]);
+    for (const [stableKey, source] of [['POST /api/drafts', 'contract-module'], ['POST /api/memos', 'derived'], ['POST /api/tasks', 'native']] as const) {
+      expect(view(result, stableKey)).toMatchObject({ enabled: false, contract: { source } });
+      expect(view(result, stableKey)?.findings).toContainEqual(expect.objectContaining({
+        code: 'contract-stale', severity: 'needs_attention', message: 'The handler interface changed after its tool-resolutions.json entry was written.',
+      }));
+    }
+    // The stale contract.ts is fixed in app code, every stale entry in tool-resolutions.json.
+    expect(buildResolveWorklist(result).items.filter((item) => item.code === 'contract-stale')
+      .map((item) => [item.stableKey, item.target.kind === 'file' ? item.target.key : item.target.kind])).toEqual([
+      ['POST /api/drafts', 'app-code'],
+      ['POST /api/drafts', 'tools["POST /api/drafts"]'],
+      ['POST /api/memos', 'tools["POST /api/memos"]'],
+      ['POST /api/tasks', 'tools["POST /api/tasks"]'],
+    ]);
+  }, 180_000);
 });
 
 describe('runToolsPipeline (orphaned policy entries)', () => {

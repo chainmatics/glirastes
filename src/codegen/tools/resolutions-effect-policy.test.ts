@@ -11,13 +11,11 @@ vi.mock('../../contracts/tool-policy.js', async (importOriginal) => ({
 const { validateResolutionEntry } = await import('./resolutions.js');
 
 const DIGEST = `sha256:${'R'.repeat(43)}`;
-const evidence = { pathParams: ['id'], queryKeys: [] as ReadonlyArray<string>, bodyKeys: ['title'] as ReadonlyArray<string> };
 
 function check(effect: string, codeRiskClass: 'write' | 'delete') {
   return validateResolutionEntry({
     stableKey: 'POST /api/tasks/:id/archive',
     raw: { interfaceDigest: DIGEST, effect },
-    evidence,
     codeRiskClass,
   });
 }

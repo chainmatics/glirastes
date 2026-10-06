@@ -243,7 +243,8 @@ function resolveItem(finding: ToolFinding, tool: ToolsPipelineTool | undefined):
   }
   if (!tool) return undefined;
   if (code === 'contract-stale') {
-    return tool.contract?.source === 'contract-module'
+    // A stale descriptive contract.ts is renewed in app code; a stale resolution entry in its file.
+    return tool.contract?.source === 'contract-module' && !finding.message.includes('tool-resolutions.json')
       ? { ...base, owner: 'agent', target: { kind: 'app-code', files: tool.files } }
       : { ...base, owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.resolutions, key: toolKey(tool.stableKey) }, expected: resolutionEntryTemplate(tool) };
   }

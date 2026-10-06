@@ -380,12 +380,21 @@ interface ResolutionAssessment {
   findings: ToolFinding[];
 }
 
+function staleResolutionFinding(subject: string): ToolFinding {
+  return toolFinding('contract-stale', 'needs_attention', subject,
+    'The handler interface changed after its tool-resolutions.json entry was written.');
+}
+
 /**
- * Whether the tool-resolutions.json entry can be used (spec 4.6): a human
- * entry for an older interface makes the tool `contract-stale`; an agent
- * entry for an older interface or one whose schema reference does not load,
- * carries secret-looking content or drops evidenced parameters is ignored,
- * and the tool keeps its fallback contract.
+ * Whether the tool-resolutions.json entry can be used (spec 4.4, 4.6). The
+ * interface comes first: a human entry for an older interface makes the tool
+ * `contract-stale` whichever tier wins, also without an input schema, so a
+ * raised effect never lapses unseen; an agent entry for an older interface is
+ * ignored with `enrichment-stale`. Only a current entry is held against the
+ * code: one whose input keys lack evidence or drop evidenced parameters, or
+ * whose schema reference does not load, carries secret-looking content or is
+ * no object, is ignored with `resolution-rejected`. An ignored entry leaves
+ * the tool its fallback contract.
  */
 function assessResolution(
   input: ResolveEndpointContractInput,
@@ -395,7 +404,7 @@ function assessResolution(
   if (!resolution) return { staleHuman: false, findings: [] };
   const subject = input.stableKey;
   if (resolution.interfaceDigest !== interfaceDigest) {
-    if (resolution.origin === 'human') return { staleHuman: true, findings: [] };
+    if (resolution.origin === 'human') return { staleHuman: true, findings: [staleResolutionFinding(subject)] };
     return {
       staleHuman: false,
       findings: [toolFinding('enrichment-stale', 'warning', subject,
@@ -407,6 +416,15 @@ function assessResolution(
     findings: [toolFinding('resolution-rejected', 'warning', subject,
       `The tool-resolutions.json entry was rejected: ${reason}.`)],
   });
+  const evidenceProblem = (schema: Record<string, unknown>) => inputEvidenceProblem(schema, {
+    pathParams: input.pathParams,
+    queryKeys: input.evidence.queryKeys,
+    bodyKeys: input.evidence.bodyKeys,
+  });
+  if (resolution.input?.jsonSchema) {
+    const problem = evidenceProblem(resolution.input.jsonSchema);
+    if (problem) return reject(problem);
+  }
   const references = [['input', resolution.input?.schemaRef], ['output', resolution.output?.schemaRef]] as const;
   for (const [role, ref] of references) {
     if (!ref) continue;
@@ -419,11 +437,7 @@ function assessResolution(
       return reject(`the input schema ${label} is not an object at its root`);
     }
     if (role === 'input' && schema.jsonSchema) {
-      const problem = inputEvidenceProblem(schema.jsonSchema, {
-        pathParams: input.pathParams,
-        queryKeys: input.evidence.queryKeys,
-        bodyKeys: input.evidence.bodyKeys,
-      });
+      const problem = evidenceProblem(schema.jsonSchema);
       if (problem) return reject(problem);
     }
   }
@@ -563,10 +577,12 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     return unresolved([probeFailureFinding(subject, input.contractModule.module, candidate)]);
   }
 
-  // Tier 4: tool-resolutions.json entry bound to the interface digest.
+  // Tier 4: tool-resolutions.json entry bound to the interface digest. A stale
+  // human input schema is not swapped for a weaker one; without an input
+  // schema the code contract stays, and `contract-stale` (a side finding)
+  // keeps the tool disabled.
   if (assessment.staleHuman && input.resolution?.input) {
-    return unresolved([toolFinding('contract-stale', 'needs_attention', subject,
-      'The handler interface changed after its tool-resolutions.json entry was written.')]);
+    return unresolved([staleResolutionFinding(subject)]);
   }
   const resolutionInput = resolution?.input;
   if (resolutionInput) {

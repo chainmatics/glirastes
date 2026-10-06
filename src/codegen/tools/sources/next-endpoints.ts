@@ -388,18 +388,14 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
     return { entry, ...(analysis ? { analysis } : {}), ...(contractModule ? { contractModule } : {}) };
   });
 
+  // The input keys of an entry are checked in resolveEndpointContract, after its interfaceDigest.
   const resolutions = new Map<string, ResolutionEntry>();
-  for (const { entry, analysis } of analyzed) {
+  for (const { entry } of analyzed) {
     const raw = ctx.resolutions.entries.get(entry.stableKey);
     if (raw === undefined) continue;
     const validated = validateResolutionEntry({
       stableKey: entry.stableKey,
       raw,
-      evidence: {
-        pathParams: entry.pathParams,
-        queryKeys: analysis?.queryKeys ?? [],
-        bodyKeys: analysis?.bodyKeys ?? 'opaque',
-      },
       codeRiskClass: deriveToolPolicyDefaults({
         executionKind: 'endpoint', method: entry.method, path: entry.path, definitionId: '',
       }).riskClass,
