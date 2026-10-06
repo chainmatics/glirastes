@@ -131,7 +131,11 @@ sink once per process at module scope, never per request: every sink draws its
 own `instanceId`.
 
 Cost is `provider-reported` when OpenRouter returns `usage.cost`, also through
-`createOpenAI({ baseURL: 'https://openrouter.ai/api/v1' })`. A `modelPricing`
+`createOpenAI({ baseURL: 'https://openrouter.ai/api/v1' }).chat(model)`; use
+`.chat`, because `createOpenAI(...)(model)` talks to the Responses API, whose
+usage the handler does not read. An endpoint that refuses a call its tool
+schema accepted (400 or 422) adds a content-free `tool_contract_rejected`
+event to the same sink, in its own batch. A `modelPricing`
 table on the handler estimates the rest (`price-table`, with its version).
 Without either, the cost stays unknown (`null`), never 0. A known cost also
 counts against the turn's `maxEstimatedCostUsd`. The legacy Lancer `telemetry`
