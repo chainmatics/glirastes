@@ -592,3 +592,18 @@ describe('runToolsPipeline (orphaned policy entries)', () => {
       .filter((finding: { code: string }) => finding.code === 'policy-entry-orphaned')).toHaveLength(3);
   }, 120_000);
 });
+
+describe('runToolsPipeline (app identity)', () => {
+  it('refuses to re-key every tool when tools.json changes its app id after a committed refresh', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const config = JSON.parse(await fixture.read(TOOLS_PATHS.config)) as Record<string, unknown>;
+    await fixture.write(TOOLS_PATHS.config, JSON.stringify({ ...config, appId: '019fb007-0000-7000-8000-0000000000f9' }));
+    const error = await failure(runToolsPipeline({ root: fixture.root, mode: 'write' }));
+    expect(error.result.findings.map((finding) => [finding.code, finding.subjectRef])).toEqual([
+      ['generation-state-invalid', TOOLS_PATHS.tombstones],
+      ['prompt-bundle-invalid', TOOLS_PATHS.promptBundle],
+    ]);
+    expect(error.result.wrote).toBe(false);
+  }, 120_000);
+});

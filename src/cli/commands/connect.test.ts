@@ -309,4 +309,63 @@ describe('glirastes connect command', () => {
     await expect(readFile(environmentPath, 'utf8')).resolves.toBe('ORIGINAL_ENV=kept\n');
     await expect(readFile(descriptorPath, 'utf8')).resolves.toBe('original descriptor');
   });
+
+  describe('tools.json', () => {
+    const tools = (patch: Record<string, unknown> = {}) => JSON.stringify({
+      schemaVersion: 1, appId, targetAppKey: 'fixture-app', locale: 'en', sources: ['next-app', 'react-actions'], ...patch,
+    });
+    const deps = (rootDir: string, client: ReturnType<typeof connectedClient>, preflight = vi.fn().mockResolvedValue({
+      projectRoot: rootDir,
+      environmentPath: join(rootDir, '.env.local'),
+      descriptorPath: join(rootDir, '.glirastes/platform-connection.json'),
+    })): ConnectCommandDependencies => ({
+      createPlan: vi.fn().mockResolvedValue(plan()),
+      preflight,
+      clientFactory: vi.fn(() => client),
+      openBrowser: vi.fn(),
+      materialize: vi.fn().mockResolvedValue({}),
+      createRunnerKey: () => 'local-runner',
+      log: vi.fn(),
+    });
+
+    it('takes the framework from the configured sources instead of package.json', async () => {
+      const rootDir = await fixture();
+      await writeFile(join(rootDir, 'package.json'), JSON.stringify({ name: '@example/fixture-app', dependencies: {} }));
+      await writeFile(join(rootDir, '.glirastes/tools.json'), tools());
+      const client = connectedClient();
+      const preflight = vi.fn().mockResolvedValue({
+        projectRoot: rootDir,
+        environmentPath: join(rootDir, '.env.local'),
+        descriptorPath: join(rootDir, '.glirastes/platform-connection.json'),
+      });
+      await runConnect({ rootDir, baseUrl: 'https://control.example' }, deps(rootDir, client, preflight));
+      expect(preflight).toHaveBeenCalledWith(expect.objectContaining({ framework: 'nextjs' }));
+      expect(client.startPairing).toHaveBeenCalledOnce();
+    });
+
+    it('names the configured sources when the stack has no automatic connection', async () => {
+      const rootDir = await fixture();
+      await writeFile(join(rootDir, '.glirastes/tools.json'), tools({ sources: ['react-actions', 'url-filters'] }));
+      const client = connectedClient();
+      await expect(runConnect({ rootDir, baseUrl: 'https://control.example' }, deps(rootDir, client))).rejects.toMatchObject({
+        code: 'E-CONNECT-FRAMEWORK-UNSUPPORTED',
+        message: 'Automatic connection materialization currently requires Next.js; .glirastes/tools.json declares react-actions, url-filters.',
+      });
+      expect(client.startPairing).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['tools.json names another app', '.glirastes/tools.json', () => tools({ appId: '019fa9a9-d5f7-7ec3-a3c7-8899de400009' })],
+      ['the checkout is already connected as another app', '.glirastes/platform-connection.json', () => JSON.stringify({
+        schemaVersion: 1, baseUrl: 'https://control.example', appId: '019fa9a9-d5f7-7ec3-a3c7-8899de400009', environmentId, runnerKey: 'local-runner',
+      })],
+    ])('refuses to change the app id silently when %s', async (_label, path, content) => {
+      const rootDir = await fixture();
+      await writeFile(join(rootDir, path), content());
+      const client = connectedClient();
+      await expect(runConnect({ rootDir, baseUrl: 'https://control.example' }, deps(rootDir, client)))
+        .rejects.toMatchObject({ code: 'E-CONNECT-APP-ID-CHANGED' });
+      expect(client.startPairing).not.toHaveBeenCalled();
+    });
+  });
 });
