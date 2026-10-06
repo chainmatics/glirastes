@@ -460,18 +460,24 @@
 }
 
 /* ---------- Chat interactions: entity actions and command arguments ---------- */
+/* The item keeps `width: 100%` from its own rule, so it gets a small flex basis here: with the full
+   row as basis the shrink is shared by basis and squeezes the chips below their own width. The row
+   wraps instead, which keeps the chips on one line beside the result and drops them below it only
+   when the result cannot keep 8rem. */
 [data-component="ai-chat-panel"] [data-component="mention-dropdown"] [data-element="result-row"] {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
   padding-right: 0.5rem;
 }
 [data-component="ai-chat-panel"] [data-element="result-row"] > [data-component="mention-dropdown-item"] {
-  flex: 1 1 auto;
+  flex: 1 1 8rem;
   min-width: 0;
 }
 [data-component="ai-chat-panel"] [data-element="entity-actions"] {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.25rem;
@@ -577,6 +583,13 @@
 }
 [data-component="command-arguments"] [data-element="options"] [role="option"][data-selected="true"] {
   background: var(--cm-primary-tint);
+}
+/* The dropdown rule for descriptions is scoped to the mention items; without this one the span runs
+   on after the label (`Alice Examplealice@example.com`). */
+[data-component="command-arguments"] [data-element="options"] [data-element="description"] {
+  display: block;
+  font-size: 12px;
+  color: var(--cm-text-muted);
 }
 [data-component="command-arguments"] [data-element="actions"] {
   display: flex;
