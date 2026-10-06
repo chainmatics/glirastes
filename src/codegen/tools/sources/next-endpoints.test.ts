@@ -228,6 +228,22 @@ describe('next-app endpoint source', () => {
     expect(tasks?.prose?.schemaDescription).toBe('List your tasks, optionally filtered by status.');
   }, 60_000);
 
+  it('refuses a tool-resolutions.json effect that would lower the risk the route has by code', async () => {
+    const app = await createAppFixture(APP_FILES);
+    const first = byKey((await createNextEndpointSource().observe(context(app.root))).observations);
+    const interfaceDigest = first.get('DELETE /api/tasks/:id')!.contract!.interfaceDigest;
+    const observe = (effect: string) => createNextEndpointSource().observe(context(app.root, {
+      resolutions: { conventions: EMPTY_CONVENTIONS, entries: new Map([['DELETE /api/tasks/:id', { interfaceDigest, effect }]]) },
+    }));
+    const lowered = await observe('write');
+    expect(lowered.findings.map((finding) => [finding.code, finding.subjectRef]))
+      .toContainEqual(['resolution-rejected', 'DELETE /api/tasks/:id']);
+    expect(byKey(lowered.observations).get('DELETE /api/tasks/:id')?.evidence.declaredEffect).toBeUndefined();
+    const raised = await observe('financial');
+    expect(raised.findings.map((finding) => finding.code)).not.toContain('resolution-rejected');
+    expect(byKey(raised.observations).get('DELETE /api/tasks/:id')?.evidence.declaredEffect).toBe('financial');
+  }, 60_000);
+
   it('keeps a previous definition id and handles apps without an API directory', async () => {
     const app = await createAppFixture({
       'src/app/api/tasks/route.ts': 'export async function GET() { await getSession(); return Response.json([]); }\n'

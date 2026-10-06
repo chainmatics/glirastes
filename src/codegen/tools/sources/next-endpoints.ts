@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import ts from 'typescript';
+import { deriveToolPolicyDefaults } from '../../../contracts/tool-policy.js';
 import type { EndpointMethod } from '../../../types.js';
 import {
   createRouteSourceFingerprint,
@@ -379,6 +380,9 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
         queryKeys: analysis?.queryKeys ?? [],
         bodyKeys: analysis?.bodyKeys ?? 'opaque',
       },
+      codeRiskClass: deriveToolPolicyDefaults({
+        executionKind: 'endpoint', method: entry.method, path: entry.path, definitionId: '',
+      }).riskClass,
     });
     findings.push(...validated.findings);
     if (validated.entry) resolutions.set(entry.stableKey, validated.entry);
