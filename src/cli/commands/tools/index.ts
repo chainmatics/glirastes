@@ -14,6 +14,7 @@ import { POLICY_USAGE, runToolsPolicy } from './policy.js';
 import { runToolsRefresh } from './refresh.js';
 import { runToolsResolve } from './resolve.js';
 import { runToolsStatus } from './status.js';
+import { runToolsVerify } from './verify.js';
 
 export interface ToolsCommandDependencies {
   cwd?: string;
@@ -40,6 +41,8 @@ export const TOOLS_USAGE = [
   '         check that every example sentence finds its tool (no model, CI-ready)',
   '       glirastes tools policy <show|disable|enable|confirm|relax|raise|roles|describe|exclude|include|accept|reset> ...',
   '         change the local tool policy (glirastes tools policy for details)',
+  '       glirastes tools verify <tool>...|--all [--root <dir>]',
+  '         confirm agent-written contracts and descriptions after review',
 ].join('\n');
 
 /** Subcommand parsing lives here so src/cli/index.ts only dispatches `tools`. */
@@ -71,6 +74,8 @@ export async function runToolsCommand(argv: string[], deps: ToolsCommandDependen
         return await runToolsEval(rest, io);
       case 'policy':
         return await runToolsPolicy(rest, io);
+      case 'verify':
+        return await runToolsVerify(rest, io);
       default:
         io.error(TOOLS_USAGE);
         return 2;

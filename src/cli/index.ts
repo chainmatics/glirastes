@@ -116,8 +116,8 @@ function parseCommand(args: string[]): {
       + '       glirastes validate [--root] [--app-id]\n'
       + '       glirastes doctor [--root] [--managed] [--json] [--verbose]\n'
       + '       glirastes build [--root] [--app-id] [--output]\n'
-      + '       glirastes tools <refresh|check|status> [options]\n'
-      + '         derive chat tools from the code, verify them or show them\n',
+      + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify> [options]\n'
+      + '         derive chat tools from the code, check them, show them and print agent work lists\n',
     );
   }
   return { command, rest };

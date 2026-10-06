@@ -120,7 +120,17 @@ describe('public foundation subpaths', () => {
       './cli/commands/tools/index.ts',
       './cli/commands/tools/refresh.ts',
       './cli/commands/tools/check.ts',
+      './cli/commands/tools/resolve.ts',
+      './cli/commands/tools/describe.ts',
+      './cli/commands/tools/eval.ts',
+      './cli/commands/tools/policy.ts',
+      './cli/commands/tools/verify.ts',
+      './cli/commands/tools/watch.ts',
       './codegen/tools/pipeline.ts',
+      './codegen/tools/worklist.ts',
+      './codegen/tools/routing-eval.ts',
+      './codegen/tools/semantics.ts',
+      './codegen/tools/agentic.ts',
     ]) {
       const toolsSource = await readFile(new URL(file, import.meta.url), 'utf8');
       expect(toolsSource).not.toMatch(/@ai-sdk\/openai|openrouter/i);
