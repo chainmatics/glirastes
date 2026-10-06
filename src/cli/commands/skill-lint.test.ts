@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { lintSkill, readSkill, skillCommands } from './__tests__/skill-lint.js';
 
 /** Shipped skills that follow the P05 contract; each skill task adds its name. */
-const LINTED_SKILLS: string[] = ['setting-up-glirastes', 'integrating-glirastes-nextjs', 'integrating-glirastes-web', 'maintaining-glirastes-tools'];
+const LINTED_SKILLS: string[] = ['setting-up-glirastes', 'integrating-glirastes-nextjs', 'integrating-glirastes-web', 'maintaining-glirastes-tools', 'describing-glirastes-tools'];
 
 const VALID = [
   '---',

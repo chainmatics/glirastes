@@ -39,7 +39,7 @@ const PART_SKILLS: Record<
   ReadonlyArray<string>
 > = {
   'chat-ui': ['building-glirastes-chat-ui'],
-  tools: ['maintaining-glirastes-tools'],
+  tools: ['maintaining-glirastes-tools', 'describing-glirastes-tools'],
   setup: ['setting-up-glirastes'],
 };
 

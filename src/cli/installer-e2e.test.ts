@@ -100,6 +100,7 @@ describe('a fresh app reaches a synced setup run', () => {
     expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}).sort())
       .toEqual([
         'building-glirastes-chat-ui',
+        'describing-glirastes-tools',
         'integrating-glirastes-nextjs',
         'maintaining-glirastes-tools',
         'setting-up-glirastes',
@@ -181,7 +182,7 @@ describe('parts install independently', () => {
 
     const manifest = await readInstalledSkillsManifest(rootDir);
     expect(Object.keys(hostRecord(manifest, 'codex')?.skills ?? {}))
-      .toEqual(['maintaining-glirastes-tools']);
+      .toEqual(['describing-glirastes-tools', 'maintaining-glirastes-tools']);
     expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}))
       .toEqual(['building-glirastes-chat-ui']);
   });

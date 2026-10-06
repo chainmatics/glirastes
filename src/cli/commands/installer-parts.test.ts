@@ -79,7 +79,7 @@ describe('part resolution', () => {
     expect(resolvePartSkills(['chat-ui'], { stack: 'nextjs' }))
       .toEqual(['building-glirastes-chat-ui']);
     expect(resolvePartSkills(['tools'], { stack: 'nextjs' }))
-      .toEqual(['maintaining-glirastes-tools']);
+      .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools']);
     expect(resolvePartSkills(['setup'], { stack: 'nextjs' }))
       .toEqual(['setting-up-glirastes']);
   });
@@ -90,7 +90,7 @@ describe('part resolution', () => {
 
   it('resolves the framework part to nothing when no stack was detected', () => {
     expect(resolvePartSkills(['framework', 'tools'], { stack: null }))
-      .toEqual(['maintaining-glirastes-tools']);
+      .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools']);
   });
 
   it('never repeats a skill selected through two parts', () => {
@@ -101,6 +101,7 @@ describe('part resolution', () => {
     expect(resolved).toEqual([
       'integrating-glirastes-nextjs',
       'maintaining-glirastes-tools',
+      'describing-glirastes-tools',
     ]);
   });
 
