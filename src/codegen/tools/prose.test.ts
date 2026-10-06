@@ -168,6 +168,29 @@ describe('tool prose', () => {
     ]);
   });
 
+  it('never echoes file-controlled map keys into a rejected-entry message', async () => {
+    const secretKey = `sk-or-v1-${'a'.repeat(64)}`;
+    const controlKey = '\u001b[31mevil\nline';
+    const loaded = await semanticsFile(JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'POST /api/tasks', origin: { [secretKey]: 'agent' } },
+        { stableKey: 'GET /api/tasks', locked: { [controlKey]: 'x' } },
+        { stableKey: 'GET /api/users', origin: { description: 'agent' }, agent: { model: 'codex' } },
+      ],
+    }));
+    expect(loaded.findings.map((finding) => [finding.code, finding.message])).toEqual([
+      ['resolution-rejected', 'Entry 0 of tool-semantics.json is invalid at origin.<key> and is ignored.'],
+      ['tool-semantics-invalid', 'Entry 1 of tool-semantics.json is invalid at locked.<key> and is ignored.'],
+      ['resolution-rejected', 'Entry 2 of tool-semantics.json is invalid at agent.interfaceDigest and is ignored.'],
+    ]);
+    for (const finding of loaded.findings) {
+      expect(finding.message).not.toContain('sk-or-v1');
+      // eslint-disable-next-line no-control-regex
+      expect(finding.message).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    }
+  });
+
   it('uses the entry the pipeline checked and adds its approval hint to the usage hints', async () => {
     const { semantics } = await semanticsFile(JSON.stringify({
       schemaVersion: 1,

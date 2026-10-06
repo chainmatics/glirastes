@@ -7,7 +7,7 @@ import type { ToolPolicyDefaults } from '../../contracts/tool-policy.js';
 import { compareCodeUnits } from './canonical.js';
 import { TOOLS_PATHS } from './config.js';
 import { toolFinding } from './findings.js';
-import { isAgenticSemantics, SemanticsEntrySchema, type ToolSemanticsEntry } from './semantics.js';
+import { isAgenticSemantics, SEMANTICS_LANGUAGES, SemanticsEntrySchema, type ToolSemanticsEntry } from './semantics.js';
 import type { ToolFinding, ToolProseHints } from './types.js';
 
 export type { ToolSemanticsEntry } from './semantics.js';
@@ -29,6 +29,26 @@ export interface ToolSemantics {
 }
 
 export const EMPTY_SEMANTICS: ToolSemantics = { byStableKey: new Map(), byName: new Map() };
+
+/**
+ * The names a schema issue path may show: entry fields, the languages and the
+ * members of an example call and of the agent block. Any other segment is a
+ * key of `origin` or `locked` taken from the file, which an agent controls.
+ */
+const SCHEMA_PATH_NAMES: ReadonlySet<string> = new Set([
+  ...Object.keys(SemanticsEntrySchema.shape),
+  ...SEMANTICS_LANGUAGES,
+  'sentence', 'input', 'model', 'interfaceDigest',
+]);
+
+/** The first issue path with schema names and array indices only; file-controlled keys become `<key>`. */
+function schemaIssuePath(path: readonly PropertyKey[]): string {
+  return path
+    .map((segment) => typeof segment === 'number' || (typeof segment === 'string' && SCHEMA_PATH_NAMES.has(segment))
+      ? String(segment)
+      : '<key>')
+    .join('.');
+}
 
 export function loadToolSemantics(root: string): { semantics: ToolSemantics; findings: ToolFinding[] } {
   let raw: string;
@@ -58,7 +78,7 @@ export function loadToolSemantics(root: string): { semantics: ToolSemantics; fin
     if (!entry.success || (!entry.data.stableKey && !entry.data.name)) {
       // An agent entry that does not even parse is a rejected agentic entry (spec 4.6).
       const agentic = isAgenticSemantics(value);
-      const path = entry.success ? '' : entry.error.issues[0]?.path.map(String).join('.') ?? '';
+      const path = entry.success ? '' : schemaIssuePath(entry.error.issues[0]?.path ?? []);
       findings.push(toolFinding(agentic ? 'resolution-rejected' : 'tool-semantics-invalid', 'warning', `${TOOLS_PATHS.semantics}#${index}`,
         `Entry ${index} of tool-semantics.json is invalid${path ? ` at ${path}` : ''} and is ignored.`));
       return;
