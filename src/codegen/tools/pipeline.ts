@@ -525,8 +525,11 @@ async function generate(
       : { findings: [], stale: false };
     findings.push(...semantics.findings);
     if (semantics.stale) {
+      const dropped = semantics.droppedExampleCalls
+        ? ` Example calls left out until then, because the input schema no longer accepts them: ${semantics.droppedExampleCalls}.`
+        : '';
       findings.push(toolFinding('semantics-stale', 'warning', execution.stableKey,
-        'The handler interface changed after an agent described this tool; the description stays in use until it is renewed.'));
+        `The handler interface changed after an agent described this tool; the description stays in use until it is renewed.${dropped}`));
     }
     const prose = resolveToolProse({
       stableKey: execution.stableKey,

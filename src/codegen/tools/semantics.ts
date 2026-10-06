@@ -111,6 +111,8 @@ export interface SemanticsCheck {
   findings: ToolFinding[];
   /** An agent entry written for an earlier interface: still used, listed for renewal. */
   stale: boolean;
+  /** Example calls of a stale entry the current input schema refuses; left out of `entry`. */
+  droppedExampleCalls?: number;
 }
 
 function fieldValue(entry: ToolSemanticsEntry, field: SemanticsField): unknown {
@@ -156,8 +158,9 @@ function agentLimitsProblem(entry: ToolSemanticsEntry): string | undefined {
  * the generated module. An agent entry must also name its model and
  * interface, stay within the prose and length limits and give example calls
  * that the tool's input schema accepts. A rejected entry is ignored and
- * reported; an agent entry for an earlier interface stays in use and is
- * listed for renewal.
+ * reported. An agent entry for an earlier interface stays in use and is
+ * listed for renewal; its example calls were written for the old schema, so
+ * the ones the current schema refuses are left out instead of rejecting it.
  */
 export function validateSemanticsEntry(entry: ToolSemanticsEntry, context: SemanticsCheckContext): SemanticsCheck {
   const agentic = isAgenticSemantics(entry);
@@ -185,14 +188,21 @@ export function validateSemanticsEntry(entry: ToolSemanticsEntry, context: Seman
     const limits = agentLimitsProblem(entry);
     if (limits) return reject(limits);
   }
-  if (entry.exampleCalls?.length) {
-    if (!context.input) return reject('example calls need a tool with an input contract');
-    const schema = createJsonSchemaLike(context.input);
-    const index = entry.exampleCalls.findIndex((call) => !schema.safeParse(call.input).success);
-    if (index >= 0) return reject(`example call ${index + 1} does not match the input schema`);
-  }
   const stale = entry.agent !== undefined && context.interfaceDigest !== undefined
     && entry.agent.interfaceDigest !== context.interfaceDigest;
+  const calls = entry.exampleCalls ?? [];
+  if (calls.length === 0) return { entry, findings: [], stale };
+  const schema = context.input ? createJsonSchemaLike(context.input) : undefined;
+  const accepted = (call: typeof calls[number]) => schema?.safeParse(call.input).success === true;
+  if (stale) {
+    const kept = calls.filter(accepted);
+    return kept.length === calls.length
+      ? { entry, findings: [], stale }
+      : { entry: { ...entry, exampleCalls: kept }, findings: [], stale, droppedExampleCalls: calls.length - kept.length };
+  }
+  if (!schema) return reject('example calls need a tool with an input contract');
+  const index = calls.findIndex((call) => !accepted(call));
+  if (index >= 0) return reject(`example call ${index + 1} does not match the input schema`);
   return { entry, findings: [], stale };
 }
 

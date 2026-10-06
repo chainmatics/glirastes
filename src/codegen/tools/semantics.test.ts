@@ -49,6 +49,26 @@ describe('tool-semantics.json entries', () => {
     expect(validateSemanticsEntry(agentEntry(), context)).toEqual({ entry: agentEntry(), findings: [], stale: false });
     const stale = validateSemanticsEntry(agentEntry(), { ...context, interfaceDigest: `sha256:${'J'.repeat(43)}` });
     expect(stale).toMatchObject({ findings: [], stale: true });
+    expect(stale).not.toHaveProperty('droppedExampleCalls');
+  });
+
+  it('keeps a stale agent entry in use and leaves out only the example calls the changed interface refuses', () => {
+    const changed = { ...context, interfaceDigest: `sha256:${'J'.repeat(43)}` };
+    const kept = { sentence: 'Add a task to call the supplier', input: { title: 'Call the supplier' } };
+    const entry = agentEntry({ exampleCalls: [agentEntry().exampleCalls![0]!, kept] });
+    const withoutDue = { ...INPUT, properties: { title: INPUT.properties.title } };
+    expect(validateSemanticsEntry(entry, { ...changed, input: withoutDue })).toEqual({
+      entry: { ...entry, exampleCalls: [kept] }, findings: [], stale: true, droppedExampleCalls: 1,
+    });
+    const withRank = { ...INPUT, properties: { ...INPUT.properties, rank: { type: 'number' } }, required: ['rank', 'title'] };
+    expect(validateSemanticsEntry(entry, { ...changed, input: withRank })).toMatchObject({
+      entry: { exampleCalls: [] }, findings: [], stale: true, droppedExampleCalls: 2,
+    });
+    const { input: _input, ...withoutContract } = changed;
+    expect(validateSemanticsEntry(entry, withoutContract)).toMatchObject({ findings: [], stale: true, droppedExampleCalls: 2 });
+    // The same calls still reject an entry written for the current interface.
+    expect(validateSemanticsEntry(entry, { ...context, input: withoutDue }).findings[0]?.message)
+      .toContain('example call 1 does not match the input schema');
   });
 
   it.each([

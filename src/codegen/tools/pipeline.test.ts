@@ -565,6 +565,46 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
       code: 'semantics-stale', subjectRef: 'GET /api/tasks',
     }));
   }, 120_000);
+
+  it('keeps a stale agent entry in use without the example calls the changed interface no longer accepts', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const entry = (stableKey: string, interfaceDigest: string, input: Record<string, unknown>) => ({
+      stableKey,
+      description: `${stableKey === 'GET /api/tasks' ? 'Lists' : 'Creates'} tasks for the caller.`,
+      synonyms: { en: [stableKey === 'GET /api/tasks' ? 'my work' : 'new to-do'] },
+      exampleCalls: [{ sentence: 'Do it', input }],
+      origin: { description: 'agent', synonyms: 'agent', exampleCalls: 'agent' },
+      agent: { model: 'codex', interfaceDigest },
+    });
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        entry('GET /api/tasks', await interfaceOf(fixture, 'GET /api/tasks'), { status: ['done'] }),
+        entry('POST /api/tasks', await interfaceOf(fixture, 'POST /api/tasks'), { title: 'Buy milk' }),
+      ],
+    })}\n`);
+    const current = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(current.findings.filter((finding) => finding.code === 'resolution-rejected' || finding.code === 'semantics-stale')).toEqual([]);
+
+    // GET drops the status key, POST switches to a schema with one more required key.
+    await fixture.write('src/lib/schemas.ts', `${SCHEMAS}export const createRankedTask = z.object({ title: z.string().min(1), rank: z.number() }).strict();\n`);
+    await fixture.write('src/app/api/tasks/route.ts', IMPORTS.replace('{ createTask }', '{ createRankedTask }')
+      + GET_HANDLER.replace("status: searchParams.getAll('status')", "q: searchParams.get('q')")
+      + POST_HANDLER.replace('createTask.parse', 'createRankedTask.parse'));
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.findings.filter((finding) => finding.code === 'resolution-rejected' || finding.code === 'tool-semantics-invalid')).toEqual([]);
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    const module = await fixture.read(DEFAULT_GENERATED_MODULE);
+    for (const [stableKey, synonym] of [['GET /api/tasks', 'my work'], ['POST /api/tasks', 'new to-do']] as const) {
+      const tool = result.tools?.find((candidate) => candidate.stableKey === stableKey);
+      expect(tool).toMatchObject({ descriptionOrigin: 'agent', semantics: { stale: true, rejected: false } });
+      expect(tool?.findings.find((finding) => finding.code === 'semantics-stale')?.message)
+        .toContain('Example calls left out until then, because the input schema no longer accepts them: 1.');
+      expect(contracts.tools.find((candidate) => candidate.stableKey === stableKey)?.search).toEqual({ synonyms: [synonym] });
+      expect(module).toContain(JSON.stringify(synonym));
+    }
+  }, 120_000);
 });
 
 describe('runToolsPipeline (orphaned policy entries)', () => {
