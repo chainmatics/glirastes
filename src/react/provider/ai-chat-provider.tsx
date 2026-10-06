@@ -96,6 +96,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   commandArgumentsLabel: 'Details for {command}',
   commandArgumentsSubmit: 'Run',
   commandArgumentsInvalid: 'These values are too long.',
+  commandArgumentsIncomplete: 'Please complete: {fields}',
   commandArgumentsAnyOption: 'Any',
   commandArgumentsNoMatches: 'No matches',
 };
@@ -986,15 +987,16 @@ export function AiChatProvider({
   const submitPendingCommand = useCallback((
     values: Readonly<Record<string, string>>,
     valueLabels?: Readonly<Record<string, string>>,
-  ) => {
-    if (!pendingCommand || !interactionRegistry || sessionNotReady || sessionMutationRef.current) return;
+  ): boolean => {
+    if (!pendingCommand || !interactionRegistry || sessionNotReady || sessionMutationRef.current) return false;
     const plan = interactionRegistry.completeCommand(pendingCommand, values, valueLabels);
     if (plan.status !== 'send') {
       setPendingCommand(plan.status === 'needs-args' ? plan.request : null);
-      return;
+      return plan.status !== 'needs-args';
     }
     setPendingCommand(null);
     void deliver(plan.text);
+    return true;
   }, [pendingCommand, interactionRegistry, sessionNotReady, deliver]);
 
   const cancelPendingCommand = useCallback(() => setPendingCommand(null), []);

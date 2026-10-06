@@ -75,8 +75,8 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
           key={`${pendingCommand.commandId}:${JSON.stringify(pendingCommand.values)}:${pendingCommand.error ?? ''}`}
           pending={pendingCommand}
           onSubmit={(values, valueLabels) => {
-            submitPendingCommand(values, valueLabels);
-            inputRef.current?.focus();
+            // Back to the editor only once the form is gone; while it keeps asking, focus stays in it.
+            if (submitPendingCommand(values, valueLabels)) inputRef.current?.focus();
           }}
           onCancel={() => {
             cancelPendingCommand();

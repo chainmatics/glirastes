@@ -101,11 +101,15 @@ export interface ChatContextValue {
   interactions?: ChatInteractionRegistry;
   /** A command or entity action waiting for arguments; the composer shows its form. */
   pendingCommand: PendingChatCommand | null;
-  /** Runs the pending command with the form values (and picked entity labels), or keeps asking. */
+  /**
+   * Runs the pending command with the form values (and picked entity labels), or keeps asking.
+   * True when the form is done (the command was sent and no longer pending); false when
+   * it is still pending (it keeps asking, or nothing could run right now).
+   */
   submitPendingCommand: (
     values: Readonly<Record<string, string>>,
     valueLabels?: Readonly<Record<string, string>>,
-  ) => void;
+  ) => boolean;
   cancelPendingCommand: () => void;
   /** Runs an entity action picked from the `@` list, without the model. */
   runEntityAction: (entity: { type: string; id: string; label: string }, actionId: string) => void;

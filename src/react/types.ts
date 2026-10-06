@@ -647,6 +647,7 @@ export interface ChatLocale {
   commandArgumentsLabel: string;      // supports `{command}`
   commandArgumentsSubmit: string;
   commandArgumentsInvalid: string;
+  commandArgumentsIncomplete: string; // supports `{fields}`: required values still missing, or a person typed but not picked
   commandArgumentsAnyOption: string;
   commandArgumentsNoMatches: string;
 }
