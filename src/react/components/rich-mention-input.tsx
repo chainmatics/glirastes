@@ -455,6 +455,11 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             if (char === ' ' || char === '\n') break;
             if (triggers.includes(char) && (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n')) {
               textNode.textContent = text.slice(0, i) + text.slice(cursorPos);
+              // Replacing the data pulls the live range to offset 0: put the caret back where the `@query` was.
+              range.setStart(textNode, i);
+              range.collapse(true);
+              selection?.removeAllRanges();
+              selection?.addRange(range);
               break;
             }
           }
@@ -655,11 +660,14 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       if (!dropdownOpen) return;
 
       const handleClickOutside = (e: MouseEvent) => {
+        // Inside a shadow root (the `<glirastes-chat>` element) a document-level listener sees the host as
+        // `e.target`, so the composed path is what tells a click on the list or the editor from an outside one.
+        const path = e.composedPath();
         if (
           dropdownRef.current &&
-          !dropdownRef.current.contains(e.target as Node) &&
+          !path.includes(dropdownRef.current) &&
           editableRef.current &&
-          !editableRef.current.contains(e.target as Node)
+          !path.includes(editableRef.current)
         ) {
           closeDropdown();
         }

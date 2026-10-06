@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useMemo } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseChatCommandMessage } from '../../../contracts/chat-command.js';
@@ -44,10 +44,10 @@ function Composer({ chat }: { chat: ChatTransport }) {
   return <AiChatProvider transport={chat} chatInteractions={interactions}><Probe /><MentionInput /></AiChatProvider>;
 }
 
-function typeInto(editor: HTMLElement, text: string) {
+function typeInto(editor: HTMLElement, text: string, caret = text.length) {
   editor.textContent = text;
   const range = document.createRange();
-  range.setStart(editor.firstChild!, text.length);
+  range.setStart(editor.firstChild!, caret);
   range.collapse(true);
   const selection = window.getSelection()!;
   selection.removeAllRanges();
@@ -58,17 +58,18 @@ function typeInto(editor: HTMLElement, text: string) {
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
-// Picking a result moves the caret in an animation frame; let it land before the next test.
+// Picking a result reports the new draft in an animation frame; let it land before the next test.
 afterEach(async () => {
   await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
   cleanup();
+  vi.restoreAllMocks();
 });
 
-async function open(query: string) {
+async function open(query: string, caret = query.length) {
   const chat = transport();
   render(<Composer chat={chat} />);
   const editor = screen.getByRole('textbox');
-  typeInto(editor, query);
+  typeInto(editor, query, caret);
   const listbox = await screen.findByRole('listbox', { name: 'Suggestions' });
   return { chat, editor, listbox };
 }
@@ -121,6 +122,22 @@ describe('composer keyboard and ARIA for chat interactions', () => {
     expect(editor.textContent).toBe('');
   });
 
+  it.each([
+    { draft: 'Bitte @rel', caret: 10, remaining: 'Bitte ', offset: 6 },
+    { draft: 'Bitte @rel danach', caret: 10, remaining: 'Bitte  danach', offset: 6 },
+  ])('keeps the caret at the removed @query after an entity action in "$draft"', async ({ draft, caret, remaining, offset }) => {
+    const { chat, editor } = await open(draft, caret);
+    fireEvent.keyDown(editor, { key: 'ArrowRight' });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
+    expect(editor.textContent).toBe(remaining);
+    const selection = window.getSelection()!;
+    expect(selection.rangeCount).toBe(1);
+    expect(selection.isCollapsed).toBe(true);
+    expect(selection.anchorNode).toBe(editor.firstChild);
+    expect(selection.anchorOffset).toBe(offset);
+  });
+
   it('runs an entity action by mouse and leaves the caret keys alone where there is no action', async () => {
     const { chat, editor } = await open('@rep');
     expect(screen.queryByRole('group')).toBeTruthy();
@@ -130,6 +147,47 @@ describe('composer keyboard and ARIA for chat interactions', () => {
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
     expect(parseChatCommandMessage(chat.sendMessage.mock.calls[0]![0].text as string)?.invocation.args)
       .toEqual({ destination: '/tasks/:taskId', params: { taskId: '8' } });
+  });
+
+  it('closes the list only for a mouse press outside it, also inside a shadow root', async () => {
+    // The <glirastes-chat> embed renders in a shadow root, where document-level listeners see the host as the target.
+    const host = document.body.appendChild(document.createElement('div'));
+    const container = host.attachShadow({ mode: 'open' }).appendChild(document.createElement('div'));
+    try {
+      const chat = transport();
+      render(<Composer chat={chat} />, { container });
+      const view = within(container);
+      const editor = view.getByRole('textbox');
+      const actionName = 'Complete: Release prüfen';
+      let caret = document.createRange();
+      // jsdom drops ranges inside a shadow tree, so the editor gets its caret through a stand-in selection.
+      vi.spyOn(window, 'getSelection').mockImplementation(
+        () => ({ rangeCount: 1, getRangeAt: () => caret, removeAllRanges() {}, addRange() {} }) as unknown as Selection,
+      );
+      const typeQuery = async () => {
+        editor.textContent = '@rel';
+        caret = document.createRange();
+        caret.setStart(editor.firstChild!, 4);
+        caret.collapse(true);
+        fireEvent.input(editor);
+        return view.findByRole('option', { name: actionName });
+      };
+
+      await typeQuery();
+      fireEvent.mouseDown(document.body);
+      expect(view.queryByRole('listbox')).toBeNull();
+
+      const action = await typeQuery();
+      fireEvent.mouseDown(editor);
+      expect(view.queryByRole('listbox')).toBeTruthy();
+      fireEvent.mouseDown(action);
+      expect(view.queryByRole('listbox')).toBeTruthy();
+      fireEvent.click(action);
+      await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
+      expect(editor.textContent).toBe('');
+    } finally {
+      host.remove();
+    }
   });
 
   it('inserts a picked entity as a structured reference the model receives', async () => {
