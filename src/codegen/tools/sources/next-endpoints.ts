@@ -20,7 +20,7 @@ import {
   type ResolvedEndpointContract,
 } from '../contract-tiers.js';
 import { collectHandlerEvidence } from '../evidence.js';
-import { findExclusion, importsChatHandler } from '../exclusions.js';
+import { findExclusion, hasAiIgnoreMarker, importsChatHandler } from '../exclusions.js';
 import { toolFinding } from '../findings.js';
 import { analyzeRouteHandler, type HandlerAnalysis } from '../handler-analysis.js';
 import { assignDefinitionIds } from '../identity.js';
@@ -358,6 +358,7 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
       method: entry.method,
       path: entry.path,
       chatHandler: importsChatHandler(entry.source),
+      aiIgnore: hasAiIgnoreMarker(entry.source),
     }, policyExcludes);
     if (exclusion) excluded.push(exclusion);
     else kept.push(entry);

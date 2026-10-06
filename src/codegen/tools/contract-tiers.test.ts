@@ -172,6 +172,20 @@ describe('resolveEndpointContract', () => {
     expect(rejected?.message).toContain('drops parameters the handler reads: due');
   });
 
+  it('rejects an agent schema reference whose root is no object and keeps the code contract', () => {
+    const derived = evidence({ readsBody: true, bodyKeys: ['title'] });
+    const current = resolve({ evidence: derived });
+    const union = { anyOf: [NOTE, { ...NOTE, properties: { title: { type: 'number' } } }] };
+    const result = resolve({
+      evidence: derived,
+      probes: probes([probeItemFor(SCHEMAS, 'input'), probed(union, digest('U'))]),
+      resolution: { origin: 'agent', model: 'codex', interfaceDigest: current.interfaceDigest, input: { schemaRef: SCHEMAS } },
+    });
+    expect(result.contract?.source).toBe('derived');
+    expect(result.findings.find((finding) => finding.code === 'resolution-rejected')?.message)
+      .toContain('the input schema src/app/api/notes/schemas.ts#createNote is not an object at its root');
+  });
+
   it('uses a load-bearing contract module with its metadata (tier 2)', () => {
     const result = resolve({
       evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),

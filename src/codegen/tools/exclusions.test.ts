@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { findExclusion, importsChatHandler, matchesExcludePattern } from './exclusions.js';
+import { findExclusion, hasAiIgnoreMarker, importsChatHandler, matchesExcludePattern } from './exclusions.js';
 import type { ExcludedTool } from './types.js';
 
 const subject = (method: string, path: string, chatHandler = false) => ({
@@ -69,5 +69,18 @@ describe('tool exclusions', () => {
 
   it('admits code-detected exclusions such as unsupported methods in the origin type', () => {
     expectTypeOf<ExcludedTool['origin']>().toEqualTypeOf<'default' | 'policy' | 'code'>();
+  });
+
+  it('reads // @ai-ignore in the leading comments of a route file as an exclusion in code', () => {
+    expect(hasAiIgnoreMarker('// @ai-ignore - Logo file upload, admin UI only\nexport async function POST() {}\n')).toBe(true);
+    expect(hasAiIgnoreMarker('\uFEFF/**\n * Internal.\n * @ai-ignore\n */\nexport async function GET() {}\n')).toBe(true);
+    expect(hasAiIgnoreMarker('export async function GET() {\n  // @ai-ignore\n}\n')).toBe(false);
+    expect(hasAiIgnoreMarker('// @ai-ignored once\nexport async function GET() {}\n')).toBe(false);
+    expect(hasAiIgnoreMarker("import { db } from '@/lib/db';\n// @ai-ignore\n")).toBe(false);
+    expect(findExclusion({ ...subject('POST', '/api/tenant/logo'), aiIgnore: true }, []))
+      .toEqual({ stableKey: 'POST /api/tenant/logo', reason: 'ai-ignore', origin: 'code' });
+    expect(findExclusion({ ...subject('POST', '/api/auth/login'), aiIgnore: true }, [])?.reason).toBe('auth-route');
+    expect(findExclusion({ ...subject('POST', '/api/internal/sync'), aiIgnore: true }, [{ match: 'POST /api/internal/**', reason: 'internal' }]))
+      .toEqual({ stableKey: 'POST /api/internal/sync', reason: 'internal', origin: 'policy' });
   });
 });

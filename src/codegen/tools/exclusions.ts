@@ -6,6 +6,8 @@ export interface ExclusionSubject {
   method: string;
   path: string;
   chatHandler: boolean;
+  /** The route file opens with an `@ai-ignore` comment (see `hasAiIgnoreMarker`). */
+  aiIgnore?: boolean;
 }
 
 export interface PolicyExcludeRule {
@@ -18,6 +20,20 @@ const CHAT_HANDLER_IMPORT = /import\s*\{[^}]*\b\w*ChatHandler\b[^}]*\}\s*from\s*
 
 export function importsChatHandler(source: string): boolean {
   return CHAT_HANDLER_IMPORT.test(source);
+}
+
+/** Whitespace and comments before the first statement of a module. */
+const LEADING_COMMENTS = /^(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*/;
+
+/**
+ * `// @ai-ignore` (or `@ai-ignore` in a leading block comment) marks a route
+ * file the old SDK kept away from the model, e.g. uploads, debug and admin
+ * routes. Only the comments before the first statement count, so a marker
+ * inside a handler or `@ai-ignored` changes nothing.
+ */
+export function hasAiIgnoreMarker(source: string): boolean {
+  const head = LEADING_COMMENTS.exec(source.replace(/^\uFEFF/, ''))?.[0] ?? '';
+  return /@ai-ignore(?![\w-])/.test(head);
 }
 
 function apiSegments(path: string): string[] {
@@ -87,5 +103,7 @@ export function findExclusion(
   const rule = DEFAULT_RULES.find((candidate) => candidate.test(subject, segments));
   if (rule) return { stableKey: subject.stableKey, reason: rule.reason, origin: 'default' };
   const policy = policyExcludes.find((entry) => matchesExcludePattern(entry.match, subject));
-  return policy ? { stableKey: subject.stableKey, reason: policy.reason, origin: 'policy' } : undefined;
+  if (policy) return { stableKey: subject.stableKey, reason: policy.reason, origin: 'policy' };
+  // Last, so a default or policy reason stays the one tool-report.json names.
+  return subject.aiIgnore ? { stableKey: subject.stableKey, reason: 'ai-ignore', origin: 'code' } : undefined;
 }

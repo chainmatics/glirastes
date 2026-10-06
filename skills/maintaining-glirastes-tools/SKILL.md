@@ -23,7 +23,7 @@ keeps its fallback.
   are shown to the developer with their command; you never run them yourself.
 - Never resolve a finding by leaving a tool, a parameter or a mapping out:
   every key a handler reads stays in its schema, and nothing is excluded to make
-  a list shorter.
+  a list shorter (no `// @ai-ignore` comment, no exclusion proposal for that).
 - Never weaken a check to pass: effects may only raise the risk, a write tool
   keeps asking first unless the developer (or, for a connected app, a Platform
   owner or admin) relaxes it, delete, financial and external tools always ask
@@ -72,6 +72,7 @@ keeps its fallback.
 | `schema-not-exported`, `schema-module-unloadable`, `schema-content-rejected`, `parameter-collision`, `contract-effect-invalid` | the app code the message names; a schema moves into a side-effect-free module (a sibling `contract.ts` or a schema file) that the handler imports, never into a new export of `route.ts`, whose exports Next.js type-checks |
 | `ui-action-id-dynamic`, `ui-action-id-invalid`, `ui-action-id-reserved`, `definition-id-invalid`, `contract-presentation-invalid` | the registration or contract in `target.files`: a literal action id, a valid contract id or presentation |
 | `tool-semantics-invalid` | the entry `target.key` names in `.glirastes/tool-semantics.json`; keep its human text, fix only the shape |
+| `input-schema-not-object` | an object at the root of the input schema (optional fields, or one field holding the variants), changed together with every caller of the route; for an internal route, tell the developer instead |
 | `navigation-bridge-missing` | mount `useGlirastesNavigationBridge` (React) or `registerNavigationBridge` (`glirastes/browser`) where it is always mounted |
 | `ui-action-payload-untyped`, `ui-action-contract-conflict` | one payload contract per client action |
 | `ui-action-write-unproven` | developer: `glirastes tools policy raise <tool> write` when the helper writes |

@@ -415,6 +415,9 @@ function assessResolution(
     if (isContentRejected(outcome)) return reject(`the ${role} schema ${label} carries secret-looking content`);
     const schema = asSchema(outcome);
     if (!schema) return reject(`the ${role} schema ${label} could not be loaded (${outcome && !outcome.ok ? outcome.reason : 'not probed'})`);
+    if (role === 'input' && schema.jsonSchema && schema.jsonSchema.type !== 'object') {
+      return reject(`the input schema ${label} is not an object at its root`);
+    }
     if (role === 'input' && schema.jsonSchema) {
       const problem = inputEvidenceProblem(schema.jsonSchema, {
         pathParams: input.pathParams,

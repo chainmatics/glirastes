@@ -15,6 +15,7 @@ import { runToolsPipeline, runToolsPipelineWith, ToolsPipelineFailure } from './
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { uiObservation } from './sources/ui-tools.js';
 import type { ToolSource } from './types.js';
+import { buildResolveWorklist } from './worklist.js';
 
 const outsideDirs: string[] = [];
 afterEach(async () => {
@@ -605,5 +606,28 @@ describe('runToolsPipeline (app identity)', () => {
       ['prompt-bundle-invalid', TOOLS_PATHS.promptBundle],
     ]);
     expect(error.result.wrote).toBe(false);
+  }, 120_000);
+});
+
+describe('runToolsPipeline (input schema root)', () => {
+  it('disables a tool whose input schema is no object at its root and lists it for the coding agent', async () => {
+    const fixture = await app();
+    await fixture.write('src/lib/notes.ts', "import { z } from 'zod';\n"
+      + 'export const saveNote = z.union([z.object({ text: z.string() }).strict(), z.object({ url: z.string() }).strict()]);\n');
+    await fixture.write('src/app/api/notes/route.ts', "import { getSession } from '@/lib/session';\nimport { saveNote } from '@/lib/notes';\n"
+      + 'export async function POST(request: Request) {\n  await getSession(request);\n'
+      + '  const input = saveNote.parse(await request.json());\n  return Response.json(input, { status: 201 });\n}\n');
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const note = result.tools?.find((tool) => tool.stableKey === 'POST /api/notes');
+    expect(note).toMatchObject({ enabled: false, contract: { source: 'native' } });
+    expect(note?.findings.filter((finding) => finding.severity === 'needs_attention').map((finding) => finding.code))
+      .toEqual(['input-schema-not-object']);
+    expect((await artifactOf(fixture)).tools.find((tool) => tool.name === 'notes.create'))
+      .toMatchObject({ enabled: false, operationGroup: 'needs_attention' });
+    expect(await fixture.read(DEFAULT_GENERATED_MODULE)).not.toContain('saveNote');
+    expect(buildResolveWorklist(result).items).toContainEqual(expect.objectContaining({
+      code: 'input-schema-not-object', tool: 'notes.create', owner: 'agent', target: { kind: 'app-code', files: note!.files },
+    }));
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
   }, 120_000);
 });

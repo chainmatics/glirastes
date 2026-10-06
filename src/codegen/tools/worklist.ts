@@ -97,6 +97,7 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'ui-action-payload-untyped',
   'ui-action-contract-conflict',
   'filter-keys-capped',
+  'input-schema-not-object',
 ]);
 
 /**
