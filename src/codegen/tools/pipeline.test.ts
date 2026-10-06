@@ -565,3 +565,30 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
     }));
   }, 120_000);
 });
+
+describe('runToolsPipeline (orphaned policy entries)', () => {
+  it('reports entries for excluded routes and accepted risks without a tool as orphaned', async () => {
+    const fixture = await app();
+    await fixture.write('src/app/api/internal/sync/route.ts', `${IMPORTS}${POST_HANDLER}`);
+    await fixture.write(TOOLS_PATHS.policy, JSON.stringify({
+      schemaVersion: 1,
+      tools: {
+        'POST /api/internal/sync': { enabled: false },
+        'POST /api/auth/login': { requiresApproval: true },
+        'GET /api/tasks': { description: 'Lists your tasks by status.' },
+      },
+      exclude: [{ match: 'POST /api/internal/**', reason: 'internal' }],
+      acceptedRisk: { 'DELETE /api/gone/:id': { riskClass: 'write', toolId: '019fb007-0000-7000-8000-0000000000e1' } },
+    }));
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const orphaned = result.findings.filter((finding) => finding.code === 'policy-entry-orphaned');
+    expect(orphaned.map((finding) => [finding.subjectRef, finding.message])).toEqual([
+      ['DELETE /api/gone/:id', 'This tool-policy.json acceptedRisk entry matches no tool in the current code.'],
+      ['POST /api/auth/login', 'This tool-policy.json tools entry matches no tool in the current code.'],
+      ['POST /api/internal/sync', 'This tool-policy.json tools entry has no effect: the route is excluded (internal, policy).'],
+    ]);
+    expect(orphaned[0]?.nextAction).toContain('glirastes tools policy reset');
+    expect(JSON.parse(await fixture.read(TOOLS_PATHS.report)).findings
+      .filter((finding: { code: string }) => finding.code === 'policy-entry-orphaned')).toHaveLength(3);
+  }, 120_000);
+});

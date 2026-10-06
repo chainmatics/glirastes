@@ -34,7 +34,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'risk-raised': 'Nothing to do: confirmation is enforced automatically. Review the change in your diff.',
   'override-lapsed-risk-raised': 'Your relaxation no longer applies at the higher risk; review whether you still need it.',
   'risk-lower-available': 'After review, record an acceptedRisk entry in .glirastes/tool-policy.json to adopt the lower risk.',
-  'policy-entry-orphaned': 'Remove the entry from .glirastes/tool-policy.json or restore the tool.',
+  'policy-entry-orphaned': 'Remove the entry (glirastes tools policy reset <tool>), restore the tool, or include an excluded route again (glirastes tools policy include <pattern>).',
   'tool-outputs-drift': 'Run glirastes tools refresh locally and commit .glirastes together with the generated module.',
   'tool-output-invalid': 'Regenerate the outputs with glirastes tools refresh; never edit generated files.',
   'generated-output-invalid': 'Nothing was written: the code produced a value past a limit of the generated file (a name, path or list the message names). Shorten or split it in the code, then rerun glirastes tools refresh; if the code is within reason, report it as a Glirastes bug.',

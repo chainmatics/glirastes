@@ -607,12 +607,17 @@ async function generate(
       },
     });
   }
-  for (const key of Object.keys(inputs.policy.tools ?? {})) {
-    if (!observedByKey.has(key)) {
-      findings.push(toolFinding('policy-entry-orphaned', 'warning', key,
-        'This tool-policy.json entry matches no tool in the current code.'));
-    }
-  }
+  // An entry for an excluded route never applies either: say why (roadmap, P05).
+  const excludedByKey = new Map(excluded.map((entry) => [entry.stableKey, entry] as const));
+  const orphaned = (key: string, section: string) => {
+    if (observedByKey.has(key)) return;
+    const exclusion = excludedByKey.get(key);
+    findings.push(toolFinding('policy-entry-orphaned', 'warning', key, exclusion
+      ? `This tool-policy.json ${section} entry has no effect: the route is excluded (${exclusion.reason}, ${exclusion.origin}).`
+      : `This tool-policy.json ${section} entry matches no tool in the current code.`));
+  };
+  for (const key of Object.keys(inputs.policy.tools ?? {})) orphaned(key, 'tools');
+  for (const key of Object.keys(inputs.policy.acceptedRisk ?? {})) orphaned(key, 'acceptedRisk');
   for (const view of toolViews) {
     view.findings = sortFindings(findings.filter((finding) => finding.subjectRef === view.stableKey));
   }
