@@ -972,6 +972,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ...(managedTurn
             ? { turnSnapshot: managedTurn.snapshot }
             : {}),
+          ...contractRejectionReporter(turnMetrics),
         };
         const registry = staticTools ?? await loadTools!(endpointToolContext);
         let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, toolOptions);

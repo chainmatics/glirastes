@@ -2,10 +2,14 @@ import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { formatChatCommandMessage } from '../../../../contracts/chat-command.js';
+import type { RuntimeMetricEvent } from '../../../../contracts/index.js';
 import { createPiiShield } from '../../../pii-shield/index.js';
-import { defineTool, type PiiDetector, type PiiShield, type ToolRegistry } from '../../../../types.js';
+import { endpointToolToTool } from '../../../core/index.js';
+import {
+  defineEndpointTool, defineTool, type PiiDetector, type PiiShield, type ToolRegistry,
+} from '../../../../types.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
-import { collectingSink, principal, snapshot, streamChunks } from './command-fixtures.js';
+import { collectingSink, LIST_TASKS_ID, principal, snapshot, streamChunks } from './command-fixtures.js';
 
 const archiveCommand = formatChatCommandMessage({
   commandId: 'task.tasks.archive', tool: 'tasks.archive', args: { id: 't1' }, label: '/Archive Release prüfen',
@@ -123,6 +127,44 @@ describe('direct commands in createAiChatHandler', () => {
     expect(forbidden.find((chunk) => chunk.type === 'tool-output-error')).toMatchObject({ errorText: 'principal_role_denied' });
     expect(archive).not.toHaveBeenCalled();
     expect(list).not.toHaveBeenCalled();
+  });
+
+  it('reports an endpoint that refuses the command call as tool_contract_rejected, like a model call', async () => {
+    const languageModel = model();
+    const { sink } = collectingSink();
+    const recorded: RuntimeMetricEvent[] = [];
+    const endpointCalls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string | URL) => {
+      endpointCalls.push(String(url));
+      return new Response(JSON.stringify({ error: 'query must not be empty' }), {
+        status: 422, headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      const handler = createAiChatHandler({
+        tools: {
+          tasks_list: endpointToolToTool(defineEndpointTool({
+            id: 'tasks.list', toolName: 'tasks_list', description: 'List tasks.', method: 'GET', path: '/api/tasks',
+            inputSchema: z.object({ query: z.string() }).strict(),
+          })),
+        },
+        model: languageModel, systemPrompt: 'Assistant',
+        metrics: { ...sink, record: (event) => { recorded.push(event); } },
+        managedRuntime: {
+          resolvePrincipal: async () => principal(),
+          resolveTurnSnapshot: async ({ turnId }) => snapshot(turnId),
+        },
+      });
+      await (await handler(post([user(listCommand)]))).text();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(endpointCalls).toHaveLength(1);
+    expect(languageModel.doStreamCalls).toHaveLength(0);
+    expect(recorded.filter((event) => event.eventType === 'tool_contract_rejected')).toEqual([
+      expect.objectContaining({ toolId: LIST_TASKS_ID, inputSchemaDigest: 'sha256:input', httpStatus: 422 }),
+    ]);
+    expect(recorded.filter((event) => event.eventType === 'turn.finished')).toHaveLength(1);
   });
 
   it('does not run a settled command again when the history is replayed', async () => {
