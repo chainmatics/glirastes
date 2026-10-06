@@ -1,4 +1,4 @@
-import { lstat, readFile, readlink, symlink } from 'node:fs/promises';
+import { chmod, lstat, readFile, readlink, stat, symlink } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAppFixture, removeAppFixtures } from '../../codegen/tools/__tests__/app-fixture.js';
 import { ToolsConfigSchema } from '../../codegen/tools/config.js';
@@ -83,5 +83,15 @@ describe('glirastes init scaffold', () => {
     expect(preview.notes).toEqual(['No Next.js app: integrating-glirastes-web describes .glirastes/tools.json for this stack.']);
     await expect(vite.read('.glirastes/prompt-bundle.json')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(vite.read('AGENTS.md')).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 60_000);
+
+  it.skipIf(process.platform === 'win32')('keeps the permissions of the developer\'s package.json and instruction file', async () => {
+    const app = await freshApp({ 'AGENTS.md': '# Agents\n' });
+    await chmod(app.path('package.json'), 0o644);
+    await chmod(app.path('AGENTS.md'), 0o664);
+    const scaffold = await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
+    expect(scaffold.written).toEqual(['.glirastes/prompt-bundle.json', '.glirastes/tools.json', 'AGENTS.md', 'package.json']);
+    expect((await stat(app.path('package.json'))).mode & 0o777).toBe(0o644);
+    expect((await stat(app.path('AGENTS.md'))).mode & 0o777).toBe(0o664);
   }, 60_000);
 });

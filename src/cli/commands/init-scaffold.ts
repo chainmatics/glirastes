@@ -212,7 +212,13 @@ export async function scaffoldToolsInputs(options: {
 
   if (!options.dryRun && writes.length > 0) {
     await mkdir(join(root, '.glirastes'), { recursive: true });
-    await writeArtifactSetAtomically(writes.map((write) => ({ path: join(root, write.path), content: write.content })));
+    // package.json and the agent instructions are the developer's own files:
+    // the replacement keeps their permissions.
+    await writeArtifactSetAtomically(writes.map((write) => ({
+      path: join(root, write.path),
+      content: write.content,
+      preserveMode: true,
+    })));
   }
   return { appId, written: writes.map((write) => write.path).sort(), notes };
 }
