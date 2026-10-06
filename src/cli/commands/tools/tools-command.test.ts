@@ -165,6 +165,17 @@ describe('glirastes tools', () => {
       .not.toContain('Platform may relax');
   });
 
+  it('prints the resolve work list from a frozen read and refuses to run without --print', async () => {
+    const h = harness(emptyResult({ mode: 'frozen' }));
+    expect(await runToolsCommand(['resolve'], h.deps())).toBe(2);
+    expect(h.err.join('\n')).toContain('Glirastes never runs a model. Use --print.');
+    expect(await runToolsCommand(['resolve', '--print', '--root', 'web'], h.deps())).toBe(0);
+    expect(h.calls).toEqual([{ root: '/app/web', mode: 'frozen', keepGoing: true }]);
+    expect(JSON.parse(h.out.join('\n'))).toEqual({
+      schemaVersion: 1, kind: 'resolve', outputsCurrent: true, blocking: [], items: [], next: expect.stringContaining('glirastes tools resolve --print'),
+    });
+  });
+
   it('asks for a refresh when status finds no outputs', async () => {
     const fixture = await createAppFixture();
     const err: string[] = [];

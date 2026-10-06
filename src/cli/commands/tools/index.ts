@@ -9,6 +9,7 @@ import { ToolsUsageError } from './args.js';
 import { runToolsCheck } from './check.js';
 import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
 import { runToolsRefresh } from './refresh.js';
+import { runToolsResolve } from './resolve.js';
 import { runToolsStatus } from './status.js';
 
 export interface ToolsCommandDependencies {
@@ -26,6 +27,8 @@ export const TOOLS_USAGE = [
   '         verify the committed tool outputs without writing, models or network',
   '       glirastes tools status [--root <dir>] [--json]',
   '         show what your chat can do',
+  '       glirastes tools resolve --print [--root <dir>] [--json]',
+  '         print the open stage-1 findings as a work list for your coding agent',
 ].join('\n');
 
 /** Subcommand parsing lives here so src/cli/index.ts only dispatches `tools`. */
@@ -47,6 +50,8 @@ export async function runToolsCommand(argv: string[], deps: ToolsCommandDependen
         return await runToolsCheck(rest, io);
       case 'status':
         return await runToolsStatus(rest, io);
+      case 'resolve':
+        return await runToolsResolve(rest, io);
       default:
         io.error(TOOLS_USAGE);
         return 2;
