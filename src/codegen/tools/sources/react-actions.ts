@@ -26,6 +26,8 @@ const REGISTRATION_SPECS = [
 const BUS_MODULES: ReadonlySet<string> = new Set(['glirastes/react', 'glirastes/browser']);
 const REGISTRATION_TEXT = /useAiClientAction|registerAiClientAction|subscribeById/;
 const WRITE_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+/** Calls of mutation hooks (React Query, SWR) whose effect the generator cannot see. */
+const MUTATION_CALLS: ReadonlySet<string> = new Set(['mutate', 'mutateAsync', 'trigger']);
 const EMPTY_PAYLOAD: JsonSchemaLike = { type: 'object', properties: {}, additionalProperties: false };
 
 interface Registration {
@@ -110,13 +112,38 @@ function payloadSchema(app: AppProgram, registration: Registration): JsonSchemaL
   return objectSchema(app, type, parameter);
 }
 
-/** A non-GET `fetch(…, { method })` or an `axios` write in the handler body. */
-function writes(handler: ts.SignatureDeclaration | undefined): boolean {
+interface WriteEvidence {
+  /** A non-GET `fetch(…, { method })` or an `axios` write: the tool writes. */
+  writes: boolean;
+  /** A call that may write but does not show it (D4): a helper of another app file, a mutation hook, a computed fetch method. */
+  unproven?: string;
+}
+
+/** The app file that declares what a call refers to, when it is not the handler's own file. */
+function otherAppFile(app: AppProgram, callee: ts.Expression, ownFile: string): string | undefined {
+  const target = ts.isPropertyAccessExpression(callee) ? callee.expression : callee;
+  let symbol = app.checker.getSymbolAtLocation(target);
+  if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = app.checker.getAliasedSymbol(symbol);
+  const declaration = symbol?.declarations?.[0];
+  const file = declaration ? app.appRelative(declaration.getSourceFile().fileName) : undefined;
+  return file && file !== ownFile ? file : undefined;
+}
+
+function calleeLabel(callee: ts.Expression): string {
+  if (ts.isIdentifier(callee)) return callee.text;
+  if (ts.isPropertyAccessExpression(callee)) return `${calleeLabel(callee.expression)}.${callee.name.text}`;
+  return 'a computed function';
+}
+
+/** What the handler body shows about writing (spec 4.5 "nachweisbar"). */
+function writeEvidence(app: AppProgram, handler: ts.SignatureDeclaration | undefined): WriteEvidence {
   const body = handler && 'body' in handler ? (handler as ts.FunctionLikeDeclaration).body : undefined;
-  if (!body) return false;
-  let found = false;
+  if (!body) return { writes: false };
+  const ownFile = app.appRelative(body.getSourceFile().fileName) ?? '';
+  let writes = false;
+  let unproven: string | undefined;
   const visit = (node: ts.Node): void => {
-    if (found) return;
+    if (writes) return;
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       if (ts.isIdentifier(callee) && callee.text === 'fetch') {
@@ -126,16 +153,28 @@ function writes(handler: ts.SignatureDeclaration | undefined): boolean {
             ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) && property.name.text === 'method'))
           : undefined;
         const value = method ? unwrap(method.initializer) : undefined;
-        if (value && ts.isStringLiteralLike(value) && WRITE_METHODS.has(value.text.toUpperCase())) found = true;
+        if (value && ts.isStringLiteralLike(value)) {
+          if (WRITE_METHODS.has(value.text.toUpperCase())) writes = true;
+        } else if (options && (!ts.isObjectLiteralExpression(options) || method || options.properties.some(ts.isSpreadAssignment))) {
+          unproven ??= 'fetch with a method the generator cannot read';
+        }
       } else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
         && callee.expression.text === 'axios' && ['post', 'put', 'patch', 'delete'].includes(callee.name.text)) {
-        found = true;
+        writes = true;
+      } else {
+        const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
+        if (name && MUTATION_CALLS.has(name)) {
+          unproven ??= `${calleeLabel(callee)}()`;
+        } else {
+          const file = otherAppFile(app, callee, ownFile);
+          if (file) unproven ??= `${calleeLabel(callee)} from ${file}`;
+        }
       }
     }
     ts.forEachChild(node, visit);
   };
   visit(body);
-  return found;
+  return writes ? { writes } : { writes, ...(unproven ? { unproven } : {}) };
 }
 
 function docOf(source: ts.SourceFile, node: ts.Node | undefined): string | undefined {
@@ -250,7 +289,13 @@ async function observeActions(root: string, options: ReactActionSourceOptions): 
             ?? (handler && ts.isFunctionDeclaration(handler) ? docOf(handler.getSourceFile(), handler) : undefined);
         })
         .find((doc) => doc !== undefined);
-      const uiMutation = handlers.some((handler) => writes(handler));
+      const evidence = handlers.map((handler) => writeEvidence(app, handler));
+      const uiMutation = evidence.some((entry) => entry.writes);
+      const unproven = evidence.find((entry) => entry.unproven)?.unproven;
+      if (!uiMutation && unproven) {
+        toolFindings.push(toolFinding('ui-action-write-unproven', 'warning', stableKey,
+          `${actionId} calls ${unproven}; if that changes data, raise the tool to write so the chat asks first.`));
+      }
       return uiObservation({
         stableKey,
         definitionId: ids.get(stableKey)!,

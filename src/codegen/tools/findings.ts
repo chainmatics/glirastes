@@ -55,6 +55,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'ui-action-id-dynamic': 'Register client actions with a literal id so the chat can call them.',
   'ui-action-id-invalid': 'Use an action id of letters, digits, dots and dashes, e.g. tasks.highlight.',
   'ui-action-id-reserved': 'Ids starting with glirastes. belong to the SDK; choose another action id.',
+  'ui-action-write-unproven': 'If the handler changes data through a helper, a Server Action or a mutation hook, raise the tool: glirastes tools policy raise <tool> write. Otherwise nothing to do.',
 };
 
 /**

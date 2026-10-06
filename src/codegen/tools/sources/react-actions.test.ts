@@ -99,6 +99,36 @@ describe('react-actions source', () => {
     expect(tool?.findings).toEqual([expect.objectContaining({ code: 'ui-action-contract-conflict', severity: 'needs_attention' })]);
   }, 120_000);
 
+  it('flags handlers that may write through a helper, a mutation hook or a computed fetch method', async () => {
+    const app = await createAppFixture({
+      'tsconfig.json': TSCONFIG,
+      'src/lib/api.ts': 'export async function archiveTask(id: string) {\n'
+        + "  await fetch(`/api/tasks/${id}`, { method: 'DELETE' });\n}\n",
+      'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\nimport { archiveTask } from './lib/api';\n"
+        + 'declare const mutation: { mutate(input: unknown): void };\n'
+        + 'export function A() {\n'
+        + "  useAiClientAction('tasks.archive', (payload: { taskId: string }) => archiveTask(payload.taskId));\n"
+        + "  useAiClientAction('tasks.star', (payload: { taskId: string }) => mutation.mutate(payload));\n"
+        + "  useAiClientAction('tasks.sync', (payload: { method: string }) => fetch('/api/sync', { method: payload.method }));\n"
+        + "  useAiClientAction('tasks.peek', (payload: { taskId: string }) => console.log(payload.taskId));\n"
+        + '  return null;\n}\n',
+    });
+    const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+    const unproven = (name: string) => tools.get(name)?.findings
+      .find((finding) => finding.code === 'ui-action-write-unproven');
+    expect(unproven('ui.tasks.archive')).toMatchObject({
+      severity: 'warning',
+      subjectRef: 'UI action tasks.archive',
+      message: 'tasks.archive calls archiveTask from src/lib/api.ts; if that changes data, raise the tool to write so the chat asks first.',
+    });
+    expect(unproven('ui.tasks.archive')?.nextAction).toContain('glirastes tools policy raise <tool> write');
+    expect(unproven('ui.tasks.star')?.message).toContain('calls mutation.mutate()');
+    expect(unproven('ui.tasks.sync')?.message).toContain('calls fetch with a method the generator cannot read');
+    expect(unproven('ui.tasks.peek')).toBeUndefined();
+    expect(tools.get('ui.tasks.archive')?.evidence.uiMutation).toBeUndefined();
+    expect(tools.get('ui.tasks.archive')?.files).toEqual(['src/a.tsx']);
+  }, 120_000);
+
   it('produces nothing without registrations', async () => {
     const app = await createAppFixture({ 'src/a.ts': 'export const x = 1;\n' });
     expect(await createReactActionSource().observe(context(app.root)))
