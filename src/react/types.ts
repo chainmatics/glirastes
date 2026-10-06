@@ -2,7 +2,7 @@ import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEv
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
-import type { ChatInteractionsConfig } from './interactions/registry.js';
+import type { ChatInteractionsConfig, PendingChatCommand } from './interactions/registry.js';
 
 export type {
   ClarificationOption,
@@ -564,6 +564,15 @@ export interface ChatComponents {
   SuggestionChip?: ComponentType<SuggestionChipProps>;
   MentionChip?: ComponentType<MentionChipProps>;
   ClarificationCard?: ComponentType<ClarificationCardProps>;
+  /** Form for the missing arguments of a `/` command or entity action. */
+  CommandArgumentsForm?: ComponentType<CommandArgumentsFormProps>;
+}
+
+export interface CommandArgumentsFormProps {
+  pending: PendingChatCommand;
+  /** Values by argument name, and the labels of picked entities. */
+  onSubmit: (values: Readonly<Record<string, string>>, valueLabels: Readonly<Record<string, string>>) => void;
+  onCancel: () => void;
 }
 
 // ============================================================================
@@ -633,6 +642,13 @@ export interface ChatLocale {
   // `@` and `/` suggestions
   completionListLabel: string;
   completionResultsLabel: string;     // supports `{count}`
+
+  // Arguments of `/` commands and entity actions
+  commandArgumentsLabel: string;      // supports `{command}`
+  commandArgumentsSubmit: string;
+  commandArgumentsInvalid: string;
+  commandArgumentsAnyOption: string;
+  commandArgumentsNoMatches: string;
 }
 
 // ============================================================================

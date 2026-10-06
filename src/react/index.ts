@@ -29,6 +29,7 @@ export type {
   CompletionItem,
   CompletionItemAction,
   CompletionPermissionContext,
+  CommandArgumentsFormProps,
   CompletionSearchRequest,
   UiToolCommandSource,
   // Session
@@ -196,6 +197,7 @@ export {
   type CompletionSearchOptions,
 } from './completions/completion-search.js';
 export { createUiToolCommandProvider } from './completions/ui-tool-command-provider.js';
+export { CommandArgumentsForm } from './components/command-arguments-form.js';
 
 // Declarative chat interactions: `@` entities and `/` commands
 export {

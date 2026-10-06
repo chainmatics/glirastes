@@ -93,6 +93,11 @@ export const DEFAULT_LOCALE: ChatLocale = {
   retryRecordingAriaLabel: 'Retry recording',
   completionListLabel: 'Suggestions',
   completionResultsLabel: '{count} suggestions',
+  commandArgumentsLabel: 'Details for {command}',
+  commandArgumentsSubmit: 'Run',
+  commandArgumentsInvalid: 'These values are too long.',
+  commandArgumentsAnyOption: 'Any',
+  commandArgumentsNoMatches: 'No matches',
 };
 
 // ============================================================================

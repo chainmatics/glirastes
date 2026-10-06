@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { CommandArgumentsForm as DefaultCommandArgumentsForm } from './command-arguments-form.js';
 import { MentionChipList } from './mention-chip.js';
 import { RichMentionInput } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
@@ -37,10 +38,14 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
     runEntityAction,
     composerMentions,
     consumeComposerMentions,
+    pendingCommand,
+    submitPendingCommand,
+    cancelPendingCommand,
   } = useChatContext();
   const [value, setValue] = useState('');
   const inputRef = useRef<RichMentionInputHandle | null>(null);
   const InputExtra = components.InputExtra;
+  const ArgumentsForm = components.CommandArgumentsForm ?? DefaultCommandArgumentsForm;
 
   // References added from outside the composer (`mentionEntity`).
   useEffect(() => {
@@ -65,6 +70,20 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
 
   return (
     <div data-component="mention-input" data-mode="providers">
+      {pendingCommand && (
+        <ArgumentsForm
+          key={`${pendingCommand.commandId}:${JSON.stringify(pendingCommand.values)}:${pendingCommand.error ?? ''}`}
+          pending={pendingCommand}
+          onSubmit={(values, valueLabels) => {
+            submitPendingCommand(values, valueLabels);
+            inputRef.current?.focus();
+          }}
+          onCancel={() => {
+            cancelPendingCommand();
+            inputRef.current?.focus();
+          }}
+        />
+      )}
       <form
         onSubmit={(event) => {
           event.preventDefault();
