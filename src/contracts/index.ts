@@ -59,12 +59,17 @@ export {
   RuntimeTurnErrorCodeSchema,
   RuntimeTurnStatusSchema,
   RuntimeTurnToolUsageSchema,
+  RuntimeMetricEventSchema,
   TechnicalRuntimeEventBatchSchema,
   TechnicalRuntimeEventSchema,
   TechnicalRuntimeEventV2Schema,
+  TOOL_CONTRACT_REJECTED_STATUSES,
+  ToolContractRejectedEventSchema,
 } from './events.js';
 export type {
   RuntimeCostSource,
+  RuntimeMetricEvent,
+  ToolContractRejectedEvent,
   RuntimeTurnCost,
   RuntimeTurnErrorCode,
   RuntimeTurnStatus,

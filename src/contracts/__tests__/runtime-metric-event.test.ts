@@ -4,16 +4,22 @@ import { describe, expect, it } from 'vitest';
 import {
   RUNTIME_METRIC_MAX_BATCH,
   RUNTIME_METRIC_MAX_TOOLS,
+  RuntimeMetricEventSchema,
   TechnicalRuntimeEventBatchSchema,
   TechnicalRuntimeEventSchema,
   TechnicalRuntimeEventV2Schema,
+  ToolContractRejectedEventSchema,
 } from '../index.js';
 
-interface MetricEventVectors {
-  schemaVersion: 2;
+interface VectorSet {
   base: Record<string, unknown>;
   valid: Array<{ name: string; patch: Record<string, unknown> }>;
   invalid: Array<{ name: string; patch: Record<string, unknown> }>;
+}
+
+interface MetricEventVectors extends VectorSet {
+  schemaVersion: 2;
+  toolContractRejected: VectorSet;
 }
 
 /**
@@ -21,7 +27,7 @@ interface MetricEventVectors {
  * runtime-metrics/__vectors__/`) and pins the same digest. Changing a vector
  * means a new digest on both sides, never a one-sided edit.
  */
-const VECTORS_SHA256 = '73c5cf4f8d95e8968e11dd6cf921e8b88d387b7d75f056aa91e4bc2b614ab17d';
+const VECTORS_SHA256 = '114521143ea6d65564a2b4dc70318a7d30ef8cbc2cfdb4f87e7101b786558d17';
 const raw = readFileSync(
   new URL('../__vectors__/runtime-metric-event.v2.json', import.meta.url),
 );
@@ -54,6 +60,35 @@ describe('TechnicalRuntimeEvent v2 golden vectors', () => {
       expect(TechnicalRuntimeEventV2Schema.safeParse(eventOf(patch)).success).toBe(false);
     },
   );
+});
+
+describe('tool_contract_rejected golden vectors (spec 4.7)', () => {
+  const set = vectors.toolContractRejected;
+  const rejectionOf = (patch: Record<string, unknown>) => ({ ...set.base, ...patch });
+
+  it('names every vector uniquely and covers both outcomes', () => {
+    const names = [...set.valid, ...set.invalid].map((vector) => vector.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(set.valid).toHaveLength(4);
+    expect(set.invalid).toHaveLength(12);
+  });
+
+  it.each(set.valid.map((vector) => [vector.name, vector.patch] as const))('accepts %s', (_name, patch) => {
+    expect(ToolContractRejectedEventSchema.safeParse(rejectionOf(patch)).success).toBe(true);
+    expect(RuntimeMetricEventSchema.safeParse(rejectionOf(patch)).success).toBe(true);
+  });
+
+  it.each(set.invalid.map((vector) => [vector.name, vector.patch] as const))('rejects %s', (_name, patch) => {
+    expect(RuntimeMetricEventSchema.safeParse(rejectionOf(patch)).success).toBe(false);
+  });
+
+  it('keeps every turn vector valid in the union and batches one event type at a time', () => {
+    for (const vector of vectors.valid) {
+      expect(RuntimeMetricEventSchema.safeParse(eventOf(vector.patch)).success).toBe(true);
+    }
+    expect(TechnicalRuntimeEventBatchSchema.safeParse({ schemaVersion: 2, events: [set.base, set.base] }).success).toBe(true);
+    expect(TechnicalRuntimeEventBatchSchema.safeParse({ schemaVersion: 2, events: [vectors.base, set.base] }).success).toBe(false);
+  });
 });
 
 describe('TechnicalRuntimeEvent v2 limits', () => {
