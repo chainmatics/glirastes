@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { formatChatCommandMessage } from '../../../../contracts/chat-command.js';
 import { defineTool, type PipelineResult } from '../../../../types.js';
 import type { InternalApiCaller } from '../../../core/index.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
@@ -16,19 +17,25 @@ const pipelineResult: PipelineResult = {
   intent: { intent: 'ambiguous', confidence: 0 }, module: null, followupsEnabled: false,
 };
 
-function chatRequest(url: string, headers: Record<string, string>) {
+type Mode = 'legacy' | 'pipeline' | 'direct command';
+
+/** A `/` command sent alone: the handler runs its tool without a model call. */
+const directCommand = formatChatCommandMessage({ commandId: 'tasks.list', tool: 'tasks.list', args: {}, label: '/List tasks' });
+
+function chatRequest(url: string, headers: Record<string, string>, text = 'Tasks') {
   return new Request(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify({ messages: [{
-      id: 'internal-caller', role: 'user', parts: [{ type: 'text', text: 'Tasks' }],
+      id: 'internal-caller', role: 'user', parts: [{ type: 'text', text }],
     }] }),
   });
 }
 
 /** Runs one chat turn and returns the caller the handler gave `loadTools`. */
-async function callerFor(request: Request, pipeline: boolean): Promise<InternalApiCaller> {
+async function callerFor(request: Request, mode: Mode): Promise<InternalApiCaller> {
   let caller: InternalApiCaller | undefined;
+  let streamed = false;
   const handler = createAiChatHandler({
     loadTools: async (context) => {
       caller = context.callEndpoint;
@@ -36,10 +43,15 @@ async function callerFor(request: Request, pipeline: boolean): Promise<InternalA
     },
     model: {},
     systemPrompt: 'Assistant',
-    ...(pipeline ? { pipeline: { process: async () => pipelineResult } } : {}),
-    streamHandler: async () => new Response('ok'),
+    ...(mode === 'pipeline' ? { pipeline: { process: async () => pipelineResult } } : {}),
+    streamHandler: async () => {
+      streamed = true;
+      return new Response('ok');
+    },
   });
-  await handler(request);
+  await (await handler(request)).text();
+  // A direct command takes its own path: it never reaches the model's stream handler.
+  expect(streamed).toBe(mode !== 'direct command');
   return caller!;
 }
 
@@ -52,9 +64,10 @@ describe('endpoint caller of the chat handler', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it.each([
-    ['legacy mode', false],
-    ['pipeline mode', true],
-  ])('calls the origin of the chat request and forwards only its cookie (%s)', async (_label, pipeline) => {
+    ['legacy mode', 'legacy'],
+    ['pipeline mode', 'pipeline'],
+    ['direct command', 'direct command'],
+  ] as const)('calls the origin of the chat request and forwards only its cookie (%s)', async (_label, mode) => {
     const fetchMock = vi.fn(async () => new Response('{"tasks":[]}', {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
@@ -66,7 +79,7 @@ describe('endpoint caller of the chat handler', () => {
       'x-forwarded-host': 'public.example',
       'x-forwarded-proto': 'https',
       'x-api-key': 'not-forwarded',
-    }), pipeline);
+    }, mode === 'direct command' ? directCommand : 'Tasks'), mode);
     const result = await caller({ method: 'GET', path: '/api/tasks' });
 
     expect(result).toMatchObject({ ok: true, status: 200 });
