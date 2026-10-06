@@ -5,16 +5,32 @@ import {
   type ToolsPipelineResult,
 } from '../../../codegen/tools/pipeline.js';
 import { isFoundationDiagnosticError } from '../../../diagnostics/index.js';
-import { ToolsUsageError } from './args.js';
-import { runToolsCheck } from './check.js';
-import { runToolsDescribe } from './describe.js';
-import { runToolsEval } from './eval.js';
+import { ToolsUsageError, type ToolArgsSpec } from './args.js';
+import { CHECK_ARGS, runToolsCheck } from './check.js';
+import { DESCRIBE_ARGS, runToolsDescribe } from './describe.js';
+import { EVAL_ARGS, runToolsEval } from './eval.js';
 import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
-import { POLICY_USAGE, runToolsPolicy } from './policy.js';
-import { runToolsRefresh } from './refresh.js';
-import { runToolsResolve } from './resolve.js';
-import { runToolsStatus } from './status.js';
-import { runToolsVerify } from './verify.js';
+import { POLICY_SUBCOMMANDS, POLICY_USAGE, runToolsPolicy } from './policy.js';
+import { REFRESH_ARGS, runToolsRefresh } from './refresh.js';
+import { RESOLVE_ARGS, runToolsResolve } from './resolve.js';
+import { runToolsStatus, STATUS_ARGS } from './status.js';
+import { runToolsVerify, VERIFY_ARGS } from './verify.js';
+
+/**
+ * Every `glirastes tools` subcommand with its flags, values and positional
+ * arguments; `tools policy` has its own table. The shipped skills are linted
+ * against these tables, so a skill can never teach a command that does not exist.
+ */
+export const TOOLS_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
+  refresh: REFRESH_ARGS,
+  check: CHECK_ARGS,
+  status: STATUS_ARGS,
+  resolve: RESOLVE_ARGS,
+  describe: DESCRIBE_ARGS,
+  eval: EVAL_ARGS,
+  verify: VERIFY_ARGS,
+};
+export { POLICY_SUBCOMMANDS };
 
 export interface ToolsCommandDependencies {
   cwd?: string;

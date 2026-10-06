@@ -3,9 +3,11 @@ import { loadToolsConfig } from '../../../codegen/tools/config.js';
 import { parseToolArgs } from './args.js';
 import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
 
+export const CHECK_ARGS = { flags: ['--strict', '--integrity-only', '--json'], values: ['--root'] } as const;
+
 /** Frozen refresh: never writes, never calls a model, never uses the network. */
 export async function runToolsCheck(argv: ReadonlyArray<string>, io: ToolsIo): Promise<number> {
-  const args = parseToolArgs(argv, { flags: ['--strict', '--integrity-only', '--json'], values: ['--root'] });
+  const args = parseToolArgs(argv, CHECK_ARGS);
   const root = resolve(io.cwd, args.values.get('--root') ?? '.');
   const config = loadToolsConfig(root);
   const strict = args.flags.has('--strict') || config.ci.strict === true;

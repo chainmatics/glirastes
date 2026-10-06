@@ -73,8 +73,10 @@ export async function readToolStatus(root: string): Promise<ToolStatusEntry[]> {
   }).sort((left, right) => compareCodeUnits(left.name, right.name));
 }
 
+export const STATUS_ARGS = { flags: ['--json'], values: ['--root'] } as const;
+
 export async function runToolsStatus(argv: ReadonlyArray<string>, io: ToolsIo): Promise<number> {
-  const args = parseToolArgs(argv, { flags: ['--json'], values: ['--root'] });
+  const args = parseToolArgs(argv, STATUS_ARGS);
   const entries = await readToolStatus(resolve(io.cwd, args.values.get('--root') ?? '.'));
   io.log(args.flags.has('--json') ? JSON.stringify({ schemaVersion: 1, tools: entries }) : formatToolStatus(entries));
   return 0;
