@@ -273,4 +273,30 @@ describe('tool_contract_rejected in the turn recorder', () => {
     expect(recorder.recordToolContractRejected('list_tasks', 422)).toMatchObject({ httpStatus: 422 });
     expect(createTurnMetricsRecorder({ sink, startedAtMs: 1_000 }).recordToolContractRejected('list_tasks', 400)).toBeUndefined();
   });
+
+  it('finds a dotted manifest tool under its definitionId and under its model-facing name', () => {
+    const dotted = createTurnSnapshot({
+      turnId: 'ai-dotted',
+      agentRevision,
+      manifestRevision: {
+        ...manifestRevision,
+        tools: [{ ...manifestRevision.tools[0]!, name: 'tasks.list' }],
+      },
+      policyRevision,
+      principal,
+      localLimits,
+    });
+    const { sink } = fakeSink();
+    const recorder = createTurnMetricsRecorder({ sink, snapshot: dotted, startedAtMs: 1_000 });
+    for (const toolName of ['tasks.list', 'tasks_list']) {
+      expect(recorder.recordToolContractRejected(toolName, 422)).toMatchObject({
+        eventType: 'tool_contract_rejected',
+        toolId: LIST_TASKS_ID,
+        inputSchemaDigest: manifestRevision.tools[0]!.inputSchemaDigest,
+        httpStatus: 422,
+      });
+    }
+    expect(recorder.recordToolContractRejected('tasks.other', 422)).toBeUndefined();
+    expect(sink.record).toHaveBeenCalledTimes(2);
+  });
 });

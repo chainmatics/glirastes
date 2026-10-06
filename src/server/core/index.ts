@@ -85,7 +85,9 @@ export interface EndpointToolContext extends ToolContext {
   /**
    * The endpoint refused a call that passed the tool's input schema (400 or
    * 422): the contract is wrong (spec 4.7, `tool_contract_rejected`). Called
-   * with the model-facing tool name; it must not throw.
+   * with the endpoint tool's `toolName` (a dotted definitionId or its
+   * model-facing encoding; the turn recorder resolves either); it must not
+   * throw.
    */
   onContractRejected?: (rejection: { toolName: string; status: 400 | 422 }) => void;
 }

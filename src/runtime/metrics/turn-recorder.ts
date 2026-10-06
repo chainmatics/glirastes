@@ -68,7 +68,8 @@ export interface TurnMetricsRecorder {
   /**
    * An endpoint refused a call its tool schema accepted (spec 4.7). Hands a
    * content-free `tool_contract_rejected` event to the sink right away and
-   * returns it; undefined for a tool outside the pinned snapshot. Never throws.
+   * returns it; undefined for a tool outside the pinned snapshot. The name is
+   * the manifest name or its model-facing encoding. Never throws.
    */
   recordToolContractRejected(toolName: string, httpStatus: 400 | 422): ToolContractRejectedEvent | undefined;
 }
@@ -194,8 +195,12 @@ export function createTurnMetricsRecorder(
 
     recordToolContractRejected(toolName, httpStatus) {
       try {
-        const toolId = toolIdByName.get(toolName);
-        const inputSchemaDigest = schemaDigestByName.get(toolName);
+        // Endpoint tools may carry the dotted definitionId as `toolName`; the
+        // maps are keyed by the model-facing encoding (idempotent for names
+        // that are already encoded).
+        const modelName = modelFacingToolName(toolName);
+        const toolId = toolIdByName.get(modelName);
+        const inputSchemaDigest = schemaDigestByName.get(modelName);
         if (!toolId || !inputSchemaDigest) return undefined;
         const parsed = ToolContractRejectedEventSchema.safeParse({
           schemaVersion: 2,
