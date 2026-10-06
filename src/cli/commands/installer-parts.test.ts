@@ -35,6 +35,15 @@ describe('stack detection', () => {
     expect(await detectStack(rootDir)).toBe('nextjs');
   });
 
+  it.each([
+    [{ vue: '^3.5.0', vite: '^7.0.0' }],
+    [{ '@nestjs/core': '^11.0.0' }],
+  ])('detects a web app with a separate backend from %j', async (dependencies) => {
+    expect(await detectStack(await projectWith(dependencies))).toBe('web');
+    expect(await detectStack(await projectWith({ ...dependencies, next: '^16.0.0' }))).toBe('nextjs');
+    expect(resolvePartSkills(['framework'], { stack: 'web' })).toEqual(['integrating-glirastes-web']);
+  });
+
   it('detects nothing in a project without a known framework', async () => {
     expect(await detectStack(await projectWith({ express: '^5.0.0' })))
       .toBeNull();

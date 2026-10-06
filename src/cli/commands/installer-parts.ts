@@ -17,8 +17,8 @@ export const INSTALLER_PARTS = [
 
 export type InstallerPart = (typeof INSTALLER_PARTS)[number];
 
-/** Stacks the installer can recognise on its own. */
-export type DetectedStack = 'nextjs';
+/** Stacks the installer can recognise on its own: Next.js, or a web app with a separate backend. */
+export type DetectedStack = 'nextjs' | 'web';
 
 export interface PartResolutionContext {
   /** What `detectStack` found, or `null` when nothing was recognised. */
@@ -31,6 +31,7 @@ export interface PartResolutionContext {
  */
 const FRAMEWORK_SKILLS: Record<DetectedStack, ReadonlyArray<string>> = {
   nextjs: ['integrating-glirastes-nextjs'],
+  web: ['integrating-glirastes-web'],
 };
 
 const PART_SKILLS: Record<
@@ -42,9 +43,12 @@ const PART_SKILLS: Record<
   setup: ['setting-up-glirastes'],
 };
 
-/** Dependency whose presence proves a stack, rather than a heuristic. */
+/** Dependency whose presence proves a stack, rather than a heuristic; Next.js wins. */
 const STACK_MARKERS: ReadonlyArray<[DetectedStack, string]> = [
   ['nextjs', 'next'],
+  ['web', '@nestjs/core'],
+  ['web', 'vue'],
+  ['web', 'vite'],
 ];
 
 /**
