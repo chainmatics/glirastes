@@ -119,12 +119,27 @@ interface WriteEvidence {
   unproven?: string;
 }
 
+/**
+ * A declaration a call can run code of: a function, method or class, a module imported
+ * as a namespace, or a variable initialised with a function or an object of methods.
+ * Fields, parameters and constants are data: a method on them is a built-in or a
+ * property of a shared type, not a function of another app file.
+ */
+function holdsCode(declaration: ts.Declaration): boolean {
+  if (ts.isFunctionDeclaration(declaration) || ts.isMethodDeclaration(declaration)
+    || ts.isClassDeclaration(declaration) || ts.isSourceFile(declaration)) return true;
+  if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) return false;
+  const initializer = unwrap(declaration.initializer);
+  return ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer) || ts.isObjectLiteralExpression(initializer);
+}
+
 /** The app file that declares what a call refers to, when it is not the handler's own file. */
 function otherAppFile(app: AppProgram, callee: ts.Expression, ownFile: string): string | undefined {
-  const target = ts.isPropertyAccessExpression(callee) ? callee.expression : callee;
-  let symbol = app.checker.getSymbolAtLocation(target);
+  const receiver = ts.isPropertyAccessExpression(callee) ? callee.expression : undefined;
+  let symbol = app.checker.getSymbolAtLocation(receiver ?? callee);
   if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = app.checker.getAliasedSymbol(symbol);
-  const declaration = symbol?.declarations?.[0];
+  // A called identifier is callable by definition; a receiver counts only when it holds code.
+  const declaration = receiver ? symbol?.declarations?.find(holdsCode) : symbol?.declarations?.[0];
   const file = declaration ? app.appRelative(declaration.getSourceFile().fileName) : undefined;
   return file && file !== ownFile ? file : undefined;
 }
@@ -149,10 +164,11 @@ function writeEvidence(app: AppProgram, handler: ts.SignatureDeclaration | undef
       if (ts.isIdentifier(callee) && callee.text === 'fetch') {
         const options = node.arguments[1] ? unwrap(node.arguments[1]) : undefined;
         const method = options && ts.isObjectLiteralExpression(options)
-          ? options.properties.find((property): property is ts.PropertyAssignment => (
-            ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) && property.name.text === 'method'))
+          ? options.properties.find((property): property is ts.PropertyAssignment | ts.ShorthandPropertyAssignment => (
+            (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
+            && ts.isIdentifier(property.name) && property.name.text === 'method'))
           : undefined;
-        const value = method ? unwrap(method.initializer) : undefined;
+        const value = method && ts.isPropertyAssignment(method) ? unwrap(method.initializer) : undefined;
         if (value && ts.isStringLiteralLike(value)) {
           if (WRITE_METHODS.has(value.text.toUpperCase())) writes = true;
         } else if (options && (!ts.isObjectLiteralExpression(options) || method || options.properties.some(ts.isSpreadAssignment))) {
