@@ -1,4 +1,4 @@
-import { createAiChatHandler } from 'glirastes/server/nextjs';
+import { createAiChatHandler, createChatInteractionsHandler } from 'glirastes/server/nextjs';
 import { createGeneratedRuntimeSource, materializeManifestToolRegistry } from 'glirastes/runtime';
 import * as generated from '../../generated/glirastes/tools.generated.js';
 import { resolveSession } from '../../auth.js';
@@ -15,11 +15,18 @@ const glirastes = createGeneratedRuntimeSource(generated, {
   identity: { tenantId: '019fb007-0000-7000-8000-000000000002' },
 });
 
+const managedRuntime = {
+  resolvePrincipal: resolveSession,
+  resolveTurnSnapshot: (context) => glirastes.source.resolveTurnSnapshot(context),
+};
+
 export const runtime = 'nodejs';
 export const POST = createAiChatHandler({
-  managedRuntime: { resolvePrincipal: resolveSession, resolveTurnSnapshot: (context) => glirastes.source.resolveTurnSnapshot(context) },
+  managedRuntime,
   loadTools: ({ turnSnapshot }) => materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: glirastes.bindings }),
   model: () => testModel(),
   systemPrompt: 'Use only the available native queries; ask when the target is unclear.',
   maxSteps: 3, maxOutputTokens: 200, emitStepReports: true,
 });
+// The `/` commands and `@` entities this user may run, derived by `glirastes tools refresh`.
+export const GET = createChatInteractionsHandler({ interactions: generated.chatInteractions, managedRuntime });
