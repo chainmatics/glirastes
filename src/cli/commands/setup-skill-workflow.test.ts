@@ -48,7 +48,7 @@ describe('bundled local-first setup workflow', () => {
 
   it('maintains local code changes without making platform sync mandatory', async () => {
     const source = await readFile(join(findPackageSkillsDir(), 'maintaining-glirastes-tools/SKILL.md'), 'utf8');
-    for (const required of ['Standalone', 'navigation', 'filter', 'glirastes setup --dry-run', 'glirastes doctor', 'restart']) {
+    for (const required of ['Standalone', 'navigation', 'filter', 'glirastes tools resolve --print', 'glirastes tools check', 'glirastes doctor', 'restart']) {
       expect(source).toContain(required);
     }
     expect(source).not.toContain('Platform interviewer');
