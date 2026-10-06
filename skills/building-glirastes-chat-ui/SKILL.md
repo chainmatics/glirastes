@@ -5,12 +5,37 @@ description: Use when integrating or customizing the Glirastes React chat, tool 
 
 # Building the Glirastes Chat UI
 
-## Start from the shipped UI
-
 Use `VercelAiChat` from `glirastes/react/vercel` plus
 `glirastes/react/styles.css`. Preserve existing product UX through supported
 themes, slots, session adapters, tool renderers, and `useAiClientAction`
-handlers rather than copying the chat implementation.
+handlers rather than copying the chat implementation. You, the app's coding
+agent, wire it; Glirastes never calls a model from the UI or the CLI: the
+chat route uses the app's own model access.
+
+## Boundaries
+
+- The browser never decides rights: role filtering in the UI only hides
+  entries, the server and the app still authorize every tool call.
+- Never derive approver authority from the browser payload; organizational
+  approval stays fail-closed while unavailable.
+- Speech traffic goes directly between the app's provider adapter and its
+  provider, never through the Glirastes Control Plane.
+- Never edit `.glirastes/tool-policy.json` or generated files to change what
+  the UI shows; UI tools come from `glirastes tools refresh`.
+
+## Workflow
+
+1. Mount one `VercelAiChat endpoint="/api/chat"` (the app's real chat route)
+   and import `glirastes/react/styles.css`; theme it before forking anything.
+2. Register client actions with `useAiClientAction` where their state lives,
+   with a payload contract, and mount the navigation bridge
+   (`useGlirastesNavigationBridge`) once. Run `glirastes tools refresh` and
+   check with `glirastes tools status` that the UI tools are active.
+3. Add `completionProviders` for `/` commands and `@` mentions, the
+   clarification card, result renderers and sessions as the product needs.
+4. Wire speech-to-text through the SDK controller (gate below).
+5. Prove it in a real browser: keyboard, mobile layout, approvals, STT
+   cleanup.
 
 The application may use an ephemeral session for basic interactive chat.
 Server-backed conversation visibility and retention must be explicit when
@@ -77,7 +102,8 @@ that bubble already carries.
 
 ## UI actions
 
-`glirastes/react` exports the action bus from `./ui.js`: `UiActionBus`,
+`glirastes/react` re-exports the framework-neutral action bus of
+`glirastes/browser`: `UiActionBus`,
 `useAiClientAction`, `useAiClientActionById`, `useAiClientActionByType`,
 `dispatchAiClientAction`, `dispatchAiClientActions`, plus
 `getRegisteredHandlers`, `getMissingHandlers`, `getActionIdInfo`,
@@ -90,6 +116,12 @@ its state is how stale closures get shipped.
 `useAiMissingHandlerWarning` and `getMissingHandlers` surface actions the model
 can emit but nothing handles. Wire the warning during development: a silently
 dropped action looks exactly like a model that ignored the request.
+
+Generated navigation (`ui.navigate`) and filter (`ui.filter.<view>`) tools run
+through `useGlirastesNavigationBridge({ push })`; without the bridge they stay
+disabled. A client action becomes the tool `ui.<actionId>`; pass its payload
+contract as the third argument of `useAiClientAction` so the payload is typed
+and checked before the handler runs.
 
 ## Commands, mentions and clarification
 
@@ -189,6 +221,14 @@ traffic goes directly between the target app's local provider adapter and its
 configured provider. Do not proxy transcripts through the Glirastes Control
 Plane.
 
+## Commands
+
+```bash
+glirastes tools refresh
+glirastes tools status
+glirastes doctor
+```
+
 ## Verification
 
 Test tool cards and UI actions, self-approval, sessions, keyboard/mobile
@@ -198,4 +238,5 @@ quality plus p50/p95 finalization latency against the product baseline.
 
 Assert that hidden and non-allowlisted tool output cannot escape through either
 result blocks or an assistant fallback summary, and that a raw transport error
-never reaches rendered state.
+never reaches rendered state. `glirastes tools status` lists the UI tools the
+chat can run, and a navigation or filter request changes the page.
