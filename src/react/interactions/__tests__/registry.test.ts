@@ -131,6 +131,23 @@ describe('createChatInteractionRegistry', () => {
     expect((await createCompletionSearch(registry.providers)('bob', '@')).map((item) => item.id)).toEqual(['bob']);
   });
 
+  it('shares the per-provider cap between entity types instead of showing only the first', async () => {
+    const hits = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => ({ id: `${prefix}${index}`, label: `${prefix} ${index}` }));
+    const entity = (type: string, count: number) => defineChatEntity({
+      type, label: type, search: (_query, { limit }) => hits(type, count).slice(0, limit),
+    });
+    const crowded = createCompletionSearch(createChatInteractionRegistry({ entities: [entity('aaa', 8), entity('bbb', 8)] }).providers);
+    const both = await crowded('', '@');
+    expect(new Set(both.map((item) => item.type))).toEqual(new Set(['aaa', 'bbb']));
+    expect(both.map((item) => item.id)).toEqual(['aaa0', 'bbb0', 'aaa1', 'bbb1', 'aaa2', 'bbb2', 'aaa3', 'bbb3']);
+
+    // A type with few hits is not starved by two with many, and a short list gives its slots to the others.
+    const mixed = createCompletionSearch(createChatInteractionRegistry({
+      entities: [entity('aaa', 8), entity('bbb', 1), entity('ccc', 8)],
+    }).providers);
+    expect((await mixed('', '@')).map((item) => item.id)).toEqual(['aaa0', 'bbb0', 'ccc0', 'aaa1', 'ccc1', 'aaa2', 'ccc2', 'aaa3']);
+  });
+
   it('sends a picked command alone as a direct command, and mixed text to the model', () => {
     const registry = createChatInteractionRegistry({ data, locale: 'en' });
     const open = mention('command', 'open.overview', 'Open Overview', '/');
@@ -184,6 +201,17 @@ describe('createChatInteractionRegistry', () => {
     const registry = createChatInteractionRegistry({ commands: [standup], locale: 'de' });
     expect(registry.planMessage('/tagesrückblick bitte kurz', [mention('command', 'standup', 'Tagesrückblick', '/')]))
       .toEqual({ status: 'prompt', text: 'Fasse meinen Tag zusammen. bitte kurz' });
+  });
+
+  it('keeps the prompt text as written, including dollar replacement patterns', () => {
+    const cost = defineChatCommand({
+      id: 'cost',
+      label: 'Cost',
+      run: { kind: 'prompt', prompt: "Cost $& and $$ and $` and $' and $1 today." },
+    });
+    const registry = createChatInteractionRegistry({ commands: [cost] });
+    expect(registry.planMessage('/cost hello', [mention('command', 'cost', 'Cost', '/')]))
+      .toEqual({ status: 'prompt', text: "Cost $& and $$ and $` and $' and $1 today. hello" });
   });
 
   it('runs entity actions with the entity id, nested where the action needs it', () => {

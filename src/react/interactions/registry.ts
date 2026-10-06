@@ -185,7 +185,16 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
           };
         });
       }));
-      return settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
+      // One entity type must not fill the whole per-provider cap: take one hit per type in turn.
+      const lists = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+      const interleaved: CompletionItem[] = [];
+      for (let index = 0; index < limit; index += 1) {
+        for (const list of lists) {
+          const item = list[index];
+          if (item) interleaved.push(item);
+        }
+      }
+      return interleaved;
     },
   };
 
@@ -264,7 +273,9 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
       const rest = withoutToken(text, token);
       if (!rest.found) return undefined;
       if (command.run.kind === 'prompt') {
-        return { status: 'prompt', text: rest.text.replace(/^\s*/, `${chatText(command.run.prompt, locale)} `).trim() };
+        const prompt = `${chatText(command.run.prompt, locale)} `;
+        // A function replacer: the prompt is the app's text, `$&` and `$$` in it stay as written.
+        return { status: 'prompt', text: rest.text.replace(/^\s*/, () => prompt).trim() };
       }
       const values: Record<string, string> = {};
       const valueLabels: Record<string, string> = {};
