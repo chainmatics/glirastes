@@ -2,14 +2,18 @@ import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { formatChatCommandMessage } from '../../../../contracts/chat-command.js';
-import type { RuntimeMetricEvent } from '../../../../contracts/index.js';
+import type { RuntimeMetricEvent, ToolOverrideDelta } from '../../../../contracts/index.js';
+import { createTurnSnapshot } from '../../../../runtime/turn-snapshot.js';
 import { createPiiShield } from '../../../pii-shield/index.js';
 import { endpointToolToTool } from '../../../core/index.js';
 import {
   defineEndpointTool, defineTool, type PiiDetector, type PiiShield, type ToolRegistry,
 } from '../../../../types.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
-import { collectingSink, LIST_TASKS_ID, principal, snapshot, streamChunks } from './command-fixtures.js';
+import {
+  agentRevision, ARCHIVE_TASK_ID, collectingSink, LIST_TASKS_ID, localLimits, manifestRevision, policyRevision,
+  principal, snapshot, streamChunks,
+} from './command-fixtures.js';
 
 const archiveCommand = formatChatCommandMessage({
   commandId: 'task.tasks.archive', tool: 'tasks.archive', args: { id: 't1' }, label: '/Archive Release prüfen',
@@ -32,6 +36,35 @@ function model() {
         },
       ] as never),
     }),
+  });
+}
+
+/** A model that calls `tasks_archive` once, then answers with text. */
+function archivingModel() {
+  const usage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 1, text: 1, reasoning: undefined },
+  };
+  let call = 0;
+  return new MockLanguageModelV3({
+    doStream: async () => {
+      call += 1;
+      return {
+        stream: convertArrayToReadableStream((call === 1
+          ? [
+            { type: 'stream-start', warnings: [] },
+            { type: 'tool-call', toolCallId: 'call-1', toolName: 'tasks_archive', input: JSON.stringify({ id: 't1' }) },
+            { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+          ]
+          : [
+            { type: 'stream-start', warnings: [] },
+            { type: 'text-start', id: 't1' },
+            { type: 'text-delta', id: 't1', delta: 'Archived.' },
+            { type: 'text-end', id: 't1' },
+            { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+          ]) as never),
+      };
+    },
   });
 }
 
@@ -127,6 +160,41 @@ describe('direct commands in createAiChatHandler', () => {
     expect(forbidden.find((chunk) => chunk.type === 'tool-output-error')).toMatchObject({ errorText: 'principal_role_denied' });
     expect(archive).not.toHaveBeenCalled();
     expect(list).not.toHaveBeenCalled();
+  });
+
+  it('takes a signed Platform relaxation (D16) from the turn snapshot, exactly like a model call', async () => {
+    // The code asks first (`needsApproval: true`); the Platform relaxed the confirmation, pinned at `write`.
+    const relaxation: ToolOverrideDelta = {
+      toolId: ARCHIVE_TASK_ID, requiresApproval: false, pin: { toolId: ARCHIVE_TASK_ID, atRiskClass: 'write' },
+    };
+    const run = async (path: 'command' | 'model', relaxableToolIds?: ReadonlySet<string>) => {
+      const { registry, archive } = tools();
+      const languageModel = path === 'model' ? archivingModel() : model();
+      const handler = createAiChatHandler({
+        tools: registry, model: languageModel, systemPrompt: 'Assistant',
+        managedRuntime: {
+          resolvePrincipal: async () => principal(),
+          resolveTurnSnapshot: async ({ turnId }) => createTurnSnapshot({
+            turnId, agentRevision, manifestRevision, principal: principal(), localLimits,
+            policyRevision: { ...policyRevision(), toolOverrides: [relaxation] },
+            ...(relaxableToolIds ? { relaxableToolIds } : {}),
+          }),
+        },
+      });
+      const output = await streamChunks(await handler(post([user(path === 'command' ? archiveCommand : 'Archive t1')])));
+      return {
+        askedFirst: output.some((chunk) => chunk.type === 'tool-approval-request'),
+        archived: archive.mock.calls.length,
+        modelCalls: languageModel.doStreamCalls.length,
+      };
+    };
+    // Without the code report naming the tool relaxable, both paths keep the confirmation (fail closed).
+    expect(await run('command')).toEqual({ askedFirst: true, archived: 0, modelCalls: 0 });
+    expect(await run('model')).toMatchObject({ askedFirst: true, archived: 0 });
+    // With it, both paths run the tool at once.
+    const relaxable = new Set([ARCHIVE_TASK_ID]);
+    expect(await run('command', relaxable)).toEqual({ askedFirst: false, archived: 1, modelCalls: 0 });
+    expect(await run('model', relaxable)).toMatchObject({ askedFirst: false, archived: 1 });
   });
 
   it('reports an endpoint that refuses the command call as tool_contract_rejected, like a model call', async () => {
