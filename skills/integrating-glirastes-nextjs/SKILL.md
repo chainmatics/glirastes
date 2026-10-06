@@ -71,6 +71,7 @@ second, hand-maintained catalogue.
      loadTools: ({ turnSnapshot }) => (turnSnapshot
        ? materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: glirastes.bindings })
        : {}),
+     toolDiscovery: true,
      toolSemantics: generated.toolSearchSemantics,
      model: openrouter.chat('anthropic/claude-sonnet-5.5'),
      systemPrompt,
@@ -81,9 +82,10 @@ second, hand-maintained catalogue.
    Use `.chat(model)`: `createOpenAI(...)(model)` talks to the Responses API,
    whose usage the handler does not read, so turn costs would stay unknown.
    `managedRuntime` names the shared turn guard, not a Platform purchase.
-   `toolSemantics` gives `find_tools` the checked synonyms; it never grants a
-   tool. With `metrics`, an endpoint that refuses a call its schema accepted
-   (400 or 422) is reported as `tool_contract_rejected`, without content.
+   `toolDiscovery: true` offers `find_tools`, and `toolSemantics` gives it the
+   checked synonyms; neither grants a tool. With `metrics`, an endpoint that
+   refuses a call its schema accepted (400 or 422) is reported as
+   `tool_contract_rejected`, without content.
 4. Mount the navigation bridge once in the root layout, as a client component,
    so `ui.navigate` and the `ui.filter.*` tools can run:
 

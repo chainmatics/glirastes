@@ -110,6 +110,24 @@ async function codeBlock(skill: string, language: string): Promise<string> {
   return match[2]!.split('\n').map((line) => line.slice(indent)).join('\n');
 }
 
+/** The option names of the `createAiChatHandler({ ... })` call in a route, with the source text of each value. */
+function handlerOptions(source: ts.SourceFile): Record<string, string> {
+  const options: Record<string, string> = {};
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'createAiChatHandler') {
+      const [config] = node.arguments;
+      if (config && ts.isObjectLiteralExpression(config)) {
+        for (const property of config.properties) {
+          if (property.name) options[property.name.getText(source)] = ts.isPropertyAssignment(property) ? property.initializer.getText(source) : '';
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return options;
+}
+
 describe('skill scenarios', () => {
   it('setting-up-glirastes takes a fresh Next app from init to a checked first tool', async () => {
     const fixture = await createAppFixture({
@@ -176,6 +194,11 @@ describe('skill scenarios', () => {
     });
     const diagnostics = ts.getPreEmitDiagnostics(program, program.getSourceFile(fixture.path('src/app/api/chat/route.ts')));
     expect(diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))).toEqual([]);
+    // `toolSemantics` only feeds `find_tools`, and the handler offers that tool only with `toolDiscovery: true`.
+    expect(handlerOptions(program.getSourceFile(fixture.path('src/app/api/chat/route.ts'))!)).toMatchObject({
+      toolSemantics: expect.any(String),
+      toolDiscovery: 'true',
+    });
     // The chat route itself is never a tool: refresh reports it as a default exclusion.
     const refreshed: string[] = [];
     expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: (line) => { refreshed.push(line); }, error: () => undefined })).toBe(0);
