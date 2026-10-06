@@ -34,6 +34,18 @@ describe('bundled local-first setup workflow', () => {
     expect(source).not.toContain('glirastes scan --sync');
   });
 
+  it('keeps the web companion within what the chat handler calls the API with', async () => {
+    const source = await readFile(join(findPackageSkillsDir(), 'integrating-glirastes-web/SKILL.md'), 'utf8');
+    // createAiChatHandler builds its own caller from the chat request (origin and cookie only)
+    // and has no option to replace it, see chat-handler-internal-caller.test.ts.
+    for (const required of ['same origin', 'session cookie', 'open gap']) {
+      expect(source).toContain(required);
+    }
+    expect(source).not.toContain('createFetchInternalApiCaller');
+    expect(source).not.toContain('defaultHeaders');
+    expect(source).not.toContain('cookie or `Authorization` header');
+  });
+
   it('maintains local code changes without making platform sync mandatory', async () => {
     const source = await readFile(join(findPackageSkillsDir(), 'maintaining-glirastes-tools/SKILL.md'), 'utf8');
     for (const required of ['Standalone', 'navigation', 'filter', 'glirastes setup --dry-run', 'glirastes doctor', 'restart']) {

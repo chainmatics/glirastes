@@ -13,8 +13,8 @@ replace the generator with a hand-written tool list.
 ## Boundaries
 
 - The backend keeps all authorization. The chat handler calls the app's API
-  with the user's own cookie or `Authorization` header, never with a service
-  account that has more rights than the user.
+  with the user's own session cookie, never with a service account that has
+  more rights than the user.
 - Never edit `.glirastes/tool-policy.json`, generated files or the `appId` in
   `.glirastes/tools.json`.
 - The model key (`OPENROUTER_API_KEY`) lives only in the environment of the
@@ -38,10 +38,15 @@ replace the generator with a hand-written tool list.
    handler is framework-neutral: `createAiChatHandler` (from
    `glirastes/server/nextjs`, despite the name) takes a Web `Request` and
    returns a `Response`; adapt your framework's request object to it.
-2. Endpoint tools call the API through an internal caller that forwards the
-   user's session: `createFetchInternalApiCaller({ baseUrl, defaultHeaders })`
-   from `glirastes/server`, built per request with that request's cookie or
-   authorization header. Never forward anything but the user's own credentials.
+2. Endpoint tools call the API through the caller that `createAiChatHandler`
+   builds for every chat request. It sends the call to the origin the chat
+   request arrived on and forwards only that request's `cookie` header; this
+   version has no option to replace it. So the API must be reachable on the
+   same origin as the handler (a reverse proxy or the dev server routes `/api`
+   to the backend) and authenticate by session cookie. An API on another
+   origin or a bearer token in an `Authorization` header is not supported
+   yet: report it as an open gap (step 5). Do not use a service account or
+   forward credentials the user did not send to get around it.
 3. Frontend actions and navigation without React: in the browser entry module
    use `glirastes/browser`:
 
@@ -70,7 +75,9 @@ replace the generator with a hand-written tool list.
 5. Configure `.glirastes/tools.json` with the supported sources, run
    `glirastes tools refresh` and the work lists of `setting-up-glirastes`.
    For the parts marked "not yet", write down which endpoints, pages or
-   actions are missing as tools and stop there.
+   actions are missing as tools and stop there. Do the same for an API the
+   chat handler cannot reach (step 2) and name the origin or credential it
+   needs.
 6. Build the backend and the frontend with the refresh step of their build
    (`glirastes tools refresh` locally, frozen in CI, integrity in Docker) and
    commit `.glirastes` with the code.
