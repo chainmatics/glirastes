@@ -44,10 +44,16 @@ identifiers; better labels, synonyms and icons come from
 ```
 
 A patch replaces the fields it names, `hidden: true` removes an entry, and a
-complete entry under a new id is added. An invalid file throws when the
-handler is created, like an invalid tool policy. `hidden` only shapes the
-lists; it is no permission. What a user may run is decided by the tool policy
-and the app's endpoints, for direct commands exactly as for the model.
+complete entry under a new id is added (a command needs `label` and `run`, an
+action `label`, `entityArg` and `run`, an entity `label` and a `search` or an
+action). A patch under an id or type that is not derived and is no complete
+entry is stale, typically after a refresh stopped deriving a tool: it is
+ignored and the handler logs one console warning naming it, so the route still
+loads. Remove stale patches, and load the chat route after every refresh. An
+invalid file (unknown field, wrong type) throws when the handler is created,
+like an invalid tool policy. `hidden` only shapes the lists; it is no
+permission. What a user may run is decided by the tool policy and the app's
+endpoints, for direct commands exactly as for the model.
 
 ## Serving them
 

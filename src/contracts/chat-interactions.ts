@@ -453,35 +453,51 @@ function withoutHidden<T extends { hidden?: boolean }>(patch: T): Omit<T, 'hidde
   return rest;
 }
 
+function hasFields(patch: object, required: ReadonlyArray<string>): boolean {
+  return required.every((key) => (patch as Record<string, unknown>)[key] !== undefined);
+}
+
 /**
  * Applies overrides to derived data: a patch replaces the fields it names,
  * `hidden: true` removes the entry, and a complete entry under a new id or
- * type is added. The result is validated again.
+ * type is added (a command needs `label` and `run`, an action `label`,
+ * `entityArg` and `run`, an entity `label` and a `search` or an action). A
+ * patch under an id or type that is not derived and is no complete entry is
+ * a stale patch, typically for a tool a refresh no longer derives: it is
+ * ignored, with one console warning naming it, so the chat route still loads
+ * and the entry keeps nothing. The result is validated again.
  */
 export function mergeChatInteractions(
   base: ChatInteractionsData,
   overrides: ChatInteractionOverrides | undefined,
 ): ChatInteractionsData {
   if (!overrides) return parseChatInteractions(base);
+  const ignored: string[] = [];
   const commandPatches = overrides.commands ?? {};
   const commands: unknown[] = base.commands
     .filter((entry) => commandPatches[entry.id]?.hidden !== true)
     .map((entry) => ({ ...entry, ...withoutHidden(commandPatches[entry.id] ?? {}) }));
   const known = new Set(base.commands.map((entry) => entry.id));
   for (const [id, patch] of Object.entries(commandPatches)) {
-    if (!known.has(id) && patch.hidden !== true) commands.push({ id, ...withoutHidden(patch) });
+    if (known.has(id) || patch.hidden === true) continue;
+    if (hasFields(patch, ['label', 'run'])) commands.push({ id, ...withoutHidden(patch) });
+    else ignored.push(`commands.${id}`);
   }
   const entityPatches = overrides.entities ?? {};
   const mergeActions = (
     actions: ReadonlyArray<ChatEntityActionData>,
     patches: Readonly<Record<string, ChatEntityActionOverride>>,
+    path: string,
+    stale: string[],
   ) => {
     const merged: unknown[] = actions
       .filter((entry) => patches[entry.id]?.hidden !== true)
       .map((entry) => ({ ...entry, ...withoutHidden(patches[entry.id] ?? {}) }));
     const ids = new Set(actions.map((entry) => entry.id));
     for (const [id, patch] of Object.entries(patches)) {
-      if (!ids.has(id) && patch.hidden !== true) merged.push({ id, ...withoutHidden(patch) });
+      if (ids.has(id) || patch.hidden === true) continue;
+      if (hasFields(patch, ['label', 'entityArg', 'run'])) merged.push({ id, ...withoutHidden(patch) });
+      else stale.push(`${path}.actions.${id}`);
     }
     return merged;
   };
@@ -492,15 +508,27 @@ export function mergeChatInteractions(
       if (!patch) return entry;
       const { actions: actionPatches, ...fields } = withoutHidden(patch);
       const { actions: current, ...rest } = entry;
-      const actions = mergeActions(current ?? [], actionPatches ?? {});
+      const actions = mergeActions(current ?? [], actionPatches ?? {}, `entities.${entry.type}`, ignored);
       return { ...rest, ...fields, ...(actions.length > 0 ? { actions } : {}) };
     });
   const types = new Set(base.entities.map((entry) => entry.type));
   for (const [type, patch] of Object.entries(entityPatches)) {
     if (types.has(type) || patch.hidden === true) continue;
     const { actions: actionPatches, ...fields } = withoutHidden(patch);
-    const actions = mergeActions([], actionPatches ?? {});
-    entities.push({ type, ...fields, ...(actions.length > 0 ? { actions } : {}) });
+    const stale: string[] = [];
+    const actions = mergeActions([], actionPatches ?? {}, `entities.${type}`, stale);
+    if (hasFields(fields, ['label']) && (fields.search !== undefined || actions.length > 0)) {
+      entities.push({ type, ...fields, ...(actions.length > 0 ? { actions } : {}) });
+      ignored.push(...stale);
+    } else {
+      ignored.push(`entities.${type}`);
+    }
+  }
+  if (ignored.length > 0) {
+    console.warn(
+      '[glirastes] .glirastes/chat-interactions.json: ignored patches for ids that are not derived '
+      + `(any more) and are no complete entries: ${ignored.join(', ')}. Remove them.`,
+    );
   }
   return parseChatInteractions({ schemaVersion: 1, entities, commands });
 }

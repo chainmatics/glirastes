@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ChatInteractionsData } from '../../../../contracts/chat-interactions.js';
 import { createChatInteractionsHandler } from '../index.js';
 import { principal, snapshot } from './command-fixtures.js';
@@ -31,6 +31,29 @@ describe('createChatInteractionsHandler', () => {
     const body = await response.json() as ChatInteractionsData;
     expect(body.commands.find((command) => command.id === 'standup')!.label).toEqual({ de: 'Tagesrückblick', en: 'Stand-up' });
     expect(body.entities).toEqual(interactions.entities);
+  });
+
+  it('loads when an override names a command the generator no longer derives', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const handler = createChatInteractionsHandler({
+        interactions,
+        overrides: {
+          schemaVersion: 1,
+          commands: {
+            'filter.tasks': { label: { de: 'Aufgaben filtern', en: 'Filter tasks' }, icon: 'filter' },
+            standup: { label: 'Tagesrückblick' },
+          },
+        },
+      });
+      const body = await (await handler(request())).json() as ChatInteractionsData;
+      expect(body.commands.map((command) => command.id)).toEqual(['tasks.search', 'standup', 'reports.open']);
+      expect(body.commands.find((command) => command.id === 'standup')!.label).toBe('Tagesrückblick');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]![0])).toContain('commands.filter.tasks');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('refuses an invalid override file at creation, like an invalid policy', () => {
