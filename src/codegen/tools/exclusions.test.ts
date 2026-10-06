@@ -76,11 +76,28 @@ describe('tool exclusions', () => {
     expect(hasAiIgnoreMarker('\uFEFF/**\n * Internal.\n * @ai-ignore\n */\nexport async function GET() {}\n')).toBe(true);
     expect(hasAiIgnoreMarker('export async function GET() {\n  // @ai-ignore\n}\n')).toBe(false);
     expect(hasAiIgnoreMarker('// @ai-ignored once\nexport async function GET() {}\n')).toBe(false);
-    expect(hasAiIgnoreMarker("import { db } from '@/lib/db';\n// @ai-ignore\n")).toBe(false);
     expect(findExclusion({ ...subject('POST', '/api/tenant/logo'), aiIgnore: true }, []))
       .toEqual({ stableKey: 'POST /api/tenant/logo', reason: 'ai-ignore', origin: 'code' });
     expect(findExclusion({ ...subject('POST', '/api/auth/login'), aiIgnore: true }, [])?.reason).toBe('auth-route');
     expect(findExclusion({ ...subject('POST', '/api/internal/sync'), aiIgnore: true }, [{ match: 'POST /api/internal/**', reason: 'internal' }]))
       .toEqual({ stableKey: 'POST /api/internal/sync', reason: 'internal', origin: 'policy' });
+  });
+
+  it('reads a marker that follows imports, as in a route file that opens with an import line', () => {
+    const handler = 'export async function GET() {}\n';
+    // The shape of a real admin route: an import, then the marker, then more imports.
+    expect(hasAiIgnoreMarker(`import { queryAdminTenants } from '@/lib/admin';\n// @ai-ignore - platform admin only\nimport { NextResponse } from 'next/server';\n${handler}`)).toBe(true);
+    expect(hasAiIgnoreMarker(`import {\n  a,\n  b,\n} from '@/lib/x';\n/** @ai-ignore */\n${handler}`)).toBe(true);
+    expect(hasAiIgnoreMarker(`import type { A } from '@/lib/a'; // @ai-ignore\n${handler}`)).toBe(true);
+    expect(hasAiIgnoreMarker(`import 'server-only';\nimport * as x from "y";\n// @ai-ignore\n`)).toBe(true);
+    // A marker after the first statement that is not an import stays unread, like one inside a handler.
+    expect(hasAiIgnoreMarker(`import { a } from '@/lib/a';\nconst ADMIN = 'x';\n// @ai-ignore\n${handler}`)).toBe(false);
+    expect(hasAiIgnoreMarker(`import { a } from '@/lib/a';\nexport const runtime = 'nodejs';\n// @ai-ignore\n${handler}`)).toBe(false);
+    expect(hasAiIgnoreMarker(`import { a } from '@/lib/a';\n${handler}// @ai-ignore\n`)).toBe(false);
+    // Only comments count: a module specifier or a string that spells the marker is no marker.
+    expect(hasAiIgnoreMarker(`import { a } from '@ai-ignore/a';\n${handler}`)).toBe(false);
+    expect(hasAiIgnoreMarker(`import { a } from '@/lib/a';\n// @ai-ignored once\n${handler}`)).toBe(false);
+    expect(hasAiIgnoreMarker("import { db } from '@/lib/db';\n")).toBe(false);
+    expect(hasAiIgnoreMarker('')).toBe(false);
   });
 });

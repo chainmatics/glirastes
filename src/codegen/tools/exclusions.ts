@@ -1,3 +1,4 @@
+import ts from 'typescript';
 import { parseExcludePattern } from '../../contracts/tool-exclude-pattern.js';
 import type { ExcludedTool } from './types.js';
 
@@ -6,7 +7,7 @@ export interface ExclusionSubject {
   method: string;
   path: string;
   chatHandler: boolean;
-  /** The route file opens with an `@ai-ignore` comment (see `hasAiIgnoreMarker`). */
+  /** The route file header carries an `@ai-ignore` comment (see `hasAiIgnoreMarker`). */
   aiIgnore?: boolean;
 }
 
@@ -22,18 +23,32 @@ export function importsChatHandler(source: string): boolean {
   return CHAT_HANDLER_IMPORT.test(source);
 }
 
-/** Whitespace and comments before the first statement of a module. */
-const LEADING_COMMENTS = /^(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*/;
+/** The comments of a module header: everything before its first statement that is not an import. */
+function headerComments(source: string): string[] {
+  const file = ts.createSourceFile('route.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const first = file.statements.find((statement) => !ts.isImportDeclaration(statement));
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source.slice(0, first ? first.getStart(file) : source.length),
+  );
+  const comments: string[] = [];
+  for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
+    if (kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia) {
+      comments.push(scanner.getTokenText());
+    }
+  }
+  return comments;
+}
 
 /**
- * `// @ai-ignore` (or `@ai-ignore` in a leading block comment) marks a route
- * file the old SDK kept away from the model, e.g. uploads, debug and admin
- * routes. Only the comments before the first statement count, so a marker
- * inside a handler or `@ai-ignored` changes nothing.
+ * `// @ai-ignore` (or `@ai-ignore` in a block comment) marks a route file the
+ * old SDK kept away from the model, e.g. uploads, debug and admin routes. The
+ * marker counts anywhere in the file header, between and after the imports
+ * and before the first other statement. A marker further down (after a
+ * constant, inside a handler), `@ai-ignored` or a module specifier that spells
+ * it changes nothing.
  */
 export function hasAiIgnoreMarker(source: string): boolean {
-  const head = LEADING_COMMENTS.exec(source.replace(/^\uFEFF/, ''))?.[0] ?? '';
-  return /@ai-ignore(?![\w-])/.test(head);
+  return headerComments(source).some((comment) => /@ai-ignore(?![\w-])/.test(comment));
 }
 
 function apiSegments(path: string): string[] {

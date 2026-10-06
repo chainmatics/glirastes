@@ -31,8 +31,11 @@ reference until parity is proven.
    schemas, `allowedRoles`, `needsApproval`, descriptions, module groupings,
    the generated registry, the MCP server and every script that regenerates
    them. Write the list down; it is the parity reference. Keep the
-   `// @ai-ignore` comments at the top of route files: those routes stay out
-   of the chat (`ai-ignore`, an exclusion in code).
+   `// @ai-ignore` comments in the header of route files (before the first
+   statement that is not an import): those routes stay out of the chat
+   (`ai-ignore`, an exclusion in code). A marker further down a file is not
+   read, so move it up and check that `.glirastes/tool-report.json` lists the
+   route as excluded with the reason `ai-ignore`; otherwise it stays a tool.
 2. Set up Glirastes with `setting-up-glirastes` (`glirastes init` writes
    `.glirastes/tools.json` and `.glirastes/prompt-bundle.json`). Keep the app id
    it wrote; never reuse an id from another app.

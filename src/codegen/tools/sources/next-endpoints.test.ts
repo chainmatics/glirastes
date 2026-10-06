@@ -256,6 +256,18 @@ describe('next-app endpoint source', () => {
     expect(byKey(observed.observations).has('POST /api/tasks')).toBe(true);
   }, 60_000);
 
+  it('also reads a // @ai-ignore that follows an import line, so an admin route stays out', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/admin/tenants/route.ts': "import { queryAdminTenants } from '@/lib/admin';\n// @ai-ignore - Platform-admin only, not exposed as AI tool\n"
+        + "import { getSession } from '@/lib/session';\n"
+        + 'export async function GET() {\n  await getSession();\n  return Response.json(await queryAdminTenants());\n}\n',
+    });
+    const observed = await createNextEndpointSource().observe(context(app.root));
+    expect(observed.excluded).toContainEqual({ stableKey: 'GET /api/admin/tenants', reason: 'ai-ignore', origin: 'code' });
+    expect(byKey(observed.observations).has('GET /api/admin/tenants')).toBe(false);
+  }, 60_000);
+
   it('keeps a previous definition id and handles apps without an API directory', async () => {
     const app = await createAppFixture({
       'src/app/api/tasks/route.ts': 'export async function GET() { await getSession(); return Response.json([]); }\n'
