@@ -10,13 +10,19 @@ const SOURCE_FILE = /\.(?:tsx?|jsx?|mjs|cjs)$/;
 /** `a.test.tsx`, `a.spec.ts`, `Button.stories.tsx`: test and story files, not app code. */
 const TEST_FILE = /\.(?:test|spec|stories)\.[^.]+$/;
 /**
- * Dependencies, build output, generated code, tests and story output never
- * register app handlers. A client action or navigation bridge that exists only
- * in a test harness or a story must not enable a tool.
+ * Dependencies and test folders never register app handlers, at any depth: a
+ * client action or navigation bridge that exists only in a test harness must
+ * not enable a tool.
  */
-const SKIPPED_DIRECTORIES = new Set([
-  'node_modules', 'dist', 'build', 'out', 'coverage', 'generated',
-  '__tests__', 'e2e', 'storybook-static',
+const SKIPPED_ANYWHERE = new Set(['node_modules', '__tests__']);
+/**
+ * Build output, generated code, coverage, end-to-end suites, story builds and
+ * static assets sit directly in the scanned folder, where tools put them. A
+ * feature folder with such a name deeper down, e.g. `src/app/(app)/build/` or
+ * `src/features/e2e/`, is app code and is scanned.
+ */
+const SKIPPED_AT_SCAN_ROOT = new Set([
+  'dist', 'build', 'out', 'coverage', 'generated', 'e2e', 'storybook-static', 'public',
 ]);
 
 export interface AppSourceFile {
@@ -76,7 +82,8 @@ export async function scanAppSources(root: string, options: {
     const entries = (await readdir(directory, { withFileTypes: true }))
       .sort((left, right) => compareCodeUnits(left.name, right.name));
     for (const entry of entries) {
-      if (entry.name.startsWith('.') || SKIPPED_DIRECTORIES.has(entry.name)) continue;
+      if (entry.name.startsWith('.') || SKIPPED_ANYWHERE.has(entry.name)) continue;
+      if (directory === start && SKIPPED_AT_SCAN_ROOT.has(entry.name)) continue;
       const absolute = join(directory, entry.name);
       if (entry.isSymbolicLink()) {
         if (await linkHidesFiles(absolute, isScannedSource(entry.name))) {
