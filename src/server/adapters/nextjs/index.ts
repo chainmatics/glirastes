@@ -27,6 +27,32 @@ export {
   resolveClarificationResume,
   type ClarificationResume,
 } from './clarification-resume.js';
+export {
+  createChatInteractionsHandler,
+  type ChatInteractionsHandlerConfig,
+} from './chat-interactions-handler.js';
+export {
+  resolveDirectCommand,
+  runDirectCommand,
+  stripChatCommandMessages,
+  type DirectCommandRequest,
+  type RunDirectCommandOptions,
+} from './direct-command.js';
+export {
+  formatChatCommandMessage,
+  parseChatCommandMessage,
+  type ChatCommandInvocation,
+} from '../../../contracts/chat-command.js';
+export {
+  chatText,
+  mergeChatInteractions,
+  parseChatInteractionOverrides,
+  parseChatInteractions,
+  type ChatCommandData,
+  type ChatEntityData,
+  type ChatInteractionOverrides,
+  type ChatInteractionsData,
+} from '../../../contracts/chat-interactions.js';
 
 // Re-export from server-node for convenience
 export { createNextInternalApiCaller } from '../../core/index.js';
