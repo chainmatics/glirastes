@@ -139,7 +139,7 @@ the command or action).
 | A page without parameters (`ui.navigate`) | `/` command `open.<path>`, segments joined by dots (`/settings/profile` is `open.settings.profile`, `/` is `open.home`) |
 | A URL filter (`ui.filter.<view>`) | `/` command `filter.<view>`; enums become choices |
 | A client action (`ui.<actionId>`) | `/` command `<actionId>` |
-| A read endpoint with `search`, `q`, `query` or `term` that lists objects with an `id` and a `title`, `name`, `label`, `subject` or `email` (`GET /api/tasks?search=`) | `@` entity `task` |
+| A read endpoint with `search`, `q`, `query` or `term` that lists objects with an `id` and a `title`, `name`, `displayName`, `label`, `subject` or `email` (`GET /api/tasks?search=`) | `@` entity `task` |
 | An endpoint with one path parameter below that collection, or a page with one parameter of that entity | Context action of the entity ("Complete", id `task.tasks.complete`; "Open") |
 
 Labels are English words built from identifiers. `docs/chat-interactions.md`
