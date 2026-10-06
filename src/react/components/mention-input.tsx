@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { MentionChipList } from './mention-chip.js';
 import { RichMentionInput } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
@@ -34,10 +34,22 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
     components,
     completionSearch,
     voice,
+    runEntityAction,
+    composerMentions,
+    consumeComposerMentions,
   } = useChatContext();
   const [value, setValue] = useState('');
   const inputRef = useRef<RichMentionInputHandle | null>(null);
   const InputExtra = components.InputExtra;
+
+  // References added from outside the composer (`mentionEntity`).
+  useEffect(() => {
+    const handle = inputRef.current;
+    if (!handle || composerMentions.length === 0) return;
+    for (const mention of composerMentions) handle.addMention(mention);
+    consumeComposerMentions();
+    setValue(handle.getValue());
+  }, [composerMentions, consumeComposerMentions]);
 
   const submit = useCallback((text: string, mentions: MentionData[]) => {
     const trimmed = text.trim();
@@ -68,6 +80,12 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
           onSearch={completionSearch}
           placeholder={locale.placeholder}
           disabled={isLoading}
+          onEntityAction={(result, actionId) => runEntityAction(
+            { type: result.type, id: result.id, label: result.label },
+            actionId,
+          )}
+          listLabel={locale.completionListLabel}
+          resultsLabel={locale.completionResultsLabel}
         />
         {voice.enabled && (
           <VoiceInputAddon

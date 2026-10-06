@@ -629,6 +629,10 @@ export interface ChatLocale {
 
   // Speech-to-text
   retryRecordingAriaLabel: string;
+
+  // `@` and `/` suggestions
+  completionListLabel: string;
+  completionResultsLabel: string;     // supports `{count}`
 }
 
 // ============================================================================
@@ -921,10 +925,20 @@ export interface RichMentionInputHandle {
   addMention: (mention: MentionData) => void;
 }
 
+/** ARIA wiring of one option in the `@`/`/` list; spread it onto the clickable element. */
+export interface MentionDropdownOptionProps {
+  id: string;
+  role: 'option';
+  'aria-selected': boolean;
+  tabIndex: -1;
+}
+
 export interface MentionDropdownItemProps {
   result: MentionResult;
   isSelected: boolean;
   onClick: () => void;
+  /** Custom items must spread these onto their clickable element for keyboard and screen-reader use. */
+  optionProps?: MentionDropdownOptionProps;
 }
 
 export interface RichMentionInputComponents {
@@ -948,6 +962,12 @@ export interface RichMentionInputProps {
   triggers?: string[];
   /** Component overrides for the autocomplete dropdown. */
   components?: RichMentionInputComponents;
+  /** An entity action picked next to a result (mouse, or ArrowRight then Enter). */
+  onEntityAction?: (result: MentionResult, actionId: string) => void;
+  /** Accessible name of the suggestion list. Default `Suggestions`. */
+  listLabel?: string;
+  /** Announced result count; `{count}` is replaced. Default `{count} suggestions`. */
+  resultsLabel?: string;
 }
 
 export interface ChatWindowHeaderRenderProps {

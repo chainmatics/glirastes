@@ -91,6 +91,8 @@ export const DEFAULT_LOCALE: ChatLocale = {
   clarificationInputLabel: 'Your answer',
   clarificationSubmitButton: 'Answer',
   retryRecordingAriaLabel: 'Retry recording',
+  completionListLabel: 'Suggestions',
+  completionResultsLabel: '{count} suggestions',
 };
 
 // ============================================================================
