@@ -12,12 +12,16 @@ the Glirastes Platform.
 
 | Derived from | Becomes |
 | --- | --- |
-| A page without parameters (`ui.navigate`) | `/` command `open.<path>` ("Open Overview") |
-| A URL filter (`ui.filter.<view>`) | `/` command `filter.<view>`; its keys are arguments, enums become choices |
-| A client action (`ui.<actionId>`) | `/` command `<actionId>`; its payload fields are arguments |
+| A page without parameters (`ui.navigate`) | `/` command `open.<path>`, the path segments joined by dots (`/overview` is `open.overview`, `/settings/profile` is `open.settings.profile`, `/` is `open.home`; "Open Overview") |
+| A URL filter (`ui.filter.<view>`) | `/` command `filter.<view>`; its string keys are arguments, enums become choices |
+| A client action (`ui.<actionId>`) | `/` command `<actionId>`; its string payload fields are arguments |
 | A read endpoint with `search`, `q`, `query` or `term` whose output lists objects with `id` and `title`/`name`/`displayName`/`label`/`subject`/`email` (`GET /api/tasks?search=`) | `@` entity `task`, searched with the user's session |
 | An endpoint with one path parameter below that collection (`PATCH /api/tasks/:id`, `POST /api/tasks/:id/complete`) | Context action of the entity ("Edit", "Complete") |
 | A page with one parameter of that entity (`/tasks/:taskId`) | Context action "Open" |
+
+Only string arguments are derived. An optional array, number or object key
+is left out of the form, and a command or action with a required key of
+another type is not offered at all.
 
 Only enabled tools count: a disabled, `needs_attention` or excluded tool
 derives nothing. Labels are English and German defaults built from
