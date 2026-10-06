@@ -28,6 +28,17 @@ function clamp(value: number | undefined, fallback: number, max: number): number
   return Math.min(Math.max(Math.trunc(value), 1), max);
 }
 
+const ACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+
+function isActions(value: unknown): boolean {
+  return value === undefined || (Array.isArray(value) && value.length <= 20 && value.every((action) => (
+    typeof action === 'object' && action !== null
+    && typeof (action as Record<string, unknown>).id === 'string' && ACTION_ID.test((action as { id: string }).id)
+    && typeof (action as Record<string, unknown>).label === 'string'
+    && (action as { label: string }).label.trim().length > 0 && (action as { label: string }).label.length <= 200
+  )));
+}
+
 function isItem(value: unknown): value is CompletionItem {
   if (typeof value !== 'object' || value === null) return false;
   const item = value as Record<string, unknown>;
@@ -36,7 +47,8 @@ function isItem(value: unknown): value is CompletionItem {
     && typeof item.type === 'string' && /^[a-z][a-z0-9_-]{0,39}$/.test(item.type)
     && typeof item.label === 'string' && item.label.trim().length > 0
     && (item.definitionId === undefined && item.args === undefined
-      || describeToolReference(item.definitionId, item.args) !== undefined);
+      || describeToolReference(item.definitionId, item.args) !== undefined)
+    && isActions(item.actions);
 }
 
 function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
@@ -112,6 +124,7 @@ export function createCompletionSearch(
           ...(item.slug ? { slug: item.slug } : {}),
           ...(item.definitionId ? { definitionId: item.definitionId } : {}),
           ...(item.args ? { args: item.args } : {}),
+          ...(item.actions?.length ? { actions: item.actions.map(({ id, label }) => ({ id, label: label.trim() })) } : {}),
         });
         if (results.length >= maxResults) return results;
       }

@@ -247,6 +247,8 @@ export interface MentionResult {
   definitionId?: string;
   /** Tool-backed commands: fixed arguments for the definition. */
   args?: Readonly<Record<string, unknown>>;
+  /** Entity actions offered next to this result (see `CompletionItem.actions`). */
+  actions?: ReadonlyArray<CompletionItemAction>;
 }
 
 export interface MentionData {
@@ -292,6 +294,17 @@ export interface CompletionItem {
   definitionId?: string;
   /** Fixed arguments for `definitionId` (needs `definitionId`), e.g. `{ destination: 'overview' }`. */
   args?: Readonly<Record<string, unknown>>;
+  /**
+   * Context actions of an `@` entity (e.g. "Open", "Complete"), offered next
+   * to it in the list and reachable by keyboard (ArrowRight/ArrowLeft).
+   */
+  actions?: ReadonlyArray<CompletionItemAction>;
+}
+
+export interface CompletionItemAction {
+  /** Action id (`[A-Za-z0-9._-]`, max 200). */
+  id: string;
+  label: string;
 }
 
 export interface CompletionSearchRequest {
