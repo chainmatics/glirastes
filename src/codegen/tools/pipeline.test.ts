@@ -667,4 +667,79 @@ describe('runToolsPipeline (MCP endpoint catalog)', () => {
     expect(invalid.findings.map((finding) => [finding.code, finding.subjectRef])).toContainEqual(['mcp-tool-names-invalid', TOOLS_PATHS.mcpToolNames]);
     expect(await fixture.read(DEFAULT_GENERATED_MODULE)).toContain('"name": "tasks_create"');
   }, 180_000);
+
+  it('refuses kept names and ids that another tool already uses and falls back to the generated ones', async () => {
+    const fixture = await createAppFixture({
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      'src/lib/session.ts': SESSION,
+      'src/lib/schemas.ts': SCHEMAS,
+      'src/app/api/tasks/route.ts': `${IMPORTS}${GET_HANDLER}${POST_HANDLER}`,
+    }, { toolsConfig: { emit: { mcpCatalog: true } } });
+    const catalogNames = async () => {
+      const module = await fixture.read(DEFAULT_GENERATED_MODULE);
+      return module.slice(module.indexOf('export function createMcpEndpointCatalog() {')).match(/"(?:id|name)": "[\w.]+"/g);
+    };
+    const collisions = (result: Awaited<ReturnType<typeof runToolsPipeline>>) => result.findings
+      .filter((finding) => finding.code === 'mcp-tool-names-invalid');
+
+    // A kept name that equals the generated name of the other route.
+    await fixture.write(TOOLS_PATHS.mcpToolNames, JSON.stringify({
+      schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'tasks.create', name: 'tasks_list' }] },
+    }));
+    const byName = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(collisions(byName)).toEqual([expect.objectContaining({
+      severity: 'warning',
+      subjectRef: 'POST /api/tasks',
+      message: expect.stringMatching(/name tasks_list kept for POST \/api\/tasks is also used by GET \/api\/tasks/),
+    })]);
+    expect(buildResolveWorklist(byName).items).toContainEqual(expect.objectContaining({
+      code: 'mcp-tool-names-invalid', owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.mcpToolNames, key: 'tools["POST /api/tasks"]' },
+    }));
+    expect(await catalogNames()).toEqual(['"id": "tasks.create"', '"name": "tasks_create"', '"id": "tasks.list"', '"name": "tasks_list"']);
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    expect(contracts.tools.map((tool) => [tool.stableKey, tool.mcp])).toEqual(expect.arrayContaining([['POST /api/tasks', undefined]]));
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'integrity' })).driftPaths).toEqual([]);
+
+    // A kept grant id that equals the contract id of the other route.
+    await fixture.write(TOOLS_PATHS.mcpToolNames, JSON.stringify({
+      schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'tasks.list', name: 'create_task' }] },
+    }));
+    const byId = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(collisions(byId)).toEqual([expect.objectContaining({
+      subjectRef: 'POST /api/tasks',
+      message: expect.stringMatching(/id tasks\.list kept for POST \/api\/tasks is also used by GET \/api\/tasks/),
+    })]);
+    expect(await catalogNames()).toEqual(['"id": "tasks.create"', '"name": "tasks_create"', '"id": "tasks.list"', '"name": "tasks_list"']);
+
+    // Names that stay clear of every other tool are kept and raise nothing.
+    await fixture.write(TOOLS_PATHS.mcpToolNames, JSON.stringify({
+      schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'tasks.add', name: 'add_task' }] },
+    }));
+    const clean = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(collisions(clean)).toEqual([]);
+    expect(await catalogNames()).toEqual(['"id": "tasks.add"', '"name": "add_task"', '"id": "tasks.list"', '"name": "tasks_list"']);
+  }, 180_000);
+
+  it('checks the names only when the catalog is emitted and only against enabled endpoint tools', async () => {
+    const files = {
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      'src/lib/session.ts': SESSION,
+      'src/lib/schemas.ts': SCHEMAS,
+      'src/app/api/tasks/route.ts': `${IMPORTS}${GET_HANDLER}${POST_HANDLER}`,
+    };
+    const names = JSON.stringify({ schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'tasks.create', name: 'tasks_list' }] } });
+    const off = await createAppFixture(files);
+    await off.write(TOOLS_PATHS.mcpToolNames, names);
+    const without = await runToolsPipeline({ root: off.root, mode: 'write' });
+    expect(without.findings.filter((finding) => finding.code === 'mcp-tool-names-invalid')).toEqual([]);
+
+    const disabled = await createAppFixture(files, { toolsConfig: { emit: { mcpCatalog: true } } });
+    await disabled.write(TOOLS_PATHS.mcpToolNames, names);
+    await disabled.write(TOOLS_PATHS.policy, JSON.stringify({ schemaVersion: 1, tools: { 'GET /api/tasks': { enabled: false } } }));
+    const result = await runToolsPipeline({ root: disabled.root, mode: 'write' });
+    expect(result.findings.filter((finding) => finding.code === 'mcp-tool-names-invalid')).toEqual([]);
+    const module = await disabled.read(DEFAULT_GENERATED_MODULE);
+    expect(module.slice(module.indexOf('export function createMcpEndpointCatalog() {')).match(/"name": "\w+"/g)).toEqual(['"name": "tasks_list"']);
+  }, 180_000);
 });

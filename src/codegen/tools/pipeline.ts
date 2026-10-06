@@ -52,6 +52,7 @@ import { renderGeneratedModule } from './emit-module.js';
 import { ToolContractsFileSchema, ToolTombstonesFileSchema, toToolContractsEntry } from './files.js';
 import { sortFindings, toolFinding, TRANSIENT_FINDING_CODES } from './findings.js';
 import { readPromptBundle, readToolInputs, type PromptBundleInput } from './inputs.js';
+import { checkMcpNames } from './mcp-names.js';
 import type { ToolsMode } from './mode.js';
 import { lookupSemantics, resolveToolProse, type DescriptionOrigin } from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
@@ -632,6 +633,21 @@ async function generate(
     if (observedByKey.get(key)?.execution.executionKind === 'endpoint') continue;
     findings.push(toolFinding('mcp-tool-names-invalid', 'warning', key,
       'This mcp-tool-names.json entry names no endpoint tool in the current code and is ignored.'));
+  }
+  if (config.emit.mcpCatalog === true) {
+    // The catalog lists every id and name once; a kept name that another tool already uses falls back to the generated ones.
+    const mcpNames = checkMcpNames(toolViews
+      .filter((view) => view.executionKind === 'endpoint' && view.enabled)
+      .map((view) => ({
+        stableKey: view.stableKey,
+        definitionId: view.definitionId,
+        modelName: view.modelName,
+        ...(inputs.mcpNames?.has(view.stableKey) ? { kept: inputs.mcpNames.get(view.stableKey)! } : {}),
+      })));
+    findings.push(...mcpNames.findings);
+    for (const entry of contractEntries) {
+      if (mcpNames.fallback.has(entry.stableKey)) delete entry.mcp;
+    }
   }
   for (const view of toolViews) {
     view.findings = sortFindings(findings.filter((finding) => finding.subjectRef === view.stableKey));

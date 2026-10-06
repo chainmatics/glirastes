@@ -74,7 +74,11 @@ reference until parity is proven.
 9. MCP: set `"emit": { "mcpCatalog": true }` in `.glirastes/tools.json` and
    keep the old grant ids and MCP names in `.glirastes/mcp-tool-names.json`
    (`{ "schemaVersion": 1, "tools": { "<stableKey>": [{ "id": "<old id>",
-   "name": "<old MCP name>" }] } }`; two old names may share one route). The
+   "name": "<old MCP name>" }] } }`; two old names may share one route). Every
+   id and name must be unused by any other enabled tool, generated ones
+   included (a route without an entry is listed under its contract id and
+   `_`-form name); a collision is reported as `mcp-tool-names-invalid` and
+   that route keeps its generated names until you fix the entry. The
    MCP server takes `createMcpEndpointCatalog()` from the generated module,
    with roles and confirmation from the effective policy; UI tools stay out
    of MCP.
