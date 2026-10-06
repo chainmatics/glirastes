@@ -12,7 +12,7 @@ export const REFRESH_ARGS = {
   values: ['--root', '--mode', '--adopt'],
 } as const;
 
-/** Until Ctrl+C: one refresh per burst of changes; a failing refresh is printed and the watch goes on. */
+/** Until Ctrl+C: one refresh per burst of changes; a failing refresh, expected or not, is printed and the watch goes on. */
 async function watchRefresh(root: string, io: ToolsIo): Promise<number> {
   const config = loadToolsConfig(root);
   const controller = new AbortController();
@@ -29,6 +29,9 @@ async function watchRefresh(root: string, io: ToolsIo): Promise<number> {
       generatedModule: generatedModulePath(config),
       signal,
       ...(io.watch ? { watch: io.watch } : {}),
+      onError: (error) => {
+        io.error(`The refresh failed unexpectedly, watching goes on: ${error instanceof Error ? error.message : String(error)}`);
+      },
       run: async () => {
         try {
           const result = await io.runPipeline({ root, mode: 'write', keepGoing: true });
