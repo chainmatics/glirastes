@@ -1,18 +1,24 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { Ajv } from 'ajv';
-import addFormatsModule from 'ajv-formats';
 import { z } from 'zod';
-import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
+import { riskTier, type DeclaredEffect } from '../../contracts/tool-policy.js';
+import type { ToolRiskClass } from '../../contracts/index.js';
+import {
+  AGENT_MODEL_PATTERN,
+  agenticContentProblem,
+  lockDigest,
+  MAX_AGENTIC_SCHEMA_BYTES,
+  schemaPropertyNames,
+  strictSchemaProblem,
+  withoutMetaSchema,
+} from './agentic.js';
 import { compareCodeUnits } from './canonical.js';
 import { TOOLS_PATHS } from './config.js';
 import { toolFinding } from './findings.js';
 import type { HandlerConventions } from './handler-analysis.js';
 import type { ToolFinding } from './types.js';
 
-const addFormats = addFormatsModule as unknown as (ajv: Ajv) => Ajv;
-
-export const MAX_RESOLUTION_SCHEMA_BYTES = 32 * 1024;
+export const MAX_RESOLUTION_SCHEMA_BYTES = MAX_AGENTIC_SCHEMA_BYTES;
 
 const appModule = z.string().trim().min(1).max(512)
   .refine((value) => !value.startsWith('/') && !value.split(/[\\/]/).includes('..'), 'Path must stay inside the app');
@@ -49,14 +55,31 @@ const SchemaSpecSchema = z.object({
   'Provide exactly one of schemaRef or jsonSchema',
 );
 
-/** P05 extends entries (model, digests, prose); unknown fields pass through untouched. */
+const digest = z.string().regex(/^sha256:[A-Za-z0-9_-]{43}$/);
+
+/**
+ * One `tool-resolutions.json` entry (spec 4.3, 4.6): a contract for one
+ * stableKey, bound to the handler interface it was written for. Strict: an
+ * unknown field rejects the entry. An agent entry names who wrote it
+ * (`model`); `glirastes tools verify` turns a reviewed entry into a human one
+ * and pins it with `locked`, the digest of the entry without that field.
+ */
 export const ResolutionEntrySchema = z.object({
   origin: z.enum(['human', 'agent']).default('human'),
-  interfaceDigest: z.string().regex(/^sha256:[A-Za-z0-9_-]{43}$/),
+  interfaceDigest: digest,
   input: SchemaSpecSchema.optional(),
   output: SchemaSpecSchema.optional(),
   effect: z.enum(['read', 'write', 'destructive', 'external', 'financial']).optional(),
-}).passthrough();
+  model: z.string().regex(AGENT_MODEL_PATTERN).optional(),
+  locked: digest.optional(),
+}).strict().superRefine((entry, context) => {
+  if (entry.origin === 'agent' && entry.model === undefined) {
+    context.addIssue({ code: 'custom', path: ['model'], message: 'An agent entry names the model or coding agent that wrote it' });
+  }
+  if (entry.origin === 'agent' && entry.locked !== undefined) {
+    context.addIssue({ code: 'custom', path: ['locked'], message: 'A locked entry was reviewed and is no agent entry' });
+  }
+});
 
 const ResolutionsFileSchema = z.object({
   schemaVersion: z.literal(1),
@@ -126,59 +149,90 @@ export interface ResolutionEvidence {
   bodyKeys: ReadonlyArray<string> | 'opaque';
 }
 
-function withoutMetaSchema(schema: Record<string, unknown>): Record<string, unknown> {
-  const { $schema: _metaSchema, ...rest } = schema;
-  return rest;
+const EFFECT_RISK: Readonly<Record<DeclaredEffect, ToolRiskClass>> = {
+  read: 'safe-read',
+  write: 'write',
+  destructive: 'delete',
+  external: 'external',
+  financial: 'financial',
+};
+
+/**
+ * Keys an input schema may name and must keep: every name needs code
+ * evidence (path, query or a closed body), and no evidenced query or body
+ * key may be dropped. An opaque body admits any body key, because the code
+ * cannot show which ones the handler passes on.
+ */
+export function inputEvidenceProblem(
+  schema: Record<string, unknown>,
+  evidence: ResolutionEvidence,
+): string | undefined {
+  const keys = schemaPropertyNames(schema);
+  if (evidence.bodyKeys !== 'opaque') {
+    const allowed = new Set([...evidence.pathParams, ...evidence.queryKeys, ...evidence.bodyKeys]);
+    const unbacked = keys.filter((key) => !allowed.has(key));
+    if (unbacked.length > 0) return `input keys without code evidence: ${unbacked.join(', ')}`;
+  }
+  const present = new Set(keys);
+  const lost = [...evidence.queryKeys, ...(evidence.bodyKeys === 'opaque' ? [] : evidence.bodyKeys)]
+    .filter((key) => !present.has(key))
+    .sort(compareCodeUnits);
+  if (lost.length > 0) return `the input schema drops parameters the handler reads: ${[...new Set(lost)].join(', ')}`;
+  return undefined;
 }
 
-function compilesStrictly(schema: Record<string, unknown>): boolean {
-  const ajv = new Ajv({ strict: true, allErrors: false, logger: false });
-  addFormats(ajv);
-  try {
-    ajv.compile(schema);
-    return true;
-  } catch {
-    return false;
-  }
+/** The digest `glirastes tools verify` pins: the entry as parsed, without `locked`. */
+export function resolutionLockDigest(entry: ResolutionEntry): string {
+  const { locked: _locked, ...content } = entry;
+  return lockDigest(content);
 }
 
 function normalizeSpec<T extends { jsonSchema?: Record<string, unknown> }>(spec: T | undefined): T | undefined {
   return spec?.jsonSchema ? { ...spec, jsonSchema: withoutMetaSchema(spec.jsonSchema) } : spec;
 }
 
-/** Basic gate for one entry; invalid entries are ignored and the tool keeps its fallback. */
+function firstIssuePath(error: z.ZodError): string {
+  const path = error.issues[0]?.path.map(String).join('.') ?? '';
+  return path ? ` at ${path}` : '';
+}
+
+/**
+ * The unified check of one entry (spec 4.6): strict parse, content limits, an
+ * intact lock, effects that only raise the risk, strict JSON Schema of at
+ * most 32 KB, and input keys that match the code evidence. An invalid entry
+ * is ignored with `resolution-rejected`; the tool keeps its fallback.
+ */
 export function validateResolutionEntry(input: {
   stableKey: string;
   raw: unknown;
   evidence: ResolutionEvidence;
+  /** The risk class the code alone derives; an effect below it is refused. */
+  codeRiskClass?: ToolRiskClass;
 }): { entry?: ResolutionEntry; findings: ToolFinding[] } {
   const reject = (reason: string) => ({
     findings: [rejected(input.stableKey, `The tool-resolutions.json entry was rejected: ${reason}.`)],
   });
   const parsed = ResolutionEntrySchema.safeParse(input.raw);
-  if (!parsed.success) return reject('it does not match the entry schema');
-  if (findSensitiveStringPath(parsed.data)) return reject('it contains secret-looking content');
+  if (!parsed.success) return reject(`it does not match the entry schema${firstIssuePath(parsed.error)}`);
   const entry = parsed.data;
+  const content = agenticContentProblem(entry);
+  if (content) return reject(`it contains ${content}`);
+  if (entry.locked !== undefined && resolutionLockDigest(entry) !== entry.locked) {
+    return reject('it was changed after review; restore it from git, or review it and run glirastes tools verify');
+  }
+  if (entry.effect && input.codeRiskClass
+    && riskTier(EFFECT_RISK[entry.effect]) < riskTier(input.codeRiskClass)) {
+    return reject(`its effect ${entry.effect} would lower the risk below ${input.codeRiskClass}; effects may only raise it`);
+  }
   const specs = [['input', entry.input], ['output', entry.output]] as const;
-  for (const [label, spec] of specs) {
+  for (const [role, spec] of specs) {
     if (!spec?.jsonSchema) continue;
     const schema = withoutMetaSchema(spec.jsonSchema);
-    if (Buffer.byteLength(JSON.stringify(schema), 'utf8') > MAX_RESOLUTION_SCHEMA_BYTES) {
-      return reject(`the ${label} schema exceeds 32 KB`);
-    }
-    if (!compilesStrictly(schema)) return reject(`the ${label} schema is not valid strict JSON Schema`);
-    if (label !== 'input') continue;
-    if (schema.type !== 'object' || schema.additionalProperties !== false) {
-      return reject('the input schema must be an object with additionalProperties false');
-    }
-    // Pattern-matched keys admit names the evidence check below never sees.
-    if (schema.patternProperties !== undefined) return reject('input schemas may not use patternProperties');
-    if (input.evidence.bodyKeys !== 'opaque') {
-      const allowed = new Set([...input.evidence.pathParams, ...input.evidence.queryKeys, ...input.evidence.bodyKeys]);
-      const keys = schema.properties && typeof schema.properties === 'object' ? Object.keys(schema.properties) : [];
-      const unbacked = keys.filter((key) => !allowed.has(key)).sort(compareCodeUnits);
-      if (unbacked.length > 0) return reject(`input keys without code evidence: ${unbacked.join(', ')}`);
-    }
+    const problem = strictSchemaProblem(schema, role);
+    if (problem) return reject(problem);
+    if (role !== 'input') continue;
+    const evidence = inputEvidenceProblem(schema, input.evidence);
+    if (evidence) return reject(evidence);
   }
   return {
     entry: {

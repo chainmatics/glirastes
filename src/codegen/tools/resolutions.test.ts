@@ -5,13 +5,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   EMPTY_CONVENTIONS,
   loadToolResolutions,
+  resolutionLockDigest,
   resolutionOrigin,
+  ResolutionEntrySchema,
   validateResolutionEntry,
 } from './resolutions.js';
 
 const roots: string[] = [];
 const DIGEST = `sha256:${'R'.repeat(43)}`;
-const evidence = { pathParams: ['id'], queryKeys: ['q'], bodyKeys: ['title'] as ReadonlyArray<string> | 'opaque' };
+const evidence = { pathParams: ['id'], queryKeys: [] as ReadonlyArray<string>, bodyKeys: ['title'] as ReadonlyArray<string> | 'opaque' };
 
 async function appWith(content?: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'glirastes-resolutions-'));
@@ -77,6 +79,7 @@ describe('tool resolutions', () => {
       raw: {
         interfaceDigest: DIGEST,
         origin: 'agent',
+        model: 'codex',
         input: { jsonSchema: { $schema: 'https://json-schema.org/draft/2020-12/schema', ...objectSchema({ id: { type: 'string' }, title: { type: 'string' } }) } },
       },
       evidence,
@@ -129,9 +132,52 @@ describe('tool resolutions', () => {
     });
     expect(ref.entry?.input?.schemaRef).toEqual({ module: 'src/lib/schemas.ts', export: 'createTask', property: [] });
     const { resolutions } = loadToolResolutions(await appWith(JSON.stringify({
-      schemaVersion: 1, tools: { 'POST /api/tasks': { interfaceDigest: DIGEST, origin: 'agent' } },
+      schemaVersion: 1, tools: { 'POST /api/tasks': { interfaceDigest: DIGEST, origin: 'agent', model: 'claude-code' } },
     })));
     expect(resolutionOrigin(resolutions, 'POST /api/tasks')).toBe('agent');
     expect(resolutionOrigin(resolutions, 'GET /api/none')).toBeUndefined();
+  });
+
+  it.each([
+    ['an unknown field', { interfaceDigest: DIGEST, notes: 'x' }, 'does not match the entry schema'],
+    ['an agent entry without its model', { interfaceDigest: DIGEST, origin: 'agent' }, 'does not match the entry schema at model'],
+    ['a dropped query parameter', { interfaceDigest: DIGEST, input: { jsonSchema: objectSchema({}) } }, 'drops parameters the handler reads: q'],
+    ['a dropped body field', { interfaceDigest: DIGEST, input: { jsonSchema: objectSchema({ q: {} }) } }, 'drops parameters the handler reads: title'],
+    ['a provider key prefix', { interfaceDigest: DIGEST, origin: 'agent', model: 'sk-or-v1' }, 'provider key prefix'],
+  ])('rejects %s with a reason', (_label, raw, reason) => {
+    const result = validateResolutionEntry({
+      stableKey: 'POST /api/tasks', raw, evidence: { pathParams: [], queryKeys: ['q'], bodyKeys: ['title'] },
+    });
+    expect(result.entry).toBeUndefined();
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({ code: 'resolution-rejected', severity: 'warning' });
+    expect(result.findings[0]?.message).toContain(reason);
+  });
+
+  it('lets effects raise the risk but never lower it below the code', () => {
+    const raw = (effect: string) => ({ interfaceDigest: DIGEST, effect });
+    const check = (effect: string) => validateResolutionEntry({
+      stableKey: 'POST /api/tasks/:id/archive', raw: raw(effect), evidence, codeRiskClass: 'write',
+    });
+    expect(check('destructive').entry?.effect).toBe('destructive');
+    expect(check('write').entry?.effect).toBe('write');
+    expect(check('read').entry).toBeUndefined();
+    expect(check('read').findings[0]?.message).toContain('would lower the risk below write');
+  });
+
+  it('keeps a reviewed entry only while its lock matches', () => {
+    const reviewed = ResolutionEntrySchema.parse({
+      interfaceDigest: DIGEST, model: 'codex', input: { jsonSchema: objectSchema({ id: {}, title: {} }) },
+    });
+    const locked = { ...reviewed, locked: resolutionLockDigest(reviewed) };
+    expect(validateResolutionEntry({ stableKey: 'PATCH /api/tasks/:id', raw: locked, evidence }).entry?.locked)
+      .toBe(locked.locked);
+    const edited = { ...locked, input: { jsonSchema: objectSchema({ id: {}, title: { type: 'string' } }) } };
+    const result = validateResolutionEntry({ stableKey: 'PATCH /api/tasks/:id', raw: edited, evidence });
+    expect(result.entry).toBeUndefined();
+    expect(result.findings[0]?.message).toContain('was changed after review');
+    expect(validateResolutionEntry({
+      stableKey: 'PATCH /api/tasks/:id', raw: { ...locked, origin: 'agent' }, evidence,
+    }).findings[0]?.message).toContain('at locked');
   });
 });
