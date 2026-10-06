@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { CommandArgumentsForm as DefaultCommandArgumentsForm } from './command-arguments-form.js';
 import { MentionChipList } from './mention-chip.js';
 import { RichMentionInput } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
@@ -34,10 +35,26 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
     components,
     completionSearch,
     voice,
+    runEntityAction,
+    composerMentions,
+    consumeComposerMentions,
+    pendingCommand,
+    submitPendingCommand,
+    cancelPendingCommand,
   } = useChatContext();
   const [value, setValue] = useState('');
   const inputRef = useRef<RichMentionInputHandle | null>(null);
   const InputExtra = components.InputExtra;
+  const ArgumentsForm = components.CommandArgumentsForm ?? DefaultCommandArgumentsForm;
+
+  // References added from outside the composer (`mentionEntity`).
+  useEffect(() => {
+    const handle = inputRef.current;
+    if (!handle || composerMentions.length === 0) return;
+    for (const mention of composerMentions) handle.addMention(mention);
+    consumeComposerMentions();
+    setValue(handle.getValue());
+  }, [composerMentions, consumeComposerMentions]);
 
   const submit = useCallback((text: string, mentions: MentionData[]) => {
     const trimmed = text.trim();
@@ -53,6 +70,20 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
 
   return (
     <div data-component="mention-input" data-mode="providers">
+      {pendingCommand && (
+        <ArgumentsForm
+          key={`${pendingCommand.commandId}:${JSON.stringify(pendingCommand.values)}:${pendingCommand.error ?? ''}`}
+          pending={pendingCommand}
+          onSubmit={(values, valueLabels) => {
+            // Back to the editor only once the form is gone; while it keeps asking, focus stays in it.
+            if (submitPendingCommand(values, valueLabels)) inputRef.current?.focus();
+          }}
+          onCancel={() => {
+            cancelPendingCommand();
+            inputRef.current?.focus();
+          }}
+        />
+      )}
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -68,6 +99,12 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
           onSearch={completionSearch}
           placeholder={locale.placeholder}
           disabled={isLoading}
+          onEntityAction={(result, actionId) => runEntityAction(
+            { type: result.type, id: result.id, label: result.label },
+            actionId,
+          )}
+          listLabel={locale.completionListLabel}
+          resultsLabel={locale.completionResultsLabel}
         />
         {voice.enabled && (
           <VoiceInputAddon

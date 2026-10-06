@@ -2,6 +2,7 @@ import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEv
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
+import type { ChatInteractionsConfig, PendingChatCommand } from './interactions/registry.js';
 
 export type {
   ClarificationOption,
@@ -247,6 +248,8 @@ export interface MentionResult {
   definitionId?: string;
   /** Tool-backed commands: fixed arguments for the definition. */
   args?: Readonly<Record<string, unknown>>;
+  /** Entity actions offered next to this result (see `CompletionItem.actions`). */
+  actions?: ReadonlyArray<CompletionItemAction>;
 }
 
 export interface MentionData {
@@ -292,6 +295,17 @@ export interface CompletionItem {
   definitionId?: string;
   /** Fixed arguments for `definitionId` (needs `definitionId`), e.g. `{ destination: 'overview' }`. */
   args?: Readonly<Record<string, unknown>>;
+  /**
+   * Context actions of an `@` entity (e.g. "Open", "Complete"), offered next
+   * to it in the list and reachable by keyboard (ArrowRight/ArrowLeft).
+   */
+  actions?: ReadonlyArray<CompletionItemAction>;
+}
+
+export interface CompletionItemAction {
+  /** Action id (`[A-Za-z0-9._-]`, max 200). */
+  id: string;
+  label: string;
 }
 
 export interface CompletionSearchRequest {
@@ -550,6 +564,15 @@ export interface ChatComponents {
   SuggestionChip?: ComponentType<SuggestionChipProps>;
   MentionChip?: ComponentType<MentionChipProps>;
   ClarificationCard?: ComponentType<ClarificationCardProps>;
+  /** Form for the missing arguments of a `/` command or entity action. */
+  CommandArgumentsForm?: ComponentType<CommandArgumentsFormProps>;
+}
+
+export interface CommandArgumentsFormProps {
+  pending: PendingChatCommand;
+  /** Values by argument name, and the labels of picked entities. */
+  onSubmit: (values: Readonly<Record<string, string>>, valueLabels: Readonly<Record<string, string>>) => void;
+  onCancel: () => void;
 }
 
 // ============================================================================
@@ -615,6 +638,18 @@ export interface ChatLocale {
 
   // Speech-to-text
   retryRecordingAriaLabel: string;
+
+  // `@` and `/` suggestions
+  completionListLabel: string;
+  completionResultsLabel: string;     // supports `{count}`
+
+  // Arguments of `/` commands and entity actions
+  commandArgumentsLabel: string;      // supports `{command}`
+  commandArgumentsSubmit: string;
+  commandArgumentsInvalid: string;
+  commandArgumentsIncomplete: string; // supports `{fields}`: required values still missing, or a person typed but not picked
+  commandArgumentsAnyOption: string;
+  commandArgumentsNoMatches: string;
 }
 
 // ============================================================================
@@ -660,6 +695,14 @@ export interface AiChatProviderConfig {
   completionProviders?: ReadonlyArray<ChatCompletionProvider>;
   completionContext?: CompletionPermissionContext;
   onCompletionProviderError?: (providerId: string, error: unknown) => void;
+  /**
+   * Declarative `@` entities and `/` commands: derived `data` (from
+   * `useChatInteractionsData` or the generated module) plus app definitions
+   * (`defineChatEntity`, `defineChatCommand`). Memoize the object. A `/`
+   * command sent alone runs its tool without the model, through the server's
+   * normal authorization and confirmation.
+   */
+  chatInteractions?: ChatInteractionsConfig;
   toolResults?: ToolResultDisplayConfig;
   voice?: VoiceInputConfig;
   session?: SessionConfig;
@@ -899,10 +942,20 @@ export interface RichMentionInputHandle {
   addMention: (mention: MentionData) => void;
 }
 
+/** ARIA wiring of one option in the `@`/`/` list; spread it onto the clickable element. */
+export interface MentionDropdownOptionProps {
+  id: string;
+  role: 'option';
+  'aria-selected': boolean;
+  tabIndex: -1;
+}
+
 export interface MentionDropdownItemProps {
   result: MentionResult;
   isSelected: boolean;
   onClick: () => void;
+  /** Custom items must spread these onto their clickable element for keyboard and screen-reader use. */
+  optionProps?: MentionDropdownOptionProps;
 }
 
 export interface RichMentionInputComponents {
@@ -926,6 +979,12 @@ export interface RichMentionInputProps {
   triggers?: string[];
   /** Component overrides for the autocomplete dropdown. */
   components?: RichMentionInputComponents;
+  /** An entity action picked next to a result (mouse, or ArrowRight then Enter). */
+  onEntityAction?: (result: MentionResult, actionId: string) => void;
+  /** Accessible name of the suggestion list. Default `Suggestions`. */
+  listLabel?: string;
+  /** Announced result count; `{count}` is replaced. Default `{count} suggestions`. */
+  resultsLabel?: string;
 }
 
 export interface ChatWindowHeaderRenderProps {

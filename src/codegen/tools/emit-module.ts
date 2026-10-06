@@ -1,6 +1,7 @@
 import { posix } from 'node:path';
 import type { AppSetupArtifact } from '../../contracts/index.js';
 import { compareCodeUnits, sortKeysDeep } from './canonical.js';
+import { deriveChatInteractions } from './chat-interactions.js';
 import type { RuntimeSchemaSource, ToolContract, ToolContractsEntry } from './types.js';
 
 export interface RenderGeneratedModuleInput {
@@ -99,6 +100,9 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     `export const setupArtifact = ${literal(input.artifact)};`,
     '',
     `export const toolCatalog = ${literal(tools.map(catalogEntry))}${typescript ? ' as const' : ''};`,
+    '',
+    '/** `@` entities and `/` commands derived from the tools; see `createChatInteractionsHandler`. */',
+    `export const chatInteractions = ${literal(deriveChatInteractions(input))}${typescript ? ' as const' : ''};`,
     '',
   );
   if (typescript) {

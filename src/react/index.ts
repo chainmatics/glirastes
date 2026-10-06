@@ -27,7 +27,9 @@ export type {
   // Completion providers
   ChatCompletionProvider,
   CompletionItem,
+  CompletionItemAction,
   CompletionPermissionContext,
+  CommandArgumentsFormProps,
   CompletionSearchRequest,
   UiToolCommandSource,
   // Session
@@ -195,6 +197,54 @@ export {
   type CompletionSearchOptions,
 } from './completions/completion-search.js';
 export { createUiToolCommandProvider } from './completions/ui-tool-command-provider.js';
+export { CommandArgumentsForm } from './components/command-arguments-form.js';
+
+// Declarative chat interactions: `@` entities and `/` commands
+export {
+  defineChatCommand,
+  defineChatEntity,
+  entitiesFromData,
+  type ChatCommandDefinition,
+  type ChatEntityAction,
+  type ChatEntityCard,
+  type ChatEntityDefinition,
+  type ChatEntityItem,
+  type ChatEntitySearchContext,
+  type DerivedEntityOptions,
+} from './interactions/definitions.js';
+export {
+  createChatInteractionRegistry,
+  type ChatInteractionRegistry,
+  type ChatInteractionsConfig,
+  type ChatSendPlan,
+  type PendingChatCommand,
+} from './interactions/registry.js';
+export {
+  useChatInteractionsData,
+  type UseChatInteractionsDataOptions,
+} from './interactions/use-chat-interactions-data.js';
+export {
+  formatChatCommandMessage,
+  parseChatCommandMessage,
+  stripChatCommandMarkers,
+  type ChatCommandInvocation,
+} from '../contracts/chat-command.js';
+export {
+  chatText,
+  mergeChatInteractions,
+  parseChatInteractionOverrides,
+  parseChatInteractions,
+  type ChatCommandData,
+  type ChatCommandRun,
+  type ChatEntityActionData,
+  type ChatEntityData,
+  type ChatInteractionArg,
+  type ChatInteractionOverrides,
+  type ChatInteractionsData,
+  type ChatLocaleCode,
+  type ChatText,
+  type ChatToolRun,
+} from '../contracts/chat-interactions.js';
 
 // Bridges
 export {

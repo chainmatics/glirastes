@@ -92,6 +92,13 @@ filter, visible tasks and the highlighted row change in Chrome; console/page
 errors fail the test. It also adds a page after setup and verifies that the
 normal app command regenerates the navigation schema before starting Next.
 
+The chat route also serves the `/` commands that `glirastes tools refresh`
+derives from the pages, the URL filter and the client action
+(`createChatInteractionsHandler`, a GET next to the chat POST; see
+`docs/chat-interactions.md`). The test picks `/Open Overview` and `/Filter
+Tasks` with the keyboard, fills the filter's argument form and checks that
+both run without the test model and still reach the app router.
+
 The browser shell's `dev` script runs `glirastes tools refresh --keep-going`
 before `next dev`; `build` runs `glirastes tools refresh` before `next build`
 and stops when the refresh fails (`tests/source-driven-build.test.ts`). `start`

@@ -9,6 +9,12 @@ import {
   resolveClarificationResume,
 } from './clarification-resume.js';
 import { scopePipelineTools } from './scope-pipeline-tools.js';
+import {
+  pseudonymizeCommandToolInputs,
+  resolveDirectCommand,
+  runDirectCommand,
+  stripChatCommandMessages,
+} from './direct-command.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
 import type { Tool, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
@@ -700,6 +706,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     toolSemantics,
     metrics,
     modelPricing: configuredModelPricing,
+    directCommands = true,
   } = config;
 
   // The Proctor endpoint behind Lancer telemetry is not served by the
@@ -796,13 +803,19 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         );
       }
 
+      // A direct command (`/` command or entity action) runs its tool without
+      // the model; the model sees earlier commands only by their label.
+      const directCommand = directCommands ? resolveDirectCommand(requestMessages) : undefined;
+
       // A clarification answer resumes its original request: routing sees
       // request + answer, the model sees an explicit continuation. The client
       // session keeps the untouched messages.
-      const clarificationResume = resolveClarificationResume(requestMessages);
-      const messages: unknown[] = clarificationResume
-        ? applyClarificationResume(requestMessages, clarificationResume)
-        : requestMessages;
+      const clarificationResume = directCommand ? undefined : resolveClarificationResume(requestMessages);
+      const messages: unknown[] = directCommand
+        ? requestMessages
+        : stripChatCommandMessages(clarificationResume
+          ? applyClarificationResume(requestMessages, clarificationResume)
+          : requestMessages);
 
       // Build tool context
       const toolContext = buildToolContext(req, { locale });
@@ -943,6 +956,40 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         } catch {
           // Telemetry is fire-and-forget
         }
+      }
+
+      // ================================================================
+      // Direct command: no routing, no guardrails, no model call. The tool
+      // runs on the registry and wrappers of a model turn, so authorization,
+      // confirmation, revocation, budget, audit, the PII shield and metrics
+      // stay the same.
+      // ================================================================
+      if (directCommand) {
+        const callEndpoint = createInternalApiCallerFromRequest(req);
+        const endpointToolContext = {
+          ...toolContext,
+          callEndpoint,
+          ...(managedTurn
+            ? { turnSnapshot: managedTurn.snapshot }
+            : {}),
+        };
+        const registry = staticTools ?? await loadTools!(endpointToolContext);
+        let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, toolOptions);
+        // The result stays in the chat history that later model turns send to the model.
+        if (piiShield) {
+          commandTools = wrapToolsWithShield(commandTools, piiShield, sessionId);
+        }
+        if (lancer?.approvals) {
+          commandTools = wrapToolsWithLancerApprovals(commandTools, lancer.approvals, sessionId);
+        }
+        return await runDirectCommand({
+          command: directCommand,
+          registry,
+          tools: commandTools,
+          managedTurn,
+          turnMetrics,
+          onError: (error) => onError?.(error, req),
+        });
       }
 
       // ================================================================
@@ -1421,9 +1468,10 @@ async function anonymizeMessages(
 
     const record = msg as Record<string, unknown>;
 
-    // Only anonymize user messages
+    // Only user messages carry text to anonymize; of the others, only the
+    // arguments of a direct command's tool call are the user's own words.
     if (record.role !== 'user') {
-      result.push(msg);
+      result.push(await pseudonymizeCommandToolInputs(record, shield, sessionId));
       continue;
     }
 

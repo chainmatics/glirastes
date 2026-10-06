@@ -176,6 +176,8 @@ test('real Next SDK chat streams native endpoint results and updates the browser
   await page.goto(origin);
   const native = page.getByTestId('native-ui');
   await native.getByRole('heading', { name: 'Tasks', exact: true }).waitFor();
+  // The layout loads the derived `/` commands; the composer then searches them.
+  await page.locator('[data-component="mention-input"][data-mode="providers"]').waitFor();
   const input = page.getByRole('textbox', { name: 'Type a message...' });
   async function chat(text) {
     await input.fill(text);
@@ -196,6 +198,40 @@ test('real Next SDK chat streams native endpoint results and updates the browser
   assert.equal(new URL(page.url()).search, '?status=done');
   await chat('Highlight Write tests');
   await native.locator('li[aria-current="true"]', { hasText: 'Write tests' }).waitFor();
+
+  // Direct `/` commands: derived from the code, served per user, run without the model.
+  const served = await fetch(`${origin}/chat`, { headers: { cookie } });
+  assert.equal(served.status, 200);
+  assert.deepEqual((await served.json()).commands.map((entry) => entry.id),
+    ['filter.tasks', 'open.archive', 'open.home', 'open.layout-proof', 'open.overview', 'open.tasks', 'tasks.highlight']);
+  assert.equal((await fetch(`${origin}/chat`)).status, 401);
+  const nextPost = () => page.waitForResponse((response) => response.url() === `${origin}/chat` && response.request().method() === 'POST');
+  await input.click();
+  await page.keyboard.type('/open-ov');
+  await page.getByRole('option', { name: 'Open Overview' }).waitFor();
+  await page.keyboard.press('Enter');
+  const opened = nextPost();
+  await page.keyboard.press('Enter');
+  const openedWire = await (await opened).text();
+  assert.match(openedWire, /tool-output-available/);
+  assert.doesNotMatch(openedWire, /Reference response complete/, 'a direct command must not reach the model');
+  await native.getByRole('heading', { name: 'Overview', exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname, '/overview');
+  await page.getByText('/Open Overview', { exact: true }).waitFor();
+  assert.equal(await page.getByText('glirastes:command').count(), 0);
+  await input.click();
+  await page.keyboard.type('/filter');
+  await page.getByRole('option', { name: 'Filter Tasks' }).waitFor();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.getByRole('form', { name: 'Details for Filter Tasks' }).waitFor();
+  await page.keyboard.press('d');
+  const filtered = nextPost();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
+  assert.doesNotMatch(await (await filtered).text(), /Reference response complete/);
+  await native.getByRole('heading', { name: 'Tasks', exact: true }).waitFor();
+  assert.equal(new URL(page.url()).search, '?status=done');
   if (process.env.REFERENCE_SCREENSHOT) await page.screenshot({ path: process.env.REFERENCE_SCREENSHOT, fullPage: true });
   await page.goto(`${origin}/layout-proof`);
   const layoutDraft = page.getByRole('textbox');
@@ -244,5 +280,5 @@ test('real Next SDK chat streams native endpoint results and updates the browser
   assert.equal(await layoutDraft.evaluate(element => element === document.activeElement), true, 'retained reopen must focus the actual drop-in composer');
   assert.deepEqual(errors, []);
   assert.doesNotMatch(logs, /Module not found|Error:|Warning:/);
-  t.diagnostic('Verified real Next HTTP + SSE, scoped endpoint results, generated navigation, URL filter and client action tools through the app router and bus, and common desktop/mobile layout geometry and draft retention. Test model only; no LLM/STT/timing claim.');
+  t.diagnostic('Verified real Next HTTP + SSE, scoped endpoint results, generated navigation, URL filter and client action tools through the app router and bus, derived / commands run without the model, and common desktop/mobile layout geometry and draft retention. Test model only; no LLM/STT/timing claim.');
 });

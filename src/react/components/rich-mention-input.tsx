@@ -2,6 +2,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -12,6 +13,7 @@ import {
 import type {
   MentionData,
   MentionDropdownItemProps,
+  MentionDropdownOptionProps,
   MentionResult,
   RichMentionInputHandle,
   RichMentionInputProps,
@@ -37,6 +39,26 @@ const SEARCH_DEBOUNCE_MS = 100;
  */
 const EDITOR_STYLE: CSSProperties = { whiteSpace: 'pre-wrap' };
 
+/** Announcements for screen readers only; behaviour, so it holds without styles.css. */
+const VISUALLY_HIDDEN: CSSProperties = {
+  position: 'absolute', width: 1, height: 1, margin: -1, padding: 0, overflow: 'hidden',
+  clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+};
+
+/**
+ * The selection inside the editor's own tree. In a shadow root (the
+ * `<glirastes-chat>` element) Chromium retargets `window.getSelection()` to
+ * the host, so the caret position would be lost; its `ShadowRoot.getSelection()`
+ * keeps the real nodes.
+ */
+function editorSelection(editor: HTMLElement | null): Selection | null {
+  const root = editor?.getRootNode() as (Node & { getSelection?: () => Selection | null }) | undefined;
+  if (root && root !== editor?.ownerDocument && typeof root.getSelection === 'function') {
+    return root.getSelection() ?? window.getSelection();
+  }
+  return window.getSelection();
+}
+
 function normalizeInputValue(text: string): string {
   return text.replace(/\u00A0/g, ' ');
 }
@@ -45,7 +67,7 @@ function normalizeInputValue(text: string): string {
 // Default dropdown item (data-attribute driven, no hardcoded styles)
 // ---------------------------------------------------------------------------
 
-function DefaultDropdownItem({ result, isSelected, onClick }: MentionDropdownItemProps) {
+function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: MentionDropdownItemProps) {
   const itemRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -58,6 +80,7 @@ function DefaultDropdownItem({ result, isSelected, onClick }: MentionDropdownIte
     <button
       ref={itemRef}
       type="button"
+      {...optionProps}
       onClick={onClick}
       data-component="mention-dropdown-item"
       data-mention-type={result.type}
@@ -89,6 +112,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       initialMentions,
       triggers = DEFAULT_TRIGGERS,
       components,
+      onEntityAction,
+      listLabel = 'Suggestions',
+      resultsLabel = '{count} suggestions',
     },
     ref,
   ) {
@@ -103,7 +129,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [searchResults, setSearchResults] = useState<MentionResult[]>([]);
     const [selectedIndex, setSelectedIndex] = useState(0);
+    // -1: the result itself; 0..n: one of its entity actions.
+    const [selectedAction, setSelectedAction] = useState(-1);
     const [isSearching, setIsSearching] = useState(false);
+    const listboxId = useId();
     const [isFocused, setIsFocused] = useState(false);
 
     // Refs for stale-closure avoidance and debounce
@@ -271,6 +300,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       setDropdownOpen(false);
       setSearchResults([]);
       setSelectedIndex(0);
+      setSelectedAction(-1);
     }, []);
 
     const performSearch = useCallback(
@@ -283,6 +313,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           if (searchVersionRef.current !== version) return;
           setSearchResults(results);
           setSelectedIndex(0);
+          setSelectedAction(-1);
           setDropdownOpen(results.length > 0);
         } catch {
           if (searchVersionRef.current !== version) return;
@@ -306,7 +337,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       query: string;
       triggerPos: number;
     } | null => {
-      const selection = window.getSelection();
+      const selection = editorSelection(editableRef.current);
       if (!selection || selection.rangeCount === 0) return null;
 
       const range = selection.getRangeAt(0);
@@ -337,7 +368,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       (result: MentionResult) => {
         if (!editableRef.current) return;
 
-        const selection = window.getSelection();
+        const selection = editorSelection(editableRef.current);
         if (!selection || selection.rangeCount === 0) return;
 
         const range = selection.getRangeAt(0);
@@ -361,7 +392,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         }
         if (triggerPos === -1) return;
 
-        const prefix = inferMentionPrefix(result.type);
+        // The trigger the user typed: an entity found with `@` stays `@` whatever its type.
+        const prefix = result.type === 'command' ? '/' : text[triggerPos]!;
         const slug = typeof result.slug === 'string' && result.slug.trim().length > 0
           ? normalizeMentionSlug(result.slug)
           : normalizeMentionSlug(result.label);
@@ -375,13 +407,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           const token = `${prefix}${slug} `;
           textNode.textContent = beforeText + token + afterText;
 
-          requestAnimationFrame(() => {
-            const newRange = document.createRange();
-            newRange.setStart(textNode, (beforeText + token).length);
-            newRange.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(newRange);
-          });
+          // The caret moves at once: keys typed right after the pick must land behind the token.
+          const newRange = document.createRange();
+          newRange.setStart(textNode, (beforeText + token).length);
+          newRange.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(newRange);
 
           setMentions((prev) => [...prev, mentionData]);
           closeDropdown();
@@ -408,14 +439,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         parent.insertBefore(afterNode, textNode);
         parent.removeChild(textNode);
 
-        requestAnimationFrame(() => {
-          const newRange = document.createRange();
-          newRange.setStart(afterNode, 1);
-          newRange.collapse(true);
-          selection.removeAllRanges();
-          selection.addRange(newRange);
-          editableRef.current?.focus();
-        });
+        const newRange = document.createRange();
+        newRange.setStart(afterNode, 1);
+        newRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+        editableRef.current?.focus();
 
         setMentions((prev) => [...prev, mentionData]);
         closeDropdown();
@@ -424,6 +453,36 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         });
       },
       [triggers, createChipElement, closeDropdown, onChange, getFullValue],
+    );
+
+    /** Removes the `@query` being typed and runs one of the result's entity actions instead. */
+    const runAction = useCallback(
+      (result: MentionResult, actionId: string) => {
+        const selection = editorSelection(editableRef.current);
+        const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+        if (range && range.startContainer.nodeType === Node.TEXT_NODE) {
+          const textNode = range.startContainer as Text;
+          const text = textNode.textContent || '';
+          const cursorPos = range.startOffset;
+          for (let i = cursorPos - 1; i >= 0; i--) {
+            const char = text[i];
+            if (char === ' ' || char === '\n') break;
+            if (triggers.includes(char) && (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n')) {
+              textNode.textContent = text.slice(0, i) + text.slice(cursorPos);
+              // Replacing the data pulls the live range to offset 0: put the caret back where the `@query` was.
+              range.setStart(textNode, i);
+              range.collapse(true);
+              selection?.removeAllRanges();
+              selection?.addRange(range);
+              break;
+            }
+          }
+        }
+        closeDropdown();
+        onChange?.(getFullValue());
+        onEntityAction?.(result, actionId);
+      },
+      [triggers, closeDropdown, onChange, getFullValue, onEntityAction],
     );
 
     // -----------------------------------------------------------------------
@@ -494,9 +553,11 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       (event: KeyboardEvent<HTMLDivElement>) => {
         // Dropdown navigation (mention mode only)
         if (hasMentionSupport && dropdownOpen && searchResults.length > 0) {
+          const actions = (onEntityAction && searchResults[selectedIndex]?.actions) || [];
           if (event.key === 'ArrowDown') {
             event.preventDefault();
             setSelectedIndex((prev) => (prev + 1) % searchResults.length);
+            setSelectedAction(-1);
             return;
           }
           if (event.key === 'ArrowUp') {
@@ -504,12 +565,27 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             setSelectedIndex(
               (prev) => (prev - 1 + searchResults.length) % searchResults.length,
             );
+            setSelectedAction(-1);
+            return;
+          }
+          // Left/right move between a result and its actions; elsewhere they move the caret.
+          if (event.key === 'ArrowRight' && selectedAction < actions.length - 1) {
+            event.preventDefault();
+            setSelectedAction((prev) => prev + 1);
+            return;
+          }
+          if (event.key === 'ArrowLeft' && selectedAction >= 0) {
+            event.preventDefault();
+            setSelectedAction((prev) => prev - 1);
             return;
           }
           if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
             event.preventDefault();
             const selected = searchResults[selectedIndex];
-            if (selected) {
+            const action = selectedAction >= 0 ? actions[selectedAction] : undefined;
+            if (selected && action) {
+              runAction(selected, action.id);
+            } else if (selected) {
               insertMention(selected);
             }
             return;
@@ -530,7 +606,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
         // Backspace: delete chip at cursor boundary (mention mode)
         if (hasMentionSupport && event.key === 'Backspace') {
-          const selection = window.getSelection();
+          const selection = editorSelection(editableRef.current);
           if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
             if (range.collapsed && range.startOffset === 0) {
@@ -554,6 +630,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         dropdownOpen,
         searchResults,
         selectedIndex,
+        selectedAction,
+        onEntityAction,
+        runAction,
         insertMention,
         closeDropdown,
         submit,
@@ -569,7 +648,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         const plainText = e.clipboardData.getData('text/plain');
         if (!plainText) return;
 
-        const selection = window.getSelection();
+        const selection = editorSelection(editableRef.current);
         if (!selection || selection.rangeCount === 0) return;
 
         const range = selection.getRangeAt(0);
@@ -595,11 +674,14 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       if (!dropdownOpen) return;
 
       const handleClickOutside = (e: MouseEvent) => {
+        // Inside a shadow root (the `<glirastes-chat>` element) a document-level listener sees the host as
+        // `e.target`, so the composed path is what tells a click on the list or the editor from an outside one.
+        const path = e.composedPath();
         if (
           dropdownRef.current &&
-          !dropdownRef.current.contains(e.target as Node) &&
+          !path.includes(dropdownRef.current) &&
           editableRef.current &&
-          !editableRef.current.contains(e.target as Node)
+          !path.includes(editableRef.current)
         ) {
           closeDropdown();
         }
@@ -659,7 +741,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       requestAnimationFrame(() => {
         if (editableRef.current) {
           const range = document.createRange();
-          const selection = window.getSelection();
+          const selection = editorSelection(editableRef.current);
           range.selectNodeContents(editableRef.current);
           range.collapse(false);
           selection?.removeAllRanges();
@@ -780,6 +862,16 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
     // Mention mode — wrapper with editor + dropdown
     const isEmpty = !isFocused && getTextContent() === '' && mentions.length === 0;
+    const optionId = (index: number, action = -1) => (
+      action >= 0 ? `${listboxId}-option-${index}-action-${action}` : `${listboxId}-option-${index}`
+    );
+    const listOpen = dropdownOpen && searchResults.length > 0;
+    const optionProps = (index: number, action = -1): MentionDropdownOptionProps => ({
+      id: optionId(index, action),
+      role: 'option',
+      'aria-selected': index === selectedIndex && action === selectedAction,
+      tabIndex: -1,
+    });
 
     return (
       <div
@@ -802,6 +894,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           data-element="editor"
           aria-disabled={disabled}
           aria-label={placeholder ?? 'Message input'}
+          aria-autocomplete="list"
+          aria-controls={listOpen ? listboxId : undefined}
+          aria-activedescendant={listOpen ? optionId(selectedIndex, selectedAction) : undefined}
           onInput={handleInput}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
@@ -816,20 +911,54 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           </div>
         )}
 
-        {dropdownOpen && searchResults.length > 0 && (
+        <div data-element="completion-status" role="status" aria-live="polite" style={VISUALLY_HIDDEN}>
+          {listOpen ? resultsLabel.replace('{count}', String(searchResults.length)) : ''}
+        </div>
+
+        {listOpen && (
           <div
             ref={dropdownRef}
+            id={listboxId}
+            role="listbox"
+            aria-label={listLabel}
             data-component="mention-dropdown"
             data-state={isSearching ? 'searching' : 'idle'}
+            // Keep the caret in the editor while the list is clicked.
+            onMouseDown={(event) => event.preventDefault()}
           >
-            {searchResults.map((result, index) => (
-              <DropdownItem
-                key={result.key ?? `${result.type}:${result.id}`}
-                result={result}
-                isSelected={index === selectedIndex}
-                onClick={() => insertMention(result)}
-              />
-            ))}
+            {searchResults.map((result, index) => {
+              const key = result.key ?? `${result.type}:${result.id}`;
+              const item = (
+                <DropdownItem
+                  key={key}
+                  result={result}
+                  isSelected={index === selectedIndex && selectedAction === -1}
+                  onClick={() => insertMention(result)}
+                  optionProps={optionProps(index)}
+                />
+              );
+              if (!onEntityAction || !result.actions?.length) return item;
+              return (
+                <div key={key} role="group" aria-label={result.label} data-element="result-row">
+                  {item}
+                  <span data-element="entity-actions">
+                    {result.actions.map((action, actionIndex) => (
+                      <button
+                        key={action.id}
+                        type="button"
+                        {...optionProps(index, actionIndex)}
+                        aria-label={`${action.label}: ${result.label}`}
+                        data-component="mention-action"
+                        data-selected={index === selectedIndex && actionIndex === selectedAction ? 'true' : 'false'}
+                        onClick={() => runAction(result, action.id)}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

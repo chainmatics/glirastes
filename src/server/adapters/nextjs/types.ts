@@ -358,6 +358,16 @@ export interface AiChatHandlerConfig {
   modelPricing?: RuntimePriceTable;
 
   /**
+   * Direct chat commands (`/` commands and entity actions of the chat UI,
+   * default `true`): a user message that is exactly one command marker runs
+   * its tool without a model call, through the same registry, guard,
+   * confirmation, audit, PII shield and metrics as a model turn. Routing,
+   * guardrails and the model are skipped. `false` sends such a message to
+   * the model like any other text.
+   */
+  directCommands?: boolean;
+
+  /**
    * Lancer client for runtime prompt and model overrides (Pro feature).
    *
    * When provided, the adapter fetches prompt overrides from Glirastes

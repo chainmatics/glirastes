@@ -15,3 +15,19 @@ export {
   type GlirastesChatEventName,
 } from './glirastes-chat-element.js';
 export { EMBED_CSS_VARIABLES, embedThemeCss } from './theme.js';
+export {
+  defineChatCommand,
+  defineChatEntity,
+  type ChatCommandDefinition,
+  type ChatEntityAction,
+  type ChatEntityCard,
+  type ChatEntityDefinition,
+  type ChatEntityItem,
+  type ChatEntitySearchContext,
+} from '../react/interactions/definitions.js';
+export type {
+  ChatInteractionArg,
+  ChatInteractionsData,
+  ChatLocaleCode,
+  ChatText,
+} from '../contracts/chat-interactions.js';

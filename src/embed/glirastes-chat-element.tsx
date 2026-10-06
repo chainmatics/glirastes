@@ -1,6 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import {
+  parseChatInteractions,
+  type ChatInteractionsData,
+  type ChatLocaleCode,
+} from '../contracts/chat-interactions.js';
 import { AiChatPanel } from '../react/components/ai-chat-panel.js';
+import {
+  defineChatCommand,
+  defineChatEntity,
+  type ChatCommandDefinition,
+  type ChatEntityDefinition,
+} from '../react/interactions/definitions.js';
+import type { ChatInteractionsConfig } from '../react/interactions/registry.js';
 import { AiChatProvider } from '../react/provider/ai-chat-provider.js';
 import { useChatContext } from '../react/provider/chat-context.js';
 import { VercelAiChat } from '../react/transports/vercel/vercel-ai-chat.js';
@@ -31,23 +43,26 @@ type Emit = <TName extends GlirastesChatEventName>(
   detail: GlirastesChatEventMap[TName],
 ) => void;
 
-type SendRef = (text: string) => void;
+interface EmbedApi {
+  send(text: string): void;
+  mentionEntity(type: string, id: string): Promise<boolean>;
+}
 
 function EmbedBridge({
   emit,
   onSendReady,
 }: {
   emit: Emit;
-  onSendReady: (send: SendRef | null) => void;
+  onSendReady: (api: EmbedApi | null) => void;
 }) {
-  const { send, isLoading, error } = useChatContext();
+  const { send, mentionEntity, isLoading, error } = useChatContext();
   const previous = useRef<string | null>(null);
   const state = error ? 'error' : isLoading ? 'busy' : 'idle';
 
   useEffect(() => {
-    onSendReady((text) => send(text));
+    onSendReady({ send: (text) => send(text), mentionEntity });
     return () => onSendReady(null);
-  }, [send, onSendReady]);
+  }, [send, mentionEntity, onSendReady]);
 
   useEffect(() => {
     emit('glirastes-chat:ready', {});
@@ -77,7 +92,7 @@ function EmbeddedChat({
   theme?: ChatThemePreset;
   welcomeMessage?: string;
   emit: Emit;
-  onSendReady: (send: SendRef | null) => void;
+  onSendReady: (api: EmbedApi | null) => void;
 }) {
   const { headers, bodyExtras, onToolResult, ...providerConfig } = config;
   const shared = {
@@ -117,30 +132,39 @@ const BaseElement = (typeof HTMLElement === 'undefined'
  * DOM for Vue, Angular, Svelte or plain HTML hosts.
  *
  * Attributes: `endpoint` (required unless `transport` is set), `theme`
- * (preset name), `placeholder`, `welcome-message`, `voice`, `voice-language`.
- * Properties: `config`, `transport`. Method: `send(text)`.
+ * (preset name), `placeholder`, `welcome-message`, `voice`, `voice-language`,
+ * `interactions` (load `@` entities and `/` commands with a GET from the
+ * endpoint or the given URL; labels follow the nearest `lang`).
+ * Properties: `config`, `transport`, `interactions`. Methods: `send(text)`,
+ * `defineEntity(definition)`, `defineCommand(definition)`,
+ * `mentionEntity(type, id)`.
  * Events (bubbling, composed): `glirastes-chat:ready`, `:status`,
  * `:tool-result`, `:error`. Styling: `--glirastes-chat-*` CSS variables.
  * Removing the element unmounts React and releases the microphone.
  */
 export class GlirastesChatElement extends BaseElement {
   static get observedAttributes(): string[] {
-    return ['endpoint', 'theme', 'placeholder', 'welcome-message', 'voice', 'voice-language'];
+    return ['endpoint', 'theme', 'placeholder', 'welcome-message', 'voice', 'voice-language', 'interactions', 'lang'];
   }
 
   #root: Root | null = null;
   #style: HTMLStyleElement | null = null;
   #config: GlirastesChatElementConfig = {};
   #transport: ChatTransport | undefined;
-  #send: SendRef | null = null;
+  #api: EmbedApi | null = null;
   #pendingUnmount = false;
+  #entities: ChatEntityDefinition[] = [];
+  #commands: ChatCommandDefinition[] = [];
+  #interactions: ChatInteractionsData | undefined;
+  #interactionsFromProperty = false;
+  #interactionsLoad: AbortController | null = null;
 
   readonly #emit: Emit = (name, detail) => {
     this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
   };
 
-  readonly #onSendReady = (send: SendRef | null) => {
-    this.#send = send;
+  readonly #onSendReady = (api: EmbedApi | null) => {
+    this.#api = api;
   };
 
   get config(): GlirastesChatElementConfig {
@@ -161,15 +185,47 @@ export class GlirastesChatElement extends BaseElement {
     this.#render();
   }
 
+  /** Derived `@` entities and `/` commands, e.g. the generated module's `chatInteractions`. */
+  get interactions(): ChatInteractionsData | undefined {
+    return this.#interactions;
+  }
+
+  set interactions(value: ChatInteractionsData | null | undefined) {
+    this.#interactionsLoad?.abort();
+    this.#interactions = value ? parseChatInteractions(value) : undefined;
+    this.#interactionsFromProperty = Boolean(value);
+    this.#render();
+  }
+
+  /** Adds or replaces (same type) an `@` entity; same definition as `defineChatEntity`. */
+  defineEntity(definition: ChatEntityDefinition): void {
+    const entity = defineChatEntity(definition);
+    this.#entities = [...this.#entities.filter((entry) => entry.type !== entity.type), entity];
+    this.#render();
+  }
+
+  /** Adds or replaces (same id) a `/` command; same definition as `defineChatCommand`. */
+  defineCommand(definition: ChatCommandDefinition): void {
+    const command = defineChatCommand(definition);
+    this.#commands = [...this.#commands.filter((entry) => entry.id !== command.id), command];
+    this.#render();
+  }
+
+  /** Adds a reference to an entity, resolved by id, to the composer. False before mount or when refused. */
+  async mentionEntity(type: string, id: string): Promise<boolean> {
+    return this.#api ? this.#api.mentionEntity(type, id) : false;
+  }
+
   /** Sends a user message through the embedded chat. False before mount. */
   send(text: string): boolean {
-    if (!this.#send || !text.trim()) return false;
-    this.#send(text);
+    if (!this.#api || !text.trim()) return false;
+    this.#api.send(text);
     return true;
   }
 
   connectedCallback(): void {
     this.#pendingUnmount = false;
+    this.#loadInteractions();
     if (!this.#root) {
       const shadow = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
       const style = document.createElement('style');
@@ -191,14 +247,63 @@ export class GlirastesChatElement extends BaseElement {
       const root = this.#root;
       this.#root = null;
       this.#style = null;
-      this.#send = null;
+      this.#api = null;
+      this.#interactionsLoad?.abort();
       root?.unmount();
       this.shadowRoot?.replaceChildren();
     });
   }
 
-  attributeChangedCallback(): void {
+  attributeChangedCallback(name?: string): void {
+    if (name === 'interactions' || name === 'endpoint') this.#loadInteractions();
     this.#render();
+  }
+
+  #locale(): ChatLocaleCode {
+    const lang = this.closest('[lang]')?.getAttribute('lang') ?? '';
+    return lang.toLowerCase().startsWith('de') ? 'de' : 'en';
+  }
+
+  /** `interactions` attribute: GET the data from its URL, or from the endpoint when empty. */
+  #loadInteractions(): void {
+    if (this.#interactionsFromProperty || !this.isConnected) return;
+    this.#interactionsLoad?.abort();
+    this.#interactionsLoad = null;
+    const attribute = this.getAttribute('interactions');
+    const url = attribute === null ? '' : attribute || this.getAttribute('endpoint') || '';
+    if (!url) return;
+    const controller = new AbortController();
+    this.#interactionsLoad = controller;
+    void (async () => {
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: { accept: 'application/json' },
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = parseChatInteractions(await response.json());
+        if (controller.signal.aborted) return;
+        this.#interactions = data;
+        this.#render();
+      } catch {
+        if (!controller.signal.aborted) this.#emit('glirastes-chat:error', { message: 'Chat interactions unavailable' });
+      }
+    })();
+  }
+
+  #chatInteractions(): ChatInteractionsConfig | undefined {
+    const base = this.#config.chatInteractions;
+    const data = this.#interactions ?? base?.data;
+    if (!base && !data && this.#entities.length === 0 && this.#commands.length === 0) return undefined;
+    return {
+      ...base,
+      locale: base?.locale ?? this.#locale(),
+      ...(data ? { data } : {}),
+      entities: [...(base?.entities ?? []), ...this.#entities],
+      commands: [...(base?.commands ?? []), ...this.#commands],
+    };
   }
 
   #render(): void {
@@ -214,8 +319,10 @@ export class GlirastesChatElement extends BaseElement {
     }
     const placeholder = this.getAttribute('placeholder');
     const voiceLanguage = this.getAttribute('voice-language');
+    const chatInteractions = this.#chatInteractions();
     const config: GlirastesChatElementConfig = {
       ...this.#config,
+      ...(chatInteractions ? { chatInteractions } : {}),
       ...(placeholder
         ? { locale: { ...(this.#config.locale ?? {}), placeholder } }
         : {}),
