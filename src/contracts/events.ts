@@ -203,10 +203,61 @@ export type RuntimeCostSource = z.infer<typeof RuntimeCostSourceSchema>;
 export type RuntimeTurnCost = z.infer<typeof RuntimeTurnCostSchema>;
 export type RuntimeTurnToolUsage = z.infer<typeof RuntimeTurnToolUsageSchema>;
 
-/** Body of `POST /v1/runtime/apps/:appId/environments/:environmentId/metrics/events`. */
+/** Statuses of an endpoint that refused a call its tool schema accepted. */
+export const TOOL_CONTRACT_REJECTED_STATUSES = [400, 422] as const;
+
+/**
+ * An endpoint refused a call that passed the tool's input schema (spec 4.7):
+ * the contract the model saw is wrong, so the tool belongs on the next work
+ * list or managed job. Content-free: tool, schema version and status, never
+ * arguments, response or message.
+ */
+export const ToolContractRejectedEventSchema = z.object({
+  schemaVersion: z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION),
+  eventId: z.uuid(),
+  eventType: z.literal('tool_contract_rejected'),
+  occurredAt: z.iso.datetime({ offset: true }),
+  appId: z.uuid(),
+  environmentId: z.uuid(),
+  buildId: metricLabel.nullable(),
+  instanceId: metricLabel,
+  revisionId: z.uuid().nullable(),
+  toolId: z.uuid(),
+  /** The manifest's digest of the input schema the call passed (same alphabet as the manifest). */
+  inputSchemaDigest: z.string().regex(/^sha256:[A-Za-z0-9+/=_-]{1,88}$/),
+  httpStatus: z.union([z.literal(400), z.literal(422)]),
+}).strict().superRefine((event, context) => {
+  const forbidden = findForbiddenPlatformContentPath(event);
+  if (forbidden) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Runtime metric events must not contain content or credentials',
+      path: forbidden,
+    });
+  }
+});
+
+export type ToolContractRejectedEvent = z.infer<typeof ToolContractRejectedEventSchema>;
+
+/** Every content-free metric event of the runtime: finished turns and contract rejections. */
+export const RuntimeMetricEventSchema = z.discriminatedUnion('eventType', [
+  TechnicalRuntimeEventV2Schema,
+  ToolContractRejectedEventSchema,
+]);
+
+export type RuntimeMetricEvent = z.infer<typeof RuntimeMetricEventSchema>;
+
+/**
+ * Body of `POST /v1/runtime/apps/:appId/environments/:environmentId/metrics/events`.
+ * One batch carries one event type, so a Platform that does not know a newer
+ * type refuses only that batch and keeps receiving turns.
+ */
 export const TechnicalRuntimeEventBatchSchema = z.object({
   schemaVersion: z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION),
-  events: z.array(TechnicalRuntimeEventV2Schema).min(1).max(RUNTIME_METRIC_MAX_BATCH),
-}).strict();
+  events: z.array(RuntimeMetricEventSchema).min(1).max(RUNTIME_METRIC_MAX_BATCH),
+}).strict().refine((batch) => new Set(batch.events.map((event) => event.eventType)).size === 1, {
+  message: 'A batch carries one event type',
+  path: ['events'],
+});
 
 export type TechnicalRuntimeEventBatch = z.infer<typeof TechnicalRuntimeEventBatchSchema>;

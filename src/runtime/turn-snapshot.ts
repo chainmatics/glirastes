@@ -17,9 +17,10 @@ export interface TurnSnapshot {
   readonly manifestRevision: ManifestRevision;
   /**
    * The pinned policy revision. Its `toolPolicies` are the effective ones:
-   * the signed values restricted by the revision's own signed `toolOverrides`
-   * deltas (restrict-only), so every consumer of the snapshot obeys Platform
-   * decisions, whichever path built it.
+   * the signed values composed with the revision's own signed `toolOverrides`
+   * deltas (restrictions, plus the D16 relaxations the local code report
+   * allows), so every consumer of the snapshot obeys Platform decisions,
+   * whichever path built it.
    */
   readonly policyRevision: RuntimePolicyRevision;
   readonly budget: ExecutionBudget;
@@ -91,17 +92,26 @@ function minBudget(
 
 /**
  * Applies the signed `toolOverrides` deltas of a Platform policy revision to
- * its reported `toolPolicies`, restrict-only. A revision composed by the local
- * runtime source carries no deltas and stays as it is; one a consumer takes
- * straight from a Platform deployment no longer runs a tool the Platform
- * disabled. Applying the same deltas twice changes nothing.
+ * its reported `toolPolicies` (`applyPolicyOverlay`). A revision composed by
+ * the local runtime source carries no deltas and stays as it is; one a
+ * consumer takes straight from a Platform deployment no longer runs a tool
+ * the Platform disabled, and switches a confirmation off only for tools the
+ * local code report names in `relaxableToolIds` (D16). Applying the same
+ * deltas twice changes nothing.
  */
-function withPlatformDecisions(policyRevision: RuntimePolicyRevision): RuntimePolicyRevision {
+function withPlatformDecisions(
+  policyRevision: RuntimePolicyRevision,
+  relaxableToolIds: ReadonlySet<string> | undefined,
+): RuntimePolicyRevision {
   const deltas = policyRevision.toolOverrides ?? [];
   if (deltas.length === 0) return policyRevision;
   return {
     ...policyRevision,
-    toolPolicies: applyPolicyOverlay(policyRevision.toolPolicies, deltas).policies,
+    toolPolicies: applyPolicyOverlay(
+      policyRevision.toolPolicies,
+      deltas,
+      relaxableToolIds ? { relaxableToolIds } : {},
+    ).policies,
   };
 }
 
@@ -114,6 +124,12 @@ export function createTurnSnapshot(options: {
   localLimits: ExecutionBudget;
   promptPin?: PromptPin;
   startedAt?: string;
+  /**
+   * D16: the tools whose confirmation a signed Platform decision may switch
+   * off, `relaxableToolIds(setupArtifact)` of the running code. Without it a
+   * snapshot built straight from a Platform deployment relaxes nothing.
+   */
+  relaxableToolIds?: ReadonlySet<string>;
 }): TurnSnapshot {
   const {
     agentRevision,
@@ -141,7 +157,7 @@ export function createTurnSnapshot(options: {
     principal: clone(principal),
     agentRevision: clone(agentRevision),
     manifestRevision: clone(manifestRevision),
-    policyRevision: clone(withPlatformDecisions(policyRevision)),
+    policyRevision: clone(withPlatformDecisions(policyRevision, options.relaxableToolIds)),
     budget: minBudget(options.localLimits, agentRevision.budget, policyRevision.budget),
     ...(options.promptPin ? { promptPin: clone(options.promptPin) } : {}),
   };

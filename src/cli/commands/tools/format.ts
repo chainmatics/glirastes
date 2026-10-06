@@ -5,7 +5,10 @@ import { nextActionFor } from '../../../codegen/tools/findings.js';
 import type { ToolsPipelineOptions, ToolsPipelineResult } from '../../../codegen/tools/pipeline.js';
 import type { DescriptionOrigin } from '../../../codegen/tools/prose.js';
 import type { ContractSource, ToolFinding } from '../../../codegen/tools/types.js';
+import { buildResolveWorklist, describeGaps } from '../../../codegen/tools/worklist.js';
+import type { ToolsWatchFactory } from './watch.js';
 import { AppSetupArtifactSchema, type ToolRiskClass } from '../../../contracts/index.js';
+import { riskTier } from '../../../contracts/tool-policy.js';
 
 export interface ToolsIo {
   cwd: string;
@@ -13,6 +16,9 @@ export interface ToolsIo {
   log(line: string): void;
   error(line: string): void;
   runPipeline(options: ToolsPipelineOptions): Promise<ToolsPipelineResult>;
+  /** `tools refresh --watch`: file watching and the stop signal (tests inject both). */
+  watch?: ToolsWatchFactory;
+  signal?: AbortSignal;
 }
 
 export interface ToolStatusEntry {
@@ -23,6 +29,10 @@ export interface ToolStatusEntry {
   needsAttention: boolean;
   riskClass: ToolRiskClass;
   confirmation: boolean;
+  /** Where the code report says the confirmation comes from; null when it does not say. */
+  confirmationOrigin: 'code-default' | 'local-policy' | null;
+  /** D16: asks first, and a connected Platform's owner or admin may switch that off. */
+  platformMayRelax: boolean;
   contractSource: ContractSource | null;
   descriptionQuality: DescriptionOrigin;
   schemaQuality: SchemaQuality;
@@ -136,6 +146,42 @@ export function formatToolsHuman(result: ToolsPipelineResult): string {
   return lines.join('\n');
 }
 
+/** The confirmation label `tools status` and `tools policy show` share (D16). */
+export function confirmationLabel(
+  entry: Pick<ToolStatusEntry, 'confirmation' | 'confirmationOrigin' | 'platformMayRelax' | 'riskClass'>,
+): string {
+  if (!entry.confirmation) return 'runs directly';
+  if (entry.platformMayRelax) return 'asks first, Platform may relax';
+  if (entry.confirmationOrigin === 'local-policy' && riskTier(entry.riskClass) <= 2) {
+    return 'asks first, locked in tool-policy.json';
+  }
+  return 'asks first';
+}
+
+function tools(count: number, verb: [string, string]): string {
+  return `${count} tool${count === 1 ? '' : 's'} ${count === 1 ? verb[0] : verb[1]}`;
+}
+
+/**
+ * The closing sentences of a refresh (spec 4.6): what the developer's own
+ * coding agent can still do, with the command that prints its work list.
+ */
+export function agentWorkNotes(result: ToolsPipelineResult): string[] {
+  const views = result.tools ?? [];
+  const attention = new Set(buildResolveWorklist(result).items
+    .filter((item) => item.owner === 'agent' && item.toolId !== null)
+    .map((item) => item.stableKey)).size;
+  const describe = views.filter((tool) => tool.contract !== null && describeGaps(tool).length > 0).length;
+  const notes: string[] = [];
+  if (attention > 0) {
+    notes.push(`${tools(attention, ['needs', 'need'])} attention – your coding agent can resolve this with \`glirastes tools resolve --print\`.`);
+  }
+  if (describe > 0) {
+    notes.push(`${tools(describe, ['needs', 'need'])} a better description – your coding agent can do this with \`glirastes tools describe --print\`.`);
+  }
+  return notes;
+}
+
 export function formatToolStatus(entries: ReadonlyArray<ToolStatusEntry>): string {
   const active = entries.filter((entry) => entry.enabled).length;
   const attention = entries.filter((entry) => entry.needsAttention).length;
@@ -146,8 +192,15 @@ export function formatToolStatus(entries: ReadonlyArray<ToolStatusEntry>): strin
     const state = entry.needsAttention ? ', disabled: needs attention' : entry.enabled ? '' : ', disabled';
     lines.push(
       `  ${entry.enabled ? '+' : '!'} ${entry.name}  ${entry.route}  ${entry.riskClass}, `
-        + `${entry.confirmation ? 'asks first' : 'runs directly'}${state}`,
+        + `${confirmationLabel(entry)}${state}`,
       `      contract: ${entry.contractSource ?? 'none'}, description: ${entry.descriptionQuality}, schema: ${entry.schemaQuality}`,
+    );
+  }
+  if (entries.some((entry) => entry.platformMayRelax)) {
+    lines.push(
+      '',
+      'A Platform owner or admin can switch off a confirmation marked "Platform may relax" for a connected app.',
+      'To keep one, run glirastes tools policy confirm <tool>; it writes "requiresApproval": true to .glirastes/tool-policy.json.',
     );
   }
   return lines.join('\n');

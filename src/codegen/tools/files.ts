@@ -74,6 +74,40 @@ const ToolPolicyDefaultsSchema = z.object({
   rulesVersion: z.literal(TOOL_POLICY_RULES_VERSION),
 }).strict();
 
+/** Synonyms bounded like the runtime index; examples are 3–5 sentences in each of two languages. */
+const ToolSearchFactsSchema = z.object({
+  synonyms: z.array(z.string().min(1).max(100)).min(1).max(20).optional(),
+  examples: z.array(z.string().min(1).max(200)).min(1).max(10).optional(),
+}).strict();
+
+/** One name an app's MCP server keeps for an endpoint tool: the grant id and the MCP tool name. */
+export const McpToolNameSchema = z.object({
+  id: z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,199}$/),
+  name: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+}).strict();
+
+/**
+ * `.glirastes/mcp-tool-names.json` (spec 5.2, MCP only): per endpoint tool the
+ * names and grant ids the app's MCP clients know. Two names may share a
+ * route; every id and every name is used once.
+ */
+export const McpToolNamesFileSchema = z.object({
+  schemaVersion: z.literal(1),
+  tools: z.record(z.string().min(1).max(2_100), z.array(McpToolNameSchema).min(1).max(10)),
+}).strict().superRefine((file, context) => {
+  const seen = { id: new Set<string>(), name: new Set<string>() };
+  for (const [stableKey, names] of Object.entries(file.tools)) {
+    for (const entry of names) {
+      for (const field of ['id', 'name'] as const) {
+        if (seen[field].has(entry[field])) {
+          context.addIssue({ code: 'custom', path: ['tools', stableKey], message: `The MCP ${field} ${entry[field]} is used twice` });
+        }
+        seen[field].add(entry[field]);
+      }
+    }
+  }
+});
+
 export const ToolContractsFileSchema = z.object({
   schemaVersion: z.literal(1),
   appId: z.uuid(),
@@ -83,6 +117,8 @@ export const ToolContractsFileSchema = z.object({
     definitionId: z.string().min(1).max(200),
     contract: ToolContractSchema.nullable(),
     defaults: ToolPolicyDefaultsSchema,
+    search: ToolSearchFactsSchema.optional(),
+    mcp: z.array(McpToolNameSchema).min(1).max(10).optional(),
   }).strict()).max(5_000),
 }).strict();
 

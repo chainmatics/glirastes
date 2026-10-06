@@ -26,8 +26,9 @@ export interface LocalDeploymentValidation {
 /**
  * Accepts a Platform deployment for the deployed code. A Platform tool the
  * code does not have, or has in a changed form, is ignored and reported
- * instead of rejecting the whole deployment, so restrict-only Platform
- * decisions keep reaching the runtime while the Platform catches up with the
+ * instead of rejecting the whole deployment, so Platform decisions (their
+ * restrictions and pinned D16 relaxations) keep reaching the runtime while the
+ * Platform catches up with the
  * code. Inconsistent Platform revisions still fail closed. The allowlist is
  * checked against the reported `toolPolicies`, never against `toolOverrides`
  * restrictions, so a tool only a Platform decision disables stays allowlisted.

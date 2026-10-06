@@ -5,18 +5,25 @@ import { ToolReportFileSchema } from '../../../codegen/tools/artifact.js';
 import { compareCodeUnits } from '../../../codegen/tools/canonical.js';
 import { TOOLS_PATHS } from '../../../codegen/tools/config.js';
 import { AppSetupArtifactSchema } from '../../../contracts/index.js';
+import { platformMayRelaxConfirmation } from '../../../contracts/tool-policy.js';
 import { FoundationDiagnosticError } from '../../../diagnostics/index.js';
 import { parseToolArgs } from './args.js';
 import { formatToolStatus, type ToolStatusEntry, type ToolsIo } from './format.js';
 
-async function readOutput<T>(root: string, path: string, schema: z.ZodType<T>): Promise<T> {
+/** A committed generator output, parsed; E-TOOLS-020/021 ask for a refresh. */
+export async function readToolOutput<T>(
+  root: string,
+  path: string,
+  schema: z.ZodType<T>,
+  operation = 'tools.status',
+): Promise<T> {
   let raw: string;
   try {
     raw = await readFile(resolve(root, path), 'utf8');
   } catch {
     throw new FoundationDiagnosticError({
       code: 'E-TOOLS-020',
-      operation: 'tools.status',
+      operation,
       message: 'No tool outputs found. Run glirastes tools refresh first.',
       remediation: 'run-tools-refresh',
       path,
@@ -31,7 +38,7 @@ async function readOutput<T>(root: string, path: string, schema: z.ZodType<T>): 
   if (!parsed?.success) {
     throw new FoundationDiagnosticError({
       code: 'E-TOOLS-021',
-      operation: 'tools.status',
+      operation,
       message: 'The tool outputs are invalid. Run glirastes tools refresh.',
       remediation: 'run-tools-refresh',
       path,
@@ -42,11 +49,12 @@ async function readOutput<T>(root: string, path: string, schema: z.ZodType<T>): 
 
 /** Local "What can my chat do?" from the committed outputs; no recomputation. */
 export async function readToolStatus(root: string): Promise<ToolStatusEntry[]> {
-  const artifact = await readOutput(root, TOOLS_PATHS.setupArtifact, AppSetupArtifactSchema);
-  const report = await readOutput(root, TOOLS_PATHS.report, ToolReportFileSchema);
+  const artifact = await readToolOutput(root, TOOLS_PATHS.setupArtifact, AppSetupArtifactSchema);
+  const report = await readToolOutput(root, TOOLS_PATHS.report, ToolReportFileSchema);
   const reported = new Map(report.tools.map((tool) => [tool.toolId, tool] as const));
   return artifact.tools.map((tool): ToolStatusEntry => {
     const entry = reported.get(tool.toolId);
+    const confirmationOrigin = tool.provenance?.policyOrigin?.requiresApproval ?? null;
     return {
       toolId: tool.toolId,
       name: tool.name,
@@ -55,6 +63,9 @@ export async function readToolStatus(root: string): Promise<ToolStatusEntry[]> {
       needsAttention: tool.operationGroup === 'needs_attention',
       riskClass: tool.riskClass,
       confirmation: tool.requiresApproval,
+      confirmationOrigin,
+      platformMayRelax: tool.requiresApproval
+        && platformMayRelaxConfirmation(tool.riskClass, confirmationOrigin ?? undefined),
       contractSource: entry?.contractSource ?? null,
       descriptionQuality: entry?.quality.description ?? 'template',
       schemaQuality: entry?.quality.schema ?? 'none',
@@ -62,8 +73,10 @@ export async function readToolStatus(root: string): Promise<ToolStatusEntry[]> {
   }).sort((left, right) => compareCodeUnits(left.name, right.name));
 }
 
+export const STATUS_ARGS = { flags: ['--json'], values: ['--root'] } as const;
+
 export async function runToolsStatus(argv: ReadonlyArray<string>, io: ToolsIo): Promise<number> {
-  const args = parseToolArgs(argv, { flags: ['--json'], values: ['--root'] });
+  const args = parseToolArgs(argv, STATUS_ARGS);
   const entries = await readToolStatus(resolve(io.cwd, args.values.get('--root') ?? '.'));
   io.log(args.flags.has('--json') ? JSON.stringify({ schemaVersion: 1, tools: entries }) : formatToolStatus(entries));
   return 0;

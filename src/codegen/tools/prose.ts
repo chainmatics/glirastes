@@ -7,7 +7,10 @@ import type { ToolPolicyDefaults } from '../../contracts/tool-policy.js';
 import { compareCodeUnits } from './canonical.js';
 import { TOOLS_PATHS } from './config.js';
 import { toolFinding } from './findings.js';
+import { isAgenticSemantics, SEMANTICS_LANGUAGES, SemanticsEntrySchema, type ToolSemanticsEntry } from './semantics.js';
 import type { ToolFinding, ToolProseHints } from './types.js';
+
+export type { ToolSemanticsEntry } from './semantics.js';
 
 export type DescriptionOrigin = 'human' | 'code' | 'agent' | 'template';
 
@@ -15,23 +18,10 @@ const MAX_DESCRIPTION = 1_000;
 const MAX_HINT = 500;
 const MAX_LABEL = 200;
 
-const SemanticsEntrySchema = z.object({
-  name: z.string().trim().min(1).max(200).optional(),
-  stableKey: z.string().trim().min(1).max(2_100).optional(),
-  description: z.string().optional(),
-  module: z.string().optional(),
-  sharedWith: z.array(z.string()).optional(),
-  usageHints: z.array(z.string()).optional(),
-  presentation: z.unknown().optional(),
-  origin: z.record(z.string(), z.string()).optional(),
-}).passthrough();
-
 const SemanticsFileSchema = z.object({
   schemaVersion: z.literal(1),
   tools: z.array(z.unknown()).max(5_000),
 }).passthrough();
-
-export type ToolSemanticsEntry = z.infer<typeof SemanticsEntrySchema>;
 
 export interface ToolSemantics {
   byStableKey: ReadonlyMap<string, ToolSemanticsEntry>;
@@ -39,6 +29,26 @@ export interface ToolSemantics {
 }
 
 export const EMPTY_SEMANTICS: ToolSemantics = { byStableKey: new Map(), byName: new Map() };
+
+/**
+ * The names a schema issue path may show: entry fields, the languages and the
+ * members of an example call and of the agent block. Any other segment is a
+ * key of `origin` or `locked` taken from the file, which an agent controls.
+ */
+const SCHEMA_PATH_NAMES: ReadonlySet<string> = new Set([
+  ...Object.keys(SemanticsEntrySchema.shape),
+  ...SEMANTICS_LANGUAGES,
+  'sentence', 'input', 'model', 'interfaceDigest',
+]);
+
+/** The first issue path with schema names and array indices only; file-controlled keys become `<key>`. */
+function schemaIssuePath(path: readonly PropertyKey[]): string {
+  return path
+    .map((segment) => typeof segment === 'number' || (typeof segment === 'string' && SCHEMA_PATH_NAMES.has(segment))
+      ? String(segment)
+      : '<key>')
+    .join('.');
+}
 
 export function loadToolSemantics(root: string): { semantics: ToolSemantics; findings: ToolFinding[] } {
   let raw: string;
@@ -66,8 +76,11 @@ export function loadToolSemantics(root: string): { semantics: ToolSemantics; fin
   file.data.tools.forEach((value, index) => {
     const entry = SemanticsEntrySchema.safeParse(value);
     if (!entry.success || (!entry.data.stableKey && !entry.data.name)) {
-      findings.push(toolFinding('tool-semantics-invalid', 'warning', `${TOOLS_PATHS.semantics}#${index}`,
-        `Entry ${index} of tool-semantics.json is invalid and is ignored.`));
+      // An agent entry that does not even parse is a rejected agentic entry (spec 4.6).
+      const agentic = isAgenticSemantics(value);
+      const path = entry.success ? '' : schemaIssuePath(entry.error.issues[0]?.path ?? []);
+      findings.push(toolFinding(agentic ? 'resolution-rejected' : 'tool-semantics-invalid', 'warning', `${TOOLS_PATHS.semantics}#${index}`,
+        `Entry ${index} of tool-semantics.json is invalid${path ? ` at ${path}` : ''} and is ignored.`));
       return;
     }
     if (entry.data.stableKey) byStableKey.set(entry.data.stableKey, entry.data);
@@ -168,12 +181,25 @@ export interface ResolveToolProseInput {
   jsDoc?: string;
   hints?: ToolProseHints;
   semantics: ToolSemantics;
+  /** The entry the pipeline already checked; `null` when it was rejected. Looked up when absent. */
+  entry?: ToolSemanticsEntry | null;
   policyDescription?: string;
+}
+
+/** The semantics entry of a tool: by stable key first, then by definition id. */
+export function lookupSemantics(
+  semantics: ToolSemantics,
+  stableKey: string,
+  definitionId: string,
+): ToolSemanticsEntry | undefined {
+  return semantics.byStableKey.get(stableKey) ?? semantics.byName.get(definitionId);
 }
 
 /** Prose without a model; templates are the visible floor, never a blocker. */
 export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
-  const entry = input.semantics.byStableKey.get(input.stableKey) ?? input.semantics.byName.get(input.definitionId);
+  const entry = input.entry === undefined
+    ? lookupSemantics(input.semantics, input.stableKey, input.definitionId)
+    : input.entry ?? undefined;
   const entryOrigin: DescriptionOrigin = entry?.origin?.description === 'agent'
     ? 'agent'
     : entry?.origin?.description === 'code' ? 'code' : 'human';
@@ -213,7 +239,9 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     .slice(0, 50);
   const hintSource = input.hints?.usageHints?.length
     ? input.hints.usageHints
-    : entry?.usageHints?.length ? entry.usageHints : [description];
+    : entry?.usageHints?.length || entry?.approvalHint
+      ? [...entry.usageHints ?? [], ...entry.approvalHint ? [entry.approvalHint] : []]
+      : [description];
   const usageHints = hintSource
     .map((hint) => bounded(hint, MAX_HINT))
     .filter((hint): hint is string => hint !== undefined)

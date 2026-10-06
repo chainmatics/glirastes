@@ -4,10 +4,13 @@ import {
   RUNTIME_METRIC_MAX_COUNT,
   RUNTIME_METRIC_MAX_TOOLS,
   TechnicalRuntimeEventV2Schema,
+  ToolContractRejectedEventSchema,
+  type RuntimeMetricEvent,
   type RuntimeTurnCost,
   type RuntimeTurnErrorCode,
   type RuntimeTurnStatus,
   type TechnicalRuntimeEventV2,
+  type ToolContractRejectedEvent,
 } from '../../contracts/index.js';
 import { modelFacingToolName } from '../local-tool-bindings.js';
 import type { TurnSnapshot } from '../turn-snapshot.js';
@@ -25,12 +28,13 @@ export interface RuntimeMetricsIdentity {
 }
 
 /**
- * Receives finished turn events. `record` must return immediately and never
- * throw: delivery happens later, off the turn, and is dropped on failure.
+ * Receives finished turns and contract rejections. `record` must return
+ * immediately and never throw: delivery happens later, off the turn, and is
+ * dropped on failure.
  */
 export interface RuntimeMetricsSink {
   readonly identity: RuntimeMetricsIdentity;
-  record(event: TechnicalRuntimeEventV2): void;
+  record(event: RuntimeMetricEvent): void;
   flush(): Promise<void>;
   close(): Promise<void>;
 }
@@ -61,6 +65,13 @@ export interface TurnMetricsRecorder {
    * the event, or undefined when the turn was already finished. Never throws.
    */
   finish(outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | undefined;
+  /**
+   * An endpoint refused a call its tool schema accepted (spec 4.7). Hands a
+   * content-free `tool_contract_rejected` event to the sink right away and
+   * returns it; undefined for a tool outside the pinned snapshot. The name is
+   * the manifest name or its model-facing encoding. Never throws.
+   */
+  recordToolContractRejected(toolName: string, httpStatus: 400 | 422): ToolContractRejectedEvent | undefined;
 }
 
 export interface TurnMetricsRecorderOptions {
@@ -86,12 +97,15 @@ export function createTurnMetricsRecorder(
 ): TurnMetricsRecorder {
   const now = options.now ?? Date.now;
   const createEventId = options.createEventId ?? randomUUID;
-  const toolIdByName = new Map(
-    (options.snapshot?.manifestRevision.tools ?? []).map((tool) => [
-      modelFacingToolName(tool.name),
-      tool.toolId,
-    ] as const),
-  );
+  const manifestTools = options.snapshot?.manifestRevision.tools ?? [];
+  const toolIdByName = new Map(manifestTools.map((tool) => [
+    modelFacingToolName(tool.name),
+    tool.toolId,
+  ] as const));
+  const schemaDigestByName = new Map(manifestTools.map((tool) => [
+    modelFacingToolName(tool.name),
+    tool.inputSchemaDigest,
+  ] as const));
   const costs: RuntimeTurnCost[] = [];
   const usage = new Map<string, { calls: number; errors: number }>();
   let firstChunkAtMs: number | undefined;
@@ -176,6 +190,41 @@ export function createTurnMetricsRecorder(
       for (const name of step.failedToolNames) {
         const entry = usageOf(name);
         if (entry) entry.errors += 1;
+      }
+    },
+
+    recordToolContractRejected(toolName, httpStatus) {
+      try {
+        // Endpoint tools may carry the dotted definitionId as `toolName`; the
+        // maps are keyed by the model-facing encoding (idempotent for names
+        // that are already encoded).
+        const modelName = modelFacingToolName(toolName);
+        const toolId = toolIdByName.get(modelName);
+        const inputSchemaDigest = schemaDigestByName.get(modelName);
+        if (!toolId || !inputSchemaDigest) return undefined;
+        const parsed = ToolContractRejectedEventSchema.safeParse({
+          schemaVersion: 2,
+          eventId: createEventId(),
+          eventType: 'tool_contract_rejected',
+          occurredAt: new Date(now()).toISOString(),
+          appId: options.sink.identity.appId,
+          environmentId: options.sink.identity.environmentId,
+          buildId: options.sink.identity.buildId,
+          instanceId: options.sink.identity.instanceId,
+          revisionId: options.snapshot?.agentRevision.revisionId ?? null,
+          toolId,
+          inputSchemaDigest,
+          httpStatus,
+        });
+        if (!parsed.success) return undefined;
+        try {
+          options.sink.record(parsed.data);
+        } catch {
+          // A sink must never fail a tool call.
+        }
+        return parsed.data;
+      } catch {
+        return undefined;
       }
     },
 

@@ -5,9 +5,9 @@ import {
   RUNTIME_METRIC_EVENT_SCHEMA_VERSION,
   RUNTIME_METRIC_LABEL_PATTERN,
   RUNTIME_METRIC_MAX_BATCH,
-  TechnicalRuntimeEventV2Schema,
+  RuntimeMetricEventSchema,
+  type RuntimeMetricEvent,
   type TechnicalRuntimeEventBatch,
-  type TechnicalRuntimeEventV2,
 } from '../../contracts/index.js';
 import type {
   RuntimeMetricsIdentity,
@@ -100,7 +100,11 @@ export function createRuntimeMetricsSink(
     buildId: config.buildId,
     instanceId: config.instanceId,
   });
-  const queue: TechnicalRuntimeEventV2[] = [];
+  // One queue per event type: a batch never mixes types, so a Platform that
+  // does not know `tool_contract_rejected` yet refuses only those batches.
+  // Turns are listed first, so they are sent first whatever arrives first.
+  const queues = new Map<RuntimeMetricEvent['eventType'], RuntimeMetricEvent[]>([['turn.finished', []]]);
+  const queued = () => [...queues.values()].reduce((sum, events) => sum + events.length, 0);
   let timer: ReturnType<typeof setInterval> | undefined;
   let inFlight: Promise<void> | undefined;
   let flushScheduled = false;
@@ -114,7 +118,7 @@ export function createRuntimeMetricsSink(
     }
   };
 
-  const send = async (events: TechnicalRuntimeEventV2[]): Promise<boolean> => {
+  const send = async (events: RuntimeMetricEvent[]): Promise<boolean> => {
     try {
       const body: TechnicalRuntimeEventBatch = {
         schemaVersion: RUNTIME_METRIC_EVENT_SCHEMA_VERSION,
@@ -142,12 +146,18 @@ export function createRuntimeMetricsSink(
 
   const flush = (): Promise<void> => {
     if (inFlight) return inFlight;
-    if (queue.length === 0) return Promise.resolve();
+    if (queued() === 0) return Promise.resolve();
     inFlight = (async () => {
       try {
-        while (queue.length > 0) {
-          const batch = queue.splice(0, config.maxBatchSize);
-          if (!await send(batch)) drop('send-failed', batch.length);
+        // An event recorded while another type is on the wire may land in a
+        // queue that was already drained: go round again until all are empty.
+        while (queued() > 0) {
+          for (const queue of queues.values()) {
+            while (queue.length > 0) {
+              const batch = queue.splice(0, config.maxBatchSize);
+              if (!await send(batch)) drop('send-failed', batch.length);
+            }
+          }
         }
       } finally {
         inFlight = undefined;
@@ -176,7 +186,7 @@ export function createRuntimeMetricsSink(
   return {
     identity,
     get pending() {
-      return queue.length;
+      return queued();
     },
     record(event) {
       try {
@@ -184,7 +194,7 @@ export function createRuntimeMetricsSink(
           drop('closed', 1);
           return;
         }
-        const checked = TechnicalRuntimeEventV2Schema.safeParse(event);
+        const checked = RuntimeMetricEventSchema.safeParse(event);
         if (
           !checked.success
           || checked.data.appId !== identity.appId
@@ -193,10 +203,12 @@ export function createRuntimeMetricsSink(
           drop('invalid', 1);
           return;
         }
-        if (queue.length >= config.maxQueueSize) {
+        if (queued() >= config.maxQueueSize) {
           drop('queue-full', 1);
           return;
         }
+        const queue = queues.get(checked.data.eventType) ?? [];
+        queues.set(checked.data.eventType, queue);
         queue.push(checked.data);
         ensureTimer();
         if (queue.length >= config.maxBatchSize) scheduleFlush();

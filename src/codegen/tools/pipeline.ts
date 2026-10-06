@@ -9,6 +9,7 @@ import {
   AppSetupArtifactSchema,
   assertAppSetupSemanticParity,
   type AppSetupArtifact,
+  type ToolRiskClass,
 } from '../../contracts/index.js';
 import {
   confirmationFloor,
@@ -16,9 +17,12 @@ import {
   resolveToolPolicy,
   riskTier,
   type EffectiveToolPolicy,
+  type ToolPolicyDefaults,
+  type ToolPolicyEntry,
 } from '../../contracts/tool-policy.js';
 import type { AppSetupToolProvenance } from '../../contracts/index.js';
 import { FoundationDiagnosticError, isFoundationDiagnosticError } from '../../diagnostics/index.js';
+import { modelFacingToolName } from '../../runtime/local-tool-bindings.js';
 import {
   discoverFoundationExecutions,
   FoundationExecutionInventorySchema,
@@ -33,6 +37,7 @@ import {
   schemaQualityOf,
   ToolReportFileSchema,
   type ArtifactToolInput,
+  type SchemaQuality,
   type ToolReportTool,
 } from './artifact.js';
 import { compareCodeUnits } from './canonical.js';
@@ -47,10 +52,19 @@ import { renderGeneratedModule } from './emit-module.js';
 import { ToolContractsFileSchema, ToolTombstonesFileSchema, toToolContractsEntry } from './files.js';
 import { sortFindings, toolFinding, TRANSIENT_FINDING_CODES } from './findings.js';
 import { readPromptBundle, readToolInputs, type PromptBundleInput } from './inputs.js';
+import { checkMcpNames } from './mcp-names.js';
 import type { ToolsMode } from './mode.js';
-import { resolveToolProse } from './prose.js';
+import { lookupSemantics, resolveToolProse, type DescriptionOrigin } from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
+import {
+  requiredLanguages,
+  semanticsFacts,
+  semanticsSearch,
+  validateSemanticsEntry,
+  type SemanticsCheck,
+  type SemanticsFacts,
+} from './semantics.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { createNextPagesSource } from './sources/next-pages.js';
 import { createReactActionSource } from './sources/react-actions.js';
@@ -65,11 +79,42 @@ import {
 import type {
   ExcludedTool,
   ObservedTool,
+  ToolContract,
   ToolContractsEntry,
   ToolFinding,
   ToolSource,
   ToolSourceContext,
 } from './types.js';
+
+/**
+ * What the generator knows about one tool, in memory only: the work lists of
+ * `tools resolve --print` and `tools describe --print` are built from it.
+ */
+export interface ToolsPipelineTool {
+  toolId: string;
+  stableKey: string;
+  definitionId: string;
+  modelName: string;
+  executionKind: 'endpoint' | 'ui';
+  /** `POST /api/tasks` or `UI tasks.highlight`. */
+  route: string;
+  files: string[];
+  contract: ToolContract | null;
+  interfaceDigest: string | null;
+  params: ToolContract['params'] | null;
+  defaults: ToolPolicyDefaults;
+  enabled: boolean;
+  riskClass: ToolRiskClass;
+  requiresApproval: boolean;
+  /** `.glirastes/tool-policy.json` has an entry for this tool. */
+  localPolicy: boolean;
+  module: string;
+  description: string;
+  descriptionOrigin: DescriptionOrigin;
+  schemaQuality: SchemaQuality;
+  semantics: SemanticsFacts & { stale: boolean; rejected: boolean };
+  findings: ToolFinding[];
+}
 
 export interface ToolsPipelineResult {
   mode: ToolsMode;
@@ -79,6 +124,8 @@ export interface ToolsPipelineResult {
   outputs: Record<string, string>;
   driftPaths: string[];
   wrote: boolean;
+  /** Every tool of the refreshed inventory; empty when the refresh stopped early or verified integrity. */
+  tools?: ToolsPipelineTool[];
 }
 
 export interface ToolsPipelineOptions {
@@ -160,14 +207,24 @@ function sortExcluded(excluded: ReadonlyArray<ExcludedTool>): ExcludedTool[] {
 type PolicyField = keyof EffectiveToolPolicy['origin'];
 const POLICY_FIELDS: ReadonlyArray<PolicyField> = ['enabled', 'requiresApproval', 'riskClass', 'allowedRoles', 'description'];
 
-/** A local report knows code defaults and local policy only, never a Platform origin. */
-function localPolicyOrigin(origin: EffectiveToolPolicy['origin']): NonNullable<AppSetupToolProvenance['policyOrigin']> {
-  const local: NonNullable<AppSetupToolProvenance['policyOrigin']> = {};
+/**
+ * A local report knows code defaults and local policy only, never a Platform
+ * origin. An explicit `requiresApproval: true` in tool-policy.json is a local
+ * lock even where the code default asks anyway: the report names it
+ * `local-policy`, so the Platform can tell a lock from a default and never
+ * offers to relax it (D16); the runtime keeps it either way.
+ */
+function localPolicyOrigin(
+  origin: EffectiveToolPolicy['origin'],
+  local: ToolPolicyEntry | undefined,
+): NonNullable<AppSetupToolProvenance['policyOrigin']> {
+  const reported: NonNullable<AppSetupToolProvenance['policyOrigin']> = {};
   for (const field of POLICY_FIELDS) {
     const value = origin[field];
-    if (value === 'code-default' || value === 'local-policy') local[field] = value;
+    if (value === 'code-default' || value === 'local-policy') reported[field] = value;
   }
-  return local;
+  if (local?.requiresApproval === true) reported.requiresApproval = 'local-policy';
+  return reported;
 }
 
 function policyWarningMessage(code: string, field: string | undefined): string {
@@ -230,7 +287,9 @@ function renderDerivedOutputs(input: DerivedOutputInput): Record<string, string>
     [TOOLS_PATHS.runtimeManifest]: manifests.runtimeContent,
     [TOOLS_PATHS.promptManifest]: manifests.promptContent,
     [TOOLS_PATHS.receipt]: `${JSON.stringify(receipt, null, 2)}\n`,
-    [modulePath]: renderGeneratedModule({ modulePath, artifact: input.artifact, contracts: input.contracts }),
+    [modulePath]: renderGeneratedModule({
+      modulePath, artifact: input.artifact, contracts: input.contracts, mcpCatalog: input.config.emit.mcpCatalog === true,
+    }),
   };
 }
 
@@ -324,6 +383,7 @@ async function generate(
 ): Promise<ToolsPipelineResult> {
   const findings: ToolFinding[] = [];
   const excluded: ExcludedTool[] = [];
+  const toolViews: ToolsPipelineTool[] = [];
   const result = (extra: Partial<ToolsPipelineResult> = {}): ToolsPipelineResult => ({
     mode: options.mode,
     changes: emptyChanges(),
@@ -332,6 +392,7 @@ async function generate(
     outputs: {},
     driftPaths: [],
     wrote: false,
+    tools: toolViews,
     ...extra,
   });
 
@@ -404,6 +465,7 @@ async function generate(
   const artifactTools: ArtifactToolInput[] = [];
   const contractEntries: ToolContractsEntry[] = [];
   const reportTools: ToolReportTool[] = [];
+  const languages = requiredLanguages(config.locale);
 
   for (const execution of inventory.executions) {
     const tool = observedByKey.get(execution.stableKey);
@@ -414,7 +476,13 @@ async function generate(
       findings.push(toolFinding('input-contract-unresolved', 'needs_attention', execution.stableKey,
         'The source reported no input contract for this tool.'));
     }
-    const needsAttention = reportedAttention || !tool.contract;
+    // Function calling needs an object at the root of the input schema; a union there fails every turn.
+    const rootNotObject = tool.contract !== undefined && tool.contract.input.type !== 'object';
+    if (rootNotObject) {
+      findings.push(toolFinding('input-schema-not-object', 'needs_attention', execution.stableKey,
+        'The input schema is not an object at its root (for example a union), so models cannot call this tool.'));
+    }
+    const needsAttention = reportedAttention || !tool.contract || rootNotObject;
     const defaults = deriveToolPolicyDefaults({
       executionKind: execution.executionKind,
       ...(execution.executionKind === 'endpoint' ? { method: execution.method, path: execution.path } : {}),
@@ -447,6 +515,22 @@ async function generate(
         `Risk raised from ${previousRisk} to ${resolved.effective.riskClass}; confirmation follows automatically.`));
     }
     findings.push(...tool.findings);
+    const semanticsEntry = lookupSemantics(inputs.semantics, execution.stableKey, execution.definitionId);
+    const semantics: SemanticsCheck = semanticsEntry
+      ? validateSemanticsEntry(semanticsEntry, {
+        stableKey: execution.stableKey,
+        ...(tool.interface ? { interfaceDigest: tool.interface.digest } : {}),
+        ...(tool.contract ? { input: tool.contract.input } : {}),
+      })
+      : { findings: [], stale: false };
+    findings.push(...semantics.findings);
+    if (semantics.stale) {
+      const dropped = semantics.droppedExampleCalls
+        ? ` Example calls left out until then, because the input schema no longer accepts them: ${semantics.droppedExampleCalls}.`
+        : '';
+      findings.push(toolFinding('semantics-stale', 'warning', execution.stableKey,
+        `The handler interface changed after an agent described this tool; the description stays in use until it is renewed.${dropped}`));
+    }
     const prose = resolveToolProse({
       stableKey: execution.stableKey,
       definitionId: execution.definitionId,
@@ -456,6 +540,7 @@ async function generate(
       ...(tool.evidence.jsDoc ? { jsDoc: tool.evidence.jsDoc } : {}),
       ...(tool.prose ? { hints: tool.prose } : {}),
       semantics: inputs.semantics,
+      entry: semantics.entry ?? null,
       ...(resolved.effective.description && resolved.effective.origin.description !== 'code-default'
         ? { policyDescription: resolved.effective.description }
         : {}),
@@ -468,18 +553,59 @@ async function generate(
       effective: resolved.effective,
       operationGroup: needsAttention ? 'needs_attention' : defaults.operationGroup,
       provenance: {
-        policyOrigin: localPolicyOrigin(resolved.effective.origin),
+        policyOrigin: localPolicyOrigin(resolved.effective.origin, local),
         ...(tool.contract ? { contractSource: tool.contract.source } : {}),
         descriptionSource: prose.descriptionOrigin,
         schemaSource: schemaQuality,
       },
     });
+    const search = semanticsSearch(semantics.entry);
+    const mcp = execution.executionKind === 'endpoint' ? inputs.mcpNames?.get(execution.stableKey) : undefined;
     contractEntries.push({
       toolId: execution.toolId,
       stableKey: execution.stableKey,
       definitionId: execution.definitionId,
       contract: tool.contract ?? null,
       defaults,
+      ...(mcp ? { mcp: [...mcp] } : {}),
+      ...(search.synonyms.length > 0 || search.examples.length > 0
+        ? {
+          search: {
+            ...(search.synonyms.length > 0 ? { synonyms: search.synonyms } : {}),
+            ...(search.examples.length > 0 ? { examples: search.examples } : {}),
+          },
+        }
+        : {}),
+    });
+    const requiresApproval = confirmationFloor(resolved.effective.riskClass, resolved.effective.requiresApproval);
+    toolViews.push({
+      toolId: execution.toolId,
+      stableKey: execution.stableKey,
+      definitionId: execution.definitionId,
+      modelName: modelFacingToolName(execution.definitionId),
+      executionKind: execution.executionKind,
+      route: execution.executionKind === 'endpoint'
+        ? `${execution.method} ${execution.path}`
+        : `UI ${execution.actionBindingRef}`,
+      files: tool.files ?? (execution.executionKind === 'endpoint' ? [execution.sourceFile] : []),
+      contract: tool.contract ?? null,
+      interfaceDigest: tool.interface?.digest ?? null,
+      params: tool.interface?.params ?? null,
+      defaults,
+      enabled: resolved.effective.enabled,
+      riskClass: resolved.effective.riskClass,
+      requiresApproval,
+      localPolicy: local !== undefined,
+      module: prose.module,
+      description: prose.description,
+      descriptionOrigin: prose.descriptionOrigin,
+      schemaQuality,
+      semantics: {
+        ...semanticsFacts(semantics.entry, languages),
+        stale: semantics.stale,
+        rejected: semanticsEntry !== undefined && semantics.entry === undefined,
+      },
+      findings: [],
     });
     reportTools.push({
       toolId: execution.toolId,
@@ -487,7 +613,7 @@ async function generate(
       definitionId: execution.definitionId,
       enabled: resolved.effective.enabled,
       riskClass: resolved.effective.riskClass,
-      requiresApproval: confirmationFloor(resolved.effective.riskClass, resolved.effective.requiresApproval),
+      requiresApproval,
       contractSource: tool.contract?.source ?? null,
       quality: {
         description: prose.descriptionOrigin,
@@ -495,11 +621,39 @@ async function generate(
       },
     });
   }
-  for (const key of Object.keys(inputs.policy.tools ?? {})) {
-    if (!observedByKey.has(key)) {
-      findings.push(toolFinding('policy-entry-orphaned', 'warning', key,
-        'This tool-policy.json entry matches no tool in the current code.'));
+  // An entry for an excluded route never applies either: say why (roadmap, P05).
+  const excludedByKey = new Map(excluded.map((entry) => [entry.stableKey, entry] as const));
+  const orphaned = (key: string, section: string) => {
+    if (observedByKey.has(key)) return;
+    const exclusion = excludedByKey.get(key);
+    findings.push(toolFinding('policy-entry-orphaned', 'warning', key, exclusion
+      ? `This tool-policy.json ${section} entry has no effect: the route is excluded (${exclusion.reason}, ${exclusion.origin}).`
+      : `This tool-policy.json ${section} entry matches no tool in the current code.`));
+  };
+  for (const key of Object.keys(inputs.policy.tools ?? {})) orphaned(key, 'tools');
+  for (const key of Object.keys(inputs.policy.acceptedRisk ?? {})) orphaned(key, 'acceptedRisk');
+  for (const key of inputs.mcpNames?.keys() ?? []) {
+    if (observedByKey.get(key)?.execution.executionKind === 'endpoint') continue;
+    findings.push(toolFinding('mcp-tool-names-invalid', 'warning', key,
+      'This mcp-tool-names.json entry names no endpoint tool in the current code and is ignored.'));
+  }
+  if (config.emit.mcpCatalog === true) {
+    // The catalog lists every id and name once; a kept name that another tool already uses falls back to the generated ones.
+    const mcpNames = checkMcpNames(toolViews
+      .filter((view) => view.executionKind === 'endpoint' && view.enabled)
+      .map((view) => ({
+        stableKey: view.stableKey,
+        definitionId: view.definitionId,
+        modelName: view.modelName,
+        ...(inputs.mcpNames?.has(view.stableKey) ? { kept: inputs.mcpNames.get(view.stableKey)! } : {}),
+      })));
+    findings.push(...mcpNames.findings);
+    for (const entry of contractEntries) {
+      if (mcpNames.fallback.has(entry.stableKey)) delete entry.mcp;
     }
+  }
+  for (const view of toolViews) {
+    view.findings = sortFindings(findings.filter((finding) => finding.subjectRef === view.stableKey));
   }
   if (findings.some(isError)) return result({ changes: generation.changes });
 

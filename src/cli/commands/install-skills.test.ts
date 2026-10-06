@@ -17,6 +17,7 @@ const packageRoot = join(
 const foundationSkills = [
   'integrating-glirastes-nextjs',
   'maintaining-glirastes-tools',
+  'describing-glirastes-tools',
   'building-glirastes-chat-ui',
 ] as const;
 const setupSkill = 'setting-up-glirastes';
@@ -125,7 +126,8 @@ describe('foundation agent skills', () => {
 
     expect(source).toContain('Autonomous mode');
     expect(source).toContain('Interview mode');
-    expect(source).toContain('glirastes setup scan');
+    expect(source).toContain('glirastes tools refresh');
+    expect(source).not.toContain('glirastes setup scan');
     expect(source).toContain('glirastes sync');
     expect(source).toContain('Standalone');
     expect(source).toContain('OpenRouter');

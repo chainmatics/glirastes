@@ -416,6 +416,7 @@ describe('createLocalRuntimeSource with a verified Platform overlay', () => {
     expect(applied).toHaveBeenCalledWith({
       revisionId: OVERLAY_REVISION_ID,
       ignored: [{ toolId: REMOVED_TOOL_ID, reason: 'platform-tool-not-in-code' }],
+      relaxations: [{ toolId: ENDPOINT_TOOL_ID, outcome: 'tier-3-always-requires-approval' }],
     });
     const registry = materializeManifestToolRegistry({
       snapshot,
@@ -627,6 +628,86 @@ describe('createLocalRuntimeSource with a verified Platform overlay', () => {
     expect(applied).toHaveBeenCalledWith({
       revisionId: OVERLAY_REVISION_ID,
       ignored: [{ toolId: UI_TOOL_ID, reason: 'platform-tool-not-in-code' }],
+      relaxations: [],
+    });
+  });
+
+  describe('and a signed relaxation of confirmation (D16)', () => {
+    /** The endpoint tool as a writing route with the given code report origin. */
+    function writeArtifact(
+      riskClass: 'write' | 'delete',
+      requiresApprovalOrigin?: 'code-default' | 'local-policy',
+    ): unknown {
+      const artifact = fixtureArtifact() as { tools: Array<Record<string, unknown>> };
+      Object.assign(artifact.tools[0]!, {
+        method: riskClass === 'delete' ? 'DELETE' : 'POST',
+        operationGroup: riskClass === 'delete' ? 'delete' : 'create',
+        riskClass,
+        requiresApproval: true,
+        ...(requiresApprovalOrigin
+          ? { provenance: { policyOrigin: { requiresApproval: requiresApprovalOrigin } } }
+          : {}),
+      });
+      return artifact;
+    }
+
+    function relaxedTurn(setupArtifact: unknown, atRiskClass: 'write' = 'write') {
+      const artifact = setupArtifact as { tools: Array<{ method: 'POST' | 'DELETE' }> };
+      const bindings = fixtureBindings().map((binding) => (
+        binding.executionKind === 'endpoint'
+          ? { ...binding, method: artifact.tools[0]!.method }
+          : binding
+      ));
+      const applied = vi.fn();
+      const source = createLocalRuntimeSource(fixtureOptions({
+        setupArtifact,
+        bindings,
+        identity: PLATFORM_IDENTITY,
+        policyOverlay: () => overlay([{
+          toolId: ENDPOINT_TOOL_ID,
+          requiresApproval: false,
+          pin: { toolId: ENDPOINT_TOOL_ID, atRiskClass },
+        }]),
+        platformRevisions: () => PLATFORM_REVISIONS,
+        onPolicyOverlayApplied: applied,
+      }));
+      const snapshot = source.resolveTurnSnapshot({ turnId: 't-relaxed', principal });
+      const registry = materializeManifestToolRegistry({ snapshot, bindings });
+      const guard = createManagedTurnGuard({ snapshot, resolvePrincipal: async () => principal });
+      return { applied, registry, guard };
+    }
+
+    // Refusals first.
+    it('keeps a confirmation tool-policy.json locks or the report does not explain', async () => {
+      for (const artifact of [writeArtifact('write', 'local-policy'), writeArtifact('write')]) {
+        const { applied, registry, guard } = relaxedTurn(artifact);
+        expect(registry.tasks_listTasks!.needsApproval).toBe(true);
+        await expect(guard.resolveApproval({ toolName: 'tasks_listTasks', input: {} })).resolves.toBe(true);
+        expect(applied).toHaveBeenCalledWith(expect.objectContaining({
+          relaxations: [{ toolId: ENDPOINT_TOOL_ID, outcome: 'locked-locally' }],
+        }));
+      }
+    });
+
+    it('keeps tier 3 confirmed when the code raised the risk above the pin', async () => {
+      const { applied, registry, guard } = relaxedTurn(writeArtifact('delete', 'code-default'));
+      expect(registry.tasks_listTasks!.needsApproval).toBe(true);
+      await expect(guard.resolveApproval({ toolName: 'tasks_listTasks', input: {} })).resolves.toBe(true);
+      expect(applied).toHaveBeenCalledWith(expect.objectContaining({
+        relaxations: [{ toolId: ENDPOINT_TOOL_ID, outcome: 'override-lapsed-risk-raised' }],
+      }));
+    });
+
+    // Acceptance.
+    it('runs a code-default write tool without asking', async () => {
+      const { applied, registry, guard } = relaxedTurn(writeArtifact('write', 'code-default'));
+      expect(registry.tasks_listTasks!.needsApproval).toBe(false);
+      await expect(guard.resolveApproval({ toolName: 'tasks_listTasks', input: {} })).resolves.toBe(false);
+      expect(applied).toHaveBeenCalledWith({
+        revisionId: OVERLAY_REVISION_ID,
+        ignored: [],
+        relaxations: [{ toolId: ENDPOINT_TOOL_ID, outcome: 'applied' }],
+      });
     });
   });
 

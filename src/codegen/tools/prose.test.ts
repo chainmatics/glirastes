@@ -154,6 +154,54 @@ describe('tool prose', () => {
     });
   });
 
+  it('reports an agent entry that does not parse as rejected agent output', async () => {
+    const loaded = await semanticsFile(JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'POST /api/tasks', description: 'x', origin: { description: 'agent' }, agent: { model: 'codex' } },
+        { stableKey: 'GET /api/tasks', description: 'y', mood: 'happy' },
+      ],
+    }));
+    expect(loaded.findings.map((finding) => [finding.code, finding.subjectRef, finding.message])).toEqual([
+      ['resolution-rejected', '.glirastes/tool-semantics.json#0', 'Entry 0 of tool-semantics.json is invalid at agent.interfaceDigest and is ignored.'],
+      ['tool-semantics-invalid', '.glirastes/tool-semantics.json#1', 'Entry 1 of tool-semantics.json is invalid and is ignored.'],
+    ]);
+  });
+
+  it('never echoes file-controlled map keys into a rejected-entry message', async () => {
+    const secretKey = `sk-or-v1-${'a'.repeat(64)}`;
+    const controlKey = '\u001b[31mevil\nline';
+    const loaded = await semanticsFile(JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'POST /api/tasks', origin: { [secretKey]: 'agent' } },
+        { stableKey: 'GET /api/tasks', locked: { [controlKey]: 'x' } },
+        { stableKey: 'GET /api/users', origin: { description: 'agent' }, agent: { model: 'codex' } },
+      ],
+    }));
+    expect(loaded.findings.map((finding) => [finding.code, finding.message])).toEqual([
+      ['resolution-rejected', 'Entry 0 of tool-semantics.json is invalid at origin.<key> and is ignored.'],
+      ['tool-semantics-invalid', 'Entry 1 of tool-semantics.json is invalid at locked.<key> and is ignored.'],
+      ['resolution-rejected', 'Entry 2 of tool-semantics.json is invalid at agent.interfaceDigest and is ignored.'],
+    ]);
+    for (const finding of loaded.findings) {
+      expect(finding.message).not.toContain('sk-or-v1');
+      // eslint-disable-next-line no-control-regex
+      expect(finding.message).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    }
+  });
+
+  it('uses the entry the pipeline checked and adds its approval hint to the usage hints', async () => {
+    const { semantics } = await semanticsFile(JSON.stringify({
+      schemaVersion: 1,
+      tools: [{ stableKey: 'POST /api/tasks', description: 'From semantics.', approvalHint: 'Confirm when the task is shared with a team.' }],
+    }));
+    const prose = resolveToolProse({ ...base, semantics });
+    expect(prose.usageHints).toEqual(['Confirm when the task is shared with a team.']);
+    const rejected = resolveToolProse({ ...base, semantics, entry: null });
+    expect(rejected).toMatchObject({ descriptionOrigin: 'template', description: 'Create tasks (POST /api/tasks).' });
+  });
+
   it('reports malformed semantics files and entries without failing', async () => {
     expect((await semanticsFile('{')).findings.map((finding) => finding.code)).toEqual(['tool-semantics-invalid']);
     const partial = await semanticsFile(JSON.stringify({ schemaVersion: 1, tools: [{ description: 'no key' }, { name: 'tasks.create', description: 'Kept.' }] }));

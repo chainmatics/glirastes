@@ -5,6 +5,15 @@ import { AppSetupClient } from './app-setup-client.js';
 export const DISCOVERY_DIGEST_PATTERN = /^sha256:[A-Za-z0-9_-]{43}$/;
 
 /**
+ * Runner capability `policyRelaxations` (D16): the version of the relaxation
+ * rule this runner applies to signed Platform decisions (pinned, up to tier 2,
+ * never over a local lock of its code report). The Platform shows a stored
+ * relaxation of confirmation as effective only for environments whose runner
+ * reports it; everywhere else it stays pending.
+ */
+export const POLICY_RELAXATIONS_VERSION = 1 as const;
+
+/**
  * What a runner tells the Platform about the code it runs (spec 4.10.6): the
  * committed, content-free setup artifact of that code. It describes tools and
  * never enables any.

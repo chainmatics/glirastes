@@ -120,22 +120,118 @@ describe('resolveEndpointContract', () => {
     expect(result.findings.map((finding) => [finding.code, finding.severity])).toEqual([[code, 'needs_attention']]);
   });
 
-  it('lets a current resolution rescue an unclear native role, but not a stale one', () => {
+  it('lets a current resolution rescue an unclear native role; a stale human entry needs attention', () => {
     const unclear = evidence({ schemaUses: [{ role: 'unclear', via: 'parse', binding: SCHEMAS }], readsBody: true, bodyKeys: 'opaque' });
     const first = resolve({ evidence: unclear });
     expect(first.findings.map((finding) => finding.code)).toEqual(['input-role-unclear']);
     const rescued = resolve({
       evidence: unclear,
-      resolution: { origin: 'agent', interfaceDigest: first.interfaceDigest, input: { jsonSchema: NOTE } },
+      resolution: { origin: 'agent', model: 'codex', interfaceDigest: first.interfaceDigest, input: { jsonSchema: NOTE } },
     });
     expect(rescued.contract).toMatchObject({ source: 'resolution', loadBearing: false, input: NOTE });
     expect(rescued.inputSchemaDigest).toBe(jsonSchemaDigest(NOTE));
     const stale = resolve({
       evidence: unclear,
-      resolution: { origin: 'agent', interfaceDigest: digest('S'), input: { jsonSchema: NOTE } },
+      resolution: { origin: 'human', interfaceDigest: digest('S'), input: { jsonSchema: NOTE } },
     });
     expect(stale.contract).toBeUndefined();
     expect(stale.findings.map((finding) => finding.code)).toEqual(['contract-stale']);
+  });
+
+  it('checks the keys of a JSON Schema entry against the code only once its interface is current', () => {
+    const derived = evidence({ readsBody: true, bodyKeys: ['title', 'due'] });
+    const current = resolve({ evidence: derived });
+    const entryWith = (origin: 'human' | 'agent', interfaceDigest: string, keys: ReadonlyArray<string>) => ({
+      origin,
+      ...(origin === 'agent' ? { model: 'codex' } : {}),
+      interfaceDigest,
+      input: { jsonSchema: { type: 'object', properties: Object.fromEntries(keys.map((key) => [key, {}])), additionalProperties: false } },
+    });
+    for (const origin of ['human', 'agent'] as const) {
+      for (const [keys, reason] of [[['title'], 'drops parameters the handler reads: due'], [['title', 'due', 'tag'], 'input keys without code evidence: tag']] as const) {
+        const rejected = resolve({ evidence: derived, resolution: entryWith(origin, current.interfaceDigest, keys) });
+        expect(rejected.contract?.source).toBe('derived');
+        expect(rejected.findings.find((finding) => finding.code === 'resolution-rejected')?.message).toContain(reason);
+      }
+    }
+    // Written for another interface, the same entries are stale before their keys are judged.
+    const human = resolve({ evidence: derived, resolution: entryWith('human', digest('S'), ['title']) });
+    expect(human.contract).toBeUndefined();
+    expect(human.findings.map((finding) => [finding.code, finding.severity])).toEqual([['contract-stale', 'needs_attention']]);
+    const agent = resolve({ evidence: derived, resolution: entryWith('agent', digest('S'), ['title', 'due', 'tag']) });
+    expect(agent.contract?.source).toBe('derived');
+    expect(agent.findings.map((finding) => finding.code)).toEqual(['output-contract-opaque', 'contract-derived', 'enrichment-stale']);
+  });
+
+  it('reports a stale human entry without an input schema on every tier and drops its effect', () => {
+    const stale = { origin: 'human' as const, interfaceDigest: digest('S'), effect: 'financial' as const };
+    const derived = resolve({ evidence: evidence({ readsBody: true, bodyKeys: ['title'] }), resolution: stale });
+    const native = resolve({
+      evidence: evidence({ schemaUses: [bodyUse], readsBody: true, bodyKeys: 'opaque' }),
+      probes: probes([probeItemFor(SCHEMAS, 'input'), probed(NOTE, digest('N'))]),
+      resolution: stale,
+    });
+    const module = resolve({
+      evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),
+      contractModule: { module: CONTRACT_MODULE, loadBearing: true, result: entry({ effect: null }) },
+      resolution: stale,
+    });
+    for (const [result, source] of [[derived, 'derived'], [native, 'native'], [module, 'contract-module']] as const) {
+      expect(result.contract?.source).toBe(source);
+      expect(result.declaredEffect).toBeUndefined();
+      expect(result.findings).toContainEqual(expect.objectContaining({
+        code: 'contract-stale', severity: 'needs_attention',
+        message: 'The handler interface changed after its tool-resolutions.json entry was written.',
+      }));
+    }
+  });
+
+  it('falls back to the code contract when an agent entry is stale, and says so', () => {
+    const derived = evidence({ readsBody: true, bodyKeys: ['title'] });
+    const typed = { ...NOTE, properties: { title: { type: 'string', minLength: 1 } } };
+    const current = resolve({ evidence: derived });
+    const enriched = resolve({
+      evidence: derived,
+      resolution: { origin: 'agent', model: 'codex', interfaceDigest: current.interfaceDigest, input: { jsonSchema: typed } },
+    });
+    expect(enriched.contract).toMatchObject({ source: 'resolution', input: typed });
+    const stale = resolve({
+      evidence: derived,
+      resolution: { origin: 'agent', model: 'codex', interfaceDigest: digest('S'), input: { jsonSchema: typed } },
+    });
+    expect(stale.contract?.source).toBe('derived');
+    expect(stale.findings.map((finding) => [finding.code, finding.severity])).toEqual([
+      ['output-contract-opaque', 'warning'], ['contract-derived', 'warning'], ['enrichment-stale', 'warning'],
+    ]);
+    expect(stale.findings[2]?.nextAction).toContain('glirastes tools describe --print');
+  });
+
+  it('rejects an agent schema reference that drops a parameter the handler reads', () => {
+    const derived = evidence({ readsBody: true, bodyKeys: ['title', 'due'] });
+    const current = resolve({ evidence: derived });
+    const result = resolve({
+      evidence: derived,
+      probes: probes([probeItemFor(SCHEMAS, 'input'), probed(NOTE, digest('N'))]),
+      resolution: { origin: 'agent', model: 'codex', interfaceDigest: current.interfaceDigest, input: { schemaRef: SCHEMAS } },
+    });
+    expect(result.contract?.source).toBe('derived');
+    const rejected = result.findings.find((finding) => finding.code === 'resolution-rejected');
+    expect(rejected).toMatchObject({ severity: 'warning', subjectRef: 'POST /api/notes' });
+    expect(rejected?.message).toContain('drops parameters the handler reads: due');
+  });
+
+  it('rejects an agent schema reference whose root is no object and keeps the code contract', () => {
+    const derived = evidence({ readsBody: true, bodyKeys: ['title'] });
+    const current = resolve({ evidence: derived });
+    const union = { anyOf: [NOTE, { ...NOTE, properties: { title: { type: 'number' } } }] };
+    const result = resolve({
+      evidence: derived,
+      probes: probes([probeItemFor(SCHEMAS, 'input'), probed(union, digest('U'))]),
+      resolution: { origin: 'agent', model: 'codex', interfaceDigest: current.interfaceDigest, input: { schemaRef: SCHEMAS } },
+    });
+    expect(result.contract?.source).toBe('derived');
+    expect(result.findings.find((finding) => finding.code === 'resolution-rejected')?.message)
+      .toContain('the input schema src/app/api/notes/schemas.ts#createNote is not an object at its root');
   });
 
   it('uses a load-bearing contract module with its metadata (tier 2)', () => {
@@ -284,7 +380,7 @@ describe('resolveEndpointContract', () => {
       expect(codes(result)).toEqual([['schema-content-rejected', 'needs_attention']]);
     });
 
-    it('fails closed when a tool-resolutions.json output schema reference is rejected', () => {
+    it('ignores a tool-resolutions.json entry whose output schema reference is rejected', () => {
       const unresolved = resolve({ evidence: evidence({ readsBody: true, bodyKeys: 'opaque', normalizedText: 'save(body)' }) });
       const outputRef: SchemaBindingRef = { module: 'src/app/api/notes/schemas.ts', export: 'noteResponse', property: [] };
       const result = resolve({
@@ -292,15 +388,15 @@ describe('resolveEndpointContract', () => {
         probes: probes([probeItemFor(outputRef, 'output'), rejected]),
         resolution: {
           origin: 'agent',
+          model: 'codex',
           interfaceDigest: unresolved.interfaceDigest,
           input: { jsonSchema: NOTE },
           output: { schemaRef: outputRef },
         },
       });
-      expect(result.contract?.source).toBe('resolution');
-      expect(result.contract?.output).toEqual({});
-      expect(result.outputSchemaDigest).toBe(OPAQUE_SCHEMA_DIGEST);
-      expect(codes(result)).toEqual([['schema-content-rejected', 'needs_attention']]);
+      expect(result.contract).toBeUndefined();
+      expect(codes(result)).toEqual([['input-contract-unresolved', 'needs_attention'], ['resolution-rejected', 'warning']]);
+      expect(result.findings[1]?.message).toContain('the output schema src/app/api/notes/schemas.ts#noteResponse carries secret-looking content');
     });
 
     it('reports a rejected contract module that is the only candidate', () => {
@@ -326,15 +422,21 @@ describe('resolveEndpointContract', () => {
       ]);
     });
 
-    it('reports a rejected tool-resolutions.json input schema reference', () => {
+    it('reports a rejected tool-resolutions.json input schema reference and keeps the fallback', () => {
       const unresolved = resolve({ evidence: evidence({ readsBody: true, bodyKeys: 'opaque', normalizedText: 'save(body)' }) });
       const result = resolve({
         evidence: evidence({ readsBody: true, bodyKeys: 'opaque', normalizedText: 'save(body)' }),
         probes: probes([probeItemFor(SCHEMAS, 'input'), rejected]),
-        resolution: { origin: 'agent', interfaceDigest: unresolved.interfaceDigest, input: { schemaRef: SCHEMAS } },
+        resolution: { origin: 'agent', model: 'codex', interfaceDigest: unresolved.interfaceDigest, input: { schemaRef: SCHEMAS } },
       });
       expect(result.contract).toBeUndefined();
-      expect(codes(result)).toEqual([['schema-content-rejected', 'needs_attention']]);
+      expect(codes(result)).toEqual([['input-contract-unresolved', 'needs_attention'], ['resolution-rejected', 'warning']]);
+      const missing = resolve({
+        evidence: evidence({ readsBody: true, bodyKeys: 'opaque', normalizedText: 'save(body)' }),
+        probes: probes([probeItemFor(SCHEMAS, 'input'), { ok: false, reason: 'missing' }]),
+        resolution: { origin: 'agent', model: 'codex', interfaceDigest: unresolved.interfaceDigest, input: { schemaRef: SCHEMAS } },
+      });
+      expect(missing.findings[1]?.message).toContain('could not be loaded (missing)');
     });
 
     it('does not flag a missing contract module', () => {

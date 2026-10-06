@@ -1,5 +1,8 @@
 import { findForbiddenContentPath } from '../contracts/content-boundary.js';
-import { DISCOVERY_DIGEST_PATTERN } from './capability-report.js';
+import {
+  DISCOVERY_DIGEST_PATTERN,
+  POLICY_RELAXATIONS_VERSION,
+} from './capability-report.js';
 import type { RuntimeSyncManager } from './sync-manager.js';
 
 export interface RuntimePushConnector {
@@ -39,6 +42,13 @@ export class RuntimeControlPlaneClient {
      * the Platform knows which capability report describes this runner.
      */
     discoveryDigest?: string;
+    /**
+     * True when this runner composes signed Platform decisions with the
+     * local code report (`createLocalRuntimeSource`, or `createTurnSnapshot`
+     * with `relaxableToolIds`), so a Platform relaxation of confirmation takes
+     * effect here (D16). Registration then reports `policyRelaxations`.
+     */
+    policyRelaxations?: boolean;
     manager: RuntimeSyncManager;
     fetchImpl?: typeof fetch;
     push?: RuntimePushConnector;
@@ -68,6 +78,18 @@ export class RuntimeControlPlaneClient {
       }
       capabilities.discoveryDigest = digest;
     }
+    const relaxations = this.options.policyRelaxations
+      ? POLICY_RELAXATIONS_VERSION
+      : undefined;
+    if (
+      capabilities.policyRelaxations !== undefined
+      && capabilities.policyRelaxations !== relaxations
+    ) {
+      // Claiming D16 without applying it would show relaxations as effective
+      // while the chat keeps asking, or the other way round.
+      throw new Error('capabilities.policyRelaxations is reported by the runtime');
+    }
+    if (relaxations !== undefined) capabilities.policyRelaxations = relaxations;
     this.assertTechnicalMetadata(capabilities);
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
     return this.request('register', {

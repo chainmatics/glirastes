@@ -3,6 +3,7 @@ import { access, lstat, realpath } from 'node:fs/promises';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
+import { scaffoldToolsInputs, type InitScaffold } from './init-scaffold.js';
 import { findPackageSkillsDir, installSkills } from './install-skills.js';
 import { hostRecord, readInstalledSkillsManifest } from './installed-skills-manifest.js';
 import { inspectSetupProject } from './project-inspection.js';
@@ -124,6 +125,7 @@ export async function runAgentSetup(options: {
     'Use the current agent and its existing model configuration; do not request an extra setup provider key or silently change provider.',
     'The app chat needs its own authorized runtime model binding. Do not extract coding-agent credentials for app use.',
     'Continue autonomously from existing evidence. Ask only genuinely unresolved decisions. Create source-derived local bindings, chat integration and repeatable build/CI regeneration; do not ask the developer to maintain a second tool catalogue.',
+    'Init wrote .glirastes/tools.json, .glirastes/prompt-bundle.json, the predev/prebuild scripts and the agent hint where they were missing. Run glirastes tools refresh, work through glirastes tools resolve --print and glirastes tools describe --print, then glirastes tools refresh and glirastes tools eval again. Never change the appId in tools.json.',
     options.managed
       ? 'Managed mode is explicit: existing Managed apps retain --managed for setup and doctor. For a fresh app, prepare local pairing artifacts, connect with approval, then apply Managed setup before any chat/tool execution. Preserve app/environment scope; never downgrade an existing Managed app.'
       : 'A fresh app defaults to Standalone without a Platform account. Preserve any existing Connected/Managed configuration; never silently downgrade it.',
@@ -131,17 +133,25 @@ export async function runAgentSetup(options: {
     'Run local setup/doctor and the actual chat/tool test. Report separately what passed and what is blocked; agent exit or Doctor success is not tool-action proof. Do not run glirastes init again inside this setup.',
   ].join('\n');
   const base = { schemaVersion: 1, agent, instructions, inspection };
+  const scaffoldText = (scaffold: InitScaffold, verb: string) => [
+    scaffold.written.length > 0 ? `${verb}: ${scaffold.written.join(', ')}` : 'No Glirastes input files were missing.',
+    ...scaffold.notes,
+  ].join('\n');
   if (options.dryRun) {
-    const preview = { ...base, status: 'preview', skillDirectory: TARGETS[agent] };
-    console.log(options.json ? JSON.stringify(preview) : `Glirastes setup preview (${agent})\nNo files changed or agent started.\n${instructions}`);
+    const scaffold = await scaffoldToolsInputs({ root, host: agent, dryRun: true });
+    const preview = { ...base, status: 'preview', skillDirectory: TARGETS[agent], scaffold };
+    console.log(options.json ? JSON.stringify(preview)
+      : `Glirastes setup preview (${agent})\nNo files changed or agent started.\n${scaffoldText(scaffold, 'Would write')}\n${instructions}`);
     return;
   }
   await installSkills({ rootDir: root, host: agent, parts: ['setup', 'tools', 'chat-ui', 'framework'], quiet: options.json });
+  const scaffold = await scaffoldToolsInputs({ root, host: agent });
   if (active === agent) {
-    console.log(options.json ? JSON.stringify({ ...base, status: 'continue-in-session' })
-      : `Continue setup in this ${agent} session:\n${instructions}`);
+    console.log(options.json ? JSON.stringify({ ...base, status: 'continue-in-session', scaffold })
+      : `${scaffoldText(scaffold, 'Wrote')}\nContinue setup in this ${agent} session:\n${instructions}`);
     return;
   }
+  console.log(scaffoldText(scaffold, 'Wrote'));
   console.log(`Starting ${agent} in the app folder with its existing model and permission settings.`);
   const exitCode = await (deps.launch ?? launchSetupAgent)({
     executable: selected!.executable, args: [instructions], cwd: root,

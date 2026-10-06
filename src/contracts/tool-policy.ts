@@ -60,6 +60,56 @@ export function confirmationFloor(
   return requiresApproval || riskTier(riskClass) >= 3;
 }
 
+export type ConfirmationRelaxationOutcome =
+  | 'applies'
+  | 'pin-for-other-tool'
+  | 'relaxation-requires-reviewed-pin'
+  | 'tier-3-always-requires-approval'
+  | 'override-lapsed-risk-raised';
+
+/**
+ * The one relaxation rule (spec 4.5, D16), shared by `resolveToolPolicy` and
+ * the runtime overlay: whether a `requiresApproval: false` entry with this pin
+ * takes effect at the effective risk class. A pin for another tool id (an
+ * earlier incarnation) lapses. Tier 0-1 relaxes freely. From tier 2 on the
+ * entry needs a reviewed pin at a tier-2 class the effective class does not
+ * exceed, so the relaxation lapses as soon as the risk rises. Tier 3 never
+ * relaxes, pinned or not.
+ */
+export function confirmationRelaxationOutcome(
+  toolId: string,
+  pin: ToolPolicyEntry['pin'],
+  riskClass: ToolRiskClass,
+): ConfirmationRelaxationOutcome {
+  if (pin && pin.toolId !== toolId) return 'pin-for-other-tool';
+  const tier = riskTier(riskClass);
+  if (tier <= 1) return 'applies';
+  if (!pin) {
+    return tier >= 3
+      ? 'tier-3-always-requires-approval'
+      : 'relaxation-requires-reviewed-pin';
+  }
+  const pinnedTier = riskTier(pin.atRiskClass);
+  if (pinnedTier >= 3) return 'tier-3-always-requires-approval';
+  if (tier > pinnedTier) return 'override-lapsed-risk-raised';
+  return 'applies';
+}
+
+/**
+ * D16 local lock: may a signed Platform decision switch off this tool's
+ * confirmation at all? Only a confirmation the local code report attributes
+ * to the code default, on a tool of tier 0-2. Whatever tool-policy.json
+ * decided (an explicit `requiresApproval: true`, or a risk raise that brings
+ * confirmation) and an origin the report does not name are local locks the
+ * Platform never relaxes; tier 3 always confirms.
+ */
+export function platformMayRelaxConfirmation(
+  riskClass: ToolRiskClass,
+  requiresApprovalOrigin: PolicyOrigin | undefined,
+): boolean {
+  return requiresApprovalOrigin === 'code-default' && riskTier(riskClass) <= 2;
+}
+
 /**
  * Raise-only combination. A candidate replaces the current class only from a
  * strictly higher tier; a same-tier relabel or a lower class never applies.
@@ -168,6 +218,15 @@ const DECLARED_EFFECT_RISK: Readonly<Record<DeclaredEffect, AssessedRiskClass>> 
   external: 'external',
   financial: 'financial',
 };
+
+/**
+ * The risk class a declared effect stands for. `deriveToolPolicyDefaults`
+ * raises to it, and anything that checks an effect against the code's class
+ * (the agent resolution gate) must read it here, never from a copy.
+ */
+export function declaredEffectRiskClass(effect: DeclaredEffect): AssessedRiskClass {
+  return DECLARED_EFFECT_RISK[effect];
+}
 
 function segmentWords(segment: string): string[] {
   return segment
@@ -570,7 +629,7 @@ function resolveApproval(
       hardenedBy ??= layer;
     } else if (
       layer.entry.requiresApproval === false
-      && relaxationAllowed(input.toolId, layer, tier, warnings, errors)
+      && relaxationAllowed(input.toolId, layer, risk.value, warnings, errors)
     ) {
       relaxedBy = layer;
     }
@@ -595,38 +654,25 @@ function resolveApproval(
 function relaxationAllowed(
   toolId: string,
   layer: PolicyLayer,
-  tier: RiskTier,
+  riskClass: ToolRiskClass,
   warnings: PolicyWarning[],
   errors: PolicyError[],
 ): boolean {
-  const pin = layer.entry.pin;
   const field = `${layer.name}.requiresApproval`;
-  if (pin && pin.toolId !== toolId) return false;
-  if (tier <= 1) return true;
-  if (!pin) {
-    errors.push({
-      code: 'E-POLICY-002',
-      field,
-      reason: tier >= 3
-        ? 'tier-3-always-requires-approval'
-        : 'relaxation-requires-reviewed-pin',
-    });
-    return false;
+  const outcome = confirmationRelaxationOutcome(toolId, layer.entry.pin, riskClass);
+  switch (outcome) {
+    case 'applies':
+      return true;
+    case 'pin-for-other-tool':
+      // Reported once as `policy-entry-orphaned` by collectPolicyLayers.
+      return false;
+    case 'override-lapsed-risk-raised':
+      warnings.push({ code: 'override-lapsed-risk-raised', field });
+      return false;
+    default:
+      errors.push({ code: 'E-POLICY-002', field, reason: outcome });
+      return false;
   }
-  const pinnedTier = riskTier(pin.atRiskClass);
-  if (pinnedTier >= 3) {
-    errors.push({
-      code: 'E-POLICY-002',
-      field,
-      reason: 'tier-3-always-requires-approval',
-    });
-    return false;
-  }
-  if (tier > pinnedTier) {
-    warnings.push({ code: 'override-lapsed-risk-raised', field });
-    return false;
-  }
-  return true;
 }
 
 function resolveDescription(

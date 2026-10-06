@@ -7,6 +7,8 @@ describe('glirastes/contracts tool policy surface', () => {
     for (const name of [
       'riskTier',
       'confirmationFloor',
+      'confirmationRelaxationOutcome',
+      'platformMayRelaxConfirmation',
       'mostRestrictiveRiskClass',
       'intersectAllowedRoles',
       'deriveToolPolicyDefaults',

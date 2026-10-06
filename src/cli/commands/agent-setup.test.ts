@@ -52,6 +52,12 @@ describe('agent-led init', () => {
     expect(launch).not.toHaveBeenCalled();
     expect(await readFile(join(root, '.agents/skills/setting-up-glirastes/SKILL.md'), 'utf8')).toContain('Setting Up Glirastes');
     expect(await readdir(root)).not.toContain('.env');
+    expect(result.scaffold).toMatchObject({
+      written: ['.glirastes/prompt-bundle.json', '.glirastes/tools.json', 'AGENTS.md', 'package.json'],
+    });
+    const config = JSON.parse(await readFile(join(root, '.glirastes/tools.json'), 'utf8')) as { appId: string };
+    expect(config.appId).toBe(result.scaffold.appId);
+    expect(result.instructions).toContain('Never change the appId in tools.json.');
   });
 
   it('requires an unambiguous host before writing anything in a noninteractive shell', async () => {

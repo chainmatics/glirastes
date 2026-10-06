@@ -266,3 +266,83 @@ describe('createRuntimeMetricsSinkFromEnv', () => {
     expect(sink?.identity.instanceId).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
+
+describe('tool_contract_rejected in the sink', () => {
+  const rejection = (suffix: number) => ({
+    schemaVersion: 2 as const,
+    eventId: `019fb900-0000-7000-8000-0000000003${suffix.toString().padStart(2, '0')}`,
+    eventType: 'tool_contract_rejected' as const,
+    occurredAt: '2026-10-05T10:16:02.000Z',
+    appId: APP_ID,
+    environmentId: ENVIRONMENT_ID,
+    buildId: 'git:4f2c9e1',
+    instanceId: 'web-1',
+    revisionId: null,
+    toolId: '019fb900-0000-7000-8000-0000000000c1',
+    inputSchemaDigest: 'sha256:Hk3m0QZrJ8v2bW6cX9fN1pL4sT7uY0aE5dG8iK2oMqA',
+    httpStatus: 422 as const,
+  });
+
+  it('sends rejections in their own batch, so a Platform without them keeps the turns', async () => {
+    const calls: Array<{ events: Array<{ eventType: string }> }> = [];
+    const fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { events: Array<{ eventType: string }> };
+      calls.push(body);
+      return new Response(null, { status: body.events[0]!.eventType === 'turn.finished' ? 202 : 400 });
+    }) as typeof globalThis.fetch;
+    const { sink, drops } = sinkWith(fetch);
+    sink.record(event());
+    sink.record(rejection(1));
+    sink.record(event());
+    sink.record(rejection(2));
+    expect(sink.pending).toBe(4);
+    await sink.flush();
+    expect(calls.map((call) => call.events.map((entry) => entry.eventType))).toEqual([
+      ['turn.finished', 'turn.finished'],
+      ['tool_contract_rejected', 'tool_contract_rejected'],
+    ]);
+    expect(drops).toEqual([{ reason: 'send-failed', count: 2 }]);
+    expect(sink.pending).toBe(0);
+  });
+
+  it('drops a rejection that carries content or names another app', () => {
+    const { sink, drops } = sinkWith(recordingFetch().fetch);
+    sink.record({ ...rejection(3), arguments: { title: 'x' } } as never);
+    sink.record({ ...rejection(4), appId: '019fb900-0000-7000-8000-0000000000a9' });
+    expect(drops).toEqual([{ reason: 'invalid', count: 1 }, { reason: 'invalid', count: 1 }]);
+    expect(sink.pending).toBe(0);
+  });
+
+  it('sends turns before rejections even when a rejection was recorded first', async () => {
+    const http = recordingFetch();
+    const { sink } = sinkWith(http.fetch);
+    sink.record(rejection(5));
+    sink.record(event());
+    await sink.flush();
+    expect(http.calls.map((call) => (call.body.events[0] as { eventType: string }).eventType))
+      .toEqual(['turn.finished', 'tool_contract_rejected']);
+  });
+
+  it('sends a turn recorded while a rejection batch is on the wire before close returns', async () => {
+    const eventTypes: string[] = [];
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { events: Array<{ eventType: string }> };
+      eventTypes.push(body.events[0]!.eventType);
+      if (body.events[0]!.eventType === 'tool_contract_rejected') await gate;
+      return new Response(null, { status: 202 });
+    }) as typeof globalThis.fetch;
+    const { sink } = sinkWith(fetch);
+    sink.record(event());
+    sink.record(rejection(6));
+    const flushing = sink.flush();
+    await vi.waitFor(() => expect(eventTypes).toEqual(['turn.finished', 'tool_contract_rejected']));
+    sink.record(event());
+    const closing = sink.close();
+    release();
+    await Promise.all([flushing, closing]);
+    expect(eventTypes).toEqual(['turn.finished', 'tool_contract_rejected', 'turn.finished']);
+    expect(sink.pending).toBe(0);
+  });
+});

@@ -15,6 +15,7 @@ import { runToolsPipeline, runToolsPipelineWith, ToolsPipelineFailure } from './
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { uiObservation } from './sources/ui-tools.js';
 import type { ToolSource } from './types.js';
+import { buildDescribeWorklist, buildResolveWorklist } from './worklist.js';
 
 const outsideDirs: string[] = [];
 afterEach(async () => {
@@ -307,6 +308,32 @@ describe('capability report in the committed setup artifact', () => {
     });
     expect(artifact.exclusions).toEqual([{ stableKey: 'POST /api/auth/login', origin: 'default' }]);
   }, 120_000);
+
+  it('reports an explicit local confirmation as a local lock, also where the code asks anyway', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const before = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.method, tool] as const));
+    expect(before.get('POST')).toMatchObject({
+      requiresApproval: true,
+      provenance: { policyOrigin: { requiresApproval: 'code-default' } },
+    });
+
+    await fixture.write(TOOLS_PATHS.policy, JSON.stringify({
+      schemaVersion: 1,
+      tools: {
+        'GET /api/tasks': { requiresApproval: true },
+        'POST /api/tasks': { requiresApproval: true, reason: 'keep asking, whatever the dashboard says' },
+      },
+    }));
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const after = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.method, tool] as const));
+    for (const method of ['GET', 'POST'] as const) {
+      expect(after.get(method)).toMatchObject({
+        requiresApproval: true,
+        provenance: { policyOrigin: { requiresApproval: 'local-policy' } },
+      });
+    }
+  }, 120_000);
 });
 
 const PAGE = 'export default function Page() { return null; }\n';
@@ -461,4 +488,395 @@ describe('runToolsPipeline (client actions)', () => {
     expect(tools.get('ui.tasks.select')).toMatchObject({ enabled: false, operationGroup: 'needs_attention' });
     expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
   }, 120_000);
+});
+
+describe('runToolsPipeline (stage-2 semantics)', () => {
+  const EXAMPLES = ['Show my tasks', 'Which tasks are still open?', 'List the finished tasks'];
+
+  async function interfaceOf(fixture: AppFixture, stableKey: string): Promise<string> {
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    return contracts.tools.find((entry) => entry.stableKey === stableKey)!.contract!.interfaceDigest;
+  }
+
+  it('carries checked synonyms and examples into the contracts file, the module and the tool view', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const interfaceDigest = await interfaceOf(fixture, 'GET /api/tasks');
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [{
+        stableKey: 'GET /api/tasks',
+        description: 'Lists the caller\'s tasks, optionally by status. Use tasks.create to add one.',
+        synonyms: { en: ['to-dos', 'my work'] },
+        examples: { en: EXAMPLES },
+        exampleCalls: [{ sentence: 'List the finished tasks', input: { status: ['done'] } }],
+        origin: { description: 'agent', synonyms: 'agent', examples: 'agent', exampleCalls: 'agent' },
+        agent: { model: 'claude-code', interfaceDigest },
+      }],
+    })}\n`);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const entry = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)))
+      .tools.find((tool) => tool.stableKey === 'GET /api/tasks');
+    expect(entry?.search).toEqual({ synonyms: ['my work', 'to-dos'], examples: [...EXAMPLES].sort() });
+    const module = await fixture.read(DEFAULT_GENERATED_MODULE);
+    expect(module).toContain('export const toolSearchSemantics = {\n  "tasks_list": {\n    "synonyms": [\n      "my work",');
+    const view = result.tools?.find((tool) => tool.stableKey === 'GET /api/tasks');
+    expect(view).toMatchObject({
+      definitionId: 'tasks.list',
+      modelName: 'tasks_list',
+      route: 'GET /api/tasks',
+      files: ['src/app/api/tasks/route.ts', 'src/lib/schemas.ts', 'src/lib/session.ts'],
+      interfaceDigest,
+      params: { path: [], query: ['status'], body: [] },
+      descriptionOrigin: 'agent',
+      schemaQuality: 'field-names',
+      semantics: { protectedFields: [], hasSynonyms: true, missingExamples: [], stale: false, rejected: false },
+    });
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+  }, 120_000);
+
+  it('ignores a rejected agent entry and keeps a stale one in use until it is renewed', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const interfaceDigest = await interfaceOf(fixture, 'GET /api/tasks');
+    const agent = { model: 'codex', interfaceDigest };
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'GET /api/tasks', description: 'Lists tasks by status.', origin: { description: 'agent' }, agent },
+        {
+          stableKey: 'POST /api/tasks', description: 'Creates a task.', examples: { en: ['Mail bob@corp.example.org', 'b', 'c'] },
+          origin: { description: 'agent', examples: 'agent' }, agent,
+        },
+      ],
+    })}\n`);
+    const first = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const post = first.tools?.find((tool) => tool.stableKey === 'POST /api/tasks');
+    expect(post).toMatchObject({ descriptionOrigin: 'template', semantics: { rejected: true } });
+    expect(post?.findings.map((finding) => finding.code)).toContain('resolution-rejected');
+    await fixture.write('src/app/api/tasks/route.ts', `${IMPORTS}${GET_HANDLER.replace(
+      "searchParams.getAll('status')", "searchParams.getAll('status'), q: searchParams.get('q')",
+    )}${POST_HANDLER}`);
+    const changed = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const get = changed.tools?.find((tool) => tool.stableKey === 'GET /api/tasks');
+    expect(get).toMatchObject({ description: 'Lists tasks by status.', descriptionOrigin: 'agent', semantics: { stale: true } });
+    expect(get?.findings.map((finding) => [finding.code, finding.severity])).toContainEqual(['semantics-stale', 'warning']);
+    expect(JSON.parse(await fixture.read(TOOLS_PATHS.report)).findings).toContainEqual(expect.objectContaining({
+      code: 'semantics-stale', subjectRef: 'GET /api/tasks',
+    }));
+  }, 120_000);
+
+  it('keeps a stale agent entry in use without the example calls the changed interface no longer accepts', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const entry = (stableKey: string, interfaceDigest: string, input: Record<string, unknown>) => ({
+      stableKey,
+      description: `${stableKey === 'GET /api/tasks' ? 'Lists' : 'Creates'} tasks for the caller.`,
+      synonyms: { en: [stableKey === 'GET /api/tasks' ? 'my work' : 'new to-do'] },
+      exampleCalls: [{ sentence: 'Do it', input }],
+      origin: { description: 'agent', synonyms: 'agent', exampleCalls: 'agent' },
+      agent: { model: 'codex', interfaceDigest },
+    });
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        entry('GET /api/tasks', await interfaceOf(fixture, 'GET /api/tasks'), { status: ['done'] }),
+        entry('POST /api/tasks', await interfaceOf(fixture, 'POST /api/tasks'), { title: 'Buy milk' }),
+      ],
+    })}\n`);
+    const current = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(current.findings.filter((finding) => finding.code === 'resolution-rejected' || finding.code === 'semantics-stale')).toEqual([]);
+
+    // GET drops the status key, POST switches to a schema with one more required key.
+    await fixture.write('src/lib/schemas.ts', `${SCHEMAS}export const createRankedTask = z.object({ title: z.string().min(1), rank: z.number() }).strict();\n`);
+    await fixture.write('src/app/api/tasks/route.ts', IMPORTS.replace('{ createTask }', '{ createRankedTask }')
+      + GET_HANDLER.replace("status: searchParams.getAll('status')", "q: searchParams.get('q')")
+      + POST_HANDLER.replace('createTask.parse', 'createRankedTask.parse'));
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.findings.filter((finding) => finding.code === 'resolution-rejected' || finding.code === 'tool-semantics-invalid')).toEqual([]);
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    const module = await fixture.read(DEFAULT_GENERATED_MODULE);
+    for (const [stableKey, synonym] of [['GET /api/tasks', 'my work'], ['POST /api/tasks', 'new to-do']] as const) {
+      const tool = result.tools?.find((candidate) => candidate.stableKey === stableKey);
+      expect(tool).toMatchObject({ descriptionOrigin: 'agent', semantics: { stale: true, rejected: false } });
+      expect(tool?.findings.find((finding) => finding.code === 'semantics-stale')?.message)
+        .toContain('Example calls left out until then, because the input schema no longer accepts them: 1.');
+      expect(contracts.tools.find((candidate) => candidate.stableKey === stableKey)?.search).toEqual({ synonyms: [synonym] });
+      expect(module).toContain(JSON.stringify(synonym));
+    }
+  }, 120_000);
+});
+
+describe('runToolsPipeline (stale tool-resolutions.json entries)', () => {
+  const memo = (route: string, keys: string) => [
+    `src/app/api/${route}/route.ts`,
+    "import { getSession } from '@/lib/session';\n"
+      + 'export async function POST(request: Request) {\n  await getSession(request);\n'
+      + `  const { ${keys} } = await request.json();\n  return Response.json({ id: '1', title }, { status: 201 });\n}\n`,
+  ] as const;
+  const schema = (keys: ReadonlyArray<string>) => ({
+    type: 'object',
+    properties: Object.fromEntries(keys.map((key) => [key, { type: 'string' }])),
+    additionalProperties: false,
+  });
+  async function digests(fixture: AppFixture): Promise<(stableKey: string) => string> {
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    return (stableKey) => contracts.tools.find((entry) => entry.stableKey === stableKey)!.contract!.interfaceDigest;
+  }
+  const view = (result: Awaited<ReturnType<typeof runToolsPipeline>>, stableKey: string) => (
+    result.tools?.find((tool) => tool.stableKey === stableKey)
+  );
+
+  it.each([
+    ['an added key', 'title, note, amount'],
+    ['a removed key', 'title'],
+  ])('compares the interface before the keys after %s: a human entry turns contract-stale, an agent one enrichment-stale', async (_label, changed) => {
+    const fixture = await app();
+    for (const route of ['memos', 'notes']) await fixture.write(...memo(route, 'title, note'));
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const digestOf = await digests(fixture);
+    await fixture.write(TOOLS_PATHS.resolutions, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: {
+        'POST /api/memos': { interfaceDigest: digestOf('POST /api/memos'), input: { jsonSchema: schema(['note', 'title']) }, effect: 'financial' },
+        'POST /api/notes': { origin: 'agent', model: 'codex', interfaceDigest: digestOf('POST /api/notes'), input: { jsonSchema: schema(['note', 'title']) } },
+      },
+    })}\n`);
+    const current = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(view(current, 'POST /api/memos')).toMatchObject({ enabled: true, riskClass: 'financial', contract: { source: 'resolution' } });
+    expect(view(current, 'POST /api/notes')).toMatchObject({ enabled: true, contract: { source: 'resolution' } });
+
+    for (const route of ['memos', 'notes']) await fixture.write(...memo(route, changed));
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const codes = (stableKey: string) => view(result, stableKey)?.findings.map((finding) => [finding.code, finding.severity]);
+    expect(result.findings.filter((finding) => finding.code === 'resolution-rejected')).toEqual([]);
+    expect(codes('POST /api/memos')).toContainEqual(['contract-stale', 'needs_attention']);
+    expect(view(result, 'POST /api/memos')).toMatchObject({ enabled: false, contract: null });
+    expect(codes('POST /api/notes')).toContainEqual(['enrichment-stale', 'warning']);
+    expect(view(result, 'POST /api/notes')).toMatchObject({ enabled: true, contract: { source: 'derived' } });
+    expect(buildResolveWorklist(result).items).toContainEqual(expect.objectContaining({
+      code: 'contract-stale', tool: 'memos.create', target: { kind: 'file', file: TOOLS_PATHS.resolutions, key: 'tools["POST /api/memos"]' },
+    }));
+    const describe = buildDescribeWorklist(result, { root: fixture.root, locale: 'en', languages: ['en'] });
+    expect(describe.items.find((item) => item.tool === 'notes.create')?.gaps).toContain('enrichment-stale');
+  }, 180_000);
+
+  it('reports a stale human entry without an input schema on every tier instead of dropping its effect', async () => {
+    const fixture = await app();
+    await fixture.write(...memo('memos', 'title, note'));
+    await fixture.write(...memo('drafts', 'title'));
+    await fixture.write('src/app/api/drafts/contract.ts', "import { z } from 'zod';\n"
+      + "export const contract = { POST: { input: z.object({ title: z.string() }).strict(), description: 'Saves a draft.' } };\n");
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const digestOf = await digests(fixture);
+    const stableKeys = ['POST /api/drafts', 'POST /api/memos', 'POST /api/tasks'];
+    await fixture.write(TOOLS_PATHS.resolutions, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: Object.fromEntries(stableKeys.map((stableKey) => [stableKey, { interfaceDigest: digestOf(stableKey), effect: 'financial' }])),
+    })}\n`);
+    const current = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    for (const stableKey of stableKeys) {
+      expect(view(current, stableKey)).toMatchObject({ enabled: true, riskClass: 'financial' });
+    }
+
+    // The derived memo loses a key, the descriptive draft gains one, the native task handler reads a query key.
+    await fixture.write(...memo('memos', 'title'));
+    await fixture.write(...memo('drafts', 'title, note'));
+    await fixture.write('src/app/api/tasks/route.ts', `${IMPORTS}${GET_HANDLER}${POST_HANDLER.replace(
+      '  const input = createTask.parse', "  const source = new URL(request.url).searchParams.get('source');\n  const input = createTask.parse",
+    ).replace('title: input.title', 'title: input.title, source')}`);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.findings.filter((finding) => finding.code === 'resolution-rejected')).toEqual([]);
+    for (const [stableKey, source] of [['POST /api/drafts', 'contract-module'], ['POST /api/memos', 'derived'], ['POST /api/tasks', 'native']] as const) {
+      expect(view(result, stableKey)).toMatchObject({ enabled: false, contract: { source } });
+      expect(view(result, stableKey)?.findings).toContainEqual(expect.objectContaining({
+        code: 'contract-stale', severity: 'needs_attention', message: 'The handler interface changed after its tool-resolutions.json entry was written.',
+      }));
+    }
+    // The stale contract.ts is fixed in app code, every stale entry in tool-resolutions.json.
+    expect(buildResolveWorklist(result).items.filter((item) => item.code === 'contract-stale')
+      .map((item) => [item.stableKey, item.target.kind === 'file' ? item.target.key : item.target.kind])).toEqual([
+      ['POST /api/drafts', 'app-code'],
+      ['POST /api/drafts', 'tools["POST /api/drafts"]'],
+      ['POST /api/memos', 'tools["POST /api/memos"]'],
+      ['POST /api/tasks', 'tools["POST /api/tasks"]'],
+    ]);
+  }, 180_000);
+});
+
+describe('runToolsPipeline (orphaned policy entries)', () => {
+  it('reports entries for excluded routes and accepted risks without a tool as orphaned', async () => {
+    const fixture = await app();
+    await fixture.write('src/app/api/internal/sync/route.ts', `${IMPORTS}${POST_HANDLER}`);
+    await fixture.write(TOOLS_PATHS.policy, JSON.stringify({
+      schemaVersion: 1,
+      tools: {
+        'POST /api/internal/sync': { enabled: false },
+        'POST /api/auth/login': { requiresApproval: true },
+        'GET /api/tasks': { description: 'Lists your tasks by status.' },
+      },
+      exclude: [{ match: 'POST /api/internal/**', reason: 'internal' }],
+      acceptedRisk: { 'DELETE /api/gone/:id': { riskClass: 'write', toolId: '019fb007-0000-7000-8000-0000000000e1' } },
+    }));
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const orphaned = result.findings.filter((finding) => finding.code === 'policy-entry-orphaned');
+    expect(orphaned.map((finding) => [finding.subjectRef, finding.message])).toEqual([
+      ['DELETE /api/gone/:id', 'This tool-policy.json acceptedRisk entry matches no tool in the current code.'],
+      ['POST /api/auth/login', 'This tool-policy.json tools entry matches no tool in the current code.'],
+      ['POST /api/internal/sync', 'This tool-policy.json tools entry has no effect: the route is excluded (internal, policy).'],
+    ]);
+    expect(orphaned[0]?.nextAction).toContain('glirastes tools policy reset');
+    expect(JSON.parse(await fixture.read(TOOLS_PATHS.report)).findings
+      .filter((finding: { code: string }) => finding.code === 'policy-entry-orphaned')).toHaveLength(3);
+  }, 120_000);
+});
+
+describe('runToolsPipeline (app identity)', () => {
+  it('refuses to re-key every tool when tools.json changes its app id after a committed refresh', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const config = JSON.parse(await fixture.read(TOOLS_PATHS.config)) as Record<string, unknown>;
+    await fixture.write(TOOLS_PATHS.config, JSON.stringify({ ...config, appId: '019fb007-0000-7000-8000-0000000000f9' }));
+    const error = await failure(runToolsPipeline({ root: fixture.root, mode: 'write' }));
+    expect(error.result.findings.map((finding) => [finding.code, finding.subjectRef])).toEqual([
+      ['generation-state-invalid', TOOLS_PATHS.tombstones],
+      ['prompt-bundle-invalid', TOOLS_PATHS.promptBundle],
+    ]);
+    expect(error.result.wrote).toBe(false);
+  }, 120_000);
+});
+
+describe('runToolsPipeline (input schema root)', () => {
+  it('disables a tool whose input schema is no object at its root and lists it for the coding agent', async () => {
+    const fixture = await app();
+    await fixture.write('src/lib/notes.ts', "import { z } from 'zod';\n"
+      + 'export const saveNote = z.union([z.object({ text: z.string() }).strict(), z.object({ url: z.string() }).strict()]);\n');
+    await fixture.write('src/app/api/notes/route.ts', "import { getSession } from '@/lib/session';\nimport { saveNote } from '@/lib/notes';\n"
+      + 'export async function POST(request: Request) {\n  await getSession(request);\n'
+      + '  const input = saveNote.parse(await request.json());\n  return Response.json(input, { status: 201 });\n}\n');
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const note = result.tools?.find((tool) => tool.stableKey === 'POST /api/notes');
+    expect(note).toMatchObject({ enabled: false, contract: { source: 'native' } });
+    expect(note?.findings.filter((finding) => finding.severity === 'needs_attention').map((finding) => finding.code))
+      .toEqual(['input-schema-not-object']);
+    expect((await artifactOf(fixture)).tools.find((tool) => tool.name === 'notes.create'))
+      .toMatchObject({ enabled: false, operationGroup: 'needs_attention' });
+    expect(await fixture.read(DEFAULT_GENERATED_MODULE)).not.toContain('saveNote');
+    expect(buildResolveWorklist(result).items).toContainEqual(expect.objectContaining({
+      code: 'input-schema-not-object', tool: 'notes.create', owner: 'agent', target: { kind: 'app-code', files: note!.files },
+    }));
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+  }, 120_000);
+});
+
+describe('runToolsPipeline (MCP endpoint catalog)', () => {
+  it('emits the catalog under the names mcp-tool-names.json keeps and re-renders it in integrity mode', async () => {
+    const fixture = await createAppFixture({
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      'src/lib/session.ts': SESSION,
+      'src/lib/schemas.ts': SCHEMAS,
+      'src/app/api/tasks/route.ts': `${IMPORTS}${GET_HANDLER}${POST_HANDLER}`,
+    }, { toolsConfig: { emit: { mcpCatalog: true } } });
+    await fixture.write(TOOLS_PATHS.mcpToolNames, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: {
+        'POST /api/tasks': [{ id: 'tasks.create', name: 'create_task' }, { id: 'tasks.quickAdd', name: 'quick_add_task' }],
+        'GET /api/gone': [{ id: 'gone.list', name: 'list_gone' }],
+      },
+    })}\n`);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(result.findings.filter((finding) => finding.code === 'mcp-tool-names-invalid').map((finding) => finding.subjectRef))
+      .toEqual(['GET /api/gone']);
+    expect(buildResolveWorklist(result).items).toContainEqual(expect.objectContaining({
+      code: 'mcp-tool-names-invalid', owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.mcpToolNames, key: 'tools["GET /api/gone"]' },
+    }));
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    expect(contracts.tools.find((tool) => tool.stableKey === 'POST /api/tasks')?.mcp)
+      .toEqual([{ id: 'tasks.create', name: 'create_task' }, { id: 'tasks.quickAdd', name: 'quick_add_task' }]);
+    const module = await fixture.read(DEFAULT_GENERATED_MODULE);
+    const catalog = module.slice(module.indexOf('export function createMcpEndpointCatalog() {'));
+    expect(catalog.match(/"name": "\w+"/g)).toEqual(['"name": "create_task"', '"name": "quick_add_task"', '"name": "tasks_list"']);
+    expect(catalog).toContain('"inputSchema": m0.createTask');
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'integrity' })).driftPaths).toEqual([]);
+    await fixture.write(TOOLS_PATHS.mcpToolNames, JSON.stringify({ schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'x', name: 'two words' }] } }));
+    const invalid = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(invalid.findings.map((finding) => [finding.code, finding.subjectRef])).toContainEqual(['mcp-tool-names-invalid', TOOLS_PATHS.mcpToolNames]);
+    expect(await fixture.read(DEFAULT_GENERATED_MODULE)).toContain('"name": "tasks_create"');
+  }, 180_000);
+
+  it('refuses kept names and ids that another tool already uses and falls back to the generated ones', async () => {
+    const fixture = await createAppFixture({
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      'src/lib/session.ts': SESSION,
+      'src/lib/schemas.ts': SCHEMAS,
+      'src/app/api/tasks/route.ts': `${IMPORTS}${GET_HANDLER}${POST_HANDLER}`,
+    }, { toolsConfig: { emit: { mcpCatalog: true } } });
+    const catalogNames = async () => {
+      const module = await fixture.read(DEFAULT_GENERATED_MODULE);
+      return module.slice(module.indexOf('export function createMcpEndpointCatalog() {')).match(/"(?:id|name)": "[\w.]+"/g);
+    };
+    const collisions = (result: Awaited<ReturnType<typeof runToolsPipeline>>) => result.findings
+      .filter((finding) => finding.code === 'mcp-tool-names-invalid');
+
+    // A kept name that equals the generated name of the other route.
+    await fixture.write(TOOLS_PATHS.mcpToolNames, JSON.stringify({
+      schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'tasks.create', name: 'tasks_list' }] },
+    }));
+    const byName = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(collisions(byName)).toEqual([expect.objectContaining({
+      severity: 'warning',
+      subjectRef: 'POST /api/tasks',
+      message: expect.stringMatching(/name tasks_list kept for POST \/api\/tasks is also used by GET \/api\/tasks/),
+    })]);
+    expect(buildResolveWorklist(byName).items).toContainEqual(expect.objectContaining({
+      code: 'mcp-tool-names-invalid', owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.mcpToolNames, key: 'tools["POST /api/tasks"]' },
+    }));
+    expect(await catalogNames()).toEqual(['"id": "tasks.create"', '"name": "tasks_create"', '"id": "tasks.list"', '"name": "tasks_list"']);
+    const contracts = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)));
+    expect(contracts.tools.map((tool) => [tool.stableKey, tool.mcp])).toEqual(expect.arrayContaining([['POST /api/tasks', undefined]]));
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'integrity' })).driftPaths).toEqual([]);
+
+    // A kept grant id that equals the contract id of the other route.
+    await fixture.write(TOOLS_PATHS.mcpToolNames, JSON.stringify({
+      schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'tasks.list', name: 'create_task' }] },
+    }));
+    const byId = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(collisions(byId)).toEqual([expect.objectContaining({
+      subjectRef: 'POST /api/tasks',
+      message: expect.stringMatching(/id tasks\.list kept for POST \/api\/tasks is also used by GET \/api\/tasks/),
+    })]);
+    expect(await catalogNames()).toEqual(['"id": "tasks.create"', '"name": "tasks_create"', '"id": "tasks.list"', '"name": "tasks_list"']);
+
+    // Names that stay clear of every other tool are kept and raise nothing.
+    await fixture.write(TOOLS_PATHS.mcpToolNames, JSON.stringify({
+      schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'tasks.add', name: 'add_task' }] },
+    }));
+    const clean = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(collisions(clean)).toEqual([]);
+    expect(await catalogNames()).toEqual(['"id": "tasks.add"', '"name": "add_task"', '"id": "tasks.list"', '"name": "tasks_list"']);
+  }, 180_000);
+
+  it('checks the names only when the catalog is emitted and only against enabled endpoint tools', async () => {
+    const files = {
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      'src/lib/session.ts': SESSION,
+      'src/lib/schemas.ts': SCHEMAS,
+      'src/app/api/tasks/route.ts': `${IMPORTS}${GET_HANDLER}${POST_HANDLER}`,
+    };
+    const names = JSON.stringify({ schemaVersion: 1, tools: { 'POST /api/tasks': [{ id: 'tasks.create', name: 'tasks_list' }] } });
+    const off = await createAppFixture(files);
+    await off.write(TOOLS_PATHS.mcpToolNames, names);
+    const without = await runToolsPipeline({ root: off.root, mode: 'write' });
+    expect(without.findings.filter((finding) => finding.code === 'mcp-tool-names-invalid')).toEqual([]);
+
+    const disabled = await createAppFixture(files, { toolsConfig: { emit: { mcpCatalog: true } } });
+    await disabled.write(TOOLS_PATHS.mcpToolNames, names);
+    await disabled.write(TOOLS_PATHS.policy, JSON.stringify({ schemaVersion: 1, tools: { 'GET /api/tasks': { enabled: false } } }));
+    const result = await runToolsPipeline({ root: disabled.root, mode: 'write' });
+    expect(result.findings.filter((finding) => finding.code === 'mcp-tool-names-invalid')).toEqual([]);
+    const module = await disabled.read(DEFAULT_GENERATED_MODULE);
+    expect(module.slice(module.indexOf('export function createMcpEndpointCatalog() {')).match(/"name": "\w+"/g)).toEqual(['"name": "tasks_list"']);
+  }, 180_000);
 });

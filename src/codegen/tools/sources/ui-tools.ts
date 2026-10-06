@@ -214,6 +214,8 @@ export interface UiObservationInput {
   prose?: ToolProseHints;
   jsDoc?: string;
   uiMutation?: boolean;
+  /** App-relative files that register or read this tool, for the work lists. */
+  files?: string[];
 }
 
 /** An `ObservedTool` for a generated UI tool; its contract is JSON Schema read from code. */
@@ -241,7 +243,8 @@ export function uiObservation(input: UiObservationInput): ObservedTool {
       inputSchemaDigest: input.input ? jsonSchemaDigest(input.input) : OPAQUE_SCHEMA_DIGEST,
       outputSchemaDigest: jsonSchemaDigest(output),
     },
-    ...(contract ? { contract } : {}),
+    ...(contract ? { contract, interface: { digest: contract.interfaceDigest, params: contract.params } } : {}),
+    ...(input.files ? { files: [...input.files] } : {}),
     evidence: {
       authEvidence: false,
       externalCall: false,

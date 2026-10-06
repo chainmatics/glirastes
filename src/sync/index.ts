@@ -68,6 +68,7 @@ export { createManagedRuntimeSync } from './managed-sync.js';
 export {
   capabilityReportFrom,
   DISCOVERY_DIGEST_PATTERN,
+  POLICY_RELAXATIONS_VERSION,
   uploadCapabilityReport,
 } from './capability-report.js';
 export type {

@@ -6,8 +6,10 @@ import {
   TechnicalRuntimeEventV2Schema,
   type ExecutionBudget,
   type TechnicalRuntimeEventV2,
+  type ToolContractRejectedEvent,
 } from '../../../../contracts/index.js';
-import { defineTool, type PipelineResult } from '../../../../types.js';
+import { defineEndpointTool, defineTool, type PipelineResult } from '../../../../types.js';
+import { endpointToolToTool } from '../../../core/index.js';
 import {
   agentRevision, localLimits, manifestRevision, policyRevision, principal,
 } from '../../../../runtime/__tests__/turn-snapshot.test.js';
@@ -91,16 +93,21 @@ function scriptedModel(steps: Array<() => ReadableStream>) {
 
 function collectingSink(record?: (event: TechnicalRuntimeEventV2) => void) {
   const events: TechnicalRuntimeEventV2[] = [];
+  const rejections: ToolContractRejectedEvent[] = [];
   const sink: RuntimeMetricsSink = {
     identity: { appId: APP_ID, environmentId: ENVIRONMENT_ID, buildId: 'git:4f2c9e1', instanceId: 'web-1' },
     record: (event) => {
+      if (event.eventType === 'tool_contract_rejected') {
+        rejections.push(event);
+        return;
+      }
       events.push(event);
       record?.(event);
     },
     flush: async () => undefined,
     close: async () => undefined,
   };
-  return { sink, events };
+  return { sink, events, rejections };
 }
 
 function managedRuntime(limits: ExecutionBudget = localLimits) {
@@ -407,6 +414,55 @@ describe('turn metrics in the Next chat handler', () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('Erledigt');
+  });
+
+  it('reports an endpoint that refuses a schema-valid call as tool_contract_rejected', async () => {
+    const { sink, events, rejections } = collectingSink();
+    const endpointCalls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string | URL) => {
+      endpointCalls.push(String(url));
+      return new Response(JSON.stringify({ error: 'query must not be empty' }), {
+        status: 422, headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      const handler = createAiChatHandler({
+        tools: {
+          list_tasks: endpointToolToTool(defineEndpointTool({
+            id: LIST_TASKS_ID,
+            toolName: 'list_tasks',
+            description: 'List visible tasks.',
+            method: 'GET',
+            path: '/api/tasks',
+            inputSchema: z.object({ query: z.string() }),
+          })),
+        },
+        model: scriptedModel([() => toolStep(), () => textStep()]),
+        systemPrompt: 'Assistant',
+        managedRuntime: managedRuntime(),
+        metrics: sink,
+      });
+      await (await handler(request())).text();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(endpointCalls).toHaveLength(1);
+    expect(rejections).toEqual([{
+      schemaVersion: 2,
+      eventId: expect.any(String),
+      eventType: 'tool_contract_rejected',
+      occurredAt: expect.any(String),
+      appId: APP_ID,
+      environmentId: ENVIRONMENT_ID,
+      buildId: 'git:4f2c9e1',
+      instanceId: 'web-1',
+      revisionId: agentRevision.revisionId,
+      toolId: LIST_TASKS_ID,
+      inputSchemaDigest: manifestRevision.tools[0]!.inputSchemaDigest,
+      httpStatus: 422,
+    }]);
+    expect(JSON.stringify(rejections)).not.toContain(SECRET_TEXT);
+    expect(events).toHaveLength(1);
   });
 
   it('refuses the legacy Lancer telemetry on the managed-local path', () => {

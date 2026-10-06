@@ -11,6 +11,13 @@ import { dirname } from 'node:path';
 export interface ArtifactWrite {
   path: string;
   content: string | Uint8Array;
+  /**
+   * Gives the replacement the permission bits of the file it replaces. Staged
+   * files are created 0600, which suits secrets and generated artifacts but
+   * would silently narrow a developer's own source file. Off by default so a
+   * credential file is never loosened to its previous mode.
+   */
+  preserveMode?: boolean;
 }
 
 export interface AtomicArtifactWriteHooks {
@@ -23,6 +30,15 @@ async function exists(path: string): Promise<boolean> {
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function existingMode(path: string): Promise<number | undefined> {
+  try {
+    return (await stat(path)).mode & 0o7777;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
 }
@@ -63,6 +79,8 @@ export async function writeArtifactSetAtomically(
       const handle = await open(entry.staged, 'wx', 0o600);
       try {
         await handle.writeFile(entry.content);
+        const mode = entry.preserveMode ? await existingMode(entry.path) : undefined;
+        if (mode !== undefined) await handle.chmod(mode);
         await handle.sync();
       } finally {
         await handle.close();

@@ -5,7 +5,7 @@ import { toolFinding } from './findings.js';
 import type { SchemaUse } from './handler-analysis.js';
 import type { InputRole } from './input-roles.js';
 import { computeInterfaceDigest } from './interface-digest.js';
-import type { ResolutionEntry } from './resolutions.js';
+import { inputEvidenceProblem, type ResolutionEntry } from './resolutions.js';
 import type {
   ProbedContractEntry,
   ProbedSchema,
@@ -321,7 +321,7 @@ function nativeParts(
 function chooseOutput(
   input: ResolveEndpointContractInput,
   entry: ProbedContractEntry | undefined,
-  resolutionCurrent: boolean,
+  resolution: ResolutionEntry | undefined,
 ): OutputChoice {
   const outputBindings = input.evidence.schemaUses
     .filter((use) => use.role === 'output' && use.binding)
@@ -350,16 +350,11 @@ function chooseOutput(
       findings: [],
     };
   }
-  const resolutionOutput = resolutionCurrent ? input.resolution?.output : undefined;
+  const resolutionOutput = resolution?.output;
   if (resolutionOutput?.schemaRef) {
-    const outcome = input.probes.get(probeKey(probeItemFor(resolutionOutput.schemaRef, 'output')));
-    const schema = asSchema(outcome);
-    if (schema) {
-      return { source: moduleExport(resolutionOutput.schemaRef), json: schema.jsonSchema ?? OPAQUE_JSON_SCHEMA, digest: schema.digest, findings: [] };
-    }
-    if (isContentRejected(outcome)) {
-      return rejectedOutput(input.stableKey, `${resolutionOutput.schemaRef.module}#${resolutionOutput.schemaRef.export}`, outcome);
-    }
+    // assessResolution only passes an entry whose references all load.
+    const schema = asSchema(input.probes.get(probeKey(probeItemFor(resolutionOutput.schemaRef, 'output'))))!;
+    return { source: moduleExport(resolutionOutput.schemaRef), json: schema.jsonSchema ?? OPAQUE_JSON_SCHEMA, digest: schema.digest, findings: [] };
   }
   if (resolutionOutput?.jsonSchema) {
     const json = resolutionOutput.jsonSchema;
@@ -375,6 +370,78 @@ function chooseOutput(
     findings: [toolFinding('output-contract-opaque', 'warning', input.stableKey,
       'The response shape could not be determined; the model sees an untyped result.')],
   };
+}
+
+interface ResolutionAssessment {
+  /** The entry, when it is current and every schema it references loads. */
+  usable?: ResolutionEntry;
+  /** A human entry written for an earlier interface: the tool needs attention. */
+  staleHuman: boolean;
+  findings: ToolFinding[];
+}
+
+function staleResolutionFinding(subject: string): ToolFinding {
+  return toolFinding('contract-stale', 'needs_attention', subject,
+    'The handler interface changed after its tool-resolutions.json entry was written.');
+}
+
+/**
+ * Whether the tool-resolutions.json entry can be used (spec 4.4, 4.6). The
+ * interface comes first: a human entry for an older interface makes the tool
+ * `contract-stale` whichever tier wins, also without an input schema, so a
+ * raised effect never lapses unseen; an agent entry for an older interface is
+ * ignored with `enrichment-stale`. Only a current entry is held against the
+ * code: one whose input keys lack evidence or drop evidenced parameters, or
+ * whose schema reference does not load, carries secret-looking content or is
+ * no object, is ignored with `resolution-rejected`. An ignored entry leaves
+ * the tool its fallback contract.
+ */
+function assessResolution(
+  input: ResolveEndpointContractInput,
+  interfaceDigest: string,
+): ResolutionAssessment {
+  const resolution = input.resolution;
+  if (!resolution) return { staleHuman: false, findings: [] };
+  const subject = input.stableKey;
+  if (resolution.interfaceDigest !== interfaceDigest) {
+    if (resolution.origin === 'human') return { staleHuman: true, findings: [staleResolutionFinding(subject)] };
+    return {
+      staleHuman: false,
+      findings: [toolFinding('enrichment-stale', 'warning', subject,
+        'The handler interface changed after an agent described this tool; it uses the contract derived from code until the description is renewed.')],
+    };
+  }
+  const reject = (reason: string): ResolutionAssessment => ({
+    staleHuman: false,
+    findings: [toolFinding('resolution-rejected', 'warning', subject,
+      `The tool-resolutions.json entry was rejected: ${reason}.`)],
+  });
+  const evidenceProblem = (schema: Record<string, unknown>) => inputEvidenceProblem(schema, {
+    pathParams: input.pathParams,
+    queryKeys: input.evidence.queryKeys,
+    bodyKeys: input.evidence.bodyKeys,
+  });
+  if (resolution.input?.jsonSchema) {
+    const problem = evidenceProblem(resolution.input.jsonSchema);
+    if (problem) return reject(problem);
+  }
+  const references = [['input', resolution.input?.schemaRef], ['output', resolution.output?.schemaRef]] as const;
+  for (const [role, ref] of references) {
+    if (!ref) continue;
+    const outcome = input.probes.get(probeKey(probeItemFor(ref, role)));
+    const label = `${ref.module}#${[ref.export, ...ref.property].join('.')}`;
+    if (isContentRejected(outcome)) return reject(`the ${role} schema ${label} carries secret-looking content`);
+    const schema = asSchema(outcome);
+    if (!schema) return reject(`the ${role} schema ${label} could not be loaded (${outcome && !outcome.ok ? outcome.reason : 'not probed'})`);
+    if (role === 'input' && schema.jsonSchema && schema.jsonSchema.type !== 'object') {
+      return reject(`the input schema ${label} is not an object at its root`);
+    }
+    if (role === 'input' && schema.jsonSchema) {
+      const problem = evidenceProblem(schema.jsonSchema);
+      if (problem) return reject(problem);
+    }
+  }
+  return { usable: resolution, staleHuman: false, findings: [] };
 }
 
 /** Tiers: 1 native, 2 contract module, 4 tool-resolutions.json, 5 derived, 6 unresolved. */
@@ -395,8 +462,9 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
   });
   const candidate = input.contractModule?.result;
   const entry = candidate?.ok && candidate.kind === 'contract-entry' ? candidate : undefined;
-  const resolutionCurrent = input.resolution?.interfaceDigest === interfaceDigest;
-  const effect = strongerEffect(entry?.effect, resolutionCurrent ? input.resolution?.effect : undefined);
+  const assessment = assessResolution(input, interfaceDigest);
+  const resolution = assessment.usable;
+  const effect = strongerEffect(entry?.effect, resolution?.effect);
   const prose: ToolProseHints = {
     ...(entry?.description ? { contractDescription: entry.description } : {}),
     ...(entry?.module ? { module: entry.module } : {}),
@@ -415,9 +483,10 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     if (isContentRejected(candidate)) return [probeFailureFinding(subject, input.contractModule.module, candidate)];
     return entry ? invalidMetadataFindings(subject, input.contractModule.module, entry) : [];
   })();
+  const sideFindings = [...moduleFindings, ...assessment.findings];
   const withModuleFindings = (findings: ToolFinding[]): ToolFinding[] => [
     ...findings,
-    ...moduleFindings.filter((extra) => !findings.some((finding) => (
+    ...sideFindings.filter((extra) => !findings.some((finding) => (
       finding.code === extra.code && finding.message === extra.message
     ))),
   ];
@@ -427,7 +496,7 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     outputSchemaDigest: OPAQUE_SCHEMA_DIGEST,
     findings: withModuleFindings(findings),
   });
-  const output = chooseOutput(input, entry, resolutionCurrent);
+  const output = chooseOutput(input, entry, resolution);
   const finish = (
     source: ToolContract['source'],
     loadBearing: boolean,
@@ -508,20 +577,18 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     return unresolved([probeFailureFinding(subject, input.contractModule.module, candidate)]);
   }
 
-  // Tier 4: tool-resolutions.json entry bound to the interface digest.
-  const resolutionInput = input.resolution?.input;
+  // Tier 4: tool-resolutions.json entry bound to the interface digest. A stale
+  // human input schema is not swapped for a weaker one; without an input
+  // schema the code contract stays, and `contract-stale` (a side finding)
+  // keeps the tool disabled.
+  if (assessment.staleHuman && input.resolution?.input) {
+    return unresolved([staleResolutionFinding(subject)]);
+  }
+  const resolutionInput = resolution?.input;
   if (resolutionInput) {
-    if (!resolutionCurrent) {
-      return unresolved([toolFinding('contract-stale', 'needs_attention', subject,
-        'The handler interface changed after its tool-resolutions.json entry was written.')]);
-    }
     let part: RolePart;
     if (resolutionInput.schemaRef) {
-      const outcome = input.probes.get(probeKey(probeItemFor(resolutionInput.schemaRef, 'input')));
-      const schema = asSchema(outcome);
-      if (!schema) {
-        return unresolved([probeFailureFinding(subject, `${resolutionInput.schemaRef.module}#${resolutionInput.schemaRef.export}`, outcome)]);
-      }
+      const schema = asSchema(input.probes.get(probeKey(probeItemFor(resolutionInput.schemaRef, 'input'))))!;
       part = {
         role: roleFor(), json: schema.jsonSchema, source: moduleExport(resolutionInput.schemaRef), digest: schema.digest,
         label: bindingLabel(roleFor(), resolutionInput.schemaRef), wholeInput: true,

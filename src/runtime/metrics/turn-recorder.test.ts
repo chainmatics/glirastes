@@ -238,3 +238,65 @@ describe('createTurnMetricsRecorder', () => {
     expect(sink.record).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('tool_contract_rejected in the turn recorder', () => {
+  it('hands a content-free rejection of a snapshot tool to the sink right away', () => {
+    const records: unknown[] = [];
+    const { sink } = fakeSink();
+    sink.record = (event) => { records.push(event); };
+    const recorder = createTurnMetricsRecorder({
+      sink, snapshot, startedAtMs: 1_000, now: () => 2_000, createEventId: () => '019fb900-0000-7000-8000-000000000201',
+    });
+    const event = recorder.recordToolContractRejected('list_tasks', 400);
+    expect(event).toEqual({
+      schemaVersion: 2,
+      eventId: '019fb900-0000-7000-8000-000000000201',
+      eventType: 'tool_contract_rejected',
+      occurredAt: '1970-01-01T00:00:02.000Z',
+      appId: APP_ID,
+      environmentId: ENVIRONMENT_ID,
+      buildId: 'git:4f2c9e1',
+      instanceId: 'web-1',
+      revisionId: agentRevision.revisionId,
+      toolId: LIST_TASKS_ID,
+      inputSchemaDigest: manifestRevision.tools[0]!.inputSchemaDigest,
+      httpStatus: 400,
+    });
+    expect(records).toEqual([event]);
+  });
+
+  it('ignores tools outside the pinned snapshot and survives a failing sink', () => {
+    const { sink } = fakeSink();
+    sink.record = () => { throw new Error('sink down'); };
+    const recorder = createTurnMetricsRecorder({ sink, snapshot, startedAtMs: 1_000 });
+    expect(recorder.recordToolContractRejected('unknown_tool', 422)).toBeUndefined();
+    expect(recorder.recordToolContractRejected('list_tasks', 422)).toMatchObject({ httpStatus: 422 });
+    expect(createTurnMetricsRecorder({ sink, startedAtMs: 1_000 }).recordToolContractRejected('list_tasks', 400)).toBeUndefined();
+  });
+
+  it('finds a dotted manifest tool under its definitionId and under its model-facing name', () => {
+    const dotted = createTurnSnapshot({
+      turnId: 'ai-dotted',
+      agentRevision,
+      manifestRevision: {
+        ...manifestRevision,
+        tools: [{ ...manifestRevision.tools[0]!, name: 'tasks.list' }],
+      },
+      policyRevision,
+      principal,
+      localLimits,
+    });
+    const { sink } = fakeSink();
+    const recorder = createTurnMetricsRecorder({ sink, snapshot: dotted, startedAtMs: 1_000 });
+    for (const toolName of ['tasks.list', 'tasks_list']) {
+      expect(recorder.recordToolContractRejected(toolName, 422)).toMatchObject({
+        eventType: 'tool_contract_rejected',
+        toolId: LIST_TASKS_ID,
+        inputSchemaDigest: manifestRevision.tools[0]!.inputSchemaDigest,
+        httpStatus: 422,
+      });
+    }
+    expect(recorder.recordToolContractRejected('tasks.other', 422)).toBeUndefined();
+    expect(sink.record).toHaveBeenCalledTimes(2);
+  });
+});

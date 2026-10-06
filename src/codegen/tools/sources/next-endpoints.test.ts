@@ -228,6 +228,46 @@ describe('next-app endpoint source', () => {
     expect(tasks?.prose?.schemaDescription).toBe('List your tasks, optionally filtered by status.');
   }, 60_000);
 
+  it('refuses a tool-resolutions.json effect that would lower the risk the route has by code', async () => {
+    const app = await createAppFixture(APP_FILES);
+    const first = byKey((await createNextEndpointSource().observe(context(app.root))).observations);
+    const interfaceDigest = first.get('DELETE /api/tasks/:id')!.contract!.interfaceDigest;
+    const observe = (effect: string) => createNextEndpointSource().observe(context(app.root, {
+      resolutions: { conventions: EMPTY_CONVENTIONS, entries: new Map([['DELETE /api/tasks/:id', { interfaceDigest, effect }]]) },
+    }));
+    const lowered = await observe('write');
+    expect(lowered.findings.map((finding) => [finding.code, finding.subjectRef]))
+      .toContainEqual(['resolution-rejected', 'DELETE /api/tasks/:id']);
+    expect(byKey(lowered.observations).get('DELETE /api/tasks/:id')?.evidence.declaredEffect).toBeUndefined();
+    const raised = await observe('financial');
+    expect(raised.findings.map((finding) => finding.code)).not.toContain('resolution-rejected');
+    expect(byKey(raised.observations).get('DELETE /api/tasks/:id')?.evidence.declaredEffect).toBe('financial');
+  }, 60_000);
+
+  it('leaves a route file marked // @ai-ignore out as an exclusion in code', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/tenant/logo/route.ts': "// @ai-ignore - Logo file upload, admin UI only\nimport { getSession } from '@/lib/session';\n"
+        + 'export async function POST(request: Request) {\n  await getSession(request);\n  return Response.json({ ok: true });\n}\n',
+    });
+    const observed = await createNextEndpointSource().observe(context(app.root));
+    expect(observed.excluded).toContainEqual({ stableKey: 'POST /api/tenant/logo', reason: 'ai-ignore', origin: 'code' });
+    expect(byKey(observed.observations).has('POST /api/tenant/logo')).toBe(false);
+    expect(byKey(observed.observations).has('POST /api/tasks')).toBe(true);
+  }, 60_000);
+
+  it('also reads a // @ai-ignore that follows an import line, so an admin route stays out', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/admin/tenants/route.ts': "import { queryAdminTenants } from '@/lib/admin';\n// @ai-ignore - Platform-admin only, not exposed as AI tool\n"
+        + "import { getSession } from '@/lib/session';\n"
+        + 'export async function GET() {\n  await getSession();\n  return Response.json(await queryAdminTenants());\n}\n',
+    });
+    const observed = await createNextEndpointSource().observe(context(app.root));
+    expect(observed.excluded).toContainEqual({ stableKey: 'GET /api/admin/tenants', reason: 'ai-ignore', origin: 'code' });
+    expect(byKey(observed.observations).has('GET /api/admin/tenants')).toBe(false);
+  }, 60_000);
+
   it('keeps a previous definition id and handles apps without an API directory', async () => {
     const app = await createAppFixture({
       'src/app/api/tasks/route.ts': 'export async function GET() { await getSession(); return Response.json([]); }\n'

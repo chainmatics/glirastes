@@ -82,6 +82,14 @@ export interface ExpressInternalApiCallerOptions {
 
 export interface EndpointToolContext extends ToolContext {
   callEndpoint: InternalApiCaller;
+  /**
+   * The endpoint refused a call that passed the tool's input schema (400 or
+   * 422): the contract is wrong (spec 4.7, `tool_contract_rejected`). Called
+   * with the endpoint tool's `toolName` (a dotted definitionId or its
+   * model-facing encoding; the turn recorder resolves either); it must not
+   * throw.
+   */
+  onContractRejected?: (rejection: { toolName: string; status: 400 | 422 }) => void;
 }
 
 // ============================================================================
@@ -561,6 +569,13 @@ export function endpointToolToTool<TInput extends SchemaLike>(
       });
 
       if (!response.ok) {
+        if (response.status === 400 || response.status === 422) {
+          try {
+            endpointContext.onContractRejected?.({ toolName: endpointTool.toolName, status: response.status });
+          } catch {
+            // Metrics never change a tool result.
+          }
+        }
         return {
           success: false,
           error: response.error ?? `Endpoint failed (${response.status})`,

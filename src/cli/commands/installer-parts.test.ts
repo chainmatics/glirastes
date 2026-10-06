@@ -35,6 +35,15 @@ describe('stack detection', () => {
     expect(await detectStack(rootDir)).toBe('nextjs');
   });
 
+  it.each([
+    [{ vue: '^3.5.0', vite: '^7.0.0' }],
+    [{ '@nestjs/core': '^11.0.0' }],
+  ])('detects a web app with a separate backend from %j', async (dependencies) => {
+    expect(await detectStack(await projectWith(dependencies))).toBe('web');
+    expect(await detectStack(await projectWith({ ...dependencies, next: '^16.0.0' }))).toBe('nextjs');
+    expect(resolvePartSkills(['framework'], { stack: 'web' })).toEqual(['integrating-glirastes-web']);
+  });
+
   it('detects nothing in a project without a known framework', async () => {
     expect(await detectStack(await projectWith({ express: '^5.0.0' })))
       .toBeNull();
@@ -70,9 +79,9 @@ describe('part resolution', () => {
     expect(resolvePartSkills(['chat-ui'], { stack: 'nextjs' }))
       .toEqual(['building-glirastes-chat-ui']);
     expect(resolvePartSkills(['tools'], { stack: 'nextjs' }))
-      .toEqual(['maintaining-glirastes-tools']);
+      .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools']);
     expect(resolvePartSkills(['setup'], { stack: 'nextjs' }))
-      .toEqual(['setting-up-glirastes']);
+      .toEqual(['setting-up-glirastes', 'migrating-to-glirastes']);
   });
 
   it('yields no skills for a part that was declined', () => {
@@ -81,7 +90,7 @@ describe('part resolution', () => {
 
   it('resolves the framework part to nothing when no stack was detected', () => {
     expect(resolvePartSkills(['framework', 'tools'], { stack: null }))
-      .toEqual(['maintaining-glirastes-tools']);
+      .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools']);
   });
 
   it('never repeats a skill selected through two parts', () => {
@@ -92,6 +101,7 @@ describe('part resolution', () => {
     expect(resolved).toEqual([
       'integrating-glirastes-nextjs',
       'maintaining-glirastes-tools',
+      'describing-glirastes-tools',
     ]);
   });
 

@@ -5,14 +5,26 @@ export class ToolsUsageError extends Error {
   }
 }
 
+export interface ToolArgsSpec {
+  flags: ReadonlyArray<string>;
+  values: ReadonlyArray<string>;
+  /** Most positional arguments (tool names, patterns, values); none by default. */
+  positionals?: number;
+}
+
 export function parseToolArgs(
   argv: ReadonlyArray<string>,
-  spec: { flags: ReadonlyArray<string>; values: ReadonlyArray<string> },
-): { flags: Set<string>; values: Map<string, string> } {
+  spec: ToolArgsSpec,
+): { flags: Set<string>; values: Map<string, string>; positionals: string[] } {
   const flags = new Set<string>();
   const values = new Map<string, string>();
+  const positionals: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]!;
+    if (!argument.startsWith('--') && positionals.length < (spec.positionals ?? 0)) {
+      positionals.push(argument);
+      continue;
+    }
     if (spec.flags.includes(argument)) {
       flags.add(argument);
       continue;
@@ -26,5 +38,5 @@ export function parseToolArgs(
     }
     throw new ToolsUsageError(`Unknown argument ${argument}.`);
   }
-  return { flags, values };
+  return { flags, values, positionals };
 }

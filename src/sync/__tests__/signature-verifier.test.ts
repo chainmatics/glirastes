@@ -74,6 +74,26 @@ describe('RuntimeRevisionVerifier', () => {
     })).rejects.toThrow(/signing key/i);
   });
 
+  it('never verifies a confirmation relaxation added to a signed policy (D16)', async () => {
+    const verifier = new RuntimeRevisionVerifier(provider);
+    const toolId = '019fa9a9-d5f7-7ec3-a3c7-8899de1d3905';
+    const policy = { toolPolicies: [], toolOverrides: [] };
+    const revision = signedRevision(policy);
+    const relaxed = {
+      ...policy,
+      toolOverrides: [{ toolId, requiresApproval: false, pin: { toolId, atRiskClass: 'write' } }],
+    };
+    await expect(verifier.verifyRevision({ ...revision, payload: relaxed }))
+      .rejects.toThrow(/content hash/i);
+    await expect(verifier.verifyRevision({
+      ...revision,
+      payload: relaxed,
+      contentHash: `sha256:${createHash('sha256')
+        .update(canonicalRuntimeJson(relaxed))
+        .digest('base64url')}`,
+    })).rejects.toThrow(/signature is invalid/i);
+  });
+
   it('verifies signed security revocations', async () => {
     const unsigned = {
       revocationId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3910',

@@ -4,14 +4,15 @@ import { describe, expect, it } from 'vitest';
 import { findPackageSkillsDir } from './install-skills.js';
 
 describe('bundled local-first setup workflow', () => {
-  it('bridges fresh code to the positive inventory before attempting setup scan', async () => {
+  it('derives tools with refresh and works through the agent work lists before wiring the chat', async () => {
     const source = await readFile(join(findPackageSkillsDir(), 'setting-up-glirastes/SKILL.md'), 'utf8');
     expect(source).toContain('glirastes setup inspect --json');
-    expect(source.indexOf('Generate the local execution inventory')).toBeGreaterThan(0);
-    expect(source.indexOf('Generate the local execution inventory')).toBeLessThan(source.indexOf('glirastes setup scan'));
-    expect(source).toContain('glirastes setup --dry-run --json');
+    expect(source.indexOf('glirastes tools refresh')).toBeGreaterThan(0);
+    expect(source.indexOf('glirastes tools refresh')).toBeLessThan(source.indexOf('glirastes tools resolve --print'));
+    expect(source.indexOf('glirastes tools resolve --print')).toBeLessThan(source.indexOf('glirastes tools describe --print'));
     expect(source).toContain('Standalone');
     expect(source).toContain('existing coding agent');
+    expect(source).not.toContain('glirastes setup scan');
     expect(source).not.toContain('glirastes setup sync --artifact');
     expect(source).not.toContain('Ask the user to choose exactly one mode');
   });
@@ -33,9 +34,21 @@ describe('bundled local-first setup workflow', () => {
     expect(source).not.toContain('glirastes scan --sync');
   });
 
+  it('keeps the web companion within what the chat handler calls the API with', async () => {
+    const source = await readFile(join(findPackageSkillsDir(), 'integrating-glirastes-web/SKILL.md'), 'utf8');
+    // createAiChatHandler builds its own caller from the chat request (origin and cookie only)
+    // and has no option to replace it, see chat-handler-internal-caller.test.ts.
+    for (const required of ['same origin', 'session cookie', 'open gap']) {
+      expect(source).toContain(required);
+    }
+    expect(source).not.toContain('createFetchInternalApiCaller');
+    expect(source).not.toContain('defaultHeaders');
+    expect(source).not.toContain('cookie or `Authorization` header');
+  });
+
   it('maintains local code changes without making platform sync mandatory', async () => {
     const source = await readFile(join(findPackageSkillsDir(), 'maintaining-glirastes-tools/SKILL.md'), 'utf8');
-    for (const required of ['Standalone', 'navigation', 'filter', 'glirastes setup --dry-run', 'glirastes doctor', 'restart']) {
+    for (const required of ['Standalone', 'navigation', 'filter', 'glirastes tools resolve --print', 'glirastes tools check', 'glirastes doctor', 'restart']) {
       expect(source).toContain(required);
     }
     expect(source).not.toContain('Platform interviewer');

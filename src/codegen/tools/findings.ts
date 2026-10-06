@@ -10,6 +10,8 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'schema-not-exported': 'Export the schema from an app module (for Next.js a sibling contract.ts) and import it in the handler.',
   'schema-module-unloadable': 'Make the schema module importable without side effects: no database, network or secrets at import time.',
   'schema-content-rejected': 'Remove secret-looking values (defaults, consts, descriptions, hints) from the schema or contract metadata; secrets must never reach committed outputs.',
+  'input-schema-not-object': 'Give the tool an object input schema (one object with optional fields, or one field that holds the variants); an internal route can be excluded by the developer instead (glirastes tools policy exclude).',
+  'mcp-tool-names-invalid': 'Fix .glirastes/mcp-tool-names.json: per endpoint stable key a list of { id, name }, every id and MCP name (letters, digits, _ and -, at most 64) used once, and not already used by another tool under its generated id or name; MCP clients see the generated names meanwhile.',
   'contract-effect-invalid': 'Use one of read, write, destructive, external or financial as the effect in contract.ts, then run glirastes tools refresh.',
   'contract-presentation-invalid': 'Fix the presentation in contract.ts (locale, singular, plural and approval text, no other keys), then run glirastes tools refresh.',
   'schema-json-unavailable': 'Use zod v4 or install zod-to-json-schema so the schema can be described as JSON Schema.',
@@ -19,7 +21,9 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'contract-derived': 'Optional: validate the input with an exported Zod schema to give the model typed parameters.',
   'description-templated': 'Optional: add a JSDoc comment to the handler or a description in tool-semantics.json.',
   'output-contract-opaque': 'Optional: return a typed object or validate the response with an exported schema.',
-  'resolution-rejected': 'Fix the tool-resolutions.json entry; the tool keeps its fallback contract meanwhile.',
+  'resolution-rejected': 'Fix or remove the tool-resolutions.json or tool-semantics.json entry the message names; the tool keeps its fallback meanwhile.',
+  'enrichment-stale': 'Optional: describe the changed tool again (glirastes tools describe --print <tool>); it uses the contract derived from code meanwhile.',
+  'semantics-stale': 'Optional: describe the changed tool again (glirastes tools describe --print <tool>); the earlier agent description stays in use meanwhile.',
   'definition-id-invalid': 'Use a contract id like resource.action (letters and digits, dot-separated).',
   'definition-id-conflict': 'Give one of the tools a distinct contract id.',
   'tool-semantics-invalid': 'Fix .glirastes/tool-semantics.json; descriptions fall back to code and templates meanwhile.',
@@ -32,7 +36,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'risk-raised': 'Nothing to do: confirmation is enforced automatically. Review the change in your diff.',
   'override-lapsed-risk-raised': 'Your relaxation no longer applies at the higher risk; review whether you still need it.',
   'risk-lower-available': 'After review, record an acceptedRisk entry in .glirastes/tool-policy.json to adopt the lower risk.',
-  'policy-entry-orphaned': 'Remove the entry from .glirastes/tool-policy.json or restore the tool.',
+  'policy-entry-orphaned': 'Remove the entry (glirastes tools policy reset <tool>), restore the tool, or include an excluded route again (glirastes tools policy include <pattern>).',
   'tool-outputs-drift': 'Run glirastes tools refresh locally and commit .glirastes together with the generated module.',
   'tool-output-invalid': 'Regenerate the outputs with glirastes tools refresh; never edit generated files.',
   'generated-output-invalid': 'Nothing was written: the code produced a value past a limit of the generated file (a name, path or list the message names). Shorten or split it in the code, then rerun glirastes tools refresh; if the code is within reason, report it as a Glirastes bug.',
@@ -53,6 +57,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'ui-action-id-dynamic': 'Register client actions with a literal id so the chat can call them.',
   'ui-action-id-invalid': 'Use an action id of letters, digits, dots and dashes, e.g. tasks.highlight.',
   'ui-action-id-reserved': 'Ids starting with glirastes. belong to the SDK; choose another action id.',
+  'ui-action-write-unproven': 'If the handler changes data through a helper, a Server Action or a mutation hook, raise the tool: glirastes tools policy raise <tool> write. Otherwise nothing to do.',
 };
 
 /**

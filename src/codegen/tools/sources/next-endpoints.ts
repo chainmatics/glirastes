@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import ts from 'typescript';
+import { deriveToolPolicyDefaults } from '../../../contracts/tool-policy.js';
 import type { EndpointMethod } from '../../../types.js';
 import {
   createRouteSourceFingerprint,
@@ -19,7 +20,7 @@ import {
   type ResolvedEndpointContract,
 } from '../contract-tiers.js';
 import { collectHandlerEvidence } from '../evidence.js';
-import { findExclusion, importsChatHandler } from '../exclusions.js';
+import { findExclusion, hasAiIgnoreMarker, importsChatHandler } from '../exclusions.js';
 import { toolFinding } from '../findings.js';
 import { analyzeRouteHandler, type HandlerAnalysis } from '../handler-analysis.js';
 import { assignDefinitionIds } from '../identity.js';
@@ -64,6 +65,8 @@ interface RoutePiece {
   resolved?: ResolvedEndpointContract;
   findings: ToolFinding[];
   evidence: ObservedTool['evidence'];
+  interface?: ObservedTool['interface'];
+  files: string[];
 }
 
 interface EnumeratedRoutes {
@@ -242,12 +245,18 @@ function observeRoute(
   resolution: ResolutionEntry | undefined,
 ): RoutePiece {
   const { entry, analysis, contractModule } = route;
+  const files = [...new Set([
+    entry.sourceFile,
+    ...(contractModule ? [contractModule] : []),
+    ...(analysis?.importedModules ?? []),
+  ])].sort(compareCodeUnits);
   if (!analysis?.located?.fn) {
     return {
       entry,
       findings: [toolFinding('handler-unresolved', 'needs_attention', entry.stableKey,
         `The ${entry.method} export of ${entry.sourceFile} is not a function the generator can read.`)],
       evidence: { authEvidence: false, externalCall: false },
+      files,
     };
   }
   const located = analysis.located;
@@ -297,6 +306,15 @@ function observeRoute(
       ...(resolved.declaredEffect ? { declaredEffect: resolved.declaredEffect } : {}),
       ...(located.jsDoc ? { jsDoc: located.jsDoc } : {}),
     },
+    interface: {
+      digest: resolved.interfaceDigest,
+      params: resolved.contract?.params ?? {
+        path: [...entry.pathParams],
+        query: [...analysis.queryKeys],
+        body: analysis.bodyKeys === 'opaque' ? 'opaque' : [...analysis.bodyKeys],
+      },
+    },
+    files,
   };
 }
 
@@ -316,6 +334,8 @@ function toObserved(piece: RoutePiece, definitionId: string): ObservedTool {
       outputSchemaDigest: resolved?.outputSchemaDigest ?? OPAQUE_SCHEMA_DIGEST,
     },
     ...(resolved?.contract ? { contract: resolved.contract } : {}),
+    ...(piece.interface ? { interface: piece.interface } : {}),
+    files: piece.files,
     evidence: piece.evidence,
     findings: piece.findings,
     ...(resolved && Object.keys(resolved.prose).length > 0 ? { prose: resolved.prose } : {}),
@@ -338,6 +358,7 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
       method: entry.method,
       path: entry.path,
       chatHandler: importsChatHandler(entry.source),
+      aiIgnore: hasAiIgnoreMarker(entry.source),
     }, policyExcludes);
     if (exclusion) excluded.push(exclusion);
     else kept.push(entry);
@@ -367,18 +388,17 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
     return { entry, ...(analysis ? { analysis } : {}), ...(contractModule ? { contractModule } : {}) };
   });
 
+  // The input keys of an entry are checked in resolveEndpointContract, after its interfaceDigest.
   const resolutions = new Map<string, ResolutionEntry>();
-  for (const { entry, analysis } of analyzed) {
+  for (const { entry } of analyzed) {
     const raw = ctx.resolutions.entries.get(entry.stableKey);
     if (raw === undefined) continue;
     const validated = validateResolutionEntry({
       stableKey: entry.stableKey,
       raw,
-      evidence: {
-        pathParams: entry.pathParams,
-        queryKeys: analysis?.queryKeys ?? [],
-        bodyKeys: analysis?.bodyKeys ?? 'opaque',
-      },
+      codeRiskClass: deriveToolPolicyDefaults({
+        executionKind: 'endpoint', method: entry.method, path: entry.path, definitionId: '',
+      }).riskClass,
     });
     findings.push(...validated.findings);
     if (validated.entry) resolutions.set(entry.stableKey, validated.entry);

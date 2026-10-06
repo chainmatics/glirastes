@@ -1,9 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { loadToolsConfig, normalizeSources, TOOLS_PATHS, type ToolsConfig } from '../../codegen/tools/config.js';
 import type {
   PairingStartRequest,
   PairingStartResponse,
@@ -133,6 +135,24 @@ function requiredBaseUrl(value: string | undefined): string {
   return value;
 }
 
+/**
+ * The framework of the app as `tools.json` declares it (spec 7): Next.js when a
+ * `next-*` source is configured. Automatic secret materialization exists for
+ * Next.js only; other stacks set the connection variables themselves.
+ */
+export function connectFrameworkOf(config: ToolsConfig): 'nextjs' | undefined {
+  return normalizeSources(config).some((source) => source.kind.startsWith('next-')) ? 'nextjs' : undefined;
+}
+
+async function connectedAppId(rootDir: string): Promise<string | undefined> {
+  try {
+    const value = JSON.parse(await readFile(resolve(rootDir, '.glirastes/platform-connection.json'), 'utf8')) as { appId?: unknown };
+    return typeof value.appId === 'string' ? value.appId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function artifactOperationFrom(plan: SetupPlan): SetupPlan['operations'][number] {
   const operation = plan.operations.find(({ kind }) => kind === 'adopt');
   if (!operation) {
@@ -213,13 +233,29 @@ export async function runConnect(
       'rerun-local-setup',
     );
   }
-  if (
-    packageJson.data.dependencies?.next === undefined
-    && packageJson.data.devDependencies?.next === undefined
-  ) {
+  // Tool ids derive from the app id: the Platform adopts the local one, and
+  // connect refuses when the committed files disagree instead of re-keying.
+  const tools = existsSync(resolve(rootDir, TOOLS_PATHS.config)) ? loadToolsConfig(rootDir) : undefined;
+  const previouslyConnected = await connectedAppId(rootDir);
+  if ((tools && tools.appId !== receipt.data.appId)
+    || (previouslyConnected !== undefined && previouslyConnected !== receipt.data.appId)) {
+    throw connectError(
+      'E-CONNECT-APP-ID-CHANGED',
+      'The app id in .glirastes/tools.json, the setup receipt and the existing connection must be the same; tool ids derive from it, so it never changes silently.',
+      'restore-tools-app-id',
+    );
+  }
+  const framework = tools
+    ? connectFrameworkOf(tools)
+    : packageJson.data.dependencies?.next !== undefined || packageJson.data.devDependencies?.next !== undefined
+      ? 'nextjs'
+      : undefined;
+  if (framework !== 'nextjs') {
     throw connectError(
       'E-CONNECT-FRAMEWORK-UNSUPPORTED',
-      'Automatic connection materialization currently requires Next.js.',
+      tools
+        ? `Automatic connection materialization currently requires Next.js; .glirastes/tools.json declares ${normalizeSources(tools).map((source) => source.kind).join(', ')}.`
+        : 'Automatic connection materialization currently requires Next.js.',
       'configure-supported-secret-target',
     );
   }
@@ -227,7 +263,7 @@ export async function runConnect(
   const preflight = dependencies.preflight ?? preflightConnectionEnvironment;
   await preflight({
     projectRoot: rootDir,
-    framework: 'nextjs',
+    framework,
     isGitIgnored: dependencies.isGitIgnored,
   });
 
@@ -300,7 +336,7 @@ export async function runConnect(
     ?? materializeConnectionEnvironment;
   await materialize({
     projectRoot: rootDir,
-    framework: 'nextjs',
+    framework,
     connection: {
       ...token.connection,
       runnerKey: (dependencies.createRunnerKey ?? localRunnerKey)(),

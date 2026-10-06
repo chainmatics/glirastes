@@ -6,6 +6,7 @@ business data are never sent through this connection.
 
 ```ts
 import { createManagedRuntimeSync } from 'glirastes/sync';
+import { setupArtifact } from './src/generated/glirastes/tools.generated';
 
 const runtimeSync = createManagedRuntimeSync({
   baseUrl: process.env.GLIRASTES_URL!,
@@ -15,6 +16,7 @@ const runtimeSync = createManagedRuntimeSync({
   runnerKey: 'get-it-done-production',
   version: '1.0.0',
   stateFilePath: '.glirastes/runtime-state.json',
+  setupArtifact,
   validateDeployment: async (_deployment, revisions) => {
     await localBindings.assertModel(revisions.agentRevision.modelAlias);
     await localBindings.assertPrompt(revisions.agentRevision.promptBindingRef);
@@ -26,6 +28,7 @@ await runtimeSync.client.register({
   capabilities: { aiSdk: true },
   technicalMetadata: { runtimeVersion: '1.0.0' },
 });
+await runtimeSync.reportCapabilities();
 void runtimeSync.client.start();
 ```
 
@@ -43,6 +46,58 @@ selected by a deterministic subject cohort or an explicit approved pin.
 Use `MemoryRuntimeStateStore` for the zero-setup embedded development path.
 Long-lived and unattended runners should use `FileRuntimeStateStore` or provide
 their own durable `RuntimeStateStore`.
+
+## Code report and Platform decisions
+
+With `setupArtifact` (the committed, content-free code report the generated
+module exports) every registration carries the code version
+(`capabilities.discoveryDigest`) and `capabilities.policyRelaxations: 1`, and
+`reportCapabilities()` uploads the report once per process. Without it the
+runner registers neither.
+
+The chat runs on the local code. Compose each turn from the deployment the
+sync manager accepted, so Platform decisions apply without a Platform call per
+turn:
+
+```ts
+import {
+  createLocalRuntimeSource,
+  policyOverlayFromRevision,
+} from 'glirastes/runtime';
+import type { MaterializedDeploymentRevisions } from 'glirastes/sync';
+
+let accepted: MaterializedDeploymentRevisions | undefined; // the active deployment
+
+const source = createLocalRuntimeSource({
+  setupArtifact,
+  bindings,
+  localLimits,
+  identity: { tenantId, targetAppId: appId, environmentId },
+  policyOverlay: () => accepted && policyOverlayFromRevision(accepted.policyRevision),
+  platformRevisions: () => accepted,
+  onPolicyOverlayApplied: (report) => console.info('glirastes policy overlay', report),
+});
+```
+
+A signed decision (`toolOverrides` of the policy revision) disables a tool,
+raises its risk class, narrows its roles, requires confirmation, or replaces
+its model-facing description. It never enables a tool the code lacks or keeps
+disabled, and never lowers a risk class. It switches a confirmation off only
+under all of these conditions (D16, see [tool policy](./tool-policy.md)):
+
+- the decision is pinned to this tool at the risk class the code reported;
+- the effective risk class is at most tier 2 (`write`) and not above the pin;
+  a higher risk lets the relaxation lapse, and tier 3 always asks;
+- the code report attributes the confirmation to the code default, so an
+  explicit `"requiresApproval": true` in `.glirastes/tool-policy.json` (a local
+  lock) always wins.
+
+`onPolicyOverlayApplied` reports every attempted relaxation with its outcome
+(`applied`, `locked-locally`, `override-lapsed-risk-raised`, …), content-free.
+A runner that builds turn snapshots straight from Platform revisions passes
+`relaxableToolIds: relaxableToolIds(setupArtifact)` to `createTurnSnapshot`;
+without it nothing relaxes there, so register such a runner with
+`setupArtifact` only once its snapshots get `relaxableToolIds`.
 
 ## Runtime metrics
 
@@ -76,7 +131,11 @@ sink once per process at module scope, never per request: every sink draws its
 own `instanceId`.
 
 Cost is `provider-reported` when OpenRouter returns `usage.cost`, also through
-`createOpenAI({ baseURL: 'https://openrouter.ai/api/v1' })`. A `modelPricing`
+`createOpenAI({ baseURL: 'https://openrouter.ai/api/v1' }).chat(model)`; use
+`.chat`, because `createOpenAI(...)(model)` talks to the Responses API, whose
+usage the handler does not read. An endpoint that refuses a call its tool
+schema accepted (400 or 422) adds a content-free `tool_contract_rejected`
+event to the same sink, in its own batch. A `modelPricing`
 table on the handler estimates the rest (`price-table`, with its version).
 Without either, the cost stays unknown (`null`), never 0. A known cost also
 counts against the turn's `maxEstimatedCostUsd`. The legacy Lancer `telemetry`

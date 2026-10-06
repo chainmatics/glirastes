@@ -1,66 +1,39 @@
-# Setup artifact contract
+# The files in `.glirastes`
 
-Create one JSON document accepted by `AppSetupArtifactSchema` from
-`glirastes/contracts`.
+Everything below is committed with the code. Inputs are written by people,
+`glirastes init`, the CLI or you; outputs belong to the generator and are
+byte-checked by `glirastes tools check`. Never write an output by hand: rerun
+`glirastes tools refresh`, which also resolves merge conflicts in them.
 
-Required top-level fields:
+## Inputs
 
-- `schemaVersion: 1`
-- UUIDs: `artifactId`, `runId`, `appId`
-- `discoveryDigest`
-- `assessmentMode`: `autonomous` or `interview`
-- `status`: `review` or `ready`
-- `tools`, `planner`, `prompts`, `warnings`, `generatedAt`
+| File | Who writes it | Contract |
+| --- | --- | --- |
+| `.glirastes/tools.json` | `glirastes init`, then you or the developer | `schemaVersion: 1`, `appId` (UUID, never changed after the first committed refresh), `targetAppKey`, `locale`, `sources`, optional `emit`, `enrich`, `ci`. Never a key. |
+| `.glirastes/prompt-bundle.json` | `glirastes init`, then you | `schemaVersion: 1`, the same `appId`, `artifactRef`, and `sections` with `planner`, `appBehavior`, `responseStyle`, `capabilityFragments`. This is local prompt text; only digests leave the app. Preserve tuned text. |
+| `.glirastes/tool-policy.json` | the developer, through `glirastes tools policy` | Overrides and exclusions. It can only restrict what the code allows, except a reviewed, pinned confirmation relaxation of a write tool. You never write it. |
+| `.glirastes/tool-resolutions.json` | you or the developer | `conventions` (`handlerWrappers`, `bodyReaders`, `authHelpers`, `filterValues`) and per-tool contracts bound to an `interfaceDigest`. Data only. |
+| `.glirastes/tool-semantics.json` | you or the developer | Descriptions, titles, synonyms, examples and hints per `stableKey`, with an origin per field. Human and locked fields are never replaced by agent output. |
+| `.glirastes/mcp-tool-names.json` | you or the developer, only for an app with an MCP server | Per endpoint `stableKey` the grant ids and MCP names its clients keep; read when `emit.mcpCatalog` is set. Never used by the chat. |
 
-Each tool carries its stable UUID, definition name, execution kind, operation
-group, risk class, enabled/approval flags, source fingerprint, and input/output
-schema digests. Reference every planner tool from the same artifact.
-
-Prompt metadata carries artifact and group digests plus a local or
-customer-controlled `artifactRef`. Do not embed prompt text.
-
-Forbidden content includes source, raw credentials, authorization values,
-business payloads, tool arguments/results, raw prompts, model transcripts, and
-secret-shaped values. Validation errors may identify a field path but must not
-echo a rejected value.
-
-## Bootstrap from app code
-
-Preserve existing identities, prompts and policy. Generate UUIDs once for a
-new local app/planner/tool identity; do not regenerate them on each scan. Reuse
-the real app identity when connecting an existing Platform application.
-
-The initial local files are distinct:
+## Outputs
 
 | File | Contract |
 | --- | --- |
-| `.glirastes/foundation-execution-inventory.json` | `FoundationExecutionInventorySchema` from `glirastes/codegen`: `schemaVersion: 2`, `targetAppKey`, and source-derived `executions`. |
-| `.glirastes/setup-artifact.json` | `AppSetupArtifactSchema` plus `assertAppSetupSemanticParity` from `glirastes/contracts`; `discoveryDigest` must match verified inventory discovery. |
-| `.glirastes/prompt-bundle.json` | Local disk input: `schemaVersion: 1`, `appId`, `artifactRef`, and `sections` containing `planner`, `appBehavior`, `responseStyle`, `capabilityFragments`. This contains local prompt text, not Platform metadata. |
+| `.glirastes/foundation-execution-inventory.json` | `FoundationExecutionInventorySchema` from `glirastes/codegen`: `schemaVersion: 2`, `targetAppKey` and the executions with their stable ids. |
+| `.glirastes/tool-tombstones.json` | Removed tools; a tool that comes back gets a new id. |
+| `.glirastes/tool-contracts.json` | Contracts, defaults and checked search data per tool; local only. |
+| `.glirastes/tool-report.json` | Content-free findings, quality and exclusions per tool. |
+| `.glirastes/setup-artifact.json` | `AppSetupArtifactSchema`; also the content-free capability report a connected runner uploads. |
+| `.glirastes/build/runtime-manifest.json`, `.glirastes/build/prompt-manifest.json`, `.glirastes/setup-receipt.json` | Digest chain the Docker build verifies with `GLIRASTES_TOOLS_MODE=integrity`. |
+| The generated module (`src/generated/glirastes/tools.generated.ts` by default) | `setupArtifact`, `toolCatalog`, `createToolBindings()`, `toolSearchSemantics`, `GeneratedToolId`. |
 
-Inventory endpoints bind UUID, definition ID, stable method/path key, source
-file, source fingerprint and schema digests. UI entries bind a real action ID
-and local handler reference. Read the exported schema for exact required fields.
-Use `createRouteSourceFingerprint` and `discoverFoundationExecutions` for their
-verified Next.js source path; the latter does not verify arbitrary backend
-languages. Never fill fingerprints/digests with placeholders or make unknown
-input schemas accept everything just to pass validation.
+## Principal
 
-Implement the app's generator against its actual schemas and handlers. It must
-preserve curated descriptions and policy while detecting added/changed/removed
-capabilities. A file listing hand-maintained tool definitions is not automatic
-discovery. Generated files may be committed; provider credentials may not.
+Set `"glirastes": { "principal": "server-verified" }` in `package.json` only
+after the real server-side `resolvePrincipal` is implemented and tested. Doctor
+checks the declaration; it never replaces the endpoint's own authorization.
 
-Set the package's `glirastes` paths to these local files. Set
-`glirastes.principal: "server-verified"` only after implementing and testing the
-real server-side resolver. It is a declaration to check, not authorization.
-The runtime's `PromptBundleSchema` is a separate execution contract: materialize
-it using the actual runtime types rather than passing the local disk `sections`
-shape unchanged.
-
-Use `glirastes setup --dry-run --json` to inspect the change plan. Source
-fingerprints, discovery and complete prompt content are checked separately by
-setup/doctor and application tests, not proved by dry-run alone. If using
-`validate-artifact.ts`, resolve its path relative to this
-skill's installation, not an assumed `skills/` folder in the target app. That
-schema-only check does not replace inventory, principal, build or live testing.
+The schema-only check `scripts/validate-artifact.ts` of this skill validates a
+setup artifact; resolve its path relative to the installed skill. It does not
+replace `glirastes tools check`, Doctor or a real tool action.

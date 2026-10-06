@@ -138,6 +138,32 @@ describe('scanAppSources', () => {
   });
 });
 
+describe('scanAppSources skip list', () => {
+  it('skips build output only directly in the source folder and scans feature folders of the same name', async () => {
+    const app = await createAppFixture({
+      'src/build/chunk.tsx': 'useAiClientAction();',
+      'src/generated/glirastes/tools.generated.ts': 'useAiClientAction();',
+      'src/app/(app)/build/actions.tsx': 'useAiClientAction();',
+      'src/features/e2e/flow.tsx': 'useAiClientAction();',
+      'src/features/generated/view.tsx': 'useAiClientAction();',
+      'src/features/__tests__/harness.tsx': 'useAiClientAction();',
+    });
+    const scan = await scanAppSources(app.root, { matches: (source) => source.includes('useAiClientAction') });
+    expect(scan.complete && scan.files.map((entry) => entry.path)).toEqual([
+      'src/app/(app)/build/actions.tsx', 'src/features/e2e/flow.tsx', 'src/features/generated/view.tsx',
+    ]);
+  });
+
+  it('leaves static assets of an app without src out of the scan', async () => {
+    const app = await createAppFixture({
+      'app/page.tsx': 'useAiClientAction();',
+      'public/vendor.js': `useAiClientAction();${'x'.repeat(2_000_001)}`,
+    });
+    const scan = await scanAppSources(app.root, { matches: (source) => source.includes('useAiClientAction') });
+    expect(scan).toEqual({ complete: true, files: [expect.objectContaining({ path: 'app/page.tsx' })] });
+  });
+});
+
 describe('UI tool observations', () => {
   const input = { type: 'object', properties: { taskId: { type: 'string' } }, required: ['taskId'], additionalProperties: false };
 

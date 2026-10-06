@@ -104,5 +104,41 @@
       "patch": { "tools": [{ "toolId": "019fb900-0000-7000-8000-0000000000c1", "calls": 0, "errors": 0 }] }
     },
     { "name": "invalid/unknown-error-code", "patch": { "status": "error", "errorCode": "timeout" } }
-  ]
+  ],
+  "toolContractRejected": {
+    "base": {
+      "schemaVersion": 2,
+      "eventId": "019fb900-0000-7000-8000-000000000101",
+      "eventType": "tool_contract_rejected",
+      "occurredAt": "2026-10-05T10:16:02.000Z",
+      "appId": "019fb900-0000-7000-8000-0000000000a1",
+      "environmentId": "019fb900-0000-7000-8000-0000000000e1",
+      "buildId": "git:4f2c9e1",
+      "instanceId": "web-1",
+      "revisionId": "019fb900-0000-7000-8000-0000000000b1",
+      "toolId": "019fb900-0000-7000-8000-0000000000c1",
+      "inputSchemaDigest": "sha256:Hk3m0QZrJ8v2bW6cX9fN1pL4sT7uY0aE5dG8iK2oMqA",
+      "httpStatus": 400
+    },
+    "valid": [
+      { "name": "valid/bad-request", "patch": {} },
+      { "name": "valid/unprocessable-entity", "patch": { "httpStatus": 422 } },
+      { "name": "valid/standalone-without-build-or-revision", "patch": { "buildId": null, "revisionId": null } },
+      { "name": "valid/base64-schema-digest", "patch": { "inputSchemaDigest": "sha256:Hk3m0QZrJ8v2bW6cX9fN1pL4sT7uY0aE5dG8iK2oMqA=" } }
+    ],
+    "invalid": [
+      { "name": "invalid/server-error", "patch": { "httpStatus": 500 } },
+      { "name": "invalid/unauthorized", "patch": { "httpStatus": 401 } },
+      { "name": "invalid/status-as-text", "patch": { "httpStatus": "400" } },
+      { "name": "invalid/tool-name-instead-of-id", "patch": { "toolId": "tasks.create" } },
+      { "name": "invalid/schema-digest-without-prefix", "patch": { "inputSchemaDigest": "Hk3m0QZrJ8v2bW6cX9fN1pL4sT7uY0aE5dG8iK2oMqA" } },
+      { "name": "invalid/arguments", "patch": { "arguments": { "title": "Bericht" } } },
+      { "name": "invalid/response-body", "patch": { "responseBody": "title is required" } },
+      { "name": "invalid/error-message", "patch": { "message": "Expected string, received number" } },
+      { "name": "invalid/secret-in-instance-id", "patch": { "instanceId": "sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789" } },
+      { "name": "invalid/turn-fields", "patch": { "status": "completed" } },
+      { "name": "invalid/schema-version-1", "patch": { "schemaVersion": 1 } },
+      { "name": "invalid/without-tool", "patch": { "toolId": null } }
+    ]
+  }
 }
