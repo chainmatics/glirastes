@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import ts from 'typescript';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
+import { readVueScript, vueFileOf } from './sources/vue-sfc.js';
 
 export interface AppProgram {
   readonly root: string;
@@ -63,7 +64,12 @@ export function createAppProgram(input: {
     declarationMap: false,
     sourceMap: false,
   };
-  const program = ts.createProgram({ rootNames: [...input.rootNames].sort(), options });
+  // `<file>.vue.ts` names read the script blocks of `<file>.vue`; every other file is read as is.
+  const host = ts.createCompilerHost(options, true);
+  const { fileExists, readFile } = host;
+  host.fileExists = (fileName) => (vueFileOf(fileName) ? readVueScript(fileName) !== undefined : fileExists(fileName));
+  host.readFile = (fileName) => (vueFileOf(fileName) ? readVueScript(fileName) : readFile(fileName));
+  const program = ts.createProgram({ rootNames: [...input.rootNames].sort(), options, host });
   if (program.getSourceFiles().length > MAX_PROGRAM_FILES) throw unbounded();
   const checker = program.getTypeChecker();
   return {
@@ -75,7 +81,7 @@ export function createAppProgram(input: {
       if (fileName.endsWith('.d.ts')) return undefined;
       const local = relative(input.root, fileName);
       if (!local || local.startsWith('..') || isAbsolute(local)) return undefined;
-      const segments = local.split(/[\\/]/);
+      const segments = (vueFileOf(local) ?? local).split(/[\\/]/);
       if (segments.includes('node_modules')) return undefined;
       return segments.join('/');
     },

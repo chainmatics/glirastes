@@ -30,6 +30,7 @@ import {
   type ImportBindings,
   type ImportedCall,
 } from './ui-tools.js';
+import { programFileName } from './vue-sfc.js';
 
 export interface UrlFilterSourceOptions extends PageTreeOptions {
   /** Where `defineQueryFilters` and the navigation bridge are searched; `src` when the app has one. */
@@ -721,7 +722,7 @@ async function observeFilters(
   const app = createAppProgram({
     root,
     rootNames: [
-      ...tree.pages.map((page) => join(root, page.file)),
+      ...tree.pages.map((page) => programFileName(join(root, page.file))),
       ...defined.files.map((file) => file.absolute),
     ],
   });
@@ -736,7 +737,7 @@ async function observeFilters(
     return view;
   };
   for (const page of tree.pages as ReadonlyArray<PageEntry>) {
-    const source = app.sourceFile(join(root, page.file));
+    const source = app.sourceFile(programFileName(join(root, page.file)));
     const rendered = source && page.component ? componentDeclaration(source, page.component) : source;
     if (!rendered) continue;
     const found = reader.viewEvidence(rendered);

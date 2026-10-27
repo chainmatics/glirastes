@@ -2,11 +2,12 @@ import { existsSync } from 'node:fs';
 import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { compareCodeUnits } from '../canonical.js';
+import { programFileName, vueScriptOf } from './vue-sfc.js';
 
 export const MAX_APP_SOURCE_FILES = 20_000;
 export const MAX_APP_SOURCE_BYTES = 2_000_000;
 
-const SOURCE_FILE = /\.(?:tsx?|jsx?|mjs|cjs)$/;
+const SOURCE_FILE = /\.(?:tsx?|jsx?|mjs|cjs|vue)$/;
 /** `a.test.tsx`, `a.spec.ts`, `Button.stories.tsx`: test and story files, not app code. */
 const TEST_FILE = /\.(?:test|spec|stories)\.[^.]+$/;
 /**
@@ -28,7 +29,9 @@ const SKIPPED_AT_SCAN_ROOT = new Set([
 export interface AppSourceFile {
   /** App-relative POSIX path. */
   path: string;
+  /** The name in the TypeScript program: `<file>.vue.ts` for a `.vue` file (see vue-sfc.ts). */
   absolute: string;
+  /** For a `.vue` file only its script blocks, at their original offsets. */
   source: string;
 }
 
@@ -102,8 +105,15 @@ export async function scanAppSources(root: string, options: {
       if ((await lstat(absolute)).size > MAX_APP_SOURCE_BYTES) {
         return `${appRelative(root, absolute)} is too large to read.`;
       }
-      const source = await readFile(absolute, 'utf8');
-      if (options.matches(source)) files.push({ path: appRelative(root, absolute), absolute, source });
+      const text = await readFile(absolute, 'utf8');
+      const script = entry.name.endsWith('.vue') ? vueScriptOf(text) : { ok: true as const, text };
+      if (!script.ok) {
+        if (options.matches(text)) return `${appRelative(root, absolute)} ${script.reason}`;
+        continue;
+      }
+      if (options.matches(script.text)) {
+        files.push({ path: appRelative(root, absolute), absolute: programFileName(absolute), source: script.text });
+      }
     }
     return undefined;
   };
