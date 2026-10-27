@@ -49,7 +49,11 @@ controllers (`nest`), react-router route objects (`react-router`), URL
 filters and client actions. `examples/react-nest-separate` is the reference
 app for a NestJS API on its own origin with a Vite React frontend; its chat
 controller passes `createHttpEndpointCaller` so tools call the API with the
-user's cookie or bearer token.
+user's cookie or bearer token. FastAPI apps are read through their committed
+OpenAPI export (`openapi`), Vue apps through `vue-router` and the script
+blocks of `.vue` files; `examples/vue-fastapi` is that reference app, with a
+small Node chat runtime next to the FastAPI API. Its tests need Python 3.12
+with `api/requirements.txt` installed and are skipped, visibly, without it.
 
 ## Focused local intent routing
 

@@ -54,12 +54,16 @@ describe('bundled local-first setup workflow', () => {
     // origin uses createHttpEndpointCaller, which forwards only cookie and authorization
     // (see chat-handler-internal-caller.test.ts and http-endpoint-caller.test.ts).
     for (const required of ['same origin', 'session cookie', 'open gap', 'endpointCaller', 'createHttpEndpointCaller',
-      '`cookie` and `authorization` headers', '| `nest` |', '| `react-router` |']) {
+      '`cookie` and `authorization` headers', '| `nest` |', '| `react-router` |', '| `openapi` |', '| `vue-router` |',
+      'examples/vue-fastapi', 'Python 3.12', 'include_in_schema=False', 'x-glirastes-effect']) {
       expect(source).toContain(required);
     }
     expect(source).not.toContain('createFetchInternalApiCaller');
     expect(source).not.toContain('defaultHeaders');
     expect(source).not.toContain('NestJS controllers, FastAPI');
+    // FastAPI, vue-router and .vue script blocks are read since P06b.
+    expect(source).not.toContain('FastAPI through OpenAPI, vue-router pages');
+    expect(source).not.toContain('not in `.vue` script blocks');
   });
 
   it('maintains local code changes without making platform sync mandatory', async () => {

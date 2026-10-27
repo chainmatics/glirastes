@@ -27,14 +27,18 @@ replace the generator with a hand-written tool list.
 | Part of the app | Read by `glirastes tools refresh` | Source in `.glirastes/tools.json` |
 | --- | --- | --- |
 | Next.js route handlers | yes | `next-app` |
-| Client actions in `.ts`, `.tsx`, `.js` files (`useAiClientAction`, `registerAiClientAction`, `bus.subscribeById`) | yes, also in Vue apps | `react-actions` |
+| Client actions in `.ts`, `.tsx`, `.js` files and in `<script>` / `<script setup>` blocks of `.vue` files (`useAiClientAction`, `registerAiClientAction`, `bus.subscribeById`) | yes | `react-actions` |
 | URL filters of SPA views declared with `defineQueryFilters`, or `nuqs` `useQueryState` in a routed page | yes | `url-filters` |
 | NestJS controllers with Zod pipes or `createZodDto` | yes | `nest` |
 | react-router route objects (`createBrowserRouter([...])`, `useRoutes([...])`) | yes | `react-router` |
-| FastAPI through OpenAPI, vue-router pages, `<script>` blocks of `.vue` files, JSX `<Route>` trees | not yet | report as an open gap |
+| FastAPI (or any API) through its committed OpenAPI 3.1 JSON export | yes | `openapi` |
+| vue-router routes of `createRouter({ routes: [...] })` | yes | `vue-router` |
+| JSX `<Route>` trees, OpenAPI 3.0 or YAML exports, `<script>` blocks in another language than ts or js | not yet | report as an open gap |
 
-The reference app `examples/react-nest-separate` in the SDK shows all four
-sources together: a NestJS API on its own origin and a Vite React frontend.
+Two reference apps in the SDK show the sources together:
+`examples/react-nest-separate` (a NestJS API on its own origin and a Vite
+React frontend) and `examples/vue-fastapi` (a FastAPI API, a small Node chat
+runtime next to it and a Vite Vue frontend).
 
 ## Workflow
 
@@ -59,6 +63,22 @@ sources together: a NestJS API on its own origin and a Vite React frontend.
    guard with `@UseGuards` or a global guard, and keep `@Controller` paths and
    `setGlobalPrefix` string literals. The generator stops instead of guessing
    on `RouterModule`, `enableVersioning` or a computed path.
+   In FastAPI, the generator reads the OpenAPI document the app exports, so
+   the server validates exactly the schemas the tools use. Export it with
+   `json.dumps(app.openapi(), indent=2, sort_keys=True)` to a committed file
+   (for example `api/openapi.json`) and run the export before every
+   `glirastes tools refresh`. Configure
+   `{ "kind": "openapi", "document": "api/openapi.json", "fastapi": "api/app" }`:
+   with `fastapi`, Python 3.12 counts the routes of that directory from
+   syntax only (the app is never imported) and the refresh stops when the
+   export is older than the code. Declare authentication as a security
+   dependency (`APIKeyCookie`, `HTTPBearer`) so it appears in the export;
+   an operation without `security` needs attention. A route with
+   `include_in_schema=False` stays out of the chat and is reported. Declare
+   an effect stronger than the method suggests with
+   `openapi_extra={'x-glirastes-effect': 'destructive'}` (it can only raise
+   the risk), and keep a route out with
+   `openapi_extra={'x-glirastes-ignore': True}`.
 3. Frontend actions and navigation without React: in the browser entry module
    use `glirastes/browser`:
 
@@ -76,7 +96,13 @@ sources together: a NestJS API on its own origin and a Vite React frontend.
    ```
 
    Literal ids and literal filter definitions only: the generator reads them
-   from code. Keep registrations in `.ts` files, not in `.vue` script blocks.
+   from code, in `.ts` modules and in the `<script lang="ts">` or
+   `<script setup lang="ts">` blocks of `.vue` files (a `src` attribute is
+   not followed). With a route config (`vue-router`, `react-router`), a
+   `defineQueryFilters` path that no route serves gets no tool and a warning.
+   In vue-router, keep `path` string literals and static `component` or
+   lazy `() => import('...')` views; an `alias` stops the refresh, a
+   redirect-only route is not a page.
 4. Embed the chat without React code in the app:
    `defineGlirastesChatElement()` from `glirastes/embed` registers
    `<glirastes-chat endpoint="/api/chat">`. It renders in a Shadow DOM,
