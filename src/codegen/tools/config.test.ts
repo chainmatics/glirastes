@@ -84,6 +84,11 @@ describe('tools config', () => {
     expect(normalizeSources(config)).toEqual([{ kind: 'nest' }, { kind: 'nest', srcDir: 'api/src' }]);
   });
 
+  it('accepts vue-router routes as the page source of navigation and filters', async () => {
+    const config = loadToolsConfig(await appWith({ ...minimal, sources: [{ kind: 'vue-router', srcDir: 'web/src' }, 'url-filters'] }));
+    expect(normalizeSources(config)).toEqual([{ kind: 'vue-router', srcDir: 'web/src' }, { kind: 'url-filters' }]);
+  });
+
   it('accepts react-router routes as the page source of navigation and filters', async () => {
     const config = loadToolsConfig(await appWith({ ...minimal, sources: [{ kind: 'react-router', srcDir: 'web/src' }, 'url-filters'] }));
     expect(normalizeSources(config)).toEqual([{ kind: 'react-router', srcDir: 'web/src' }, { kind: 'url-filters' }]);
@@ -102,6 +107,7 @@ describe('tools config', () => {
   it.each([
     ['an unknown key', { ...minimal, openrouterApiKey: 'value' }],
     ['two page sources', { ...minimal, sources: ['next-pages', 'react-router'] }],
+    ['a react and a vue router', { ...minimal, sources: ['react-router', 'vue-router'] }],
     ['a secret-looking value', { ...minimal, enrich: { model: `sk-or-v1-${'a'.repeat(32)}` } }],
     ['a module outside the app', { ...minimal, emit: { module: '../outside/tools.generated.ts' } }],
     ['an absolute module path', { ...minimal, emit: { module: '/tmp/tools.generated.ts' } }],

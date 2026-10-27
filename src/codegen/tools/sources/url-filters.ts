@@ -15,7 +15,7 @@ import type {
 import { scanAppSources } from './app-files.js';
 import { navigationBridgeMissing, scanForNavigationBridge } from './next-pages.js';
 import { enumeratePages, pathExclusion, type PageEntry, type PageTreeOptions } from './page-tree.js';
-import { componentDeclaration, enumerateRouteConfigPages } from './route-config.js';
+import { componentDeclaration, enumerateRouteConfigPages, type RouterKind } from './route-config.js';
 import {
   filterStableKey,
   hasNavigationBridge,
@@ -36,7 +36,7 @@ export interface UrlFilterSourceOptions extends PageTreeOptions {
   /** Where `defineQueryFilters` and the navigation bridge are searched; `src` when the app has one. */
   srcDir?: string;
   /** Which page list the filters attach to: the Next.js page tree (default) or react-router routes. */
-  pages?: 'next' | 'react-router';
+  pages?: 'next' | RouterKind;
 }
 
 export type FilterDomain =
@@ -707,8 +707,8 @@ async function observeFilters(
   options: UrlFilterSourceOptions,
   policyExcludes: ReadonlyArray<{ match: string; reason: string }>,
 ): Promise<ToolSourceObservation> {
-  const tree = options.pages === 'react-router'
-    ? await enumerateRouteConfigPages(root, options, policyExcludes)
+  const tree = options.pages === 'react-router' || options.pages === 'vue-router'
+    ? await enumerateRouteConfigPages(root, options, policyExcludes, options.pages)
     : await enumeratePages(root, options, policyExcludes);
   if (!tree.complete) return incompleteUiSource('url-filters', tree.reason);
   const defined = await scanAppSources(root, {

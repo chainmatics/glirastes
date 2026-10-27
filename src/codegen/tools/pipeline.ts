@@ -66,7 +66,7 @@ import {
   type SemanticsFacts,
 } from './semantics.js';
 import { createNestEndpointSource } from './sources/nest-endpoints.js';
-import { createReactRouterSource } from './sources/route-config.js';
+import { createReactRouterSource, createVueRouterSource } from './sources/route-config.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { createNextPagesSource } from './sources/next-pages.js';
 import { createReactActionSource } from './sources/react-actions.js';
@@ -167,7 +167,7 @@ export class ToolsPipelineFailure extends FoundationDiagnosticError {
 export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
   const sources = normalizeSources(config);
   const pages = sources.find((source) => source.kind === 'next-pages');
-  const routes = sources.find((source) => source.kind === 'react-router');
+  const routes = sources.find((source) => source.kind === 'react-router' || source.kind === 'vue-router');
   return sources.map((source) => {
     switch (source.kind) {
       case 'next-app':
@@ -178,10 +178,14 @@ export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
         return createNextPagesSource(source);
       case 'react-router':
         return createReactRouterSource(source.srcDir ? { srcDir: source.srcDir } : {});
+      case 'vue-router':
+        return createVueRouterSource(source.srcDir ? { srcDir: source.srcDir } : {});
       case 'url-filters':
         return createUrlFilterSource({
           ...(pages && pages.kind === 'next-pages' ? pages : {}),
-          ...(routes && routes.kind === 'react-router' ? { pages: 'react-router' as const, ...(routes.srcDir ? { srcDir: routes.srcDir } : {}) } : {}),
+          ...(routes && (routes.kind === 'react-router' || routes.kind === 'vue-router')
+            ? { pages: routes.kind, ...(routes.srcDir ? { srcDir: routes.srcDir } : {}) }
+            : {}),
           ...source,
         });
       case 'react-actions':

@@ -5,7 +5,7 @@ import { loadToolsConfig } from '../config.js';
 import { EMPTY_CONVENTIONS } from '../resolutions.js';
 import { createSchemaProbe } from '../schema-probe.js';
 import type { ToolSourceContext } from '../types.js';
-import { createReactRouterSource, enumerateRouteConfigPages } from './route-config.js';
+import { createReactRouterSource, createVueRouterSource, enumerateRouteConfigPages } from './route-config.js';
 import { createUrlFilterSource } from './url-filters.js';
 
 afterEach(removeAppFixtures);
@@ -110,5 +110,103 @@ describe('react-router route objects', () => {
     expect(observed.complete).toBe(false);
     expect(observed.findings).toEqual([expect.objectContaining({ code: 'E-INVENTORY-011' })]);
     expect(observed.findings[0]!.message).toContain(reason);
+  });
+});
+
+const VUE_ROUTER = "import { createRouter, createWebHistory } from 'vue-router';\n"
+  + "import TasksView from '../views/TasksView.vue';\n"
+  + 'const routes = [\n'
+  + "  { path: '/', component: () => import('../views/HomeView.vue') },\n"
+  + "  { path: '/tasks', component: TasksView, children: [\n"
+  + "    { path: '', component: TasksView },\n"
+  + "    { path: ':taskId', component: () => import('../views/TaskDetail.vue') },\n"
+  + '  ] },\n'
+  + "  { path: '/reports', components: { default: () => import('../views/ReportsView.vue') } },\n"
+  + "  { path: '/old', redirect: '/tasks' },\n"
+  + "  { path: '/login', component: TasksView },\n"
+  + "  { path: '/:pathMatch(.*)*', component: () => import('../views/NotFound.vue') },\n"
+  + '];\nexport const router = createRouter({ history: createWebHistory(), routes });\n';
+const VUE_VIEW = '<template><p>View</p></template>\n';
+const VUE_FILES: Record<string, string> = {
+  'src/main.ts': "import { registerNavigationBridge } from 'glirastes/browser';\nimport { router } from './router';\n"
+    + 'registerNavigationBridge({ push: (href: string) => { void router.push(href); } });\n',
+  'src/router/index.ts': VUE_ROUTER,
+  'src/views/TasksView.vue': '<script setup lang="ts">\nconst title = \'Tasks\';\n</script>\n<template><h1>{{ title }}</h1></template>\n',
+  'src/views/HomeView.vue': VUE_VIEW,
+  'src/views/TaskDetail.vue': VUE_VIEW,
+  'src/views/ReportsView.vue': '<script lang="ts">\n'
+    + "import { defineQueryFilters } from 'glirastes/browser';\n"
+    + "export const reportFilters = defineQueryFilters({ path: '/reports', filters: { range: ['week', 'month'] } });\n"
+    + '</script>\n<template><p>Reports</p></template>\n',
+  'src/views/NotFound.vue': VUE_VIEW,
+};
+
+describe('vue-router routes', () => {
+  it('lists every route of createRouter as a page of its single-file component, or a reasoned exclusion', async () => {
+    const app = await createAppFixture(VUE_FILES);
+    const tree = await enumerateRouteConfigPages(app.root, {}, [], 'vue-router');
+
+    expect(tree).toEqual({
+      complete: true,
+      pages: [
+        { path: '/', params: [], file: 'src/views/HomeView.vue', component: 'default' },
+        { path: '/reports', params: [], file: 'src/views/ReportsView.vue', component: 'default' },
+        { path: '/tasks', params: [], file: 'src/views/TasksView.vue', component: 'default' },
+        { path: '/tasks/:taskId', params: ['taskId'], file: 'src/views/TaskDetail.vue', component: 'default' },
+      ],
+      excluded: [
+        { stableKey: 'PAGE /:pathMatch(.*)*', reason: 'catch-all-page', origin: 'default' },
+        { stableKey: 'PAGE /login', reason: 'auth-page', origin: 'default' },
+      ],
+      findings: [],
+    });
+  });
+
+  it('offers the routes through registerNavigationBridge and reads filters of a .vue view', async () => {
+    const app = await createAppFixture(VUE_FILES, { toolsConfig: { sources: ['vue-router', 'url-filters'] } });
+    const navigation = await createVueRouterSource().observe(context(app.root));
+    const filters = await createUrlFilterSource({ pages: 'vue-router' }).observe(context(app.root));
+
+    expect(navigation.complete).toBe(true);
+    expect(navigation.observations[0]!.contract!.input).toMatchObject({
+      properties: { destination: { enum: ['/', '/reports', '/tasks', '/tasks/:taskId'] } },
+    });
+    expect(navigation.observations[0]!.findings).toEqual([]);
+    expect(filters.observations.map((tool) => tool.execution.definitionId)).toEqual(['ui.filter.reports']);
+  });
+
+  it('stops instead of guessing for a route alias', async () => {
+    const app = await createAppFixture({
+      ...VUE_FILES,
+      'src/router/index.ts': VUE_ROUTER.replace("{ path: '/login', component: TasksView }", "{ path: '/login', alias: '/signin', component: TasksView }"),
+    }, { toolsConfig: { sources: ['vue-router'] } });
+    const observed = await createVueRouterSource().observe(context(app.root));
+
+    expect(observed.complete).toBe(false);
+    expect(observed.findings[0]!.message).toContain('has a route alias');
+  });
+
+  it('stops for a view it cannot resolve and excludes custom-regex and repeatable params', async () => {
+    const inline = await createAppFixture({
+      ...VUE_FILES,
+      'src/router/index.ts': VUE_ROUTER.replace("{ path: '/login', component: TasksView }", "{ path: '/inline', component: { template: '<p />' } }"),
+    }, { toolsConfig: { sources: ['vue-router'] } });
+    expect((await createVueRouterSource().observe(context(inline.root))).findings[0]!.message)
+      .toContain('"/inline" whose component cannot be resolved');
+
+    const shaped = await createAppFixture({
+      ...VUE_FILES,
+      'src/router/index.ts': VUE_ROUTER.replace("{ path: '/old', redirect: '/tasks' }",
+        "{ path: '/old', redirect: '/tasks', component: TasksView }, { path: '/n/:id([0-9]+)', component: TasksView },"
+        + " { path: '/c/:chapters+', component: TasksView }"),
+    });
+    const tree = await enumerateRouteConfigPages(shaped.root, {}, [], 'vue-router');
+    expect(tree.complete && tree.pages.map((page) => page.path)).toEqual(['/', '/reports', '/tasks', '/tasks/:taskId']);
+    expect(tree.complete && tree.excluded.map(({ stableKey, reason }) => [stableKey, reason])).toEqual([
+      ['PAGE /:pathMatch(.*)*', 'catch-all-page'],
+      ['PAGE /c/:chapters+', 'unsupported-path'],
+      ['PAGE /login', 'auth-page'],
+      ['PAGE /n/:id([0-9]+)', 'unsupported-path'],
+    ]);
   });
 });

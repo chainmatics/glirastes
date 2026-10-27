@@ -110,7 +110,7 @@ export function uniqueDefinitionIds(entries: ReadonlyArray<{ stableKey: string; 
 
 export function parseAppSource(file: Pick<AppSourceFile, 'path' | 'source'>): ts.SourceFile {
   const kind = /\.tsx$/.test(file.path) ? ts.ScriptKind.TSX
-    : /\.[cm]?ts$/.test(file.path) ? ts.ScriptKind.TS
+    : /\.(?:[cm]?ts|vue)$/.test(file.path) ? ts.ScriptKind.TS
       : ts.ScriptKind.JSX;
   return ts.createSourceFile(file.path, file.source, ts.ScriptTarget.Latest, true, kind);
 }
