@@ -282,7 +282,7 @@
     "SECURITY.md"
   ],
   "scripts": {
-    "build": "node scripts/generate-embed-styles.mjs --check && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && cp src/react/styles.css dist/cjs/react/styles.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs && cp src/codegen/tools/probe-child.mjs src/codegen/tools/probe-loader.mjs dist/codegen/tools/",
+    "build": "node scripts/generate-embed-styles.mjs --check && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && cp src/react/styles.css dist/cjs/react/styles.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs && cp src/codegen/tools/probe-child.mjs src/codegen/tools/probe-loader.mjs dist/codegen/tools/ && cp src/codegen/tools/sources/fastapi-routes.py dist/codegen/tools/sources/",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
     "test": "vitest run"

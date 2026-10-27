@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import ts from 'typescript';
+import { operationFingerprint, operationsOf, parseOpenapiDocument } from './openapi-document.js';
 import { createRouteSourceFingerprint } from './route-fingerprint.js';
 import { readRouteExports } from './route-exports.js';
 import { decoratorsOf, NEST_METHOD_DECORATORS, readImports } from './tools/sources/nest-decorators.js';
@@ -28,7 +29,7 @@ const endpointExecution = executionBase.extend({
    * The deterministic source that enumerated the endpoint. Absent on
    * inventories written before the tools generator; treated as next-app.
    */
-  sourceKind: z.enum(['next-app', 'nest']).optional(),
+  sourceKind: z.enum(['next-app', 'nest', 'openapi']).optional(),
   sourceFile: z.string().trim().min(1).max(2_048),
   method: z.enum(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']),
   path: z.string().startsWith('/').max(2_048),
@@ -218,6 +219,37 @@ async function verifyNestEndpoint(
   return { ...execution, sourceLocator: { sourceFile: execution.sourceFile, exportName: execution.method } };
 }
 
+async function verifyOpenapiEndpoint(
+  rootDir: string,
+  execution: z.infer<typeof endpointExecution>,
+): Promise<DiscoveredFoundationExecution> {
+  let text: string;
+  try {
+    text = await readFile(resolve(rootDir, execution.sourceFile), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`Foundation inventory references a missing OpenAPI document: ${execution.stableKey}`);
+    }
+    throw error;
+  }
+  const parsed = parseOpenapiDocument(text);
+  const operation = parsed.ok
+    ? operationsOf(parsed.document).find((candidate) => (
+      candidate.path === execution.path && candidate.operationKey === execution.method.toLowerCase()
+    ))
+    : undefined;
+  if (!parsed.ok || !operation) {
+    throw new Error(`Foundation inventory references a missing OpenAPI operation: ${execution.stableKey}`);
+  }
+  if (execution.stableKey !== `${execution.method} ${execution.path}`) {
+    throw new Error(`Foundation inventory stable key mismatch: ${execution.stableKey}`);
+  }
+  if (operationFingerprint(parsed.document, operation, execution.method, execution.path) !== execution.sourceFingerprint) {
+    throw new Error(`Foundation route fingerprint mismatch: ${execution.stableKey}`);
+  }
+  return { ...execution, sourceLocator: { sourceFile: execution.sourceFile, exportName: execution.method } };
+}
+
 async function verifyEndpoint(
   rootDir: string,
   execution: z.infer<typeof endpointExecution>,
@@ -225,6 +257,7 @@ async function verifyEndpoint(
   const kind = execution.sourceKind ?? 'next-app';
   if (kind === 'next-app') return verifyNextEndpoint(rootDir, execution);
   if (kind === 'nest') return verifyNestEndpoint(rootDir, execution);
+  if (kind === 'openapi') return verifyOpenapiEndpoint(rootDir, execution);
   throw new Error(`Unsupported endpoint source kind: ${String(kind)}`);
 }
 

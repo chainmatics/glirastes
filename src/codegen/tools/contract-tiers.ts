@@ -48,6 +48,18 @@ export interface ResolveEndpointContractInput {
   contractModule?: ContractModuleCandidate;
   resolution?: ResolutionEntry;
   previousContract?: ToolContract;
+  /**
+   * An exported OpenAPI 3.1 operation (FastAPI): the dereferenced parameter
+   * and body schemas the server validates. Read after native schemas and
+   * before a sibling contract module.
+   */
+  openapi?: OpenapiOperationInput;
+}
+
+export interface OpenapiOperationInput {
+  parts: ReadonlyArray<{ role: InputRole; json: JsonSchemaLike; label: string }>;
+  /** `x-glirastes-effect` of the operation, when it names a known effect. */
+  effect?: DeclaredEffect;
 }
 
 export interface ResolvedEndpointContract {
@@ -464,7 +476,7 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
   const entry = candidate?.ok && candidate.kind === 'contract-entry' ? candidate : undefined;
   const assessment = assessResolution(input, interfaceDigest);
   const resolution = assessment.usable;
-  const effect = strongerEffect(entry?.effect, resolution?.effect);
+  const effect = strongerEffect(strongerEffect(entry?.effect, resolution?.effect), input.openapi?.effect);
   const prose: ToolProseHints = {
     ...(entry?.description ? { contractDescription: entry.description } : {}),
     ...(entry?.module ? { module: entry.module } : {}),
@@ -544,6 +556,16 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     } else {
       nativeProblems = native.findings;
     }
+  }
+
+  // Tier 1b: an exported OpenAPI operation; the server validates exactly these schemas.
+  if (input.openapi) {
+    const parts = input.openapi.parts.map((part): RolePart => ({
+      role: part.role, json: part.json, source: jsonSource(part.json), digest: jsonSchemaDigest(part.json), label: part.label,
+    }));
+    const composed = composeInput(subject, parts, input.pathParams);
+    if (!('source' in composed)) return unresolved(composed.findings);
+    return finish('openapi', true, composed, paramsFrom(input.pathParams, parts, evidence), [], undefined);
   }
 
   // Tier 2: sibling contract module.

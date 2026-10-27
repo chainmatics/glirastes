@@ -7,6 +7,7 @@ import {
   FoundationExecutionInventorySchema,
   type FoundationExecutionInventory,
 } from './execution-inventory.js';
+import { operationFingerprint, operationsOf, parseOpenapiDocument } from './openapi-document.js';
 import { createRouteSourceFingerprint } from './route-scanner.js';
 
 const id = (suffix: string) => (
@@ -445,6 +446,47 @@ describe('endpoint source kinds', () => {
     await expect(discoverFoundationExecutions({
       rootDir,
       inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [{ ...base, sourceKind: 'nest' as const }] },
+    })).rejects.toThrow(error);
+  });
+
+  const OPENAPI = JSON.stringify({
+    openapi: '3.1.0',
+    info: { title: 'Tasks', version: '1' },
+    paths: { '/api/tasks': { get: { security: [{ APIKeyCookie: [] }], responses: { '200': { description: 'Tasks' } } } } },
+  });
+
+  function openapiExecution(document: string) {
+    const parsed = parseOpenapiDocument(document);
+    if (!parsed.ok) throw new Error(parsed.reason);
+    const [operation] = operationsOf(parsed.document);
+    return {
+      ...endpoint({ source: document, sourceFile: 'api/openapi.json' }),
+      sourceKind: 'openapi',
+      sourceFingerprint: operationFingerprint(parsed.document, operation!, 'GET', '/api/tasks'),
+    };
+  }
+
+  it('verifies an OpenAPI operation by its path, method and fingerprint', async () => {
+    const rootDir = await fixture({ 'api/openapi.json': OPENAPI });
+    const result = await discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [openapiExecution(OPENAPI)] },
+    });
+    expect(result.executions[0]).toMatchObject({
+      sourceKind: 'openapi',
+      sourceLocator: { sourceFile: 'api/openapi.json', exportName: 'GET' },
+    });
+  });
+
+  it.each([
+    ['the operation is gone', OPENAPI.replace('"get"', '"post"'), /missing OpenAPI operation/],
+    ['the operation changed', OPENAPI.replace('"Tasks"}', '"Open tasks"}'), /fingerprint mismatch/],
+  ])('fails closed for an OpenAPI endpoint when %s', async (_label, current, error) => {
+    expect(current).not.toBe(OPENAPI);
+    const rootDir = await fixture({ 'api/openapi.json': current });
+    await expect(discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [openapiExecution(OPENAPI)] },
     })).rejects.toThrow(error);
   });
 

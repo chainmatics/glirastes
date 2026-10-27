@@ -38,7 +38,7 @@ const modulePath = z.string().trim().min(1).max(512)
   .refine(insideApp, 'Path must stay inside the app');
 
 export const ToolSourceKindSchema = z.enum([
-  'next-app', 'nest', 'next-pages', 'react-router', 'vue-router', 'url-filters', 'react-actions',
+  'next-app', 'nest', 'openapi', 'next-pages', 'react-router', 'vue-router', 'url-filters', 'react-actions',
 ]);
 
 /** A folder name such as `[locale]`, never a path. */
@@ -49,6 +49,13 @@ const SourceSchema = z.union([
   ToolSourceKindSchema,
   z.object({ kind: z.literal('next-app'), apiDir: appPath.optional() }).strict(),
   z.object({ kind: z.literal('nest'), srcDir: appPath.optional() }).strict(),
+  z.object({
+    kind: z.literal('openapi'),
+    /** The exported OpenAPI 3.1 document, app-relative; `openapi.json` by default. */
+    document: appPath.regex(/\.json$/, 'The OpenAPI document must be a .json export').optional(),
+    /** The folder of the FastAPI code; its routes are counted against the export. */
+    fastapi: appPath.optional(),
+  }).strict(),
   z.object({
     kind: z.literal('next-pages'),
     appDir: appPath.optional(),
@@ -132,6 +139,7 @@ export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 export type ToolSourceConfig =
   | { kind: 'next-app'; apiDir?: string }
   | { kind: 'nest'; srcDir?: string }
+  | { kind: 'openapi'; document?: string; fastapi?: string }
   | { kind: 'next-pages' | 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[] }
   | { kind: 'react-router' | 'vue-router' | 'react-actions'; srcDir?: string };
 

@@ -84,6 +84,12 @@ describe('tools config', () => {
     expect(normalizeSources(config)).toEqual([{ kind: 'nest' }, { kind: 'nest', srcDir: 'api/src' }]);
   });
 
+  it('accepts an OpenAPI export with the FastAPI folder it is counted against', async () => {
+    const source = { kind: 'openapi', document: 'api/openapi.json', fastapi: 'api/app' };
+    const config = loadToolsConfig(await appWith({ ...minimal, sources: [source, 'vue-router'] }));
+    expect(normalizeSources(config)).toEqual([source, { kind: 'vue-router' }]);
+  });
+
   it('accepts vue-router routes as the page source of navigation and filters', async () => {
     const config = loadToolsConfig(await appWith({ ...minimal, sources: [{ kind: 'vue-router', srcDir: 'web/src' }, 'url-filters'] }));
     expect(normalizeSources(config)).toEqual([{ kind: 'vue-router', srcDir: 'web/src' }, { kind: 'url-filters' }]);
@@ -115,6 +121,8 @@ describe('tools config', () => {
     ['NodeNext imports for a JavaScript module', { ...minimal, emit: { module: 'src/tools.generated.js', moduleResolution: 'nodenext' } }],
     ['an unknown module resolution', { ...minimal, emit: { moduleResolution: 'node16' } }],
     ['an unknown source kind', { ...minimal, sources: ['rails'] }],
+    ['an OpenAPI document that is not JSON', { ...minimal, sources: [{ kind: 'openapi', document: 'api/openapi.yaml' }] }],
+    ['a FastAPI folder outside the app', { ...minimal, sources: [{ kind: 'openapi', fastapi: '../api' }] }],
     ['an empty source list', { ...minimal, sources: [] }],
     ['a strip segment that is a path', { ...minimal, sources: [{ kind: 'next-pages', stripSegments: ['a/b'] }] }],
     ['a page option on the endpoint source', { ...minimal, sources: [{ kind: 'next-app', stripSegments: [] }] }],

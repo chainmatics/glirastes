@@ -66,6 +66,7 @@ import {
   type SemanticsFacts,
 } from './semantics.js';
 import { createNestEndpointSource } from './sources/nest-endpoints.js';
+import { createOpenapiEndpointSource } from './sources/openapi-endpoints.js';
 import { createReactRouterSource, createVueRouterSource } from './sources/route-config.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { createNextPagesSource } from './sources/next-pages.js';
@@ -174,6 +175,11 @@ export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
         return createNextEndpointSource(source.apiDir ? { apiDir: source.apiDir } : {});
       case 'nest':
         return createNestEndpointSource(source.srcDir ? { srcDir: source.srcDir } : {});
+      case 'openapi':
+        return createOpenapiEndpointSource({
+          ...(source.document ? { document: source.document } : {}),
+          ...(source.fastapi ? { fastapi: source.fastapi } : {}),
+        });
       case 'next-pages':
         return createNextPagesSource(source);
       case 'react-router':
