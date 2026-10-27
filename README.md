@@ -44,6 +44,13 @@ approvals, rollout, and content-free technical health.
 NestJS, LangGraph and the older generator surfaces remain in source for later
 acceptance; they are not exported by this Foundation package.
 
+`glirastes tools refresh` reads Next.js route handlers and pages, NestJS
+controllers (`nest`), react-router route objects (`react-router`), URL
+filters and client actions. `examples/react-nest-separate` is the reference
+app for a NestJS API on its own origin with a Vite React frontend; its chat
+controller passes `createHttpEndpointCaller` so tools call the API with the
+user's cookie or bearer token.
+
 ## Focused local intent routing
 
 `createLocalAiPipeline` now defaults to focused routing. Confident intents get

@@ -50,14 +50,16 @@ describe('bundled local-first setup workflow', () => {
 
   it('keeps the web companion within what the chat handler calls the API with', async () => {
     const source = await readFile(join(findPackageSkillsDir(), 'integrating-glirastes-web/SKILL.md'), 'utf8');
-    // createAiChatHandler builds its own caller from the chat request (origin and cookie only)
-    // and has no option to replace it, see chat-handler-internal-caller.test.ts.
-    for (const required of ['same origin', 'session cookie', 'open gap']) {
+    // The default caller forwards the chat request's cookie to its own origin; an API on its own
+    // origin uses createHttpEndpointCaller, which forwards only cookie and authorization
+    // (see chat-handler-internal-caller.test.ts and http-endpoint-caller.test.ts).
+    for (const required of ['same origin', 'session cookie', 'open gap', 'endpointCaller', 'createHttpEndpointCaller',
+      '`cookie` and `authorization` headers', '| `nest` |', '| `react-router` |']) {
       expect(source).toContain(required);
     }
     expect(source).not.toContain('createFetchInternalApiCaller');
     expect(source).not.toContain('defaultHeaders');
-    expect(source).not.toContain('cookie or `Authorization` header');
+    expect(source).not.toContain('NestJS controllers, FastAPI');
   });
 
   it('maintains local code changes without making platform sync mandatory', async () => {

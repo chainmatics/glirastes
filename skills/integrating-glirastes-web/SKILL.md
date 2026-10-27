@@ -13,8 +13,8 @@ replace the generator with a hand-written tool list.
 ## Boundaries
 
 - The backend keeps all authorization. The chat handler calls the app's API
-  with the user's own session cookie, never with a service account that has
-  more rights than the user.
+  with the user's own session cookie or bearer token, never with a service
+  account that has more rights than the user.
 - Never edit `.glirastes/tool-policy.json`, generated files or the `appId` in
   `.glirastes/tools.json`.
 - The model key (`OPENROUTER_API_KEY`) lives only in the environment of the
@@ -28,8 +28,13 @@ replace the generator with a hand-written tool list.
 | --- | --- | --- |
 | Next.js route handlers | yes | `next-app` |
 | Client actions in `.ts`, `.tsx`, `.js` files (`useAiClientAction`, `registerAiClientAction`, `bus.subscribeById`) | yes, also in Vue apps | `react-actions` |
-| URL filters of SPA views declared with `defineQueryFilters` | yes | `url-filters` |
-| NestJS controllers, FastAPI through OpenAPI, react-router and vue-router pages, `<script>` blocks of `.vue` files | not yet | report as an open gap |
+| URL filters of SPA views declared with `defineQueryFilters`, or `nuqs` `useQueryState` in a routed page | yes | `url-filters` |
+| NestJS controllers with Zod pipes or `createZodDto` | yes | `nest` |
+| react-router route objects (`createBrowserRouter([...])`, `useRoutes([...])`) | yes | `react-router` |
+| FastAPI through OpenAPI, vue-router pages, `<script>` blocks of `.vue` files, JSX `<Route>` trees | not yet | report as an open gap |
+
+The reference app `examples/react-nest-separate` in the SDK shows all four
+sources together: a NestJS API on its own origin and a Vite React frontend.
 
 ## Workflow
 
@@ -38,15 +43,22 @@ replace the generator with a hand-written tool list.
    handler is framework-neutral: `createAiChatHandler` (from
    `glirastes/server/nextjs`, despite the name) takes a Web `Request` and
    returns a `Response`; adapt your framework's request object to it.
-2. Endpoint tools call the API through the caller that `createAiChatHandler`
-   builds for every chat request. It sends the call to the origin the chat
-   request arrived on and forwards only that request's `cookie` header; this
-   version has no option to replace it. So the API must be reachable on the
-   same origin as the handler (a reverse proxy or the dev server routes `/api`
-   to the backend) and authenticate by session cookie. An API on another
-   origin or a bearer token in an `Authorization` header is not supported
-   yet: report it as an open gap (step 5). Do not use a service account or
-   forward credentials the user did not send to get around it.
+2. Endpoint tools call the API with the user's own credentials. By default
+   `createAiChatHandler` sends each call to the origin the chat request
+   arrived on and forwards only its session cookie, so an API on the
+   same origin as the handler (a reverse proxy or the dev server routes
+   `/api` to the backend) needs nothing more. For an API on its own origin, or one that
+   authenticates by bearer token, pass
+   `endpointCaller: (request) => createHttpEndpointCaller({ baseUrl: apiOrigin, request })`
+   (from `glirastes/server`): every call goes to that fixed origin and
+   carries only the `cookie` and `authorization` headers of that chat
+   request. Do not use a service account or add credentials the user did not
+   send; an API that needs another credential is an open gap (step 5).
+   In NestJS, validate input with a Zod pipe (`@Body(new ZodValidationPipe(schema))`,
+   `@Query(...)`) or with `createZodDto` and a global `ZodValidationPipe`,
+   guard with `@UseGuards` or a global guard, and keep `@Controller` paths and
+   `setGlobalPrefix` string literals. The generator stops instead of guessing
+   on `RouterModule`, `enableVersioning` or a computed path.
 3. Frontend actions and navigation without React: in the browser entry module
    use `glirastes/browser`:
 
