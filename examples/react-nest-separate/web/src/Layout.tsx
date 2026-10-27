@@ -6,6 +6,7 @@ export function Layout() {
     <main>
       <GlirastesBridge />
       <Outlet />
+      <glirastes-chat endpoint="/api/chat" theme="light" placeholder="Ask about your tasks" />
     </main>
   );
 }
