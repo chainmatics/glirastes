@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "appId": "019fb007-0000-7000-8000-000000000003",
+  "targetAppKey": "react-nest-separate-fixture",
+  "locale": "en-US",
+  "sources": [
+    { "kind": "nest", "srcDir": "api/src" }
+  ],
+  "emit": { "module": "api/src/generated/glirastes/tools.generated.ts", "moduleResolution": "nodenext" }
+}

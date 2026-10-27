@@ -1,0 +1,16 @@
+{
+  "//": "Read by glirastes tools refresh for the whole app; each part builds with its own tsconfig.",
+  "files": [],
+  "references": [{ "path": "./api" }],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "skipLibCheck": true,
+    "types": []
+  }
+}

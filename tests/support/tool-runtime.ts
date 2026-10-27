@@ -18,6 +18,7 @@ import {
   type ManagedTurnGuard,
 } from '../../src/runtime/index.js';
 import {
+  createHttpEndpointCaller,
   toolsToAiTools,
   type InternalApiRequest,
   type InternalApiResponse,
@@ -96,7 +97,7 @@ export interface BootedApp {
   disabled: ReadonlyArray<{ toolId: string; reason: string }>;
   createSession(user: Principal): string;
   revokeSession(token: string): void;
-  turn(options: { cookie?: string; resolvePrincipal?: () => Principal | undefined }): BootedTurn;
+  turn(options: { cookie?: string; authorization?: string; resolvePrincipal?: () => Principal | undefined }): BootedTurn;
 }
 
 function matchesRoute(pattern: string, pathname: string): boolean {
@@ -106,13 +107,57 @@ function matchesRoute(pattern: string, pathname: string): boolean {
     && expected.every((segment, index) => segment.startsWith(':') || segment === actual[index]);
 }
 
-/** Boots the standalone runtime from the committed outputs, like the app's chat route does. */
-export async function bootApp(root: string, modulePath = GENERATED_MODULE): Promise<BootedApp> {
-  const generated = await import(pathToFileURL(join(root, modulePath)).href) as GeneratedToolModule;
-  const runtime = createGeneratedRuntimeSource(generated, {
+type EndpointCaller = (request: InternalApiRequest) => Promise<InternalApiResponse>;
+
+function runtimeOf(generated: GeneratedToolModule) {
+  return createGeneratedRuntimeSource(generated, {
     localLimits: LOCAL_LIMITS,
     identity: { tenantId: FIXTURE_TENANT_ID },
   });
+}
+
+/** One managed turn per call, its endpoint tools calling the app with the turn's credentials. */
+function turnsOf(
+  runtime: ReturnType<typeof runtimeOf>,
+  auth: FixtureAuth,
+  endpointFor: (headers: Headers) => EndpointCaller,
+): BootedApp['turn'] {
+  return (options) => {
+    const headers = new Headers({
+      ...(options.cookie ? { cookie: options.cookie } : {}),
+      ...(options.authorization ? { authorization: options.authorization } : {}),
+    });
+    const resolvePrincipal = options.resolvePrincipal
+      ?? (() => auth.resolveSession(new Request('http://fixture.local/chat', { headers })));
+    const initial = resolvePrincipal();
+    if (!initial) throw new Error('missing_principal');
+    const snapshot = runtime.source.resolveTurnSnapshot({ turnId: randomUUID(), principal: initial });
+    const guard = createManagedTurnGuard({ snapshot, resolvePrincipal });
+    const registry = materializeManifestToolRegistry({ snapshot, bindings: runtime.bindings });
+    const context = { currentDate: new Date(), locale: 'en-US', callEndpoint: endpointFor(headers) };
+    const tools = createAiSdkTools({ tools: toolsToAiTools(registry, context), ...guard });
+    return {
+      guard,
+      registry,
+      tools,
+      async execute(name, input) {
+        const tool = tools[name];
+        if (!tool?.execute) {
+          await guard.beforeToolCall({ toolName: name, input });
+          throw new Error(`Tool unavailable: ${name}`);
+        }
+        const parsed = registry[name]!.inputSchema.safeParse(input);
+        if (!parsed.success) throw new Error(`Input does not match the bound schema (${name})`);
+        return tool.execute(parsed.data, { toolCallId: randomUUID(), messages: [] });
+      },
+    };
+  };
+}
+
+/** Boots the standalone runtime from the committed outputs, like the app's chat route does. */
+export async function bootApp(root: string, modulePath = GENERATED_MODULE): Promise<BootedApp> {
+  const generated = await import(pathToFileURL(join(root, modulePath)).href) as GeneratedToolModule;
+  const runtime = runtimeOf(generated);
   const auth = await import(pathToFileURL(join(root, 'src/auth.js')).href) as FixtureAuth;
   const inventory = FoundationExecutionInventorySchema.parse(JSON.parse(
     await readFile(join(root, '.glirastes/foundation-execution-inventory.json'), 'utf8'),
@@ -131,55 +176,95 @@ export async function bootApp(root: string, modulePath = GENERATED_MODULE): Prom
     }
     return undefined;
   };
+  const endpointFor = (credentials: Headers): EndpointCaller => async ({ method, path, body }) => {
+    const url = new URL(path, 'http://fixture.local');
+    const handler = await handlerFor(method, url.pathname);
+    if (!handler) return { ok: false, status: 404, error: 'Unavailable' };
+    const headers = new Headers(credentials);
+    if (body !== undefined) headers.set('content-type', 'application/json');
+    const response = await handler(new Request(url, {
+      method,
+      headers,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    }));
+    const data = await response.json() as unknown;
+    const error = !response.ok && typeof data === 'object' && data !== null
+      && typeof (data as { error?: unknown }).error === 'string'
+      ? (data as { error: string }).error
+      : undefined;
+    return { ok: response.ok, status: response.status, data, ...(error ? { error } : {}) };
+  };
   return {
     disabled: runtime.disabled,
     createSession: (user) => auth.createSession(user),
     revokeSession: (token) => { auth.revokeSession(token); },
-    turn(options) {
-      const resolvePrincipal = options.resolvePrincipal ?? (() => auth.resolveSession(new Request(
-        'http://fixture.local/chat',
-        { headers: options.cookie ? { cookie: options.cookie } : {} },
-      )));
-      const initial = resolvePrincipal();
-      if (!initial) throw new Error('missing_principal');
-      const snapshot = runtime.source.resolveTurnSnapshot({ turnId: randomUUID(), principal: initial });
-      const guard = createManagedTurnGuard({ snapshot, resolvePrincipal });
-      const registry = materializeManifestToolRegistry({ snapshot, bindings: runtime.bindings });
-      const callEndpoint = async ({ method, path, body }: InternalApiRequest): Promise<InternalApiResponse> => {
-        const url = new URL(path, 'http://fixture.local');
-        const handler = await handlerFor(method, url.pathname);
-        if (!handler) return { ok: false, status: 404, error: 'Unavailable' };
-        const headers = new Headers(options.cookie ? { cookie: options.cookie } : {});
-        if (body !== undefined) headers.set('content-type', 'application/json');
-        const response = await handler(new Request(url, {
-          method,
-          headers,
-          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        }));
-        const data = await response.json() as unknown;
-        const error = !response.ok && typeof data === 'object' && data !== null
-          && typeof (data as { error?: unknown }).error === 'string'
-          ? (data as { error: string }).error
-          : undefined;
-        return { ok: response.ok, status: response.status, data, ...(error ? { error } : {}) };
-      };
-      const context = { currentDate: new Date(), locale: 'en-US', callEndpoint };
-      const tools = createAiSdkTools({ tools: toolsToAiTools(registry, context), ...guard });
-      return {
-        guard,
-        registry,
-        tools,
-        async execute(name, input) {
-          const tool = tools[name];
-          if (!tool?.execute) {
-            await guard.beforeToolCall({ toolName: name, input });
-            throw new Error(`Tool unavailable: ${name}`);
-          }
-          const parsed = registry[name]!.inputSchema.safeParse(input);
-          if (!parsed.success) throw new Error(`Input does not match the bound schema (${name})`);
-          return tool.execute(parsed.data, { toolCallId: randomUUID(), messages: [] });
-        },
-      };
-    },
+    turn: turnsOf(runtime, auth, endpointFor),
   };
+}
+
+export const NEST_APP = resolve(SDK_ROOT, 'examples/react-nest-separate');
+export const NEST_GENERATED_MODULE = 'api/src/generated/glirastes/tools.generated.ts';
+
+/** The API's server adapter is a fixture-local dependency (examples/react-nest-separate/api/bun.lock). */
+export function assertNestInstalled(): void {
+  if (!existsSync(join(NEST_APP, 'api/node_modules/@nestjs/platform-express/package.json'))) {
+    throw new Error('Run bun install --frozen-lockfile in examples/react-nest-separate/api first.');
+  }
+}
+
+/** Copies the React+NestJS fixture like `copyApp` and links its installed API dependencies. */
+export async function copyNestApp(from: string, prefix = '.tool-sync-nest-'): Promise<string> {
+  const root = await copyApp(from, prefix);
+  await symlink(join(NEST_APP, 'api/node_modules'), join(root, 'api/node_modules'), 'dir');
+  return root;
+}
+
+interface NestApi {
+  listen(port: number, host: string): Promise<unknown>;
+  getUrl(): Promise<string>;
+  close(): Promise<void>;
+}
+
+export interface BootedNestApp extends BootedApp {
+  /** The API's own origin, e.g. `http://127.0.0.1:54321`. */
+  origin: string;
+}
+
+const servers: NestApi[] = [];
+
+/**
+ * Compiles the API with its own tsconfig (NodeNext), starts it on a free
+ * local port and boots the runtime from the compiled generated module. Tools
+ * reach the API only over HTTP, through `createHttpEndpointCaller`.
+ */
+export async function bootNestApp(root: string, model: () => unknown = () => {
+  throw new Error('This test sends no chat message');
+}): Promise<BootedNestApp> {
+  await promisify(execFile)(process.execPath, [join(SDK_ROOT, 'node_modules/typescript/bin/tsc'), '-p', join(root, 'api')]);
+  const dist = (file: string) => pathToFileURL(join(root, 'api/dist', file)).href;
+  const generated = await import(dist('generated/glirastes/tools.generated.js')) as GeneratedToolModule;
+  const runtime = runtimeOf(generated);
+  const auth = await import(dist('auth/sessions.js')) as FixtureAuth;
+  const { createApi } = await import(dist('app.js')) as {
+    createApi(options: { model: () => unknown; apiOrigin: () => string; tenantId: string }): Promise<NestApi>;
+  };
+  let origin = '';
+  const api = await createApi({ model, apiOrigin: () => origin, tenantId: FIXTURE_TENANT_ID });
+  servers.push(api);
+  await api.listen(0, '127.0.0.1');
+  origin = await api.getUrl();
+  return {
+    origin,
+    disabled: runtime.disabled,
+    createSession: (user) => auth.createSession(user),
+    revokeSession: (token) => { auth.revokeSession(token); },
+    turn: turnsOf(runtime, auth, (headers) => createHttpEndpointCaller({
+      baseUrl: origin,
+      request: new Request(`${origin}/api/chat`, { headers }),
+    })),
+  };
+}
+
+export async function closeNestApps(): Promise<void> {
+  for (const api of servers.splice(0)) await api.close();
 }
