@@ -86,6 +86,23 @@ describe('renderGeneratedModule', () => {
     expect(text).not.toContain('export type');
   });
 
+  it.each([
+    ['notes.schemas.ts', 'notes.schemas.js'],
+    ['notes.schemas.tsx', 'notes.schemas.js'],
+    ['notes.schemas.mts', 'notes.schemas.mjs'],
+    ['notes.schemas.cts', 'notes.schemas.cjs'],
+    ['notes.schemas.js', 'notes.schemas.js'],
+  ])('imports %s as %s for a NodeNext app', (file, specifier) => {
+    const text = renderGeneratedModule({
+      modulePath: 'api/src/generated/glirastes/tools.generated.ts',
+      artifact,
+      contracts: contracts(`api/src/notes/${file}`),
+      moduleResolution: 'nodenext',
+    });
+    expect(text).toContain(`import * as m0 from "../../notes/${specifier}";`);
+    expect(text).toContain('] as const;');
+  });
+
   it('exports the synonyms of enabled tools for find_tools, keyed by model-facing name', () => {
     const searched = contracts('src/app/api/notes/schemas.ts').map((entry) => (
       entry.toolId === id('a2') ? { ...entry, search: { synonyms: ['Notizen', 'memos'], examples: ['Show my notes'] } }
@@ -177,6 +194,48 @@ describe('renderGeneratedModule', () => {
     const program = ts.createProgram(files, parsed.options);
     const diagnostics = files.flatMap((file) => program.getSemanticDiagnostics(program.getSourceFile(file)));
     expect(diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))).toEqual([]);
+  }, 120_000);
+});
+
+describe('renderGeneratedModule for NodeNext', () => {
+  it('type-checks under moduleResolution NodeNext, which refuses extensionless imports', async () => {
+    const files = {
+      'src/notes/notes.schemas.ts': "import { z } from 'zod';\n"
+        + 'export const createNote = z.object({ title: z.string() }).strict();\n'
+        + 'export const contract = { GET: { output: z.object({ notes: z.array(z.string()) }) } };\n',
+      'src/consumer.ts': "import { createContractBindings } from 'glirastes/runtime';\n"
+        + "import * as generated from './generated/glirastes/tools.generated.js';\n"
+        + 'export const bound = createContractBindings(generated);\n',
+    };
+    const diagnosticsFor = async (moduleResolution: 'bundler' | 'nodenext') => {
+      const app = await createAppFixture({
+        ...files,
+        'tsconfig.json': JSON.stringify({
+          compilerOptions: {
+            strict: true, noEmit: true, target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', skipLibCheck: true,
+            paths: {
+              'glirastes/runtime': [join(SDK_ROOT, 'src/runtime/index.ts')],
+              'glirastes/server': [join(SDK_ROOT, 'src/server/index.ts')],
+            },
+          },
+        }),
+        'src/generated/glirastes/tools.generated.ts': renderGeneratedModule({
+          modulePath: 'src/generated/glirastes/tools.generated.ts',
+          artifact,
+          contracts: contracts('src/notes/notes.schemas.ts'),
+          moduleResolution,
+        }),
+      });
+      const config = ts.readConfigFile(app.path('tsconfig.json'), ts.sys.readFile);
+      const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, app.root);
+      const generated = app.path('src/generated/glirastes/tools.generated.ts');
+      const program = ts.createProgram([app.path('src/consumer.ts'), generated], parsed.options);
+      return program.getSemanticDiagnostics(program.getSourceFile(generated))
+        .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
+    };
+    expect(await diagnosticsFor('nodenext')).toEqual([]);
+    // The extensionless default does not compile here: the option is what makes NodeNext apps work.
+    expect((await diagnosticsFor('bundler')).join('\n')).toContain("Cannot find module '../../notes/notes.schemas'");
   }, 120_000);
 });
 

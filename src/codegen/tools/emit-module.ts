@@ -10,6 +10,8 @@ export interface RenderGeneratedModuleInput {
   contracts: ReadonlyArray<ToolContractsEntry>;
   /** `emit.mcpCatalog`: also export `createMcpEndpointCatalog()` for the app's MCP server. */
   mcpCatalog?: boolean;
+  /** `emit.moduleResolution` of a `.ts` module; `bundler` when absent. */
+  moduleResolution?: 'bundler' | 'nodenext';
 }
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
@@ -18,10 +20,24 @@ function accessor(name: string): string {
   return IDENTIFIER.test(name) ? `.${name}` : `[${JSON.stringify(name)}]`;
 }
 
-function importSpecifier(fromModule: string, target: string, typescript: boolean): string {
+/** The file a NodeNext import names: what the source compiles to (`schemas.ts` → `schemas.js`). */
+const NODENEXT_EXTENSIONS: Readonly<Record<string, string>> = {
+  '.ts': '.js', '.tsx': '.js', '.mts': '.mjs', '.cts': '.cjs',
+};
+
+function importSpecifier(
+  fromModule: string,
+  target: string,
+  typescript: boolean,
+  moduleResolution: 'bundler' | 'nodenext',
+): string {
   let specifier = posix.relative(posix.dirname(fromModule), target);
   if (!specifier.startsWith('.')) specifier = `./${specifier}`;
-  return typescript ? specifier.replace(/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/, '') : specifier;
+  if (!typescript) return specifier;
+  if (moduleResolution === 'nodenext') {
+    return specifier.replace(/\.(?:ts|tsx|mts|cts)$/, (extension) => NODENEXT_EXTENSIONS[extension]!);
+  }
+  return specifier.replace(/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/, '');
 }
 
 function literal(value: unknown, indent = 0): string {
@@ -93,7 +109,8 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
   if (usesJson) lines.push("import { createJsonSchemaLike } from 'glirastes/runtime';");
   if (serverImports.length > 0) lines.push(`import { ${serverImports.join(', ')} } from 'glirastes/server';`);
   for (const module of modules) {
-    lines.push(`import * as ${aliases.get(module)!} from ${JSON.stringify(importSpecifier(input.modulePath, module, typescript))};`);
+    const specifier = importSpecifier(input.modulePath, module, typescript, input.moduleResolution ?? 'bundler');
+    lines.push(`import * as ${aliases.get(module)!} from ${JSON.stringify(specifier)};`);
   }
   lines.push(
     '',

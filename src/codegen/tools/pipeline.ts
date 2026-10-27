@@ -288,7 +288,11 @@ function renderDerivedOutputs(input: DerivedOutputInput): Record<string, string>
     [TOOLS_PATHS.promptManifest]: manifests.promptContent,
     [TOOLS_PATHS.receipt]: `${JSON.stringify(receipt, null, 2)}\n`,
     [modulePath]: renderGeneratedModule({
-      modulePath, artifact: input.artifact, contracts: input.contracts, mcpCatalog: input.config.emit.mcpCatalog === true,
+      modulePath,
+      artifact: input.artifact,
+      contracts: input.contracts,
+      mcpCatalog: input.config.emit.mcpCatalog === true,
+      ...(input.config.emit.moduleResolution ? { moduleResolution: input.config.emit.moduleResolution } : {}),
     }),
   };
 }

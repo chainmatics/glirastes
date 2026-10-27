@@ -75,6 +75,13 @@ export const ToolsConfigSchema = z.object({
     module: modulePath.optional(),
     /** Also emit `createMcpEndpointCatalog()` for the app's MCP server (names from mcp-tool-names.json). */
     mcpCatalog: z.boolean().optional(),
+    /**
+     * How the app resolves the imports of a generated `.ts` module: `bundler`
+     * (the default) leaves the extension off, `nodenext` writes the runtime
+     * extension (`./schemas.js` for `schemas.ts`), as TypeScript's
+     * `moduleResolution: NodeNext` and Node's ESM loader require.
+     */
+    moduleResolution: z.enum(['bundler', 'nodenext']).optional(),
   }).strict().default({}),
   /** Accepted now; consumed by the agentic plans P05 and P10. */
   enrich: z.object({
@@ -93,6 +100,13 @@ export const ToolsConfigSchema = z.object({
     if (kinds.filter((candidate) => candidate === kind).length > 1) {
       context.addIssue({ code: 'custom', path: ['sources'], message: `The ${kind} source may appear only once` });
     }
+  }
+  if (config.emit.moduleResolution === 'nodenext' && !(config.emit.module ?? DEFAULT_GENERATED_MODULE).endsWith('.ts')) {
+    context.addIssue({
+      code: 'custom',
+      path: ['emit', 'moduleResolution'],
+      message: 'emit.moduleResolution applies to a .ts module; a JavaScript module keeps its import extensions',
+    });
   }
   const sensitive = findSensitiveStringPath(config);
   if (sensitive) {

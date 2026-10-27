@@ -79,12 +79,24 @@ describe('tools config', () => {
     ]);
   });
 
+  it('accepts NodeNext imports for a TypeScript module', async () => {
+    const config = loadToolsConfig(await appWith({
+      ...minimal,
+      emit: { module: 'api/src/generated/glirastes/tools.generated.ts', moduleResolution: 'nodenext' },
+    }));
+    expect(config.emit).toEqual({ module: 'api/src/generated/glirastes/tools.generated.ts', moduleResolution: 'nodenext' });
+    expect(loadToolsConfig(await appWith({ ...minimal, emit: { moduleResolution: 'nodenext' } })).emit.moduleResolution)
+      .toBe('nodenext');
+  });
+
   it.each([
     ['an unknown key', { ...minimal, openrouterApiKey: 'value' }],
     ['a secret-looking value', { ...minimal, enrich: { model: `sk-or-v1-${'a'.repeat(32)}` } }],
     ['a module outside the app', { ...minimal, emit: { module: '../outside/tools.generated.ts' } }],
     ['an absolute module path', { ...minimal, emit: { module: '/tmp/tools.generated.ts' } }],
     ['an unsupported module extension', { ...minimal, emit: { module: 'src/tools.generated.tsx' } }],
+    ['NodeNext imports for a JavaScript module', { ...minimal, emit: { module: 'src/tools.generated.js', moduleResolution: 'nodenext' } }],
+    ['an unknown module resolution', { ...minimal, emit: { moduleResolution: 'node16' } }],
     ['an unknown source kind', { ...minimal, sources: ['rails'] }],
     ['an empty source list', { ...minimal, sources: [] }],
     ['a strip segment that is a path', { ...minimal, sources: [{ kind: 'next-pages', stripSegments: ['a/b'] }] }],
