@@ -125,6 +125,8 @@ function readRoutes(app: AppProgram, file: string, array: ts.ArrayLiteralExpress
     let index = false;
     let component: { file: string; component: string } | undefined;
     let children: ts.ArrayLiteralExpression | undefined;
+    let rendersElsewhere = false;
+    let declaresRender = false;
     for (const property of route.properties) {
       if (ts.isSpreadAssignment(property)) return `${file} spreads a route object, so its routes cannot be enumerated.`;
       if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) continue;
@@ -142,12 +144,22 @@ function readRoutes(app: AppProgram, file: string, array: ts.ArrayLiteralExpress
         children = arrayOf(app, value);
         if (!children) return `${file} has route children that are not an array literal.`;
       } else if (name === 'Component' || name === 'element') {
+        declaresRender = true;
         component = componentOf(app, value) ?? component;
+        const element = unwrap(value);
+        if ((ts.isJsxSelfClosingElement(element) || ts.isJsxElement(element))
+          && /^Navigate$/.test(ts.isJsxElement(element) ? element.openingElement.tagName.getText() : element.tagName.getText())) {
+          rendersElsewhere = true;
+        }
       } else if (name === 'lazy') {
+        declaresRender = true;
         component = lazyComponentOf(app, value) ?? component;
       }
     }
     const full = path !== undefined ? joinRoute(parent, path) : parent;
+    if (path !== undefined && !index && !component && !children && declaresRender && !rendersElsewhere) {
+      return `${file} has a route "${path}" whose component cannot be resolved (wrapped element, inline component or unresolvable lazy module).`;
+    }
     if ((path !== undefined || index) && (component || index)) {
       const { params, reason } = shape(full);
       into.push({

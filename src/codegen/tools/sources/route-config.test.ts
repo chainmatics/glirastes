@@ -96,6 +96,13 @@ describe('react-router route objects', () => {
       + 'export const router = createBrowserRouter([{ ...base }]);\n', 'spreads a route object'],
     ['a computed path', "import { createBrowserRouter } from 'react-router';\nconst p = '/x';\n"
       + 'export const router = createBrowserRouter([{ path: p }]);\n', 'not a string literal'],
+    ['a wrapped element', "import { createBrowserRouter } from 'react-router';\nimport { Suspense } from 'react';\n"
+      + "import { TasksPage } from './pages/TasksPage';\n"
+      + "export const router = createBrowserRouter([{ path: '/x', element: <Suspense><TasksPage /></Suspense> }]);\n",
+      'component cannot be resolved'],
+    ['an inline component', "import { createBrowserRouter } from 'react-router';\n"
+      + "export const router = createBrowserRouter([{ path: '/x', Component: () => <div /> }]);\n",
+      'component cannot be resolved'],
   ])('stops instead of guessing for %s', async (_label, source, reason) => {
     const app = await createAppFixture({ ...FILES, 'src/routes.tsx': source }, { toolsConfig: { sources: ['react-router'] } });
     const observed = await createReactRouterSource().observe(context(app.root));
