@@ -76,6 +76,26 @@ export interface ExpressInternalApiCallerOptions {
   fetchImpl?: typeof fetch;
 }
 
+export interface HttpEndpointCallerOptions {
+  /**
+   * Origin of the API the tools call, e.g. `http://127.0.0.1:4000`. The app
+   * fixes it; it is never read from the chat request, so a `Host` or
+   * `X-Forwarded-Host` header cannot send a tool call elsewhere. Tool paths
+   * carry the full API path, so the URL has no path of its own.
+   */
+  baseUrl: string;
+  /** The chat request whose user credentials every call carries. */
+  request?: Request;
+  /** Headers of `request` forwarded to the API; `cookie` and `authorization` when absent. */
+  forwardHeaderNames?: ReadonlyArray<string>;
+  /**
+   * Extra headers of every call. A default never stands in for a forwarded
+   * header: one with a forwarded name is dropped, also when the user sent none.
+   */
+  defaultHeaders?: Record<string, string>;
+  fetchImpl?: typeof fetch;
+}
+
 // ============================================================================
 // Tool Execution Context (server-side, adds callEndpoint)
 // ============================================================================
@@ -1162,6 +1182,64 @@ export function createExpressInternalApiCaller(
       ...(options.defaultHeaders ?? {}),
     },
   });
+}
+
+const HTTP_FORWARDED_HEADERS = ['cookie', 'authorization'];
+
+/**
+ * Endpoint caller for an API on its own origin (a NestJS or FastAPI backend
+ * next to the chat handler): every call goes to the fixed `baseUrl` and
+ * carries only the `cookie` and `authorization` headers the user sent with
+ * the chat request, so the API authorizes the user, never a substitute.
+ */
+export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): InternalApiCaller {
+  const base = new URL(options.baseUrl);
+  if (base.protocol !== 'http:' && base.protocol !== 'https:') {
+    throw new Error('createHttpEndpointCaller: baseUrl must be an http or https URL');
+  }
+  if (base.pathname !== '/' || base.search || base.hash || base.username || base.password) {
+    throw new Error('createHttpEndpointCaller: baseUrl is an origin; tool paths carry the full API path');
+  }
+  const names = new Set((options.forwardHeaderNames ?? HTTP_FORWARDED_HEADERS).map((name) => name.toLowerCase()));
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(options.defaultHeaders ?? {})) {
+    if (!names.has(name.toLowerCase())) headers[name.toLowerCase()] = value;
+  }
+  for (const name of [...names].sort()) {
+    const value = options.request?.headers.get(name);
+    if (value) headers[name] = value;
+  }
+  const call = createFetchInternalApiCaller({
+    baseUrl: base.origin,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    defaultHeaders: headers,
+  });
+  return async (request) => {
+    if (!staysOnOrigin(request.path, base.origin)) {
+      return { ok: false, status: 400, error: 'Endpoint path must be relative to the API' };
+    }
+    return call(request);
+  };
+}
+
+/**
+ * A tool path is relative to the API. An absolute or protocol-relative one
+ * would leave it, and so would one that a URL parser rewrites: it drops tab,
+ * CR and LF anywhere and reads `\` as `/`, so `/<tab>/host` becomes `//host`.
+ * Control characters and `\` are therefore refused, and the resolved URL must
+ * still be on the API's origin.
+ */
+function staysOnOrigin(path: string, origin: string): boolean {
+  if (!path.startsWith('/') || path.startsWith('//')) return false;
+  for (const char of path) {
+    const code = char.codePointAt(0)!;
+    if (code <= 0x1f || code === 0x7f || char === '\\') return false;
+  }
+  try {
+    return new URL(path, origin).origin === origin;
+  } catch {
+    return false;
+  }
 }
 
 // ============================================================================
