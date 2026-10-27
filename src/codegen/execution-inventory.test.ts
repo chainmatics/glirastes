@@ -411,6 +411,32 @@ describe('endpoint source kinds', () => {
   });
 
   it.each([
+    ['a namespace import', "import * as common from '@nestjs/common';\n"
+      + "@common.Controller('tasks')\nexport class TasksController {\n  @common.Get()\n  list() {\n    return [];\n  }\n}\n"],
+    ['an aliased named import', "import { Controller as C, Get as G } from '@nestjs/common';\n"
+      + "@C('tasks')\nexport class TasksController {\n  @G()\n  list() {\n    return [];\n  }\n}\n"],
+  ])('verifies a Nest controller decorated through %s', async (_label, source) => {
+    const rootDir = await fixture({ 'src/tasks.controller.ts': source });
+    const base = endpoint({ source, sourceFile: 'src/tasks.controller.ts' });
+    const result = await discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [{ ...base, sourceKind: 'nest' as const }] },
+    });
+    expect(result.executions[0]).toMatchObject({ sourceKind: 'nest', sourceLocator: { exportName: 'GET' } });
+  });
+
+  it('rejects a Nest method decorator from a namespace that is not @nestjs/common', async () => {
+    const source = "import * as other from 'other-lib';\n"
+      + "@other.Controller('tasks')\nexport class TasksController {\n  @other.Get()\n  list() {\n    return [];\n  }\n}\n";
+    const rootDir = await fixture({ 'src/tasks.controller.ts': source });
+    const base = endpoint({ source, sourceFile: 'src/tasks.controller.ts' });
+    await expect(discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [{ ...base, sourceKind: 'nest' as const }] },
+    })).rejects.toThrow(/missing controller method/);
+  });
+
+  it.each([
     ['the method decorator is gone', NEST_CONTROLLER.replace('@Get()', '@Post()').replace('{ Controller, Get }', '{ Controller, Post }'), /missing controller method/],
     ['the controller changed', NEST_CONTROLLER.replace('return []', 'return [1]'), /fingerprint mismatch/],
   ])('fails closed for a Nest endpoint when %s', async (_label, current, error) => {

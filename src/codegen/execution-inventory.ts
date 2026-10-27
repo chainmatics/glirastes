@@ -5,6 +5,7 @@ import { z } from 'zod';
 import ts from 'typescript';
 import { createRouteSourceFingerprint } from './route-fingerprint.js';
 import { readRouteExports } from './route-exports.js';
+import { decoratorsOf, NEST_METHOD_DECORATORS, readImports } from './tools/sources/nest-decorators.js';
 
 const uuid = z.uuid();
 const identifier = z.string().trim().min(1).max(200);
@@ -174,36 +175,20 @@ async function verifyNextEndpoint(
   };
 }
 
-/** The HTTP method decorators of `@nestjs/common`, as the Nest source reads them. */
-const NEST_METHOD_DECORATORS: Readonly<Record<string, string>> = {
-  Get: 'GET', Head: 'HEAD', Post: 'POST', Put: 'PUT', Patch: 'PATCH', Delete: 'DELETE',
-};
-
 /**
  * Whether a `@Controller` class of the file declares a handler of this HTTP
- * method. The full path joins the global prefix of another file, so the
- * fingerprint, not this check, pins the path.
+ * method. It reads decorators exactly as the Nest source does, through a named
+ * or a namespace import of `@nestjs/common`. The full path joins the global
+ * prefix of another file, so the fingerprint, not this check, pins the path.
  */
 function declaresNestMethod(source: string, fileName: string, method: string): boolean {
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
-  const names = new Map<string, string>();
-  for (const statement of file.statements) {
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
-      || statement.moduleSpecifier.text !== '@nestjs/common') continue;
-    const bindings = statement.importClause?.namedBindings;
-    if (!bindings || !ts.isNamedImports(bindings)) continue;
-    for (const element of bindings.elements) names.set(element.name.text, (element.propertyName ?? element.name).text);
-  }
-  const decorated = (node: ts.Node, wanted: (name: string) => boolean) => (
-    (ts.canHaveDecorators(node) ? ts.getDecorators(node) ?? [] : []).some((decorator) => (
-      ts.isCallExpression(decorator.expression) && ts.isIdentifier(decorator.expression.expression)
-      && wanted(names.get(decorator.expression.expression.text) ?? '')
-    ))
-  );
+  const imports = readImports(file);
+  const names = (node: ts.Node) => decoratorsOf(node, imports).map(({ name }) => name);
   return file.statements.some((statement) => (
-    ts.isClassDeclaration(statement) && decorated(statement, (name) => name === 'Controller')
+    ts.isClassDeclaration(statement) && names(statement).includes('Controller')
     && statement.members.some((member) => (
-      ts.isMethodDeclaration(member) && decorated(member, (name) => NEST_METHOD_DECORATORS[name] === method)
+      ts.isMethodDeclaration(member) && names(member).some((name) => NEST_METHOD_DECORATORS[name] === method)
     ))
   ));
 }

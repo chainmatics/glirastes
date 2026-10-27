@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ToolPolicyFileSchema } from '../../../contracts/tool-policy.js';
+import { discoverFoundationExecutions } from '../../execution-inventory.js';
 import { createRouteSourceFingerprint } from '../../route-scanner.js';
 import { createAppFixture, removeAppFixtures } from '../__tests__/app-fixture.js';
 import { loadToolsConfig } from '../config.js';
@@ -234,5 +235,46 @@ describe('nest endpoint source', () => {
 
     expect(observed.findings).toContainEqual(expect.objectContaining({ code: 'E-INVENTORY-010', severity: 'error' }));
     expect(observed.excluded).toContainEqual({ stableKey: 'ALL /api/tasks/any', reason: 'unsupported-method', origin: 'code' });
+  });
+
+  it('enumerates a namespace-imported controller that the inventory then verifies', async () => {
+    const controller = "import * as common from '@nestjs/common';\n"
+      + "@common.Controller('tasks')\n@common.UseGuards(class {})\nexport class TasksController {\n"
+      + '  @common.Get()\n  list() {\n    return [];\n  }\n}\n';
+    const app = await createAppFixture({
+      'tsconfig.json': TSCONFIG,
+      'src/main.ts': MAIN,
+      'src/tasks.controller.ts': controller,
+    }, { toolsConfig: { sources: [{ kind: 'nest' }] } });
+    const observed = await createNestEndpointSource().observe(context(app.root));
+    const list = byKey(observed.observations).get('GET /api/tasks')!;
+    expect(list.execution).toMatchObject({ sourceKind: 'nest', sourceFile: 'src/tasks.controller.ts' });
+
+    const { execution } = list;
+    if (execution.executionKind !== 'endpoint') throw new Error('expected an endpoint execution');
+    const discovery = await discoverFoundationExecutions({
+      rootDir: app.root,
+      inventory: {
+        schemaVersion: 2,
+        targetAppKey: 'fixture',
+        executions: [{
+          toolId: '019fa9a9-d5f7-7ec3-a3c7-8899de1e0001',
+          definitionId: execution.definitionId,
+          stableKey: execution.stableKey,
+          executionKind: 'endpoint',
+          sourceKind: 'nest',
+          sourceFile: execution.sourceFile,
+          method: execution.method,
+          path: execution.path,
+          sourceFingerprint: execution.sourceFingerprint,
+          inputSchemaDigest: `sha256:${'a'.repeat(43)}`,
+          outputSchemaDigest: `sha256:${'b'.repeat(43)}`,
+        }],
+      },
+    });
+    expect(discovery.executions[0]).toMatchObject({
+      stableKey: 'GET /api/tasks',
+      sourceLocator: { sourceFile: 'src/tasks.controller.ts', exportName: 'GET' },
+    });
   });
 });
