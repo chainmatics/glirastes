@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "appId": "019fb007-0000-7000-8000-000000000004",
+  "targetAppKey": "vue-fastapi-fixture",
+  "locale": "en-US",
+  "sources": [
+    { "kind": "openapi", "document": "api/openapi.json", "fastapi": "api/app" }
+  ],
+  "emit": { "module": ".glirastes/build/tools.generated.mjs" }
+}

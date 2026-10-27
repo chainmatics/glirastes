@@ -1,7 +1,9 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -267,4 +269,112 @@ export async function bootNestApp(root: string, model: () => unknown = () => {
 
 export async function closeNestApps(): Promise<void> {
   for (const api of servers.splice(0)) await api.close();
+}
+
+export const VUE_APP = resolve(SDK_ROOT, 'examples/vue-fastapi');
+export const VUE_GENERATED_MODULE = '.glirastes/build/tools.generated.mjs';
+/** Python 3.12 with examples/vue-fastapi/api/requirements.txt installed. */
+export const PYTHON = process.env.GLIRASTES_TEST_PYTHON ?? 'python3';
+
+/** True when PYTHON imports FastAPI, uvicorn and Pydantic; the Vue+FastAPI tests skip visibly otherwise. */
+export function pythonReady(): boolean {
+  return spawnSync(PYTHON, ['-I', '-c', 'import fastapi, uvicorn, pydantic'], { stdio: 'ignore' }).status === 0;
+}
+
+/** The app's own export step (`python3 export_openapi.py`), which imports the app; Glirastes never does. */
+export async function exportOpenapi(root: string): Promise<void> {
+  await promisify(execFile)(PYTHON, ['-B', 'export_openapi.py'], {
+    cwd: join(root, 'api'),
+    env: { PATH: process.env.PATH ?? '' },
+  });
+}
+
+export interface BootedFastapiApp {
+  /** The FastAPI app's own origin, e.g. `http://127.0.0.1:54321`. */
+  apiOrigin: string;
+  /** The Node chat runtime next to it (runtime/chat.mjs). */
+  runtimeOrigin: string;
+  disabled: BootedApp['disabled'];
+  /** Alice's session, accepted by the API as the `session` cookie or a bearer token. */
+  token: string;
+  turn: BootedApp['turn'];
+}
+
+const pythonProcesses: ChildProcess[] = [];
+const chatRuntimes: Server[] = [];
+
+function startUvicorn(root: string, sessions: Readonly<Record<string, Principal>>): Promise<string> {
+  const child = spawn(PYTHON, [
+    '-I', '-B', '-m', 'uvicorn', '--app-dir', join(root, 'api'), 'app.main:app', '--host', '127.0.0.1', '--port', '0',
+  ], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: { PATH: process.env.PATH ?? '', FIXTURE_SESSIONS: JSON.stringify(sessions) },
+  });
+  pythonProcesses.push(child);
+  return new Promise((started, failed) => {
+    let log = '';
+    const timer = setTimeout(() => failed(new Error(`uvicorn did not start within 20 s:\n${log}`)), 20_000);
+    child.stderr!.setEncoding('utf8').on('data', (chunk: string) => {
+      log += chunk;
+      const origin = /Uvicorn running on (http:\/\/127\.0\.0\.1:\d+)/.exec(log)?.[1];
+      if (origin) {
+        clearTimeout(timer);
+        started(origin);
+      }
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      failed(new Error(`uvicorn exited with ${String(code)}:\n${log}`));
+    });
+  });
+}
+
+/**
+ * Starts the FastAPI app with uvicorn on a free local port, with one session
+ * for Alice, and the Node chat runtime next to it. Endpoint tools reach the
+ * API only over HTTP, through `createHttpEndpointCaller`.
+ */
+export async function bootFastapiApp(root: string, model: () => unknown = () => {
+  throw new Error('This test sends no chat message');
+}): Promise<BootedFastapiApp> {
+  const token = randomUUID();
+  const apiOrigin = await startUvicorn(root, { [token]: principal() });
+  const generated = await import(pathToFileURL(join(root, VUE_GENERATED_MODULE)).href) as GeneratedToolModule;
+  const runtime = runtimeOf(generated);
+  const { createChatRuntime } = await import(pathToFileURL(join(root, 'runtime/chat.mjs')).href) as {
+    createChatRuntime(options: { apiOrigin: () => string; model: () => unknown; tenantId: string }): { server: Server };
+  };
+  const chat = createChatRuntime({ apiOrigin: () => apiOrigin, model, tenantId: FIXTURE_TENANT_ID });
+  chatRuntimes.push(chat.server);
+  await new Promise<void>((listening) => chat.server.listen(0, '127.0.0.1', listening));
+  // The turn snapshot needs a principal before the first call; the API checks the same token on every call.
+  const tokenOf = (request: Request) => request.headers.get('authorization')?.match(/^Bearer\s+(\S+)$/i)?.[1]
+    ?? request.headers.get('cookie')?.match(/(?:^|;\s*)session=([^;]+)/)?.[1];
+  const auth: FixtureAuth = {
+    createSession: () => token,
+    revokeSession: () => undefined,
+    resolveSession: (request) => (tokenOf(request) === token ? principal() : undefined),
+  };
+  return {
+    apiOrigin,
+    runtimeOrigin: `http://127.0.0.1:${(chat.server.address() as AddressInfo).port}`,
+    disabled: runtime.disabled,
+    token,
+    turn: turnsOf(runtime, auth, (headers) => createHttpEndpointCaller({
+      baseUrl: apiOrigin,
+      request: new Request(`${apiOrigin}/api/chat`, { headers }),
+    })),
+  };
+}
+
+export async function closeFastapiApps(): Promise<void> {
+  for (const server of chatRuntimes.splice(0)) {
+    await new Promise<void>((closed) => server.close(() => closed()));
+  }
+  for (const child of pythonProcesses.splice(0)) {
+    if (child.exitCode !== null) continue;
+    const exited = new Promise<void>((done) => child.once('exit', () => done()));
+    child.kill('SIGTERM');
+    await exited;
+  }
 }

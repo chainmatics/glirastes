@@ -1,7 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { MockLanguageModelV3 } from 'ai/test';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { compareArtifacts } from '../src/cli/commands/setup-plan.js';
 import { runToolsPipeline } from '../src/codegen/tools/pipeline.js';
@@ -18,9 +16,11 @@ import {
 import {
   artifactOf,
   byToolId,
+  chatBody,
   failingCheck,
   passingCheck,
   replaceIn,
+  scriptedModel,
   tombstonesOf,
   toolNamed,
 } from './support/tool-sync.js';
@@ -63,37 +63,6 @@ const LIST_METHOD = '  @Get()\n'
   + '  list(@Query(new ZodValidationPipe(listTasksQuery)) query: ListTasksQuery, @Req() request: SessionRequest) {\n'
   + '    const tasks = tasksOf(request.user!.subjectId).filter((task) => !query.status || task.status === query.status);\n'
   + '    return listTasksOutput.parse({ tasks });\n  }\n\n';
-
-/** Deterministic transport fixture: "Show done tasks" calls tasks_list once, then answers. */
-function scriptedModel() {
-  return new MockLanguageModelV3({ doStream: async ({ prompt }) => {
-    const last = prompt.at(-1);
-    const asked = last?.role === 'user'
-      && last.content.some((part) => part.type === 'text' && part.text === 'Show done tasks');
-    const usage = {
-      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-      outputTokens: { total: 1, text: 1, reasoning: 0 },
-    };
-    const chunks = asked
-      ? [
-        { type: 'stream-start' as const, warnings: [] },
-        { type: 'tool-call' as const, toolCallId: randomUUID(), toolName: 'tasks_list', input: JSON.stringify({ status: 'done' }) },
-        { type: 'finish' as const, finishReason: { unified: 'tool-calls' as const, raw: undefined }, usage },
-      ]
-      : [
-        { type: 'stream-start' as const, warnings: [] },
-        { type: 'text-start' as const, id: 'answer' },
-        { type: 'text-delta' as const, id: 'answer', delta: 'Reference response complete.' },
-        { type: 'text-end' as const, id: 'answer' },
-        { type: 'finish' as const, finishReason: { unified: 'stop' as const, raw: undefined }, usage },
-      ];
-    return { stream: new ReadableStream({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } }) };
-  } });
-}
-
-function chatBody(text: string): string {
-  return JSON.stringify({ messages: [{ id: randomUUID(), role: 'user', parts: [{ type: 'text', text }] }] });
-}
 
 describe('React+NestJS endpoint change corpus', () => {
   it('adds a controller: active at once with defaults, inside the user session, rejected without one', async () => {

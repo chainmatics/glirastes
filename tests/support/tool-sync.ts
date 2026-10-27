@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { MockLanguageModelV3 } from 'ai/test';
 import { expect } from 'vitest';
 import {
   runToolsPipeline,
@@ -51,3 +53,34 @@ export function hrefOf(result: unknown): unknown {
 }
 
 export const byToolId = (left: { toolId: string }, right: { toolId: string }) => (left.toolId < right.toolId ? -1 : 1);
+
+/** Deterministic transport fixture: "Show done tasks" calls tasks_list once, then answers. */
+export function scriptedModel() {
+  return new MockLanguageModelV3({ doStream: async ({ prompt }) => {
+    const last = prompt.at(-1);
+    const asked = last?.role === 'user'
+      && last.content.some((part) => part.type === 'text' && part.text === 'Show done tasks');
+    const usage = {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    };
+    const chunks = asked
+      ? [
+        { type: 'stream-start' as const, warnings: [] },
+        { type: 'tool-call' as const, toolCallId: randomUUID(), toolName: 'tasks_list', input: JSON.stringify({ status: 'done' }) },
+        { type: 'finish' as const, finishReason: { unified: 'tool-calls' as const, raw: undefined }, usage },
+      ]
+      : [
+        { type: 'stream-start' as const, warnings: [] },
+        { type: 'text-start' as const, id: 'answer' },
+        { type: 'text-delta' as const, id: 'answer', delta: 'Reference response complete.' },
+        { type: 'text-end' as const, id: 'answer' },
+        { type: 'finish' as const, finishReason: { unified: 'stop' as const, raw: undefined }, usage },
+      ];
+    return { stream: new ReadableStream({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } }) };
+  } });
+}
+
+export function chatBody(text: string): string {
+  return JSON.stringify({ messages: [{ id: randomUUID(), role: 'user', parts: [{ type: 'text', text }] }] });
+}
