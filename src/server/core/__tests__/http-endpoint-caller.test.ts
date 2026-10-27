@@ -111,4 +111,18 @@ describe('createHttpEndpointCaller', () => {
     });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['an HTTPException', 401, { detail: 'Unauthenticated' }, 'Unauthenticated'],
+    ['a validation error', 422, {
+      detail: [
+        { loc: ['body', 'title'], msg: 'String should have at least 1 character', type: 'string_too_short' },
+        { loc: ['query', 'status'], msg: "Input should be 'open' or 'done'", type: 'literal_error' },
+      ],
+    }, "body.title: String should have at least 1 character; query.status: Input should be 'open' or 'done'"],
+  ])('reads the error of a FastAPI %s', async (_label, status, body, error) => {
+    const caller = createHttpEndpointCaller({ baseUrl: 'http://127.0.0.1:8000', fetchImpl: fetchRecorder(body, status) });
+
+    expect(await caller({ method: 'POST', path: '/api/tasks', body: { title: '' } })).toMatchObject({ ok: false, status, error });
+  });
 });

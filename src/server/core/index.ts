@@ -1062,6 +1062,19 @@ function toErrorMessage(data: unknown, fallback: string): string {
     if (typeof message === 'string' && message.trim()) return message;
     if (typeof data.error === 'string' && data.error.trim())
       return data.error;
+    // FastAPI: HTTPException returns { detail: string }, a validation error { detail: [{ loc, msg }] }.
+    const detail = data.detail;
+    if (typeof detail === 'string' && detail.trim()) return detail;
+    if (Array.isArray(detail)) {
+      const details = detail
+        .filter(isRecord)
+        .filter((item) => typeof item.msg === 'string' && item.msg.trim())
+        .map((item) => {
+          const location = Array.isArray(item.loc) ? item.loc.filter((part) => typeof part === 'string' || typeof part === 'number').join('.') : '';
+          return location ? `${location}: ${item.msg as string}` : item.msg as string;
+        });
+      if (details.length > 0) return details.join('; ');
+    }
   }
   return fallback;
 }
