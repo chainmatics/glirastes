@@ -27,7 +27,7 @@ const endpointExecution = executionBase.extend({
    * The deterministic source that enumerated the endpoint. Absent on
    * inventories written before the tools generator; treated as next-app.
    */
-  sourceKind: z.enum(['next-app']).optional(),
+  sourceKind: z.enum(['next-app', 'nest']).optional(),
   sourceFile: z.string().trim().min(1).max(2_048),
   method: z.enum(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']),
   path: z.string().startsWith('/').max(2_048),
@@ -174,12 +174,72 @@ async function verifyNextEndpoint(
   };
 }
 
+/** The HTTP method decorators of `@nestjs/common`, as the Nest source reads them. */
+const NEST_METHOD_DECORATORS: Readonly<Record<string, string>> = {
+  Get: 'GET', Head: 'HEAD', Post: 'POST', Put: 'PUT', Patch: 'PATCH', Delete: 'DELETE',
+};
+
+/**
+ * Whether a `@Controller` class of the file declares a handler of this HTTP
+ * method. The full path joins the global prefix of another file, so the
+ * fingerprint, not this check, pins the path.
+ */
+function declaresNestMethod(source: string, fileName: string, method: string): boolean {
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const names = new Map<string, string>();
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
+      || statement.moduleSpecifier.text !== '@nestjs/common') continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) names.set(element.name.text, (element.propertyName ?? element.name).text);
+  }
+  const decorated = (node: ts.Node, wanted: (name: string) => boolean) => (
+    (ts.canHaveDecorators(node) ? ts.getDecorators(node) ?? [] : []).some((decorator) => (
+      ts.isCallExpression(decorator.expression) && ts.isIdentifier(decorator.expression.expression)
+      && wanted(names.get(decorator.expression.expression.text) ?? '')
+    ))
+  );
+  return file.statements.some((statement) => (
+    ts.isClassDeclaration(statement) && decorated(statement, (name) => name === 'Controller')
+    && statement.members.some((member) => (
+      ts.isMethodDeclaration(member) && decorated(member, (name) => NEST_METHOD_DECORATORS[name] === method)
+    ))
+  ));
+}
+
+async function verifyNestEndpoint(
+  rootDir: string,
+  execution: z.infer<typeof endpointExecution>,
+): Promise<DiscoveredFoundationExecution> {
+  let source: string;
+  try {
+    source = await readFile(resolve(rootDir, execution.sourceFile), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`Foundation inventory references a missing controller: ${execution.stableKey}`);
+    }
+    throw error;
+  }
+  if (!declaresNestMethod(source, execution.sourceFile, execution.method)) {
+    throw new Error(`Foundation inventory references a missing controller method: ${execution.stableKey}`);
+  }
+  if (execution.stableKey !== `${execution.method} ${execution.path}`) {
+    throw new Error(`Foundation inventory stable key mismatch: ${execution.stableKey}`);
+  }
+  if (createRouteSourceFingerprint(source, execution.method, execution.path) !== execution.sourceFingerprint) {
+    throw new Error(`Foundation route fingerprint mismatch: ${execution.stableKey}`);
+  }
+  return { ...execution, sourceLocator: { sourceFile: execution.sourceFile, exportName: execution.method } };
+}
+
 async function verifyEndpoint(
   rootDir: string,
   execution: z.infer<typeof endpointExecution>,
 ): Promise<DiscoveredFoundationExecution> {
   const kind = execution.sourceKind ?? 'next-app';
   if (kind === 'next-app') return verifyNextEndpoint(rootDir, execution);
+  if (kind === 'nest') return verifyNestEndpoint(rootDir, execution);
   throw new Error(`Unsupported endpoint source kind: ${String(kind)}`);
 }
 

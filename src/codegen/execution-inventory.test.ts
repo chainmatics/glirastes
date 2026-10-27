@@ -394,6 +394,34 @@ describe('endpoint source kinds', () => {
     })).rejects.toThrow(/missing route export/);
   });
 
+  const NEST_CONTROLLER = "import { Controller, Get } from '@nestjs/common';\n"
+    + "@Controller('tasks')\nexport class TasksController {\n  @Get()\n  list() {\n    return [];\n  }\n}\n";
+
+  it('verifies a Nest controller method by its decorator and fingerprint', async () => {
+    const rootDir = await fixture({ 'src/tasks.controller.ts': NEST_CONTROLLER });
+    const base = endpoint({ source: NEST_CONTROLLER, sourceFile: 'src/tasks.controller.ts' });
+    const result = await discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [{ ...base, sourceKind: 'nest' as const }] },
+    });
+    expect(result.executions[0]).toMatchObject({
+      sourceKind: 'nest',
+      sourceLocator: { sourceFile: 'src/tasks.controller.ts', exportName: 'GET' },
+    });
+  });
+
+  it.each([
+    ['the method decorator is gone', NEST_CONTROLLER.replace('@Get()', '@Post()').replace('{ Controller, Get }', '{ Controller, Post }'), /missing controller method/],
+    ['the controller changed', NEST_CONTROLLER.replace('return []', 'return [1]'), /fingerprint mismatch/],
+  ])('fails closed for a Nest endpoint when %s', async (_label, current, error) => {
+    const rootDir = await fixture({ 'src/tasks.controller.ts': current });
+    const base = endpoint({ source: NEST_CONTROLLER, sourceFile: 'src/tasks.controller.ts' });
+    await expect(discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [{ ...base, sourceKind: 'nest' as const }] },
+    })).rejects.toThrow(error);
+  });
+
   it('rejects unknown endpoint source kinds', () => {
     const parsed = FoundationExecutionInventorySchema.safeParse({
       schemaVersion: 2,

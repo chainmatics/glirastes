@@ -122,7 +122,7 @@ function functionOf(
   return undefined;
 }
 
-function jsDocOf(host: ts.Node): string | undefined {
+export function jsDocOf(host: ts.Node): string | undefined {
   const docs = ts.getJSDocCommentsAndTags(host).filter(ts.isJSDoc);
   const last = docs[docs.length - 1];
   const text = last ? ts.getTextOfJSDocComment(last.comment) : undefined;

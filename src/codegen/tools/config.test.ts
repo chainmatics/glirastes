@@ -79,6 +79,11 @@ describe('tools config', () => {
     ]);
   });
 
+  it('accepts a NestJS source with its own source folder', async () => {
+    const config = loadToolsConfig(await appWith({ ...minimal, sources: ['nest', { kind: 'nest', srcDir: 'api/src' }] }));
+    expect(normalizeSources(config)).toEqual([{ kind: 'nest' }, { kind: 'nest', srcDir: 'api/src' }]);
+  });
+
   it('accepts NodeNext imports for a TypeScript module', async () => {
     const config = loadToolsConfig(await appWith({
       ...minimal,

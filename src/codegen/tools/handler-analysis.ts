@@ -127,7 +127,7 @@ function exportNameOf(app: AppProgram, sourceFile: ts.SourceFile, symbol: ts.Sym
   return undefined;
 }
 
-function resolveSchemaBinding(
+export function resolveSchemaBinding(
   app: AppProgram,
   sourceFile: ts.SourceFile,
   expression: ts.Expression,
@@ -164,7 +164,7 @@ function resolveSchemaBinding(
   return module && exported ? { binding: { module, export: exported, property } } : { problem: 'not-exported' };
 }
 
-function isSchemaExpression(app: AppProgram, expression: ts.Expression): boolean {
+export function isSchemaExpression(app: AppProgram, expression: ts.Expression): boolean {
   const type = app.checker.getTypeAtLocation(expression);
   return Boolean(type.getProperty('_zod') ?? type.getProperty('_def'));
 }

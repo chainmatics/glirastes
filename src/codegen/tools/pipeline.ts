@@ -65,6 +65,7 @@ import {
   type SemanticsCheck,
   type SemanticsFacts,
 } from './semantics.js';
+import { createNestEndpointSource } from './sources/nest-endpoints.js';
 import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { createNextPagesSource } from './sources/next-pages.js';
 import { createReactActionSource } from './sources/react-actions.js';
@@ -169,11 +170,13 @@ export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
     switch (source.kind) {
       case 'next-app':
         return createNextEndpointSource(source.apiDir ? { apiDir: source.apiDir } : {});
+      case 'nest':
+        return createNestEndpointSource(source.srcDir ? { srcDir: source.srcDir } : {});
       case 'next-pages':
         return createNextPagesSource(source);
       case 'url-filters':
         return createUrlFilterSource({
-          ...(pages && pages.kind !== 'next-app' ? pages : {}),
+          ...(pages && pages.kind === 'next-pages' ? pages : {}),
           ...source,
         });
       case 'react-actions':

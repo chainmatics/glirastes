@@ -37,7 +37,7 @@ const modulePath = z.string().trim().min(1).max(512)
   .regex(/\.(?:ts|js|mjs)$/, 'The generated module must end in .ts, .js or .mjs')
   .refine(insideApp, 'Path must stay inside the app');
 
-export const ToolSourceKindSchema = z.enum(['next-app', 'next-pages', 'url-filters', 'react-actions']);
+export const ToolSourceKindSchema = z.enum(['next-app', 'nest', 'next-pages', 'url-filters', 'react-actions']);
 
 /** A folder name such as `[locale]`, never a path. */
 const folderName = z.string().trim().min(1).max(200)
@@ -46,6 +46,7 @@ const folderName = z.string().trim().min(1).max(200)
 const SourceSchema = z.union([
   ToolSourceKindSchema,
   z.object({ kind: z.literal('next-app'), apiDir: appPath.optional() }).strict(),
+  z.object({ kind: z.literal('nest'), srcDir: appPath.optional() }).strict(),
   z.object({
     kind: z.literal('next-pages'),
     appDir: appPath.optional(),
@@ -121,6 +122,7 @@ export const ToolsConfigSchema = z.object({
 export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 export type ToolSourceConfig =
   | { kind: 'next-app'; apiDir?: string }
+  | { kind: 'nest'; srcDir?: string }
   | { kind: 'next-pages' | 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[] }
   | { kind: 'react-actions'; srcDir?: string };
 
