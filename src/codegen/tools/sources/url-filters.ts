@@ -701,14 +701,20 @@ function pathParams(path: string): string[] {
   return path.split('/').filter((segment) => segment.startsWith(':')).map((segment) => segment.slice(1));
 }
 
+/** A path with its parameter names left out: `/tasks/:id` and `/tasks/:taskId` are the same page. */
+function routeShape(path: string): string {
+  return path.split('/').map((segment) => (segment.startsWith(':') ? ':' : segment)).join('/');
+}
+
 async function observeFilters(
   root: string,
   locale: string,
   options: UrlFilterSourceOptions,
   policyExcludes: ReadonlyArray<{ match: string; reason: string }>,
 ): Promise<ToolSourceObservation> {
-  const tree = options.pages === 'react-router' || options.pages === 'vue-router'
-    ? await enumerateRouteConfigPages(root, options, policyExcludes, options.pages)
+  const routeConfig = options.pages === 'react-router' || options.pages === 'vue-router' ? options.pages : undefined;
+  const tree = routeConfig
+    ? await enumerateRouteConfigPages(root, options, policyExcludes, routeConfig)
     : await enumeratePages(root, options, policyExcludes);
   if (!tree.complete) return incompleteUiSource('url-filters', tree.reason);
   const defined = await scanAppSources(root, {
@@ -750,6 +756,8 @@ async function observeFilters(
   const definitionNotes: Array<{ file: string; code: string; message: string }> = [];
   const excludedPaths = new Map(tree.excluded.map((entry) => [entry.stableKey.slice('PAGE '.length), entry] as const));
   const excluded: ExcludedTool[] = [];
+  // A route config lists every page the SPA serves; a filter for any other path would navigate nowhere.
+  const routed = routeConfig ? new Set(tree.pages.map((page) => routeShape(page.path))) : undefined;
   for (const file of defined.files) {
     const source = app.sourceFile(file.absolute);
     if (!source) continue;
@@ -758,6 +766,11 @@ async function observeFilters(
       const pageExclusion = excludedPaths.get(definition.path) ?? pathExclusion(definition.path, policyExcludes);
       if (pageExclusion) {
         excluded.push({ stableKey: filterStableKey(definition.path), reason: pageExclusion.reason, origin: pageExclusion.origin });
+        continue;
+      }
+      if (routed && !routed.has(routeShape(definition.path))) {
+        findings.push(toolFinding('filter-path-unrouted', 'warning', filterStableKey(definition.path),
+          `${file.path} defines query filters for ${definition.path}, which no route serves; no filter tool is generated for it.`));
         continue;
       }
       const view = viewOf(definition.path, pathParams(definition.path));

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ToolPolicyFileSchema } from '../../../contracts/tool-policy.js';
 import { createAppFixture, removeAppFixtures } from '../__tests__/app-fixture.js';
 import { loadToolsConfig } from '../config.js';
+import { nextActionFor } from '../findings.js';
 import { EMPTY_CONVENTIONS } from '../resolutions.js';
 import { createSchemaProbe } from '../schema-probe.js';
 import type { ToolSourceContext } from '../types.js';
@@ -173,6 +174,25 @@ describe('vue-router routes', () => {
     });
     expect(navigation.observations[0]!.findings).toEqual([]);
     expect(filters.observations.map((tool) => tool.execution.definitionId)).toEqual(['ui.filter.reports']);
+  });
+
+  it('leaves out a query filter for a path the routes do not serve, with a warning', async () => {
+    const app = await createAppFixture({
+      ...VUE_FILES,
+      'src/views/archive-filters.ts': "import { defineQueryFilters } from 'glirastes/browser';\n"
+        + "export const archive = defineQueryFilters({ path: '/archive', filters: { year: ['2025', '2026'] } });\n"
+        + "export const detail = defineQueryFilters({ path: '/tasks/:id', filters: { tab: ['notes', 'files'] } });\n",
+    }, { toolsConfig: { sources: ['vue-router', 'url-filters'] } });
+    const observed = await createUrlFilterSource({ pages: 'vue-router' }).observe(context(app.root));
+
+    // `/tasks/:id` is the route `/tasks/:taskId`; a parameter name does not change the page.
+    expect(observed.observations.map((tool) => tool.execution.definitionId).sort())
+      .toEqual(['ui.filter.reports', 'ui.filter.tasksItem']);
+    expect(observed.findings).toEqual([{
+      code: 'filter-path-unrouted', severity: 'warning', subjectRef: 'UI filter /archive',
+      message: 'src/views/archive-filters.ts defines query filters for /archive, which no route serves; no filter tool is generated for it.',
+      nextAction: nextActionFor('filter-path-unrouted'),
+    }]);
   });
 
   it('stops instead of guessing for a route alias', async () => {

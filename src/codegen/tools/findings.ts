@@ -50,6 +50,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'filter-domain-open': 'Optional: give the URL parameter a closed domain, e.g. parseAsStringLiteral([...]) or a defineQueryFilters value list.',
   'filter-domain-conflict': 'Read the URL parameter with one parser on the page and its components.',
   'filter-parser-unsupported': 'Use parseAsString, parseAsInteger, parseAsFloat, parseAsBoolean, parseAsStringLiteral or parseAsArrayOf for parameters the chat may set.',
+  'filter-path-unrouted': 'Add a route for the path, or correct the path of defineQueryFilters, then run glirastes tools refresh.',
   'filter-definition-unreadable': 'Write the filter key, path and values as literals so glirastes tools refresh can read them.',
   'filter-key-reserved': 'Rename the URL parameter; params is reserved for route parameters of the filtered page.',
   'filter-key-invalid': 'Name the URL parameter with letters, digits, _ or - (starting with a letter or _, at most 64 characters) so the chat can set it; other names are left out of the filter tool.',
