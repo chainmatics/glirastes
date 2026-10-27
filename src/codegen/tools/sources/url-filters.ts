@@ -15,6 +15,7 @@ import type {
 import { scanAppSources } from './app-files.js';
 import { navigationBridgeMissing, scanForNavigationBridge } from './next-pages.js';
 import { enumeratePages, pathExclusion, type PageEntry, type PageTreeOptions } from './page-tree.js';
+import { componentDeclaration, enumerateRouteConfigPages } from './route-config.js';
 import {
   filterStableKey,
   hasNavigationBridge,
@@ -33,6 +34,8 @@ import {
 export interface UrlFilterSourceOptions extends PageTreeOptions {
   /** Where `defineQueryFilters` and the navigation bridge are searched; `src` when the app has one. */
   srcDir?: string;
+  /** Which page list the filters attach to: the Next.js page tree (default) or react-router routes. */
+  pages?: 'next' | 'react-router';
 }
 
 export type FilterDomain =
@@ -490,7 +493,7 @@ class FilterReader {
    * bounded. A binding is resolved to where it is declared, so a barrel, a
    * module's other exports and a cache another page uses are not credited.
    */
-  viewEvidence(page: ts.SourceFile): Evidence {
+  viewEvidence(page: ts.Node): Evidence {
     const found: Evidence = { keys: [], notes: [] };
     const seen = new Set<ts.Node>([page]);
     let frontier: ts.Node[] = [page];
@@ -703,7 +706,9 @@ async function observeFilters(
   options: UrlFilterSourceOptions,
   policyExcludes: ReadonlyArray<{ match: string; reason: string }>,
 ): Promise<ToolSourceObservation> {
-  const tree = await enumeratePages(root, options, policyExcludes);
+  const tree = options.pages === 'react-router'
+    ? await enumerateRouteConfigPages(root, options, policyExcludes)
+    : await enumeratePages(root, options, policyExcludes);
   if (!tree.complete) return incompleteUiSource('url-filters', tree.reason);
   const defined = await scanAppSources(root, {
     ...(options.srcDir ? { srcDir: options.srcDir } : {}),
@@ -732,12 +737,13 @@ async function observeFilters(
   };
   for (const page of tree.pages as ReadonlyArray<PageEntry>) {
     const source = app.sourceFile(join(root, page.file));
-    if (!source) continue;
-    const found = reader.viewEvidence(source);
+    const rendered = source && page.component ? componentDeclaration(source, page.component) : source;
+    if (!rendered) continue;
+    const found = reader.viewEvidence(rendered);
     if (found.keys.length === 0 && found.notes.length === 0) continue;
-    const view = viewOf(page.path, page.params);
-    for (const key of found.keys) addKey(view, key);
-    for (const note of found.notes) addNote(view, note);
+    const pageView = viewOf(page.path, page.params);
+    for (const key of found.keys) addKey(pageView, key);
+    for (const note of found.notes) addNote(pageView, note);
   }
   const findings: ToolFinding[] = [];
   const definitionNotes: Array<{ file: string; code: string; message: string }> = [];

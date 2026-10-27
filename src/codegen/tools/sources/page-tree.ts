@@ -17,6 +17,12 @@ export interface PageEntry {
   params: string[];
   /** App-relative POSIX path of the page file. */
   file: string;
+  /**
+   * The export of `file` that renders the page (`default` for a default
+   * export), when `file` is a component module rather than a page file, as
+   * for react-router routes. Absent: the whole file is the page.
+   */
+  component?: string;
 }
 
 export type PageTree =

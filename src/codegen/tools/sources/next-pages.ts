@@ -8,7 +8,7 @@ import type {
   ToolSourceObservation,
 } from '../types.js';
 import { scanAppSources, type AppSourceScan } from './app-files.js';
-import { enumeratePages, type PageEntry, type PageTreeOptions } from './page-tree.js';
+import { enumeratePages, type PageEntry, type PageTree, type PageTreeOptions } from './page-tree.js';
 import {
   hasNavigationBridge,
   incompleteUiSource,
@@ -75,19 +75,20 @@ export function scanForNavigationBridge(root: string, srcDir: string | undefined
   return scanAppSources(root, { ...(srcDir ? { srcDir } : {}), matches: mentionsNavigationBridge });
 }
 
-async function observePages(
+/** The one `ui.navigate` tool over a page list, whichever source enumerated it. */
+export async function observeNavigation(
+  kind: string,
+  tree: PageTree,
   root: string,
   locale: string,
-  options: NextPagesSourceOptions,
-  policyExcludes: ReadonlyArray<{ match: string; reason: string }>,
+  srcDir: string | undefined,
 ): Promise<ToolSourceObservation> {
-  const tree = await enumeratePages(root, options, policyExcludes);
-  if (!tree.complete) return incompleteUiSource('next-pages', tree.reason);
+  if (!tree.complete) return incompleteUiSource(kind, tree.reason);
   if (tree.pages.length === 0) {
     return { observations: [], findings: tree.findings, complete: true, excluded: tree.excluded };
   }
-  const sources = await scanForNavigationBridge(root, options.srcDir);
-  if (!sources.complete) return incompleteUiSource('next-pages', sources.reason);
+  const sources = await scanForNavigationBridge(root, srcDir);
+  if (!sources.complete) return incompleteUiSource(kind, sources.reason);
   const tool = uiObservation({
     stableKey: NAVIGATE_STABLE_KEY,
     definitionId: NAVIGATE_DEFINITION_ID,
@@ -113,6 +114,7 @@ async function observePages(
 export function createNextPagesSource(options: NextPagesSourceOptions = {}): ToolSource {
   return {
     kind: 'next-pages',
-    observe: (ctx) => observePages(ctx.root, ctx.config.locale, options, ctx.policy.exclude ?? []),
+    observe: async (ctx) => observeNavigation('next-pages',
+      await enumeratePages(ctx.root, options, ctx.policy.exclude ?? []), ctx.root, ctx.config.locale, options.srcDir),
   };
 }

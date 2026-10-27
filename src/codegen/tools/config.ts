@@ -37,7 +37,7 @@ const modulePath = z.string().trim().min(1).max(512)
   .regex(/\.(?:ts|js|mjs)$/, 'The generated module must end in .ts, .js or .mjs')
   .refine(insideApp, 'Path must stay inside the app');
 
-export const ToolSourceKindSchema = z.enum(['next-app', 'nest', 'next-pages', 'url-filters', 'react-actions']);
+export const ToolSourceKindSchema = z.enum(['next-app', 'nest', 'next-pages', 'react-router', 'url-filters', 'react-actions']);
 
 /** A folder name such as `[locale]`, never a path. */
 const folderName = z.string().trim().min(1).max(200)
@@ -59,11 +59,14 @@ const SourceSchema = z.union([
     srcDir: appPath.optional(),
     stripSegments: z.array(folderName).max(20).optional(),
   }).strict(),
+  z.object({ kind: z.literal('react-router'), srcDir: appPath.optional() }).strict(),
   z.object({ kind: z.literal('react-actions'), srcDir: appPath.optional() }).strict(),
 ]);
 
 /** Sources that each produce app-wide UI tools; a second copy would duplicate them. */
-const SINGLETON_SOURCES: ReadonlyArray<string> = ['next-pages', 'url-filters', 'react-actions'];
+const SINGLETON_SOURCES: ReadonlyArray<string> = ['next-pages', 'react-router', 'url-filters', 'react-actions'];
+/** Page sources each own the one `ui.navigate` tool and the pages URL filters attach to. */
+const PAGE_SOURCES: ReadonlyArray<string> = ['next-pages', 'react-router'];
 
 export const ToolsConfigSchema = z.object({
   schemaVersion: z.literal(1),
@@ -102,6 +105,9 @@ export const ToolsConfigSchema = z.object({
       context.addIssue({ code: 'custom', path: ['sources'], message: `The ${kind} source may appear only once` });
     }
   }
+  if (PAGE_SOURCES.filter((kind) => (kinds as ReadonlyArray<string>).includes(kind)).length > 1) {
+    context.addIssue({ code: 'custom', path: ['sources'], message: `Use one page source: ${PAGE_SOURCES.join(' or ')}` });
+  }
   if (config.emit.moduleResolution === 'nodenext' && !(config.emit.module ?? DEFAULT_GENERATED_MODULE).endsWith('.ts')) {
     context.addIssue({
       code: 'custom',
@@ -124,7 +130,7 @@ export type ToolSourceConfig =
   | { kind: 'next-app'; apiDir?: string }
   | { kind: 'nest'; srcDir?: string }
   | { kind: 'next-pages' | 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[] }
-  | { kind: 'react-actions'; srcDir?: string };
+  | { kind: 'react-router' | 'react-actions'; srcDir?: string };
 
 function invalidConfig(): FoundationDiagnosticError {
   return new FoundationDiagnosticError({
