@@ -4,7 +4,10 @@
   "targetAppKey": "react-nest-separate-fixture",
   "locale": "en-US",
   "sources": [
-    { "kind": "nest", "srcDir": "api/src" }
+    { "kind": "nest", "srcDir": "api/src" },
+    { "kind": "react-router", "srcDir": "web/src" },
+    { "kind": "url-filters", "srcDir": "web/src" },
+    { "kind": "react-actions", "srcDir": "web/src" }
   ],
   "emit": { "module": "api/src/generated/glirastes/tools.generated.ts", "moduleResolution": "nodenext" }
 }

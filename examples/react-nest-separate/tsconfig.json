@@ -1,7 +1,7 @@
 {
   "//": "Read by glirastes tools refresh for the whole app; each part builds with its own tsconfig.",
   "files": [],
-  "references": [{ "path": "./api" }],
+  "references": [{ "path": "./api" }, { "path": "./web" }],
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
