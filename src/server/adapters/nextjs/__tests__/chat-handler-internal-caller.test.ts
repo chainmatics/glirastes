@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { formatChatCommandMessage } from '../../../../contracts/chat-command.js';
 import { defineTool, type PipelineResult } from '../../../../types.js';
-import type { InternalApiCaller } from '../../../core/index.js';
+import { createHttpEndpointCaller, type InternalApiCaller } from '../../../core/index.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
 
 const registry = {
@@ -33,10 +33,15 @@ function chatRequest(url: string, headers: Record<string, string>, text = 'Tasks
 }
 
 /** Runs one chat turn and returns the caller the handler gave `loadTools`. */
-async function callerFor(request: Request, mode: Mode): Promise<InternalApiCaller> {
+async function callerFor(
+  request: Request,
+  mode: Mode,
+  endpointCaller?: (request: Request) => InternalApiCaller,
+): Promise<InternalApiCaller> {
   let caller: InternalApiCaller | undefined;
   let streamed = false;
   const handler = createAiChatHandler({
+    ...(endpointCaller ? { endpointCaller } : {}),
     loadTools: async (context) => {
       caller = context.callEndpoint;
       return registry;
@@ -57,8 +62,9 @@ async function callerFor(request: Request, mode: Mode): Promise<InternalApiCalle
 
 /**
  * The integrating-glirastes-web skill tells agents what the chat handler's
- * endpoint caller can reach. These tests pin that claim to the handler: the
- * caller is built from the chat request, there is no option to replace it.
+ * endpoint caller can reach. These tests pin that claim to the handler: by
+ * default the caller is built from the chat request (its origin and cookie),
+ * and `endpointCaller` replaces it in every mode.
  */
 describe('endpoint caller of the chat handler', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -87,5 +93,35 @@ describe('endpoint caller of the chat handler', () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('https://public.example/api/tasks');
     expect(init.headers).toEqual({ cookie: 'session=abc' });
+  });
+
+  it.each([
+    ['legacy mode', 'legacy'],
+    ['pipeline mode', 'pipeline'],
+    ['direct command', 'direct command'],
+  ] as const)('uses the configured endpoint caller for an API on its own origin (%s)', async (_label, mode) => {
+    const fetchMock = vi.fn(async () => new Response('{"tasks":[]}', {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const requests: Request[] = [];
+
+    const caller = await callerFor(chatRequest('https://app.example/api/chat', {
+      cookie: 'session=abc',
+      authorization: 'Bearer user-token',
+      'x-forwarded-host': 'public.example',
+      'x-api-key': 'not-forwarded',
+    }, mode === 'direct command' ? directCommand : 'Tasks'), mode, (request) => {
+      requests.push(request);
+      return createHttpEndpointCaller({ baseUrl: 'http://127.0.0.1:4000', request });
+    });
+    const result = await caller({ method: 'GET', path: '/api/tasks' });
+
+    expect(result).toMatchObject({ ok: true, status: 200 });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toBe('https://app.example/api/chat');
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('http://127.0.0.1:4000/api/tasks');
+    expect(init.headers).toEqual({ authorization: 'Bearer user-token', cookie: 'session=abc' });
   });
 });

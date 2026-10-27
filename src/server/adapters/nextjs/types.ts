@@ -368,6 +368,15 @@ export interface AiChatHandlerConfig {
   directCommands?: boolean;
 
   /**
+   * The caller endpoint tools of one chat request use. When absent, calls go
+   * to the origin the chat request arrived on and carry only its cookie
+   * (`createInternalApiCallerFromRequest`). An API on its own origin, or one
+   * that authenticates by `Authorization` header, passes
+   * `(request) => createHttpEndpointCaller({ baseUrl, request })`.
+   */
+  endpointCaller?: (request: Request) => InternalApiCaller;
+
+  /**
    * Lancer client for runtime prompt and model overrides (Pro feature).
    *
    * When provided, the adapter fetches prompt overrides from Glirastes

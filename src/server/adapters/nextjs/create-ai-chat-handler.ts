@@ -707,6 +707,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     metrics,
     modelPricing: configuredModelPricing,
     directCommands = true,
+    endpointCaller = createInternalApiCallerFromRequest,
   } = config;
 
   // The Proctor endpoint behind Lancer telemetry is not served by the
@@ -965,7 +966,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // stay the same.
       // ================================================================
       if (directCommand) {
-        const callEndpoint = createInternalApiCallerFromRequest(req);
+        const callEndpoint = endpointCaller(req);
         const endpointToolContext = {
           ...toolContext,
           callEndpoint,
@@ -999,7 +1000,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (pipeline) {
 
         // Create callEndpoint for endpoint tools (needed regardless of static/dynamic)
-        const callEndpoint = createInternalApiCallerFromRequest(req);
+        const callEndpoint = endpointCaller(req);
         const endpointToolContext = {
           ...toolContext,
           callEndpoint,
@@ -1268,7 +1269,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
 
       // Create callEndpoint for endpoint tools (needed regardless of static/dynamic)
-      const callEndpoint = createInternalApiCallerFromRequest(req);
+      const callEndpoint = endpointCaller(req);
       const endpointToolContext = {
         ...toolContext,
         callEndpoint,
