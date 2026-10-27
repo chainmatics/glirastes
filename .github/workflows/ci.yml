@@ -51,8 +51,50 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The reference-app tests boot the built SDK and the NestJS fixture's own API dependencies.
+      - name: Build
+        run: bun run build
+
+      - name: Install the NestJS fixture API
+        run: bun install --frozen-lockfile --cwd examples/react-nest-separate/api
+
+      # Without Python the Vue+FastAPI tests skip visibly here; the reference-fastapi job runs them.
       - name: Test
         run: bun run test
+
+  reference-fastapi:
+    name: Reference app Vue+FastAPI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install the FastAPI fixture API
+        run: python -m pip install -r examples/vue-fastapi/api/requirements.txt
+
+      - name: Build
+        run: bun run build
+
+      - name: Vue+FastAPI change corpus
+        env:
+          GLIRASTES_REQUIRE_PYTHON: '1'
+          GLIRASTES_TEST_PYTHON: python
+        run: bunx vitest run tests/tool-sync-vue-fastapi.test.ts tests/tool-sync-vue-fastapi-ui.test.ts
 
   build:
     name: Build

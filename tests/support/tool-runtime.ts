@@ -276,9 +276,17 @@ export const VUE_GENERATED_MODULE = '.glirastes/build/tools.generated.mjs';
 /** Python 3.12 with examples/vue-fastapi/api/requirements.txt installed. */
 export const PYTHON = process.env.GLIRASTES_TEST_PYTHON ?? 'python3';
 
-/** True when PYTHON imports FastAPI, uvicorn and Pydantic; the Vue+FastAPI tests skip visibly otherwise. */
+/**
+ * True when PYTHON imports FastAPI, uvicorn and Pydantic; the Vue+FastAPI
+ * tests skip visibly otherwise. The fixture's own CI job sets
+ * GLIRASTES_REQUIRE_PYTHON=1, so there a missing Python fails instead of skipping.
+ */
 export function pythonReady(): boolean {
-  return spawnSync(PYTHON, ['-I', '-c', 'import fastapi, uvicorn, pydantic'], { stdio: 'ignore' }).status === 0;
+  const ready = spawnSync(PYTHON, ['-I', '-c', 'import fastapi, uvicorn, pydantic'], { stdio: 'ignore' }).status === 0;
+  if (!ready && process.env.GLIRASTES_REQUIRE_PYTHON === '1') {
+    throw new Error(`GLIRASTES_REQUIRE_PYTHON=1, but ${PYTHON} cannot import fastapi, uvicorn and pydantic; install examples/vue-fastapi/api/requirements.txt.`);
+  }
+  return ready;
 }
 
 /** The app's own export step (`python3 export_openapi.py`), which imports the app; Glirastes never does. */
