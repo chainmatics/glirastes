@@ -1,0 +1,17 @@
+{
+  "name": "vue-fastapi-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "vue": "3.5.35",
+    "vue-router": "4.5.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.10",
+    "vite": "8.0.8"
+  }
+}

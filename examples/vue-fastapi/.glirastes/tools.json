@@ -4,7 +4,10 @@
   "targetAppKey": "vue-fastapi-fixture",
   "locale": "en-US",
   "sources": [
-    { "kind": "openapi", "document": "api/openapi.json", "fastapi": "api/app" }
+    { "kind": "openapi", "document": "api/openapi.json", "fastapi": "api/app" },
+    { "kind": "vue-router", "srcDir": "web/src" },
+    { "kind": "url-filters", "srcDir": "web/src" },
+    { "kind": "react-actions", "srcDir": "web/src" }
   ],
   "emit": { "module": ".glirastes/build/tools.generated.mjs" }
 }
