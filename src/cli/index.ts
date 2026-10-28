@@ -47,6 +47,7 @@ import {
 import { runSync, type SyncCommandDependencies } from './commands/sync.js';
 import { inspectSetupProject, formatSetupProjectInspection } from './commands/project-inspection.js';
 import { runAgentSetup, type AgentSetupDependencies } from './commands/agent-setup.js';
+import { writeCiWorkflow } from './commands/ci-workflow.js';
 import { runToolsCommand, type ToolsCommandDependencies } from './commands/tools/index.js';
 
 type CommandName =
@@ -98,6 +99,8 @@ function parseCommand(args: string[]): {
     throw new Error(
       'Usage: glirastes init [--agent codex|claude] [--root] [--dry-run] [--json]\n'
       + '         start integration with your existing coding agent\n'
+      + '       glirastes init --ci github [--enrich-on-main] [--force] [--root] [--json]\n'
+      + '         write the GitHub workflow: model-free tool check, Pro managed tool job\n'
       + '       glirastes setup [--dry-run] [--managed] [--json]\n'
       + '         detect, validate and atomically install local artifacts\n'
       + '       glirastes connect --base-url <url> [--json]\n'
@@ -116,7 +119,7 @@ function parseCommand(args: string[]): {
       + '       glirastes validate [--root] [--app-id]\n'
       + '       glirastes doctor [--root] [--managed] [--json] [--verbose]\n'
       + '       glirastes build [--root] [--app-id] [--output]\n'
-      + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify> [options]\n'
+      + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify|enrich> [options]\n'
       + '         derive chat tools from the code, check them, show them and print agent work lists\n',
     );
   }
@@ -665,6 +668,18 @@ export async function runCli(
 ): Promise<void> {
   const { command, rest } = parseCommand(args);
   if (command === 'init') {
+    const ci = getFlagValue(rest, '--ci');
+    if (ci !== undefined) {
+      // CI setup is its own step: the workflow lands once the app is set up.
+      const written = await writeCiWorkflow({
+        root: resolve(getFlagValue(rest, '--root') ?? process.cwd()),
+        provider: ci,
+        enrichOnMain: hasFlag(rest, '--enrich-on-main'),
+        force: hasFlag(rest, '--force'),
+      });
+      console.log(hasFlag(rest, '--json') ? JSON.stringify(written) : `${written.path}: ${written.status}`);
+      return;
+    }
     await runAgentSetup({
       rootDir: getFlagValue(rest, '--root') ?? process.cwd(),
       agent: getFlagValue(rest, '--agent'), dryRun: hasFlag(rest, '--dry-run'),
