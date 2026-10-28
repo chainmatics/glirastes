@@ -153,14 +153,8 @@
       }
     },
     "./server/testing": {
-      "import": {
-        "types": "./dist/server/testing/index.d.ts",
-        "default": "./dist/server/testing/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/server/testing/index.d.ts",
-        "default": "./dist/cjs/server/testing/index.js"
-      }
+      "types": "./dist/server/testing/index.d.ts",
+      "default": "./dist/server/testing/index.js"
     },
     "./react": {
       "types": "./dist/react/index.d.ts",
