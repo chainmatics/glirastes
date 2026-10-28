@@ -18,6 +18,8 @@ export interface ToolFinding {
   severity: ToolFindingSeverity;
   message: string;
   nextAction: string;
+  /** What the worklist hands the agent as `expected`, e.g. a proposed registration; never written to outputs. */
+  expected?: unknown;
 }
 
 export type ContractSource =

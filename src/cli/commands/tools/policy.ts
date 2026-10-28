@@ -6,6 +6,7 @@ import { ToolContractsFileSchema } from '../../../codegen/tools/files.js';
 import { AppSetupArtifactSchema, ToolRiskClassSchema, type ToolRiskClass } from '../../../contracts/index.js';
 import { parseExcludePattern } from '../../../contracts/tool-exclude-pattern.js';
 import {
+  CONTROL_REF,
   platformMayRelaxConfirmation,
   resolveToolPolicy,
   riskTier,
@@ -37,6 +38,8 @@ export const POLICY_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
   describe: { flags: [], values: ['--root'], positionals: 2 },
   exclude: { flags: [], values: ['--root', '--reason'], positionals: 1 },
   include: { flags: [], values: ['--root'], positionals: 1 },
+  'exclude-control': { flags: [], values: ['--root', '--reason'], positionals: 1 },
+  'include-control': { flags: [], values: ['--root'], positionals: 1 },
   accept: { flags: [], values: ['--root'], positionals: 1 },
   reset: { flags: [], values: ['--root'], positionals: 1 },
 };
@@ -50,6 +53,8 @@ export const POLICY_USAGE = [
   '       glirastes tools policy describe <tool> <text|->',
   '       glirastes tools policy exclude "<METHOD|PAGE|*> /path/**" --reason <text>',
   '       glirastes tools policy include "<pattern>"',
+  '       glirastes tools policy exclude-control <file>#<setter> --reason <text>   (no client action is proposed for this UI control)',
+  '       glirastes tools policy include-control <file>#<setter>',
   '       glirastes tools policy accept <tool>    (adopt a lower risk the code now implies)',
   '       glirastes tools policy reset <tool>     (remove every local entry of the tool)',
 ].join('\n');
@@ -105,6 +110,7 @@ function renderPolicy(file: ToolPolicyFile): string {
     tools: sorted(file.tools),
     exclude: file.exclude,
     acceptedRisk: sorted(file.acceptedRisk),
+    ...(file.excludeControls?.length ? { excludeControls: file.excludeControls } : {}),
   });
 }
 
@@ -191,6 +197,7 @@ function formatShow(tools: ReadonlyArray<ToolRef>, file: ToolPolicyFile): string
     if (accepted) lines.push(`      accepted risk: ${accepted.riskClass}`);
   }
   for (const exclusion of file.exclude) lines.push(`  excluded: ${exclusion.match}  (${exclusion.reason})`);
+  for (const control of file.excludeControls ?? []) lines.push(`  excluded control: ${control.control}  (${control.reason})`);
   return lines.join('\n');
 }
 
@@ -224,6 +231,22 @@ export async function runToolsPolicy(argv: ReadonlyArray<string>, io: ToolsIo): 
     return done({ ...file, exclude: file.exclude.filter((entry) => entry.match !== first) }, `${first} is included again`);
   }
 
+  if (subcommand === 'exclude-control' || subcommand === 'include-control') {
+    if (!first || !CONTROL_REF.test(first)) {
+      throw new ToolsUsageError('Name the control as <file>#<setter>, as glirastes tools resolve --print lists it.');
+    }
+    const excludeControls = file.excludeControls ?? [];
+    const listed = excludeControls.some((entry) => entry.control === first);
+    if (subcommand === 'exclude-control') {
+      if (!reason) throw new ToolsUsageError('Say why with --reason; the reason is part of the reviewed policy.');
+      if (listed) throw new ToolsUsageError(`${first} is already excluded.`);
+      return done({ ...file, excludeControls: [...excludeControls, { control: first, reason }] }, `${first} is excluded`);
+    }
+    if (!listed) throw new ToolsUsageError(`No excluded control matches ${first} exactly; glirastes tools policy show lists them.`);
+    return done({ ...file, excludeControls: excludeControls.filter((entry) => entry.control !== first) },
+      `${first} is included again`);
+  }
+
   if (subcommand === 'reset' && first && (Object.hasOwn(file.tools, first) || Object.hasOwn(file.acceptedRisk, first))) {
     // Orphaned keys have no tool any more; reset still removes them.
     const { [first]: _tool, ...tools } = file.tools;
@@ -253,6 +276,7 @@ export async function runToolsPolicy(argv: ReadonlyArray<string>, io: ToolsIo): 
           acceptedRisk: file.acceptedRisk[tool.stableKey] ?? null,
         })),
         exclude: file.exclude,
+        excludeControls: file.excludeControls ?? [],
       }));
     } else {
       io.log(formatShow(selected, file));

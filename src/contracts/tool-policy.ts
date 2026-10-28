@@ -319,6 +319,8 @@ export function deriveToolPolicyDefaults(
 
 const boundedText = (max: number) => z.string().trim().min(1).max(max);
 const stableKey = z.string().min(1).max(512);
+/** `src/components/ui-size-provider.tsx#setSize`: the file that declares a control and its setter. */
+export const CONTROL_REF = /^[^#\s]+#[A-Za-z_$][\w$]*$/;
 
 /**
  * `.glirastes/tool-policy.json`. Written by the developer or the CLI only,
@@ -338,6 +340,11 @@ export const ToolPolicyFileSchema = z.object({
     riskClass: ToolRiskClassSchema,
     toolId: z.uuid(),
   }).strict()).default({}),
+  /** UI controls (`<file>#<setter>`) the developer keeps out of the chat; refresh stops proposing a client action for them. */
+  excludeControls: z.array(z.object({
+    control: z.string().max(1_024).regex(CONTROL_REF, 'Expected "<app file>#<setter>", e.g. "src/theme.tsx#setTheme"'),
+    reason: boundedText(500),
+  }).strict()).max(500).optional(),
 }).strict().superRefine((file, context) => {
   // Values only: stable keys such as "POST /api/auth/token" are not content.
   const sensitivePath = findSensitiveStringPath(file);

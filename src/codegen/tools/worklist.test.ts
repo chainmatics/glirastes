@@ -134,6 +134,28 @@ describe('tools resolve work list', () => {
       owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.semantics, key: '.glirastes/tool-semantics.json#1' },
     });
   }, 120_000);
+
+  it('hands the agent the registration for a UI control without a client action', async () => {
+    const fixture = await createAppFixture({
+      ...FILES,
+      'src/components/density.tsx': "'use client';\nimport { createContext } from 'react';\n"
+        + "export const DensityContext = createContext<{ density: 'compact' | 'roomy'; setDensity(density: 'compact' | 'roomy'): void }>"
+        + "({ density: 'roomy', setDensity: () => {} });\n",
+    }, { toolsConfig: { sources: ['next-app', 'react-actions'] } });
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'frozen', keepGoing: true });
+    const items = byCode(buildResolveWorklist(result).items);
+    expect(items.get('ui-control-unbound src/components/density.tsx#setDensity')).toMatchObject({
+      owner: 'agent',
+      toolId: null,
+      target: { kind: 'app-code', files: ['src/components/density.tsx'] },
+      expected: {
+        actionId: 'density.set',
+        registration: "useAiClientAction('density.set', ({ density }) => setDensity(density), "
+          + "z.object({ density: z.enum(['compact', 'roomy']) }));",
+      },
+    });
+    expect(items.get('ui-control-unbound src/components/density.tsx#setDensity')?.nextAction).toContain('useAiClientAction');
+  }, 120_000);
 });
 
 const TASKS_ROUTE = "import { getSession } from '@/lib/session';\nimport { createTask } from '@/lib/schemas';\n"

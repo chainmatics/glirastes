@@ -126,6 +126,21 @@ describe('glirastes tools policy', () => {
     expect((await h.policy()).tools).toEqual({});
   }, 180_000);
 
+  it('keeps UI controls out of the chat and lets them back in', async () => {
+    const h = await harness();
+    const control = 'src/components/theme.tsx#setTheme';
+    expect(await h.run('policy', 'exclude-control', control)).toBe(2);
+    expect(await h.run('policy', 'exclude-control', 'src/components/theme.tsx', '--reason', 'x')).toBe(2);
+    expect(await h.run('policy', 'exclude-control', control, '--reason', 'Theme stays manual.')).toBe(0);
+    expect(h.out.at(-1)).toBe(`Updated .glirastes/tool-policy.json: ${control} is excluded. Run glirastes tools refresh to apply it.`);
+    expect(await h.run('policy', 'exclude-control', control, '--reason', 'again')).toBe(2);
+    expect((await h.policy()).excludeControls).toEqual([{ control, reason: 'Theme stays manual.' }]);
+    expect(await h.run('refresh')).toBe(0);
+    expect(await h.run('policy', 'include-control', 'src/other.tsx#setSize')).toBe(2);
+    expect(await h.run('policy', 'include-control', control)).toBe(0);
+    expect(await h.policy()).not.toHaveProperty('excludeControls');
+  }, 180_000);
+
   it('accepts exactly the lower risk the ratchet holds back', async () => {
     const h = await harness();
     const contracts = ToolContractsFileSchema.parse(JSON.parse(await h.fixture.read(TOOLS_PATHS.contracts)));

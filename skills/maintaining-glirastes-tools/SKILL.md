@@ -47,7 +47,8 @@ keeps its fallback.
    - `owner: "agent"`, `target.kind: "app-code"`: change the app code in
      `target.files` as the finding says (export the schema, add the payload
      contract as third argument of `useAiClientAction`, mount the navigation
-     bridge, rename a colliding parameter).
+     bridge, rename a colliding parameter, add the client action a UI
+     control proposes).
    - `owner: "developer"`: show `target.command` and why; stop there.
      With `target.kind: "review"` a person wrote or reviewed the entry at
      `target.key` of `target.file` (human or locked): leave it exactly as it
@@ -78,6 +79,8 @@ keeps its fallback.
 | `input-schema-not-object` | an object at the root of the input schema (optional fields, or one field holding the variants), changed together with every caller of the route; for an internal route, tell the developer instead |
 | `navigation-bridge-missing` | mount `useGlirastesNavigationBridge` (React) or `registerNavigationBridge` (`glirastes/browser`) where it is always mounted |
 | `ui-action-payload-untyped`, `ui-action-contract-conflict` | one payload contract per client action |
+| `ui-control-unbound` | a setting the chat cannot set yet (a context setter or the next-themes `setTheme` with a closed set of values). Add `expected.registration` in `expected.file`, inside the component that owns the state and is always mounted (the provider, or for `setTheme` a component rendered inside the `ThemeProvider`), never on the settings page. Keep `expected.actionId`; import `useAiClientAction` from `glirastes/react` and `z` from `zod`, and use the app's own const list (e.g. `z.enum(UI_SIZES)`) where it has one. If the chat must not set it, tell the developer: `glirastes tools policy exclude-control <subject> --reason <text>` |
+| `ui-control-contract-mismatch` | narrow the client action's contract to the values the setter takes |
 | `ui-action-write-unproven` | developer: `glirastes tools policy raise <tool> write` when the helper writes |
 | `risk-lower-available` | developer: `glirastes tools policy accept <tool>` after review |
 | `policy-entry-orphaned` | developer: `glirastes tools policy reset <tool>` or `include` |

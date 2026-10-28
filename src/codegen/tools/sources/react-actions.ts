@@ -3,8 +3,9 @@ import { canonicalJson, compareCodeUnits } from '../canonical.js';
 import { toolFinding } from '../findings.js';
 import { typeToJsonSchema } from '../output-inference.js';
 import { createAppProgram, type AppProgram } from '../program.js';
-import type { JsonSchemaLike, ToolFinding, ToolSource, ToolSourceObservation } from '../types.js';
+import type { JsonSchemaLike, ToolFinding, ToolSource, ToolSourceContext, ToolSourceObservation } from '../types.js';
 import { scanAppSources } from './app-files.js';
+import { analyzeUiControls, CONTROL_TEXT } from './ui-controls.js';
 import {
   actionStableKey,
   importedCalls,
@@ -251,17 +252,20 @@ function registrationsOf(
   return registrations;
 }
 
-async function observeActions(root: string, options: ReactActionSourceOptions): Promise<ToolSourceObservation> {
+async function observeActions(ctx: ToolSourceContext, options: ReactActionSourceOptions): Promise<ToolSourceObservation> {
+  const { root } = ctx;
+  // Every file is read: a control's setter may be used anywhere; only candidates enter the program.
   const scan = await scanAppSources(root, {
     ...(options.srcDir ? { srcDir: options.srcDir } : {}),
-    matches: (source) => REGISTRATION_TEXT.test(source),
+    matches: () => true,
   });
   if (!scan.complete) return incompleteUiSource('react-actions', scan.reason);
-  if (scan.files.length === 0) return { observations: [], findings: [], complete: true, excluded: [] };
-  const app = createAppProgram({ root, rootNames: scan.files.map((file) => file.absolute) });
+  const files = scan.files.filter((file) => REGISTRATION_TEXT.test(file.source) || CONTROL_TEXT.test(file.source));
+  if (files.length === 0) return { observations: [], findings: [], complete: true, excluded: [] };
+  const app = createAppProgram({ root, rootNames: files.map((file) => file.absolute) });
   const findings: ToolFinding[] = [];
   const byId = new Map<string, Registration[]>();
-  for (const file of scan.files) {
+  for (const file of files) {
     const source = app.sourceFile(file.absolute);
     if (!source) continue;
     for (const registration of registrationsOf(source, file.path, findings)) {
@@ -279,6 +283,21 @@ async function observeActions(root: string, options: ReactActionSourceOptions): 
     named.push({ actionId, base });
   }
   const ids = uniqueDefinitionIds(named.map(({ actionId, base }) => ({ stableKey: actionStableKey(actionId), base })));
+  const controls = analyzeUiControls({
+    app,
+    files,
+    allFiles: scan.files,
+    registrations: [...byId].flatMap(([actionId, registrations]) => registrations.map((registration) => ({
+      actionId,
+      stableKey: actionStableKey(actionId),
+      handler: registration.handler,
+      schema: payloadSchema(app, registration),
+    }))),
+    policy: ctx.policy,
+    functionOf: (expression) => functionOf(app, expression),
+    writes: (fn) => writeEvidence(app, fn).writes,
+  });
+  findings.push(...controls.findings);
   const observations = named
     .sort((left, right) => compareCodeUnits(left.actionId, right.actionId))
     .map(({ actionId }) => {
@@ -289,7 +308,7 @@ async function observeActions(root: string, options: ReactActionSourceOptions): 
         .filter((schema): schema is JsonSchemaLike => schema !== undefined)
         .map((schema) => [canonicalJson(schema), schema] as const)).values()];
       const handlers = registrations.map((registration) => functionOf(app, registration.handler));
-      const toolFindings: ToolFinding[] = [];
+      const toolFindings: ToolFinding[] = [...controls.byStableKey.get(stableKey) ?? []];
       if (typed.length === 0) {
         toolFindings.push(toolFinding('ui-action-payload-untyped', 'needs_attention', stableKey,
           `${actionId} has neither a payload contract nor a typed handler parameter.`));
@@ -341,8 +360,9 @@ async function observeActions(root: string, options: ReactActionSourceOptions): 
 /**
  * The `react-actions` source: one `ui.<actionId>` tool per literal client
  * action id registered with `useAiClientAction`, `registerAiClientAction`,
- * `useAiClientActionById` or `bus.subscribeById` (spec 4.4).
+ * `useAiClientActionById` or `bus.subscribeById` (spec 4.4). It also reports
+ * stateful UI controls that no client action reaches yet (`ui-control-unbound`).
  */
 export function createReactActionSource(options: ReactActionSourceOptions = {}): ToolSource {
-  return { kind: 'react-actions', observe: (ctx) => observeActions(ctx.root, options) };
+  return { kind: 'react-actions', observe: (ctx) => observeActions(ctx, options) };
 }

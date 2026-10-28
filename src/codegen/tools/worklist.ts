@@ -103,6 +103,7 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'ui-action-contract-conflict',
   'filter-keys-capped',
   'input-schema-not-object',
+  'ui-control-contract-mismatch',
 ]);
 
 /**
@@ -244,6 +245,12 @@ function resolveItem(finding: ToolFinding, tool: ToolsPipelineTool | undefined):
       target: { kind: 'file', file: TOOLS_PATHS.resolutions, key: 'conventions.authHelpers' },
       expected: { conventions: { authHelpers: ['<name of the session or auth helper this handler calls>'] } },
     };
+  }
+  if (code === 'ui-control-unbound' && finding.expected !== undefined) {
+    // No tool yet: the agent adds the proposed client action where the state lives.
+    const expected = finding.expected as { file?: unknown };
+    const files = typeof expected.file === 'string' ? [expected.file] : [finding.subjectRef.replace(/#[^#]*$/, '')];
+    return { ...base, owner: 'agent', target: { kind: 'app-code', files }, expected: finding.expected };
   }
   if (DROPPED_CODES.has(code)) {
     // `src/a.tsx:12` or `src/a.tsx` when no tool exists for the registration.

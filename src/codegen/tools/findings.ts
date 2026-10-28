@@ -60,6 +60,8 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'ui-action-id-dynamic': 'Register client actions with a literal id so the chat can call them.',
   'ui-action-id-invalid': 'Use an action id of letters, digits, dots and dashes, e.g. tasks.highlight.',
   'ui-action-id-reserved': 'Ids starting with glirastes. belong to the SDK; choose another action id.',
+  'ui-control-unbound': 'Add the proposed useAiClientAction (expected.registration) in expected.file, inside the component that owns the state and stays mounted, with imports from glirastes/react and zod; keep the action id. If the chat must not set it, the developer runs glirastes tools policy exclude-control <file>#<setter> --reason <text>.',
+  'ui-control-contract-mismatch': 'Restrict the payload contract of the client action to the values the setter takes, e.g. z.enum of the same const list.',
   'ui-action-write-unproven': 'If the handler changes data through a helper, a Server Action or a mutation hook, raise the tool: glirastes tools policy raise <tool> write. Otherwise nothing to do.',
 };
 
