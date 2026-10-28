@@ -1297,3 +1297,13 @@
   min-height: 0;
   height: 100%;
 }
+
+/* ---------- Approval reminder ---------- */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="approval-reminder"] {
+  margin: 0 1rem 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-primary-tint);
+  color: var(--cm-text);
+  font-size: 0.8125rem;
+}

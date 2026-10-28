@@ -32,6 +32,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     pipelineSteps,
     pipelineState,
     pendingApprovals,
+    approvalReminder,
     approve,
     reject,
     isProcessingApproval,
@@ -144,6 +145,12 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
           isProcessing={isProcessingApproval}
         />
       ))}
+
+      {approvalReminder && pendingApprovals.length > 0 && (
+        <div data-component="approval-reminder" role="status">
+          {locale.approvalPendingHint}
+        </div>
+      )}
 
       {/* Typing indicator */}
       {showTypingIndicator && (

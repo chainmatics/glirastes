@@ -279,6 +279,11 @@ widget roots then render `data-unstyled`, no shipped rule matches them or
 anything inside, and no theme variables are written. Markup, `data-component`
 and `data-element` hooks and `classNames` stay, so your stylesheet takes over.
 
+For German texts pass `locale={deChatLocale}` (from `glirastes/react`), or
+spread it and override single texts. If you build your own composer on
+`useChatContext().send`, clear the input only when `send` returns true: it
+returns false while an approval card waits for a decision.
+
 For a sidebar that can float or collapse, place the same widget alongside your
 page in a bounded-height flex row. No custom chat implementation is needed:
 

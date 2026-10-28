@@ -50,8 +50,8 @@ export function ChatInput({ className, onSubmit }: ChatInputProps) {
       if (!trimmed || isLoading) return;
       if (onSubmit) {
         onSubmit(trimmed);
-      } else {
-        send(trimmed);
+      } else if (!send(trimmed)) {
+        return;
       }
       setValue('');
     },

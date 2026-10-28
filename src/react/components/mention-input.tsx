@@ -61,8 +61,8 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
     if (!trimmed || isLoading) return false;
     if (onSubmit) {
       onSubmit(trimmed);
-    } else {
-      send(trimmed, { mentions });
+    } else if (!send(trimmed, { mentions })) {
+      return false;
     }
     setValue('');
     return true;
@@ -191,8 +191,8 @@ function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
     if (!trimmed || isLoading) return;
     if (onSubmit) {
       onSubmit(trimmed);
-    } else {
-      send(trimmed);
+    } else if (!send(trimmed)) {
+      return;
     }
     setValue('');
     clearMentionSearch();

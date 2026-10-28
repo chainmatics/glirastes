@@ -115,6 +115,7 @@ export type {
 
 // Provider
 export { AiChatProvider, type AiChatProviderProps } from './provider/ai-chat-provider.js';
+export { deChatLocale } from './locale-de.js';
 
 // Context (for advanced use cases)
 export { useChatContext } from './provider/chat-context.js';

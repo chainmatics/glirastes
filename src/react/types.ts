@@ -610,6 +610,8 @@ export interface ChatLocale {
   pipelineErrorLabel: string;
   pipelineStepLabel: string;
   pipelineApprovalPendingLabel: string;
+  /** Shown when the user sends while an approval card waits for a decision. */
+  approvalPendingHint: string;
 
   // Floating widget / chat window chrome
   chatTitle: string;                 // default header title ("AI Assistant")

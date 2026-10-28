@@ -68,6 +68,13 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 - `AiChatProvider` takes `unstyled` to bring your own styles: widget roots
   render `data-unstyled`, the shipped stylesheet no longer applies to them, and
   no theme variables are written.
+- `deChatLocale` from `glirastes/react`: German texts for the whole chat UI.
+
+### Changed
+
+- The chat context's `send` returns whether the message was taken. It returns
+  false while an approval card waits or the session is not ready; a custom
+  composer should keep the typed text then, as the shipped composers do.
 
 ### Fixed
 
@@ -80,6 +87,9 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 - A tool whose result does not match its declared output is reported as done
   with the details withheld (`outputWithheld: true`) instead of failed, so a
   write that succeeded is not retried or reported to the user as an error.
+- A message typed while an approval card is open no longer rejects the
+  request. The card stays, the message is held, and the panel shows
+  `approvalPendingHint` until the card is decided.
 - The packed tarball is installed and loaded in the test suite (ESM, CommonJS,
   the CLI and a strict NodeNext consumer), so an undeclared dependency or a
   missing file fails before a release.

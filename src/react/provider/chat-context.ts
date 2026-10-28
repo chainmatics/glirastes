@@ -62,8 +62,12 @@ export interface ChatContextValue {
   messages: ChatMessage[];
   isLoading: boolean;
   error: Error | null;
-  /** `mentions` replaces the provider's active mentions for this message. */
-  send: (message: string, options?: { mentions?: MentionData[] }) => void;
+  /**
+   * `mentions` replaces the provider's active mentions for this message.
+   * Returns false when the message is not taken (an approval is still open or
+   * the session is not ready); the composer should then keep the typed text.
+   */
+  send: (message: string, options?: { mentions?: MentionData[] }) => boolean;
   stop: () => void;
   clear: () => void;
   loadMore: () => void;
@@ -73,6 +77,11 @@ export interface ChatContextValue {
 
   // Approvals
   pendingApprovals: PendingApproval[];
+  /**
+   * True after the user tried to send while an approval waits. Sending is held
+   * until the card is decided; show `locale.approvalPendingHint`.
+   */
+  approvalReminder: boolean;
   approve: (id: string) => void;
   reject: (id: string) => void;
   isProcessingApproval: boolean;

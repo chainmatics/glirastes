@@ -61,6 +61,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   dismissButton: 'Dismiss',
   cancelButton: 'Cancel',
   confirmButton: 'Confirm',
+  approvalPendingHint: 'Please approve or reject the open request first.',
   moreItemsLabel: 'more',
   allCountLabel: 'All {count}',
   pipelineTitle: 'Pipeline',
@@ -440,6 +441,11 @@ export function AiChatProvider({
 
   // Approvals state (Map for O(1) lookup)
   const [pendingApprovalsMap, setPendingApprovalsMap] = useState<Map<string, PendingApproval>>(new Map());
+  // Set when the user sends while an approval waits; cleared once none waits.
+  const [approvalReminder, setApprovalReminder] = useState(false);
+  useEffect(() => {
+    if (pendingApprovalsMap.size === 0) setApprovalReminder(false);
+  }, [pendingApprovalsMap]);
   const [processingApprovalIds, setProcessingApprovalIds] = useState<Set<string>>(new Set());
   const [approvalError, setApprovalError] = useState<Error | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -883,6 +889,13 @@ export function AiChatProvider({
   // Actions
   // The shared tail of every send: transport hygiene, then the transport.
   const deliver = useCallback(async (processedMessage: string) => {
+    // An open approval is decided on its card. A typed "yes" must not count as
+    // approval, and rejecting it on send dropped requests the user wanted.
+    if (pendingApprovalsMap.size > 0) {
+      setApprovalReminder(true);
+      return;
+    }
+
     // Clear truncation and suggestion chips on new message
     setTruncation(null);
     setSuggestionChips([]);
@@ -897,19 +910,6 @@ export function AiChatProvider({
       setPendingApprovalsMap(new Map());
     }
 
-    // Auto-reject pending approvals when user sends new message
-    if (pendingApprovalsMap.size > 0) {
-      const approvalIds = Array.from(pendingApprovalsMap.keys());
-      setPendingApprovalsMap(new Map());
-      for (const approvalId of approvalIds) {
-        await addToolApprovalResponse({
-          id: approvalId,
-          approved: false,
-          reason: 'Auto-rejected: user sent a new message.',
-        });
-      }
-    }
-
     await sendMessage({ text: processedMessage });
     setActiveMentions([]);
     setMentionQuery('');
@@ -920,16 +920,14 @@ export function AiChatProvider({
     rawMessages,
     setMessages,
     sendMessage,
-    addToolApprovalResponse,
     pendingApprovalsMap,
   ]);
 
-  const send = useCallback(async (
+  const dispatchSend = useCallback(async (
     message: string,
     sendOptions?: { mentions?: MentionData[] },
   ) => {
     const mentionsForSend = sendOptions?.mentions ?? activeMentions;
-    if (sessionNotReady || sessionMutationRef.current) return;
 
     // A `/` command alone runs without the model; missing arguments open its form.
     const plan = interactionRegistry?.planMessage(message, mentionsForSend);
@@ -976,7 +974,6 @@ export function AiChatProvider({
 
     await deliver(processedMessage);
   }, [
-    sessionNotReady,
     rawMessages,
     deliver,
     interactionRegistry,
@@ -984,6 +981,21 @@ export function AiChatProvider({
     onBeforeSend,
     activeMentions,
   ]);
+
+  // Decides synchronously whether the message is taken, so any composer can
+  // keep the typed text when it is not.
+  const send = useCallback((
+    message: string,
+    sendOptions?: { mentions?: MentionData[] },
+  ): boolean => {
+    if (sessionNotReady || sessionMutationRef.current) return false;
+    if (pendingApprovalsMap.size > 0) {
+      setApprovalReminder(true);
+      return false;
+    }
+    void dispatchSend(message, sendOptions);
+    return true;
+  }, [sessionNotReady, pendingApprovalsMap, dispatchSend]);
 
   const submitPendingCommand = useCallback((
     values: Readonly<Record<string, string>>,
@@ -1402,6 +1414,7 @@ export function AiChatProvider({
       pipelineSteps,
       pipelineState,
       pendingApprovals,
+      approvalReminder,
       approve,
       reject,
       isProcessingApproval: processingApprovalIds.size > 0,
@@ -1475,6 +1488,7 @@ export function AiChatProvider({
       pipelineSteps,
       pipelineState,
       pendingApprovals,
+      approvalReminder,
       approve,
       reject,
       processingApprovalIds,

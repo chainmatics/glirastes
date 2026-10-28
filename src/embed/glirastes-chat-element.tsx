@@ -44,7 +44,7 @@ type Emit = <TName extends GlirastesChatEventName>(
 ) => void;
 
 interface EmbedApi {
-  send(text: string): void;
+  send(text: string): boolean;
   mentionEntity(type: string, id: string): Promise<boolean>;
 }
 
@@ -219,8 +219,7 @@ export class GlirastesChatElement extends BaseElement {
   /** Sends a user message through the embedded chat. False before mount. */
   send(text: string): boolean {
     if (!this.#api || !text.trim()) return false;
-    this.#api.send(text);
-    return true;
+    return this.#api.send(text);
   }
 
   connectedCallback(): void {
