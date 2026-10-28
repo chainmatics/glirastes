@@ -8,7 +8,7 @@ import {
 } from '../codegen/index.js';
 import type { AppSetupArtifact } from '../contracts/index.js';
 import { FoundationDiagnosticError } from '../diagnostics/foundation-diagnostic.js';
-import { runCli } from './index.js';
+import { CLI_USAGE, runCli } from './index.js';
 
 const id = (suffix: string) => (
   `019fa9a9-d5f7-7ec3-a3c7-8899de20${suffix.padStart(4, '0')}`
@@ -155,7 +155,7 @@ afterEach(() => {
 
 describe('glirastes setup', () => {
   it('documents direct setup and keeps the legacy wizard explicit', async () => {
-    await expect(runCli(['unknown'])).rejects.toThrow(
+    expect(CLI_USAGE).toMatch(
       /glirastes setup \[--dry-run\].*glirastes connect --base-url.*glirastes sync.*glirastes setup guided/s,
     );
   });

@@ -79,11 +79,51 @@ function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
 }
 
+/** The command overview printed by `glirastes --help`. */
+export const CLI_USAGE =
+  'Usage: glirastes init [--agent codex|claude] [--root] [--dry-run] [--json]\n'
+  + '         start integration with your existing coding agent\n'
+  + '       glirastes init --ci github [--enrich-on-main] [--force] [--root] [--json]\n'
+  + '         write the GitHub workflow: model-free tool check, Pro managed tool job\n'
+  + '       glirastes setup [--dry-run] [--managed] [--json]\n'
+  + '         detect, validate and atomically install local artifacts\n'
+  + '       glirastes connect --base-url <url> [--json]\n'
+  + '         pair an existing local setup with the Platform\n'
+  + '       glirastes sync [--json]\n'
+  + '         upload the current local setup without reassessment\n'
+  + '       glirastes setup guided [options]\n'
+  + '         run the legacy interactive setup interview\n'
+  + '       glirastes setup inspect [--root] [--json]\n'
+  + '         inspect local manifests before app integration\n'
+  + '       glirastes setup <scan|sync|status> [options]\n'
+  + '         the same steps, one at a time\n'
+  + '       glirastes scan [--output] [--sync] [--execution-inventory]\n'
+  + '       glirastes install [--host a,b] [--symlink] [--force] '
+  + '[--dry-run]\n'
+  + '       glirastes validate [--root] [--app-id]\n'
+  + '       glirastes doctor [--root] [--managed] [--json] [--verbose]\n'
+  + '       glirastes build [--root] [--app-id] [--output]\n'
+  + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify|enrich> [options]\n'
+  + '         derive chat tools from the code, check them, show them and print agent work lists\n';
+
+const HELP_FLAGS = new Set(['--help', '-h', 'help']);
+const VERSION_FLAGS = new Set(['--version', '-v']);
+
+/** Version of the installed glirastes package (src/cli and dist/cli both sit two levels below it). */
+function packageVersion(): string {
+  const manifest = JSON.parse(
+    readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+  ) as { version: string };
+  return manifest.version;
+}
+
 function parseCommand(args: string[]): {
-  command: CommandName;
+  command: CommandName | 'help' | 'version';
   rest: string[];
 } {
   const [command, ...rest] = args;
+  if (command === undefined || HELP_FLAGS.has(command)) return { command: 'help', rest };
+  if (VERSION_FLAGS.has(command)) return { command: 'version', rest };
   if (
     command !== 'init'
     && command !== 'scan'
@@ -96,32 +136,12 @@ function parseCommand(args: string[]): {
     && command !== 'build'
     && command !== 'tools'
   ) {
-    throw new Error(
-      'Usage: glirastes init [--agent codex|claude] [--root] [--dry-run] [--json]\n'
-      + '         start integration with your existing coding agent\n'
-      + '       glirastes init --ci github [--enrich-on-main] [--force] [--root] [--json]\n'
-      + '         write the GitHub workflow: model-free tool check, Pro managed tool job\n'
-      + '       glirastes setup [--dry-run] [--managed] [--json]\n'
-      + '         detect, validate and atomically install local artifacts\n'
-      + '       glirastes connect --base-url <url> [--json]\n'
-      + '         pair an existing local setup with the Platform\n'
-      + '       glirastes sync [--json]\n'
-      + '         upload the current local setup without reassessment\n'
-      + '       glirastes setup guided [options]\n'
-      + '         run the legacy interactive setup interview\n'
-      + '       glirastes setup inspect [--root] [--json]\n'
-      + '         inspect local manifests before app integration\n'
-      + '       glirastes setup <scan|sync|status> [options]\n'
-      + '         the same steps, one at a time\n'
-      + '       glirastes scan [--output] [--sync] [--execution-inventory]\n'
-      + '       glirastes install [--host a,b] [--symlink] [--force] '
-      + '[--dry-run]\n'
-      + '       glirastes validate [--root] [--app-id]\n'
-      + '       glirastes doctor [--root] [--managed] [--json] [--verbose]\n'
-      + '       glirastes build [--root] [--app-id] [--output]\n'
-      + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify|enrich> [options]\n'
-      + '         derive chat tools from the code, check them, show them and print agent work lists\n',
-    );
+    throw new FoundationDiagnosticError({
+      code: 'E-SETUP-030',
+      operation: 'cli',
+      message: `Unknown command '${command}'.`,
+      remediation: 'Run glirastes --help to list the commands.',
+    });
   }
   return { command, rest };
 }
@@ -667,6 +687,14 @@ export async function runCli(
   dependencies: CliDependencies = {},
 ): Promise<void> {
   const { command, rest } = parseCommand(args);
+  if (command === 'help') {
+    console.log(CLI_USAGE.trimEnd());
+    return;
+  }
+  if (command === 'version') {
+    console.log(packageVersion());
+    return;
+  }
   if (command === 'init') {
     const ci = getFlagValue(rest, '--ci');
     if (ci !== undefined) {
