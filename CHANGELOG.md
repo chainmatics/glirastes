@@ -30,7 +30,7 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   `glirastes tools refresh` derives the tools instead.
 - The CLI commands of 0.4.0 (`generate*`, `validate-tools`, `coverage`,
   `scaffold`, `test`, `check-upgrade`, `install-skills`) are replaced by `init`,
-  `setup`, `connect`, `sync`, `doctor`, `install`, `validate`, `build` and
+  `setup`, `connect`, `sync`, `doctor`, `install`, `validate`, `build`, `scan` and
   `tools`. `glirastes --help` lists them.
 - `glirastes/server/testing` is ESM only. Its CommonJS entry could never load,
   because Vitest cannot be required from CommonJS.
