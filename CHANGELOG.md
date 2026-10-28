@@ -77,6 +77,9 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   `runtime.clientActions`, and the generated tool refuses any other action, so
   the model cannot claim a dialog opened. Without the report the old behaviour
   stays.
+- A tool whose result does not match its declared output is reported as done
+  with the details withheld (`outputWithheld: true`) instead of failed, so a
+  write that succeeded is not retried or reported to the user as an error.
 - The packed tarball is installed and loaded in the test suite (ESM, CommonJS,
   the CLI and a strict NodeNext consumer), so an undeclared dependency or a
   missing file fails before a release.

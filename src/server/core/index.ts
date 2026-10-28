@@ -933,10 +933,13 @@ export function toolToAiTool(
                   `${i.path?.join('.') ?? ''}: ${i.message ?? 'invalid value'}`,
                 ),
             );
+            // The tool ran, and a write may already have happened: report it
+            // as done, so the model neither claims a failure nor calls again.
             cleanResult = {
-              success: false,
-              error: 'Tool output did not match its declared schema.',
-              retryable: false,
+              success: true,
+              outputWithheld: true,
+              message: 'The tool ran, but its result did not match its declared output, so the details are withheld. Do not call it again for the same request.',
+              ...(rec.uiAction ? { uiAction: rec.uiAction } : {}),
             };
           }
         }

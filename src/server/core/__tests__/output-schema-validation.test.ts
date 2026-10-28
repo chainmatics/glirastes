@@ -38,7 +38,7 @@ describe('tool output schema validation', () => {
     warning.mockRestore();
   });
 
-  it('returns a bounded error instead of leaking a mismatched payload', async () => {
+  it('reports a run whose output does not match as done, without leaking the payload', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const tool = defineTool({
       id: 'tasks.list',
@@ -67,10 +67,12 @@ describe('tool output schema validation', () => {
 
     const result = await aiTool.execute({});
 
+    // The tool ran (a write may already have happened); a failure here made the
+    // model report a created team as failed and invited a second call.
     expect(result).toEqual({
-      success: false,
-      error: 'Tool output did not match its declared schema.',
-      retryable: false,
+      success: true,
+      outputWithheld: true,
+      message: 'The tool ran, but its result did not match its declared output, so the details are withheld. Do not call it again for the same request.',
     });
     expect(JSON.stringify(result)).not.toContain('Pilot pruefen');
     expect(JSON.stringify(result)).not.toContain('rank');
