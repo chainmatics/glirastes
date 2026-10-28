@@ -65,6 +65,9 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 - `glirastes --help` and `glirastes --version`. An unknown command fails with
   `E-SETUP-030` and points to `--help`.
 - `docs/support-matrix.md` and the acceptance documents in `docs/acceptance/`.
+- `AiChatProvider` takes `unstyled` to bring your own styles: widget roots
+  render `data-unstyled`, the shipped stylesheet no longer applies to them, and
+  no theme variables are written.
 
 ### Fixed
 

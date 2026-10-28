@@ -274,6 +274,11 @@ export function ChatWidget() {
 Use themes, slots, session adapters, tool renderers, and
 `useAiClientAction` for product-specific UX.
 
+To style the chat entirely yourself, pass `unstyled` to `AiChatProvider`. The
+widget roots then render `data-unstyled`, no shipped rule matches them or
+anything inside, and no theme variables are written. Markup, `data-component`
+and `data-element` hooks and `classNames` stay, so your stylesheet takes over.
+
 For a sidebar that can float or collapse, place the same widget alongside your
 page in a bounded-height flex row. No custom chat implementation is needed:
 

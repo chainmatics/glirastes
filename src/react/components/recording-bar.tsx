@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import { createPortal } from 'react-dom';
+import { ChatContext } from '../provider/chat-context.js';
 import type { RecordingBarProps } from '../types.js';
 import { CancelButton, StopButton } from './recording-controls.js';
 import { StreamWaveform } from './stream-waveform.js';
@@ -101,11 +102,12 @@ function RecordingBarInner({
 }
 
 export function RecordingBar(props: RecordingBarProps) {
+  const unstyled = useContext(ChatContext)?.unstyled ?? false;
   if (props.variant === 'trigger') {
     if (typeof document === 'undefined') return null;
 
     return createPortal(
-      <div data-component="recording-bar-portal">
+      <div data-component="recording-bar-portal" data-unstyled={unstyled || undefined}>
         <RecordingBarInner {...props} />
       </div>,
       document.body,

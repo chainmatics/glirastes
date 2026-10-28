@@ -85,6 +85,7 @@ export function ChatWindow({
   const ctx = useContext(ChatContext);
   const themeVars = ctx?.themeVars ?? {};
   const themeEffect = ctx?.themeEffect;
+  const unstyled = ctx?.unstyled ?? false;
 
   const panelRef = useRef<HTMLElement | null>(null);
   const wasOpen = useRef(isOpen);
@@ -273,6 +274,7 @@ export function ChatWindow({
       data-mode={currentMode}
       data-collapsed={isCollapsed || undefined}
       data-theme-effect={themeEffect}
+      data-unstyled={unstyled || undefined}
       hidden={!isOpen}
       inert={!isOpen}
       style={{

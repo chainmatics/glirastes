@@ -1,12 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { UNSTYLED_GUARD } from '../unstyled.js';
 
 const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 
+// Rules carry the unstyled guard on their first compound; look them up without it.
+const plain = css.replaceAll(UNSTYLED_GUARD, '');
+
 function rule(selector: string): string {
-  const start = css.indexOf(`${selector} {`);
+  const start = plain.indexOf(`${selector} {`);
   expect(start, `missing rule for ${selector}`).toBeGreaterThanOrEqual(0);
-  return css.slice(start, css.indexOf('}', start));
+  return plain.slice(start, plain.indexOf('}', start));
 }
 
 describe('shipped styles for the new chat surfaces', () => {

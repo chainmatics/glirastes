@@ -737,6 +737,13 @@ export interface AiChatProviderConfig {
    * `<glirastes-chat>` uses it so page CSS can theme the shadow root.
    */
   themeScope?: 'inline' | 'inherit';
+  /**
+   * Bring your own styles. Widget roots render `data-unstyled`, which turns
+   * every rule of the shipped stylesheet off for them and everything inside,
+   * and no theme variables are written. Markup, `data-*` hooks and
+   * `classNames` stay, so the host stylesheet styles the chat on its own.
+   */
+  unstyled?: boolean;
   onToolResult?: OnToolResult;
   /**
    * Bus that receives the UI actions of generated tools (`ui.navigate`,

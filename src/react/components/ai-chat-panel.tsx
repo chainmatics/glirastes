@@ -41,6 +41,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     components,
     themeVars,
     themeEffect,
+    unstyled,
   } = useChatContext();
 
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
@@ -87,6 +88,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
       data-component="ai-chat-panel"
       data-state={isLoading ? 'loading' : 'idle'}
       data-theme-effect={themeEffect}
+      data-unstyled={unstyled || undefined}
       style={themeVars}
     >
       {error && (

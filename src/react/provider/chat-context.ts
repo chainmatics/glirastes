@@ -43,6 +43,11 @@ export interface ChatContextValue {
    * `data-theme-effect={themeEffect}` on widget roots.
    */
   themeEffect: string | undefined;
+  /**
+   * True when the provider runs without the shipped styles. Render
+   * `data-unstyled={unstyled || undefined}` on widget roots.
+   */
+  unstyled: boolean;
   suggestions: SuggestionsConfig;
   toolLabels: ToolLabelConfig;
   toolResults: ToolResultDisplayConfig;

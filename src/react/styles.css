@@ -9,7 +9,7 @@
   [data-component="ai-chat-panel"],
   [data-component="chat-window"],
   [data-component="ai-trigger-button"]
-) {
+):where(:not([data-unstyled], [data-unstyled] *)) {
   --cm-primary: #6366f1;
   --cm-primary-soft: #818cf8;
   --cm-primary-tint: rgba(99, 102, 241, 0.12);
@@ -27,7 +27,7 @@
   --cm-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-[data-component="ai-chat-panel"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -46,14 +46,14 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
-[data-component="ai-chat-panel"] *,
-[data-component="ai-chat-panel"] *::before,
-[data-component="ai-chat-panel"] *::after {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) *,
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) *::before,
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) *::after {
   box-sizing: border-box;
 }
 
 /* ---------- Error banner ---------- */
-[data-component="ai-chat-panel"] [data-component="error-banner"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="error-banner"] {
   padding: 0.75rem 1rem;
   background: #fef2f2;
   color: #991b1b;
@@ -62,7 +62,7 @@
 }
 
 /* ---------- Empty state ---------- */
-[data-component="ai-chat-panel"] [data-component="empty-state"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="empty-state"] {
   flex: 1;
   display: grid;
   place-items: center;
@@ -72,7 +72,7 @@
 }
 
 /* ---------- Message list ---------- */
-[data-component="ai-chat-panel"] [data-component="message-list"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-list"] {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -82,7 +82,7 @@
   gap: 0.75rem;
   scroll-behavior: smooth;
 }
-[data-component="ai-chat-panel"] [data-component="message-list"] > [data-action="load-more"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-list"] > [data-action="load-more"] {
   align-self: center;
   padding: 0.375rem 0.75rem;
   font: inherit;
@@ -95,23 +95,23 @@
 }
 
 /* ---------- Message bubble ---------- */
-[data-component="ai-chat-panel"] [data-component="message-bubble"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-bubble"] {
   max-width: 85%;
   padding: 0.625rem 0.875rem;
   border-radius: var(--cm-radius);
   word-wrap: break-word;
   overflow-wrap: anywhere;
 }
-[data-component="ai-chat-panel"] [data-component="message-bubble"][data-role="user"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-bubble"][data-role="user"] {
   align-self: flex-end;
   background: var(--cm-bubble-user);
   color: var(--cm-text);
 }
-[data-component="ai-chat-panel"] [data-component="message-bubble"][data-role="assistant"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-bubble"][data-role="assistant"] {
   align-self: flex-start;
   background: var(--cm-bubble-assistant);
 }
-[data-component="ai-chat-panel"] [data-component="message-bubble"][data-role="system"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-bubble"][data-role="system"] {
   align-self: center;
   background: var(--cm-bg-muted);
   color: var(--cm-text-muted);
@@ -120,13 +120,13 @@
 }
 
 /* ---------- Markdown content ---------- */
-[data-component="ai-chat-panel"] [data-component="markdown"] p {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] p {
   margin: 0 0 0.5rem 0;
 }
-[data-component="ai-chat-panel"] [data-component="markdown"] p:last-child {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] p:last-child {
   margin: 0;
 }
-[data-component="ai-chat-panel"] [data-component="markdown"] pre {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] pre {
   background: rgba(0, 0, 0, 0.05);
   padding: 0.625rem 0.75rem;
   border-radius: var(--cm-radius-sm);
@@ -134,26 +134,26 @@
   font-size: 12px;
   margin: 0.5rem 0;
 }
-[data-component="ai-chat-panel"] [data-component="markdown"] code {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] code {
   background: rgba(0, 0, 0, 0.06);
   padding: 0.125rem 0.25rem;
   border-radius: 3px;
   font-size: 0.9em;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
-[data-component="ai-chat-panel"] [data-component="markdown"] pre code {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] pre code {
   background: transparent;
   padding: 0;
 }
-[data-component="ai-chat-panel"] [data-component="markdown"] ul,
-[data-component="ai-chat-panel"] [data-component="markdown"] ol {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] ul,
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] ol {
   margin: 0.25rem 0 0.5rem 1.25rem;
   padding: 0;
 }
 
 /* ---------- Chat input / mention input ---------- */
-[data-component="ai-chat-panel"] [data-component="chat-input"],
-[data-component="ai-chat-panel"] [data-component="mention-input"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-input"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"] {
   flex-shrink: 0;
   display: flex;
   gap: 0.5rem;
@@ -162,8 +162,8 @@
   border-top: 1px solid var(--cm-border);
   background: var(--cm-bg);
 }
-[data-component="ai-chat-panel"] [data-component="chat-input"] textarea,
-[data-component="ai-chat-panel"] [data-component="mention-input"] textarea {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-input"] textarea,
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"] textarea {
   flex: 1;
   min-height: 40px;
   max-height: 160px;
@@ -177,18 +177,18 @@
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-[data-component="ai-chat-panel"] [data-component="chat-input"] textarea:focus,
-[data-component="ai-chat-panel"] [data-component="mention-input"] textarea:focus {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-input"] textarea:focus,
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"] textarea:focus {
   border-color: var(--cm-primary);
   box-shadow: 0 0 0 3px var(--cm-primary-ring);
 }
-[data-component="ai-chat-panel"] [data-component="chat-input"] textarea::placeholder,
-[data-component="ai-chat-panel"] [data-component="mention-input"] textarea::placeholder {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-input"] textarea::placeholder,
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"] textarea::placeholder {
   color: var(--cm-text-muted);
 }
 
 /* ---------- Send / stop buttons ---------- */
-[data-component="ai-chat-panel"] [data-action="send"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="send"] {
   padding: 0.5rem 1rem;
   background: var(--cm-primary);
   color: #fff;
@@ -199,17 +199,17 @@
   cursor: pointer;
   transition: opacity 0.15s, transform 0.05s;
 }
-[data-component="ai-chat-panel"] [data-action="send"]:hover:not(:disabled) {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="send"]:hover:not(:disabled) {
   opacity: 0.92;
 }
-[data-component="ai-chat-panel"] [data-action="send"]:active:not(:disabled) {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="send"]:active:not(:disabled) {
   transform: translateY(1px);
 }
-[data-component="ai-chat-panel"] [data-action="send"]:disabled {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="send"]:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-[data-component="ai-chat-panel"] [data-action="stop"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="stop"] {
   padding: 0.5rem 0.875rem;
   background: transparent;
   color: var(--cm-text);
@@ -220,13 +220,13 @@
 }
 
 /* ---------- Suggestion bar ---------- */
-[data-component="ai-chat-panel"] [data-component="suggestion-bar"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="suggestion-bar"] {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0.5rem 1rem 0.25rem 1rem;
 }
-[data-component="ai-chat-panel"] [data-component="suggestion-chip"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="suggestion-chip"] {
   padding: 0.375rem 0.75rem;
   background: var(--cm-bg-muted);
   border: 1px solid var(--cm-border);
@@ -237,29 +237,29 @@
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
-[data-component="ai-chat-panel"] [data-component="suggestion-chip"]:hover {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="suggestion-chip"]:hover {
   background: var(--cm-bubble-user);
   border-color: var(--cm-primary);
 }
 
 /* ---------- Typing indicator ---------- */
-[data-component="ai-chat-panel"] [data-component="typing-indicator"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="typing-indicator"] {
   display: flex;
   gap: 4px;
   padding: 0.5rem 1rem;
   align-items: center;
 }
-[data-component="ai-chat-panel"] [data-component="typing-indicator"] [data-element="dot"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="typing-indicator"] [data-element="dot"] {
   width: 6px;
   height: 6px;
   background: var(--cm-text-muted);
   border-radius: 50%;
   animation: cm-chat-typing 1.4s infinite ease-in-out both;
 }
-[data-component="ai-chat-panel"] [data-component="typing-indicator"] [data-element="dot"]:nth-child(2) {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="typing-indicator"] [data-element="dot"]:nth-child(2) {
   animation-delay: 0.16s;
 }
-[data-component="ai-chat-panel"] [data-component="typing-indicator"] [data-element="dot"]:nth-child(3) {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="typing-indicator"] [data-element="dot"]:nth-child(3) {
   animation-delay: 0.32s;
 }
 @keyframes cm-chat-typing {
@@ -268,7 +268,7 @@
 }
 
 /* ---------- Truncation banner ---------- */
-[data-component="ai-chat-panel"] [data-component="truncation-banner"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="truncation-banner"] {
   padding: 0.75rem 1rem;
   background: #fef9c3;
   color: #713f12;
@@ -279,11 +279,11 @@
   gap: 1rem;
   font-size: 13px;
 }
-[data-component="ai-chat-panel"] [data-component="truncation-banner"] [data-element="actions"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="truncation-banner"] [data-element="actions"] {
   display: flex;
   gap: 0.5rem;
 }
-[data-component="ai-chat-panel"] [data-component="truncation-banner"] button {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="truncation-banner"] button {
   padding: 0.3125rem 0.625rem;
   background: #fff;
   border: 1px solid #d4a574;
@@ -294,8 +294,8 @@
 }
 
 /* ---------- Approval cards ---------- */
-[data-component="ai-chat-panel"] [data-component="approval-card"],
-[data-component="ai-chat-panel"] [data-component="bulk-approval-card"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="approval-card"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="bulk-approval-card"] {
   margin: 0 1rem 0.75rem 1rem;
   padding: 0.875rem 1rem;
   background: #fffbeb;
@@ -303,14 +303,14 @@
   border-radius: var(--cm-radius);
   font-size: 13px;
 }
-[data-component="ai-chat-panel"] [data-component="approval-card"] [data-element="header"],
-[data-component="ai-chat-panel"] [data-component="bulk-approval-card"] [data-element="header"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="approval-card"] [data-element="header"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="bulk-approval-card"] [data-element="header"] {
   font-weight: 500;
   color: #713f12;
   margin-bottom: 0.5rem;
 }
-[data-component="ai-chat-panel"] [data-component="approval-card"] [data-element="details"],
-[data-component="ai-chat-panel"] [data-component="bulk-approval-card"] [data-element="details"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="approval-card"] [data-element="details"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="bulk-approval-card"] [data-element="details"] {
   background: rgba(255, 255, 255, 0.6);
   border: 1px solid rgba(252, 211, 77, 0.6);
   border-radius: var(--cm-radius-sm);
@@ -319,12 +319,12 @@
   font-size: 12px;
   color: #78350f;
 }
-[data-component="ai-chat-panel"] [data-component="approval-card"] [data-element="actions"],
-[data-component="ai-chat-panel"] [data-component="bulk-approval-card"] [data-element="actions"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="approval-card"] [data-element="actions"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="bulk-approval-card"] [data-element="actions"] {
   display: flex;
   gap: 0.5rem;
 }
-[data-component="ai-chat-panel"] [data-action="approve"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="approve"] {
   padding: 0.375rem 0.875rem;
   background: #16a34a;
   color: #fff;
@@ -335,10 +335,10 @@
   font-weight: 500;
   cursor: pointer;
 }
-[data-component="ai-chat-panel"] [data-action="approve"]:hover:not(:disabled) {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="approve"]:hover:not(:disabled) {
   background: #15803d;
 }
-[data-component="ai-chat-panel"] [data-action="reject"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="reject"] {
   padding: 0.375rem 0.875rem;
   background: #fff;
   color: #dc2626;
@@ -350,7 +350,7 @@
 }
 
 /* ---------- Mention chip ---------- */
-[data-component="ai-chat-panel"] [data-component="mention-chip"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-chip"] {
   display: inline-flex;
   align-items: center;
   padding: 0.125rem 0.5rem;
@@ -362,7 +362,7 @@
 }
 
 /* ---------- Pipeline timeline ---------- */
-[data-component="ai-chat-panel"] [data-component="pipeline-timeline"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] {
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--cm-border);
   background: var(--cm-bg-muted);
@@ -371,7 +371,7 @@
 }
 
 /* ---------- Tool result ---------- */
-[data-component="ai-chat-panel"] [data-component="tool-result"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="tool-result"] {
   margin: 0.375rem 0;
   padding: 0.5rem 0.75rem;
   background: rgba(0, 0, 0, 0.03);
@@ -385,7 +385,7 @@
 /* The wrapper above is flex, but the editor, mic and Send sit inside a bare
    <form> (classNames.input is empty by default). Without this rule the form
    shrink-wraps its contents and the editor and its list collapse to ~111px. */
-[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"][data-mode="providers"] > form {
   display: flex;
   flex: 1;
   min-width: 0;
@@ -393,12 +393,12 @@
   align-items: flex-end;
   flex-wrap: wrap;
 }
-[data-component="ai-chat-panel"] [data-component="rich-mention-input"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"] {
   position: relative;
   flex: 1;
   min-width: 0;
 }
-[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-element="editor"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"] [data-element="editor"] {
   box-sizing: border-box;
   min-height: 40px;
   max-height: 160px;
@@ -411,18 +411,18 @@
   color: var(--cm-text);
   outline: none;
 }
-[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-element="editor"]:focus {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"] [data-element="editor"]:focus {
   border-color: var(--cm-primary);
   box-shadow: 0 0 0 3px var(--cm-primary-ring);
 }
-[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-element="placeholder"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"] [data-element="placeholder"] {
   position: absolute;
   top: 0.5rem;
   left: 0.75rem;
   color: var(--cm-text-muted);
   pointer-events: none;
 }
-[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-component="mention-dropdown"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"] [data-component="mention-dropdown"] {
   position: absolute;
   left: 0;
   right: 0;
@@ -437,7 +437,7 @@
   border-radius: var(--cm-radius-sm);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
-[data-component="ai-chat-panel"] [data-component="mention-dropdown-item"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown-item"] {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -451,10 +451,10 @@
   text-align: left;
   cursor: pointer;
 }
-[data-component="ai-chat-panel"] [data-component="mention-dropdown-item"][data-selected="true"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown-item"][data-selected="true"] {
   background: var(--cm-primary-tint);
 }
-[data-component="ai-chat-panel"] [data-component="mention-dropdown-item"] [data-element="description"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown-item"] [data-element="description"] {
   font-size: 12px;
   color: var(--cm-text-muted);
 }
@@ -464,25 +464,25 @@
    row as basis the shrink is shared by basis and squeezes the chips below their own width. The row
    wraps instead, which keeps the chips on one line beside the result and drops them below it only
    when the result cannot keep 8rem. */
-[data-component="ai-chat-panel"] [data-component="mention-dropdown"] [data-element="result-row"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown"] [data-element="result-row"] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
   padding-right: 0.5rem;
 }
-[data-component="ai-chat-panel"] [data-element="result-row"] > [data-component="mention-dropdown-item"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="result-row"] > [data-component="mention-dropdown-item"] {
   flex: 1 1 8rem;
   min-width: 0;
 }
-[data-component="ai-chat-panel"] [data-element="entity-actions"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="entity-actions"] {
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.25rem;
 }
-[data-component="ai-chat-panel"] [data-component="mention-action"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-action"] {
   padding: 0.125rem 0.5rem;
   background: var(--cm-bg-muted);
   border: 1px solid var(--cm-border);
@@ -493,11 +493,11 @@
   white-space: nowrap;
   cursor: pointer;
 }
-[data-component="ai-chat-panel"] [data-component="mention-action"][data-selected="true"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-action"][data-selected="true"] {
   background: var(--cm-primary-tint);
   border-color: var(--cm-primary);
 }
-[data-component="ai-chat-panel"] [data-component="command-arguments"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="command-arguments"] {
   box-sizing: border-box;
   display: flex;
   flex-wrap: wrap;
@@ -513,26 +513,26 @@
 /* The composer wrapper is one flex row and its `> form` rule (flex: 1) outranks the rule above,
    which would park the argument form beside the editor. The wrapper wraps and the form takes
    the full first row; the wrapper's gap supplies the space below it. */
-[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"][data-mode="providers"] {
   flex-wrap: wrap;
 }
-[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form[data-component="command-arguments"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"][data-mode="providers"] > form[data-component="command-arguments"] {
   flex: 1 1 100%;
   margin: 0;
 }
-[data-component="command-arguments"] [data-element="title"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="title"] {
   flex: 1 1 100%;
   margin: 0;
   font-weight: 500;
   overflow-wrap: anywhere;
 }
-[data-component="command-arguments"] [data-element="error"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="error"] {
   flex: 1 1 100%;
   margin: 0;
   color: var(--cm-danger);
   font-size: 12px;
 }
-[data-component="command-arguments"] [data-element="field"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="field"] {
   position: relative;
   display: flex;
   flex: 1 1 10rem;
@@ -542,8 +542,8 @@
   color: var(--cm-text-muted);
   font-size: 12px;
 }
-[data-component="command-arguments"] input,
-[data-component="command-arguments"] select {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) input,
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) select {
   box-sizing: border-box;
   width: 100%;
   padding: 0.375rem 0.5rem;
@@ -554,13 +554,13 @@
   font: inherit;
   font-size: 14px;
 }
-[data-component="command-arguments"] input:focus,
-[data-component="command-arguments"] select:focus {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) input:focus,
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) select:focus {
   outline: none;
   border-color: var(--cm-primary);
   box-shadow: 0 0 0 3px var(--cm-primary-ring);
 }
-[data-component="command-arguments"] [data-element="options"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="options"] {
   position: absolute;
   left: 0;
   right: 0;
@@ -576,46 +576,46 @@
   border-radius: var(--cm-radius-sm);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
-[data-component="command-arguments"] [data-element="options"] [role="option"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="options"] [role="option"] {
   padding: 0.375rem 0.5rem;
   color: var(--cm-text);
   cursor: pointer;
 }
-[data-component="command-arguments"] [data-element="options"] [role="option"][data-selected="true"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="options"] [role="option"][data-selected="true"] {
   background: var(--cm-primary-tint);
 }
 /* The dropdown rule for descriptions is scoped to the mention items; without this one the span runs
    on after the label (`Alice Examplealice@example.com`). */
-[data-component="command-arguments"] [data-element="options"] [data-element="description"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="options"] [data-element="description"] {
   display: block;
   font-size: 12px;
   color: var(--cm-text-muted);
 }
-[data-component="command-arguments"] [data-element="actions"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="actions"] {
   display: flex;
   gap: 0.375rem;
 }
-[data-component="command-arguments"] [data-action="run"],
-[data-component="command-arguments"] [data-action="cancel"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="run"],
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="cancel"] {
   padding: 0.375rem 0.75rem;
   border-radius: var(--cm-radius-sm);
   font: inherit;
   font-size: 14px;
   cursor: pointer;
 }
-[data-component="command-arguments"] [data-action="run"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="run"] {
   background: var(--cm-primary);
   border: 1px solid var(--cm-primary);
   color: #ffffff;
 }
-[data-component="command-arguments"] [data-action="cancel"] {
+[data-component="command-arguments"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="cancel"] {
   background: transparent;
   border: 1px solid var(--cm-border);
   color: var(--cm-text);
 }
 
 /* ---------- Structured clarification ---------- */
-[data-component="ai-chat-panel"] [data-component="clarification-card"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="clarification-card"] {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -627,17 +627,17 @@
   border: 1px solid var(--cm-border);
   border-radius: var(--cm-radius-sm);
 }
-[data-component="clarification-card"] [data-element="question"] {
+[data-component="clarification-card"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="question"] {
   margin: 0;
   font-weight: 500;
   overflow-wrap: anywhere;
 }
-[data-component="clarification-card"] [data-element="options"] {
+[data-component="clarification-card"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="options"] {
   display: flex;
   flex-wrap: wrap;
   gap: 0.375rem;
 }
-[data-component="clarification-card"] [data-action="answer-option"] {
+[data-component="clarification-card"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="answer-option"] {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
@@ -653,19 +653,19 @@
   overflow-wrap: anywhere;
   cursor: pointer;
 }
-[data-component="clarification-card"] [data-action="answer-option"]:disabled {
+[data-component="clarification-card"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="answer-option"]:disabled {
   opacity: 0.6;
   cursor: default;
 }
-[data-component="clarification-card"] [data-element="description"] {
+[data-component="clarification-card"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="description"] {
   font-size: 11px;
   color: var(--cm-text-muted);
 }
-[data-component="clarification-card"] [data-element="free-text"] {
+[data-component="clarification-card"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="free-text"] {
   display: flex;
   gap: 0.375rem;
 }
-[data-component="clarification-card"] [data-element="free-text"] input {
+[data-component="clarification-card"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="free-text"] input {
   flex: 1;
   min-width: 0;
   padding: 0.375rem 0.625rem;
@@ -675,7 +675,7 @@
   color: var(--cm-text);
   font: inherit;
 }
-[data-component="clarification-card"] [data-action="answer-free-text"] {
+[data-component="clarification-card"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="answer-free-text"] {
   padding: 0.375rem 0.75rem;
   background: var(--cm-primary);
   border: none;
@@ -684,14 +684,14 @@
   font: inherit;
   cursor: pointer;
 }
-[data-component="clarification-card"] [data-action="answer-free-text"]:disabled {
+[data-component="clarification-card"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="answer-free-text"]:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 /* ---------- Voice: mic, push-to-talk, retry, recording bar ---------- */
-[data-component="ai-chat-panel"] [data-component="voice-input-addon"],
-[data-component="ai-chat-panel"] [data-action="retry-recording"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="voice-input-addon"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="retry-recording"] {
   flex-shrink: 0;
   min-width: 40px;
   min-height: 40px;
@@ -707,11 +707,11 @@
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-[data-component="ai-chat-panel"] [data-component="voice-input-addon"][data-state="recording"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="voice-input-addon"][data-state="recording"] {
   border-color: var(--cm-danger);
   color: var(--cm-danger);
 }
-[data-component="ai-chat-panel"] [data-component="recording-bar"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="recording-bar"] {
   min-width: 0;
 }
 /* The inline bar is `width: 100%` (inline style). Next to the editor, mic and
@@ -719,7 +719,7 @@
    non-auto flex-basis beats that width, so the bar takes a row of its own
    below them (form wraps; `order` moves it behind Send, which stays beside
    the editor). The row exists only while the bar is mounted. */
-[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"] {
   flex: 1 1 100%;
   order: 1;
 }
@@ -730,7 +730,7 @@
    zero consumer styling. Override by passing className/buttonClassName.
    =========================================================================== */
 
-[data-component="ai-trigger-button"] [data-element="button-pill"] {
+[data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="button-pill"] {
   background: linear-gradient(135deg, var(--cm-primary) 0%, var(--cm-primary-soft) 100%);
   color: #ffffff;
   box-shadow:
@@ -741,7 +741,7 @@
   font-family: var(--cm-font);
 }
 
-[data-component="ai-trigger-button"] [data-element="button-pill"]:hover {
+[data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="button-pill"]:hover {
   transform: translateY(-1px);
   box-shadow:
     0 14px 30px -5px var(--cm-primary-tint),
@@ -749,22 +749,22 @@
     0 0 0 1px rgba(255, 255, 255, 0.16) inset;
 }
 
-[data-component="ai-trigger-button"][data-dragging="true"] [data-element="button-pill"] {
+[data-component="ai-trigger-button"][data-dragging="true"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="button-pill"] {
   transform: scale(1.04);
 }
 
-[data-component="ai-trigger-button"] [data-element="mic-trigger"] {
+[data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="mic-trigger"] {
   background: rgba(255, 255, 255, 0.22) !important;
   color: #ffffff;
   transition: background 150ms ease;
 }
 
-[data-component="ai-trigger-button"] [data-element="mic-trigger"]:hover {
+[data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="mic-trigger"]:hover {
   background: rgba(255, 255, 255, 0.34) !important;
 }
 
 /* ---------- Chat window shell ---------- */
-[data-component="chat-window"] {
+[data-component="chat-window"]:where(:not([data-unstyled], [data-unstyled] *)) {
   box-sizing: border-box;
   background: var(--cm-bg);
   color: var(--cm-text);
@@ -781,14 +781,14 @@
   font-size: 14px;
 }
 
-[data-component="chat-window"][data-mode="sidebar"] {
+[data-component="chat-window"][data-mode="sidebar"]:where(:not([data-unstyled], [data-unstyled] *)) {
   border-radius: 0;
   box-shadow: none;
 }
-[data-component="chat-window"][data-mode="sidebar"] [data-component="chat-window-header"] {
+[data-component="chat-window"][data-mode="sidebar"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-window-header"] {
   cursor: default;
 }
-[data-component="chat-window-sidebar-resize"] {
+[data-component="chat-window-sidebar-resize"]:where(:not([data-unstyled], [data-unstyled] *)) {
   position: absolute;
   inset: 0 auto 0 0;
   width: 8px;
@@ -796,13 +796,13 @@
   cursor: ew-resize;
   touch-action: none;
 }
-[data-component="chat-window-sidebar-resize"]:hover,
-[data-component="chat-window-sidebar-resize"]:focus-visible {
+[data-component="chat-window-sidebar-resize"]:hover:where(:not([data-unstyled], [data-unstyled] *)),
+[data-component="chat-window-sidebar-resize"]:focus-visible:where(:not([data-unstyled], [data-unstyled] *)) {
   background: var(--cm-primary-tint);
   outline: 2px solid var(--cm-primary);
   outline-offset: -2px;
 }
-[data-component="chat-window-rail"] {
+[data-component="chat-window-rail"]:where(:not([data-unstyled], [data-unstyled] *)) {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -810,14 +810,14 @@
   padding: 8px 0;
   height: 100%;
 }
-[data-component="chat-window-rail"] span {
+[data-component="chat-window-rail"]:where(:not([data-unstyled], [data-unstyled] *)) span {
   writing-mode: vertical-rl;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-[data-component="chat-window-rail"] button {
+[data-component="chat-window-rail"]:where(:not([data-unstyled], [data-unstyled] *)) button {
   appearance: none;
   border: 0;
   border-radius: var(--cm-radius-sm);
@@ -828,7 +828,7 @@
   cursor: pointer;
   font-size: 20px;
 }
-[data-component="chat-window-rail"] button:hover {
+[data-component="chat-window-rail"]:where(:not([data-unstyled], [data-unstyled] *)) button:hover {
   background: var(--cm-primary-tint);
 }
 
@@ -836,12 +836,12 @@
    Applied when the resolved theme sets `effect: 'glass'` (e.g. the
    `liquid-glass` preset). Adds a real backdrop blur so translucent
    backgrounds read as frosted glass instead of a flat wash. */
-[data-component="chat-window"][data-theme-effect="glass"],
-[data-component="ai-chat-panel"][data-theme-effect="glass"] {
+[data-component="chat-window"][data-theme-effect="glass"]:where(:not([data-unstyled], [data-unstyled] *)),
+[data-component="ai-chat-panel"][data-theme-effect="glass"]:where(:not([data-unstyled], [data-unstyled] *)) {
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
 }
-[data-component="ai-trigger-button"][data-theme-effect="glass"] [data-element="button-pill"] {
+[data-component="ai-trigger-button"][data-theme-effect="glass"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="button-pill"] {
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
 }
@@ -852,7 +852,7 @@
    edge-resize handles/drag headers don't map to touch gestures.
    Pin to the viewport, kill the radius, and disable edge handles. */
 @media (max-width: 640px) {
-  [data-component="chat-window"] {
+  [data-component="chat-window"]:where(:not([data-unstyled], [data-unstyled] *)) {
     position: fixed !important;
     left: 0 !important;
     top: 0 !important;
@@ -867,37 +867,37 @@
     max-width: none !important;
     max-height: none !important;
   }
-  [data-component="chat-window"][data-collapsed="true"] {
+  [data-component="chat-window"][data-collapsed="true"]:where(:not([data-unstyled], [data-unstyled] *)) {
     left: auto !important;
     width: 44px !important;
   }
-  [data-component="chat-window-resize-handle"],
-  [data-component="chat-window-sidebar-resize"] {
+  [data-component="chat-window-resize-handle"]:where(:not([data-unstyled], [data-unstyled] *)),
+  [data-component="chat-window-sidebar-resize"]:where(:not([data-unstyled], [data-unstyled] *)) {
     display: none !important;
   }
-  [data-component="chat-window-header"] {
+  [data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) {
     cursor: default !important;
     padding-top: max(0.75rem, env(safe-area-inset-top));
     padding-left: max(1rem, env(safe-area-inset-left));
     padding-right: max(1rem, env(safe-area-inset-right));
   }
-  [data-component="chat-window-body"] {
+  [data-component="chat-window-body"]:where(:not([data-unstyled], [data-unstyled] *)) {
     padding-bottom: env(safe-area-inset-bottom);
   }
   /* Hide the pill while the chat is open — on mobile we own the
      whole viewport, so the pill would overlap the input bar. */
-  [data-component="ai-trigger-button"] {
+  [data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) {
     z-index: 9998;
   }
 }
 
-[data-component="chat-window"] *,
-[data-component="chat-window"] *::before,
-[data-component="chat-window"] *::after {
+[data-component="chat-window"]:where(:not([data-unstyled], [data-unstyled] *)) *,
+[data-component="chat-window"]:where(:not([data-unstyled], [data-unstyled] *)) *::before,
+[data-component="chat-window"]:where(:not([data-unstyled], [data-unstyled] *)) *::after {
   box-sizing: border-box;
 }
 
-[data-component="chat-window-header"] {
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -909,11 +909,11 @@
   flex-shrink: 0;
 }
 
-[data-component="chat-window-header"]:active {
+[data-component="chat-window-header"]:active:where(:not([data-unstyled], [data-unstyled] *)) {
   cursor: grabbing;
 }
 
-[data-component="chat-window-header"] [data-element="title"] {
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="title"] {
   font-size: 14px;
   font-weight: 600;
   color: var(--cm-text);
@@ -922,14 +922,14 @@
   text-overflow: ellipsis;
 }
 
-[data-component="chat-window-header"] [data-element="title-wrap"] {
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="title-wrap"] {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
 }
 
-[data-component="chat-window-header"] [data-element="actions"] {
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="actions"] {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
@@ -937,9 +937,9 @@
   margin-left: 0.5rem;
 }
 
-[data-component="chat-window-header"] [data-action="close"],
-[data-component="chat-window-header"] [data-action="layout"],
-[data-component="chat-window-header"] [data-action="clear"] {
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="close"],
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="layout"],
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="clear"] {
   appearance: none;
   border: none;
   background: transparent;
@@ -955,21 +955,21 @@
   transition: background 120ms ease, color 120ms ease;
 }
 
-[data-component="chat-window-header"] [data-action="close"]:hover,
-[data-component="chat-window-header"] [data-action="layout"]:hover,
-[data-component="chat-window-header"] [data-action="clear"]:hover:not(:disabled) {
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="close"]:hover,
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="layout"]:hover,
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="clear"]:hover:not(:disabled) {
   background: var(--cm-primary-tint);
   color: var(--cm-text);
 }
 
-[data-component="chat-window-header"] [data-action="clear"]:disabled {
+[data-component="chat-window-header"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="clear"]:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
 
 /* ---------- Session switcher ---------- */
 
-[data-component="session-switcher"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) {
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
@@ -978,12 +978,12 @@
   pointer-events: none;
 }
 
-[data-component="session-switcher"] [data-element="trigger"],
-[data-component="session-switcher"] [data-element="popover"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="trigger"],
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="popover"] {
   pointer-events: auto;
 }
 
-[data-component="session-switcher"] [data-element="trigger"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="trigger"] {
   appearance: none;
   border: 1px solid transparent;
   background: transparent;
@@ -1000,23 +1000,23 @@
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-[data-component="session-switcher"] [data-element="trigger"]:hover {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="trigger"]:hover {
   background: var(--cm-primary-tint);
 }
 
-[data-component="session-switcher"][data-open] [data-element="trigger"] {
+[data-component="session-switcher"][data-open]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="trigger"] {
   background: var(--cm-primary-tint);
   border-color: var(--cm-primary);
 }
 
-[data-component="session-switcher"] [data-element="trigger-title"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="trigger-title"] {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 14rem;
 }
 
-[data-component="session-switcher"] [data-element="popover"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="popover"] {
   position: absolute;
   top: calc(100% + 0.375rem);
   left: 0;
@@ -1034,7 +1034,7 @@
   font-weight: 400;
 }
 
-[data-component="session-switcher"] [data-element="new-session"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="new-session"] {
   appearance: none;
   border: none;
   background: transparent;
@@ -1051,11 +1051,11 @@
   border-bottom: 1px solid var(--cm-border);
 }
 
-[data-component="session-switcher"] [data-element="new-session"]:hover {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="new-session"]:hover {
   background: var(--cm-primary-tint);
 }
 
-[data-component="session-switcher"] [data-element="new-session"] [data-element="plus"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="new-session"] [data-element="plus"] {
   display: inline-flex;
   width: 1.25rem;
   height: 1.25rem;
@@ -1068,20 +1068,20 @@
   line-height: 1;
 }
 
-[data-component="session-switcher"] [data-element="session-list"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-list"] {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 0.25rem 0;
 }
 
-[data-component="session-switcher"] [data-element="empty"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="empty"] {
   padding: 1rem 0.875rem;
   color: var(--cm-text-muted);
   font-size: 13px;
   text-align: center;
 }
 
-[data-component="session-switcher"] [data-element="session-row"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"] {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -1090,20 +1090,20 @@
   transition: background 120ms ease;
 }
 
-[data-component="session-switcher"] [data-element="session-row"]:hover {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"]:hover {
   background: var(--cm-primary-tint);
 }
 
-[data-component="session-switcher"] [data-element="session-row"][data-active] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"][data-active] {
   background: var(--cm-primary-tint);
 }
 
-[data-component="session-switcher"] [data-element="row-main"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-main"] {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-[data-component="session-switcher"] [data-element="row-title"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-title"] {
   font-size: 13px;
   font-weight: 600;
   color: var(--cm-text);
@@ -1112,14 +1112,14 @@
   text-overflow: ellipsis;
 }
 
-[data-component="session-switcher"] [data-element="row-subtitle"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-subtitle"] {
   font-size: 11px;
   color: var(--cm-text-muted);
   margin-top: 0.125rem;
 }
 
-[data-component="session-switcher"] [data-element="row-delete"],
-[data-component="session-switcher"] [data-element="row-edit"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-delete"],
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-edit"] {
   appearance: none;
   border: none;
   background: transparent;
@@ -1136,27 +1136,27 @@
   flex-shrink: 0;
 }
 
-[data-component="session-switcher"] [data-element="session-row"]:hover [data-element="row-delete"],
-[data-component="session-switcher"] [data-element="session-row"]:hover [data-element="row-edit"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"]:hover [data-element="row-delete"],
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"]:hover [data-element="row-edit"] {
   opacity: 1;
 }
 
-[data-component="session-switcher"] [data-element="row-edit"]:hover {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-edit"]:hover {
   background: var(--cm-primary-tint);
   color: var(--cm-text);
 }
 
-[data-component="session-switcher"] [data-element="row-delete"]:hover {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-delete"]:hover {
   background: rgba(220, 38, 38, 0.1);
   color: var(--cm-danger);
 }
 
-[data-component="session-switcher"] [data-element="session-row"][data-editing] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"][data-editing] {
   background: var(--cm-primary-tint);
   cursor: text;
 }
 
-[data-component="session-switcher"] [data-element="row-title-input"] {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-title-input"] {
   width: 100%;
   appearance: none;
   background: transparent;
@@ -1171,13 +1171,13 @@
   caret-color: var(--cm-primary);
 }
 
-[data-component="session-switcher"] [data-element="row-title-input"]::placeholder {
+[data-component="session-switcher"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-title-input"]::placeholder {
   color: var(--cm-text-muted);
 }
 
 /* ---------- Confirm dialog ---------- */
 
-[data-component="confirm-dialog-backdrop"] {
+[data-component="confirm-dialog-backdrop"]:where(:not([data-unstyled], [data-unstyled] *)) {
   position: fixed;
   inset: 0;
   z-index: 10010;
@@ -1192,7 +1192,7 @@
   animation: cm-confirm-fade 140ms ease-out;
 }
 
-[data-component="confirm-dialog"] {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) {
   background: var(--cm-bg);
   color: var(--cm-text);
   border: 1px solid var(--cm-border);
@@ -1209,28 +1209,28 @@
   animation: cm-confirm-pop 160ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
 }
 
-[data-component="confirm-dialog"] [data-element="title"] {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="title"] {
   font-size: 15px;
   font-weight: 600;
   color: var(--cm-text);
   line-height: 1.4;
 }
 
-[data-component="confirm-dialog"] [data-element="message"] {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="message"] {
   font-size: 13px;
   color: var(--cm-text-muted);
   line-height: 1.5;
   margin-bottom: 0.25rem;
 }
 
-[data-component="confirm-dialog"] [data-element="actions"] {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="actions"] {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.75rem;
 }
 
-[data-component="confirm-dialog"] [data-element="actions"] button {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="actions"] button {
   appearance: none;
   border: 1px solid var(--cm-border);
   background: transparent;
@@ -1244,28 +1244,28 @@
   font-family: inherit;
 }
 
-[data-component="confirm-dialog"] [data-element="cancel"]:hover {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="cancel"]:hover {
   background: var(--cm-primary-tint);
   border-color: var(--cm-primary);
 }
 
-[data-component="confirm-dialog"] [data-element="confirm"] {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="confirm"] {
   background: var(--cm-primary);
   border-color: var(--cm-primary);
   color: #ffffff;
 }
 
-[data-component="confirm-dialog"] [data-element="confirm"]:hover:not(:disabled) {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="confirm"]:hover:not(:disabled) {
   filter: brightness(1.1);
   transform: translateY(-1px);
 }
 
-[data-component="confirm-dialog"] [data-element="confirm"][data-destructive] {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="confirm"][data-destructive] {
   background: var(--cm-danger);
   border-color: var(--cm-danger);
 }
 
-[data-component="confirm-dialog"] [data-element="confirm"]:disabled {
+[data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="confirm"]:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -1280,7 +1280,7 @@
   to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-[data-component="chat-window-body"] {
+[data-component="chat-window-body"]:where(:not([data-unstyled], [data-unstyled] *)) {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -1290,7 +1290,7 @@
 
 /* When ai-chat-panel is a direct child of chat-window-body, drop its own
    border/radius/shadow so the window shell owns the framing. */
-[data-component="chat-window-body"] > [data-component="ai-chat-panel"] {
+[data-component="chat-window-body"]:where(:not([data-unstyled], [data-unstyled] *)) > [data-component="ai-chat-panel"] {
   border: none;
   border-radius: 0;
   box-shadow: none;

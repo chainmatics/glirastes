@@ -146,13 +146,13 @@ function injectStyles() {
       0%, 100% { transform: translateY(0); }
       50% { transform: translateY(-25%); }
     }
-    [data-component="ai-trigger-button"] [data-dot] {
+    [data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-dot] {
       animation: ai-trigger-bounce 1.4s ease-in-out infinite;
     }
-    [data-component="ai-trigger-button"] [data-dot="2"] {
+    [data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-dot="2"] {
       animation-delay: 0.15s;
     }
-    [data-component="ai-trigger-button"] [data-dot="3"] {
+    [data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-dot="3"] {
       animation-delay: 0.3s;
     }
   `;
@@ -202,7 +202,9 @@ export function AiTriggerButton({
   const [isMounted, setIsMounted] = useState(false);
 
   // Theme vars from the provider (standalone use is allowed — fall back).
-  const themeVars = useContext(ChatContext)?.themeVars ?? {};
+  const ctx = useContext(ChatContext);
+  const themeVars = ctx?.themeVars ?? {};
+  const unstyled = ctx?.unstyled ?? false;
 
   const { position, isDragging, onMouseDown, wasDragged, resetPosition } =
     useDraggablePosition({
@@ -240,6 +242,7 @@ export function AiTriggerButton({
         style={wrapperStyle}
         data-component="ai-trigger-button"
         data-state={state}
+        data-unstyled={unstyled || undefined}
       >
         <div
           className={buttonClassName ?? undefined}
@@ -333,6 +336,7 @@ export function AiTriggerButton({
       style={wrapperStyle}
       data-component="ai-trigger-button"
       data-state="idle"
+      data-unstyled={unstyled || undefined}
       data-dragging={isDragging || undefined}
     >
       {wrapped}

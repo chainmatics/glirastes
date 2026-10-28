@@ -387,6 +387,7 @@ export function AiChatProvider({
   locale: userLocale,
   theme: userTheme,
   themeScope = 'inline',
+  unstyled = false,
   onToolResult,
   uiActionBus,
   onBeforeSend,
@@ -404,8 +405,8 @@ export function AiChatProvider({
   );
   // Resolve `theme` prop → CSS variables spread onto widget roots.
   const themeVars = useMemo<CSSProperties>(
-    () => (themeScope === 'inherit' ? {} : getThemeVars(userTheme)) as CSSProperties,
-    [userTheme, themeScope],
+    () => (themeScope === 'inherit' || unstyled ? {} : getThemeVars(userTheme)) as CSSProperties,
+    [userTheme, themeScope, unstyled],
   );
   const themeEffect = useMemo(() => getThemeEffect(userTheme), [userTheme]);
   const classNames = useMemo(() => userClassNames ?? {}, [userClassNames]);
@@ -1380,6 +1381,7 @@ export function AiChatProvider({
       locale,
       themeVars,
       themeEffect,
+      unstyled,
       suggestions: suggestionsConfig,
       toolLabels,
       toolResults: toolResultConfig,
@@ -1449,6 +1451,7 @@ export function AiChatProvider({
       locale,
       themeVars,
       themeEffect,
+      unstyled,
       suggestionsConfig,
       toolLabels,
       toolResultConfig,
