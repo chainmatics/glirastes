@@ -30,6 +30,10 @@ vi.mock('../../provider/chat-context.js', () => ({
   useChatContext: () => chatContext.current,
 }));
 
+vi.mock('../message-list.js', () => ({
+  MessageList: () => <div data-testid="message-list" />,
+}));
+
 function TestApprovalCard({
   approval,
   onApprove,
@@ -164,5 +168,37 @@ describe('AiChatPanel composition', () => {
     expect(screen.getByRole('alert').textContent)
       .toBe('Die Anfrage ist fehlgeschlagen.');
     expect(screen.queryByText('raw provider payload')).toBeNull();
+  });
+
+  it('leaves the pipeline bar out unless the app supplies one', () => {
+    const { rerender } = render(<AiChatPanel />);
+    expect(screen.getByTestId('pipeline')).toBeTruthy();
+
+    const { PipelineTimeline: _custom, ...rest } = chatContext.current.components as Record<string, unknown>;
+    chatContext.current.components = rest;
+    chatContext.current.pipelineState = {
+      status: 'running', totalSteps: 0, maxSteps: 5, stepLimitSource: 'module',
+      updatedAt: '2026-10-28T10:00:00.000Z',
+    };
+    chatContext.current.pipelineSteps = [0, 1].map((stepNumber) => ({
+      stepNumber, finishReason: 'tool-calls', toolCalls: ['tasks.update'], toolResults: 1,
+      requiresApproval: false, pendingApprovals: 0, summary: '',
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      createdAt: '2026-10-28T10:00:00.000Z',
+    }));
+    chatContext.current.toolLabels = {};
+    rerender(<AiChatPanel />);
+    expect(document.querySelector('[data-component="pipeline-timeline"]')).toBeNull();
+  });
+
+  it('drops the typing dots once the activity log shows a running tool', () => {
+    chatContext.current.isLoading = true;
+    chatContext.current.messages = [{
+      id: 'a1',
+      role: 'assistant',
+      parts: [{ type: 'tool-tasks.update', toolCallId: 'c1', state: 'input-available' }],
+    }];
+    render(<AiChatPanel />);
+    expect(document.querySelector('[data-component="typing-indicator"]')).toBeNull();
   });
 });

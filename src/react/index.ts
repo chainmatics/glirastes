@@ -171,6 +171,8 @@ export { ChatWindow } from './components/chat-window.js';
 export { ApprovalCard } from './components/approval-card.js';
 export { BulkApprovalCard } from './components/bulk-approval-card.js';
 export { PipelineTimeline } from './components/pipeline-timeline.js';
+export { ActivityLog, type ActivityLogProps } from './components/activity-log.js';
+export { PlanChecklist, type PlanChecklistProps } from './components/plan-checklist.js';
 export { SuggestionChip } from './components/suggestion-chip.js';
 export { SuggestionBar } from './components/suggestion-bar.js';
 export { MentionChip, MentionChipList } from './components/mention-chip.js';
@@ -259,6 +261,13 @@ export { getThemeVars, CHAT_THEME_PRESETS, DEFAULT_THEME_PRESET } from './themes
 
 // Utilities
 export { mergePipelineSteps } from './utils/merge-pipeline-steps.js';
+export {
+  readActivitySteps,
+  readLatestPlan,
+  type ActivityStep,
+  type ActivityStepStatus,
+} from './utils/activity.js';
+export type { PlanItem, PlanItemStatus } from '../contracts/plan.js';
 export { sanitizeStoredMessages } from './utils/sanitize-stored-messages.js';
 export {
   stripContextBlocks,

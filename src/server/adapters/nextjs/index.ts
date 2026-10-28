@@ -77,6 +77,7 @@ export type {
   // Re-exported from glirastes
   AiPipeline,
   ClarificationConfig,
+  PlanningConfig,
   FollowupsConfig,
   PipelineResult,
   ManagedLocalRuntimeConfig,

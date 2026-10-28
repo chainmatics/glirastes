@@ -369,67 +369,79 @@
   font-size: 12px;
   color: var(--cm-text-muted);
 }
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="header"] {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
+
+/* ---------- Activity log and plan ---------- */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="plan-checklist"] {
+  margin: 0 0 0.375rem;
+  font-size: 12px;
+  color: var(--cm-text-muted);
 }
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="header-right"] {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="steps"] {
-  list-style: none;
-  margin: 0.375rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="step"] {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-}
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="step"] > details {
-  flex: 1;
-  min-width: 0;
-}
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="step-summary"] {
-  display: flex;
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-summary"] {
+  display: inline-flex;
   align-items: center;
   gap: 0.375rem;
   cursor: pointer;
   list-style: none;
+  user-select: none;
 }
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="step-summary"]::-webkit-details-marker {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-summary"]::-webkit-details-marker {
   display: none;
 }
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="icon"] {
-  flex-shrink: 0;
-}
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="step"][data-status="completed"] [data-element="icon"] {
-  color: var(--cm-primary);
-}
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="step"][data-status="running"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"][data-state="running"] [data-element="activity-summary"] {
   color: var(--cm-text);
 }
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="step"][data-status="pending"] {
-  opacity: 0.55;
-}
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="approval"] {
-  font-style: italic;
-}
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="detail"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-steps"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="plan-checklist"] [data-element="plan-items"] {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0 0 0 0.375rem;
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
-  padding: 0.125rem 0 0.25rem 1.25rem;
 }
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="pipeline-timeline"] [data-element="message"] {
-  margin: 0.375rem 0 0;
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-steps"] {
+  border-left: 1px solid var(--cm-border);
+  margin-left: 0.375rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-step"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="plan-checklist"] [data-element="plan-item"] {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="icon"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="plan-checklist"] [data-element="icon"] {
+  flex-shrink: 0;
+  align-self: center;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-step"][data-status="done"] [data-element="icon"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="plan-checklist"] [data-element="plan-item"][data-status="completed"] [data-element="icon"] {
+  color: var(--cm-primary);
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-step"][data-status="error"] [data-element="icon"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"][data-state="error"] [data-element="activity-summary"] [data-element="icon"] {
+  color: #dc2626;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="detail"] {
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="detail"]::before {
+  content: "· ";
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-notice"] {
+  margin: 0.25rem 0 0;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="plan-checklist"] [data-element="title"] {
+  font-weight: 600;
+  color: var(--cm-text);
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="plan-checklist"] [data-element="plan-item"][data-status="in_progress"] {
+  color: var(--cm-text);
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="plan-checklist"] [data-element="plan-item"][data-status="pending"] {
+  opacity: 0.55;
 }
 
 /* ---------- Tool result ---------- */

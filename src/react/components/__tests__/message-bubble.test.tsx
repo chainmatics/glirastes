@@ -4,7 +4,8 @@ import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MessageBubble } from '../message-bubble.js';
-import type { ToolResultDisplayConfig } from '../../types.js';
+import { deChatLocale } from '../../locale-de.js';
+import type { PipelineState, ToolResultDisplayConfig } from '../../types.js';
 
 const chatContext = vi.hoisted(() => ({
   current: {
@@ -13,6 +14,11 @@ const chatContext = vi.hoisted(() => ({
       Markdown: ({ content }: { content: string }) => <div>{content}</div>,
     },
     toolResults: { mode: 'default' } as ToolResultDisplayConfig,
+    locale: {} as typeof deChatLocale,
+    toolLabels: { labels: { 'tasks.update': { singular: 'Aufgabe ändern', plural: 'Aufgaben ändern' } } },
+    messages: [] as Array<{ id: string }>,
+    isLoading: false,
+    pipelineState: null as PipelineState | null,
   },
 }));
 
@@ -20,10 +26,16 @@ vi.mock('../../provider/chat-context.js', () => ({
   useChatContext: () => chatContext.current,
 }));
 
+// vi.hoisted runs before imports, so the locale is set here.
+chatContext.current.locale = deChatLocale;
+
 describe('MessageBubble tool-result visibility', () => {
   afterEach(() => {
     cleanup();
     chatContext.current.toolResults = { mode: 'default' };
+    chatContext.current.messages = [];
+    chatContext.current.isLoading = false;
+    chatContext.current.pipelineState = null;
   });
 
   it('does not expose a tool-result message when display mode is hidden', () => {
@@ -67,7 +79,10 @@ describe('MessageBubble tool-result visibility', () => {
     );
 
     expect(screen.queryByText('Vertrauliches Tool-Ergebnis')).toBeNull();
-    expect(document.querySelector('[data-component="message-bubble"]')).toBeNull();
+    expect(document.querySelector('[data-component="tool-result"]')).toBeNull();
+    // The activity log still says that a step ran, without its output.
+    expect(document.querySelector('[data-component="activity-log"]')?.textContent)
+      .toContain('1 Schritt ausgeführt');
   });
 
   it('renders only allowlisted tool results', () => {
@@ -169,5 +184,83 @@ describe('MessageBubble tool-result visibility', () => {
     expect(screen.getByText(
       'Meine Vorschläge: zuerst priorisieren, dann planen.',
     )).toBeTruthy();
+  });
+
+  it('shows a running tool call of the active turn before any text arrives', () => {
+    chatContext.current.messages = [{ id: 'message-7' }];
+    chatContext.current.isLoading = true;
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-7',
+          role: 'assistant',
+          parts: [{ type: 'tool-tasks.update', toolCallId: 'c1', state: 'input-available' } as never],
+        }}
+      />,
+    );
+    const log = document.querySelector('[data-component="activity-log"]')!;
+    expect(log.getAttribute('data-state')).toBe('running');
+    expect(log.textContent).toContain('Aufgabe ändern…');
+  });
+
+  it('keeps an older turn finished even while a new one loads', () => {
+    chatContext.current.messages = [{ id: 'message-8' }, { id: 'message-9' }];
+    chatContext.current.isLoading = true;
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-8',
+          role: 'assistant',
+          parts: [{ type: 'tool-tasks.update', toolCallId: 'c1', state: 'output-available', output: {} } as never],
+        }}
+      />,
+    );
+    expect(document.querySelector('[data-component="activity-log"]')!.getAttribute('data-state'))
+      .toBe('done');
+  });
+
+  it('renders a recorded plan above the activity log', () => {
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-10',
+          role: 'assistant',
+          parts: [
+            { type: 'tool-update_plan', toolCallId: 'p1', state: 'output-available', input: {
+              items: [
+                { title: 'Aufgaben suchen', status: 'completed' },
+                { title: 'Team anlegen', status: 'completed' },
+              ],
+            }, output: { success: true, items: 2 } } as never,
+            { type: 'tool-tasks.update', toolCallId: 'c1', state: 'output-available', output: {} } as never,
+            { type: 'text', text: 'Fertig.' },
+          ],
+        }}
+      />,
+    );
+    const plan = document.querySelector('[data-component="plan-checklist"]')!;
+    const log = document.querySelector('[data-component="activity-log"]')!;
+    expect(plan.textContent).toContain('Team anlegen');
+    expect(plan.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.querySelector('[data-component="tool-result"][data-tool="update_plan"]')).toBeNull();
+  });
+
+  it('ends the activity log of the latest turn with a pipeline stop', () => {
+    chatContext.current.messages = [{ id: 'message-11' }];
+    chatContext.current.pipelineState = {
+      status: 'safety-stop', totalSteps: 1, maxSteps: 1, stepLimitSource: 'safety',
+      updatedAt: '2026-10-28T10:00:00.000Z',
+    };
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-11',
+          role: 'assistant',
+          parts: [{ type: 'tool-tasks.update', toolCallId: 'c1', state: 'output-available', output: {} } as never],
+        }}
+      />,
+    );
+    expect(document.querySelector('[data-element="activity-notice"]')!.textContent)
+      .toBe('Sicherheitsstopp');
   });
 });

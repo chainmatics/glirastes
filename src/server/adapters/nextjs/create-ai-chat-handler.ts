@@ -2,8 +2,13 @@ import {
   toolsToAiTools,
   createFollowupTool,
   createClarificationTool,
+  createPlanTool,
 } from '../../core/index.js';
 import { CLARIFICATION_TOOL_NAME } from '../../../contracts/clarification.js';
+import { PLAN_TOOL_NAME } from '../../../contracts/plan.js';
+
+/** Handler-created built-ins that stay callable for every tool selection. */
+const ALWAYS_ON_BUILTINS: ReadonlyArray<string> = [CLARIFICATION_TOOL_NAME, PLAN_TOOL_NAME];
 import {
   applyClarificationResume,
   resolveClarificationResume,
@@ -666,6 +671,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     pipeline,
     followups,
     clarification,
+    planning,
 
     loadTools,
 
@@ -786,10 +792,22 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   const clarificationTool = clarification
     ? createClarificationTool(clarification)
     : null;
-  const withClarification = (registry: ToolRegistry): ToolRegistry =>
-    clarificationTool && !registry[CLARIFICATION_TOOL_NAME]
-      ? { ...registry, [CLARIFICATION_TOOL_NAME]: clarificationTool }
-      : registry;
+  const planTool = planning ? createPlanTool(planning) : null;
+  const withAlwaysOnBuiltins = (registry: ToolRegistry): ToolRegistry => {
+    let next = registry;
+    for (const tool of [clarificationTool, planTool]) {
+      if (tool && !next[tool.id]) next = { ...next, [tool.id]: tool };
+    }
+    return next;
+  };
+  /** Keeps the always-on built-ins of `source` next to a scoped selection. */
+  const keepAlwaysOn = <T,>(scoped: Record<string, T>, source: Record<string, T>) => {
+    const kept = { ...scoped };
+    for (const name of ALWAYS_ON_BUILTINS) {
+      if (source[name]) kept[name] = source[name];
+    }
+    return kept;
+  };
 
   async function handler(req: Request): Promise<Response> {
     reportDefaultsOnce();
@@ -888,7 +906,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // a built-in's name are never listed here and stay discoverable only
         // through the manifest-checked index.
         const builtinToolNames = handlerBuiltinNames.filter((name) =>
-          name === CLARIFICATION_TOOL_NAME || initialToolNames.includes(name));
+          ALWAYS_ON_BUILTINS.includes(name) || initialToolNames.includes(name));
         if (!managedTurn) {
           return createHybridToolDiscovery({
             discovery: createRegistryToolDiscovery({
@@ -1025,10 +1043,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (followupTool && !registry[followupTool.id]) {
           registry = { ...registry, [followupTool.id]: followupTool };
         }
-        registry = withClarification(registry);
+        registry = withAlwaysOnBuiltins(registry);
         const handlerBuiltinNames = findHandlerBuiltins(
           registry,
-          [followupTool, clarificationTool],
+          [followupTool, clarificationTool, planTool],
         );
 
         // Extract user input for pipeline
@@ -1108,7 +1126,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
         // Convert all tools to AI tools
         let aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
-        const clarificationAiTool = aiTools[CLARIFICATION_TOOL_NAME];
+        const unscopedAiTools = aiTools;
 
         // Scope tools to pipeline selection
         if (pipelineResult.blocked) {
@@ -1121,10 +1139,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             selected: pipelineResult.tools,
             fallbackToAll: !hasExplicitSelection,
           });
-          // Clarification stays callable, also for an empty focused selection.
-          if (clarificationAiTool) {
-            aiTools = { ...aiTools, [CLARIFICATION_TOOL_NAME]: clarificationAiTool };
-          }
+          // Clarification and the plan stay callable, also for an empty
+          // focused selection.
+          aiTools = keepAlwaysOn(aiTools, unscopedAiTools);
         }
 
         // Resolve model — config callback > pipeline instance > error
@@ -1288,10 +1305,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       } else {
         registry = await loadTools!(endpointToolContext);
       }
-      registry = withClarification(registry);
-      const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool]);
+      registry = withAlwaysOnBuiltins(registry);
+      const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool, planTool]);
       const allToolNames = Object.keys(registry)
-        .filter((name) => name !== CLARIFICATION_TOOL_NAME);
+        .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
 
       // PII Shield: anonymize for legacy mode
       const legacySessionId = piiShield ? deriveSessionId(processedMessages) : '';
@@ -1318,9 +1335,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           if (aiTools[name]) scoped[name] = aiTools[name];
         }
         if (Object.keys(scoped).length > 0) {
-          aiTools = aiTools[CLARIFICATION_TOOL_NAME]
-            ? { ...scoped, [CLARIFICATION_TOOL_NAME]: aiTools[CLARIFICATION_TOOL_NAME] }
-            : scoped;
+          aiTools = keepAlwaysOn(scoped, aiTools);
         }
       }
 

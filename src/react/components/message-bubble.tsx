@@ -5,13 +5,17 @@ import { parseMentionSegments, stripContextBlocks } from '../utils/mention-marku
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, readClarificationPart } from '../utils/clarification.js';
 import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
+import { ActivityLog } from './activity-log.js';
+import { PlanChecklist } from './plan-checklist.js';
+import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
+import { PLAN_TOOL_NAME } from '../../contracts/plan.js';
 import { RendererBoundary } from '../tool-renderers/renderer-boundary.js';
 import {
   CLARIFICATION_TOOL_NAME,
   stripClarificationMarkers,
 } from '../../contracts/clarification.js';
 import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
-import type { MessageBubbleProps, TextPart } from '../types.js';
+import type { ChatLocale, MessageBubbleProps, PipelineState, TextPart } from '../types.js';
 
 // Lazy-load react-markdown — keeps it out of the synchronous import graph so
 // server-only consumers don't pay for it, and gracefully degrades to raw text
@@ -49,9 +53,25 @@ function shouldRenderToolResult(
   if (toolName === 'suggest_followups') return false;
   // Clarifications render as an answerable card, never as raw output.
   if (toolName === CLARIFICATION_TOOL_NAME) return false;
+  // The plan renders as a checklist.
+  if (toolName === PLAN_TOOL_NAME) return false;
   if (mode === 'hidden') return false;
   if (mode === 'allowlist') return allowlist.includes(toolName);
   return true;
+}
+
+/** Stop or failure of the latest turn, shown as the last activity line. */
+function pipelineNotice(state: PipelineState | null, locale: ChatLocale): string | undefined {
+  switch (state?.status) {
+    case 'safety-stop':
+      return locale.pipelineSafetyStopLabel;
+    case 'aborted':
+      return locale.pipelineAbortedLabel;
+    case 'error':
+      return locale.pipelineErrorLabel;
+    default:
+      return undefined;
+  }
 }
 
 function isTextPart(part: unknown): part is TextPart {
@@ -76,6 +96,8 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
     messages,
     send,
     isLoading,
+    locale,
+    pipelineState,
   } = useChatContext();
   const MarkdownComponent = components.Markdown ?? DefaultMarkdown;
   const ToolResultComponent = components.ToolResultBlock ?? DefaultToolResult;
@@ -112,6 +134,15 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 
   const mode = toolResults.mode ?? 'default';
   const allowlist = toolResults.allowlist ?? [];
+
+  const isAssistant = message.role === 'assistant';
+  const activitySteps = isAssistant
+    ? readActivitySteps(message.parts, (toolName) => shouldRenderToolResult(toolName, mode, allowlist))
+    : [];
+  const planItems = isAssistant ? readLatestPlan(message.parts) : null;
+  const hasPlan = (planItems?.length ?? 0) >= 2;
+  const turnActive = isLatestMessage && isLoading;
+  const notice = isLatestMessage ? pipelineNotice(pipelineState, locale) : undefined;
 
   // Extract tool result summaries as fallback text when no text parts exist
   const cleanTextParts = message.parts
@@ -160,7 +191,13 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   }
 
   // Skip truly empty assistant messages
-  if (message.role === 'assistant' && !hasTextContent && !fallbackSummary) {
+  if (
+    message.role === 'assistant'
+    && !hasTextContent
+    && !fallbackSummary
+    && activitySteps.length === 0
+    && !hasPlan
+  ) {
     const hasVisibleToolOutput = message.parts.some(p => {
       if (readClarificationPart(p)) return true;
       if (!isRecord(p)) return false;
@@ -184,6 +221,9 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
       data-component="message-bubble"
       data-role={message.role}
     >
+      {hasPlan && <PlanChecklist items={planItems!} active={turnActive} />}
+      <ActivityLog steps={activitySteps} active={turnActive} notice={notice} />
+
       {/* Render text parts */}
       {cleanTextParts.map((text, i) => {
         const segments = parseMentionSegments(text);

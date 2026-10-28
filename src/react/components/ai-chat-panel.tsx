@@ -7,7 +7,7 @@ import { MentionInput } from './mention-input.js';
 import { SuggestionBar } from './suggestion-bar.js';
 import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
 import { BulkApprovalCard as DefaultBulkApprovalCard } from './bulk-approval-card.js';
-import { PipelineTimeline as DefaultPipelineTimeline } from './pipeline-timeline.js';
+import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
 import type { AiChatPanelProps, PendingApproval } from '../types.js';
 
 /**
@@ -47,7 +47,9 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
 
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const BulkApprovalCardComponent = components.BulkApprovalCard ?? DefaultBulkApprovalCard;
-  const PipelineTimelineComponent = components.PipelineTimeline ?? DefaultPipelineTimeline;
+  // The work log lives in each assistant bubble; a pipeline bar only shows
+  // when the app supplies its own component.
+  const PipelineTimelineComponent = components.PipelineTimeline;
   const InputComponent = components.ChatInput
     ?? (hasMentions || hasCompletions ? MentionInput : ChatInput);
 
@@ -77,6 +79,11 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     if (!isLoading) return false;
     const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
     if (!lastAssistant) return true;
+    // The activity log already shows a spinner for running tools.
+    if (
+      readActivitySteps(lastAssistant.parts, () => false).length > 0
+      || (readLatestPlan(lastAssistant.parts)?.length ?? 0) >= 2
+    ) return false;
     const hasText = lastAssistant.parts.some(
       p => 'text' in p && typeof p.text === 'string' && p.text.trim().length > 0,
     );
@@ -98,12 +105,14 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
         </div>
       )}
 
-      <PipelineTimelineComponent
-        steps={pipelineSteps}
-        pipelineState={pipelineState}
-        isLoading={isLoading}
-        onStop={stop}
-      />
+      {PipelineTimelineComponent && (
+        <PipelineTimelineComponent
+          steps={pipelineSteps}
+          pipelineState={pipelineState}
+          isLoading={isLoading}
+          onStop={stop}
+        />
+      )}
 
       {messages.length > 0 ? (
         <MessageList />

@@ -610,6 +610,13 @@ export interface ChatLocale {
   pipelineErrorLabel: string;
   pipelineStepLabel: string;
   pipelineApprovalPendingLabel: string;
+  // Work log of an assistant turn and its optional plan
+  activityWorkingLabel: string;
+  activityWaitingLabel: string;
+  activityDoneLabel: string;         // supports `{count}`
+  activityDoneOneLabel: string;
+  activityFailedLabel: string;       // supports `{count}`
+  planTitle: string;
   /** Shown when the user sends while an approval card waits for a decision. */
   approvalPendingHint: string;
 

@@ -15,7 +15,7 @@ import type {
   SchemaLike,
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
-import type { ClarificationConfig, InternalApiCaller } from '../../core/index.js';
+import type { ClarificationConfig, InternalApiCaller, PlanningConfig } from '../../core/index.js';
 import type {
   Principal,
   SecurityRevocation,
@@ -224,6 +224,14 @@ export interface AiChatHandlerConfig {
   clarification?: ClarificationConfig;
 
   /**
+   * Built-in task list (`update_plan`). The model records a short plan only
+   * for requests with several distinct actions and updates its statuses as
+   * it works; the chat UI shows the latest call as a checklist. The turn
+   * continues after each call. Omit to keep the tool unavailable.
+   */
+  planning?: PlanningConfig;
+
+  /**
    * Model or model-resolver. Optional when pipeline `ModelSelectorConfig`
    * entries include an `instance` field — the adapter falls back to
    * `pipelineResult.model.instance` automatically.
@@ -426,7 +434,7 @@ export type { PromptOverride };
 
 // Re-export pipeline types for consumer convenience
 export type { AiPipeline, FollowupsConfig, PipelineResult };
-export type { ClarificationConfig };
+export type { ClarificationConfig, PlanningConfig };
 
 // ============================================================================
 // Server Action Helper Types

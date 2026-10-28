@@ -75,13 +75,26 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 - The chat context's `send` returns whether the message was taken. It returns
   false while an approval card waits or the session is not ready; a custom
   composer should keep the typed text then, as the shipped composers do.
-- `PipelineTimeline` is a compact step checklist: one row per tool call with a
-  check when done, a spinner row while the pipeline works and dimmed rows
-  (`data-status="pending"`) for calls waiting on approval. Each row is a
-  `<details>` that expands to its step summary. It only shows from two tool
-  calls on, so a single tool call no longer opens a pipeline panel. The icons
-  are inline SVG and also work in unstyled mode; the whole-list collapse and
-  `data-collapsed` are gone.
+- Each assistant bubble shows a collapsible work log of its tool calls
+  (`ActivityLog`, `data-component="activity-log"`), like Claude Code: one
+  line with a spinner and the running tool while the turn works, then a
+  summary such as "3 steps done, 1 failed" that expands to the steps in the
+  order they ran, each with a check or an error and the output message or
+  error text when the tool result display mode allows it. A pipeline stop or
+  error is its last line. SDK built-ins are left out, and the typing dots give
+  way to the log once a tool runs. The icons are inline SVG and also work in
+  unstyled mode.
+- `AiChatPanel` no longer renders the pipeline bar on top by default; pass
+  `components.PipelineTimeline` to keep one.
+- `createAiChatHandler` takes `planning` for the built-in `update_plan` tool.
+  The model records a short task list only for requests with several distinct
+  actions and updates its statuses as it works; the turn continues after each
+  call. The bubble shows the latest call above the work log as `PlanChecklist`
+  (`data-component="plan-checklist"`): a check for done items, a spinner for
+  the current one, dimmed pending ones. Plans below two items never show.
+- New locale texts: `activityWorkingLabel`, `activityWaitingLabel`,
+  `activityDoneLabel`, `activityDoneOneLabel`, `activityFailedLabel` and
+  `planTitle`.
 
 ### Fixed
 
