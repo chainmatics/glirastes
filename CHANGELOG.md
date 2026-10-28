@@ -75,6 +75,13 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 - The chat context's `send` returns whether the message was taken. It returns
   false while an approval card waits or the session is not ready; a custom
   composer should keep the typed text then, as the shipped composers do.
+- `PipelineTimeline` is a compact step checklist: one row per tool call with a
+  check when done, a spinner row while the pipeline works and dimmed rows
+  (`data-status="pending"`) for calls waiting on approval. Each row is a
+  `<details>` that expands to its step summary. It only shows from two tool
+  calls on, so a single tool call no longer opens a pipeline panel. The icons
+  are inline SVG and also work in unstyled mode; the whole-list collapse and
+  `data-collapsed` are gone.
 
 ### Fixed
 

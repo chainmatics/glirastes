@@ -1,6 +1,18 @@
-import { useMemo, useState, useRef, useEffect } from 'react';
+import { useMemo } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
-import type { PipelineTimelineProps, PipelineState } from '../types.js';
+import type { PipelineTimelineProps, PipelineState, PipelineStepReport } from '../types.js';
+
+/** A single tool call is not worth a checklist; two or more are. */
+const MIN_TOOL_CALLS = 2;
+
+type ChecklistStatus = 'completed' | 'running' | 'pending';
+
+interface ChecklistItem {
+  key: string;
+  toolName: string;
+  status: ChecklistStatus;
+  step: PipelineStepReport;
+}
 
 function statusLabel(status: PipelineState['status'], labels: {
   running: string;
@@ -25,8 +37,61 @@ function statusLabel(status: PipelineState['status'], labels: {
   }
 }
 
+/** One row per tool call; calls that wait for approval have not run yet. */
+function toChecklist(steps: PipelineStepReport[]): ChecklistItem[] {
+  return steps.flatMap((step) =>
+    step.toolCalls.map((toolName, index): ChecklistItem => ({
+      key: `step-${step.stepNumber}-${index}`,
+      toolName,
+      status: step.requiresApproval ? 'pending' : 'completed',
+      step,
+    })),
+  );
+}
+
 /**
- * Vertical step timeline for the streamed pipeline report.
+ * Inline icons carry their own shape and motion (SMIL), so the checklist
+ * reads correctly in unstyled mode without any stylesheet.
+ */
+function StatusIcon({ status }: { status: ChecklistStatus }) {
+  const icon = status === 'completed' ? 'check' : status === 'running' ? 'spinner' : 'pending';
+  return (
+    <svg
+      data-element="icon"
+      data-icon={icon}
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {icon === 'check' && <path d="M3 8.5l3.5 3.5L13 4.5" />}
+      {icon === 'pending' && <circle cx="8" cy="8" r="5.5" strokeWidth="1.5" opacity="0.5" />}
+      {icon === 'spinner' && (
+        <path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5">
+          <animateTransform
+            attributeName="transform"
+            type="rotate"
+            from="0 8 8"
+            to="360 8 8"
+            dur="0.9s"
+            repeatCount="indefinite"
+          />
+        </path>
+      )}
+    </svg>
+  );
+}
+
+/**
+ * Compact step checklist for multi-step requests: a check for done tool
+ * calls, a spinner while the pipeline still works, dimmed rows for calls
+ * waiting on approval. Each row expands to its step summary. Renders
+ * nothing for fewer than two tool calls.
  *
  * Keeps styling neutral via `data-*` attributes.
  */
@@ -39,17 +104,8 @@ export function PipelineTimeline({
 }: PipelineTimelineProps) {
   const { classNames, locale, toolLabels, pipelineMessageTranslator, stepSummaryFormatter } = useChatContext();
 
-  /** Translate a raw tool name via toolLabels (singular/plural). */
-  const translateToolCalls = (toolCalls: string[]): string => {
-    const labelMap = toolLabels.labels;
-    if (!labelMap) return toolCalls.join(', ');
-    return toolCalls
-      .map((name) => {
-        const entry = labelMap[name];
-        return entry ? entry.singular : name;
-      })
-      .join(', ');
-  };
+  const translateTool = (name: string): string =>
+    toolLabels.labels?.[name]?.singular ?? name;
 
   const currentStatus = pipelineState?.status ?? (isLoading ? 'running' : null);
 
@@ -63,33 +119,21 @@ export function PipelineTimeline({
     approvalPending: locale.pipelineApprovalPendingLabel ?? 'Approval pending',
   }), [locale]);
 
-  const [collapsed, setCollapsed] = useState(true);
-  const scrollRef = useRef<HTMLOListElement>(null);
+  const items = useMemo(() => toChecklist(steps), [steps]);
+  if (items.length < MIN_TOOL_CALLS) return null;
 
-  // Auto-scroll to bottom when new steps arrive
-  useEffect(() => {
-    if (!collapsed && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [steps.length, collapsed]);
-
-  const hasContent = steps.length > 0 || currentStatus !== null;
-  if (!hasContent) return null;
+  const awaitingApproval = items.some((item) => item.status === 'pending');
+  const showRunning = isLoading && !awaitingApproval;
 
   return (
     <section
       className={className ?? classNames.pipelineTimeline}
       data-component="pipeline-timeline"
       data-state={currentStatus ?? 'idle'}
-      data-collapsed={collapsed ? 'true' : 'false'}
     >
-      <div data-element="header" onClick={() => setCollapsed(c => !c)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(c => !c); } }}>
+      <div data-element="header">
         <div data-element="header-left">
-          <span data-element="chevron" aria-hidden="true" />
           <strong>{locale.pipelineTitle ?? 'Pipeline'}</strong>
-          {collapsed && steps.length > 0 && (
-            <span data-element="step-count">{steps.length}</span>
-          )}
         </div>
         <div data-element="header-right">
           {currentStatus && (
@@ -98,47 +142,48 @@ export function PipelineTimeline({
             </span>
           )}
           {isLoading && (
-            <button type="button" onClick={(e) => { e.stopPropagation(); onStop?.(); }} data-action="stop-pipeline">
+            <button type="button" onClick={() => onStop?.()} data-action="stop-pipeline">
               {locale.stopButton}
             </button>
           )}
         </div>
       </div>
 
-      {!collapsed && (
-        <>
-          <ol data-element="steps" ref={scrollRef}>
-            {steps.map((step) => {
-              const summary = stepSummaryFormatter ? stepSummaryFormatter(step) : step.summary;
-              return (
-                <li
-                  key={`step-${step.stepNumber}`}
-                  data-element="step"
-                  data-status={step.requiresApproval ? 'approval-pending' : 'completed'}
-                  title={summary}
-                >
-                  <span data-element="title">{step.stepNumber + 1}</span>
-                  {step.toolCalls.length > 0 ? (
-                    <span data-element="tools">{translateToolCalls(step.toolCalls)}</span>
-                  ) : (
-                    <span data-element="summary">{summary}</span>
-                  )}
-                  {step.requiresApproval && (
+      <ol data-element="steps">
+        {items.map((item) => {
+          const summary = stepSummaryFormatter ? stepSummaryFormatter(item.step) : item.step.summary;
+          return (
+            <li key={item.key} data-element="step" data-status={item.status}>
+              <details>
+                <summary data-element="step-summary">
+                  <StatusIcon status={item.status} />
+                  <span data-element="tools">{translateTool(item.toolName)}</span>
+                  {item.status === 'pending' && (
                     <span data-element="approval">{labels.approvalPending}</span>
                   )}
-                </li>
-              );
-            })}
-          </ol>
+                </summary>
+                <div data-element="detail">
+                  <span data-element="title">{`${labels.step} ${item.step.stepNumber + 1}`}</span>
+                  {summary && <span data-element="summary">{summary}</span>}
+                </div>
+              </details>
+            </li>
+          );
+        })}
+        {showRunning && (
+          <li data-element="step" data-status="running">
+            <StatusIcon status="running" />
+            <span data-element="tools">{labels.running}</span>
+          </li>
+        )}
+      </ol>
 
-          {pipelineState?.message && (
-            <p data-element="message">
-              {pipelineMessageTranslator
-                ? pipelineMessageTranslator(pipelineState.message)
-                : pipelineState.message}
-            </p>
-          )}
-        </>
+      {pipelineState?.message && (
+        <p data-element="message">
+          {pipelineMessageTranslator
+            ? pipelineMessageTranslator(pipelineState.message)
+            : pipelineState.message}
+        </p>
       )}
     </section>
   );
