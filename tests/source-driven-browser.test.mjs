@@ -7,94 +7,14 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { stopProcessGroup } from './browser/process-group.mjs';
 
 const port = 3191;
 const origin = `http://localhost:${port}`;
 const message = (text) => ({ messages: [{ id: randomUUID(), role: 'user', parts: [{ type: 'text', text }] }] });
 
-// macOS answers kill(-pgid) with EPERM instead of ESRCH while every member of
-// the group is a zombie awaiting reaping. These groups are always our own
-// detached children (same uid, no setuid), so EPERM can only mean "gone".
-const GROUP_GONE = new Set(['ESRCH', 'EPERM']);
-const systemKill = (pid, signal) => process.kill(pid, signal);
-
-function processGroupAlive(pid, kill = systemKill) {
-  try { kill(-pid, 0); return true; } catch (error) { if (GROUP_GONE.has(error.code)) return false; throw error; }
-}
-
-function killProcessGroupQuietly(pid) {
-  try { process.kill(-pid, 'SIGKILL'); } catch (error) { if (!GROUP_GONE.has(error.code)) throw error; }
-}
-
-async function stopProcessGroup(child, graceMs = 3_000, kill = systemKill) {
-  const alive = () => processGroupAlive(child.pid, kill);
-  const signal = (name) => { try { kill(-child.pid, name); } catch (error) { if (!GROUP_GONE.has(error.code)) throw error; } };
-  const wait = async (ms) => {
-    const deadline = Date.now() + ms;
-    while (alive() && Date.now() < deadline) await delay(20);
-    return !alive();
-  };
-  if (!alive()) return;
-  signal('SIGTERM');
-  if (await wait(graceMs)) return;
-  signal('SIGKILL');
-  assert.ok(await wait(2_000), 'test process group did not stop after SIGKILL');
-}
-
-const UNREAL_PID = 2 ** 30; // above every Linux/macOS pid_max: real kill() can only answer ESRCH
-const killError = (code) => Object.assign(new Error(`kill ${code}`), { code, syscall: 'kill' });
-
-test('reference cleanup treats a zombie-only process group (EPERM on macOS) as stopped', { timeout: 10_000 }, async () => {
-  const sent = [];
-  const zombieGroup = (pid, signal) => { sent.push([pid, signal]); throw killError('EPERM'); };
-  await stopProcessGroup({ pid: UNREAL_PID }, 30, zombieGroup);
-  assert.deepEqual(sent, [[-UNREAL_PID, 0]]);
-});
-
-test('reference cleanup stops waiting once the group becomes zombies after SIGTERM', { timeout: 10_000 }, async () => {
-  const sent = [];
-  let terminated = false;
-  const exitsOnTerm = (pid, signal) => {
-    sent.push(signal);
-    if (signal === 'SIGTERM') { terminated = true; return true; }
-    if (terminated) throw killError('EPERM');
-    return true;
-  };
-  await stopProcessGroup({ pid: UNREAL_PID }, 1_000, exitsOnTerm);
-  assert.deepEqual(sent.slice(0, 2), [0, 'SIGTERM']);
-  assert.equal(sent.includes('SIGKILL'), false);
-});
-
-test('reference cleanup still surfaces unexpected kill errors', { timeout: 10_000 }, async () => {
-  const broken = () => { throw killError('EINVAL'); };
-  await assert.rejects(stopProcessGroup({ pid: UNREAL_PID }, 30, broken), { code: 'EINVAL' });
-});
-
-test('reference cleanup escalates when its own child ignores SIGTERM', { timeout: 10_000 }, async (t) => {
-  const child = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)"],
-    { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH } });
-  t.after(() => killProcessGroupQuietly(child.pid));
-  await once(child.stdout, 'data');
-  assert.equal(typeof stopProcessGroup, 'function', 'bounded process-group cleanup is missing');
-  await stopProcessGroup(child, 30);
-  // A zombie-only group counts as stopped before Node has reaped the leader.
-  if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
-  assert.equal(child.signalCode, 'SIGKILL');
-});
-
-test('reference cleanup also stops descendants after the group leader exits', { timeout: 10_000 }, async (t) => {
-  const descendant = "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)";
-  const script = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: 'inherit' }); setInterval(() => {}, 1000);`;
-  const child = spawn(process.execPath, ['-e', script],
-    { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH } });
-  t.after(() => killProcessGroupQuietly(child.pid));
-  await once(child.stdout, 'data');
-  await stopProcessGroup(child, 30);
-  assert.equal(processGroupAlive(child.pid), false);
-});
-
 test('real Next SDK chat streams native endpoint results and updates the browser UI', { timeout: 180_000 }, async (t) => {
-  const module = await import('../examples/source-driven-next/prepare-browser.mjs').catch(() => ({}));
+  const module = await import('../examples/source-driven-next/prepare-browser.mjs');
   assert.equal(typeof module.prepareBrowserReference, 'function', 'the real Next reference preparer is missing');
   assert.ok(process.env.PLAYWRIGHT_MODULE, 'Set PLAYWRIGHT_MODULE to an installed Playwright module (not downloaded implicitly)');
   const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);

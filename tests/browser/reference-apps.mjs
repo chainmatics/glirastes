@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { MockLanguageModelV3 } from 'ai/test';
+import { stopProcessGroup } from './process-group.mjs';
 
 export const SDK = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const TENANT_ID = '019fb007-0000-7000-8000-000000000002';
@@ -83,11 +84,7 @@ export async function startVite(web, port, env, processes) {
 
 /** Stops a detached child and everything it started. */
 export async function stopGroup(child) {
-  try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (!['ESRCH', 'EPERM'].includes(error.code)) throw error; }
-  if (child.exitCode === null && child.signalCode === null) {
-    await Promise.race([new Promise((done) => child.once('exit', done)), delay(3_000)]);
-  }
-  try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (!['ESRCH', 'EPERM'].includes(error.code)) throw error; }
+  await stopProcessGroup(child);
 }
 
 export async function launchBrowser() {
