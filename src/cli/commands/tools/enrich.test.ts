@@ -148,6 +148,7 @@ function run(fixture: AppFixture, env: Record<string, string>, options: {
   model?: MockLanguageModelV3;
   pullRequests?: string[][];
   out?: string[];
+  exec?: Exec;
 }) {
   const loadOpenAI = vi.fn(async () => (() => ({ chat: () => options.model ?? writingModel() })) as never);
   const out = options.out ?? [];
@@ -162,7 +163,7 @@ function run(fixture: AppFixture, env: Record<string, string>, options: {
     log: (line) => { out.push(line); },
     error: (line) => { out.push(line); },
     enrich: {
-      exec: execWith(options.pullRequests ?? []),
+      exec: options.exec ?? execWith(options.pullRequests ?? []),
       fetchImpl: options.platform.fetchImpl,
       loadOpenAI,
       now: () => new Date('2026-10-22T12:00:00.000Z'),
@@ -260,6 +261,25 @@ describe('glirastes tools enrich --managed', () => {
     expect(await git(fixture, 'rev-parse', 'HEAD')).toBe(before);
     expect(api.ledgers[0]).toMatchObject({ outcome: 'failed', reasonCode: 'path_violation', changedFiles: 0 });
     expect(api.ledgers[0]!.items.every((item) => item.state === 'unchanged')).toBe(true);
+  }, 240_000);
+
+  it('reports a runner_error ledger when an unexpected error follows the grant', async () => {
+    const fixture = await committedApp('feature/tasks');
+    const api = platform();
+    const real = execWith([]);
+    let broken = false;
+    const exec: Exec = async (file, args, options) => {
+      if (broken) throw new Error('disk gone');
+      return real(file, args, options);
+    };
+    const model = writingModel(async () => { broken = true; });
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model, exec });
+
+    expect(await result.code).toBe(1);
+    expect(JSON.parse(result.out.at(-1)!)).toMatchObject({ status: 'failed', code: 'runner_error', outcome: 'failed' });
+    expect(api.ledgers).toHaveLength(1);
+    expect(api.ledgers[0]).toMatchObject({ outcome: 'failed', reasonCode: 'runner_error', changedFiles: 0 });
   }, 240_000);
 
   it('ends green with the named code when the Platform refuses for the plan, and never loads the provider', async () => {

@@ -242,122 +242,130 @@ export async function runToolsEnrich(
     }
   };
 
-  const apiKey = grant.openrouter?.apiKey ?? io.env.GLIRASTES_TOOLS_OPENROUTER_KEY?.trim();
-  if (!apiKey) return finish('failed', { reasonCode: 'byok_key_missing' });
-  const openRouterUrl = grant.openrouter?.baseUrl ?? OPENROUTER_BASE_URL;
-  let model: LanguageModel;
-  let modelId: string;
-  try {
-    const selected = await selectJobModel({
-      baseUrl: openRouterUrl,
-      apiKey,
-      model: grant.model,
-      fallbackModel: grant.fallbackModel,
-      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-    });
-    modelId = selected.model;
-    const createOpenAI = await (deps.loadOpenAI ?? loadOpenAI)().catch(() => undefined);
-    if (!createOpenAI) return finish('failed', { reasonCode: 'provider_package_missing' });
-    model = createJobModel({
-      createOpenAI,
-      baseUrl: openRouterUrl,
-      apiKey,
-      model: modelId,
-      routing: grant.routing,
-      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-    });
-  } catch (error) {
-    if (error instanceof ModelAccessError) return finish('failed', { reasonCode: error.code });
-    throw error;
-  }
-
-  const workspace = new Workspace({
-    root,
-    isIgnored: (paths) => repository.ignored(paths),
-    writableFiles: [TOOLS_PATHS.resolutions, TOOLS_PATHS.semantics],
-    creatableFiles: before.describeList.writeContracts
-      ? before.describeList.items.flatMap((item) => (item.targets.contract ? [item.targets.contract.file] : []))
-      : [],
-  });
-  const refresh = async (): Promise<RefreshSummary> => {
-    const result = await io.runPipeline({ root, mode: 'write', keepGoing: true });
-    for (const path of Object.keys(result.outputs)) allowed.files.add(path);
-    return {
-      findings: result.findings.slice(0, 200).map(({ code, subjectRef, message }) => ({ code, subjectRef, message })),
-      changed: result.changes.added.length + result.changes.changed.length + result.changes.removed.length,
-    };
-  };
-  const evaluate = async () => {
-    const setup = await readToolOutput(root, TOOLS_PATHS.setupArtifact, AppSetupArtifactSchema, 'tools.enrich');
-    const contracts = await readToolOutput(root, TOOLS_PATHS.contracts, ToolContractsFileSchema, 'tools.enrich');
-    const evaluation = evaluateRouting({ artifact: setup, contracts: contracts.tools });
-    return { failed: evaluation.summary.failed, failures: evaluation.tools.filter((tool) => tool.failures.length > 0).slice(0, 50) };
-  };
-
-  const run = await runSkillJob({
-    model,
-    modelId,
-    skills: await readSkills(),
-    worklists: { resolve: before.resolveList, describe: before.describeList },
-    workspace,
-    tools: { refresh, evaluate },
-    budgetUsd: grant.budgetUsd,
-    deadline: new Date(grant.expiresAt),
-    now,
-  });
-  if (run.outcome === 'failed') return finish('failed', { reasonCode: run.reasonCode ?? 'model_error', run, model: modelId });
-  if (!run.refresh) await refresh();
-
-  for (const path of workspace.written) allowed.files.add(path);
-  const changed = await repository.changedPaths();
-  if (pathViolations(changed, allowed).length > 0) {
-    return finish('failed', { reasonCode: 'path_violation', run, model: modelId });
-  }
-
-  const after = await worklists();
-  const open = new Map(after.items.map((item) => [item.stableKey, new Set(item.gaps)]));
-  const rejected = new Set((run.refresh?.findings ?? [])
-    .filter((finding) => finding.code === 'resolution-rejected')
-    .map((finding) => finding.subjectRef));
-  const resolutionCodes = new Set(before.resolveList.items.map((item) => item.code));
-  const states: ToolJobLedger['items'] = items.map((item) => {
-    const remaining = open.get(item.stableKey) ?? new Set<string>();
-    if (rejected.has(item.stableKey)) return { stableKey: item.stableKey, state: 'failed', reasonCode: 'resolution-rejected' };
-    const closed = item.gaps.filter((gap) => !remaining.has(gap));
-    if (closed.length === 0) return { stableKey: item.stableKey, state: 'unchanged' };
-    const state = closed.some((gap) => resolutionCodes.has(gap)) ? 'resolved' : 'described';
-    // Some gaps closed, others still open (e.g. a schema the job did not write).
-    return closed.length < item.gaps.length
-      ? { stableKey: item.stableKey, state, reasonCode: 'gaps-remaining' }
-      : { stableKey: item.stableKey, state };
-  });
-  const outcomeOf = (committed: ToolJobOutcome): ToolJobOutcome => (run.outcome === 'completed' ? committed : run.outcome);
-  if (changed.length === 0) {
-    return finish(outcomeOf('no_change'), { ...(run.reasonCode ? { reasonCode: run.reasonCode } : {}), run, model: modelId, states });
-  }
-
-  const message = `chore(glirastes): describe tools ${BOT_MARKER}\n\nGlirastes-Job: ${grant.jobId}`;
-  const reason = run.reasonCode ? { reasonCode: run.reasonCode } : {};
-  try {
-    if (branch === base) {
-      // Started on the base branch: the bot never pushes there, it opens a pull request.
-      const botBranch = `glirastes/tools-${head.sha.slice(0, 12)}`;
-      await repository.switchToNewBranch(botBranch);
-      const commitSha = await repository.commit(changed, message);
-      await repository.push(botBranch);
-      const pullRequest = await repository.openPullRequest({
-        base,
-        head: botBranch,
-        title: `chore(glirastes): describe tools ${BOT_MARKER}`,
-        body: `Glirastes job ${grant.jobId} wrote tool descriptions, schemas and their generated outputs. Review them, then run glirastes tools verify.`,
+  // Any unexpected throw after the grant still reports a ledger, so the job is released.
+  const execute = async () => {
+    const apiKey = grant.openrouter?.apiKey ?? io.env.GLIRASTES_TOOLS_OPENROUTER_KEY?.trim();
+    if (!apiKey) return finish('failed', { reasonCode: 'byok_key_missing' });
+    const openRouterUrl = grant.openrouter?.baseUrl ?? OPENROUTER_BASE_URL;
+    let model: LanguageModel;
+    let modelId: string;
+    try {
+      const selected = await selectJobModel({
+        baseUrl: openRouterUrl,
+        apiKey,
+        model: grant.model,
+        fallbackModel: grant.fallbackModel,
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
       });
-      return await finish(outcomeOf('pull_request'), { ...reason, run, model: modelId, committed: changed, commitSha, pullRequest, states });
+      modelId = selected.model;
+      const createOpenAI = await (deps.loadOpenAI ?? loadOpenAI)().catch(() => undefined);
+      if (!createOpenAI) return finish('failed', { reasonCode: 'provider_package_missing' });
+      model = createJobModel({
+        createOpenAI,
+        baseUrl: openRouterUrl,
+        apiKey,
+        model: modelId,
+        routing: grant.routing,
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+      });
+    } catch (error) {
+      if (error instanceof ModelAccessError) return finish('failed', { reasonCode: error.code });
+      throw error;
     }
-    const commitSha = await repository.commit(changed, message);
-    await repository.push(branch);
-    return await finish(outcomeOf('committed'), { ...reason, run, model: modelId, committed: changed, commitSha, states });
-  } catch (error) {
-    if (error instanceof GitCommandError) return finish('failed', { reasonCode: error.code, run, model: modelId });
-    throw error;
+
+    const workspace = new Workspace({
+      root,
+      isIgnored: (paths) => repository.ignored(paths),
+      writableFiles: [TOOLS_PATHS.resolutions, TOOLS_PATHS.semantics],
+      creatableFiles: before.describeList.writeContracts
+        ? before.describeList.items.flatMap((item) => (item.targets.contract ? [item.targets.contract.file] : []))
+        : [],
+    });
+    const refresh = async (): Promise<RefreshSummary> => {
+      const result = await io.runPipeline({ root, mode: 'write', keepGoing: true });
+      for (const path of Object.keys(result.outputs)) allowed.files.add(path);
+      return {
+        findings: result.findings.slice(0, 200).map(({ code, subjectRef, message }) => ({ code, subjectRef, message })),
+        changed: result.changes.added.length + result.changes.changed.length + result.changes.removed.length,
+      };
+    };
+    const evaluate = async () => {
+      const setup = await readToolOutput(root, TOOLS_PATHS.setupArtifact, AppSetupArtifactSchema, 'tools.enrich');
+      const contracts = await readToolOutput(root, TOOLS_PATHS.contracts, ToolContractsFileSchema, 'tools.enrich');
+      const evaluation = evaluateRouting({ artifact: setup, contracts: contracts.tools });
+      return { failed: evaluation.summary.failed, failures: evaluation.tools.filter((tool) => tool.failures.length > 0).slice(0, 50) };
+    };
+
+    const run = await runSkillJob({
+      model,
+      modelId,
+      skills: await readSkills(),
+      worklists: { resolve: before.resolveList, describe: before.describeList },
+      workspace,
+      tools: { refresh, evaluate },
+      budgetUsd: grant.budgetUsd,
+      deadline: new Date(grant.expiresAt),
+      now,
+    });
+    if (run.outcome === 'failed') return finish('failed', { reasonCode: run.reasonCode ?? 'model_error', run, model: modelId });
+    if (!run.refresh) await refresh();
+
+    for (const path of workspace.written) allowed.files.add(path);
+    const changed = await repository.changedPaths();
+    if (pathViolations(changed, allowed).length > 0) {
+      return finish('failed', { reasonCode: 'path_violation', run, model: modelId });
+    }
+
+    const after = await worklists();
+    const open = new Map(after.items.map((item) => [item.stableKey, new Set(item.gaps)]));
+    const rejected = new Set((run.refresh?.findings ?? [])
+      .filter((finding) => finding.code === 'resolution-rejected')
+      .map((finding) => finding.subjectRef));
+    const resolutionCodes = new Set(before.resolveList.items.map((item) => item.code));
+    const states: ToolJobLedger['items'] = items.map((item) => {
+      const remaining = open.get(item.stableKey) ?? new Set<string>();
+      if (rejected.has(item.stableKey)) return { stableKey: item.stableKey, state: 'failed', reasonCode: 'resolution-rejected' };
+      const closed = item.gaps.filter((gap) => !remaining.has(gap));
+      if (closed.length === 0) return { stableKey: item.stableKey, state: 'unchanged' };
+      const state = closed.some((gap) => resolutionCodes.has(gap)) ? 'resolved' : 'described';
+      // Some gaps closed, others still open (e.g. a schema the job did not write).
+      return closed.length < item.gaps.length
+        ? { stableKey: item.stableKey, state, reasonCode: 'gaps-remaining' }
+        : { stableKey: item.stableKey, state };
+    });
+    const outcomeOf = (committed: ToolJobOutcome): ToolJobOutcome => (run.outcome === 'completed' ? committed : run.outcome);
+    if (changed.length === 0) {
+      return finish(outcomeOf('no_change'), { ...(run.reasonCode ? { reasonCode: run.reasonCode } : {}), run, model: modelId, states });
+    }
+
+    const message = `chore(glirastes): describe tools ${BOT_MARKER}\n\nGlirastes-Job: ${grant.jobId}`;
+    const reason = run.reasonCode ? { reasonCode: run.reasonCode } : {};
+    try {
+      if (branch === base) {
+        // Started on the base branch: the bot never pushes there, it opens a pull request.
+        const botBranch = `glirastes/tools-${head.sha.slice(0, 12)}`;
+        await repository.switchToNewBranch(botBranch);
+        const commitSha = await repository.commit(changed, message);
+        await repository.push(botBranch);
+        const pullRequest = await repository.openPullRequest({
+          base,
+          head: botBranch,
+          title: `chore(glirastes): describe tools ${BOT_MARKER}`,
+          body: `Glirastes job ${grant.jobId} wrote tool descriptions, schemas and their generated outputs. Review them, then run glirastes tools verify.`,
+        });
+        return await finish(outcomeOf('pull_request'), { ...reason, run, model: modelId, committed: changed, commitSha, pullRequest, states });
+      }
+      const commitSha = await repository.commit(changed, message);
+      await repository.push(branch);
+      return await finish(outcomeOf('committed'), { ...reason, run, model: modelId, committed: changed, commitSha, states });
+    } catch (error) {
+      if (error instanceof GitCommandError) return finish('failed', { reasonCode: error.code, run, model: modelId });
+      throw error;
+    }
+  };
+  try {
+    return await execute();
+  } catch {
+    return finish('failed', { reasonCode: 'runner_error' });
   }
 }
