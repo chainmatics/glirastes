@@ -7,12 +7,10 @@ tool arguments/results, and final authorization. The Glirastes Platform is the
 Control Plane for reviewed configuration, immutable signed revisions,
 approvals, rollout, and content-free technical health.
 
-> This is the in-development Foundation branch. Its `0.4.0` version label does
-> not identify the same package contents as the currently published npm
-> `glirastes@0.4.0`. The Foundation examples require this branch's build until
-> a distinct release is published. One-command fresh-app bootstrap and fully
-> automatic capability maintenance are MVP work in progress, not completed
-> features implied by the prepared-pilot commands below.
+> `0.5.0` is the first Foundation release. Its surface differs from
+> `glirastes@0.4.0`; [CHANGELOG.md](CHANGELOG.md) lists the breaking changes.
+> [docs/support-matrix.md](docs/support-matrix.md) says which stacks are
+> detected, integrated and automatically checked.
 
 ## Foundation guarantees
 
@@ -127,10 +125,10 @@ Both init and `setup inspect` skip implicit environment-file loading.
 After an external agent exits, init runs the real offline Doctor. A nonzero
 agent exit, failed checks or zero tools are not success. The interactive CLI may
 stay open until you exit it; Doctor runs afterward. A passing Doctor still is
-not live tool-action evidence. Fresh-app timing and three-stack end-to-end
-acceptance remain open; the initializer does not imply universal framework
-support. Use the exact Foundation package checkout: the historical public
-`0.4.0` package has a different surface despite the same version number.
+not live tool-action evidence. Fresh-app timing is measured in the user test
+([docs/acceptance/](docs/acceptance/user-test-protocol.md)); the initializer
+does not imply support for every framework (see the
+[support matrix](docs/support-matrix.md)).
 
 ## Next.js local validation and optional connection
 

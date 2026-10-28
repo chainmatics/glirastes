@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - Unreleased
+
+The Foundation release. Its surface differs from 0.4.0; read **Breaking** before
+upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
+
+### Breaking
+
+- Removed exports, deferred and not shipped: `glirastes/server/nestjs`,
+  `glirastes/openapi` and `glirastes/react/langgraph`. Their sources stay in
+  the repository for a later release.
+- `glirastes/server` no longer exports the Platform client (`createLancer`,
+  `ServiceBlockedError` and the `Lancer*` and namespace types) or
+  `createAegisDetector`. Apps connect through `glirastes connect` and
+  `glirastes sync`, and the runtime reads signed revisions through
+  `glirastes/sync`.
+- `glirastes/codegen` no longer exports the scanners, generators and validators
+  of 0.4.0 (`scanEndpointTools`, `scanUiTools`, `scanNestControllers`,
+  `generateEndpointRegistry`, `generateUiRegistry`, `generateModuleRegistry`,
+  `generateAgentSkills`, `generateMcpServer`, `scaffoldAiTool`,
+  `validateAiTools`, `checkAiCoverage`, `syncAssetToGlirastes` and their types).
+  `glirastes tools refresh` derives the tools instead.
+- The CLI commands of 0.4.0 (`generate*`, `validate-tools`, `coverage`,
+  `scaffold`, `test`, `check-upgrade`, `install-skills`) are replaced by `init`,
+  `setup`, `connect`, `sync`, `doctor`, `install`, `validate`, `build` and
+  `tools`. `glirastes --help` lists them.
+- `glirastes/server/testing` is ESM only. Its CommonJS entry could never load,
+  because Vitest cannot be required from CommonJS.
+- `typescript`, `ajv` and `ajv-formats` are runtime dependencies (the tools
+  generator needs them). The `wavesurfer.js` peer is gone.
+
+### Added
+
+- Tools follow the code: `glirastes tools refresh` derives endpoint, navigation,
+  filter and client-action tools from Next.js, NestJS, OpenAPI (FastAPI),
+  react-router and vue-router sources into committed `.glirastes/` files, and
+  `glirastes tools check` fails CI when they are stale. Write and delete tools
+  ask before they run.
+- `glirastes init` hands setup to your coding agent, with bundled skills under
+  `skills/`; `glirastes setup`, `connect`, `sync` and `doctor` install, pair,
+  upload and diagnose a local setup.
+- New subpaths: `glirastes/contracts`, `glirastes/runtime`, `glirastes/ai-sdk`
+  (also `glirastes/runtime/ai-sdk`), `glirastes/stt`, `glirastes/sync`,
+  `glirastes/adapter/nextjs`, `glirastes/embed` (the `<glirastes-chat>` element
+  for apps without React) and `glirastes/browser` (navigation bridge, query
+  filters and client actions without React).
+- Content-free runtime metrics (tokens, cost with its source, latency, errors,
+  tool use), sent in batches off the turn path and dropped on failure.
+- Generic `@` mentions and `/` commands in the shared chat, and push-to-talk STT.
+- Pro: `glirastes tools enrich --managed` runs the bundled tool skills as a
+  budgeted job on the Platform's model access (optional peer `@ai-sdk/openai`),
+  and `glirastes init --ci github` writes a workflow with the model-free tool
+  check and, for Pro, the managed tool job.
+- `createLocalAiPipeline` (`glirastes/server`) runs the AI pipeline inside the
+  app without the Platform, with focused tool routing by default; pass
+  `routingMode: 'legacy'` for the broad routing.
+- `glirastes --help` and `glirastes --version`. An unknown command fails with
+  `E-SETUP-030` and points to `--help`.
+- `docs/support-matrix.md` and the acceptance documents in `docs/acceptance/`.
+
+### Fixed
+
+- The packed tarball is installed and loaded in the test suite (ESM, CommonJS,
+  the CLI and a strict NodeNext consumer), so an undeclared dependency or a
+  missing file fails before a release.
+
 ## [0.4.0] - 2026-06-25
 
 ### Changed
@@ -187,7 +252,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/chainmatics/glirastes/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/chainmatics/glirastes/compare/v0.3.2...v0.4.0
 [0.2.1]: https://github.com/chainmatics/glirastes/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/chainmatics/glirastes/releases/tag/v0.2.0

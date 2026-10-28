@@ -74,3 +74,26 @@ describe('release workflows', () => {
     ]);
   });
 });
+
+describe('release notes', () => {
+  const manifest = JSON.parse(read('package.json')) as { version: string; exports: Record<string, unknown> };
+  const changelog = read('CHANGELOG.md');
+
+  it('opens the CHANGELOG with the package version, its breaking changes and a compare link', () => {
+    const releases = [...changelog.matchAll(/^## \[(\d+\.\d+\.\d+)\] - (Unreleased|\d{4}-\d{2}-\d{2})$/gm)];
+    expect(releases[0]?.[1]).toBe(manifest.version);
+    const notes = changelog.slice(releases[0]!.index, releases[1]!.index);
+    expect(notes).toContain('\n### Breaking\n');
+    expect(changelog).toContain(`\n[${manifest.version}]: https://github.com/chainmatics/glirastes/compare/v${releases[1]![1]}...v${manifest.version}\n`);
+    for (const deferred of ['server/nestjs', 'openapi', 'react/langgraph']) {
+      expect(manifest.exports[`./${deferred}`], deferred).toBeUndefined();
+      expect(notes, deferred).toContain(`\`glirastes/${deferred}\``);
+    }
+  });
+
+  it('describes the shipped version in the README, not an in-development label', () => {
+    const readme = read('README.md');
+    expect(readme).not.toContain('in-development Foundation branch');
+    expect(readme).toContain(`\`${manifest.version}\` is the first Foundation release`);
+  });
+});
