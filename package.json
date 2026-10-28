@@ -296,6 +296,7 @@
     "ai": "^6.0.0"
   },
   "peerDependencies": {
+    "@ai-sdk/openai": "^3",
     "react": "^18 || ^19",
     "react-dom": "^19",
     "@ai-sdk/react": "^3.0.0",
@@ -313,6 +314,9 @@
     "vitest": ">=2.0.0"
   },
   "peerDependenciesMeta": {
+    "@ai-sdk/openai": {
+      "optional": true
+    },
     "react": {
       "optional": true
     },

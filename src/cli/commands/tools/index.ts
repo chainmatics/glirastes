@@ -8,6 +8,7 @@ import { isFoundationDiagnosticError } from '../../../diagnostics/index.js';
 import { ToolsUsageError, type ToolArgsSpec } from './args.js';
 import { CHECK_ARGS, runToolsCheck } from './check.js';
 import { DESCRIBE_ARGS, runToolsDescribe } from './describe.js';
+import { ENRICH_ARGS, runToolsEnrich, type EnrichDependencies } from './enrich.js';
 import { EVAL_ARGS, runToolsEval } from './eval.js';
 import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
 import { POLICY_SUBCOMMANDS, POLICY_USAGE, runToolsPolicy } from './policy.js';
@@ -29,6 +30,7 @@ export const TOOLS_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
   describe: DESCRIBE_ARGS,
   eval: EVAL_ARGS,
   verify: VERIFY_ARGS,
+  enrich: ENRICH_ARGS,
 };
 export { POLICY_SUBCOMMANDS };
 
@@ -40,6 +42,8 @@ export interface ToolsCommandDependencies {
   runPipeline?: (options: ToolsPipelineOptions) => Promise<ToolsPipelineResult>;
   watch?: ToolsIo['watch'];
   signal?: AbortSignal;
+  /** `tools enrich --managed`: git, network and the provider loader (tests inject them). */
+  enrich?: EnrichDependencies;
 }
 
 export const TOOLS_USAGE = [
@@ -59,6 +63,8 @@ export const TOOLS_USAGE = [
   '         change the local tool policy (glirastes tools policy for details)',
   '       glirastes tools verify <tool>...|--all [--root <dir>]',
   '         confirm agent-written contracts and descriptions after review',
+  '       glirastes tools enrich --managed [--first-run] [--base <branch>] [--root <dir>] [--json]',
+  '         Pro, in CI only: run the managed job that describes the open tools and commits as glirastes-bot',
 ].join('\n');
 
 /** Subcommand parsing lives here so src/cli/index.ts only dispatches `tools`. */
@@ -92,6 +98,8 @@ export async function runToolsCommand(argv: string[], deps: ToolsCommandDependen
         return await runToolsPolicy(rest, io);
       case 'verify':
         return await runToolsVerify(rest, io);
+      case 'enrich':
+        return await runToolsEnrich(rest, io, deps.enrich);
       default:
         io.error(TOOLS_USAGE);
         return 2;

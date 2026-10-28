@@ -42,6 +42,7 @@
         "zod-v3": "npm:zod@3.25.76",
       },
       "peerDependencies": {
+        "@ai-sdk/openai": "^3",
         "@ai-sdk/react": "^3.0.0",
         "@nestjs/common": "^10 || ^11",
         "@nestjs/config": "^3 || ^4",
@@ -59,6 +60,7 @@
         "ws": "^8",
       },
       "optionalPeers": [
+        "@ai-sdk/openai",
         "@ai-sdk/react",
         "@nestjs/common",
         "@nestjs/config",
