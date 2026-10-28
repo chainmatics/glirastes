@@ -57,11 +57,18 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Test
-        run: bun run test
+      - name: Typecheck tests
+        run: bun run typecheck:tests
 
+      # The suite boots the built SDK (pack completeness, reference apps).
       - name: Build
         run: bun run build
+
+      - name: Install the NestJS fixture API
+        run: bun install --frozen-lockfile --cwd examples/react-nest-separate/api
+
+      - name: Test
+        run: bun run test
 
       # Auth is via GitHub OIDC (Trusted Publishing) — no token needed.
       # Configure the trusted publisher for this repo + workflow on npmjs.com:

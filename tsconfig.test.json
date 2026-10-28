@@ -2,7 +2,25 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": "."
+    "rootDir": ".",
+    "paths": {
+      "glirastes": ["./src/index.ts"],
+      "glirastes/contracts": ["./src/contracts/index.ts"],
+      "glirastes/runtime": ["./src/runtime/index.ts"],
+      "glirastes/runtime/ai-sdk": ["./src/runtime/ai-sdk/index.ts"],
+      "glirastes/ai-sdk": ["./src/runtime/ai-sdk/index.ts"],
+      "glirastes/stt": ["./src/stt/index.ts"],
+      "glirastes/sync": ["./src/sync/index.ts"],
+      "glirastes/server": ["./src/server/index.ts"],
+      "glirastes/server/nextjs": ["./src/server/adapters/nextjs/index.ts"],
+      "glirastes/adapter/nextjs": ["./src/server/adapters/nextjs/index.ts"],
+      "glirastes/server/testing": ["./src/server/testing/index.ts"],
+      "glirastes/react": ["./src/react/index.ts"],
+      "glirastes/react/vercel": ["./src/react/transports/vercel/index.ts"],
+      "glirastes/embed": ["./src/embed/index.ts"],
+      "glirastes/browser": ["./src/browser/index.ts"],
+      "glirastes/codegen": ["./src/codegen/index.ts"]
+    }
   },
   "include": ["src", "tests"],
   "exclude": ["src/cli/deferred-full.ts"]

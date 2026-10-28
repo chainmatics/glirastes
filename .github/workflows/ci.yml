@@ -34,6 +34,10 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      # Maps glirastes/* to src/*, so it needs no build.
+      - name: Typecheck tests
+        run: bun run typecheck:tests
+
   test:
     name: Test
     runs-on: ubuntu-latest
