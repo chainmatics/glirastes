@@ -107,7 +107,7 @@ export function createManagedRuntimeSync(options: {
     environmentId: options.environmentId,
     runnerKey: options.runnerKey,
     version: options.version,
-    ...(report ? { discoveryDigest: report.discoveryDigest } : {}),
+    ...(report ? { discoveryDigest: report.discoveryDigest, setupRunId: report.artifact.runId } : {}),
     policyRelaxations: report !== undefined,
     manager,
     fetchImpl: options.fetchImpl,

@@ -5,6 +5,8 @@ import {
 } from './capability-report.js';
 import type { RuntimeSyncManager } from './sync-manager.js';
 
+const SETUP_RUN_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface RuntimePushConnector {
   connect(options: {
     url: string;
@@ -43,6 +45,12 @@ export class RuntimeControlPlaneClient {
      */
     discoveryDigest?: string;
     /**
+     * Setup run of the committed artifact this build carries (P10). With it
+     * the Platform shows the capability report of exactly this build, also
+     * when another build of the same endpoint inventory reported later.
+     */
+    setupRunId?: string;
+    /**
      * True when this runner composes signed Platform decisions with the
      * local code report (`createLocalRuntimeSource`, or `createTurnSnapshot`
      * with `relaxableToolIds`), so a Platform relaxation of confirmation takes
@@ -61,6 +69,14 @@ export class RuntimeControlPlaneClient {
     ) {
       throw new Error('discoveryDigest must be a sha256 digest of the running code');
     }
+    if (options.setupRunId !== undefined) {
+      if (options.discoveryDigest === undefined) {
+        throw new Error('setupRunId names the setup run of a discoveryDigest; pass both');
+      }
+      if (!SETUP_RUN_ID_PATTERN.test(options.setupRunId)) {
+        throw new Error('setupRunId must be the uuid of the committed setup run');
+      }
+    }
   }
 
   async register(input: {
@@ -78,6 +94,14 @@ export class RuntimeControlPlaneClient {
       }
       capabilities.discoveryDigest = digest;
     }
+    const setupRunId = this.options.setupRunId;
+    if (
+      capabilities.setupRunId !== undefined
+      && capabilities.setupRunId !== setupRunId
+    ) {
+      throw new Error('capabilities.setupRunId is reported from the committed setup artifact');
+    }
+    if (setupRunId !== undefined) capabilities.setupRunId = setupRunId;
     const relaxations = this.options.policyRelaxations
       ? POLICY_RELAXATIONS_VERSION
       : undefined;
