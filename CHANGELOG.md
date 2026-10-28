@@ -71,6 +71,12 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 
 ### Fixed
 
+- A client action the open page has no handler for no longer reports success.
+  The chat transport sends the action ids the page handles
+  (`glirastesClientActions`), the Next.js handler puts them into
+  `runtime.clientActions`, and the generated tool refuses any other action, so
+  the model cannot claim a dialog opened. Without the report the old behaviour
+  stays.
 - The packed tarball is installed and loaded in the test suite (ESM, CommonJS,
   the CLI and a strict NodeNext consumer), so an undeclared dependency or a
   missing file fails before a release.

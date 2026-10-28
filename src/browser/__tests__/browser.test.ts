@@ -31,6 +31,19 @@ describe('UiActionBus', () => {
     expect(byId).toHaveBeenCalledTimes(1);
   });
 
+  it('lists the client actions that have a handler right now', () => {
+    const bus = new UiActionBus();
+    const first = bus.subscribeById('tasks.highlight', () => {});
+    const second = bus.subscribeById('tasks.highlight', () => {});
+    bus.subscribeById('task-delete-dialog.open', () => {})();
+    bus.subscribeByType('glirastes.navigate', () => {});
+    expect(bus.registeredActionIds()).toEqual(['tasks.highlight']);
+    first();
+    expect(bus.registeredActionIds()).toEqual(['tasks.highlight']);
+    second();
+    expect(bus.registeredActionIds()).toEqual([]);
+  });
+
   it('shares one default bus per page, even across duplicated module copies', () => {
     expect(getDefaultUiActionBus()).toBe(getDefaultUiActionBus());
     const key = Symbol.for('glirastes.uiActionBus');

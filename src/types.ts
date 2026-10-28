@@ -57,6 +57,11 @@ export type EndpointMethod = 'GET' | 'HEAD' | 'POST' | 'PATCH' | 'PUT' | 'DELETE
 export interface RuntimeContext {
   origin?: string;
   cookieHeader?: string;
+  /**
+   * Client actions with a handler on the page the user has open, as the chat
+   * reported them. Absent when the client does not report them.
+   */
+  clientActions?: readonly string[];
   [key: string]: unknown;
 }
 

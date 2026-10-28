@@ -8,6 +8,31 @@ const context = { currentDate: new Date(), locale: 'en-US' } as never;
 const anyObject = createJsonSchemaLike({ type: 'object' });
 
 describe('uiActionToolToTool', () => {
+  it('refuses a client action that no handler on the current page takes', async () => {
+    const tool = uiActionToolToTool({
+      id: 'ui.taskDeleteDialog.open',
+      toolName: 'ui_taskDeleteDialog_open',
+      description: 'Open the delete dialog of a task.',
+      inputSchema: anyObject,
+      needsApproval: false,
+      action: { kind: 'client-action', actionId: 'task-delete-dialog.open' },
+    });
+    const on = (clientActions?: string[]) => ({
+      currentDate: new Date(), locale: 'de-DE', runtime: clientActions ? { clientActions } : {},
+    });
+    await expect(tool.execute({ taskId: 't1' }, on(['task-details.open']))).resolves.toEqual({
+      success: false,
+      error: 'This action is not available on the page the user has open. Do not claim it happened; navigate to a page that offers it, or use another tool.',
+      retryable: false,
+    });
+    await expect(tool.execute({ taskId: 't1' }, on(['task-delete-dialog.open']))).resolves.toMatchObject({
+      success: true,
+      uiAction: { type: 'glirastes.action', actionId: 'task-delete-dialog.open', payload: { taskId: 't1' } },
+    });
+    // A client that does not report its handlers keeps the previous behavior.
+    await expect(tool.execute({ taskId: 't1' }, on())).resolves.toMatchObject({ success: true });
+  });
+
   it('turns a navigation call into the href the app bridge pushes', async () => {
     const tool = uiActionToolToTool({
       id: 'ui.navigate',

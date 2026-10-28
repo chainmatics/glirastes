@@ -795,7 +795,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     reportDefaultsOnce();
     let turnMetrics: TurnMetricsRecorder | undefined;
     try {
-      const { messages: requestMessages } = await req.json();
+      const { messages: requestMessages, glirastesClientActions } = await req.json();
 
       if (!Array.isArray(requestMessages)) {
         return new Response(
@@ -820,6 +820,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       // Build tool context
       const toolContext = buildToolContext(req, { locale });
+      const clientActions = readClientActions(glirastesClientActions);
+      if (clientActions) toolContext.runtime = { ...toolContext.runtime, clientActions };
       const requestStart = Date.now();
       const turnId = deriveSessionId(messages);
 
@@ -1782,4 +1784,14 @@ function extractTextFromMessage(msg: Record<string, unknown>): string {
     }
   }
   return texts.join(' ');
+}
+
+/**
+ * The client actions the chat reported for the open page, or undefined when
+ * the report is missing or malformed (then client-action tools run as before).
+ */
+function readClientActions(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value) || value.length > 500) return undefined;
+  if (!value.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 200)) return undefined;
+  return value as string[];
 }

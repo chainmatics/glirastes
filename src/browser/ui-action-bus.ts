@@ -41,6 +41,15 @@ export class UiActionBus {
     return addHandler(this.handlersById, actionId, handler);
   }
 
+  /**
+   * Client actions that have a handler right now. The chat sends them with
+   * each request, so a generated client-action tool can refuse an action the
+   * open page does not take instead of reporting it as done.
+   */
+  registeredActionIds(): string[] {
+    return Array.from(this.handlersById.keys());
+  }
+
   async dispatch(action: UiAction): Promise<void> {
     const typeHandlers = this.handlersByType.get(action.type);
     const idHandlers = action.actionId

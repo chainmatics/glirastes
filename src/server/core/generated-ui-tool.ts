@@ -48,10 +48,18 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
     inputSchema: definition.inputSchema,
     ...(definition.outputSchema ? { outputSchema: definition.outputSchema } : {}),
     needsApproval: definition.needsApproval,
-    execute: async (rawInput: unknown) => {
+    execute: async (rawInput: unknown, context) => {
       const input = isRecord(rawInput) ? rawInput : {};
       const action = definition.action;
       if (action.kind === 'client-action') {
+        const available = context?.runtime?.clientActions;
+        if (available && !available.includes(action.actionId)) {
+          return {
+            success: false,
+            error: 'This action is not available on the page the user has open. Do not claim it happened; navigate to a page that offers it, or use another tool.',
+            retryable: false,
+          };
+        }
         return {
           success: true,
           message: 'Action executed.',
