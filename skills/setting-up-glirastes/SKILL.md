@@ -68,9 +68,8 @@ material questions that the code and earlier decisions cannot answer.
    Start the app with its safe development path and prove one real,
    authorized chat tool action, and that an unauthenticated call is refused.
    Avoid production data and side effects.
-8. Add the CI job: install, `glirastes tools check --json` and
-   `glirastes tools eval`, no secrets. Commit code, `.glirastes` and the
-   generated module together.
+8. Add the CI job with `glirastes init --ci github` (see CI below). Commit
+   code, `.glirastes`, the generated module and the workflow together.
 9. Report setup time (agent, downloads and waiting for input separately),
    changed files, tests and the action evidence. Validation, Doctor success and
    a successful action are distinct facts; report blockers precisely.
@@ -96,6 +95,27 @@ Only with the developer's explicit consent: `glirastes connect --base-url
 `glirastes sync` uploads the current technical result; it never reassesses
 source and never activates anything. Existing Managed apps keep `--managed`
 for setup and Doctor.
+
+## CI
+
+`glirastes init --ci github` writes `.github/workflows/glirastes-tools.yml`
+for the app's package manager; never write or hand-edit that workflow. An
+existing file with other content is refused: report the difference; replacing
+it is the developer's decision. The job `glirastes-tools` runs
+`glirastes tools check --json` and `glirastes tools eval` with no secrets and
+no model on every pull request and push to `main`.
+
+- Free: you work through the resolve and describe lists locally, as in the
+  workflow above, and commit the result. The workflow's second job,
+  `glirastes-tools-enrich`, stays off; nothing else is needed.
+- Pro: the managed CI runner works the same lists in `glirastes-tools-enrich`
+  and commits them as `glirastes-bot` on the pull request branch (with
+  `--enrich-on-main` also after pushes to `main`, through a pull request). It
+  runs only once the developer sets the repository variable
+  `GLIRASTES_MANAGED_TOOLS` to `true`, the variable
+  `GLIRASTES_CONTROL_PLANE_URL` and the secret `GLIRASTES_CI_KEY` from the
+  Platform. Never set them, read them or ask for their values; name them for
+  the developer. Review its commits like your own.
 
 ## Commands
 

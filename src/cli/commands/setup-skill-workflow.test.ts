@@ -18,6 +18,26 @@ describe('bundled local-first setup workflow', () => {
     expect(source).not.toContain('Ask the user to choose exactly one mode');
   });
 
+  it('adds the CI job with init --ci github and separates the Free and Pro paths', async () => {
+    const source = await readFile(join(findPackageSkillsDir(), 'setting-up-glirastes/SKILL.md'), 'utf8');
+    const flat = source.replace(/\s+/g, ' ');
+    const ci = flat.slice(flat.indexOf('## CI'), flat.indexOf('## Commands'));
+    // The workflow comes from the CLI (ci-workflow.ts), never by hand.
+    for (const required of ['glirastes init --ci github', '.github/workflows/glirastes-tools.yml', '`glirastes-tools`',
+      'no secrets', "the developer's decision"]) {
+      expect(ci).toContain(required);
+    }
+    // Free: the existing coding agent works the lists locally; the enrich job stays off.
+    expect(ci).toContain('Free');
+    expect(ci).toContain('you work through');
+    // Pro: the managed CI runner, switched on by the developer, never by the agent.
+    for (const required of ['Pro', '`glirastes-tools-enrich`', 'GLIRASTES_MANAGED_TOOLS', 'GLIRASTES_CI_KEY',
+      'GLIRASTES_CONTROL_PLANE_URL', 'glirastes-bot', '`--enrich-on-main`', 'the developer sets']) {
+      expect(ci).toContain(required);
+    }
+    expect(flat).not.toContain('8. Add the CI job: install,');
+  });
+
   it('documents complete local bootstrap artifacts and does not confuse digest metadata with prompt content', async () => {
     const source = await readFile(join(findPackageSkillsDir(), 'setting-up-glirastes/references/artifact-contract.md'), 'utf8');
     for (const required of ['FoundationExecutionInventorySchema', 'targetAppKey', 'sections', 'appBehavior', 'responseStyle', 'server-verified']) {
