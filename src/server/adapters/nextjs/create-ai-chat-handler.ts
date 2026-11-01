@@ -404,14 +404,25 @@ async function defaultStreamHandler(
   );
 
   let wasTruncated = false;
+  // At the runtime budget the turn blocks further tools and gets one bounded
+  // final summary, so it still ends with an answer instead of silence.
+  let finalSummaryClaimed = false;
+  const budgetExhausted = () =>
+    ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
   const shouldStop = (event: {
     steps: Array<{ toolCalls: Array<{ toolName: string }> }>;
-  }) => shouldStopManagedExecution({
-    stepCount: event.steps.length,
-    maxSteps: ctx.maxSteps,
-    budgetState: ctx.managedTurn?.tracker.evaluate().state,
-    lastStepToolNames: event.steps.at(-1)?.toolCalls.map((call) => call.toolName),
-  });
+  }) => {
+    const budgetState = ctx.managedTurn?.tracker.evaluate().state;
+    const summarize = budgetState === 'hard-limit'
+      && ctx.managedTurn!.tracker.claimFinalSummary();
+    if (summarize) finalSummaryClaimed = true;
+    return shouldStopManagedExecution({
+      stepCount: event.steps.length,
+      maxSteps: ctx.maxSteps,
+      budgetState: summarize ? undefined : budgetState,
+      lastStepToolNames: event.steps.at(-1)?.toolCalls.map((call) => call.toolName),
+    });
+  };
 
   const stream = createUIMessageStream({
     onError: () => 'AI request failed',
@@ -449,13 +460,16 @@ async function defaultStreamHandler(
         system: ctx.systemPrompt,
         tools: vercelTools as Parameters<typeof streamText>[0]['tools'],
         ...(ctx.toolDiscovery
-          ? {
-            activeTools: [...ctx.toolDiscovery.activeToolNames()],
-            prepareStep: () => ({
-              activeTools: [...ctx.toolDiscovery!.activeToolNames()],
-            }),
-          }
+          ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
+        prepareStep: () => {
+          if (budgetExhausted()) {
+            return { activeTools: [], toolChoice: 'none' as const };
+          }
+          return ctx.toolDiscovery
+            ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
+            : {};
+        },
         maxOutputTokens: ctx.maxOutputTokens,
         temperature: ctx.temperature,
         timeout: resolveTurnTimeout(
@@ -558,9 +572,10 @@ async function defaultStreamHandler(
           const budgetEvaluation = ctx.managedTurn?.tracker.evaluate();
           const stoppedByBudget =
             budgetEvaluation?.state === 'hard-limit';
-          wasTruncated =
+          wasTruncated = finalSummaryClaimed || (
             event.finishReason === 'tool-calls' &&
-            (event.steps.length >= ctx.maxSteps || stoppedByBudget);
+            (event.steps.length >= ctx.maxSteps || stoppedByBudget)
+          );
           totalSteps = Math.max(totalSteps, event.steps.length);
 
           const isSafetyStop =

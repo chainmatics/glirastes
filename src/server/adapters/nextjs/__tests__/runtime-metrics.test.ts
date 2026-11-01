@@ -232,9 +232,34 @@ describe('turn metrics in the Next chat handler', () => {
 
     const wire = await (await handler(request())).text();
 
-    expect(model.doStreamCalls).toHaveLength(1);
+    // At the limit the runtime blocks further tools and allows one bounded
+    // final summary, so the turn still ends with an answer.
+    expect(model.doStreamCalls).toHaveLength(2);
+    expect(model.doStreamCalls[1]!.tools ?? []).toHaveLength(0);
+    expect(wire).toContain('Erledigt:');
     expect(wire).toContain('Stopped at runtime budget: maxEstimatedCostUsd.');
     expect(events[0]).toMatchObject({ status: 'safety-stop', errorCode: 'budget_exhausted' });
+  });
+
+  it('answers once without tools when the input token budget runs out mid-turn', async () => {
+    const model = scriptedModel([
+      () => toolStep(),
+      () => textStep(),
+    ]);
+    const handler = createAiChatHandler({
+      tools: registry(),
+      model,
+      systemPrompt: 'Assistant',
+      managedRuntime: managedRuntime({ ...localLimits, maxInputTokens: 10 }),
+    });
+
+    const wire = await (await handler(request())).text();
+
+    expect(model.doStreamCalls).toHaveLength(2);
+    expect(model.doStreamCalls[1]!.tools ?? []).toHaveLength(0);
+    expect(wire).toContain('Erledigt:');
+    expect(wire).toContain('"status":"safety-stop"');
+    expect(wire).toContain('Stopped at runtime budget: maxInputTokens.');
   });
 
   it('estimates from the configured price table when the provider reports no cost', async () => {
