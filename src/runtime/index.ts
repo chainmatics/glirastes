@@ -164,3 +164,15 @@ export {
   type RuntimeMetricsDropReason,
   type RuntimeMetricsSinkOptions,
 } from './metrics/sink.js';
+export {
+  createGlirastes,
+  type CreateGlirastesOptions,
+  type Glirastes,
+  type GlirastesChatTurn,
+  type GlirastesGeneratedModule,
+  type GlirastesPrincipalFactory,
+} from './glirastes.js';
+export {
+  lookupRuntimeConnection,
+  type ResolvedRuntimeConnection,
+} from '../sync/connection-lookup.js';

@@ -349,7 +349,7 @@ export interface AiChatHandlerConfig {
 
   /**
    * Content-free turn metrics (TechnicalRuntimeEvent v2) for the Glirastes
-   * Platform, e.g. `createRuntimeMetricsSinkFromEnv()` from
+   * Platform, e.g. `metrics` from `createGlirastes(...).chatTurn()` in
    * `glirastes/runtime`. One event per turn (tokens, cost with provenance,
    * latency, outcome, tool ids); never prompts, messages, arguments, results
    * or secrets. Recording is synchronous and cheap, delivery happens later
