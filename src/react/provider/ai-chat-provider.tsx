@@ -314,7 +314,8 @@ function normalizePipelineState(data: unknown): PipelineState | null {
   if (
     data.stepLimitSource !== 'explicit' &&
     data.stepLimitSource !== 'module' &&
-    data.stepLimitSource !== 'safety'
+    data.stepLimitSource !== 'safety' &&
+    data.stepLimitSource !== 'runtime-budget'
   ) {
     return null;
   }

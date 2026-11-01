@@ -225,7 +225,7 @@ export interface PipelineState {
   totalSteps: number;
   finishReason?: string;
   maxSteps: number;
-  stepLimitSource: 'explicit' | 'module' | 'safety';
+  stepLimitSource: 'explicit' | 'module' | 'safety' | 'runtime-budget';
   updatedAt: string;
   message?: string;
 }
