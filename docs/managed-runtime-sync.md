@@ -4,16 +4,44 @@
 environment. Prompts, provider credentials, tool arguments, tool results, and
 business data are never sent through this connection.
 
+Most apps never call `glirastes/sync` directly. `createGlirastes` from
+`glirastes/runtime` does all of the following for them (see the README,
+"Standalone and Connected"). This page describes the parts underneath.
+
+## Connection
+
+A connected app sets one variable, `GLIRASTES_API_KEY`.
+`GLIRASTES_CONTROL_PLANE_URL` is optional (default
+`https://api.glirastes.chainmatics.io`). The runtime asks the Platform which
+app, environment and runner the key belongs to:
+
+```ts
+import { resolveRuntimeConnectionConfig } from 'glirastes/runtime';
+import { lookupRuntimeConnection } from 'glirastes/sync';
+
+const config = resolveRuntimeConnectionConfig(process.env); // undefined in Standalone
+const connection = config && await lookupRuntimeConnection(config);
+// { baseUrl, appId, environmentId, runnerKey }
+```
+
+`GET /v1/runtime/connection` with the `x-api-key` header answers
+`{ schemaVersion: 1, appId, environmentId, runnerKey }`, 401 for an invalid
+key, and 409 `{ code: 'connection_key_unbound' }` for a key that no pairing
+issued. Errors carry the operation and the status only. The looked-up `appId`
+must match the setup artifact of the code; a different app is an error.
+
+## Sync
+
 ```ts
 import { createManagedRuntimeSync } from 'glirastes/sync';
 import { setupArtifact } from './src/generated/glirastes/tools.generated';
 
 const runtimeSync = createManagedRuntimeSync({
-  baseUrl: process.env.GLIRASTES_URL!,
-  apiKey: process.env.GLIRASTES_RUNTIME_KEY!,
-  appId: process.env.GLIRASTES_APP_ID!,
-  environmentId: process.env.GLIRASTES_ENVIRONMENT_ID!,
-  runnerKey: 'get-it-done-production',
+  baseUrl: config.baseUrl,
+  apiKey: config.apiKey,
+  appId: connection.appId,
+  environmentId: connection.environmentId,
+  runnerKey: connection.runnerKey,
   version: '1.0.0',
   stateFilePath: '.glirastes/runtime-state.json',
   setupArtifact,
@@ -108,22 +136,20 @@ and error counts. Prompts, messages, tool arguments, tool results, and secrets
 never enter an event; both the SDK and the Platform refuse an event that
 carries them.
 
+`createGlirastes` creates the sink once the connection was looked up and
+passes it with every `chatTurn()`; Standalone has none and stays silent. To
+build one yourself:
+
 ```ts
 import { createRuntimeMetricsSinkFromEnv } from 'glirastes/runtime';
-import { createAiChatHandler } from 'glirastes/server/nextjs';
 
-// Undefined in Standalone (no GLIRASTES_CONTROL_PLANE_URL): no network at all.
-const metrics = createRuntimeMetricsSinkFromEnv();
-
-export const POST = createAiChatHandler({
-  // ...model, tools, managedRuntime, systemPrompt
-  metrics,
-});
+// Undefined in Standalone (no GLIRASTES_API_KEY) and without a connection.
+const metrics = createRuntimeMetricsSinkFromEnv(process.env, { connection });
 ```
 
-The sink reads the variables `glirastes connect` writes
-(`GLIRASTES_CONTROL_PLANE_URL`, `GLIRASTES_API_KEY`, `GLIRASTES_APP_ID`,
-`GLIRASTES_ENVIRONMENT_ID`) plus an optional `GLIRASTES_BUILD_ID`. Recording is
+The sink reads `GLIRASTES_API_KEY`, the optional
+`GLIRASTES_CONTROL_PLANE_URL` and `GLIRASTES_BUILD_ID`; app and environment
+come from the looked-up `connection`. Recording is
 synchronous and cheap; batches of at most 50 events leave every five seconds,
 off the turn. A slow, failing, or rejecting Platform drops the batch; metrics
 never retry, never block a turn, and never keep the process alive. Create the

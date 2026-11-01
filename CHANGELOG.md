@@ -51,6 +51,20 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 
 ### Added
 
+- `createGlirastes` in `glirastes/runtime` wires an app to Glirastes in one
+  call: pass the generated module and the local limits. It runs Standalone
+  without `GLIRASTES_API_KEY` and Connected with it, keeps one instance per
+  app and process, and `chatTurn(principal)` returns what `createAiChatHandler`
+  needs for a turn (`managedRuntime` with revocations, `loadTools`,
+  `toolSemantics`, `metrics`). Connected, it asks the Platform for the app,
+  environment and runner, registers, reports the code and syncs in the
+  background. Until that works the chat runs on the local code; errors go to
+  `onError` (operation and status only) and are retried. `wrapBindings` lets an
+  app wrap its generated tools. This replaces the connection code apps wrote
+  by hand.
+- `lookupRuntimeConnection` (`glirastes/sync`, `glirastes/runtime`) asks the
+  Platform which app, environment and runner a runtime key belongs to
+  (`GET /v1/runtime/connection`).
 - Tools follow the code: `glirastes tools refresh` derives endpoint, navigation,
   filter and client-action tools from Next.js, NestJS, OpenAPI (FastAPI),
   react-router and vue-router sources into committed `.glirastes/` files, and
@@ -84,6 +98,21 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 
 ### Changed
 
+- A connected app needs one variable: `GLIRASTES_API_KEY`. The runtime asks
+  the Platform for the app, environment and runner, so `GLIRASTES_APP_ID`,
+  `GLIRASTES_ENVIRONMENT_ID` and `GLIRASTES_RUNNER_KEY` are gone.
+  `GLIRASTES_CONTROL_PLANE_URL` is optional and defaults to
+  `https://api.glirastes.chainmatics.io`; set it only to self-host or run the
+  Platform locally. The key, not the URL, now switches between Standalone and
+  Connected (`resolveRuntimeMode`); a malformed key or a URL that is not
+  http(s) stops the start with an error that names the variable.
+  `glirastes connect` writes only the key (and the URL for a self-hosted
+  Platform) and removes the three old lines. `glirastes sync` and
+  `glirastes doctor` take app, environment and runner from
+  `.glirastes/platform-connection.json`; `doctor` says when the old variables
+  are still set and no longer needed. `createRuntimeMetricsSinkFromEnv` takes
+  the looked-up connection (`{ connection: { appId, environmentId } }`).
+  `GLIRASTES_CI_KEY` for the Pro CI job is unchanged.
 - The chat context's `send` returns whether the message was taken. It returns
   false while an approval card waits or the session is not ready; a custom
   composer should keep the typed text then, as the shipped composers do.

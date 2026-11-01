@@ -167,6 +167,66 @@ local secret target must already be ignored by Git. Pairing never uploads
 prompts, schemas, source, credentials, tool arguments, results, or business
 content. Restart the application after connecting.
 
+### Standalone and Connected
+
+A connected app needs one variable, `GLIRASTES_API_KEY`. `connect` writes it
+to `.env.local`; in production set it like any other secret. The runtime asks
+the Platform which app, environment and runner the key belongs to.
+`GLIRASTES_CONTROL_PLANE_URL` is only for a self-hosted or local Platform; the
+default is `https://api.glirastes.chainmatics.io`. Without the key the app runs
+Standalone and makes no network call. `GLIRASTES_APP_ID`,
+`GLIRASTES_ENVIRONMENT_ID` and `GLIRASTES_RUNNER_KEY` are no longer needed;
+`glirastes doctor` tells you when they are still set.
+
+The app wires this with one module:
+
+```ts
+// src/lib/glirastes.ts (server only)
+import { createGlirastes } from 'glirastes/runtime';
+import * as generated from '@/generated/glirastes/tools.generated';
+
+export const glirastes = createGlirastes({
+  generated,
+  localLimits: {
+    maxModelSteps: 12, maxToolCalls: 16, totalTimeoutMs: 60_000, toolTimeoutMs: 15_000,
+    maxInputTokens: 40_000, maxOutputTokens: 4_000, maxEstimatedCostUsd: 0.5,
+    maxRepeatedFingerprint: 3, maxConsecutiveErrors: 3,
+    delegation: { maxDepth: 1, maxBreadth: 1, sharedBudget: true },
+  },
+});
+```
+
+and spreads one turn into the chat handler:
+
+```ts
+// app/api/ai/chat/route.ts
+import { createAiChatHandler } from 'glirastes/server/nextjs';
+import { glirastes } from '@/lib/glirastes';
+
+export async function POST(req: Request) {
+  const user = await requireSessionUser(req); // your verified session
+  const turn = await glirastes.chatTurn((runtimeTenantId) => ({
+    subjectId: user.id,
+    tenantId: runtimeTenantId,
+    roles: user.roles,
+    attributes: { localTenantId: user.tenantId },
+  }));
+  return createAiChatHandler({ ...turn, model, systemPrompt, toolDiscovery: true })(req);
+}
+```
+
+`createGlirastes` keeps one instance per app and process, also when Next.js
+bundles routes separately. Connected, the first `chatTurn()` or `ready()`
+looks up the connection, registers the runner, reports the code and syncs in
+the background; it waits at most five seconds for that and never fails the
+turn. Until the first deployment is accepted, and whenever the Platform cannot
+be reached, the chat runs on the local code. Errors go to `onError` with the
+operation and status only, and the runtime retries. A key that belongs to
+another app is reported and never switches the app. To start the connection at
+server start, call `void glirastes.ready()` from `instrumentation.ts`. To wrap
+the generated tools (for example to add write feedback), pass
+`wrapBindings: (bindings) => …`.
+
 After local setup changes, synchronize the already validated canonical
 artifact without repeating setup, discovery, or assessment:
 
