@@ -12,6 +12,10 @@ import {
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 export { formatDoctorReport } from './doctor-presentation.js';
 import {
+  OBSOLETE_CONNECTION_VARIABLES,
+  preflightConnectionEnvironment,
+} from './connection-environment.js';
+import {
   assertConnectionScope,
   loadConnectionCredentials,
   readPlatformConnectionDescriptor,
@@ -85,6 +89,39 @@ function finish(
     counts: { tools, passed, warnings, failed },
     checks,
   };
+}
+
+/**
+ * True when the app, environment or runner variables of older `connect`
+ * runs are still set. Names only; values are never read into the report.
+ */
+async function hasObsoleteConnectionVariables(options: {
+  rootDir: string;
+  env: NodeJS.ProcessEnv;
+  readSecretFile: boolean;
+  isGitIgnored?: (path: string, root: string) => Promise<boolean>;
+}): Promise<boolean> {
+  if (OBSOLETE_CONNECTION_VARIABLES.some((name) => options.env[name]?.trim())) {
+    return true;
+  }
+  if (!options.readSecretFile) return false;
+  try {
+    const { environmentPath } = await preflightConnectionEnvironment({
+      projectRoot: options.rootDir,
+      framework: 'nextjs',
+      isGitIgnored: options.isGitIgnored,
+    });
+    const raw = await readFile(environmentPath, 'utf8');
+    return raw.split(/\r?\n/).some((line) => {
+      const name = line.match(/^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=/)?.[1];
+      return OBSOLETE_CONNECTION_VARIABLES.includes(
+        name as typeof OBSOLETE_CONNECTION_VARIABLES[number],
+      );
+    });
+  } catch {
+    // An unreadable or unsafe secret file is reported by the credential checks.
+    return false;
+  }
 }
 
 export async function createDoctorReport(
@@ -262,9 +299,25 @@ export async function createDoctorReport(
   }
 
   const env = options.env ?? process.env;
-  const strayControlPlane = Boolean(env.GLIRASTES_CONTROL_PLANE_URL?.trim());
+  if (await hasObsoleteConnectionVariables({
+    rootDir,
+    env,
+    readSecretFile: mode !== 'standalone',
+    isGitIgnored: options.isGitIgnored,
+  })) {
+    checks.push(check(
+      'connection-obsolete-variables',
+      'warn',
+      'E-CONNECT-104',
+      'remove-obsolete-connection-variables',
+    ));
+  }
+
+  // The runtime key is the switch: a standalone app that carries one would
+  // start talking to the Platform without a selected app and environment.
+  const strayRuntimeKey = Boolean(env.GLIRASTES_API_KEY?.trim());
   const modeValid = mode === 'standalone'
-    ? !strayControlPlane
+    ? !strayRuntimeKey
     : connectedValid;
   checks.push(modeValid
     ? check('runtime-mode', 'pass', 'E-SETUP-106')

@@ -10,6 +10,10 @@ import {
 } from '../../contracts/index.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import {
+  DEFAULT_CONTROL_PLANE_URL,
+  RUNTIME_API_KEY_PATTERN,
+} from '../../runtime/runtime-mode.js';
+import {
   AppSetupClient,
   type AppSetupRun,
 } from '../../sync/app-setup-client.js';
@@ -37,21 +41,17 @@ const receiptSchema = z.object({
   restartRequired: z.literal(true),
 }).strict();
 
+// Only the key (and, for a self-hosted Platform, its URL) live in the
+// environment; app, environment and runner come from the descriptor.
 const connectionVariableNames = [
   'GLIRASTES_CONTROL_PLANE_URL',
-  'GLIRASTES_APP_ID',
-  'GLIRASTES_ENVIRONMENT_ID',
-  'GLIRASTES_RUNNER_KEY',
   'GLIRASTES_API_KEY',
 ] as const;
 type ConnectionVariableName = typeof connectionVariableNames[number];
 
 const connectionCredentialsSchema = z.object({
-  GLIRASTES_CONTROL_PLANE_URL: z.string().trim().min(1).max(2_048),
-  GLIRASTES_APP_ID: z.uuid(),
-  GLIRASTES_ENVIRONMENT_ID: z.uuid(),
-  GLIRASTES_RUNNER_KEY: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
-  GLIRASTES_API_KEY: z.string().regex(/^gl_[A-Za-z0-9]{32,128}$/),
+  GLIRASTES_CONTROL_PLANE_URL: z.string().trim().min(1).max(2_048).optional(),
+  GLIRASTES_API_KEY: z.string().regex(RUNTIME_API_KEY_PATTERN),
 }).strict();
 
 export type ConnectionCredentials = z.infer<
@@ -190,11 +190,9 @@ export async function loadConnectionCredentials(options: {
   const processValues = Object.fromEntries(connectionVariableNames.map(
     (name) => [name, env[name]?.trim() || undefined],
   ));
-  const hasCompleteProcessSet = connectionVariableNames.every(
-    (name) => processValues[name],
-  );
+  const hasCompleteProcessSet = Boolean(processValues.GLIRASTES_API_KEY);
   if (hasCompleteProcessSet && !options.requireLocalSecretFile) {
-    const parsed = connectionCredentialsSchema.safeParse(processValues);
+    const parsed = connectionCredentialsSchema.safeParse(definedOnly(processValues));
     if (!parsed.success) {
       throw syncError(
         'E-SYNC-CREDENTIAL-INVALID',
@@ -228,7 +226,7 @@ export async function loadConnectionCredentials(options: {
     name,
     processValues[name] || fileValues[name],
   ]));
-  const parsed = connectionCredentialsSchema.safeParse(selected);
+  const parsed = connectionCredentialsSchema.safeParse(definedOnly(selected));
   if (!parsed.success) {
     throw syncError(
       'E-SYNC-CREDENTIAL-INVALID',
@@ -239,6 +237,23 @@ export async function loadConnectionCredentials(options: {
   return parsed.data;
 }
 
+function definedOnly(
+  values: Record<string, string | undefined>,
+): Record<string, string> {
+  return Object.fromEntries(Object.entries(values).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined,
+  ));
+}
+
+function withoutTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
+/** The Platform these credentials talk to: the configured URL or the hosted default. */
+export function controlPlaneUrlOf(credentials: ConnectionCredentials): string {
+  return credentials.GLIRASTES_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
+}
+
 export function assertConnectionScope(options: {
   descriptor: PlatformConnectionDescriptor;
   credentials: ConnectionCredentials;
@@ -247,10 +262,8 @@ export function assertConnectionScope(options: {
   const { descriptor, credentials, appId } = options;
   if (
     descriptor.appId !== appId
-    || credentials.GLIRASTES_APP_ID !== appId
-    || credentials.GLIRASTES_ENVIRONMENT_ID !== descriptor.environmentId
-    || credentials.GLIRASTES_CONTROL_PLANE_URL !== descriptor.baseUrl
-    || credentials.GLIRASTES_RUNNER_KEY !== descriptor.runnerKey
+    || withoutTrailingSlash(controlPlaneUrlOf(credentials))
+      !== withoutTrailingSlash(descriptor.baseUrl)
   ) {
     throw syncError(
       'E-SYNC-SCOPE-MISMATCH',

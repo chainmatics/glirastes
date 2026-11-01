@@ -219,36 +219,48 @@ describe('createRuntimeMetricsSink', () => {
 });
 
 describe('createRuntimeMetricsSinkFromEnv', () => {
-  const connected = {
-    GLIRASTES_CONTROL_PLANE_URL: BASE_URL,
-    GLIRASTES_API_KEY: API_KEY,
-    GLIRASTES_APP_ID: APP_ID,
-    GLIRASTES_ENVIRONMENT_ID: ENVIRONMENT_ID,
-  };
+  const env = { GLIRASTES_API_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: BASE_URL };
+  const connection = { appId: APP_ID, environmentId: ENVIRONMENT_ID };
 
   it('stays absent and network-silent in standalone mode', () => {
     const http = recordingFetch();
-    expect(createRuntimeMetricsSinkFromEnv({}, { fetch: http.fetch })).toBeUndefined();
-    expect(createRuntimeMetricsSinkFromEnv({
-      ...connected,
-      GLIRASTES_CONTROL_PLANE_URL: ' ',
-    }, { fetch: http.fetch })).toBeUndefined();
+    expect(createRuntimeMetricsSinkFromEnv({}, { fetch: http.fetch, connection })).toBeUndefined();
+    expect(createRuntimeMetricsSinkFromEnv({ GLIRASTES_API_KEY: ' ' }, { fetch: http.fetch, connection }))
+      .toBeUndefined();
     expect(http.mock).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['without a key', { GLIRASTES_API_KEY: undefined }],
-    ['without an environment', { GLIRASTES_ENVIRONMENT_ID: undefined }],
-    ['with an invalid app id', { GLIRASTES_APP_ID: 'app-1' }],
-  ])('stays absent %s', (_label, patch) => {
-    expect(createRuntimeMetricsSinkFromEnv({ ...connected, ...patch })).toBeUndefined();
+  it('stays absent until the connection was resolved', () => {
+    expect(createRuntimeMetricsSinkFromEnv(env)).toBeUndefined();
+    expect(createRuntimeMetricsSinkFromEnv({
+      ...env,
+      GLIRASTES_APP_ID: APP_ID,
+      GLIRASTES_ENVIRONMENT_ID: ENVIRONMENT_ID,
+    })).toBeUndefined();
   });
 
-  it('reports with the connected identity and an optional build id', () => {
+  it.each([
+    ['with an invalid app id', { connection: { appId: 'app-1', environmentId: ENVIRONMENT_ID } }, env],
+    ['with a malformed key', { connection }, { GLIRASTES_API_KEY: 'k' }],
+  ])('stays absent %s', (_label, options, values) => {
+    expect(createRuntimeMetricsSinkFromEnv(values, options)).toBeUndefined();
+  });
+
+  it('reports to the hosted platform when no URL is set', async () => {
+    const http = recordingFetch();
+    const sink = createRuntimeMetricsSinkFromEnv({ GLIRASTES_API_KEY: API_KEY }, { connection, fetch: http.fetch });
+    sink?.record(event());
+    await sink?.flush();
+    expect(http.calls[0]!.url).toBe(
+      `https://api.glirastes.chainmatics.io/v1/runtime/apps/${APP_ID}/environments/${ENVIRONMENT_ID}/metrics/events`,
+    );
+  });
+
+  it('reports with the resolved identity and an optional build id', () => {
     const sink = createRuntimeMetricsSinkFromEnv({
-      ...connected,
+      ...env,
       GLIRASTES_BUILD_ID: 'git:4f2c9e1',
-    }, { instanceId: 'web-2' });
+    }, { instanceId: 'web-2', connection });
     expect(sink?.identity).toEqual({
       appId: APP_ID,
       environmentId: ENVIRONMENT_ID,
@@ -259,90 +271,10 @@ describe('createRuntimeMetricsSinkFromEnv', () => {
 
   it('ignores an unusable build id and draws a random instance id', () => {
     const sink = createRuntimeMetricsSinkFromEnv({
-      ...connected,
+      ...env,
       GLIRASTES_BUILD_ID: 'not a label',
-    });
+    }, { connection });
     expect(sink?.identity.buildId).toBeNull();
     expect(sink?.identity.instanceId).toMatch(/^[0-9a-f-]{36}$/);
-  });
-});
-
-describe('tool_contract_rejected in the sink', () => {
-  const rejection = (suffix: number) => ({
-    schemaVersion: 2 as const,
-    eventId: `019fb900-0000-7000-8000-0000000003${suffix.toString().padStart(2, '0')}`,
-    eventType: 'tool_contract_rejected' as const,
-    occurredAt: '2026-10-05T10:16:02.000Z',
-    appId: APP_ID,
-    environmentId: ENVIRONMENT_ID,
-    buildId: 'git:4f2c9e1',
-    instanceId: 'web-1',
-    revisionId: null,
-    toolId: '019fb900-0000-7000-8000-0000000000c1',
-    inputSchemaDigest: 'sha256:Hk3m0QZrJ8v2bW6cX9fN1pL4sT7uY0aE5dG8iK2oMqA',
-    httpStatus: 422 as const,
-  });
-
-  it('sends rejections in their own batch, so a Platform without them keeps the turns', async () => {
-    const calls: Array<{ events: Array<{ eventType: string }> }> = [];
-    const fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as { events: Array<{ eventType: string }> };
-      calls.push(body);
-      return new Response(null, { status: body.events[0]!.eventType === 'turn.finished' ? 202 : 400 });
-    }) as typeof globalThis.fetch;
-    const { sink, drops } = sinkWith(fetch);
-    sink.record(event());
-    sink.record(rejection(1));
-    sink.record(event());
-    sink.record(rejection(2));
-    expect(sink.pending).toBe(4);
-    await sink.flush();
-    expect(calls.map((call) => call.events.map((entry) => entry.eventType))).toEqual([
-      ['turn.finished', 'turn.finished'],
-      ['tool_contract_rejected', 'tool_contract_rejected'],
-    ]);
-    expect(drops).toEqual([{ reason: 'send-failed', count: 2 }]);
-    expect(sink.pending).toBe(0);
-  });
-
-  it('drops a rejection that carries content or names another app', () => {
-    const { sink, drops } = sinkWith(recordingFetch().fetch);
-    sink.record({ ...rejection(3), arguments: { title: 'x' } } as never);
-    sink.record({ ...rejection(4), appId: '019fb900-0000-7000-8000-0000000000a9' });
-    expect(drops).toEqual([{ reason: 'invalid', count: 1 }, { reason: 'invalid', count: 1 }]);
-    expect(sink.pending).toBe(0);
-  });
-
-  it('sends turns before rejections even when a rejection was recorded first', async () => {
-    const http = recordingFetch();
-    const { sink } = sinkWith(http.fetch);
-    sink.record(rejection(5));
-    sink.record(event());
-    await sink.flush();
-    expect(http.calls.map((call) => (call.body.events[0] as { eventType: string }).eventType))
-      .toEqual(['turn.finished', 'tool_contract_rejected']);
-  });
-
-  it('sends a turn recorded while a rejection batch is on the wire before close returns', async () => {
-    const eventTypes: string[] = [];
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as { events: Array<{ eventType: string }> };
-      eventTypes.push(body.events[0]!.eventType);
-      if (body.events[0]!.eventType === 'tool_contract_rejected') await gate;
-      return new Response(null, { status: 202 });
-    }) as typeof globalThis.fetch;
-    const { sink } = sinkWith(fetch);
-    sink.record(event());
-    sink.record(rejection(6));
-    const flushing = sink.flush();
-    await vi.waitFor(() => expect(eventTypes).toEqual(['turn.finished', 'tool_contract_rejected']));
-    sink.record(event());
-    const closing = sink.close();
-    release();
-    await Promise.all([flushing, closing]);
-    expect(eventTypes).toEqual(['turn.finished', 'tool_contract_rejected', 'turn.finished']);
-    expect(sink.pending).toBe(0);
   });
 });

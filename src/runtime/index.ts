@@ -25,7 +25,11 @@ export {
 } from './budget.js';
 export { createExecutionFingerprint } from './fingerprint.js';
 export {
+  DEFAULT_CONTROL_PLANE_URL,
+  RUNTIME_API_KEY_PATTERN,
+  resolveRuntimeConnectionConfig,
   resolveRuntimeMode,
+  type RuntimeConnectionConfig,
   type RuntimeMode,
 } from './runtime-mode.js';
 export {

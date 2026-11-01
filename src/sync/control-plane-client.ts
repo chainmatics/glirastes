@@ -19,12 +19,15 @@ export interface RuntimePushConnector {
 export class RuntimeControlPlaneRequestError extends Error {
   readonly operation: string;
   readonly status: number;
+  /** A content-free error code the Platform answered with, e.g. `connection_key_unbound`. */
+  readonly code?: string;
 
-  constructor(operation: string, status: number) {
+  constructor(operation: string, status: number, code?: string) {
     super(`Glirastes Control Plane ${operation} request failed (${status})`);
     this.name = 'RuntimeControlPlaneRequestError';
     this.operation = operation;
     this.status = status;
+    if (code !== undefined) this.code = code;
   }
 }
 

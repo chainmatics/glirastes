@@ -81,6 +81,7 @@ async function fixture(overrides?: {
   receiptPromptDigest?: string;
   environment?: string;
   writeEnvironment?: boolean;
+  descriptorBaseUrl?: string;
 }): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'glirastes-sync-'));
   await mkdir(join(root, '.glirastes'), { recursive: true });
@@ -105,7 +106,7 @@ async function fixture(overrides?: {
     join(root, '.glirastes/platform-connection.json'),
     `${JSON.stringify({
       schemaVersion: 1,
-      baseUrl: 'https://control.example',
+      baseUrl: overrides?.descriptorBaseUrl ?? 'https://control.example',
       appId: overrides?.descriptorAppId ?? appId,
       environmentId: overrides?.descriptorEnvironmentId ?? environmentId,
       runnerKey: 'fixture-runner',
@@ -116,9 +117,6 @@ async function fixture(overrides?: {
       join(root, '.env.local'),
       overrides?.environment ?? [
         'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
-        `GLIRASTES_APP_ID=${appId}`,
-        `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
-        'GLIRASTES_RUNNER_KEY=fixture-runner',
         'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
         '',
       ].join('\n'),
@@ -230,9 +228,6 @@ describe('runSync', () => {
       isGitIgnored,
       env: {
         GLIRASTES_CONTROL_PLANE_URL: 'https://control.example',
-        GLIRASTES_APP_ID: appId,
-        GLIRASTES_ENVIRONMENT_ID: environmentId,
-        GLIRASTES_RUNNER_KEY: 'fixture-runner',
         GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234',
       },
     });
@@ -245,13 +240,51 @@ describe('runSync', () => {
     expect(isGitIgnored).not.toHaveBeenCalled();
   });
 
+  it('needs only the key for the hosted platform', async () => {
+    const rootDir = await fixture({
+      writeEnvironment: false,
+      descriptorBaseUrl: 'https://api.glirastes.chainmatics.io',
+    });
+    const deps = dependencies({
+      env: { GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234' },
+    });
+
+    await runSync({ rootDir }, deps.value);
+
+    expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: 'https://api.glirastes.chainmatics.io',
+      appId,
+      setupApiKey: 'gl_processprocessprocessprocess1234',
+    }));
+  });
+
+  it('takes app, environment and runner from the descriptor and ignores obsolete variables', async () => {
+    const rootDir = await fixture({
+      environment: [
+        'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+        `GLIRASTES_APP_ID=${id('90')}`,
+        `GLIRASTES_ENVIRONMENT_ID=${id('91')}`,
+        'GLIRASTES_RUNNER_KEY=stale-runner',
+        'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+        '',
+      ].join('\n'),
+    });
+    const deps = dependencies();
+
+    await runSync({ rootDir, json: true }, deps.value);
+
+    expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ appId }));
+    const output = JSON.parse(String(vi.mocked(deps.value.log!).mock.calls[0]?.[0]));
+    expect(output).toMatchObject({ appId, environmentId });
+  });
+
   it('fills a partial process credential set only from verified .env.local', async () => {
     const rootDir = await fixture();
     const isGitIgnored = vi.fn().mockResolvedValue(true);
     const deps = dependencies({
       isGitIgnored,
       env: {
-        GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234',
+        GLIRASTES_CONTROL_PLANE_URL: 'https://control.example',
       },
     });
 
@@ -261,23 +294,22 @@ describe('runSync', () => {
     expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({
       baseUrl: 'https://control.example',
       appId,
-      setupApiKey: 'gl_processprocessprocessprocess1234',
+      setupApiKey: 'gl_abcdefghijklmnopqrstuvwxyz123456',
     }));
   });
 
   it.each([
     ['descriptor app', { descriptorAppId: id('80') }],
-    ['descriptor environment', { descriptorEnvironmentId: id('81') }],
     ['receipt app', { receiptAppId: id('83') }],
-    ['credential environment', {
+    ['credential control plane', {
       environment: [
-        'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
-        `GLIRASTES_APP_ID=${appId}`,
-        `GLIRASTES_ENVIRONMENT_ID=${id('82')}`,
-        'GLIRASTES_RUNNER_KEY=fixture-runner',
+        'GLIRASTES_CONTROL_PLANE_URL=https://other.example',
         'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
         '',
       ].join('\n'),
+    }],
+    ['hosted default against a self-hosted descriptor', {
+      environment: 'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456\n',
     }],
   ] as const)('rejects %s scope drift before constructing a network client', async (_name, values) => {
     const rootDir = await fixture(values);
@@ -294,7 +326,7 @@ describe('runSync', () => {
     const rootDir = await fixture();
     const deps = dependencies({
       env: {
-        GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234',
+        GLIRASTES_CONTROL_PLANE_URL: 'https://control.example',
       },
       isGitIgnored: vi.fn().mockResolvedValue(false),
     });

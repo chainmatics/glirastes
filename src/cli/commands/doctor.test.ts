@@ -132,9 +132,6 @@ describe('createDoctorReport', () => {
     });
     await writeFile(join(rootDir, '.env.local'), [
       'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
-      `GLIRASTES_APP_ID=${appId}`,
-      `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
-      'GLIRASTES_RUNNER_KEY=fixture-runner',
       'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
       '',
     ].join('\n'));
@@ -155,8 +152,74 @@ describe('createDoctorReport', () => {
       expect.objectContaining({ name: 'connection-scope', status: 'pass' }),
       expect.objectContaining({ name: 'connection-credential', status: 'pass' }),
     ]));
+    expect(report.counts.warnings).toBe(0);
     expect(JSON.stringify(report)).not.toContain('gl_abcdefghijklmnopqrstuvwxyz123456');
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('hints that the old app, environment and runner variables are no longer needed', async () => {
+    const rootDir = await fixture();
+    const appId = id('1');
+    const environmentId = id('9');
+    await writeJson(rootDir, '.glirastes/platform-connection.json', {
+      schemaVersion: 1,
+      baseUrl: 'https://control.example',
+      appId,
+      environmentId,
+      runnerKey: 'fixture-runner',
+    });
+    await writeFile(join(rootDir, '.env.local'), [
+      'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+      `GLIRASTES_APP_ID=${appId}`,
+      `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
+      'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+      '',
+    ].join('\n'));
+
+    const report = await createDoctorReport({
+      rootDir,
+      env: { GLIRASTES_RUNNER_KEY: 'fixture-runner' },
+      isGitIgnored: vi.fn().mockResolvedValue(true),
+    });
+
+    expect(report.status).toBe('pass');
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: 'connection-obsolete-variables',
+      status: 'warn',
+      remediation: 'remove-obsolete-connection-variables',
+    }));
+    const text = formatDoctorReport(report);
+    expect(text).toMatch(/no longer needed/);
+    expect(text).toContain('GLIRASTES_APP_ID');
+    expect(text).not.toContain(appId);
+    expect(text).not.toContain('fixture-runner');
+  });
+
+  it('fails a standalone app that still carries a runtime key', async () => {
+    const rootDir = await fixture();
+
+    const report = await createDoctorReport({
+      rootDir,
+      env: { GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234' },
+    });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: 'runtime-mode', status: 'fail', code: 'E-SETUP-009',
+    }));
+    expect(JSON.stringify(report)).not.toContain('gl_processprocessprocessprocess1234');
+  });
+
+  it('keeps a standalone app valid with only a control plane URL', async () => {
+    const rootDir = await fixture();
+
+    const report = await createDoctorReport({
+      rootDir,
+      env: { GLIRASTES_CONTROL_PLANE_URL: 'http://localhost:8101' },
+    });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: 'runtime-mode', status: 'pass',
+    }));
   });
 
   it('fails Connected Doctor scope checks before any network access', async () => {
@@ -169,10 +232,7 @@ describe('createDoctorReport', () => {
       runnerKey: 'fixture-runner',
     });
     await writeFile(join(rootDir, '.env.local'), [
-      'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
-      `GLIRASTES_APP_ID=${id('1')}`,
-      `GLIRASTES_ENVIRONMENT_ID=${id('8')}`,
-      'GLIRASTES_RUNNER_KEY=fixture-runner',
+      'GLIRASTES_CONTROL_PLANE_URL=https://other.example',
       'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
       '',
     ].join('\n'));
@@ -207,9 +267,6 @@ describe('createDoctorReport', () => {
       rootDir,
       env: {
         GLIRASTES_CONTROL_PLANE_URL: 'https://control.example',
-        GLIRASTES_APP_ID: id('1'),
-        GLIRASTES_ENVIRONMENT_ID: environmentId,
-        GLIRASTES_RUNNER_KEY: 'fixture-runner',
         GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234',
       },
       isGitIgnored: vi.fn().mockResolvedValue(true),

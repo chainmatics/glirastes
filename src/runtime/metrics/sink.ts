@@ -13,6 +13,7 @@ import type {
   RuntimeMetricsIdentity,
   RuntimeMetricsSink,
 } from './turn-recorder.js';
+import { resolveRuntimeConnectionConfig } from '../runtime-mode.js';
 
 export type RuntimeMetricsDropReason =
   | 'invalid'
@@ -229,32 +230,36 @@ export function createRuntimeMetricsSink(
 }
 
 /**
- * The sink of a connected app (`glirastes connect` writes these variables),
- * or undefined. Standalone apps (no `GLIRASTES_CONTROL_PLANE_URL`) get no
- * sink and stay network-silent; an incomplete or invalid connection also
- * yields none, because metrics must never stop a chat from starting.
- * `GLIRASTES_BUILD_ID` (optional) names the deployed build.
+ * The sink of a connected app, or undefined. The key (and the optional
+ * self-hosting URL) come from the environment; the app and environment come
+ * from the connection the runtime looked up (`lookupRuntimeConnection`), so
+ * the sink exists only once that lookup resolved. Standalone apps (no
+ * `GLIRASTES_API_KEY`) get no sink and stay network-silent; an invalid
+ * connection also yields none, because metrics must never stop a chat from
+ * starting. `GLIRASTES_BUILD_ID` (optional) names the deployed build.
  */
 export function createRuntimeMetricsSinkFromEnv(
   env: Record<string, string | undefined> = process.env,
   options: Omit<
     RuntimeMetricsSinkOptions,
     'controlPlaneUrl' | 'apiKey' | 'appId' | 'environmentId' | 'buildId'
-  > = {},
+  > & {
+    /** The resolved connection; without it the sink stays absent. */
+    connection?: { appId: string; environmentId: string };
+  } = {},
 ): BatchingRuntimeMetricsSink | undefined {
-  const controlPlaneUrl = env.GLIRASTES_CONTROL_PLANE_URL?.trim();
-  const apiKey = env.GLIRASTES_API_KEY?.trim();
-  const appId = env.GLIRASTES_APP_ID?.trim();
-  const environmentId = env.GLIRASTES_ENVIRONMENT_ID?.trim();
-  if (!controlPlaneUrl || !apiKey || !appId || !environmentId) return undefined;
+  const { connection, ...sinkOptions } = options;
+  if (!connection) return undefined;
   const buildId = env.GLIRASTES_BUILD_ID?.trim();
   try {
+    const config = resolveRuntimeConnectionConfig(env);
+    if (!config) return undefined;
     return createRuntimeMetricsSink({
-      ...options,
-      controlPlaneUrl,
-      apiKey,
-      appId,
-      environmentId,
+      ...sinkOptions,
+      controlPlaneUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      appId: connection.appId,
+      environmentId: connection.environmentId,
       buildId: buildId && RUNTIME_METRIC_LABEL_PATTERN.test(buildId) ? buildId : null,
     });
   } catch {

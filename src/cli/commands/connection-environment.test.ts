@@ -84,12 +84,14 @@ describe('connection environment preflight', () => {
 });
 
 describe('connection environment materialization', () => {
-  it('preserves unrelated CRLF lines and replaces all five variables once', async () => {
+  it('writes the key and a self-hosted URL, dropping the obsolete variables', async () => {
     const { root, environmentPath } = await fixture();
     const original = [
       '# existing',
       'UNRELATED=value',
       'GLIRASTES_APP_ID=old',
+      'GLIRASTES_ENVIRONMENT_ID=old',
+      'GLIRASTES_RUNNER_KEY=old',
       'TAIL=kept',
       '',
     ].join('\r\n');
@@ -106,16 +108,28 @@ describe('connection environment materialization', () => {
     const result = await readFile(environmentPath, 'utf8');
     expect(result).toContain('# existing\r\nUNRELATED=value\r\n');
     expect(result).toContain('\r\nTAIL=kept\r\n');
-    for (const name of [
-      'GLIRASTES_CONTROL_PLANE_URL',
-      'GLIRASTES_APP_ID',
-      'GLIRASTES_ENVIRONMENT_ID',
-      'GLIRASTES_RUNNER_KEY',
-      'GLIRASTES_API_KEY',
-    ]) {
-      expect(result.match(new RegExp(`^${name}=`, 'gm'))).toHaveLength(1);
+    for (const name of ['GLIRASTES_APP_ID', 'GLIRASTES_ENVIRONMENT_ID', 'GLIRASTES_RUNNER_KEY']) {
+      expect(result).not.toContain(name);
     }
+    expect(result.match(/^GLIRASTES_API_KEY=/gm)).toHaveLength(1);
     expect(result).toContain(`GLIRASTES_API_KEY=${credential}`);
+    expect(result).toContain(`GLIRASTES_CONTROL_PLANE_URL=${connection.baseUrl}`);
+  });
+
+  it('writes only the key for the hosted platform and removes a stale URL', async () => {
+    const { root, environmentPath } = await fixture();
+    await writeFile(environmentPath, 'GLIRASTES_CONTROL_PLANE_URL=http://localhost:8101\nKEEP=1\n');
+
+    await materializeConnectionEnvironment({
+      projectRoot: root,
+      framework: 'nextjs',
+      connection: { ...connection, baseUrl: 'https://api.glirastes.chainmatics.io' },
+      apiKey: credential,
+      isGitIgnored: vi.fn().mockResolvedValue(true),
+    });
+
+    await expect(readFile(environmentPath, 'utf8'))
+      .resolves.toBe(`KEEP=1\nGLIRASTES_API_KEY=${credential}\n`);
   });
 
   it('writes a secret-free descriptor and creates the secret file as 0600', async () => {

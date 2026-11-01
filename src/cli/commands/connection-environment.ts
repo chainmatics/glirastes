@@ -7,6 +7,7 @@ import {
   type PlatformConnectionDescriptor,
 } from '../../contracts/index.js';
 import { FoundationDiagnosticError } from '../../diagnostics/foundation-diagnostic.js';
+import { DEFAULT_CONTROL_PLANE_URL } from '../../runtime/runtime-mode.js';
 import {
   type AtomicArtifactWriteHooks,
   writeArtifactSetAtomically,
@@ -18,12 +19,20 @@ import {
 } from './connection-descriptor.js';
 
 const execFileAsync = promisify(execFile);
-const variableNames = [
+// Written by `connect`; the URL only for a self-hosted or local Platform.
+const writtenVariableNames = [
   'GLIRASTES_CONTROL_PLANE_URL',
+  'GLIRASTES_API_KEY',
+] as const;
+// Written by older `connect` runs; the runtime now asks the Platform for them.
+export const OBSOLETE_CONNECTION_VARIABLES = [
   'GLIRASTES_APP_ID',
   'GLIRASTES_ENVIRONMENT_ID',
   'GLIRASTES_RUNNER_KEY',
-  'GLIRASTES_API_KEY',
+] as const;
+const variableNames = [
+  ...writtenVariableNames,
+  ...OBSOLETE_CONNECTION_VARIABLES,
 ] as const;
 
 type ConnectionVariable = typeof variableNames[number];
@@ -112,16 +121,16 @@ async function readOptional(path: string): Promise<string> {
 
 function renderEnvironment(
   existing: string,
-  values: Record<ConnectionVariable, string>,
+  values: Partial<Record<ConnectionVariable, string>>,
 ): string {
   const newline = existing.includes('\r\n') ? '\r\n' : '\n';
   const hadFinalNewline = existing.endsWith('\n');
-  const lines = existing === '' ? [] : existing.split(/\r?\n/);
+  const lines: Array<string | undefined> = existing === '' ? [] : existing.split(/\r?\n/);
   if (hadFinalNewline) lines.pop();
 
   const found = new Map<ConnectionVariable, number>();
   for (const [index, line] of lines.entries()) {
-    const match = line.match(/^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=/);
+    const match = line?.match(/^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=/);
     if (!match || !variableNames.includes(match[1] as ConnectionVariable)) {
       continue;
     }
@@ -139,12 +148,18 @@ function renderEnvironment(
   }
 
   for (const name of variableNames) {
-    const rendered = `${name}=${values[name]}`;
+    const value = values[name];
     const index = found.get(name);
+    if (value === undefined) {
+      // Not needed (any more): drop the line an older connect wrote.
+      if (index !== undefined) lines[index] = undefined;
+      continue;
+    }
+    const rendered = `${name}=${value}`;
     if (index === undefined) lines.push(rendered);
     else lines[index] = rendered;
   }
-  const output = lines.join(newline);
+  const output = lines.filter((line) => line !== undefined).join(newline);
   return `${output}${hadFinalNewline || existing === '' ? newline : ''}`;
 }
 
@@ -163,11 +178,12 @@ export async function materializeConnectionEnvironment(
   }
 
   const existing = await readOptional(targets.environmentPath);
+  // The key is the only variable a connected app needs; app, environment
+  // and runner the runtime asks the Platform (`/v1/runtime/connection`).
+  const selfHosted = connection.baseUrl.replace(/\/+$/, '')
+    !== DEFAULT_CONTROL_PLANE_URL;
   const secretBuffer = Buffer.from(renderEnvironment(existing, {
-    GLIRASTES_CONTROL_PLANE_URL: connection.baseUrl,
-    GLIRASTES_APP_ID: connection.appId,
-    GLIRASTES_ENVIRONMENT_ID: connection.environmentId,
-    GLIRASTES_RUNNER_KEY: connection.runnerKey,
+    ...(selfHosted ? { GLIRASTES_CONTROL_PLANE_URL: connection.baseUrl } : {}),
     GLIRASTES_API_KEY: options.apiKey,
   }));
   try {

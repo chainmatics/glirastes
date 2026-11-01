@@ -66,6 +66,10 @@ export type {
 } from './local-deployment-validator.js';
 export { createManagedRuntimeSync } from './managed-sync.js';
 export {
+  lookupRuntimeConnection,
+  type ResolvedRuntimeConnection,
+} from './connection-lookup.js';
+export {
   capabilityReportFrom,
   DISCOVERY_DIGEST_PATTERN,
   POLICY_RELAXATIONS_VERSION,
