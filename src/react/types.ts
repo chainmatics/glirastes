@@ -671,11 +671,18 @@ export type OnBeforeSend = (text: string, mentions: MentionData[]) => string;
 /** Called when a tool produces output — useful for app-specific dispatching */
 export type OnToolResult = (toolName: string, result: unknown) => void;
 
+/** What the chat knows beyond the arguments of the call to approve. */
+export interface ApprovalDescriptionContext {
+  /** Record names the tool results of this conversation reported, by lower-case record id. */
+  names?: ReadonlyMap<string, string>;
+}
+
 /** Formats approval display for a given tool call */
 export type ApprovalDescriptionFn = (
   toolName: string,
   approvalId: string,
   args: unknown,
+  context?: ApprovalDescriptionContext,
 ) => PendingApproval;
 
 /** Translates a pipeline state message (e.g. "Stopped by user.") before rendering. */

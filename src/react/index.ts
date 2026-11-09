@@ -64,6 +64,7 @@ export type {
   OnBeforeSend,
   OnToolResult,
   ApprovalDescriptionFn,
+  ApprovalDescriptionContext,
   PipelineMessageTranslator,
   StepSummaryFormatter,
   // Provider

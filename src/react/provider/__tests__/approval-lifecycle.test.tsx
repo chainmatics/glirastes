@@ -125,6 +125,45 @@ describe('AiChatProvider approval lifecycle', () => {
     expect(screen.queryByText('raw transport payload')).toBeNull();
   });
 
+  it('hands the approval description the record names earlier tool results reported', async () => {
+    const taskId = '14f1e041-4609-4b24-a723-631b133115cc';
+    const transport = createTransport(vi.fn());
+    transport.messages = [
+      {
+        id: 'assistant-0',
+        role: 'assistant',
+        parts: [{
+          type: 'tool-tasks.list',
+          toolCallId: 'call-0',
+          state: 'output-available',
+          input: {},
+          output: { success: true, tasks: [{ id: taskId, title: 'Angebot Meier' }] },
+        } as never],
+      },
+      { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'delete it' } as never] },
+      ...transport.messages,
+    ];
+    const approvalDescription = vi.fn((
+      toolName: string,
+      id: string,
+      args: unknown,
+      _context?: { names?: ReadonlyMap<string, string> },
+    ) => ({
+      id, toolName, args: args as Record<string, unknown>, messageId: '', description: '', details: [],
+    }));
+
+    render(
+      <AiChatProvider transport={transport} approvalDescription={approvalDescription}>
+        <ApprovalProbe />
+      </AiChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-count').textContent).toBe('1');
+    });
+    expect(approvalDescription.mock.calls[0][3]?.names?.get(taskId)).toBe('Angebot Meier');
+  });
+
   it('removes an approval only after the transport confirms it', async () => {
     let resolveResponse: (() => void) | undefined;
     const response = new Promise<void>((resolve) => {

@@ -23,6 +23,7 @@ import type {
 } from '../types.js';
 import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
+import { collectEntityNames } from '../utils/entity-names.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
@@ -749,7 +750,12 @@ export function AiChatProvider({
           !handledApprovalIdsRef.current.has(toolPart.approval.id)
         ) {
           handledApprovalIdsRef.current.add(toolPart.approval.id);
-          const pending = approvalDescriptionRef.current(toolName, toolPart.approval.id, toolPart.input);
+          const pending = approvalDescriptionRef.current(
+            toolName,
+            toolPart.approval.id,
+            toolPart.input,
+            { names: collectEntityNames(rawMessages) },
+          );
           setPendingApprovalsMap(prev => new Map(prev).set(toolPart.approval!.id, pending));
         }
 
