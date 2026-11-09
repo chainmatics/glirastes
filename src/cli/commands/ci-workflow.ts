@@ -6,7 +6,8 @@ import { dirname, join } from 'node:path';
  * `glirastes init --ci github` (spec 4.6, 4.8): the GitHub Actions workflow
  * with the model-free check job `glirastes-tools` and the Pro job
  * `glirastes-tools-enrich`, which stays off until the repository variable
- * GLIRASTES_MANAGED_TOOLS is "true".
+ * GLIRASTES_MANAGED_TOOLS is "true". It runs on pull requests and, on request,
+ * after pushes to the branches the environments deploy from.
  */
 
 export const CI_WORKFLOW_PATH = '.github/workflows/glirastes-tools.yml';
@@ -16,10 +17,12 @@ export const ENRICH_TIMEOUT_MINUTES = 50;
 export type PackageManager = 'bun' | 'pnpm' | 'yarn' | 'npm';
 
 export class CiWorkflowError extends Error {
-  constructor(readonly code: 'ci_provider_unsupported' | 'ci_workflow_exists') {
+  constructor(readonly code: 'ci_provider_unsupported' | 'ci_workflow_exists' | 'ci_branch_invalid') {
     super(code === 'ci_provider_unsupported'
       ? 'Only --ci github is supported.'
-      : `${CI_WORKFLOW_PATH} exists with other content; review it or pass --force to replace it.`);
+      : code === 'ci_branch_invalid'
+        ? '--enrich-on takes branch names separated by commas, for example staging,main.'
+        : `${CI_WORKFLOW_PATH} exists with other content; review it or pass --force to replace it.`);
     this.name = 'CiWorkflowError';
   }
 }
@@ -70,12 +73,36 @@ const SETUP: Record<PackageManager, { steps: string[]; install: string; run: str
   },
 };
 
-export function githubToolsWorkflow(options: { packageManager: PackageManager; enrichOnMain: boolean }): string {
+/** A branch name as git and the Platform accept it; nothing a YAML string or an expression could misread. */
+const BRANCH = /^(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/;
+
+/**
+ * The environment branches the managed job also runs on after a push
+ * (`--enrich-on staging,main`; `--enrich-on-main` is `main`). There the bot
+ * never commits: it opens a pull request against that branch.
+ */
+export function enrichBranches(options: { enrichOn?: readonly string[]; enrichOnMain?: boolean }): string[] {
+  const branches = [...(options.enrichOn ?? []), ...(options.enrichOnMain ? ['main'] : [])];
+  if (branches.some((branch) => !BRANCH.test(branch))) throw new CiWorkflowError('ci_branch_invalid');
+  return [...new Set(branches)];
+}
+
+const yamlBranch = (branch: string) => (/^[A-Za-z0-9._-]+$/.test(branch) ? branch : `'${branch}'`);
+
+export function githubToolsWorkflow(options: {
+  packageManager: PackageManager;
+  enrichOnMain?: boolean;
+  enrichOn?: readonly string[];
+}): string {
   const setup = SETUP[options.packageManager];
-  const trigger = options.enrichOnMain
+  const branches = enrichBranches(options);
+  const onPush = branches.length > 0;
+  const refs = branches.map((branch) => `github.ref == 'refs/heads/${branch}'`).join(' || ');
+  const trigger = onPush
     ? "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)\n"
-      + "        || (github.event_name == 'push' && github.ref == 'refs/heads/main')"
+      + `        || (github.event_name == 'push' && ${branches.length > 1 ? `(${refs})` : refs})`
     : "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository";
+  const pushBranches = [...new Set(['main', ...branches])].map(yamlBranch).join(', ');
   return [
     '# Written by `glirastes init --ci github`.',
     '# glirastes-tools checks the committed tool outputs without secrets or models.',
@@ -87,7 +114,7 @@ export function githubToolsWorkflow(options: { packageManager: PackageManager; e
     'on:',
     '  pull_request:',
     '  push:',
-    '    branches: [main]',
+    `    branches: [${pushBranches}]`,
     '',
     'permissions:',
     '  contents: read',
@@ -115,7 +142,7 @@ export function githubToolsWorkflow(options: { packageManager: PackageManager; e
     '      cancel-in-progress: false',
     '    permissions:',
     '      contents: write',
-    ...(options.enrichOnMain ? ['      pull-requests: write'] : []),
+    ...(onPush ? ['      pull-requests: write'] : []),
     '    steps:',
     '      - uses: actions/checkout@v4',
     '        with:',
@@ -123,12 +150,16 @@ export function githubToolsWorkflow(options: { packageManager: PackageManager; e
     ...setup.steps,
     `      - run: ${setup.install}`,
     `      - run: ${setup.run} tools refresh --mode write --keep-going`,
-    `      - run: ${setup.run} tools enrich --managed --json`,
+    `      - run: ${setup.run} tools enrich --managed --json${onPush ? ' --base "$GLIRASTES_BASE_BRANCH"' : ''}`,
     '        env:',
     '          GLIRASTES_CI_KEY: ${{ secrets.GLIRASTES_CI_KEY }}',
     '          GLIRASTES_CONTROL_PLANE_URL: ${{ vars.GLIRASTES_CONTROL_PLANE_URL }}',
     '          GLIRASTES_TOOLS_OPENROUTER_KEY: ${{ secrets.GLIRASTES_TOOLS_OPENROUTER_KEY }}',
-    ...(options.enrichOnMain ? ['          GH_TOKEN: ${{ github.token }}'] : []),
+    ...(onPush ? [
+      // A pull request names its target, a push its own branch: there the bot opens a pull request.
+      '          GLIRASTES_BASE_BRANCH: ${{ github.base_ref || github.ref_name }}',
+      '          GH_TOKEN: ${{ github.token }}',
+    ] : []),
     '',
   ].join('\n');
 }
@@ -137,12 +168,14 @@ export async function writeCiWorkflow(options: {
   root: string;
   provider: string;
   enrichOnMain?: boolean;
+  enrichOn?: readonly string[];
   force?: boolean;
 }): Promise<{ path: string; status: 'written' | 'unchanged' | 'replaced' }> {
   if (options.provider !== 'github') throw new CiWorkflowError('ci_provider_unsupported');
   const content = githubToolsWorkflow({
     packageManager: detectPackageManager(options.root),
     enrichOnMain: options.enrichOnMain === true,
+    ...(options.enrichOn ? { enrichOn: options.enrichOn } : {}),
   });
   const target = join(options.root, CI_WORKFLOW_PATH);
   const existing = await readFile(target, 'utf8').catch(() => undefined);

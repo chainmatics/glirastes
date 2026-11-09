@@ -110,7 +110,9 @@ no model on every pull request and push to `main`.
   `glirastes-tools-enrich`, stays off; nothing else is needed.
 - Pro: the managed CI runner works the same lists in `glirastes-tools-enrich`
   and commits them as `glirastes-bot` on the pull request branch (with
-  `--enrich-on-main` also after pushes to `main`, through a pull request). It
+  `--enrich-on-main` also after pushes to `main`, through a pull request;
+  `--enrich-on staging,main` names every branch an environment deploys from,
+  and the pull request goes against that branch). It
   runs only once the developer sets the repository variable
   `GLIRASTES_MANAGED_TOOLS` to `true`, the variable
   `GLIRASTES_CONTROL_PLANE_URL` and the secret `GLIRASTES_CI_KEY` from the

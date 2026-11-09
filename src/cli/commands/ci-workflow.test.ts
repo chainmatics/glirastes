@@ -66,6 +66,36 @@ describe('glirastes init --ci github', () => {
     expect(enrich).toContain('          GH_TOKEN: ${{ github.token }}\n');
   });
 
+  it('runs on every environment branch asked for and opens the pull request against that branch', () => {
+    const workflow = githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging', 'release/next'] });
+    const enrich = job(workflow, 'glirastes-tools-enrich');
+
+    expect(workflow).toContain("  push:\n    branches: [main, staging, 'release/next']\n");
+    expect(enrich).toContain("|| (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/release/next'))");
+    expect(enrich).toContain('      contents: write\n      pull-requests: write\n');
+    // The branch name reaches the shell through the environment, never through the script text.
+    expect(enrich).toContain('      - run: bunx glirastes tools enrich --managed --json --base "$GLIRASTES_BASE_BRANCH"\n');
+    expect(enrich).toContain('          GLIRASTES_BASE_BRANCH: ${{ github.base_ref || github.ref_name }}\n');
+    expect(githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['main'] }))
+      .toBe(githubToolsWorkflow({ packageManager: 'bun', enrichOnMain: true }));
+  });
+
+  it('refuses a branch name that is not one', async () => {
+    await expect(writeCiWorkflow({ root, provider: 'github', enrichOn: ['staging', 'a b'] }))
+      .rejects.toEqual(new CiWorkflowError('ci_branch_invalid'));
+    await expect(writeCiWorkflow({ root, provider: 'github', enrichOn: ["x' || true"] }))
+      .rejects.toEqual(new CiWorkflowError('ci_branch_invalid'));
+  });
+
+  it('takes the environment branches from --enrich-on', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await runCli(['init', '--ci', 'github', '--enrich-on', 'staging,main', '--root', root, '--json'], { init: { ask: vi.fn() } as never });
+
+    expect(await readFile(join(root, CI_WORKFLOW_PATH), 'utf8'))
+      .toBe(githubToolsWorkflow({ packageManager: 'npm', enrichOn: ['staging', 'main'] }));
+  });
+
   it('uses the package manager of the lockfile', async () => {
     expect(detectPackageManager(root)).toBe('npm');
     expect(githubToolsWorkflow({ packageManager: 'npm', enrichOnMain: false }))
