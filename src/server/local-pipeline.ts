@@ -24,6 +24,20 @@ export interface LocalAiPipelineConfig extends AiPipelineConfig {
   generateText?: LocalClassifierConfig['generateText'];
 }
 
+const CONTINUATION_TTL_MS = 10 * 60 * 1000;
+const CONTINUATION_MAX_ENTRIES = 200;
+
+/** The request and the user messages before it; assistant text added by a continuation does not count. */
+function continuationKeyOf(
+  input: string,
+  conversationHistory: ReadonlyArray<{ role: string; content: string }> | undefined,
+): string {
+  return JSON.stringify([
+    input,
+    (conversationHistory ?? []).filter((message) => message.role === 'user').map((message) => message.content),
+  ]);
+}
+
 /**
  * Target-app pipeline for content-bearing guardrails, intent classification,
  * routing, and model selection. No request or user content leaves the local
@@ -76,6 +90,10 @@ export function createLocalAiPipeline(
   });
   const followupsEnabled = config.followups?.enabled ?? false;
   const defaultModel: ModelConfig = { modelId: 'default' };
+  // A request reaches the pipeline again when it continues after an approval:
+  // same words, same earlier user messages. It keeps its classification, so
+  // the continuation saves the classifier call and stays in its module.
+  const recentIntents = new Map<string, { intent: IntentClassification; at: number }>();
 
   const selectModel = (
     intent: IntentClassification,
@@ -118,6 +136,10 @@ export function createLocalAiPipeline(
         ? null
         : fastPath.match(validation.sanitized);
       const fastPathHit = intent !== null;
+      const continuationKey = continuationKeyOf(validation.sanitized, conversationHistory);
+      const continued = intent ? undefined : recentIntents.get(continuationKey);
+      const continuationHit = !!continued && Date.now() - continued.at < CONTINUATION_TTL_MS;
+      if (continuationHit) intent = continued.intent;
       if (!intent) {
         intent = await classifier.classify(
           validation.sanitized,
@@ -126,6 +148,13 @@ export function createLocalAiPipeline(
         );
         if (!hasConversationHistory) {
           fastPath.learn(validation.sanitized, intent);
+        }
+        if (intent.intent !== 'ambiguous') {
+          recentIntents.delete(continuationKey);
+          recentIntents.set(continuationKey, { intent, at: Date.now() });
+          if (recentIntents.size > CONTINUATION_MAX_ENTRIES) {
+            recentIntents.delete(recentIntents.keys().next().value as string);
+          }
         }
       }
       void fastPath.saveToStorage();
