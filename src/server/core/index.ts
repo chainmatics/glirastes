@@ -602,7 +602,8 @@ export function endpointToolToTool<TInput extends SchemaLike>(
         };
       }
 
-      const responseData = isRecord(response.data)
+      // A list or scalar answer has no fields of its own, so it travels under `data`.
+      const responseData = isRecord(response.data) && !Array.isArray(response.data)
         ? (response.data as Record<string, unknown>)
         : { data: response.data };
 
@@ -914,10 +915,14 @@ export function toolToAiTool(
             } = rec;
             parsed = tool.outputSchema.safeParse(declaredPayload);
           }
+          const carriedUnderData = !parsed.success
+            && rec.data !== undefined
+            && (!isRecord(rec.data) || Array.isArray(rec.data));
+          if (carriedUnderData) parsed = tool.outputSchema.safeParse(rec.data);
           if (parsed.success) {
             // Use parsed data (extra fields stripped by Zod)
             cleanResult = {
-              ...parsed.data as Record<string, unknown>,
+              ...(carriedUnderData ? { data: parsed.data } : parsed.data as Record<string, unknown>),
               // Preserve success flag
               ...(rec.success !== undefined ? { success: rec.success } : {}),
               // Re-attach uiAction for client stream (stripped by schema parse)

@@ -175,4 +175,56 @@ describe('tool output schema validation', () => {
     expect(JSON.stringify(result)).not.toContain('privateField');
     expect(JSON.stringify(result)).not.toContain('must-not-reach-model');
   });
+
+  it('delivers an endpoint that answers with a list to the model', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const definition = defineEndpointTool({
+      id: 'teams.list',
+      toolName: 'teams_list',
+      description: 'List teams.',
+      method: 'GET',
+      path: '/api/teams',
+      inputSchema: z.object({}).strict(),
+      outputSchema: z.array(z.object({ id: z.string(), name: z.string() })),
+    });
+    const context: EndpointToolContext = {
+      currentDate: new Date('2026-08-15T10:00:00.000Z'),
+      locale: 'de-DE',
+      callEndpoint: async () => ({
+        ok: true,
+        status: 200,
+        data: [{ id: 'team-1', name: 'Neues team', undeclared: 'must-not-reach-model' }],
+      }),
+    };
+    const aiTool = toolToAiTool(endpointToolToTool(definition), context);
+
+    const result = await aiTool.execute({});
+
+    expect(result).toEqual({ success: true, data: [{ id: 'team-1', name: 'Neues team' }] });
+    expect(warning).not.toHaveBeenCalled();
+    warning.mockRestore();
+  });
+
+  it('still withholds a list that does not match its declared items', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const definition = defineEndpointTool({
+      id: 'teams.list',
+      toolName: 'teams_list',
+      description: 'List teams.',
+      method: 'GET',
+      path: '/api/teams',
+      inputSchema: z.object({}).strict(),
+      outputSchema: z.array(z.object({ id: z.string() }).strict()),
+    });
+    const context: EndpointToolContext = {
+      currentDate: new Date('2026-08-15T10:00:00.000Z'),
+      locale: 'de-DE',
+      callEndpoint: async () => ({ ok: true, status: 200, data: [{ id: 42 }] }),
+    };
+    const aiTool = toolToAiTool(endpointToolToTool(definition), context);
+
+    await expect(aiTool.execute({})).resolves.toMatchObject({ success: true, outputWithheld: true });
+    expect(warning).toHaveBeenCalledTimes(1);
+    warning.mockRestore();
+  });
 });
