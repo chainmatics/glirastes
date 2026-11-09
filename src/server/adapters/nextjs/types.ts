@@ -285,7 +285,8 @@ export interface AiChatHandlerConfig {
   maxConversationHistoryPairs?: number;
 
   /**
-   * @deprecated Use `pipeline` instead. Ignored when `pipeline` is set.
+   * The app's own input check. Runs before the pipeline or the intent router,
+   * also with `pipeline` set; a refusal answers 400 without any model call.
    */
   guardrails?: GuardrailHook;
 

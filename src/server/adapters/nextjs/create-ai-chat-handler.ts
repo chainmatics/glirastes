@@ -1032,6 +1032,21 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // ================================================================
       // Pipeline mode
       // ================================================================
+      // The app's own input check runs first in both modes, without any model call.
+      let processedMessages = messages;
+      if (guardrails) {
+        const check = await guardrails(messages);
+        if (!check.ok) {
+          return new Response(
+            JSON.stringify({ error: check.reason ?? 'Invalid input' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (check.sanitizedMessages) {
+          processedMessages = check.sanitizedMessages;
+        }
+      }
+
       if (pipeline) {
 
         // Create callEndpoint for endpoint tools (needed regardless of static/dynamic)
@@ -1066,7 +1081,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
         // Extract user input for pipeline
         let userText = clarificationResume?.routingText
-          ?? extractLastUserText(messages);
+          ?? extractLastUserText(processedMessages);
         if (piiShield) {
           userText = await piiShield.outbound(userText, sessionId);
         }
@@ -1074,7 +1089,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // Build lightweight conversation history for intent classification.
         // Include the last few user/assistant text exchanges (excluding the
         // current message) so the classifier can understand follow-ups.
-        const conversationHistory = extractConversationHistory(messages, maxConversationHistoryPairs);
+        const conversationHistory = extractConversationHistory(processedMessages, maxConversationHistoryPairs);
 
         // Run pipeline: guardrails + classification + routing + model selection
         const pipelineResult = await pipeline.process(
@@ -1237,7 +1252,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         const contextWindow =
           pipelineResult.module?.executionDefaults?.contextWindow ??
           maxContextMessages;
-        let recentMessages = messages.slice(-contextWindow);
+        let recentMessages = processedMessages.slice(-contextWindow);
 
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
@@ -1286,21 +1301,6 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // ================================================================
       // Legacy mode (without pipeline)
       // ================================================================
-
-      // Guardrails
-      let processedMessages = messages;
-      if (guardrails) {
-        const check = await guardrails(messages);
-        if (!check.ok) {
-          return new Response(
-            JSON.stringify({ error: check.reason ?? 'Invalid input' }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } },
-          );
-        }
-        if (check.sanitizedMessages) {
-          processedMessages = check.sanitizedMessages;
-        }
-      }
 
       // Create callEndpoint for endpoint tools (needed regardless of static/dynamic)
       const callEndpoint = endpointCaller(req);
