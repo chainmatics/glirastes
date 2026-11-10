@@ -118,7 +118,8 @@ function handlerOptions(source: ts.SourceFile): Record<string, string> {
       const [config] = node.arguments;
       if (config && ts.isObjectLiteralExpression(config)) {
         for (const property of config.properties) {
-          if (property.name) options[property.name.getText(source)] = ts.isPropertyAssignment(property) ? property.initializer.getText(source) : '';
+          if (ts.isSpreadAssignment(property)) options[`...${property.expression.getText(source)}`] = '';
+          else if (property.name) options[property.name.getText(source)] = ts.isPropertyAssignment(property) ? property.initializer.getText(source) : '';
         }
       }
     }
@@ -194,10 +195,11 @@ describe('skill scenarios', () => {
     });
     const diagnostics = ts.getPreEmitDiagnostics(program, program.getSourceFile(fixture.path('src/app/api/chat/route.ts')));
     expect(diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))).toEqual([]);
-    // `toolSemantics` only feeds `find_tools`, and the handler offers that tool only with `toolDiscovery: true`.
+    // The turn brings the guard, the tools and the synonyms for `find_tools`; the handler offers that tool only with `toolDiscovery: true`.
     expect(handlerOptions(program.getSourceFile(fixture.path('src/app/api/chat/route.ts'))!)).toMatchObject({
-      toolSemantics: expect.any(String),
+      '...turn': '',
       toolDiscovery: 'true',
+      onError: expect.any(String),
     });
     // The chat route itself is never a tool: refresh reports it as a default exclusion.
     const refreshed: string[] = [];

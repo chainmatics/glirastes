@@ -58,14 +58,13 @@ describe('bundled local-first setup workflow', () => {
 
   it('keeps the Next.js companion local-first with real server authorization', async () => {
     const source = await readFile(join(findPackageSkillsDir(), 'integrating-glirastes-nextjs/SKILL.md'), 'utf8');
-    for (const required of ['setting-up-glirastes', 'Standalone', 'createLocalRuntimeSource', 'resolvePrincipal', 'navigation', 'filter']) {
+    for (const required of ['setting-up-glirastes', 'Standalone', 'createGlirastes', 'chatTurn', 'resolvePrincipal', 'navigation', 'filter']) {
       expect(source).toContain(required);
     }
     expect(source).not.toContain('In the Platform interviewer');
     expect(source).not.toContain('glirastes scan --sync');
-    // One object for the POST and the chat interactions GET (the route example type-checks in tests/skill-scenarios.test.ts).
-    expect(source).toMatch(/const managedRuntime: ManagedLocalRuntimeConfig = \{/);
-    expect(source).toContain('shared `const` at module scope');
+    // The POST and the chat interactions GET decide with the same turn guard (the route example type-checks in tests/skill-scenarios.test.ts).
+    expect(source).toContain('`turn.managedRuntime`');
   });
 
   it('keeps the web companion within what the chat handler calls the API with', async () => {

@@ -28,6 +28,9 @@ chat route uses the app's own model access.
 
 1. Mount one `VercelAiChat endpoint="/api/chat"` (the app's real chat route)
    and import `glirastes/react/styles.css`; theme it before forking anything.
+   Place the assistant as in "Placing the assistant" below: a toggle where the
+   app wants it, the chat docked on the right or detached as a window. The
+   bare floating bubble is only for apps without a layout of their own.
 2. Register client actions with `useAiClientAction` where their state lives,
    with a payload contract, and mount the navigation bridge
    (`useGlirastesNavigationBridge`) once. Run `glirastes tools refresh` and
@@ -246,6 +249,57 @@ viewport constraint, and snapback. Panel dimensions persist and stay bounded.
 
 Mount the window through the shipped portal rather than nesting it in product
 layout: it is what keeps the panel clear of transformed or clipping ancestors.
+
+## Placing the assistant
+
+The default for an app with its own layout: an "Ask AI" button where the app
+wants it (usually the top bar), and the chat docked on the right of the page
+or detached as a window the user moves and resizes. `AssistantWorkspace` is
+that whole integration in one component; `VercelAiChat` with children supplies
+the chat and drops its own floating widget:
+
+```tsx
+'use client';
+import { VercelAiChat } from 'glirastes/react/vercel';
+import { AiChatPanel, AssistantToggle, AssistantWorkspace } from 'glirastes/react';
+import 'glirastes/react/styles.css';
+
+export function AppFrame({ children }: { children: React.ReactNode }) {
+  return (
+    <VercelAiChat endpoint="/api/chat">
+      <AssistantWorkspace chat={<AiChatPanel />} storageKey={`assistant:${userId}`}>
+        <header>… <AssistantToggle /></header>
+        {children}
+      </AssistantWorkspace>
+    </VercelAiChat>
+  );
+}
+```
+
+The workspace is a row that fills its parent: the page on the left, the
+docked assistant on the right. It folds to a rail, takes the whole row on
+narrow screens, and publishes its width as `--assistant-right-inset` for
+fixed elements of the page. Detaching or docking is remembered, so a closed
+window reopens as a window. `defaultMode="floating"` opens detached first.
+
+- Toggle anywhere: `AssistantToggle` works at any depth inside the workspace;
+  `useAssistantLayout()` gives `openChat`, `closeChat`, `setMode` and the
+  state for the app's own controls.
+- Shortcuts on every OS: mod+I toggles, alt+shift+D docks or detaches,
+  alt+shift+C collapses, alt+shift+N starts a new chat (with `onNewChat`),
+  alt+shift+I focuses the input. Pass `shortcuts={{ newChat: 'alt+shift+k',
+  toggleCollapse: false }}` when the app already uses one; `formatShortcut`
+  shows a combination as ⌘I or Ctrl+I.
+- Look: `icons`, `labels` (`DE_ASSISTANT_SHELL_LABELS` ships German),
+  `classNames`, `renderButton` for the app's own button component, the
+  `headerStart` / `headerTitle` / `headerActions` slots, `window` for the
+  size limits of the detached window, and `showBubble={false}` to drop the
+  round opener. With the provider's `unstyled` only the handle geometry stays.
+- Own layout: `AssistantLayoutProvider` + `AssistantShell` are the parts the
+  workspace is made of. The shell is then the last child of the row that
+  holds the page, marked `data-assistant-main`. An existing provider higher
+  up is reused by the workspace.
+- Scope `storageKey` per user when several people share a browser.
 
 ## Approvals
 

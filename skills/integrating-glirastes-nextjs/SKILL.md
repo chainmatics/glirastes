@@ -37,63 +37,59 @@ second, hand-maintained catalogue.
 2. Server-only `resolvePrincipal(request)` returns the verified `subjectId`,
    `tenantId`, roles and attributes from the real session, or `undefined` for
    an unauthenticated request.
-3. The chat route boots the local runtime from the generated module
-   (`createGeneratedRuntimeSource` wraps `createLocalRuntimeSource` and
-   `createContractBindings`). Restart after a refresh; Managed apps use the
-   verified Managed revision source with the same local bindings instead.
+3. The chat route creates the runtime from the generated tools and spreads
+   one turn into the handler. Peer packages: `ai@^6`, `@ai-sdk/openai@^3`,
+   `@ai-sdk/react@^3`. Restart after a refresh.
 
    ```ts
    // src/app/api/chat/route.ts
    import { createOpenAI } from '@ai-sdk/openai';
-   import {
-     createGeneratedRuntimeSource, createRuntimeMetricsSinkFromEnv, materializeManifestToolRegistry,
-   } from 'glirastes/runtime';
-   import { createAiChatHandler, type ManagedLocalRuntimeConfig } from 'glirastes/server/nextjs';
+   import { createGlirastes } from 'glirastes/runtime';
+   import { createAiChatHandler } from 'glirastes/server/nextjs';
    import * as generated from '@/generated/glirastes/tools.generated';
    import { resolvePrincipal } from '@/lib/glirastes-principal';
 
-   const localLimits = {
-     maxModelSteps: 6, maxToolCalls: 8, totalTimeoutMs: 60_000, toolTimeoutMs: 15_000,
-     maxInputTokens: 40_000, maxOutputTokens: 4_000, maxEstimatedCostUsd: 0.5,
-     maxRepeatedFingerprint: 3, maxConsecutiveErrors: 3,
-     delegation: { maxDepth: 1, maxBreadth: 1, sharedBudget: true },
-   };
-   const systemPrompt = 'Use the tools of this app. Ask one short question when the target is unclear.';
-   const glirastes = createGeneratedRuntimeSource(generated, { localLimits });
-   // One sink per process, at module scope. Standalone apps get undefined and stay network-silent.
-   const metrics = createRuntimeMetricsSinkFromEnv();
+   // One instance per app and process, also when routes are bundled apart.
+   const glirastes = createGlirastes({
+     generated,
+     localLimits: {
+       maxModelSteps: 6, maxToolCalls: 8, totalTimeoutMs: 60_000, toolTimeoutMs: 15_000,
+       maxInputTokens: 40_000, maxOutputTokens: 4_000, maxEstimatedCostUsd: 0.5,
+       maxRepeatedFingerprint: 3, maxConsecutiveErrors: 3,
+       delegation: { maxDepth: 1, maxBreadth: 1, sharedBudget: true },
+     },
+   });
    const openrouter = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY });
-
-   // One object for every handler of this route (see below).
-   const managedRuntime: ManagedLocalRuntimeConfig = {
-     resolvePrincipal,
-     resolveTurnSnapshot: (context) => glirastes.source.resolveTurnSnapshot(context),
-   };
+   const systemPrompt = 'Use the tools of this app. Ask one short question when the target is unclear.';
 
    export const runtime = 'nodejs';
-   export const POST = createAiChatHandler({
-     managedRuntime,
-     // With managedRuntime the handler always pins a snapshot; without one no tool is offered.
-     loadTools: ({ turnSnapshot }) => (turnSnapshot
-       ? materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: glirastes.bindings })
-       : {}),
-     toolDiscovery: true,
-     toolSemantics: generated.toolSearchSemantics,
-     model: openrouter.chat('anthropic/claude-sonnet-5.5'),
-     systemPrompt,
-     ...(metrics ? { metrics } : {}),
-   });
+   export async function POST(request: Request) {
+     const principal = await resolvePrincipal(request);
+     if (!principal) return new Response('Unauthorized', { status: 401 });
+     const turn = await glirastes.chatTurn((runtimeTenantId) => ({ ...principal, tenantId: runtimeTenantId }));
+     return createAiChatHandler({
+       ...turn,
+       model: openrouter.chat('anthropic/claude-sonnet-5.5'),
+       systemPrompt,
+       toolDiscovery: true,
+       onError: (error) => console.error('[chat]', error),
+     })(request);
+   }
    ```
 
-   Use `.chat(model)`: `createOpenAI(...)(model)` talks to the Responses API,
+   Several routes share the runtime when the `createGlirastes` call moves to
+   a server-only module such as `src/lib/glirastes.ts`.
+   `chatTurn` brings the shared turn guard (`managedRuntime`), the tools of
+   the pinned snapshot, the checked synonyms for `find_tools` and, Connected,
+   the content-free metrics sink; Standalone it makes no network call. Use
+   `.chat(model)`: `createOpenAI(...)(model)` talks to the Responses API,
    whose usage the handler does not read, so turn costs would stay unknown.
-   `managedRuntime` names the shared turn guard, not a Platform purchase.
-   Keep it a shared `const` at module scope: when the route also serves the
+   A failed turn shows the user a neutral message and logs only the error
+   name; pass `onError` to see the cause. When the route also serves the
    chat's `@` and `/` list with a GET (`createChatInteractionsHandler`, see
-   `building-glirastes-chat-ui`), pass that same object to the POST and the
-   GET, so the list and the turn decide with one principal and one snapshot.
-   `toolDiscovery: true` offers `find_tools`, and `toolSemantics` gives it the
-   checked synonyms; neither grants a tool. With `metrics`, an endpoint that
+   `building-glirastes-chat-ui`), give it `turn.managedRuntime` of the same
+   principal, so the list and the turn decide alike. `toolDiscovery: true`
+   offers `find_tools`; it grants no tool. With metrics, an endpoint that
    refuses a call its schema accepted (400 or 422) is reported as
    `tool_contract_rejected`, without content.
 4. Mount the navigation bridge once in the root layout, as a client component,
@@ -121,8 +117,10 @@ second, hand-maintained catalogue.
    handler that writes through a helper, a Server Action or a mutation hook is
    flagged (`ui-action-write-unproven`); the developer raises it with
    `glirastes tools policy raise <tool> write`.
-7. Mount the chat with `building-glirastes-chat-ui`
-   (`VercelAiChat endpoint="/api/chat"` from `glirastes/react/vercel`).
+7. Mount the chat with `building-glirastes-chat-ui`: `VercelAiChat
+   endpoint="/api/chat"` (from `glirastes/react/vercel`) around an
+   `AssistantWorkspace` that holds the page, and an `AssistantToggle` in the
+   top bar. The chat then docks on the right or detaches as a window.
 8. Run `glirastes tools refresh`, the work lists of `setting-up-glirastes`,
    `glirastes tools check` and `glirastes doctor`, then the real chat test.
    Connecting is optional: `glirastes connect --base-url <url>`, then
