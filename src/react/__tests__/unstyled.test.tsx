@@ -112,7 +112,7 @@ describe('unstyled (BYOS) mode', () => {
   it('marks roots that portal out of the panel', () => {
     render(
       <AiChatProvider transport={transport()} unstyled>
-        <AiTriggerButton onClickChat={() => {}} />
+        <AiTriggerButton onClickChat={() => {}} onClickMic={() => {}} />
         <ConfirmDialog open title="Delete?" onConfirm={() => {}} onCancel={() => {}} />
       </AiChatProvider>,
     );

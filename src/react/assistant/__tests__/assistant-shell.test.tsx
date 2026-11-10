@@ -155,7 +155,7 @@ describe('several chats in the assistant header', () => {
     locale: new Proxy({}, { get: (_, key) => String(key) }),
   }) as unknown as ChatContextValue;
   const mountWith = (value: ChatContextValue, props: Partial<React.ComponentProps<typeof AssistantShell>> = {}) =>
-    render(<ChatContext.Provider value={value}><AssistantLayoutProvider defaultOpen>
+    render(<ChatContext.Provider value={value}><AssistantLayoutProvider>
       <AssistantShell {...props}><textarea aria-label="Draft" /></AssistantShell>
     </AssistantLayoutProvider></ChatContext.Provider>);
 

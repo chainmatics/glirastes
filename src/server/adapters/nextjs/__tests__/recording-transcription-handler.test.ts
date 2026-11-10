@@ -7,7 +7,7 @@ function request(options: { body?: Uint8Array; type?: string; query?: string } =
   return new Request(`http://app.test/api/ai/speech-recognize${options.query ?? ''}`, {
     method: 'POST',
     headers: { 'content-type': options.type ?? 'audio/wav' },
-    body: options.body ?? wav(),
+    body: (options.body ?? wav()) as BodyInit,
   });
 }
 
