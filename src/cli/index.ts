@@ -83,7 +83,7 @@ function hasFlag(args: string[], flag: string): boolean {
 export const CLI_USAGE =
   'Usage: glirastes init [--agent codex|claude] [--root] [--dry-run] [--json]\n'
   + '         start integration with your existing coding agent\n'
-  + '       glirastes init --ci github [--enrich-on <branch,...>] [--enrich-on-main] [--force] [--root] [--json]\n'
+  + '       glirastes init --ci github [--enrich-on <branch,...>] [--enrich-on-main] [--ci-environment <name>] [--force] [--root] [--json]\n'
   + '         write the GitHub workflow: model-free tool check, Pro managed tool job\n'
   + '       glirastes setup [--dry-run] [--managed] [--json]\n'
   + '         detect, validate and atomically install local artifacts\n'
@@ -704,6 +704,7 @@ export async function runCli(
         provider: ci,
         enrichOnMain: hasFlag(rest, '--enrich-on-main'),
         enrichOn: (getFlagValue(rest, '--enrich-on') ?? '').split(',').map((branch) => branch.trim()).filter(Boolean),
+        ...(getFlagValue(rest, '--ci-environment') !== undefined ? { environment: getFlagValue(rest, '--ci-environment') } : {}),
         force: hasFlag(rest, '--force'),
       });
       console.log(hasFlag(rest, '--json') ? JSON.stringify(written) : `${written.path}: ${written.status}`);

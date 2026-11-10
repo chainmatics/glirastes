@@ -117,7 +117,10 @@ no model on every pull request and push to `main`.
   `GLIRASTES_MANAGED_TOOLS` to `true`, the variable
   `GLIRASTES_CONTROL_PLANE_URL` and the secret `GLIRASTES_CI_KEY` from the
   Platform. Never set them, read them or ask for their values; name them for
-  the developer. Review its commits like your own.
+  the developer. Review its commits like your own. When the repository's
+  production already keeps Glirastes values in repository variables, or a
+  staging Platform needs its own key, add `--ci-environment <name>`: the job
+  then reads all three from that GitHub environment.
 
 ## Commands
 

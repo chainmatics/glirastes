@@ -17,9 +17,11 @@ export const ENRICH_TIMEOUT_MINUTES = 50;
 export type PackageManager = 'bun' | 'pnpm' | 'yarn' | 'npm';
 
 export class CiWorkflowError extends Error {
-  constructor(readonly code: 'ci_provider_unsupported' | 'ci_workflow_exists' | 'ci_branch_invalid') {
+  constructor(readonly code: 'ci_provider_unsupported' | 'ci_workflow_exists' | 'ci_branch_invalid' | 'ci_environment_invalid') {
     super(code === 'ci_provider_unsupported'
       ? 'Only --ci github is supported.'
+      : code === 'ci_environment_invalid'
+        ? '--ci-environment takes the name of one GitHub environment, for example staging.'
       : code === 'ci_branch_invalid'
         ? '--enrich-on takes branch names separated by commas, for example staging,main.'
         : `${CI_WORKFLOW_PATH} exists with other content; review it or pass --force to replace it.`);
@@ -87,15 +89,30 @@ export function enrichBranches(options: { enrichOn?: readonly string[]; enrichOn
   return [...new Set(branches)];
 }
 
+/** A GitHub environment name that YAML and an expression read literally. */
+const ENVIRONMENT = /^[A-Za-z0-9._-]{1,100}$/;
+
 const yamlBranch = (branch: string) => (/^[A-Za-z0-9._-]+$/.test(branch) ? branch : `'${branch}'`);
 
 export function githubToolsWorkflow(options: {
   packageManager: PackageManager;
   enrichOnMain?: boolean;
   enrichOn?: readonly string[];
+  /**
+   * The GitHub environment whose secrets and variables the managed job reads
+   * (`--ci-environment staging`), so a staging Platform's CI key never sits
+   * beside production's repository values. A job-level `if` cannot see
+   * environment variables, so every step checks GLIRASTES_MANAGED_TOOLS.
+   */
+  environment?: string;
 }): string {
   const setup = SETUP[options.packageManager];
   const branches = enrichBranches(options);
+  const environment = options.environment;
+  if (environment !== undefined && !ENVIRONMENT.test(environment)) throw new CiWorkflowError('ci_environment_invalid');
+  const gated = (steps: string[]) => (environment === undefined ? steps : steps.flatMap((line) => (
+    /^      - /.test(line) ? [line, "        if: vars.GLIRASTES_MANAGED_TOOLS == 'true'"] : [line]
+  )));
   const onPush = branches.length > 0;
   const refs = branches.map((branch) => `github.ref == 'refs/heads/${branch}'`).join(' || ');
   const trigger = onPush
@@ -132,9 +149,10 @@ export function githubToolsWorkflow(options: {
     '',
     '  glirastes-tools-enrich:',
     '    if: >-',
-    "      vars.GLIRASTES_MANAGED_TOOLS == 'true' && (",
-    `        ${trigger}`,
-    '      )',
+    ...(environment === undefined
+      ? ["      vars.GLIRASTES_MANAGED_TOOLS == 'true' && (", `        ${trigger}`, '      )']
+      : [`      ${trigger.replace('\n        ', '\n      ')}`]),
+    ...(environment === undefined ? [] : [`    environment: ${environment}`]),
     '    runs-on: ubuntu-latest',
     `    timeout-minutes: ${ENRICH_TIMEOUT_MINUTES}`,
     '    concurrency:',
@@ -144,13 +162,15 @@ export function githubToolsWorkflow(options: {
     '      contents: write',
     ...(onPush ? ['      pull-requests: write'] : []),
     '    steps:',
-    '      - uses: actions/checkout@v4',
-    '        with:',
-    '          ref: ${{ github.head_ref || github.ref_name }}',
-    ...setup.steps,
-    `      - run: ${setup.install}`,
-    `      - run: ${setup.run} tools refresh --mode write --keep-going`,
-    `      - run: ${setup.run} tools enrich --managed --json${onPush ? ' --base "$GLIRASTES_BASE_BRANCH"' : ''}`,
+    ...gated([
+      '      - uses: actions/checkout@v4',
+      '        with:',
+      '          ref: ${{ github.head_ref || github.ref_name }}',
+      ...setup.steps,
+      `      - run: ${setup.install}`,
+      `      - run: ${setup.run} tools refresh --mode write --keep-going`,
+      `      - run: ${setup.run} tools enrich --managed --json${onPush ? ' --base "$GLIRASTES_BASE_BRANCH"' : ''}`,
+    ]),
     '        env:',
     '          GLIRASTES_CI_KEY: ${{ secrets.GLIRASTES_CI_KEY }}',
     '          GLIRASTES_CONTROL_PLANE_URL: ${{ vars.GLIRASTES_CONTROL_PLANE_URL }}',
@@ -169,12 +189,14 @@ export async function writeCiWorkflow(options: {
   provider: string;
   enrichOnMain?: boolean;
   enrichOn?: readonly string[];
+  environment?: string;
   force?: boolean;
 }): Promise<{ path: string; status: 'written' | 'unchanged' | 'replaced' }> {
   if (options.provider !== 'github') throw new CiWorkflowError('ci_provider_unsupported');
   const content = githubToolsWorkflow({
     packageManager: detectPackageManager(options.root),
     enrichOnMain: options.enrichOnMain === true,
+    ...(options.environment !== undefined ? { environment: options.environment } : {}),
     ...(options.enrichOn ? { enrichOn: options.enrichOn } : {}),
   });
   const target = join(options.root, CI_WORKFLOW_PATH);

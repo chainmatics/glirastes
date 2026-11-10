@@ -96,6 +96,34 @@ describe('glirastes init --ci github', () => {
       .toBe(githubToolsWorkflow({ packageManager: 'npm', enrichOn: ['staging', 'main'] }));
   });
 
+  it("reads the managed job's keys from a GitHub environment on request", () => {
+    const workflow = githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'], environment: 'staging' });
+    const enrich = job(workflow, 'glirastes-tools-enrich');
+    const steps = enrich.slice(enrich.indexOf('    steps:\n'));
+
+    expect(enrich).toContain('    environment: staging\n');
+    // A job-level `if` cannot see environment variables, so every step checks the switch.
+    expect(enrich).not.toContain("vars.GLIRASTES_MANAGED_TOOLS == 'true' && (");
+    expect(steps.match(/      - (uses|run): /g)).toHaveLength(5);
+    expect(steps.match(/        if: vars.GLIRASTES_MANAGED_TOOLS == 'true'\n/g)).toHaveLength(5);
+    expect(job(workflow, 'glirastes-tools')).not.toMatch(/environment|vars\./);
+    expect(githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'] })).not.toContain('environment:');
+  });
+
+  it('refuses an environment name that is not one', async () => {
+    await expect(writeCiWorkflow({ root, provider: 'github', environment: "x' || true" }))
+      .rejects.toEqual(new CiWorkflowError('ci_environment_invalid'));
+  });
+
+  it('takes the environment from --ci-environment', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await runCli(['init', '--ci', 'github', '--enrich-on', 'staging', '--ci-environment', 'staging', '--root', root, '--json'], { init: { ask: vi.fn() } as never });
+
+    expect(await readFile(join(root, CI_WORKFLOW_PATH), 'utf8'))
+      .toBe(githubToolsWorkflow({ packageManager: 'npm', enrichOn: ['staging'], environment: 'staging' }));
+  });
+
   it('uses the package manager of the lockfile', async () => {
     expect(detectPackageManager(root)).toBe('npm');
     expect(githubToolsWorkflow({ packageManager: 'npm', enrichOnMain: false }))
