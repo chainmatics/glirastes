@@ -68,7 +68,8 @@ function resolveWebSocketUrl(
   return url.toString();
 }
 
-async function createPcmPipeline(
+/** Microphone audio as 16 kHz mono 16-bit PCM chunks; returns its stop function. */
+export async function createPcmPipeline(
   stream: MediaStream,
   onAudio: (audio: ArrayBuffer) => void,
 ): Promise<() => Promise<void>> {

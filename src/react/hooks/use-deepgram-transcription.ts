@@ -15,10 +15,11 @@ export function useDeepgramTranscription(
 ): UseDeepgramTranscriptionReturn {
   const getTokenRef = useRef(options.getToken);
   getTokenRef.current = options.getToken;
-  const adapter = useMemo(() => new DeepgramSttAdapter({
+  const ownAdapter = options.adapter;
+  const adapter = useMemo(() => ownAdapter ?? new DeepgramSttAdapter({
     baseUrl: options.baseUrl,
     getToken: () => getTokenRef.current?.(),
-  }), [options.baseUrl]);
+  }), [ownAdapter, options.baseUrl]);
   const stt = useStt({
     adapter,
     language: options.language ?? 'de',

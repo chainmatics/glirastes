@@ -104,6 +104,12 @@ export interface UseDeepgramTranscriptionOptions {
   baseUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
   getToken?: () => string | null | undefined;
+  /**
+   * The app's own speech provider instead of the Deepgram stream, for example
+   * a `RecordedSttAdapter`. `baseUrl` and `getToken` are then unused. Keep
+   * one instance across renders; a new one ends the running recording.
+   */
+  adapter?: import('./stt/controller.js').SttProviderAdapter;
   onInterimTranscript?: (text: string) => void;
   onError?: (error: string) => void;
 }

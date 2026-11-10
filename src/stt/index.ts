@@ -8,6 +8,11 @@ export {
   type SttSessionSnapshot,
 } from '../react/stt/controller.js';
 export {
+  RecordedSttAdapter,
+  encodeWav,
+  type RecordedSttAdapterOptions,
+} from '../react/stt/recorded.js';
+export {
   DeepgramSttAdapter,
   createDeepgramSegmentParser,
   type DeepgramSttAdapterOptions,

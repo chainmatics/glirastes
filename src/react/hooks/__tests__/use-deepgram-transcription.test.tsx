@@ -55,4 +55,27 @@ describe('useDeepgramTranscription', () => {
 
     unmount();
   });
+
+  it('records through the provider adapter of the app when one is given', async () => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [] }) as unknown as MediaStream) },
+    });
+    const connect = vi.fn(async () => ({
+      finalize: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    }));
+
+    // One adapter for the life of the component, as an app keeps it.
+    const adapter = { connect };
+    const { result, unmount } = renderHook(() => useDeepgramTranscription({ adapter }));
+    await act(async () => {
+      await result.current.startRecording('');
+    });
+
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(adapterConnect).not.toHaveBeenCalled();
+    unmount();
+  });
 });

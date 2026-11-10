@@ -138,6 +138,11 @@ export {
   type SttSessionSnapshot,
 } from './stt/controller.js';
 export {
+  RecordedSttAdapter,
+  encodeWav,
+  type RecordedSttAdapterOptions,
+} from './stt/recorded.js';
+export {
   DeepgramSttAdapter,
   createDeepgramSegmentParser,
   type DeepgramSttAdapterOptions,
