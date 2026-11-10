@@ -62,7 +62,7 @@ describe('release workflows', () => {
 
   it('publishes only after the CI gates, with the build before the tests', () => {
     expect(jobRuns(read('.github/workflows/publish.yml'), 'publish')).toEqual([
-      'npm install -g npm@latest',
+      'npm install -g npm@11',
       '|',
       'bun install --frozen-lockfile',
       'bun run typecheck',
