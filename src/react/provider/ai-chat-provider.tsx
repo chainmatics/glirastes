@@ -688,6 +688,9 @@ export function AiChatProvider({
         if (cancelled) return;
         processedToolCallsRef.current.clear();
         handledApprovalIdsRef.current.clear();
+        // The transport may still have held the previous chat's messages
+        // until now; an approval read from them is not this chat's.
+        setPendingApprovalsMap(new Map());
         // Coerce wire-shape rows (with `content: string`) into SDK
         // messages (with `parts: [...]`) so bridges don't have to.
         const coerced = loaded ? coerceLoadedMessages(loaded as unknown[]) : [];

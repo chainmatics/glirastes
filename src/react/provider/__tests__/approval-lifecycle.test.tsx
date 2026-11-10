@@ -189,6 +189,35 @@ describe('AiChatProvider approval lifecycle', () => {
     });
   });
 
+  it('drops the approval of the previous chat once the opened chat has loaded', async () => {
+    // A provider remounted per chat can start with the transport still
+    // holding the previous chat's messages, open approval included.
+    const stale = createTransport(vi.fn()).messages;
+    let finishLoad: ((messages: never[]) => void) | undefined;
+    const load = () => new Promise<never[]>((resolve) => { finishLoad = resolve; });
+    function Host() {
+      const [messages, setMessages] = React.useState(stale);
+      const transport = { ...createTransport(vi.fn()), messages, setMessages: setMessages as never };
+      return (
+        <AiChatProvider transport={transport} session={{ activeId: 'chat-b', load }}>
+          <ApprovalProbe />
+        </AiChatProvider>
+      );
+    }
+
+    render(<Host />);
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-count').textContent).toBe('1');
+    });
+    await act(async () => {
+      finishLoad?.([]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-count').textContent).toBe('0');
+    });
+  });
+
   it('removes an approval only after the transport confirms it', async () => {
     let resolveResponse: (() => void) | undefined;
     const response = new Promise<void>((resolve) => {
