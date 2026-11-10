@@ -44,6 +44,7 @@ import {
 } from './context-helpers.js';
 import { prepareModelMessages, wrapToolsForVercelAi } from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
+import { toolPresentationOf } from './tool-presentation.js';
 import { PrincipalSchema } from '../../../contracts/index.js';
 import {
   createManagedTurnGuard,
@@ -452,6 +453,12 @@ async function defaultStreamHandler(
           transient,
         });
       };
+
+      // Ahead of the first chunk, so the UI can name a tool the moment it is called.
+      const presentation = toolPresentationOf(ctx.managedTurn?.snapshot.manifestRevision);
+      if (presentation) {
+        writer.write({ type: 'data-tool-presentation', data: presentation, transient: true });
+      }
 
       writePipelineState(
         createPipelineState({

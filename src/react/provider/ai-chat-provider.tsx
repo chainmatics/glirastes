@@ -24,6 +24,8 @@ import type {
 import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { collectEntityNames } from '../utils/entity-names.js';
+import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
+import { languageLocale, parseToolPresentation, type ToolPresentation } from '../utils/tool-presentation.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
@@ -44,7 +46,7 @@ import {
 // Default locale (English)
 // ============================================================================
 
-import type { ChatLocale } from '../types.js';
+import type { ApprovalDescriptionFn, ChatLocale, ToolLabelConfig } from '../types.js';
 
 export const DEFAULT_LOCALE: ChatLocale = {
   placeholder: 'Type a message...',
@@ -158,21 +160,6 @@ function getMentionTypesForTrigger(types: string[], trigger: MentionTrigger): st
     return atTypes.length > 0 ? atTypes : types;
   }
   return types;
-}
-
-/** Default approval description — returns raw tool name and JSON args */
-function defaultApprovalDescription(
-  toolName: string,
-  approvalId: string,
-  args: unknown,
-): PendingApproval {
-  return {
-    id: approvalId,
-    toolName,
-    args: isRecord(args) ? (args as Record<string, unknown>) : {},
-    messageId: '',
-    description: toolName,
-  };
 }
 
 /**
@@ -407,10 +394,20 @@ export function AiChatProvider({
   stepSummaryFormatter,
   children,
 }: AiChatProviderProps) {
-  // Merge caller-supplied locale overrides with English defaults.
+  // What the chat turn says about its tools (label per model name, app
+  // language) and the language of the page: the defaults of a chat that
+  // configures neither `locale`, `toolLabels` nor `approvalDescription`.
+  const [toolPresentation, setToolPresentation] = useState<ToolPresentation | null>(null);
+  const [pageLanguage, setPageLanguage] = useState<string | null>(null);
+  useEffect(() => {
+    // After mount, so the server render and the first client render agree.
+    setPageLanguage(document.documentElement.lang || null);
+  }, []);
+  const language = toolPresentation?.locale ?? pageLanguage;
+  // English defaults, then the built-in texts of the app's language, then the caller's overrides.
   const locale = useMemo<ChatLocale>(
-    () => ({ ...DEFAULT_LOCALE, ...(userLocale ?? {}) }),
-    [userLocale],
+    () => ({ ...DEFAULT_LOCALE, ...languageLocale(language), ...(userLocale ?? {}) }),
+    [userLocale, language],
   );
   // Resolve `theme` prop → CSS variables spread onto widget roots.
   const themeVars = useMemo<CSSProperties>(
@@ -443,9 +440,27 @@ export function AiChatProvider({
     }),
     [userVoice],
   );
-  const toolLabels = useMemo(() => userToolLabels ?? {}, [userToolLabels]);
+  // The labels of the turn's tools, each used for one call and for several; the caller's labels win.
+  const toolLabels = useMemo<ToolLabelConfig>(() => ({
+    labels: {
+      ...Object.fromEntries(Object.entries(toolPresentation?.labels ?? {})
+        .map(([name, label]) => [name, { singular: label, plural: label }])),
+      ...(userToolLabels?.labels ?? {}),
+    },
+  }), [toolPresentation, userToolLabels]);
 
-  const approvalDescriptionFn = userApprovalDescription ?? defaultApprovalDescription;
+  // Without the app's own description, an approval names the action by its
+  // label and lists what the call states, instead of the raw tool name alone.
+  const derivedApprovalDescription = useMemo<ApprovalDescriptionFn>(() => {
+    const actions = Object.fromEntries(Object.entries(toolLabels.labels ?? {})
+      .map(([name, label]) => [name, label.singular]));
+    const describe = createApprovalDescriptionGenerator({ toolLabels: actions, dateLocale: language ?? 'en-US' });
+    return (toolName, approvalId, args, context) => {
+      const pending = describe(toolName, approvalId, args, context);
+      return actions[toolName] ? pending : { ...pending, description: toolName };
+    };
+  }, [toolLabels, language]);
+  const approvalDescriptionFn = userApprovalDescription ?? derivedApprovalDescription;
 
   // Approvals state (Map for O(1) lookup)
   const [pendingApprovalsMap, setPendingApprovalsMap] = useState<Map<string, PendingApproval>>(new Map());
@@ -553,6 +568,12 @@ export function AiChatProvider({
 
   // Data part handler — processes pipeline and truncation events from any transport
   const handleDataPart = useCallback((dataPart: { type: string; data: unknown }) => {
+    if (dataPart.type === 'data-tool-presentation') {
+      const next = parseToolPresentation(dataPart.data);
+      // Every turn sends it again; keep the object while its content is the same.
+      if (next) setToolPresentation((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+      return;
+    }
     if (dataPart.type === 'data-truncation') {
       const data = dataPart.data as { completedTools: string[]; message: string };
       setTruncation({
