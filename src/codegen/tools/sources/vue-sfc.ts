@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
  */
 export const VUE_SCRIPT_SUFFIX = '.vue.ts';
 
-const SCRIPT_BLOCK = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+const SCRIPT_BLOCK = /<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi;
 const ATTRIBUTE = /([:@\w-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 const READ_LANGUAGES = new Set(['ts', 'js']);
 

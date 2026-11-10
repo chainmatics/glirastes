@@ -1,3 +1,4 @@
+import { trimTrailingSlashes } from '../contracts/url.js';
 import { z } from 'zod';
 import { RuntimeControlPlaneRequestError } from './control-plane-client.js';
 
@@ -43,7 +44,7 @@ export async function lookupRuntimeConnection(options: {
   signal?: AbortSignal;
 }): Promise<ResolvedRuntimeConnection> {
   const response = await (options.fetchImpl ?? fetch)(
-    `${options.baseUrl.replace(/\/+$/, '')}/v1/runtime/connection`,
+    `${trimTrailingSlashes(options.baseUrl)}/v1/runtime/connection`,
     {
       method: 'GET',
       headers: { 'x-api-key': options.apiKey, accept: 'application/json' },

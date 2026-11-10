@@ -40,7 +40,7 @@ function corpusTests(files: string[], name: string): string[] {
   const titles: string[] = [];
   for (const file of files) {
     const source = read(file);
-    const start = source.search(new RegExp(`describe(?:\\.skipIf\\([^)]*\\))?\\('${name.replace(/[+.]/g, '\\$&')}'`));
+    const start = source.search(new RegExp(`describe(?:\\.skipIf\\([^)]*\\))?\\('${name.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}'`));
     if (start < 0) continue;
     const next = source.indexOf('\ndescribe', start + 1);
     const block = source.slice(start, next < 0 ? undefined : next);

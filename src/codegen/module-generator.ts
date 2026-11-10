@@ -328,7 +328,7 @@ async function readModuleMeta(
  * Generate intentModules record + getModuleForIntent / getAllModules helpers.
  * Only emitted when module meta is available (has execution/systemPrompt data).
  */
-function generateIntentModules(
+export function generateIntentModules(
   modules: string[],
   meta: Map<string, ModuleMetaInfo>,
   moduleTools: Map<string, Set<string>>,
@@ -342,7 +342,7 @@ function generateIntentModules(
     // Build meta object literal
     const hint = info?.hint ?? '';
     const examples = info?.examples ?? [];
-    const exStr = examples.map((e) => `'${e.replace(/'/g, "\\'")}'`).join(', ');
+    const exStr = examples.map((e) => JSON.stringify(e)).join(', ');
 
     // Execution overrides (only non-default values)
     let execStr = '';
@@ -355,11 +355,11 @@ function generateIntentModules(
     }
 
     const sysPrompt = info?.systemPrompt
-      ? `    systemPrompt: \`${info.systemPrompt.replace(/`/g, '\\`')}\`,\n`
+      ? `    systemPrompt: ${JSON.stringify(info.systemPrompt)},\n`
       : '';
 
     entries.push(`  '${mod}': buildIntentModule('${mod}', toolsByModule['${mod}'], {
-    classification: { hint: '${hint.replace(/'/g, "\\'")}', examples: [${exStr}] },
+    classification: { hint: ${JSON.stringify(hint)}, examples: [${exStr}] },
 ${execStr}${sysPrompt}  })`);
   }
 

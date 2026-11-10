@@ -5,8 +5,9 @@ import type {
   MentionSerializationConfig,
 } from '../types.js';
 
-const CONTEXT_BLOCK_RE = /<!--\s*context:[\s\S]*?-->\s*/gi;
-const MENTION_MARKER_RE = /\{\{mention:([^:}]+):([^:}]+):([^}]+)\}\}/g;
+const CONTEXT_OPEN_RE = /<!--\s*context:/iy;
+// Bounded parts keep the scan linear on hostile text with many unclosed markers.
+const MENTION_MARKER_RE = /\{\{mention:([^:}]{1,200}):([^:}]{1,200}):([^}]{1,1000})\}\}/g;
 const DEFINITION_ID_RE = /^[A-Za-z0-9_.-]{1,200}$/;
 const MAX_TOOL_ARGS_LENGTH = 2_000;
 
@@ -14,8 +15,31 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Removes `<!-- context: … -->` blocks and the whitespace after them. Scans with
+ * indexOf instead of one lazy regex, which is quadratic on many unclosed openers.
+ */
 export function stripContextBlocks(text: string): string {
-  return text.replace(CONTEXT_BLOCK_RE, '').trimStart();
+  let kept = '';
+  let cursor = 0;
+  let from = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', from);
+    if (open < 0) break;
+    CONTEXT_OPEN_RE.lastIndex = open;
+    if (!CONTEXT_OPEN_RE.test(text)) {
+      from = open + 4;
+      continue;
+    }
+    const close = text.indexOf('-->', CONTEXT_OPEN_RE.lastIndex);
+    if (close < 0) break;
+    kept += text.slice(cursor, open);
+    let end = close + 3;
+    while (end < text.length && /\s/.test(text[end]!)) end += 1;
+    cursor = end;
+    from = end;
+  }
+  return (kept + text.slice(cursor)).trimStart();
 }
 
 /**

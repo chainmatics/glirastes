@@ -93,3 +93,11 @@ describe('.vue script blocks', () => {
     expect(observed.findings[0]!.message).toContain('src/views/TasksView.vue has a <script lang="tsx"> block');
   });
 });
+
+describe('vueScriptOf end tags', () => {
+  it('closes a script block on an end tag with attributes or whitespace', () => {
+    const script = vueScriptOf('<script lang="ts">const a = 1;</script\tfoo>\n<template><p /></template>\n');
+    expect(script.ok).toBe(true);
+    if (script.ok) expect(script.text).toContain('const a = 1;');
+  });
+});

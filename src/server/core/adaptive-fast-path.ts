@@ -40,7 +40,7 @@ class AdaptiveFastPath implements AdaptiveFastPathInstance {
       .toLowerCase()
       .trim()
       .replace(/\s+/g, ' ')
-      .replace(/[.!?]+$/, '');
+      .replace(/[.!?]+/g, (run, offset: number, all: string) => (offset + run.length === all.length ? '' : run));
   }
 
   match(input: string): IntentClassification | null {

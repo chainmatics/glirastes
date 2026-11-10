@@ -1,3 +1,4 @@
+import { trimTrailingSlashes } from '../../contracts/url.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
@@ -93,7 +94,7 @@ export function createRuntimeMetricsSink(
   }
   const config = parsed.data;
   const fetchImpl = options.fetch ?? globalThis.fetch;
-  const endpoint = `${config.controlPlaneUrl.replace(/\/+$/, '')}/v1/runtime/apps/`
+  const endpoint = `${trimTrailingSlashes(config.controlPlaneUrl)}/v1/runtime/apps/`
     + `${config.appId}/environments/${config.environmentId}/metrics/events`;
   const identity: RuntimeMetricsIdentity = Object.freeze({
     appId: config.appId,

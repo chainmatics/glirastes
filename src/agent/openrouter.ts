@@ -1,3 +1,4 @@
+import { trimTrailingSlashes } from '../contracts/url.js';
 import type { LanguageModel } from 'ai';
 
 /**
@@ -63,7 +64,7 @@ export async function selectJobModel(options: {
 }): Promise<{ model: string; fallbackUsed: boolean }> {
   let listed: unknown;
   try {
-    const response = await (options.fetchImpl ?? fetch)(`${options.baseUrl.replace(/\/+$/, '')}/models`, {
+    const response = await (options.fetchImpl ?? fetch)(`${trimTrailingSlashes(options.baseUrl)}/models`, {
       method: 'GET',
       headers: { authorization: `Bearer ${options.apiKey}` },
       ...(options.signal ? { signal: options.signal } : {}),

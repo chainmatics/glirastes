@@ -1,3 +1,4 @@
+import { trimTrailingSlashes } from '../contracts/url.js';
 import { z } from 'zod';
 
 /**
@@ -134,7 +135,7 @@ export class PlatformToolJobs {
   }
 
   private async post(path: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
-    const url = `${this.options.baseUrl.replace(/\/+$/, '')}/v2/apps/${encodeURIComponent(this.options.appId)}/tool-jobs${path}`;
+    const url = `${trimTrailingSlashes(this.options.baseUrl)}/v2/apps/${encodeURIComponent(this.options.appId)}/tool-jobs${path}`;
     let response: Response;
     try {
       response = await this.fetchImpl(url, {

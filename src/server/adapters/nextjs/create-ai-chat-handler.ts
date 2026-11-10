@@ -1507,7 +1507,7 @@ function deriveSessionId(messages: unknown[]): string {
       return `ai-${msg.id}`;
     }
   }
-  return `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `ai-${globalThis.crypto.randomUUID()}`;
 }
 
 async function anonymizeMessages(

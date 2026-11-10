@@ -1,3 +1,4 @@
+import { trimTrailingSlashes } from '../../../contracts/url.js';
 /** The languages a recording may be transcribed in, unless the app sets its own list. */
 export const DEFAULT_RECORDING_LANGUAGES = ['de', 'en', 'de-DE', 'en-US', 'en-GB', 'fr', 'es', 'it', 'nl', 'pt'] as const;
 
@@ -56,7 +57,7 @@ export function createRecordingTranscriptionHandler(config: RecordingTranscripti
     form.set('language', language.slice(0, 2));
 
     try {
-      const response = await (config.fetch ?? globalThis.fetch)(`${config.url.replace(/\/+$/, '')}/v1/audio/transcriptions`, {
+      const response = await (config.fetch ?? globalThis.fetch)(`${trimTrailingSlashes(config.url)}/v1/audio/transcriptions`, {
         method: 'POST',
         headers: config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {},
         body: form,

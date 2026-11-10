@@ -222,3 +222,16 @@ describe('tool reference chip dataset', () => {
     expect(toolReferenceFromDataset({ mentionDefinitionId: 'ui.navigate' })).toEqual({ definitionId: 'ui.navigate' });
   });
 });
+
+describe('mention markup on hostile input', () => {
+  it('strips unclosed context openers in linear time', () => {
+    const input = '<!--context:'.repeat(50_000);
+    const started = performance.now();
+    expect(stripContextBlocks(input)).toBe(input);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('keeps stripping closed context blocks case-insensitively', () => {
+    expect(stripContextBlocks('<!-- CONTEXT: a -->\n  Hallo <!--context:b-->Welt')).toBe('Hallo Welt');
+  });
+});
