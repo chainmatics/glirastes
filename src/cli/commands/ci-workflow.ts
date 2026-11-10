@@ -124,8 +124,16 @@ export function githubToolsWorkflow(options: {
     '# Written by `glirastes init --ci github`.',
     '# glirastes-tools checks the committed tool outputs without secrets or models.',
     '# glirastes-tools-enrich (Glirastes Pro) describes open tools in a managed job and',
-    '# commits them as glirastes-bot; it runs once the repository variable',
-    '# GLIRASTES_MANAGED_TOOLS is "true" and the secret GLIRASTES_CI_KEY is set.',
+    ...(environment === undefined
+      ? [
+        '# commits them as glirastes-bot; it runs once the repository variable',
+        '# GLIRASTES_MANAGED_TOOLS is "true" and the secret GLIRASTES_CI_KEY is set.',
+      ]
+      : [
+        '# commits them as glirastes-bot; it runs once the variable',
+        `# GLIRASTES_MANAGED_TOOLS of the GitHub environment ${environment} is "true" and`,
+        '# that environment holds GLIRASTES_CI_KEY and GLIRASTES_CONTROL_PLANE_URL.',
+      ]),
     'name: glirastes-tools',
     '',
     'on:',

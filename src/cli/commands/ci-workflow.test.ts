@@ -102,6 +102,7 @@ describe('glirastes init --ci github', () => {
     const steps = enrich.slice(enrich.indexOf('    steps:\n'));
 
     expect(enrich).toContain('    environment: staging\n');
+    expect(workflow).toContain('# GLIRASTES_MANAGED_TOOLS of the GitHub environment staging is "true"');
     // A job-level `if` cannot see environment variables, so every step checks the switch.
     expect(enrich).not.toContain("vars.GLIRASTES_MANAGED_TOOLS == 'true' && (");
     expect(steps.match(/      - (uses|run): /g)).toHaveLength(5);
