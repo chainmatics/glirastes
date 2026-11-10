@@ -7,19 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `glirastes tools refresh` reports settings the chat cannot set yet: a React
-  context setter with a closed set of values, or the next-themes `setTheme`.
-  The `ui-control-unbound` finding names no tool. In `tools resolve --print`
-  it proposes the `useAiClientAction` registration and where to add it, and
-  the tool comes from that registration on the next refresh.
-  `ui-control-contract-mismatch` flags a client action whose contract allows
-  values that the setter does not take. The developer keeps a control out
-  with `glirastes tools policy exclude-control <file>#<setter> --reason …`
-  (`excludeControls` in `tool-policy.json`).
-
-## [0.5.0] - Unreleased
+## [0.5.0] - 2026-11-10
 
 The Foundation release. Its surface differs from 0.4.0; read **Breaking** before
 upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
@@ -50,6 +38,16 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   generator needs them). The `wavesurfer.js` peer is gone.
 
 ### Added
+
+- `glirastes tools refresh` reports settings the chat cannot set yet: a React
+  context setter with a closed set of values, or the next-themes `setTheme`.
+  The `ui-control-unbound` finding names no tool. In `tools resolve --print`
+  it proposes the `useAiClientAction` registration and where to add it, and
+  the tool comes from that registration on the next refresh.
+  `ui-control-contract-mismatch` flags a client action whose contract allows
+  values that the setter does not take. The developer keeps a control out
+  with `glirastes tools policy exclude-control <file>#<setter> --reason …`
+  (`excludeControls` in `tool-policy.json`).
 
 - `createGlirastes` in `glirastes/runtime` wires an app to Glirastes in one
   call: pass the generated module and the local limits. It runs Standalone
