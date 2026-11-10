@@ -37,6 +37,37 @@ describe('ActivityLog', () => {
     expect(container.innerHTML).toBe('');
   });
 
+  it('folds the same tool run several times in a row into one line with its count', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'list_tasks', status: 'done' },
+          { id: 'c2', toolName: 'list_tasks', status: 'done' },
+          { id: 'c3', toolName: 'list_tasks', status: 'done' },
+          { id: 'c4', toolName: 'create_team', status: 'done' },
+          { id: 'c5', toolName: 'create_team', status: 'error' },
+          { id: 'c6', toolName: 'create_team', status: 'done', detail: 'Team Vertrieb' },
+          { id: 'c7', toolName: 'list_tasks', status: 'done' },
+        ]}
+      />,
+    );
+
+    // The summary still counts every call.
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
+      .toContain('7 Schritte ausgeführt');
+    expect(rows().map((row) => row.textContent)).toEqual([
+      'Aufgaben lesen×3',
+      'Team anlegen',
+      'Team anlegen',
+      'Team anlegenTeam Vertrieb',
+      'Aufgaben lesen',
+    ]);
+    expect(rows()[0].querySelector('[data-element="count"]')!.textContent).toBe('×3');
+    expect(rows()[1].getAttribute('data-status')).toBe('done');
+    expect(rows()[2].getAttribute('data-status')).toBe('error');
+  });
+
   it('shows the running tool as one collapsed line with a spinner', () => {
     render(
       <ActivityLog

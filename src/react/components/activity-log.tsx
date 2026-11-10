@@ -19,6 +19,29 @@ const STEP_ICONS: Record<ActivityStepStatus, StatusIconKind> = {
 };
 
 /**
+ * The same tool run several times in a row with the same outcome reads as
+ * one line with its count. A step with its own detail text stays a line.
+ */
+function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; count: number }> {
+  const lines: Array<{ step: ActivityStep; count: number }> = [];
+  for (const step of steps) {
+    const last = lines.at(-1);
+    if (
+      last
+      && last.step.toolName === step.toolName
+      && last.step.status === step.status
+      && !last.step.detail
+      && !step.detail
+    ) {
+      last.count += 1;
+    } else {
+      lines.push({ step, count: 1 });
+    }
+  }
+  return lines;
+}
+
+/**
  * Collapsible work log of one assistant turn, modelled on how Claude Code
  * shows tool calls: one line with a spinner while the turn runs, then a
  * summary that expands to the steps in the order they ran.
@@ -61,10 +84,13 @@ export function ActivityLog({ steps, active, notice, className }: ActivityLogPro
         <span data-element="label">{summaryText}</span>
       </summary>
       <ol data-element="activity-steps">
-        {steps.map((step) => (
+        {foldRepeatedSteps(steps).map(({ step, count }) => (
           <li key={step.id} data-element="activity-step" data-status={step.status}>
             <StatusIcon icon={STEP_ICONS[step.status]} />
-            <span data-element="label">{label(step.toolName)}</span>
+            <span data-element="label">
+              {count > 1 ? toolLabels.labels?.[step.toolName]?.plural ?? label(step.toolName) : label(step.toolName)}
+            </span>
+            {count > 1 && <span data-element="count">×{count}</span>}
             {step.detail && <span data-element="detail">{step.detail}</span>}
           </li>
         ))}
