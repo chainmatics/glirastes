@@ -8,7 +8,10 @@
 :where(
   [data-component="ai-chat-panel"],
   [data-component="chat-window"],
-  [data-component="ai-trigger-button"]
+  [data-component="ai-trigger-button"],
+  [data-component="assistant-shell"],
+  [data-component="assistant-bubble"],
+  [data-component="assistant-toggle"]
 ):where(:not([data-unstyled], [data-unstyled] *)) {
   --cm-primary: #6366f1;
   --cm-primary-soft: #818cf8;
@@ -1380,4 +1383,129 @@
   background: var(--cm-primary-tint);
   color: var(--cm-text);
   font-size: 0.8125rem;
+}
+
+/* ---------------------------------------------------------------------------
+   AssistantShell — docked sidebar or detached window. The handle geometry
+   is inline, so it also works unstyled; these rules are only the look.
+   --------------------------------------------------------------------------- */
+[data-component="assistant-shell"][data-floating-gesture]:where(:not([data-unstyled], [data-unstyled] *)) { transition: none; will-change: transform, width, height; }
+@media (pointer: coarse) {
+  [data-component="assistant-shell-window-handle"]:where(:not([data-unstyled], [data-unstyled] *)):is([data-resize-edge="n"], [data-resize-edge="s"]) { height: 16px !important; }
+  [data-component="assistant-shell-window-handle"]:where(:not([data-unstyled], [data-unstyled] *)):is([data-resize-edge="e"], [data-resize-edge="w"]) { width: 16px !important; }
+  [data-component="assistant-shell-window-handle"]:where(:not([data-unstyled], [data-unstyled] *)):is([data-resize-edge="ne"], [data-resize-edge="nw"], [data-resize-edge="se"], [data-resize-edge="sw"]) { width: 28px !important; height: 28px !important; }
+}
+
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) {
+  box-sizing: border-box;
+  z-index: 60;
+  background: var(--cm-bg);
+  color: var(--cm-text);
+  font-family: var(--cm-font);
+  border-left: 1px solid var(--cm-border);
+}
+[data-component="assistant-shell"][data-mode="floating"]:where(:not([data-unstyled], [data-unstyled] *)) {
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius);
+  box-shadow: 0 12px 32px -12px rgba(17, 24, 39, 0.25);
+  overflow: hidden;
+}
+[data-component="assistant-shell"][data-floating-gesture="move"]:where(:not([data-unstyled], [data-unstyled] *)) {
+  box-shadow: 0 16px 40px -12px rgba(17, 24, 39, 0.35);
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="header"] {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid var(--cm-border);
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="header"] > [data-element="icon"] {
+  display: inline-flex;
+  color: var(--cm-primary);
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="title"] {
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  color: var(--cm-text-muted);
+  cursor: pointer;
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action]:hover {
+  background: var(--cm-primary-tint);
+  color: var(--cm-text);
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="rail"] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  padding: 0.5rem 0;
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="expand"] {
+  flex: 1 1 0%;
+  width: 100%;
+  height: auto;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 1rem;
+  padding-top: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+[data-component="assistant-shell-resize"]:where(:not([data-unstyled], [data-unstyled] *)):is(:hover, :focus-visible, [data-dragging]) {
+  background: linear-gradient(to right, transparent 3px, var(--cm-primary) 3px, var(--cm-primary) 5px, transparent 5px);
+  outline: none;
+}
+[data-component="assistant-bubble"]:where(:not([data-unstyled], [data-unstyled] *)) {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--cm-primary);
+  color: #fff;
+  box-shadow: 0 8px 20px -8px rgba(17, 24, 39, 0.4);
+  cursor: pointer;
+}
+[data-component="assistant-toggle"]:where(:not([data-unstyled], [data-unstyled] *)) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  border: 0;
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  color: var(--cm-text);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+[data-component="assistant-toggle"]:where(:not([data-unstyled], [data-unstyled] *)):is(:hover, [aria-pressed="true"]) {
+  background: var(--cm-primary-tint);
 }

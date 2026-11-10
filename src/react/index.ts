@@ -183,6 +183,35 @@ export type {
 } from './hooks/use-draggable-position.js';
 
 // Components
+export {
+  AssistantLayoutProvider,
+  useAssistantLayout,
+  parseAssistantLayout,
+  defaultAssistantLayout,
+  clampAssistantWidth,
+  DEFAULT_ASSISTANT_LAYOUT_KEY,
+  DEFAULT_ASSISTANT_LAYOUT_LIMITS,
+  type AssistantLayout,
+  type AssistantLayoutLimits,
+  type AssistantLayoutMode,
+  type AssistantLayoutProviderProps,
+  type AssistantLayoutState,
+} from './assistant/assistant-layout.js';
+export {
+  AssistantShell,
+  AssistantToggle,
+  DEFAULT_ASSISTANT_SHELL_ICONS,
+  DEFAULT_ASSISTANT_SHELL_LABELS,
+  DE_ASSISTANT_SHELL_LABELS,
+  type AssistantShellAction,
+  type AssistantShellButtonProps,
+  type AssistantShellClassNames,
+  type AssistantShellIcons,
+  type AssistantShellLabels,
+  type AssistantShellProps,
+  type AssistantShellWindowOptions,
+} from './assistant/assistant-shell.js';
+export { AssistantWorkspace, type AssistantWorkspaceProps } from './assistant/assistant-workspace.js';
 export { AiChatPanel } from './components/ai-chat-panel.js';
 export { FloatingChatUI, type FloatingChatUIProps } from './components/floating-chat-ui.js';
 export { MessageList } from './components/message-list.js';
