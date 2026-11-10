@@ -145,7 +145,7 @@ export interface AssistantShellProps {
   showClearButton?: boolean;
   /** Default: `clear()` of the surrounding chat provider. */
   onClear?: () => void;
-  /** Handler of the new-chat shortcut; without it the shortcut stays off. */
+  /** Handler of the new-chat shortcut. Default: a new chat when the chat keeps several, otherwise the shortcut stays off. */
   onNewChat?: () => void;
   /** The app's own key combinations; see `DEFAULT_CHAT_SHORTCUTS`. */
   shortcuts?: ChatShortcutMap;
@@ -367,11 +367,13 @@ export function AssistantShell({
     return () => { cancelAnimationFrame(frame); if (previous?.isConnected) previous.focus(); };
   }, [ui.open, ui.collapsed, ui.mode, focusComposer, shell]);
 
+  // A chat that keeps several conversations starts a new one by itself.
+  const newChat = onNewChat ?? (sessionsSupported && chat?.createSession ? () => { void chat.createSession(); } : undefined);
   const shortcuts = useChatShortcuts({
     toggle: ui.toggleChat,
     toggleLayout: () => { if (ui.open) ui.setMode(sidebar ? 'floating' : 'sidebar'); },
     toggleCollapse: () => { if (ui.open && sidebar) ui.toggleCollapsed(); },
-    ...(onNewChat ? { newChat: () => { ui.openChat(); onNewChat(); } } : {}),
+    ...(newChat ? { newChat: () => { ui.openChat(); newChat(); } } : {}),
     focusInput: () => { ui.openChat(); focusComposer(); requestAnimationFrame(focusComposer); },
   }, { shortcuts: shortcutOverrides, shouldIgnore: shouldIgnoreShortcut });
 

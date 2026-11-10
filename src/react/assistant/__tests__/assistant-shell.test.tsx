@@ -179,4 +179,20 @@ describe('several chats in the assistant header', () => {
     expect(container.querySelector('[data-component="session-switcher"]')).toBeNull();
     expect(screen.getByTestId('own').textContent).toBe('Eigene');
   });
+
+  it('starts a new chat with the shortcut when the chat keeps several', async () => {
+    const value = chat(true);
+    mountWith(value); await frame();
+    fireEvent.keyDown(window, { key: 'n', code: 'KeyN', altKey: true, shiftKey: true });
+    expect(value.createSession).toHaveBeenCalledOnce();
+  });
+
+  it('leaves the new chat shortcut to the app that handles it', async () => {
+    const value = chat(true);
+    const onNewChat = vi.fn();
+    mountWith(value, { onNewChat }); await frame();
+    fireEvent.keyDown(window, { key: 'n', code: 'KeyN', altKey: true, shiftKey: true });
+    expect(onNewChat).toHaveBeenCalledOnce();
+    expect(value.createSession).not.toHaveBeenCalled();
+  });
 });

@@ -298,7 +298,7 @@ window reopens as a window. `defaultMode="floating"` opens detached first.
   `useAssistantLayout()` gives `openChat`, `closeChat`, `setMode` and the
   state for the app's own controls.
 - Shortcuts on every OS: mod+I toggles, alt+shift+D docks or detaches,
-  alt+shift+C collapses, alt+shift+N starts a new chat (with `onNewChat`),
+  alt+shift+C collapses, alt+shift+N starts a new chat (when the chat keeps several, or `onNewChat`),
   alt+shift+I focuses the input. Pass `shortcuts={{ newChat: 'alt+shift+k',
   toggleCollapse: false }}` when the app already uses one; `formatShortcut`
   shows a combination as ⌘I or Ctrl+I. `assistantShortcutList({ shortcuts,
