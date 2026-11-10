@@ -188,6 +188,8 @@ export function createApprovalDescriptionGenerator(
     const details: string[] = [];
     if (args && typeof args === 'object') {
       const stated = collectDetails(args as Record<string, unknown>);
+      // What the call states comes first: a grouped card shows the first line.
+      details.push(...stated);
       if (context?.names?.size) {
         // A name the arguments already state is not repeated; a differing
         // one stays visible next to it.
@@ -195,7 +197,6 @@ export function createApprovalDescriptionGenerator(
           if (!stated.some((line) => line.endsWith(`: ${name}`))) details.push(`${label}: ${name}`);
         }
       }
-      details.push(...stated);
     }
 
     return {

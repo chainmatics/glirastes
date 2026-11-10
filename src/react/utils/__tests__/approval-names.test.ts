@@ -66,7 +66,7 @@ describe('approval card names', () => {
   it('shows the known name next to a differing claimed one', () => {
     const card = describeApproval('tasks_delete', 'a1', { id: TASK, taskTitle: 'Quartalsplanung' }, { names });
 
-    expect(card.details).toEqual(['Ziel: Angebot Meier', 'Aufgabe: Quartalsplanung']);
+    expect(card.details).toEqual(['Aufgabe: Quartalsplanung', 'Ziel: Angebot Meier']);
   });
 
   it('keeps ids hidden without known names or name labels', () => {
