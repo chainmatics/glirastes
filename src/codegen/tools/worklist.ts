@@ -423,7 +423,7 @@ function perLanguage<T>(languages: ReadonlyArray<SemanticsLanguage>, value: (lan
 /** The tool-semantics.json entry an agent writes, without the fields it must leave alone. */
 export function semanticsEntryTemplate(tool: ToolsPipelineTool, options: Pick<DescribeWorklistOptions, 'locale' | 'languages'>): Record<string, unknown> {
   const fields: Record<string, unknown> = {
-    description: '<what the tool does, when it fits, and which tool fits better for similar requests>',
+    description: '<in English: what the tool does, when it fits, and which tool fits better for similar requests>',
     title: perLanguage(options.languages, () => '<short title, e.g. "Aufgaben auflisten" / "List tasks">'),
     module: tool.module,
     usageHints: ['<when to use it, in one sentence>'],

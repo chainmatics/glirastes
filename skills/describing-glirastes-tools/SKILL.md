@@ -54,6 +54,10 @@ in each description which neighbour fits better for which request.
 2. For each module, read the handler, the services and schemas it imports and
    the pages that use it. Then write, replacing every `<…>` placeholder:
    - `description`: what the tool does, when it fits, which tool fits better.
+     Always in English, for every tool and every app: only the model reads
+     it, and descriptions from code comments are English too, so a mixed set
+     never arises. Everything people read (`title`, `presentation`,
+     `synonyms`, `examples`) follows the languages of the work list.
    - The input schema: types, required fields, enums, formats, bounds and a
      description per parameter; strict JSON Schema 2020-12, an object with
      `additionalProperties: false`, at most 32 KB. An output schema where the
