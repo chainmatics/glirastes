@@ -241,6 +241,16 @@ wire shape. `SessionSwitcher` renders list, create, switch, and rename.
 Corrupted stored sessions fail closed rather than rendering garbage, and clearing
 history requires an explicit confirmation. Both are tested behavior; keep them.
 
+For several chats per user without a backend, pass
+`session={createLocalSessionStore({ storageKey: `myapp:${userId}` })}`
+(from `glirastes/react`; create it once per user, in `useMemo`): the chats
+stay in the browser's `localStorage`, are named after their first question,
+and the assistant header lists them in place of its title, with new, rename
+and delete. Include the signed-in user in `storageKey`. This keeps chat
+content on the device, so decide it with the developer; an app that needs
+chats on every device supplies `list`, `create`, `remove`, `rename`, `save`
+and `load` from its own server instead.
+
 ## Floating window
 
 `FloatingChatUI`, `ChatWindow`, and `AiTriggerButton` provide the portal-mounted

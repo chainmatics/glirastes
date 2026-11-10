@@ -6,6 +6,7 @@ import { ChatContext } from '../provider/chat-context.js';
 import { formatShortcut, useChatShortcuts, type ChatShortcutMap } from '../hooks/use-chat-shortcuts.js';
 import { useFloatingPanel, type FloatingResizeEdge } from '../hooks/use-floating-panel.js';
 import { isGerman, usePageLanguage } from '../utils/tool-presentation.js';
+import { SessionSwitcher } from '../components/session-switcher.js';
 import { useAssistantLayout } from './assistant-layout.js';
 
 /** A built-in button of the shell, for `renderButton`. */
@@ -295,6 +296,7 @@ export function AssistantShell({
   const chat = useContext(ChatContext);
   const icons = { ...DEFAULT_ASSISTANT_SHELL_ICONS, ...iconOverrides };
   const labels = { ...assistantShellLabelsFor(usePageLanguage()), ...labelOverrides };
+  const sessionsSupported = useContext(ChatContext)?.sessionsSupported === true;
   const render = renderButton ?? defaultButton(chat?.unstyled);
   const button = (props: Omit<AssistantShellButtonProps, 'className'>) =>
     render({ ...props, className: props.action === 'bubble' ? classNames.bubble : classNames.button });
@@ -411,7 +413,10 @@ export function AssistantShell({
           {...(sidebar ? {} : { tabIndex: 0, 'aria-label': labels.windowHeader, ...dragHandleProps })}>
           {headerStart}
           <span data-element="icon">{icons.assistant}</span>
-          {headerTitle ?? <span data-element="title">{labels.title}</span>}
+          {headerTitle ?? (sessionsSupported
+            // A chat that keeps several conversations lists them where the title would be.
+            ? <SessionSwitcher fallbackTitle={labels.title} />
+            : <span data-element="title">{labels.title}</span>)}
           {headerActions}
           {sidebar && button({ action: 'detach', label: labels.detach, title: withShortcut(labels.detach, shortcuts.toggleLayout), onClick: () => ui.setMode('floating'), children: icons.detach })}
           {showClearButton && clear && button({ action: 'clear', label: labels.clear, title: labels.clear, onClick: clear, children: icons.clear })}

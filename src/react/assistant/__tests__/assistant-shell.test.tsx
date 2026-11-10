@@ -9,6 +9,7 @@ import {
   useAssistantLayout,
 } from '../assistant-layout.js';
 import { AssistantShell, AssistantToggle, DE_ASSISTANT_SHELL_LABELS } from '../assistant-shell.js';
+import { ChatContext, type ChatContextValue } from '../../provider/chat-context.js';
 
 // Node ships its own localStorage stub, so the tests bring a working one.
 let store = new Map<string, string>();
@@ -139,5 +140,43 @@ describe('AssistantShell', () => {
     fireEvent.keyDown(window, { key: 'd', code: 'KeyD', altKey: true, shiftKey: true });
     fireEvent.keyDown(window, { key: 'c', code: 'KeyC', altKey: true, shiftKey: true });
     expect(state()).toMatchObject({ mode: 'sidebar', collapsed: true });
+  });
+});
+
+describe('several chats in the assistant header', () => {
+  /** What the session switcher reads from the chat; every text is its own key. */
+  const chat = (sessionsSupported: boolean) => ({
+    sessionsSupported,
+    sessions: [{ id: 'default', title: 'Offene Aufträge' }, { id: 's2', title: 'Kunden' }],
+    activeSessionId: 'default',
+    isSessionsLoading: false,
+    isLoading: false,
+    switchSession: vi.fn(), createSession: vi.fn(), removeSession: vi.fn(), renameSession: vi.fn(),
+    locale: new Proxy({}, { get: (_, key) => String(key) }),
+  }) as unknown as ChatContextValue;
+  const mountWith = (value: ChatContextValue, props: Partial<React.ComponentProps<typeof AssistantShell>> = {}) =>
+    render(<ChatContext.Provider value={value}><AssistantLayoutProvider defaultOpen>
+      <AssistantShell {...props}><textarea aria-label="Draft" /></AssistantShell>
+    </AssistantLayoutProvider></ChatContext.Provider>);
+
+  it('lists the chats in place of the title when the chat keeps several', async () => {
+    const { container } = mountWith(chat(true)); await frame();
+    const header = container.querySelector('header[data-element="header"]')!;
+    expect(header.querySelector('[data-component="session-switcher"]')).not.toBeNull();
+    expect(header.querySelector('[data-element="title"]')).toBeNull();
+    expect(header.textContent).toContain('Offene Aufträge');
+  });
+
+  it('keeps the plain title for a chat with one conversation', async () => {
+    const { container } = mountWith(chat(false)); await frame();
+    const header = container.querySelector('header[data-element="header"]')!;
+    expect(header.querySelector('[data-component="session-switcher"]')).toBeNull();
+    expect(header.querySelector('[data-element="title"]')!.textContent).toBe('AI assistant');
+  });
+
+  it('leaves the header to the app that passes its own title', async () => {
+    const { container } = mountWith(chat(true), { headerTitle: <b data-testid="own">Eigene</b> }); await frame();
+    expect(container.querySelector('[data-component="session-switcher"]')).toBeNull();
+    expect(screen.getByTestId('own').textContent).toBe('Eigene');
   });
 });
