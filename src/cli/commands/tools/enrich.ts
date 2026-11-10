@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { LanguageModel } from 'ai';
 import {
@@ -96,6 +96,72 @@ export function jobItems(
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .slice(0, TOOL_JOB_ITEM_LIMIT)
     .map(([stableKey, codes]) => ({ stableKey, gaps: [...codes].sort().slice(0, 20) }));
+}
+
+type JsonRecord = Record<string, unknown>;
+const isRecord = (value: unknown): value is JsonRecord => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+async function readText(path: string): Promise<string | null> {
+  return readFile(path, 'utf8').catch(() => null);
+}
+
+function parsed(text: string | null): JsonRecord | null {
+  if (text === null) return null;
+  try {
+    const value = JSON.parse(text) as unknown;
+    return isRecord(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Names the model that actually ran in every agent entry the job wrote or
+ * changed. A model only knows the label the skill shows as an example, so it
+ * would sign its work as someone else; entries the job left alone keep theirs.
+ * Returns whether a file changed.
+ */
+export async function stampAgentModel(root: string, before: ReadonlyMap<string, string | null>, model: string): Promise<boolean> {
+  let stamped = false;
+  const semanticsPath = join(root, TOOLS_PATHS.semantics);
+  const semantics = parsed(await readText(semanticsPath));
+  if (semantics && Array.isArray(semantics.tools)) {
+    const earlier = parsed(before.get(TOOLS_PATHS.semantics) ?? null);
+    const previous = new Map((Array.isArray(earlier?.tools) ? earlier.tools : [])
+      .filter(isRecord)
+      .map((entry) => [entry.stableKey, JSON.stringify(entry)] as const));
+    let changed = false;
+    for (const entry of semantics.tools) {
+      if (!isRecord(entry) || !isRecord(entry.agent) || entry.agent.model === model) continue;
+      if (previous.get(entry.stableKey) === JSON.stringify(entry)) continue;
+      entry.agent.model = model;
+      changed = true;
+    }
+    if (changed) await writeFile(semanticsPath, `${JSON.stringify(semantics, null, 2)}\n`);
+    stamped ||= changed;
+  }
+  const resolutionsPath = join(root, TOOLS_PATHS.resolutions);
+  const resolutions = parsed(await readText(resolutionsPath));
+  if (resolutions && isRecord(resolutions.tools)) {
+    const earlier = parsed(before.get(TOOLS_PATHS.resolutions) ?? null);
+    const previous = isRecord(earlier?.tools) ? earlier.tools : {};
+    let changed = false;
+    for (const [key, entry] of Object.entries(resolutions.tools)) {
+      if (!isRecord(entry) || entry.origin !== 'agent' || typeof entry.model !== 'string' || entry.model === model) continue;
+      if (JSON.stringify(previous[key]) === JSON.stringify(entry)) continue;
+      entry.model = model;
+      changed = true;
+    }
+    if (changed) await writeFile(resolutionsPath, `${JSON.stringify(resolutions, null, 2)}\n`);
+    stamped ||= changed;
+  }
+  return stamped;
+}
+
+/** The message of an unexpected error for the CI log, without anything that looks like a key. */
+function causeOf(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|gl_[A-Za-z0-9_]{8,}|Bearer\s+\S+)/g, '[redacted]').slice(0, 500);
 }
 
 async function readSkills(): Promise<JobSkill[]> {
@@ -296,6 +362,8 @@ export async function runToolsEnrich(
       return { failed: evaluation.summary.failed, failures: evaluation.tools.filter((tool) => tool.failures.length > 0).slice(0, 50) };
     };
 
+    const written = new Map(await Promise.all([TOOLS_PATHS.semantics, TOOLS_PATHS.resolutions]
+      .map(async (path) => [path, await readText(join(root, path))] as const)));
     const run = await runSkillJob({
       model,
       modelId,
@@ -308,7 +376,8 @@ export async function runToolsEnrich(
       now,
     });
     if (run.outcome === 'failed') return finish('failed', { reasonCode: run.reasonCode ?? 'model_error', run, model: modelId });
-    if (!run.refresh) await refresh();
+    const ranModel = MODEL_ID.test(run.servedModel) ? run.servedModel : modelId;
+    if (await stampAgentModel(root, written, ranModel) || !run.refresh) await refresh();
 
     for (const path of workspace.written) allowed.files.add(path);
     const changed = await repository.changedPaths();
@@ -365,7 +434,8 @@ export async function runToolsEnrich(
   };
   try {
     return await execute();
-  } catch {
+  } catch (error) {
+    io.error(`glirastes tools enrich: runner_error: ${causeOf(error)}`);
     return finish('failed', { reasonCode: 'runner_error' });
   }
 }

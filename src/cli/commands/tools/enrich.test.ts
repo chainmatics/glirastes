@@ -115,10 +115,10 @@ function platform(options: { refuse?: { status: number; code: string } } = {}): 
 }
 
 /** Writes the semantics through the sandbox, then stops; `sideEffect` simulates a misbehaving step. */
-function writingModel(sideEffect?: () => Promise<void>) {
+function writingModel(sideEffect?: () => Promise<void>, content: (prompt: unknown) => string = () => SEMANTICS) {
   let step = 0;
   return new MockLanguageModelV3({
-    doGenerate: async () => {
+    doGenerate: async ({ prompt }) => {
       step += 1;
       if (step === 1) await sideEffect?.();
       const write = step === 1;
@@ -128,7 +128,7 @@ function writingModel(sideEffect?: () => Promise<void>) {
             type: 'tool-call' as const,
             toolCallId: 'call-1',
             toolName: 'write_file',
-            input: JSON.stringify({ path: '.glirastes/tool-semantics.json', content: SEMANTICS }),
+            input: JSON.stringify({ path: '.glirastes/tool-semantics.json', content: content(prompt) }),
           }]
           : [{ type: 'text' as const, text: 'Done.' }],
         finishReason: { unified: write ? 'tool-calls' as const : 'stop' as const, raw: undefined },
@@ -263,6 +263,38 @@ describe('glirastes tools enrich --managed', () => {
     expect(api.ledgers[0]!.items.every((item) => item.state === 'unchanged')).toBe(true);
   }, 240_000);
 
+  it('records the model that ran, not the name the model gives itself', async () => {
+    const fixture = await committedApp('feature/tasks');
+    // Like a real model, it copies the skill's example label and the digest the work list printed.
+    const selfNamed = (prompt: unknown) => {
+      const user = (prompt as Array<{ role: string; content: Array<{ type: string; text?: string }> }>)
+        .find((message) => message.role === 'user')!;
+      const { worklists } = JSON.parse(user.content[0]!.text!) as {
+        worklists: { describe: { items: Array<{ targets: { semantics: { expected: { stableKey: string; agent: { interfaceDigest: string } } } } }> } };
+      };
+      const digests = new Map(worklists.describe.items.map((item) => [
+        item.targets.semantics.expected.stableKey,
+        item.targets.semantics.expected.agent.interfaceDigest,
+      ]));
+      const semantics = JSON.parse(SEMANTICS) as { tools: Array<Record<string, unknown> & { stableKey: string }> };
+      for (const entry of semantics.tools) {
+        entry.origin = { description: 'agent', synonyms: 'agent', examples: 'agent' };
+        entry.agent = { model: 'claude-code', interfaceDigest: digests.get(entry.stableKey) };
+      }
+      return JSON.stringify(semantics);
+    };
+    const api = platform();
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model: writingModel(undefined, selfNamed) });
+
+    expect(await result.code).toBe(0);
+    const committed = JSON.parse(await git(fixture, 'show', 'HEAD:.glirastes/tool-semantics.json')) as {
+      tools: Array<{ agent: { model: string } }>;
+    };
+    expect(committed.tools.map((entry) => entry.agent.model)).toEqual([MODEL, MODEL]);
+    expect(await git(fixture, 'status', '--porcelain')).toBe('');
+  }, 240_000);
+
   it('reports a runner_error ledger when an unexpected error follows the grant', async () => {
     const fixture = await committedApp('feature/tasks');
     const api = platform();
@@ -280,6 +312,8 @@ describe('glirastes tools enrich --managed', () => {
     expect(JSON.parse(result.out.at(-1)!)).toMatchObject({ status: 'failed', code: 'runner_error', outcome: 'failed' });
     expect(api.ledgers).toHaveLength(1);
     expect(api.ledgers[0]).toMatchObject({ outcome: 'failed', reasonCode: 'runner_error', changedFiles: 0 });
+    // The cause reaches the CI log, so a failed run can be explained.
+    expect(result.out.some((line) => line.includes('disk gone'))).toBe(true);
   }, 240_000);
 
   it('ends green with the named code when the Platform refuses for the plan, and never loads the provider', async () => {
