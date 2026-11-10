@@ -81,12 +81,19 @@ function findPendingApprovalCallIds(
   const content = lastMsg.content;
   if (!Array.isArray(content)) return pendingCallIds;
 
-  // Only consider this a pending approval if the tool message has NO
-  // tool-result parts (otherwise it's a completed step, not a pending approval)
-  const hasToolResult = content.some(
-    (part) => isRecord(part) && part.type === 'tool-result',
-  );
-  if (hasToolResult) return pendingCallIds;
+  // A response whose own call already has a result here belongs to a completed
+  // step. A result of another call (a lookup made in the same step) does not
+  // complete it: collectToolApprovals still runs the approved call.
+  const resultCallIds = new Set<string>();
+  for (const part of content) {
+    if (
+      isRecord(part) &&
+      part.type === 'tool-result' &&
+      typeof part.toolCallId === 'string'
+    ) {
+      resultCallIds.add(part.toolCallId);
+    }
+  }
 
   for (const part of content) {
     if (
@@ -95,7 +102,7 @@ function findPendingApprovalCallIds(
       typeof part.approvalId === 'string'
     ) {
       const linkedCallId = approvalIdToCallId.get(part.approvalId as string);
-      if (linkedCallId) {
+      if (linkedCallId && !resultCallIds.has(linkedCallId)) {
         pendingCallIds.add(linkedCallId);
       }
     }

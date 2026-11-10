@@ -11,12 +11,25 @@
 import { useCallback, useMemo, useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
+import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import type {
   ChatTransport,
   ChatTransportConfig,
   ChatTransportDataHandler,
   ChatMessage,
 } from '../types.js';
+
+/**
+ * Body of each chat request: the client actions the open page handles, so
+ * the server refuses the others, plus the host's extras.
+ * @internal
+ */
+export function chatRequestBody(
+  extras: Record<string, unknown> | (() => Record<string, unknown>) | undefined,
+): Record<string, unknown> {
+  const resolved = !extras ? {} : typeof extras === 'function' ? extras() : extras;
+  return { glirastesClientActions: getDefaultUiActionBus().registeredActionIds(), ...resolved };
+}
 
 export interface UseVercelAiChatTransportOptions extends ChatTransportConfig {
   /**
@@ -76,11 +89,7 @@ export function useVercelAiChatTransport(
               return typeof h === 'function' ? h() : h ?? {};
             }
           : undefined,
-        body: () => {
-          const extras = bodyExtrasRef.current;
-          if (!extras) return {};
-          return typeof extras === 'function' ? extras() : extras;
-        },
+        body: () => chatRequestBody(bodyExtrasRef.current),
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- headersRef/bodyExtrasRef are stable
     [endpoint, !!userHeaders],

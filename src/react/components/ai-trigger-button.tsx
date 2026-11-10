@@ -1,10 +1,10 @@
-import { useContext, useEffect, useState, useRef, type ReactElement, type CSSProperties } from 'react';
+import { useContext, useEffect, useState, type ReactElement, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { AiTriggerButtonProps } from '../types.js';
 import { CancelButton, StopButton } from './recording-controls.js';
 import { useDraggablePosition } from '../hooks/use-draggable-position.js';
 import { ChatContext } from '../provider/chat-context.js';
-import { loadWaveSurfer } from './wavesurfer-loader.js';
+import { StreamWaveform } from './stream-waveform.js';
 
 // ---------------------------------------------------------------------------
 // Inline SVG icons (no lucide-react dependency)
@@ -146,13 +146,13 @@ function injectStyles() {
       0%, 100% { transform: translateY(0); }
       50% { transform: translateY(-25%); }
     }
-    [data-component="ai-trigger-button"] [data-dot] {
+    [data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-dot] {
       animation: ai-trigger-bounce 1.4s ease-in-out infinite;
     }
-    [data-component="ai-trigger-button"] [data-dot="2"] {
+    [data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-dot="2"] {
       animation-delay: 0.15s;
     }
-    [data-component="ai-trigger-button"] [data-dot="3"] {
+    [data-component="ai-trigger-button"]:where(:not([data-unstyled], [data-unstyled] *)) [data-dot="3"] {
       animation-delay: 0.3s;
     }
   `;
@@ -160,7 +160,7 @@ function injectStyles() {
 }
 
 // ---------------------------------------------------------------------------
-// ConnectingDots — shown while connecting or as wavesurfer fallback
+// ConnectingDots — shown while the speech provider connects.
 // ---------------------------------------------------------------------------
 
 function ConnectingDots() {
@@ -174,77 +174,6 @@ function ConnectingDots() {
 }
 
 // ---------------------------------------------------------------------------
-// TriggerLiveWave — real-time mic waveform via WaveSurfer.js
-// ---------------------------------------------------------------------------
-
-function TriggerLiveWave() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    let disposed = false;
-    const cleanupRef = { current: () => {} };
-
-    // Lazy-load the optional wavesurfer.js peer dep at runtime — see wavesurfer-loader.ts.
-    loadWaveSurfer()
-      .then(({ WaveSurfer, RecordPlugin }) => {
-        if (disposed) return;
-
-        const ws = WaveSurfer.create({
-          container: el,
-          waveColor: '#000000',
-          height: 24,
-          barWidth: 2,
-          barGap: 1,
-          barRadius: 2,
-          cursorWidth: 0,
-          interact: false,
-          normalize: true,
-        });
-
-        const record = ws.registerPlugin(
-          RecordPlugin.create({
-            scrollingWaveform: true,
-            scrollingWaveformWindow: 5,
-            renderRecordedAudio: false,
-          }),
-        );
-
-        record.startMic().catch((err: unknown) => {
-          console.warn('[AiTriggerButton] Failed to start waveform mic:', err);
-        });
-
-        cleanupRef.current = () => {
-          record.stopMic();
-          record.destroy();
-          ws.destroy();
-        };
-      })
-      .catch((err) => {
-        console.warn(
-          '[AiTriggerButton] wavesurfer.js is not installed — waveform visualization disabled. Install it with: npm install wavesurfer.js',
-          err,
-        );
-        if (!disposed) setLoadFailed(true);
-      });
-
-    return () => {
-      disposed = true;
-      cleanupRef.current();
-    };
-  }, []);
-
-  if (loadFailed) {
-    return <ConnectingDots />;
-  }
-
-  return <div ref={containerRef} data-element="waveform" style={{ flex: 1, minWidth: 0 }} />;
-}
-
-// ---------------------------------------------------------------------------
 // AiTriggerButton
 // ---------------------------------------------------------------------------
 
@@ -253,6 +182,8 @@ export function AiTriggerButton({
   onClickMic,
   isRecording,
   isConnecting,
+  recordingStream,
+  recordingTranscript,
   onStopRecording,
   onCancelRecording,
   portal = true,
@@ -271,7 +202,9 @@ export function AiTriggerButton({
   const [isMounted, setIsMounted] = useState(false);
 
   // Theme vars from the provider (standalone use is allowed — fall back).
-  const themeVars = useContext(ChatContext)?.themeVars ?? {};
+  const ctx = useContext(ChatContext);
+  const themeVars = ctx?.themeVars ?? {};
+  const unstyled = ctx?.unstyled ?? false;
 
   const { position, isDragging, onMouseDown, wasDragged, resetPosition } =
     useDraggablePosition({
@@ -309,6 +242,7 @@ export function AiTriggerButton({
         style={wrapperStyle}
         data-component="ai-trigger-button"
         data-state={state}
+        data-unstyled={unstyled || undefined}
       >
         <div
           className={buttonClassName ?? undefined}
@@ -318,7 +252,19 @@ export function AiTriggerButton({
           <CancelButton onClick={onCancelRecording!} ariaLabel={cancelAriaLabel} />
 
           <div style={WAVEFORM_CONTAINER_STYLE} data-element="waveform-container">
-            {isConnecting ? <ConnectingDots /> : <TriggerLiveWave />}
+            {isConnecting ? (
+              <ConnectingDots />
+            ) : (
+              <>
+                <StreamWaveform stream={recordingStream} />
+                <span
+                  aria-live="polite"
+                  style={{ flex: 2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {recordingTranscript || '…'}
+                </span>
+              </>
+            )}
           </div>
 
           <StopButton onClick={onStopRecording!} ariaLabel={stopAriaLabel} />
@@ -390,6 +336,7 @@ export function AiTriggerButton({
       style={wrapperStyle}
       data-component="ai-trigger-button"
       data-state="idle"
+      data-unstyled={unstyled || undefined}
       data-dragging={isDragging || undefined}
     >
       {wrapped}

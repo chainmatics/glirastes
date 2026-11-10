@@ -1,6 +1,27 @@
-import { toolsToAiTools, createFollowupTool } from '../../core/index.js';
+import {
+  toolsToAiTools,
+  createFollowupTool,
+  createClarificationTool,
+  createPlanTool,
+} from '../../core/index.js';
+import { CLARIFICATION_TOOL_NAME } from '../../../contracts/clarification.js';
+import { PLAN_TOOL_NAME } from '../../../contracts/plan.js';
+
+/** Handler-created built-ins that stay callable for every tool selection. */
+const ALWAYS_ON_BUILTINS: ReadonlyArray<string> = [CLARIFICATION_TOOL_NAME, PLAN_TOOL_NAME];
+import {
+  applyClarificationResume,
+  resolveClarificationResume,
+} from './clarification-resume.js';
+import { scopePipelineTools } from './scope-pipeline-tools.js';
+import {
+  pseudonymizeCommandToolInputs,
+  resolveDirectCommand,
+  runDirectCommand,
+  stripChatCommandMessages,
+} from './direct-command.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
-import type { ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
+import type { Tool, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import {
@@ -23,6 +44,27 @@ import {
 } from './context-helpers.js';
 import { prepareModelMessages, wrapToolsForVercelAi } from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
+import { toolPresentationOf } from './tool-presentation.js';
+import { PrincipalSchema } from '../../../contracts/index.js';
+import {
+  createManagedTurnGuard,
+  createRegistryToolDiscovery,
+  createTurnMetricsRecorder,
+  createTurnToolDiscovery,
+  isToolRevoked,
+  rawChunkCostUsd,
+  resolveStepCost,
+  RuntimePriceTableSchema,
+  type BudgetEvaluation,
+  type ManagedTurnGuard,
+  type RuntimePriceTable,
+  type TurnMetricsRecorder,
+} from '../../../runtime/index.js';
+import {
+  createHybridToolDiscovery,
+  NON_DOMAIN_TOOL_NAMES,
+  type HybridToolDiscovery,
+} from './tool-discovery.js';
 
 /**
  * Callback that the consumer provides to stream the AI response.
@@ -62,6 +104,26 @@ export interface StreamHandlerContext {
   pipelineResult?: PipelineResult;
   /** PII shield context for response de-anonymization */
   piiShield?: { shield: PiiShield; sessionId: string };
+  /** Pinned managed-local turn guard, present when managedRuntime is enabled. */
+  managedTurn?: ManagedTurnGuard;
+  /** Immutable turn-local controller for custom stream integrations. */
+  toolDiscovery?: HybridToolDiscovery;
+  /**
+   * Identity set of SDK built-ins (`NON_DOMAIN_TOOL_NAMES`) whose tool
+   * instance this handler created itself for the turn. Only these run outside
+   * the managed guard; a registry- or manifest-supplied tool that merely
+   * shares a built-in's name stays fully guarded (revocation, principal
+   * re-authorization, budget).
+   */
+  handlerBuiltinToolNames?: ReadonlyArray<string>;
+  /**
+   * Content-free metrics of this turn when the handler has `metrics`. The
+   * built-in stream handler reports every step and the outcome; a custom
+   * stream handler reports through it (`recordStep`, `finish`) itself.
+   */
+  turnMetrics?: TurnMetricsRecorder;
+  /** Price table configured on the handler (`modelPricing`). */
+  modelPricing?: RuntimePriceTable;
 }
 
 /**
@@ -101,21 +163,99 @@ export function resolveStepLimit(options: {
   moduleMaxSteps?: number | null;
   configuredMaxSteps?: number | null;
   safetyMaxSteps?: number;
+  runtimeBudgetMaxSteps?: number | null;
 }): { maxSteps: number; stepLimitSource: StepLimitSource } {
+  let resolved: { maxSteps: number; stepLimitSource: StepLimitSource };
   const moduleMaxSteps = asPositiveInt(options.moduleMaxSteps);
   if (moduleMaxSteps) {
-    return { maxSteps: moduleMaxSteps, stepLimitSource: 'module' };
+    resolved = { maxSteps: moduleMaxSteps, stepLimitSource: 'module' };
+  } else {
+    const configuredMaxSteps = asPositiveInt(options.configuredMaxSteps);
+    resolved = configuredMaxSteps
+      ? { maxSteps: configuredMaxSteps, stepLimitSource: 'explicit' }
+      : {
+          maxSteps:
+            asPositiveInt(options.safetyMaxSteps)
+            ?? DEFAULT_SAFETY_MAX_STEPS,
+          stepLimitSource: 'safety',
+        };
   }
 
-  const configuredMaxSteps = asPositiveInt(options.configuredMaxSteps);
-  if (configuredMaxSteps) {
-    return { maxSteps: configuredMaxSteps, stepLimitSource: 'explicit' };
-  }
+  const runtimeBudgetMaxSteps = asPositiveInt(
+    options.runtimeBudgetMaxSteps,
+  );
+  return runtimeBudgetMaxSteps && runtimeBudgetMaxSteps < resolved.maxSteps
+    ? {
+        maxSteps: runtimeBudgetMaxSteps,
+        stepLimitSource: 'runtime-budget',
+      }
+    : resolved;
+}
 
-  return {
-    maxSteps: asPositiveInt(options.safetyMaxSteps) ?? DEFAULT_SAFETY_MAX_STEPS,
-    stepLimitSource: 'safety',
+export function resolveTurnTimeout(
+  totalTimeoutMs: number | undefined,
+): { totalMs: number } | undefined {
+  if (totalTimeoutMs === undefined) return undefined;
+  if (!Number.isFinite(totalTimeoutMs) || totalTimeoutMs <= 0) {
+    throw new RangeError('totalTimeoutMs must be a positive finite number');
+  }
+  return { totalMs: totalTimeoutMs };
+}
+
+export function shouldStopManagedExecution(options: {
+  stepCount: number;
+  maxSteps: number;
+  budgetState?: BudgetEvaluation['state'];
+  /** Tool names called in the latest step; a clarification ends the turn. */
+  lastStepToolNames?: ReadonlyArray<string>;
+}): boolean {
+  return options.stepCount >= options.maxSteps
+    || options.budgetState === 'hard-limit'
+    || (options.lastStepToolNames ?? []).includes(CLARIFICATION_TOOL_NAME);
+}
+
+/** Model id of a finished step; AI SDK 6 versions differ in where they put it. */
+function stepModelId(event: unknown): string | null {
+  const record = event as {
+    model?: { modelId?: unknown };
+    response?: { modelId?: unknown };
   };
+  const modelId = record.model?.modelId ?? record.response?.modelId;
+  return typeof modelId === 'string' ? modelId : null;
+}
+
+/**
+ * Names of the tool calls of a step that failed: thrown errors and the
+ * `{ error }` results SDK tools return. Only names leave this function.
+ */
+function failedToolNames(content: ReadonlyArray<unknown>): string[] {
+  const names: string[] = [];
+  for (const part of content) {
+    const record = part as { type?: unknown; toolName?: unknown; output?: unknown };
+    if (typeof record?.toolName !== 'string') continue;
+    const output = record.output as { error?: unknown } | null | undefined;
+    if (
+      record.type === 'tool-error'
+      || (
+        record.type === 'tool-result'
+        && typeof output === 'object'
+        && output !== null
+        && typeof output.error === 'string'
+      )
+    ) {
+      names.push(record.toolName);
+    }
+  }
+  return names;
+}
+
+/** Hands endpoint contract rejections to the turn's metrics, when the app reports metrics. */
+function contractRejectionReporter(
+  turnMetrics: TurnMetricsRecorder | undefined,
+): { onContractRejected?: (rejection: { toolName: string; status: 400 | 422 }) => void } {
+  return turnMetrics
+    ? { onContractRejected: ({ toolName, status }) => { turnMetrics.recordToolContractRejected(toolName, status); } }
+    : {};
 }
 
 function compactToolNames(toolCalls: Array<{ toolName: string }>): string[] {
@@ -234,46 +374,74 @@ function createPipelineState(options: {
 async function defaultStreamHandler(
   ctx: StreamHandlerContext,
   onFinish?: AiChatHandlerConfig['onFinish'],
+  onStreamError?: (error: unknown) => void,
 ): Promise<Response> {
-  const vercelTools = wrapToolsForVercelAi(ctx.tools);
+  // SDK built-ins the handler created itself are not manifest tools, so the
+  // managed guard would deny them. Everything else stays guarded.
+  const builtinNames = new Set(ctx.handlerBuiltinToolNames ?? []);
+  const builtinTools: Record<string, unknown> = {};
+  const domainTools: Record<string, unknown> = {};
+  for (const [name, tool] of Object.entries(ctx.tools)) {
+    (builtinNames.has(name) ? builtinTools : domainTools)[name] = tool;
+  }
+  const vercelTools = wrapToolsForVercelAi(
+    domainTools,
+    ctx.managedTurn
+      ? {
+          beforeToolCall: ctx.managedTurn.beforeToolCall,
+          afterToolCall: ctx.managedTurn.afterToolCall,
+          onToolError: ctx.managedTurn.onToolError,
+          resolveApproval: ctx.managedTurn.resolveApproval,
+          toolTimeoutMs: ctx.managedTurn.toolTimeoutMs,
+        }
+      : undefined,
+  );
+  if (Object.keys(builtinTools).length > 0) {
+    Object.assign(vercelTools, wrapToolsForVercelAi(builtinTools));
+  }
   const modelMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
     { maxContextMessages: ctx.maxContextMessages },
   );
 
   let wasTruncated = false;
-  let stoppedByLoop = false;
-
-  // Stop condition: step count OR consecutive identical tool calls (loop detection).
-  const LOOP_REPEAT_THRESHOLD = 3;
+  // At the runtime budget the turn blocks further tools and gets one bounded
+  // final summary, so it still ends with an answer instead of silence.
+  let finalSummaryClaimed = false;
+  const budgetExhausted = () =>
+    ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
   const shouldStop = (event: {
     steps: Array<{ toolCalls: Array<{ toolName: string }> }>;
   }) => {
-    if (event.steps.length >= ctx.maxSteps) return true;
-
-    if (event.steps.length >= LOOP_REPEAT_THRESHOLD) {
-      const recent = event.steps.slice(-LOOP_REPEAT_THRESHOLD);
-      const signatures = recent.map((s) =>
-        s.toolCalls
-          .map((c) => c.toolName)
-          .sort()
-          .join(','),
-      );
-      if (
-        signatures[0].length > 0 &&
-        signatures.every((sig) => sig === signatures[0])
-      ) {
-        stoppedByLoop = true;
-        return true;
-      }
-    }
-    return false;
+    const budgetState = ctx.managedTurn?.tracker.evaluate().state;
+    const summarize = budgetState === 'hard-limit'
+      && ctx.managedTurn!.tracker.claimFinalSummary();
+    if (summarize) finalSummaryClaimed = true;
+    return shouldStopManagedExecution({
+      stepCount: event.steps.length,
+      maxSteps: ctx.maxSteps,
+      budgetState: summarize ? undefined : budgetState,
+      lastStepToolNames: event.steps.at(-1)?.toolCalls.map((call) => call.toolName),
+    });
   };
 
+  let providerErrorReported = false;
   const stream = createUIMessageStream({
+    // A turn can also fail outside the provider call, e.g. on a model object
+    // from an unsupported AI SDK version. The client gets the generic text,
+    // the app's error callback the cause.
+    onError: (error) => {
+      if (!providerErrorReported) {
+        providerErrorReported = true;
+        onStreamError?.(error);
+      }
+      return 'AI request failed';
+    },
     execute: async ({ writer }) => {
       let totalSteps = 0;
       let finalStateWritten = false;
+      // Cost of the running model step, read from its raw stream chunks.
+      let stepRawCostUsd: number | null = null;
 
       const writePipelineState = (
         state: PipelineStreamState,
@@ -285,6 +453,12 @@ async function defaultStreamHandler(
           transient,
         });
       };
+
+      // Ahead of the first chunk, so the UI can name a tool the moment it is called.
+      const presentation = toolPresentationOf(ctx.managedTurn?.snapshot.manifestRevision);
+      if (presentation) {
+        writer.write({ type: 'data-tool-presentation', data: presentation, transient: true });
+      }
 
       writePipelineState(
         createPipelineState({
@@ -301,10 +475,68 @@ async function defaultStreamHandler(
         messages: modelMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
         system: ctx.systemPrompt,
         tools: vercelTools as Parameters<typeof streamText>[0]['tools'],
+        ...(ctx.toolDiscovery
+          ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
+          : {}),
+        prepareStep: () => {
+          if (budgetExhausted()) {
+            return { activeTools: [], toolChoice: 'none' as const };
+          }
+          return ctx.toolDiscovery
+            ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
+            : {};
+        },
         maxOutputTokens: ctx.maxOutputTokens,
         temperature: ctx.temperature,
+        timeout: resolveTurnTimeout(
+          ctx.managedTurn?.snapshot.budget.totalTimeoutMs,
+        ),
         stopWhen: shouldStop,
-        onStepFinish: (event) => {
+        // OpenRouter reports `usage.cost` only in the raw final chunk when the
+        // OpenAI-compatible provider is used; the UI stream drops raw chunks.
+        includeRawChunks: Boolean(ctx.managedTurn || ctx.turnMetrics),
+        onChunk: ({ chunk }) => {
+          if (chunk.type === 'raw') {
+            stepRawCostUsd = rawChunkCostUsd(chunk.rawValue) ?? stepRawCostUsd;
+            return;
+          }
+          ctx.turnMetrics?.markFirstChunk();
+        },
+        // AI SDK's default logs the complete provider error, including
+        // request/response content. Only the local consumer owns diagnostics.
+        onError: ({ error }) => {
+          providerErrorReported = true;
+          onStreamError?.(error);
+        },
+        onStepFinish: async (event) => {
+          const inputTokens = event.usage.inputTokens ?? 0;
+          const outputTokens = event.usage.outputTokens ?? 0;
+          const model = stepModelId(event);
+          const rawCostUsd = stepRawCostUsd;
+          stepRawCostUsd = null;
+          const cost = resolveStepCost({
+            model,
+            inputTokens,
+            outputTokens,
+            providerMetadata: event.providerMetadata,
+            usageRaw: event.usage.raw,
+            rawChunkCostUsd: rawCostUsd,
+          }, ctx.modelPricing);
+          // A known cost counts against maxEstimatedCostUsd; an unknown one
+          // is never recorded as 0.
+          await ctx.managedTurn?.afterModelStep({
+            inputTokens,
+            outputTokens,
+            ...(cost.usd !== null ? { estimatedCostUsd: cost.usd } : {}),
+          });
+          ctx.turnMetrics?.recordStep({
+            model,
+            inputTokens,
+            outputTokens,
+            cost,
+            toolNames: event.toolCalls.map((call) => call.toolName),
+            failedToolNames: failedToolNames(event.content),
+          });
           const report = buildStepReport({
             stepNumber: event.stepNumber,
             finishReason: event.finishReason,
@@ -329,6 +561,15 @@ async function defaultStreamHandler(
           ctx.onStepReport?.(report);
         },
         onAbort: (event) => {
+          // The runtime time budget is the only abort source of this handler,
+          // so an abort at the hard limit is a budget stop, not a user abort.
+          const abortedByBudget =
+            ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
+          ctx.turnMetrics?.finish(
+            abortedByBudget
+              ? { status: 'safety-stop', errorCode: 'budget_exhausted' }
+              : { status: 'aborted', errorCode: null },
+          );
           if (finalStateWritten) return;
           totalSteps = Math.max(totalSteps, event.steps.length);
           writePipelineState(
@@ -344,20 +585,34 @@ async function defaultStreamHandler(
           finalStateWritten = true;
         },
         onFinish: (event) => {
-          wasTruncated =
+          const budgetEvaluation = ctx.managedTurn?.tracker.evaluate();
+          const stoppedByBudget =
+            budgetEvaluation?.state === 'hard-limit';
+          wasTruncated = finalSummaryClaimed || (
             event.finishReason === 'tool-calls' &&
-            (event.steps.length >= ctx.maxSteps || stoppedByLoop);
+            (event.steps.length >= ctx.maxSteps || stoppedByBudget)
+          );
           totalSteps = Math.max(totalSteps, event.steps.length);
 
-          const isSafetyStop = wasTruncated && ctx.stepLimitSource === 'safety' && !stoppedByLoop;
+          const isSafetyStop =
+            wasTruncated
+            && (
+              ctx.stepLimitSource === 'safety'
+              || ctx.stepLimitSource === 'runtime-budget'
+              || stoppedByBudget
+            );
           const status: PipelineStreamState['status'] =
-            stoppedByLoop
-              ? 'safety-stop'
-              : isSafetyStop
+            isSafetyStop
                 ? 'safety-stop'
                 : event.finishReason === 'error'
                   ? 'error'
                   : 'completed';
+          ctx.turnMetrics?.finish({
+            status,
+            errorCode: status === 'safety-stop'
+              ? stoppedByBudget ? 'budget_exhausted' : 'step_limit'
+              : status === 'error' ? 'model_error' : null,
+          });
 
           if (!finalStateWritten) {
             writePipelineState(
@@ -367,8 +622,10 @@ async function defaultStreamHandler(
                 finishReason: event.finishReason,
                 maxSteps: ctx.maxSteps,
                 stepLimitSource: ctx.stepLimitSource,
-                message: stoppedByLoop
-                  ? 'Stopped: repeated tool call loop detected.'
+                message: stoppedByBudget
+                  ? `Stopped at runtime budget: ${
+                      budgetEvaluation.reasons.join(', ')
+                    }.`
                   : wasTruncated
                     ? isSafetyStop
                       ? 'Paused at step safety cap. You can continue or stop.'
@@ -394,10 +651,11 @@ async function defaultStreamHandler(
         },
       });
 
-      writer.merge(result.toUIMessageStream());
+      writer.merge(result.toUIMessageStream({ onError: () => 'AI request failed' }));
       try {
         await result.response;
       } catch (error) {
+        ctx.turnMetrics?.finish({ status: 'error', errorCode: 'model_error' });
         if (finalStateWritten) return;
         writePipelineState(
           createPipelineState({
@@ -410,7 +668,7 @@ async function defaultStreamHandler(
           }),
         );
         finalStateWritten = true;
-        throw error;
+        if (!providerErrorReported) throw error;
       }
     },
   });
@@ -440,8 +698,11 @@ async function defaultStreamHandler(
 export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   const {
     tools: staticTools,
+    managedRuntime,
     pipeline,
     followups,
+    clarification,
+    planning,
 
     loadTools,
 
@@ -472,13 +733,39 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     guardrails,
     intentRouter,
     wrapHandler,
-    onError,
+    onError: onErrorConfig,
     onToolError,
     onPipelineResult,
     onStepReport,
     onFinish,
     streamHandler: customStreamHandler,
+    toolDiscovery: enableToolDiscovery = false,
+    toolSemantics,
+    metrics,
+    modelPricing: configuredModelPricing,
+    directCommands = true,
+    endpointCaller = createInternalApiCallerFromRequest,
   } = config;
+  // Without a callback a failed turn would only say "AI request failed" to
+  // the user and nothing to the developer. Name only: provider errors can
+  // carry request and response content.
+  const onError = onErrorConfig ?? ((error: unknown) => {
+    const name = error instanceof Error ? error.name : typeof error;
+    console.error(`[glirastes] AI chat turn failed (${name}). Pass onError to createAiChatHandler to see the cause.`);
+  });
+
+  // The Proctor endpoint behind Lancer telemetry is not served by the
+  // Foundation control plane and its audit payloads are not content-free;
+  // the managed-local path reports through `metrics` instead.
+  if (managedRuntime && telemetry) {
+    throw new Error(
+      'createAiChatHandler: telemetry (legacy Lancer) cannot be combined with '
+      + 'managedRuntime; use metrics for content-free runtime metrics',
+    );
+  }
+  const modelPricing = configuredModelPricing
+    ? RuntimePriceTableSchema.parse(configuredModelPricing)
+    : undefined;
 
   // Report model defaults to Glirastes (fire-and-forget, once)
   let defaultsReported = false;
@@ -489,7 +776,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
 
   // Build stream handler factory — per-request to allow session.ended audit
-  function createStreamHandler(auditContext?: {
+  function createStreamHandler(req: Request, auditContext?: {
     sessionId: string;
     requestStart: number;
     modelId?: string;
@@ -529,7 +816,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     };
     return customStreamHandler
       ? customStreamHandler
-      : (ctx: StreamHandlerContext) => defaultStreamHandler(ctx, wrappedOnFinish);
+      : (ctx: StreamHandlerContext) => defaultStreamHandler(
+          ctx, wrappedOnFinish, (error) => onError?.(error, req),
+        );
   }
 
   if (!staticTools && !loadTools) {
@@ -538,24 +827,163 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     );
   }
 
+  const clarificationTool = clarification
+    ? createClarificationTool(clarification)
+    : null;
+  const planTool = planning ? createPlanTool(planning) : null;
+  const withAlwaysOnBuiltins = (registry: ToolRegistry): ToolRegistry => {
+    let next = registry;
+    for (const tool of [clarificationTool, planTool]) {
+      if (tool && !next[tool.id]) next = { ...next, [tool.id]: tool };
+    }
+    return next;
+  };
+  /** Keeps the always-on built-ins of `source` next to a scoped selection. */
+  const keepAlwaysOn = <T,>(scoped: Record<string, T>, source: Record<string, T>) => {
+    const kept = { ...scoped };
+    for (const name of ALWAYS_ON_BUILTINS) {
+      if (source[name]) kept[name] = source[name];
+    }
+    return kept;
+  };
+
   async function handler(req: Request): Promise<Response> {
     reportDefaultsOnce();
+    let turnMetrics: TurnMetricsRecorder | undefined;
     try {
-      const { messages } = await req.json();
+      const { messages: requestMessages, glirastesClientActions } = await req.json();
 
-      if (!Array.isArray(messages)) {
+      if (!Array.isArray(requestMessages)) {
         return new Response(
           JSON.stringify({ error: 'messages must be an array' }),
           { status: 400, headers: { 'Content-Type': 'application/json' } },
         );
       }
 
+      // A direct command (`/` command or entity action) runs its tool without
+      // the model; the model sees earlier commands only by their label.
+      const directCommand = directCommands ? resolveDirectCommand(requestMessages) : undefined;
+
+      // A clarification answer resumes its original request: routing sees
+      // request + answer, the model sees an explicit continuation. The client
+      // session keeps the untouched messages.
+      const clarificationResume = directCommand ? undefined : resolveClarificationResume(requestMessages);
+      const messages: unknown[] = directCommand
+        ? requestMessages
+        : stripChatCommandMessages(clarificationResume
+          ? applyClarificationResume(requestMessages, clarificationResume)
+          : requestMessages);
+
       // Build tool context
       const toolContext = buildToolContext(req, { locale });
+      const clientActions = readClientActions(glirastesClientActions);
+      if (clientActions) toolContext.runtime = { ...toolContext.runtime, clientActions };
       const requestStart = Date.now();
+      const turnId = deriveSessionId(messages);
+
+      let managedTurn: ManagedTurnGuard | undefined;
+      if (managedRuntime) {
+        const principalResult = PrincipalSchema.safeParse(
+          await managedRuntime.resolvePrincipal(req),
+        );
+        if (!principalResult.success) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized' }),
+            { status: 401, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        const snapshot = await managedRuntime.resolveTurnSnapshot({
+          request: req,
+          turnId,
+          principal: principalResult.data,
+        });
+        if (
+          snapshot.turnId !== turnId
+          || snapshot.principal.subjectId !== principalResult.data.subjectId
+          || snapshot.principal.tenantId !== principalResult.data.tenantId
+        ) {
+          return new Response(
+            JSON.stringify({ error: 'Turn snapshot identity mismatch' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        managedTurn = createManagedTurnGuard({
+          snapshot,
+          resolvePrincipal: async () => {
+            const current = PrincipalSchema.safeParse(
+              await managedRuntime.resolvePrincipal(req),
+            );
+            return current.success ? current.data : undefined;
+          },
+          loadRevocations: managedRuntime.loadRevocations
+            ? () => managedRuntime.loadRevocations!({ request: req, snapshot })
+            : undefined,
+          onBudgetSignal: managedRuntime.onBudgetSignal,
+        });
+      }
+
+      turnMetrics = metrics
+        ? createTurnMetricsRecorder({
+            sink: metrics,
+            snapshot: managedTurn?.snapshot,
+            startedAtMs: requestStart,
+          })
+        : undefined;
+
+      const buildDiscovery = async (
+        registry: ToolRegistry,
+        initialToolNames: ReadonlyArray<string>,
+        handlerBuiltinNames: ReadonlyArray<string>,
+      ): Promise<HybridToolDiscovery | undefined> => {
+        if (!enableToolDiscovery) return undefined;
+        // Handler-created SDK built-ins stay active next to the searchable
+        // domain tools: clarification whenever configured, follow-ups when
+        // this turn's pipeline selected them. Registry-supplied tools sharing
+        // a built-in's name are never listed here and stay discoverable only
+        // through the manifest-checked index.
+        const builtinToolNames = handlerBuiltinNames.filter((name) =>
+          ALWAYS_ON_BUILTINS.includes(name) || initialToolNames.includes(name));
+        if (!managedTurn) {
+          return createHybridToolDiscovery({
+            discovery: createRegistryToolDiscovery({
+              turnId,
+              registry,
+              excludeNames: NON_DOMAIN_TOOL_NAMES,
+              semantics: toolSemantics,
+            }),
+            initialToolNames,
+            builtinToolNames,
+          });
+        }
+        const revocations = managedRuntime?.loadRevocations
+          ? await managedRuntime.loadRevocations({
+            request: req,
+            snapshot: managedTurn.snapshot,
+          })
+          : [];
+        const revokedToolIds = managedTurn.snapshot.manifestRevision.tools
+          .filter((tool) => isToolRevoked(
+            managedTurn!.snapshot,
+            tool.toolId,
+            revocations,
+          ))
+          .map((tool) => tool.toolId);
+        return createHybridToolDiscovery({
+          discovery: createTurnToolDiscovery({
+            snapshot: managedTurn.snapshot,
+            registry,
+            revokedToolIds,
+            semantics: toolSemantics,
+          }),
+          initialToolNames,
+          builtinToolNames,
+        });
+      };
 
       // Derive session ID — stable per conversation turn (groups approval flows)
-      const sessionId = (onAudit || piiShield || telemetry) ? deriveSessionId(messages) : '';
+      const sessionId = (onAudit || piiShield || telemetry) ? turnId : '';
 
       const toolOptions: ToolToAiToolOptions = {
         uiActionSchema,
@@ -590,13 +1018,70 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
 
       // ================================================================
+      // Direct command: no routing, no guardrails, no model call. The tool
+      // runs on the registry and wrappers of a model turn, so authorization,
+      // confirmation, revocation, budget, audit, the PII shield and metrics
+      // stay the same.
+      // ================================================================
+      if (directCommand) {
+        const callEndpoint = endpointCaller(req);
+        const endpointToolContext = {
+          ...toolContext,
+          callEndpoint,
+          ...(managedTurn
+            ? { turnSnapshot: managedTurn.snapshot }
+            : {}),
+          ...contractRejectionReporter(turnMetrics),
+        };
+        const registry = staticTools ?? await loadTools!(endpointToolContext);
+        let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, toolOptions);
+        // The result stays in the chat history that later model turns send to the model.
+        if (piiShield) {
+          commandTools = wrapToolsWithShield(commandTools, piiShield, sessionId);
+        }
+        if (lancer?.approvals) {
+          commandTools = wrapToolsWithLancerApprovals(commandTools, lancer.approvals, sessionId);
+        }
+        return await runDirectCommand({
+          command: directCommand,
+          registry,
+          tools: commandTools,
+          managedTurn,
+          turnMetrics,
+          onError: (error) => onError?.(error, req),
+        });
+      }
+
+      // ================================================================
       // Pipeline mode
       // ================================================================
+      // The app's own input check runs first in both modes, without any model call.
+      let processedMessages = messages;
+      if (guardrails) {
+        const check = await guardrails(messages);
+        if (!check.ok) {
+          return new Response(
+            JSON.stringify({ error: check.reason ?? 'Invalid input' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (check.sanitizedMessages) {
+          processedMessages = check.sanitizedMessages;
+        }
+      }
+
       if (pipeline) {
 
         // Create callEndpoint for endpoint tools (needed regardless of static/dynamic)
-        const callEndpoint = createInternalApiCallerFromRequest(req);
-        const endpointToolContext = { ...toolContext, callEndpoint };
+        const callEndpoint = endpointCaller(req);
+        const endpointToolContext = {
+          ...toolContext,
+          callEndpoint,
+          ...(managedTurn
+            ? { turnSnapshot: managedTurn.snapshot }
+            : {}),
+          ...contractRejectionReporter(turnMetrics),
+        };
 
         // Get tools (static or dynamic)
         let registry: ToolRegistry;
@@ -607,15 +1092,19 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         }
 
         // Add followup tool if configured
-        if (followups) {
-          const followupTool = createFollowupTool(followups);
-          if (followupTool) {
-            registry = { ...registry, [followupTool.id]: followupTool };
-          }
+        const followupTool = followups ? createFollowupTool(followups) : null;
+        if (followupTool && !registry[followupTool.id]) {
+          registry = { ...registry, [followupTool.id]: followupTool };
         }
+        registry = withAlwaysOnBuiltins(registry);
+        const handlerBuiltinNames = findHandlerBuiltins(
+          registry,
+          [followupTool, clarificationTool, planTool],
+        );
 
         // Extract user input for pipeline
-        let userText = extractLastUserText(messages);
+        let userText = clarificationResume?.routingText
+          ?? extractLastUserText(processedMessages);
         if (piiShield) {
           userText = await piiShield.outbound(userText, sessionId);
         }
@@ -623,7 +1112,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // Build lightweight conversation history for intent classification.
         // Include the last few user/assistant text exchanges (excluding the
         // current message) so the classifier can understand follow-ups.
-        const conversationHistory = extractConversationHistory(messages, maxConversationHistoryPairs);
+        const conversationHistory = extractConversationHistory(processedMessages, maxConversationHistoryPairs);
 
         // Run pipeline: guardrails + classification + routing + model selection
         const pipelineResult = await pipeline.process(
@@ -678,19 +1167,34 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           }
         }
 
+        const hasExplicitSelection = pipelineResult.toolSelection === 'explicit';
+        const initialToolNames = pipelineResult.blocked
+          ? []
+          : hasExplicitSelection || pipelineResult.tools.length > 0
+          ? pipelineResult.tools
+          : Object.keys(registry);
+        const discoveryController = pipelineResult.blocked
+          ? undefined
+          : await buildDiscovery(registry, initialToolNames, handlerBuiltinNames);
+
         // Convert all tools to AI tools
         let aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
+        const unscopedAiTools = aiTools;
 
         // Scope tools to pipeline selection
         if (pipelineResult.blocked) {
           // Guardrails blocked — no tools allowed
           aiTools = {};
-        } else if (pipelineResult.tools.length > 0) {
-          const scoped: typeof aiTools = {};
-          for (const name of pipelineResult.tools) {
-            if (aiTools[name]) scoped[name] = aiTools[name];
-          }
-          if (Object.keys(scoped).length > 0) aiTools = scoped;
+        } else if (!discoveryController && (hasExplicitSelection || pipelineResult.tools.length > 0)) {
+          aiTools = scopePipelineTools({
+            aiTools,
+            registryToolNames: new Set(Object.keys(registry)),
+            selected: pipelineResult.tools,
+            fallbackToAll: !hasExplicitSelection,
+          });
+          // Clarification and the plan stay callable, also for an empty
+          // focused selection.
+          aiTools = keepAlwaysOn(aiTools, unscopedAiTools);
         }
 
         // Resolve model — config callback > pipeline instance > error
@@ -703,6 +1207,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         } else if (pipelineResult.model.instance) {
           model = pipelineResult.model.instance;
         } else {
+          turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
           return new Response(
             JSON.stringify({
               error:
@@ -718,6 +1223,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             ? systemPromptConfig({
                 pipelineResult,
                 currentDate: new Date(),
+                ...(managedTurn ? { turnSnapshot: managedTurn.snapshot } : {}),
               })
             : systemPromptConfig;
 
@@ -763,11 +1269,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           moduleMaxSteps: pipelineResult.module?.executionDefaults?.maxSteps,
           configuredMaxSteps,
           safetyMaxSteps,
+          runtimeBudgetMaxSteps:
+            managedTurn?.snapshot.budget.maxModelSteps,
         });
         const contextWindow =
           pipelineResult.module?.executionDefaults?.contextWindow ??
           maxContextMessages;
-        let recentMessages = messages.slice(-contextWindow);
+        let recentMessages = processedMessages.slice(-contextWindow);
 
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
@@ -780,14 +1288,16 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           aiTools = wrapToolsWithLancerApprovals(aiTools, lancer.approvals, sessionId) as typeof aiTools;
         }
 
-        const pipelineStreamHandler = createStreamHandler((onAudit || telemetry) ? {
+        const pipelineStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
           sessionId,
           requestStart,
           modelId: resolvedModelId,
         } : undefined);
 
-        return pipelineStreamHandler({
-          tools: aiTools as Record<string, unknown>,
+        return await pipelineStreamHandler({
+          tools: discoveryController
+            ? { ...aiTools, find_tools: discoveryController.tool }
+            : aiTools as Record<string, unknown>,
           messages: recentMessages,
           systemPrompt,
           model,
@@ -801,6 +1311,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           modelTier: pipelineResult.model.modelId,
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
+          managedTurn,
+          turnMetrics,
+          modelPricing,
+          toolDiscovery: discoveryController,
+          handlerBuiltinToolNames: discoveryController
+            ? [...handlerBuiltinNames, 'find_tools']
+            : handlerBuiltinNames,
         });
       }
 
@@ -808,24 +1325,16 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // Legacy mode (without pipeline)
       // ================================================================
 
-      // Guardrails
-      let processedMessages = messages;
-      if (guardrails) {
-        const check = await guardrails(messages);
-        if (!check.ok) {
-          return new Response(
-            JSON.stringify({ error: check.reason ?? 'Invalid input' }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } },
-          );
-        }
-        if (check.sanitizedMessages) {
-          processedMessages = check.sanitizedMessages;
-        }
-      }
-
       // Create callEndpoint for endpoint tools (needed regardless of static/dynamic)
-      const callEndpoint = createInternalApiCallerFromRequest(req);
-      const endpointToolContext = { ...toolContext, callEndpoint };
+      const callEndpoint = endpointCaller(req);
+      const endpointToolContext = {
+        ...toolContext,
+        callEndpoint,
+        ...(managedTurn
+          ? { turnSnapshot: managedTurn.snapshot }
+          : {}),
+        ...contractRejectionReporter(turnMetrics),
+      };
 
       // Load tools
       let registry: ToolRegistry;
@@ -834,7 +1343,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       } else {
         registry = await loadTools!(endpointToolContext);
       }
-      const allToolNames = Object.keys(registry);
+      registry = withAlwaysOnBuiltins(registry);
+      const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool, planTool]);
+      const allToolNames = Object.keys(registry)
+        .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
 
       // PII Shield: anonymize for legacy mode
       const legacySessionId = piiShield ? deriveSessionId(processedMessages) : '';
@@ -846,7 +1358,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // Intent routing
       let routing: IntentRoutingResult | undefined;
       if (intentRouter) {
-        const text = extractLastUserText(processedMessages);
+        const text = clarificationResume?.routingText
+          ?? extractLastUserText(processedMessages);
         routing = await intentRouter(text, allToolNames);
       }
 
@@ -859,11 +1372,25 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         for (const name of routing.toolNames) {
           if (aiTools[name]) scoped[name] = aiTools[name];
         }
-        if (Object.keys(scoped).length > 0) aiTools = scoped;
+        if (Object.keys(scoped).length > 0) {
+          aiTools = keepAlwaysOn(scoped, aiTools);
+        }
+      }
+
+      const discoveryController = await buildDiscovery(
+        registry,
+        routing?.toolNames?.length ? routing.toolNames : allToolNames,
+        handlerBuiltinNames,
+      );
+      if (discoveryController) {
+        // Discovery needs the full eligible server-side set; `activeTools`
+        // preserves the intent router's fast initial scope.
+        aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
       }
 
       // Resolve model + system prompt (legacy mode — no pipeline fallback)
       if (!modelConfig) {
+        turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
         return new Response(
           JSON.stringify({
             error:
@@ -882,12 +1409,15 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ? systemPromptConfig({
               routing,
               currentDate: new Date(),
+              ...(managedTurn ? { turnSnapshot: managedTurn.snapshot } : {}),
             })
           : systemPromptConfig;
 
       const stepLimit = resolveStepLimit({
         configuredMaxSteps: routing?.maxSteps ?? configuredMaxSteps,
         safetyMaxSteps,
+        runtimeBudgetMaxSteps:
+          managedTurn?.snapshot.budget.maxModelSteps,
       });
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
       let recentMessages = processedMessages.slice(-contextWindow);
@@ -903,14 +1433,16 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         aiTools = wrapToolsWithLancerApprovals(aiTools, lancer.approvals, legacySessionId || sessionId) as typeof aiTools;
       }
 
-      const legacyStreamHandler = createStreamHandler((onAudit || telemetry) ? {
+      const legacyStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
         sessionId: legacySessionId || sessionId,
         requestStart,
       } : undefined);
 
       // Delegate streaming to consumer's handler
-      return legacyStreamHandler({
-        tools: aiTools as Record<string, unknown>,
+      return await legacyStreamHandler({
+        tools: discoveryController
+          ? { ...aiTools, find_tools: discoveryController.tool }
+          : aiTools as Record<string, unknown>,
         messages: recentMessages,
         systemPrompt,
         model,
@@ -924,8 +1456,16 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         modelTier: routing?.modelTier,
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,
+        managedTurn,
+        turnMetrics,
+        modelPricing,
+        toolDiscovery: discoveryController,
+        handlerBuiltinToolNames: discoveryController
+          ? [...handlerBuiltinNames, 'find_tools']
+          : handlerBuiltinNames,
       });
     } catch (error) {
+      turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
       onError?.(error, req);
       return new Response(
         JSON.stringify({ error: 'AI request failed' }),
@@ -941,6 +1481,19 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   return handler;
 }
 
+/**
+ * SDK built-ins whose tool instance the handler itself put into the registry.
+ * Instance identity decides, not the name: a registry- or manifest-supplied
+ * tool that shares a built-in's name is never listed and stays fully guarded.
+ */
+function findHandlerBuiltins(
+  registry: ToolRegistry,
+  created: ReadonlyArray<Tool | null>,
+): string[] {
+  return NON_DOMAIN_TOOL_NAMES.filter((name) =>
+    created.some((tool) => tool !== null && registry[name] === tool));
+}
+
 // ============================================================================
 // PII Shield Helpers
 // ============================================================================
@@ -954,7 +1507,7 @@ function deriveSessionId(messages: unknown[]): string {
       return `ai-${msg.id}`;
     }
   }
-  return `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `ai-${globalThis.crypto.randomUUID()}`;
 }
 
 async function anonymizeMessages(
@@ -972,9 +1525,10 @@ async function anonymizeMessages(
 
     const record = msg as Record<string, unknown>;
 
-    // Only anonymize user messages
+    // Only user messages carry text to anonymize; of the others, only the
+    // arguments of a direct command's tool call are the user's own words.
     if (record.role !== 'user') {
-      result.push(msg);
+      result.push(await pseudonymizeCommandToolInputs(record, shield, sessionId));
       continue;
     }
 
@@ -1283,4 +1837,14 @@ function extractTextFromMessage(msg: Record<string, unknown>): string {
     }
   }
   return texts.join(' ');
+}
+
+/**
+ * The client actions the chat reported for the open page, or undefined when
+ * the report is missing or malformed (then client-action tools run as before).
+ */
+function readClientActions(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value) || value.length > 500) return undefined;
+  if (!value.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 200)) return undefined;
+  return value as string[];
 }

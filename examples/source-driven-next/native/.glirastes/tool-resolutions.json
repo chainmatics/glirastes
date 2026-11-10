@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "conventions": {
+    "handlerWrappers": [
+      { "module": "src/query.js", "export": "query", "queryArg": 1, "outputArg": 2 }
+    ],
+    "bodyReaders": [],
+    "authHelpers": ["resolveSession"],
+    "filterValues": {}
+  },
+  "tools": {}
+}

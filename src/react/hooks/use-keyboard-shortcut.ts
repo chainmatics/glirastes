@@ -47,7 +47,8 @@ function matches(event: KeyboardEvent, combo: Combo): boolean {
   if (wantMod !== gotMod) return false;
   if (combo.shift !== event.shiftKey) return false;
   if (combo.alt !== event.altKey) return false;
-  const key = event.key.toLowerCase();
+  // Synthetic keydowns, such as Chrome autofill's, can lack `key`.
+  const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
   if (combo.key === 'escape') return key === 'escape' || key === 'esc';
   return key === combo.key;
 }

@@ -1,6 +1,6 @@
 {
   "name": "glirastes",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Official Chainmatics SDK for building AI-powered chat, tools, and agent systems. Part of the Glirastes platform.",
   "license": "Apache-2.0",
   "author": {
@@ -31,7 +31,7 @@
     "react"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.6"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
@@ -62,6 +62,66 @@
         "default": "./dist/cjs/index.js"
       }
     },
+    "./contracts": {
+      "import": {
+        "types": "./dist/contracts/index.d.ts",
+        "default": "./dist/contracts/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/contracts/index.d.ts",
+        "default": "./dist/cjs/contracts/index.js"
+      }
+    },
+    "./runtime": {
+      "import": {
+        "types": "./dist/runtime/index.d.ts",
+        "default": "./dist/runtime/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/runtime/index.d.ts",
+        "default": "./dist/cjs/runtime/index.js"
+      }
+    },
+    "./runtime/ai-sdk": {
+      "import": {
+        "types": "./dist/runtime/ai-sdk/index.d.ts",
+        "default": "./dist/runtime/ai-sdk/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/runtime/ai-sdk/index.d.ts",
+        "default": "./dist/cjs/runtime/ai-sdk/index.js"
+      }
+    },
+    "./ai-sdk": {
+      "import": {
+        "types": "./dist/runtime/ai-sdk/index.d.ts",
+        "default": "./dist/runtime/ai-sdk/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/runtime/ai-sdk/index.d.ts",
+        "default": "./dist/cjs/runtime/ai-sdk/index.js"
+      }
+    },
+    "./stt": {
+      "import": {
+        "types": "./dist/stt/index.d.ts",
+        "default": "./dist/stt/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/stt/index.d.ts",
+        "default": "./dist/cjs/stt/index.js"
+      }
+    },
+    "./sync": {
+      "import": {
+        "types": "./dist/sync/index.d.ts",
+        "default": "./dist/sync/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/sync/index.d.ts",
+        "default": "./dist/cjs/sync/index.js"
+      }
+    },
     "./server": {
       "import": {
         "types": "./dist/server/index.d.ts",
@@ -82,25 +142,19 @@
         "default": "./dist/cjs/server/adapters/nextjs/index.js"
       }
     },
-    "./server/nestjs": {
+    "./adapter/nextjs": {
       "import": {
-        "types": "./dist/server/adapters/nestjs/index.d.ts",
-        "default": "./dist/server/adapters/nestjs/index.js"
+        "types": "./dist/server/adapters/nextjs/index.d.ts",
+        "default": "./dist/server/adapters/nextjs/index.js"
       },
       "require": {
-        "types": "./dist/cjs/server/adapters/nestjs/index.d.ts",
-        "default": "./dist/cjs/server/adapters/nestjs/index.js"
+        "types": "./dist/cjs/server/adapters/nextjs/index.d.ts",
+        "default": "./dist/cjs/server/adapters/nextjs/index.js"
       }
     },
     "./server/testing": {
-      "import": {
-        "types": "./dist/server/testing/index.d.ts",
-        "default": "./dist/server/testing/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/server/testing/index.d.ts",
-        "default": "./dist/cjs/server/testing/index.js"
-      }
+      "types": "./dist/server/testing/index.d.ts",
+      "default": "./dist/server/testing/index.js"
     },
     "./react": {
       "types": "./dist/react/index.d.ts",
@@ -110,26 +164,108 @@
       "types": "./dist/react/transports/vercel/index.d.ts",
       "default": "./dist/react/transports/vercel/index.js"
     },
-    "./react/langgraph": {
-      "types": "./dist/react/transports/langgraph/index.d.ts",
-      "default": "./dist/react/transports/langgraph/index.js"
-    },
     "./react/styles.css": "./dist/react/styles.css",
+    "./embed": {
+      "types": "./dist/embed/index.d.ts",
+      "default": "./dist/embed/index.js"
+    },
+    "./browser": {
+      "import": {
+        "types": "./dist/browser/index.d.ts",
+        "default": "./dist/browser/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/browser/index.d.ts",
+        "default": "./dist/cjs/browser/index.js"
+      }
+    },
     "./codegen": {
       "types": "./dist/codegen/index.d.ts",
       "default": "./dist/codegen/index.js"
-    },
-    "./openapi": {
-      "types": "./dist/openapi/index.d.ts",
-      "default": "./dist/openapi/index.js"
     }
   },
   "files": [
     "dist",
+    "!dist/openapi",
+    "!dist/cjs/openapi",
+    "!dist/server/adapters/nestjs",
+    "!dist/cjs/server/adapters/nestjs",
+    "!dist/react/transports/langgraph.*",
+    "!dist/react/transports/langgraph",
+    "!dist/cjs/react/transports/langgraph.*",
+    "!dist/cjs/react/transports/langgraph",
+    "!dist/codegen/skill-generator.*",
+    "!dist/cjs/codegen/skill-generator.*",
+    "!dist/codegen/mcp-generator.*",
+    "!dist/cjs/codegen/mcp-generator.*",
+    "!dist/codegen/output-recommender.*",
+    "!dist/cjs/codegen/output-recommender.*",
+    "!dist/codegen/asset-sync.*",
+    "!dist/cjs/codegen/asset-sync.*",
+    "!dist/codegen/nestjs-scanner.*",
+    "!dist/cjs/codegen/nestjs-scanner.*",
+    "!dist/codegen/endpoint-scanner.*",
+    "!dist/cjs/codegen/endpoint-scanner.*",
+    "!dist/codegen/ui-scanner.*",
+    "!dist/cjs/codegen/ui-scanner.*",
+    "!dist/codegen/module-generator.*",
+    "!dist/cjs/codegen/module-generator.*",
+    "!dist/codegen/validator.*",
+    "!dist/cjs/codegen/validator.*",
+    "!dist/codegen/coverage.*",
+    "!dist/cjs/codegen/coverage.*",
+    "!dist/codegen/scaffolder.*",
+    "!dist/cjs/codegen/scaffolder.*",
+    "!dist/cli/commands/check-upgrade.*",
+    "!dist/cjs/cli/commands/check-upgrade.*",
+    "!dist/cli/commands/test.*",
+    "!dist/cjs/cli/commands/test.*",
+    "!dist/cli/utils",
+    "!dist/cli/deferred-full.*",
+    "!dist/cjs/cli/utils",
+    "!dist/cjs/cli/deferred-full.*",
+    "!dist/endpoint-scanner.*",
+    "!dist/cjs/endpoint-scanner.*",
+    "!dist/route-scanner.*",
+    "!dist/cjs/route-scanner.*",
+    "!dist/ui-scanner.*",
+    "!dist/cjs/ui-scanner.*",
+    "!dist/module-generator.*",
+    "!dist/cjs/module-generator.*",
+    "!dist/validator.*",
+    "!dist/cjs/validator.*",
+    "!dist/coverage.*",
+    "!dist/cjs/coverage.*",
+    "!dist/scaffolder.*",
+    "!dist/cjs/scaffolder.*",
+    "!dist/format.*",
+    "!dist/cjs/format.*",
+    "!dist/fs-utils.*",
+    "!dist/cjs/fs-utils.*",
+    "!dist/skill-generator.*",
+    "!dist/cjs/skill-generator.*",
+    "!dist/mcp-generator.*",
+    "!dist/cjs/mcp-generator.*",
+    "!dist/output-recommender.*",
+    "!dist/cjs/output-recommender.*",
+    "!dist/asset-sync.*",
+    "!dist/cjs/asset-sync.*",
+    "!dist/nestjs-scanner.*",
+    "!dist/cjs/nestjs-scanner.*",
+    "contracts",
+    "runtime",
+    "ai-sdk",
+    "stt",
+    "sync",
     "server",
+    "!server/nestjs",
+    "adapter",
+    "!adapter/nestjs",
     "react",
+    "!react/langgraph",
+    "embed",
+    "browser",
     "codegen",
-    "openapi",
     "skills",
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
@@ -140,21 +276,25 @@
     "SECURITY.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs",
+    "build": "node scripts/generate-embed-styles.mjs --check && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && cp src/react/styles.css dist/cjs/react/styles.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs && cp src/codegen/tools/probe-child.mjs src/codegen/tools/probe-loader.mjs dist/codegen/tools/ && cp src/codegen/tools/sources/fastapi-routes.py dist/codegen/tools/sources/",
     "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.test.json",
     "test": "vitest run"
   },
   "dependencies": {
+    "typescript": "^5.7.3",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "zod": "^4.0.0",
     "snowball-stemmers": "^0.6.0",
     "ai": "^6.0.0"
   },
   "peerDependencies": {
+    "@ai-sdk/openai": "^3",
     "react": "^18 || ^19",
     "react-dom": "^19",
     "@ai-sdk/react": "^3.0.0",
     "react-markdown": "^10.1.0",
-    "wavesurfer.js": "^7",
     "@nestjs/common": "^10 || ^11",
     "@nestjs/core": "^10 || ^11",
     "@nestjs/config": "^3 || ^4",
@@ -168,6 +308,9 @@
     "vitest": ">=2.0.0"
   },
   "peerDependenciesMeta": {
+    "@ai-sdk/openai": {
+      "optional": true
+    },
     "react": {
       "optional": true
     },
@@ -178,9 +321,6 @@
       "optional": true
     },
     "react-markdown": {
-      "optional": true
-    },
-    "wavesurfer.js": {
       "optional": true
     },
     "@nestjs/common": {
@@ -218,31 +358,32 @@
     }
   },
   "devDependencies": {
-    "typescript": "^5.7.3",
-    "vitest": "^4.0.18",
     "@ai-sdk/openai": "^3",
+    "@ai-sdk/react": "^3.0.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/passport": "^11",
+    "@nestjs/swagger": "^11.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/express": "^5.0.0",
     "@types/node": "^25.6.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@types/express": "^5.0.0",
-    "@types/ws": "^8.5.0",
     "@types/snowball-stemmers": "^0.6.0",
+    "@types/ws": "^8.5.0",
+    "class-transformer": "^0.5.0",
+    "class-validator": "^0.15.1",
+    "express": "^5.0.0",
+    "jsdom": "^28.1.0",
+    "next": "^15.0.0",
+    "passport": "^0.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@ai-sdk/react": "^3.0.0",
     "react-markdown": "^10.1.0",
-    "wavesurfer.js": "^7.12.1",
-    "@nestjs/common": "^11.0.0",
-    "@nestjs/core": "^11.0.0",
-    "@nestjs/config": "^4.0.0",
-    "@nestjs/passport": "^11",
-    "@nestjs/swagger": "^11.4.1",
-    "next": "^15.0.0",
-    "express": "^5.0.0",
-    "passport": "^0.7",
+    "reflect-metadata": "^0.2.0",
+    "vitest": "^4.0.18",
     "ws": "^8.0.0",
-    "class-validator": "^0.15.1",
-    "class-transformer": "^0.5.0",
-    "reflect-metadata": "^0.2.0"
+    "zod-v3": "npm:zod@3.25.76"
   }
 }

@@ -3,11 +3,13 @@ export * from './core/index.js';
 
 // AI pipeline (multi-stage: guardrails → classify → route → model select)
 export * from './pipeline.js';
-
-// Lancer (platform client) — createLancer, ServiceBlockedError, types
-export * from './lancer/index.js';
+export {
+  createLocalAiPipeline,
+  type LocalAiPipelineConfig,
+} from './local-pipeline.js';
 
 // PII shield
-export { createPiiShield } from './pii-shield/index.js';
-export { createAegisDetector } from './pii-shield/index.js';
-export type { AegisLike } from './pii-shield/index.js';
+export {
+  createPiiShield,
+  createRegexPiiDetector,
+} from './pii-shield/index.js';

@@ -59,6 +59,8 @@ export function VercelAiChat({
   bodyExtras,
   sessions,
   title,
+  open,
+  onOpenChange,
   defaultOpen,
   draggable,
   resizable,
@@ -71,6 +73,22 @@ export function VercelAiChat({
   headerActions,
   triggerIcon,
   showMic,
+  welcomeMessage,
+  portal,
+  mode,
+  defaultMode,
+  onModeChange,
+  layoutControls,
+  collapsed,
+  onCollapsedChange,
+  sidebarWidth,
+  minSidebarWidth,
+  maxSidebarWidth,
+  onSidebarWidthChange,
+  layoutLabels,
+  keepMounted,
+  persistDimensions,
+  persistSidebarWidth,
   children,
   ...providerConfig
 }: VercelAiChatProps) {
@@ -132,6 +150,8 @@ export function VercelAiChat({
       {children ?? (
         <FloatingChatUI
           title={title}
+          open={open}
+          onOpenChange={onOpenChange}
           defaultOpen={defaultOpen}
           draggable={draggable}
           resizable={resizable}
@@ -144,6 +164,22 @@ export function VercelAiChat({
           headerActions={headerActions}
           triggerIcon={triggerIcon}
           showMic={showMic}
+          welcomeMessage={welcomeMessage}
+          portal={portal}
+          mode={mode}
+          defaultMode={defaultMode}
+          onModeChange={onModeChange}
+          layoutControls={layoutControls}
+          collapsed={collapsed}
+          onCollapsedChange={onCollapsedChange}
+          sidebarWidth={sidebarWidth}
+          minSidebarWidth={minSidebarWidth}
+          maxSidebarWidth={maxSidebarWidth}
+          onSidebarWidthChange={onSidebarWidthChange}
+          layoutLabels={layoutLabels}
+          keepMounted={keepMounted}
+          persistDimensions={persistDimensions}
+          persistSidebarWidth={persistSidebarWidth}
         />
       )}
     </AiChatProvider>

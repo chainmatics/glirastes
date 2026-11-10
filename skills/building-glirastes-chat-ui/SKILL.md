@@ -1,378 +1,393 @@
 ---
 name: building-glirastes-chat-ui
-description: Customizing the Glirastes chat UI — VercelAiChat / LangGraphAiChat, AiChatProvider + AiChatPanel composition, theming, mentions, voice input, approval cards, ChatWindow portal, useAiClientAction. Use when going beyond the zero-config chat widget.
-version: 1.0.0
-tags:
-  - glirastes
-  - react
-  - chat-ui
-  - components
-triggers:
-  - chat panel
-  - chat window
-  - VercelAiChat
-  - LangGraphAiChat
-  - AiChatProvider
-  - AiChatPanel
-  - useAiChat
-  - useAiClientAction
-  - chat theming
-  - chat mentions
-  - voice input
-  - approval card
-  - suggestion chips
-  - pipeline timeline
+description: Use when integrating or customizing the Glirastes React chat, tool cards, approvals, sessions, mentions and slash commands (derived `@` entities and `/` commands, direct commands), suggestions, UI actions, themes, floating window behavior, or speech-to-text.
 ---
 
 # Building the Glirastes Chat UI
 
-> **Scope:** customizing the chat UI beyond `<VercelAiChat endpoint="/api/chat" />`. For the initial integration (install, wire the route, drop the widget), see [integrating-glirastes-nextjs](../integrating-glirastes-nextjs/SKILL.md) or [integrating-glirastes-nestjs](../integrating-glirastes-nestjs/SKILL.md).
+Use `VercelAiChat` from `glirastes/react/vercel` plus
+`glirastes/react/styles.css`. Preserve existing product UX through supported
+themes, slots, session adapters, tool renderers, and `useAiClientAction`
+handlers rather than copying the chat implementation. You, the app's coding
+agent, wire it; Glirastes never calls a model from the UI or the CLI: the
+chat route uses the app's own model access.
 
-## Component map
+## Boundaries
 
+- The browser never decides rights: role filtering in the UI only hides
+  entries, the server and the app still authorize every tool call.
+- Never derive approver authority from the browser payload; organizational
+  approval stays fail-closed while unavailable.
+- Speech traffic goes directly between the app's provider adapter and its
+  provider, never through the Glirastes Control Plane.
+- Never edit `.glirastes/tool-policy.json` or generated files to change what
+  the UI shows; UI tools, `@` entities and `/` commands come from
+  `glirastes tools refresh`.
+
+## Workflow
+
+1. Mount one `VercelAiChat endpoint="/api/chat"` (the app's real chat route)
+   and import `glirastes/react/styles.css`; theme it before forking anything.
+   Place the assistant as in "Placing the assistant" below: a toggle where the
+   app wants it, the chat docked on the right or detached as a window. The
+   bare floating bubble is only for apps without a layout of their own.
+2. Register client actions with `useAiClientAction` where their state lives,
+   with a payload contract, and mount the navigation bridge
+   (`useGlirastesNavigationBridge`) once. Run `glirastes tools refresh` and
+   check with `glirastes tools status` that the UI tools are active.
+3. Serve the derived `@` entities and `/` commands next to the chat route and
+   pass them as `chatInteractions` (section below); add `completionProviders`
+   only for sources they do not cover, plus the clarification card, result
+   renderers and sessions as the product needs.
+4. Wire speech-to-text through the SDK controller (gate below).
+5. Prove it in a real browser: keyboard, mobile layout, approvals, STT
+   cleanup.
+
+The application may use an ephemeral session for basic interactive chat.
+Server-backed conversation visibility and retention must be explicit when
+durable sessions are enabled.
+
+## Configuration
+
+`VercelAiChat` requires `endpoint` and creates its transport internally.
+It also accepts `AiChatProviderConfig` fields directly. Only when composing
+`AiChatProvider` yourself do you supply `transport` from the transport hook.
+Reach for configuration before forking a component.
+
+| Field | What it decides |
+|---|---|
+| `endpoint` | required by `VercelAiChat`; the actual server chat route |
+| `theme` | preset name or override object |
+| `theme.colors.primary`, `theme.colors.primarySoft` | accent and gradient stop within a theme override |
+| `classNames` | per-slot class hooks |
+| `components` | replace a rendered component (see *Slots*) |
+| `locale` | override any user-facing string; omitted keys fall back to English |
+| `session` | `save` / `load` / `clear` for durable conversations |
+| `mentions` | mention sources and search |
+| `suggestions` | contextual suggestion chips |
+| `voice` | speech-to-text |
+| `toolResults`, `toolLabels` | how tool output is displayed and named |
+| `onBeforeSend`, `onToolResult` | hooks around a turn |
+| `approvalDescription` | human-readable text for an approval request |
+
+`locale` exists so the SDK never fights the product's i18n stack. Bind it to
+whatever the app already uses:
+
+```tsx
+const t = useTranslations('chat');
+<VercelAiChat endpoint="/api/chat" locale={{ sendButton: t('send'), placeholder: t('placeholder') }} />
 ```
-AiChatProvider (state + transport + config)
- └─ AiChatPanel (the panel layout — header, body, input)
-     ├─ MessageList → MessageBubble (text, mentions, tool results, approvals, pipeline timeline)
-     ├─ SuggestionBar (Pro: contextual followup chips)
-     └─ ChatInput / RichMentionInput (input box)
-         └─ VoiceInputAddon (optional: live waveform + STT)
 
-VercelAiChat = AiChatProvider + ChatWindow (floating, draggable, resizable) + AiTriggerButton (the floating launcher)
-LangGraphAiChat = same shape but talks LangGraph instead of Vercel AI SDK
+## Theming before forking
+
+`theme` takes a preset name or an object that overrides one. Presets:
+`professional-lightblue` (the default), `professional-dark`, `minimal-white`,
+`vibrant-indigo`, `terminal-green`, `liquid-glass`, `purple-haze`, `blue-dream`,
+`sunset-orange`, `ocean-teal`, `midnight-mono`.
+
+```tsx
+<VercelAiChat endpoint="/api/chat" theme="professional-dark" />
+<VercelAiChat endpoint="/api/chat" theme={{ preset: 'minimal-white', colors: { primary: '#10b981' } }} />
 ```
 
-`<VercelAiChat />` is the zero-config wrapper. For full control, drop down to `AiChatProvider` + `AiChatPanel`.
+`getThemeVars`, `CHAT_THEME_PRESETS`, and `DEFAULT_THEME_PRESET` are exported for
+products that need to read the resolved variables. Prefer `theme` and
+`classNames` over overriding the shipped CSS: styles are variable-driven, and
+inline overrides are what break under a strict CSP.
 
-## Three integration levels
+## Slots
 
-### Level 1 — VercelAiChat (zero config)
+`components` replaces one rendered piece while the rest of the chat keeps
+working: `MessageBubble`, `ChatInput`, `ToolResultBlock`, `Markdown`,
+`InputExtra`, `ApprovalCard`, `BulkApprovalCard`, `PipelineTimeline`,
+`SuggestionChip`, `MentionChip`.
+
+Replace the narrowest slot that solves the problem. Swapping `MessageBubble`
+to restyle one tool result costs the streaming, approval, and mention behavior
+that bubble already carries.
+
+## UI actions
+
+`glirastes/react` re-exports the framework-neutral action bus of
+`glirastes/browser`: `UiActionBus`,
+`useAiClientAction`, `useAiClientActionById`, `useAiClientActionByType`,
+`dispatchAiClientAction`, `dispatchAiClientActions`, plus
+`getRegisteredHandlers`, `getMissingHandlers`, `getActionIdInfo`,
+`setActionIdRegistry`, and `useAiMissingHandlerWarning`.
+
+A UI tool produces an action; a handler in the app performs it. Register with
+`useAiClientAction` where the state lives, not at the root — a handler far from
+its state is how stale closures get shipped.
+
+`useAiMissingHandlerWarning` and `getMissingHandlers` surface actions the model
+can emit but nothing handles. Wire the warning during development: a silently
+dropped action looks exactly like a model that ignored the request.
+
+Generated navigation (`ui.navigate`) and filter (`ui.filter.<view>`) tools run
+through `useGlirastesNavigationBridge({ push })`; without the bridge they stay
+disabled. A client action becomes the tool `ui.<actionId>`; pass its payload
+contract as the third argument of `useAiClientAction` so the payload is typed
+and checked before the handler runs.
+
+## `@` entities and `/` commands
+
+`glirastes tools refresh` derives them from the enabled tools and writes
+`chatInteractions` into the generated module. A disabled, `needs_attention` or
+excluded tool derives nothing, and only string arguments are derived (an
+optional key of another type is left out of the form; a required one hides
+the command or action).
+
+| Derived from | Becomes |
+| --- | --- |
+| A page without parameters (`ui.navigate`) | `/` command `open.<path>`, segments joined by dots (`/settings/profile` is `open.settings.profile`, `/` is `open.home`) |
+| A URL filter (`ui.filter.<view>`) | `/` command `filter.<view>`; enums become choices |
+| A client action (`ui.<actionId>`) | `/` command `<actionId>` |
+| A read endpoint with `search`, `q`, `query` or `term` that lists objects with an `id` and a `title`, `name`, `displayName`, `label`, `subject` or `email` (`GET /api/tasks?search=`) | `@` entity `task` |
+| An endpoint with one path parameter below that collection, or a page with one parameter of that entity | Context action of the entity ("Complete", id `task.tasks.complete`; "Open") |
+
+Labels are English words built from identifiers. `docs/chat-interactions.md`
+in the Glirastes repository (not shipped in the package) has the same table
+with the override format.
+
+- Serve them with a GET next to the chat POST:
+  `export const GET = createChatInteractionsHandler({ interactions: generated.chatInteractions, overrides, managedRuntime })`
+  from `glirastes/server/nextjs`, with `overrides` the parsed
+  `.glirastes/chat-interactions.json` when the app has one. With
+  `managedRuntime` the list is per user and leaves out what this user may
+  not run; without it every caller gets the same list. Define
+  `managedRuntime` once as a `const` at module scope and pass that same
+  object to the POST and the GET; two hand-written copies drift apart, and
+  the list then shows commands the POST refuses or hides ones it would run.
+- In React, load them with `useChatInteractionsData('/api/chat')` and pass a
+  memoized `chatInteractions={{ data, entities, commands, locale }}` to
+  `VercelAiChat`. `defineChatEntity` and `defineChatCommand` add what the
+  code does not show (people from another service, a prepared prompt) and
+  replace a derived entry with the same type or id. Key the chat by user
+  when the identity can change without a reload, so the list follows.
+- `chatInteractions` already offers the generated UI tools as `/` commands;
+  drop an earlier `createUiToolCommandProvider`, or the list shows them twice.
+- `<glirastes-chat endpoint="/api/chat" interactions>` loads the same list
+  and offers `defineEntity`, `defineCommand` and `mentionEntity`. Its GET
+  sends no app headers: a host that authenticates by header sets the
+  `interactions` property instead.
+- A `/` command sent alone runs its tool on the server without a model
+  call, under the same guard, confirmation, audit and PII shield as a model
+  call; missing arguments open a form first. `directCommands: false` on
+  `createAiChatHandler` turns this off.
+- Better labels, synonyms (`keywords`) and icons go into
+  `.glirastes/chat-interactions.json` (`describing-glirastes-tools`).
+  `hidden` there only shapes the list; the server still authorizes.
+- `VercelAiChat` has no slot for the suggestion item. Only a hand-composed
+  `RichMentionInput` takes `components={{ DropdownItem }}`; that item must
+  spread its `optionProps`, or the listbox loses its active option for screen
+  readers.
+- Keyboard model of the `/` and `@` list: the editor is a `textbox` that
+  controls the suggestion `listbox`; ArrowUp and ArrowDown move between
+  results, ArrowRight and ArrowLeft between an entity and its actions, Enter
+  or Tab picks, Escape closes. The argument form starts at the first empty
+  required field, entity fields are ARIA 1.2 comboboxes, and Escape closes an
+  open list before it cancels the form.
+
+## Commands, mentions and clarification
+
+`completionProviders` turns the composer into provider search. Each provider
+has a stable `id`, a `trigger` (`/` or `@`) and an async `search` that gets
+the query, an abort `signal`, a `limit` and the `completionContext` (roles and
+attributes the UI knows). Arrow keys, Tab/Enter and Escape work in the list,
+and the selected item's own id reaches the model in the mention marker.
+`createUiToolCommandProvider` offers the catalog's UI tools as `/` commands.
+Role filtering only hides entries: the server and the app still authorize.
+Memoize the providers array; a new identity rebuilds the search.
+
+Enable `clarification` on `createAiChatHandler`. The model asks one targeted
+question through the built-in clarification tool inside its normal step, no
+extra planner call. `ClarificationCard` renders the options and a free-text
+answer; the answer resumes the original request, and typing into the composer
+while a question is open answers it too.
+
+## Result components
+
+`toolRenderers` maps a tool's `definitionId` and `schemaVersion` to a compact
+local component built with `defineToolResultRenderer`. Each version's
+`outputSchema` guards stored messages: when no version accepts the output or
+the component throws, the default `ToolResultBlock` renders instead.
+
+## Non-React hosts
+
+`glirastes/embed` registers `<glirastes-chat endpoint="/api/chat">` through
+`defineGlirastesChatElement()`. The React UI runs in a Shadow DOM, page CSS
+themes it with `--glirastes-chat-primary` and the other `--glirastes-chat-*`
+variables, `glirastes-chat:ready`, `:status`, `:tool-result` and `:error`
+events bubble out, and removing the element unmounts it and frees the
+microphone. The host needs `react`, `react-dom`, `@ai-sdk/react` and `ai`.
+
+## Mentions and suggestions
+
+`mentions` supplies the sources; `MentionInput` and `RichMentionInput` render
+them, `MentionChip` and `MentionChipList` display the result. Structured mention
+ids must survive submission — assert that, because a mention degraded to plain
+text still looks right on screen and no longer resolves.
+
+`suggestions` drives `SuggestionBar` and `SuggestionChip`. Suggestions are
+contextual, so they must handle their source failing: a search error may not
+take the composer down with it.
+
+## Sessions
+
+`session.save`, `session.load`, and `session.clear` make conversations durable.
+`load` accepts full SDK `ChatMessage`s or flat `WireChatMessage`s and coerces the
+wire shape. `SessionSwitcher` renders list, create, switch, and rename.
+
+Corrupted stored sessions fail closed rather than rendering garbage, and clearing
+history requires an explicit confirmation. Both are tested behavior; keep them.
+
+For several chats per user without a backend, pass
+`session={createLocalSessionStore({ storageKey: `myapp:${userId}` })}`
+(from `glirastes/react`; create it once per user, in `useMemo`): the chats
+stay in the browser's `localStorage`, are named after their first question,
+and the assistant header lists them in place of its title, with new, rename
+and delete. Include the signed-in user in `storageKey`. This keeps chat
+content on the device, so decide it with the developer; an app that needs
+chats on every device supplies `list`, `create`, `remove`, `rename`, `save`
+and `load` from its own server instead.
+
+## Floating window
+
+`FloatingChatUI`, `ChatWindow`, and `AiTriggerButton` provide the portal-mounted
+widget; `useDragResizePanel` and `useDraggablePosition` carry drag, resize,
+viewport constraint, and snapback. Panel dimensions persist and stay bounded.
+
+Mount the window through the shipped portal rather than nesting it in product
+layout: it is what keeps the panel clear of transformed or clipping ancestors.
+
+## Placing the assistant
+
+The default for an app with its own layout: an "Ask AI" button where the app
+wants it (usually the top bar), and the chat docked on the right of the page
+or detached as a window the user moves and resizes. `AssistantWorkspace` is
+that whole integration in one component; `VercelAiChat` with children supplies
+the chat and drops its own floating widget:
 
 ```tsx
 'use client';
 import { VercelAiChat } from 'glirastes/react/vercel';
+import { AiChatPanel, AssistantToggle, AssistantWorkspace } from 'glirastes/react';
 import 'glirastes/react/styles.css';
 
-export function ChatWidget() {
-  return <VercelAiChat endpoint="/api/chat" />;
-}
-```
-
-This gives you the floating trigger button (bottom-right), draggable+resizable chat window, message rendering, mentions, voice input, approval cards. Everything wired up. ~80% of apps stop here.
-
-### Level 2 — VercelAiChat with props
-
-`VercelAiChat` (and `LangGraphAiChat`) accept layout + behaviour props:
-
-```tsx
-<VercelAiChat
-  endpoint="/api/chat"
-  headers={() => ({ Authorization: `Bearer ${getToken()}` })}
-  bodyExtras={() => ({ tenantId: getTenantId() })}
-  title="Assistant"
-  defaultOpen={false}
-  draggable
-  resizable
-  size={{ width: 400, height: 640 }}
-  hideTriggerWhenOpen
-  shortcut={{ key: 'k', meta: true }}
-  showMic={true}
-  showClearButton
-  confirmClear
-  showSessionSwitcher
-  welcomeMessage="Hi! Ask me about your tasks."
-  triggerIcon={<MyCustomIcon />}
-  headerActions={<MySettingsButton />}
-  sessions={{ storage: 'localStorage', maxHistory: 30 }}
-  autoResumeOnApproval
-/>
-```
-
-Highlights:
-
-| Prop | What it does |
-|---|---|
-| `headers` | Function returning request headers — refreshed on every request, ideal for JWT |
-| `bodyExtras` | Extra fields merged into the chat request body — tenant ID, locale, etc. |
-| `shortcut` | Keyboard shortcut to toggle the chat (e.g. `⌘K`) |
-| `showMic` | Voice input toggle. Set `false` to drop `wavesurfer.js` from the bundle entirely |
-| `sessions` | Multi-session history — switches between conversations, persists across reloads |
-| `autoResumeOnApproval` | After an approval card is approved, the LLM continues without manual nudge |
-
-### Level 3 — AiChatProvider + AiChatPanel (full control)
-
-When you need a non-floating layout (sidebar, full-page, embedded), compose manually:
-
-```tsx
-'use client';
-import { AiChatProvider, AiChatPanel, useAiChat } from 'glirastes/react';
-import { useVercelAiChatTransport } from 'glirastes/react/vercel';
-
-export function FullPageChat() {
-  const transport = useVercelAiChatTransport({
-    endpoint: '/api/chat',
-    headers: () => ({ Authorization: `Bearer ${getToken()}` }),
-  });
-
+export function AppFrame({ children }: { children: React.ReactNode }) {
   return (
-    <AiChatProvider transport={transport}>
-      <div className="h-full flex">
-        <Sidebar />
-        <AiChatPanel className="flex-1" />
-      </div>
-    </AiChatProvider>
+    <VercelAiChat endpoint="/api/chat">
+      <AssistantWorkspace chat={<AiChatPanel />} storageKey={`assistant:${userId}`}>
+        <header>… <AssistantToggle /></header>
+        {children}
+      </AssistantWorkspace>
+    </VercelAiChat>
   );
 }
 ```
 
-Inside any descendant of `AiChatProvider`, `useAiChat()` exposes the full state — messages, sending, current pipeline state, etc. Useful when you want to render messages elsewhere or add custom controls.
+The workspace is a row that fills its parent: the page on the left, the
+docked assistant on the right. The parent needs a height (for example
+`html, body { height: 100dvh }` or a full-height app frame); otherwise the
+docked assistant is only as tall as the page content. It folds to a rail, takes the whole row on
+narrow screens, and publishes its width as `--assistant-right-inset` for
+fixed elements of the page. Detaching or docking is remembered, so a closed
+window reopens as a window. `defaultMode="floating"` opens detached first.
 
-## UI Action Bus — frontend reactions to tool results
+- Toggle anywhere: `AssistantToggle` works at any depth inside the workspace;
+  `useAssistantLayout()` gives `openChat`, `closeChat`, `setMode` and the
+  state for the app's own controls.
+- Shortcuts on every OS: mod+I toggles, alt+shift+D docks or detaches,
+  alt+shift+C collapses, alt+shift+N starts a new chat (when the chat keeps several, or `onNewChat`),
+  alt+shift+I focuses the input. Pass `shortcuts={{ newChat: 'alt+shift+k',
+  toggleCollapse: false }}` when the app already uses one; `formatShortcut`
+  shows a combination as ⌘I or Ctrl+I. `assistantShortcutList({ shortcuts,
+  language })` gives the active ones with labels (German ships) for the
+  app's shortcut overview.
+- Look: `icons`, `labels` (`DE_ASSISTANT_SHELL_LABELS` ships German),
+  `classNames`, `renderButton` for the app's own button component, the
+  `headerStart` / `headerTitle` / `headerActions` slots, `window` for the
+  size limits of the detached window, and `showBubble={false}` to drop the
+  round opener. With the provider's `unstyled` only the handle geometry stays.
+- Own layout: `AssistantLayoutProvider` + `AssistantShell` are the parts the
+  workspace is made of. The shell is then the last child of the row that
+  holds the page, marked `data-assistant-main`. An existing provider higher
+  up is reused by the workspace.
+- Scope `storageKey` per user when several people share a browser.
 
-Tool results that carry a `uiAction` payload (from `uiPattern` or `uiActionOnSuccess`) are dispatched through `UiActionBus`. Register handlers anywhere in the component tree:
+## Approvals
 
-```tsx
-'use client';
-import { useAiClientAction } from 'glirastes/react';
-import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
+Self-confirmation stays in the initiating chat. Organizational approval creates
+a durable Platform request and remains fail-closed while unavailable. Never
+derive approver authority from the browser payload. Test denial, expiry,
+replay, cross-app, and cross-tenant cases.
 
-export function TaskList() {
-  const router = useRouter();
+`ApprovalCard` handles one request and `BulkApprovalCard` groups same-tool
+requests while keeping each approval independent — bulk rendering must not become
+bulk authorization. An approval failure is retryable without losing the request.
 
-  // Open the detail view when the LLM picks a task
-  useAiClientAction('task-details.open', (payload) => {
-    router.push(`/tasks/${payload?.taskId}`);
-  });
+## Speech-to-text gate
 
-  // Refresh the list after a mutation
-  useAiClientAction('tasks.refresh', () => {
-    queryClient.invalidateQueries({ queryKey: ['tasks'] });
-  });
+Use the SDK STT controller as the only recording state machine:
 
-  // Open a custom dialog
-  useAiClientAction('task-create-dialog.open', () => {
-    setCreateDialogOpen(true);
-  });
+- exactly one microphone stream supplies capture and visualization;
+- push-to-talk exposes an unambiguous recording state;
+- show a visible interim transcript while recording;
+- merge interim and final segments without loss or duplication;
+- stop finalizes into the draft; cancel restores the previous draft;
+- let the user edit before sending;
+- no automatic send on finalization: only the user sends;
+- retry permission, provider, and reconnect failures explicitly;
+- close MediaStream tracks, sockets, timers, and audio resources on every exit.
 
-  return /* ... */;
-}
-```
+`voice.pushToTalk` adds hold-to-talk on the mic button and a hold hotkey
+(default `mod+shift+space`) next to tap-to-toggle. Pass `voice.routeKey` (for
+example the pathname) so navigation stops recording and keeps the speech as
+draft; back/forward, session switches and unmount release the microphone as
+well. `voice.adapter` plugs in another provider; keep its identity stable.
 
-Action IDs follow conventions derived from `uiPattern`:
-
-| `uiPattern.type` | Derived action ID |
-|---|---|
-| `open-detail`, `entity: 'task'` | `task-details.open` |
-| `open-dialog`, `dialog: 'create-task'` | `task-create-dialog.open` |
-| `refresh`, `target: 'tasks'` | `tasks.refresh` |
-| `toast` | dispatched directly to your toast lib via the SDK's toast handler config |
-
-For raw `uiActionOnSuccess: { type: 'run-client-action', actionId: 'X' }` you choose any string for `actionId`.
-
-`glirastes coverage` reports any action ID declared in tools but not handled (or vice versa).
-
-## Approval cards
-
-Mutations with `needsApproval: true` (default for POST/PATCH/PUT/DELETE) render an approval card before executing. The default card shows:
-
-- Tool name and description
-- Input parameters
-- Approve / Cancel buttons
-
-Customize per-tool with optional `approvalCard` config:
+A finished recording (`RecordedSttAdapter`, `audio/wav` to
+`/api/ai/speech-recognize`) needs one route; the app's transcription service
+(any `POST /v1/audio/transcriptions` server) stays on the server:
 
 ```ts
-defineEndpointTool({
-  // ...
-  approvalCard: {
-    title: 'Create task',
-    description: (input) => `Create task "${input.title}"?`,
-    severity: 'info', // or 'warning' | 'danger' for destructive ops
-  },
-})
+// src/app/api/ai/speech-recognize/route.ts
+import { createRecordingTranscriptionHandler } from 'glirastes/server/nextjs';
+import { resolvePrincipal } from '@/lib/glirastes-principal';
+
+export const runtime = 'nodejs';
+export const POST = createRecordingTranscriptionHandler({
+  authorize: async (request) => Boolean(await resolvePrincipal(request)),
+  url: process.env.STT_RECORDING_URL,
+  apiKey: process.env.STT_RECORDING_API_KEY,
+  model: process.env.STT_RECORDING_MODEL,
+});
 ```
 
-For full UI control, pass a custom component to `AiChatProvider`:
+`useStt` is the hook, `VoiceInputButton` and `RecordingBar` the surface. Speech
+traffic goes directly between the target app's local provider adapter and its
+configured provider. Do not proxy transcripts through the Glirastes Control
+Plane.
 
-```tsx
-<AiChatProvider
-  components={{ ApprovalCard: MyCustomApprovalCard }}
->
-  ...
-</AiChatProvider>
-```
-
-## Mentions (`@user`, `#tag`)
-
-Mentions let users reference entities the LLM can resolve to IDs. Configure on the provider or on `VercelAiChat`:
-
-```tsx
-<VercelAiChat
-  endpoint="/api/chat"
-  mentions={{
-    triggers: {
-      '@': {
-        label: 'User',
-        search: async (query) => {
-          const users = await fetch(`/api/users/search?q=${query}`).then(r => r.json());
-          return users.map(u => ({ id: u.id, label: u.name, hint: u.email }));
-        },
-      },
-      '#': {
-        label: 'Tag',
-        search: async (query) => fetch(`/api/tags?q=${query}`).then(r => r.json()),
-      },
-    },
-  }}
-/>
-```
-
-Mentions in the input get serialized into the user message — your tools see structured references the LLM can pass back as IDs:
-
-```
-Input:  "assign @Alice the task #urgent"
-Wire:   "assign user_123 the task with tag tag_456"
-```
-
-## Theming
-
-The chat UI is styled with a small token system. Override at the provider level:
-
-```tsx
-<VercelAiChat
-  endpoint="/api/chat"
-  theme={{
-    colors: {
-      primary: '#6366f1',
-      background: '#0a0a0a',
-      foreground: '#ffffff',
-      muted: '#262626',
-      border: '#404040',
-    },
-    radius: '12px',
-    fontFamily: 'Inter, sans-serif',
-  }}
-/>
-```
-
-For deeper customization, swap the default `glirastes/react/styles.css` for your own:
-
-1. Don't import `glirastes/react/styles.css`
-2. Inspect the DOM (every component has stable `data-*` attributes) — e.g. `[data-glirastes='chat-panel']`, `[data-part='message-bubble']`
-3. Write your own CSS targeting those selectors
-
-## Voice input (Deepgram speech-to-text)
-
-The trigger button has a built-in mic mode. When the user holds the mic:
-
-1. Browser captures audio
-2. `wavesurfer.js` renders a live waveform
-3. Audio frames stream to your backend's `/api/ai/speech-stream` WebSocket
-4. Backend proxies to Deepgram, streams transcriptions back
-5. On release, the final transcript becomes the chat input
-
-**Frontend setup:**
+## Commands
 
 ```bash
-npm install wavesurfer.js
+glirastes tools refresh
+glirastes tools status
+glirastes doctor
 ```
 
-```tsx
-<VercelAiChat
-  endpoint="/api/chat"
-  showMic={true}
-  voiceInput={{
-    websocketUrl: '/api/ai/speech-stream',
-    language: 'en', // or 'de', etc.
-  }}
-/>
-```
+## Verification
 
-**Backend setup:** see [integrating-glirastes-nestjs](../integrating-glirastes-nestjs/SKILL.md) → "Speech-to-text WebSocket". For Next.js standalone, you need a separate WebSocket server — Next.js Route Handlers don't support WS natively.
+Test tool cards and UI actions, self-approval, sessions, keyboard/mobile
+layouts, permission denial, start/stop/cancel/retry, duplicate final segments,
+cleanup after unmount, and one-stream enforcement in real browsers. Record STT
+quality plus p50/p95 finalization latency against the product baseline.
 
-If you don't want voice input at all, set `showMic={false}` and skip installing `wavesurfer.js`. The components are tree-shaken.
-
-### Content Security Policy and `wavesurfer.js`
-
-The optional-peer loader for `wavesurfer.js` uses `new Function('s', 'return import(s)')` to hide the specifier from bundlers (so apps that don't install the peer don't fail to build). This requires `script-src 'unsafe-eval'` in your CSP.
-
-If your deployment forbids `unsafe-eval` **and** you want voice input, install `wavesurfer.js` unconditionally:
-
-```bash
-npm install wavesurfer.js
-```
-
-With the peer present at install time, the bundler resolves the static path successfully and the runtime trick is bypassed entirely. Strict-CSP environments without voice can stay on `showMic={false}` and never need `wavesurfer.js`.
-
-## ChatWindow — portal, draggable, resizable
-
-`VercelAiChat` already wraps the panel in a `ChatWindow`. If you compose manually, you can use the window separately:
-
-```tsx
-import { ChatWindow, AiChatPanel } from 'glirastes/react';
-
-<ChatWindow
-  open={open}
-  onOpenChange={setOpen}
-  draggable
-  resizable
-  size={{ width: 400, height: 640 }}
-  defaultPosition={{ x: 'right', y: 'bottom', offset: 24 }}
->
-  <AiChatPanel />
-</ChatWindow>
-```
-
-The window portals to `document.body` by default — no z-index fights with your app shell.
-
-## Sessions (multi-conversation)
-
-Enable conversation history with the `sessions` prop:
-
-```tsx
-<VercelAiChat
-  endpoint="/api/chat"
-  sessions={{
-    storage: 'localStorage', // or a custom adapter implementing { load, save, clear }
-    maxHistory: 30,
-    onCreate: (session) => trackEvent('chat:new-session'),
-  }}
-  showSessionSwitcher
-/>
-```
-
-A session switcher renders in the header (with `showSessionSwitcher`); users can name, switch, or delete sessions. Custom adapters let you persist server-side instead of localStorage.
-
-## Pipeline timeline (Pro)
-
-When `GLIRASTES_API_KEY` is set, the chat shows per-request pipeline steps inline (intent classification, guardrails, tool calls, model selection):
-
-```
-↳ Intent: task_query (0.94)
-↳ Tools available: 3
-↳ Model: gpt-4o-mini
-↳ Tool call: list_tasks (124ms)
-```
-
-No setup beyond having the key — the timeline auto-renders inside the message bubble of the corresponding assistant turn.
-
-## Common pitfalls
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Widget unstyled | `styles.css` not imported | Add `import 'glirastes/react/styles.css'` near the root |
-| Floating button overlaps a sticky footer | Default position bottom-right | Pass `defaultPosition={{ x: 'right', y: 'bottom', offset: 80 }}` |
-| `useAiClientAction` doesn't fire | Component not mounted when the action arrives | Mount the handler in a layout that's always rendered |
-| Mentions search runs on every keystroke | No debounce | Wrap your `search` fn with `lodash.debounce` (300ms typical) |
-| Voice input fails silently | WebSocket URL wrong / `DEEPGRAM_API_KEY` missing | Check browser DevTools → WS frame; check backend logs |
-| Approval card not shown for a mutation | Tool sets `needsApproval: false` explicitly | Either remove the override or set `autoApproveTools` per-user |
-| Approval card shown for a benign GET | Tool overrides `needsApproval: true` | GETs default to `false` — drop the override |
-| Multiple chat instances on the page | Mounted `<VercelAiChat />` more than once | Render exactly one in your root layout |
-| Bundle includes `wavesurfer.js` despite `showMic={false}` | Direct import of voice components elsewhere | Remove any `import` from `glirastes/react/components/recording-bar` etc. |
-
-## What this skill does NOT cover
-
-- **Initial integration** (install, route handler, widget mount) — see [integrating-glirastes-nextjs](../integrating-glirastes-nextjs/SKILL.md) or [integrating-glirastes-nestjs](../integrating-glirastes-nestjs/SKILL.md)
-- **Tool authoring** (`uiPattern` / `uiActionOnSuccess` semantics, `actionId` derivation, approval flag) — see [maintaining-glirastes-tools](../maintaining-glirastes-tools/SKILL.md)
-- **LangGraph transport differences** — replace `useVercelAiChatTransport` / `VercelAiChat` with `useLangGraphAiChatTransport` / `LangGraphAiChat`; everything else in this skill applies unchanged
+Assert that hidden and non-allowlisted tool output cannot escape through either
+result blocks or an assistant fallback summary, and that a raw transport error
+never reaches rendered state. `glirastes tools status` lists the UI tools the
+chat can run, and a navigation or filter request changes the page. A derived
+`/` command runs without a model call (also through `<glirastes-chat>`), a
+command whose tool asks first still shows the approval card, and an `@`
+search returns only what the user's own session may read.

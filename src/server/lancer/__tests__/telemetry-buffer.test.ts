@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { TelemetryBuffer } from '../telemetry-buffer';
-import type { TelemetryEvent } from '../types';
+import { TelemetryBuffer } from '../telemetry-buffer.js';
+import type { TelemetryEvent } from '../types.js';
 
 function makeEvent(n = 0): TelemetryEvent {
   return { eventType: `test.event.${n}` };

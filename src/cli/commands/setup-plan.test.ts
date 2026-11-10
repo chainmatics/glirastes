@@ -1,0 +1,432 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { AppSetupArtifactSchema } from '../../contracts/index.js';
+import { FoundationDiagnosticError } from '../../diagnostics/index.js';
+import {
+  acceptsReceiptPlanDigest,
+  assertSetupPlanConfirmation,
+  compareArtifacts,
+  createSelfSetupPlan,
+  createSetupPlan,
+  createSetupPlanFromContents,
+  type SetupPlan,
+} from './setup-plan.js';
+
+const id = (suffix: string) =>
+  `019fa9a9-d5f7-7ec3-a3c7-8899de30${suffix.padStart(4, '0')}`;
+const digest = (character: string) => `sha256:${character.repeat(43)}`;
+
+function artifact(overrides: Record<string, unknown> = {}) {
+  const tool = {
+    toolId: id('4'),
+    sourceFingerprint: digest('B'),
+    name: 'tasks.list',
+    description: 'List visible tasks.',
+    modelName: 'tasks_list',
+    module: 'task_query',
+    sharedWith: [],
+    usageHints: ['Use for visible task lists.'],
+    presentation: {
+      locale: 'de-DE',
+      singular: 'Aufgabenliste',
+      plural: 'Aufgabenlisten',
+      approval: 'Aufgabenliste anzeigen',
+    },
+    executionKind: 'endpoint',
+    method: 'GET',
+    path: '/api/tasks',
+    operationGroup: 'read',
+    riskClass: 'safe-read',
+    enabled: true,
+    requiresApproval: false,
+    inputSchemaDigest: digest('C'),
+    outputSchemaDigest: digest('D'),
+    ...overrides,
+  };
+  return {
+    schemaVersion: 1,
+    artifactId: id('1'),
+    runId: id('2'),
+    appId: id('3'),
+    discoveryDigest: digest('A'),
+    assessmentMode: 'interview',
+    status: 'ready',
+    tools: [tool],
+    planner: {
+      plannerId: id('5'),
+      modelBindingRef: 'model-standard',
+      promptBindingRef: 'prompt-v1',
+      budgetProfileRef: 'interactive-default',
+      toolIds: [id('4')],
+    },
+    prompts: {
+      bundleDigest: digest('E'),
+      artifactRef: 'registry://fixture/prompts/v1',
+      plannerDigest: digest('F'),
+      appBehaviorDigest: digest('G'),
+      responseStyleDigest: digest('H'),
+      capabilityFragmentDigests: {},
+    },
+    warnings: [],
+    generatedAt: '2026-08-14T08:00:00.000Z',
+  };
+}
+
+async function fixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'glirastes-setup-plan-'));
+  await mkdir(join(root, '.glirastes'), { recursive: true });
+  await writeFile(
+    join(root, 'package.json'),
+    JSON.stringify({
+      name: 'fixture',
+      glirastes: { principal: 'server-verified' },
+    }),
+  );
+  await writeFile(
+    join(root, '.glirastes/setup-artifact.json'),
+    `${JSON.stringify(artifact())}\n`,
+  );
+  await writeFile(
+    join(root, '.glirastes/previous-setup-artifact.json'),
+    `${JSON.stringify(artifact())}\n`,
+  );
+  await writeFile(
+    join(root, '.glirastes/foundation-execution-inventory.json'),
+    JSON.stringify({
+      schemaVersion: 2,
+      targetAppKey: 'fixture',
+      executions: [],
+    }),
+  );
+  await writeFile(
+    join(root, '.glirastes/prompt-bundle.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      appId: id('3'),
+      artifactRef: 'local://fixture/prompts',
+      sections: {
+        planner: 'Plan safely.',
+        appBehavior: 'Use the fixture.',
+        responseStyle: 'Be concise.',
+        capabilityFragments: {},
+      },
+    }),
+  );
+  return root;
+}
+
+async function firstSetupFixture(
+  proposed: ReturnType<typeof artifact>,
+): Promise<string> {
+  const root = await fixture();
+  await rm(join(root, '.glirastes/setup-artifact.json'));
+  await rm(join(root, '.glirastes/previous-setup-artifact.json'));
+  await writeFile(
+    join(root, '.glirastes/proposed-setup.json'),
+    `${JSON.stringify(proposed)}\n`,
+  );
+  return root;
+}
+
+describe('createSetupPlan', () => {
+  it('is byte-deterministic and contains bounded technical facts only', async () => {
+    const root = await fixture();
+    const first = await createSetupPlan({ rootDir: root });
+    const second = await createSetupPlan({ rootDir: root });
+
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+    expect(first).toMatchObject({
+      schemaVersion: 1,
+      counts: { tools: 1, semanticChanges: 1 },
+      requiresConfirmation: false,
+    });
+    expect(first.operations.map((operation) => operation.kind)).toEqual([
+      'validate',
+      'adopt',
+      'build',
+      'receipt',
+    ]);
+    const serialized = JSON.stringify(first);
+    expect(serialized).not.toMatch(
+      /sourceCode|inputSchema|outputSchema|prompt|argument|result|credential|Private task/,
+    );
+    expect(first.planDigest).toMatch(/^sha256:/);
+  });
+
+  it('adds remote sync only for explicit Managed setup', async () => {
+    const root = await fixture();
+
+    const standalone = await createSetupPlan({ rootDir: root });
+    const managed = await createSetupPlan({ rootDir: root, managed: true });
+
+    expect(standalone.operations.some(({ kind }) => kind === 'sync')).toBe(false);
+    expect(managed.operations.map(({ kind }) => kind)).toEqual([
+      'validate',
+      'adopt',
+      'build',
+      'receipt',
+      'sync',
+    ]);
+  });
+
+  it('binds inventory and local prompt inputs into the exact plan digest', async () => {
+    const root = await fixture();
+    const before = await createSetupPlan({ rootDir: root });
+    const promptPath = join(root, '.glirastes/prompt-bundle.json');
+    const prompt = JSON.parse(await readFile(promptPath, 'utf8'));
+    prompt.sections.responseStyle = 'Use a different concise style.';
+    await writeFile(promptPath, JSON.stringify(prompt));
+
+    const after = await createSetupPlan({ rootDir: root });
+
+    expect(after.planDigest).not.toBe(before.planDigest);
+    expect(after.operations.find(({ kind }) => kind === 'build')?.digest)
+      .not.toBe(before.operations.find(({ kind }) => kind === 'build')?.digest);
+  });
+
+  it('marks a loosening and binds confirmation to its exact digest', async () => {
+    const root = await fixture();
+    await writeFile(
+      join(root, '.glirastes/previous-setup-artifact.json'),
+      `${JSON.stringify(artifact({ requiresApproval: true }))}\n`,
+    );
+    const plan = await createSetupPlan({ rootDir: root });
+    expect(plan.semanticChanges[0]).toMatchObject({
+      classification: 'loosening',
+      fields: ['requiresApproval'],
+      requiresConfirmation: true,
+    });
+    expect(() => assertSetupPlanConfirmation(plan, {})).toThrowError(
+      expect.objectContaining<Partial<FoundationDiagnosticError>>({
+        code: 'E-SEMANTICS-004',
+      }),
+    );
+    expect(() => assertSetupPlanConfirmation(plan, {
+      confirmLoosening: true,
+      planDigest: plan.planDigest,
+    })).not.toThrow();
+    expect(() => assertSetupPlanConfirmation(plan, {
+      confirmLoosening: true,
+      planDigest: digest('Z'),
+    })).toThrowError(expect.objectContaining({ code: 'E-SEMANTICS-004' }));
+  });
+
+  it('adds a new tool at its route defaults without confirmation', async () => {
+    const root = await fixture();
+    const previous = artifact({
+      toolId: id('9'),
+      name: 'tasks.archived',
+      modelName: 'tasks_archived',
+      path: '/api/tasks/archived',
+    });
+    previous.planner.toolIds = [id('9')];
+    await writeFile(
+      join(root, '.glirastes/previous-setup-artifact.json'),
+      `${JSON.stringify(previous)}\n`,
+    );
+
+    const plan = await createSetupPlan({ rootDir: root });
+
+    expect(plan.semanticChanges).toEqual([
+      {
+        toolId: id('4'),
+        classification: 'added',
+        fields: ['toolId'],
+        requiresConfirmation: false,
+      },
+      {
+        toolId: id('9'),
+        classification: 'hardening',
+        fields: ['toolId'],
+        requiresConfirmation: false,
+      },
+    ]);
+    expect(plan.requiresConfirmation).toBe(false);
+    expect(() => assertSetupPlanConfirmation(plan, {})).not.toThrow();
+  });
+
+  it('needs no confirmation for a first setup at the defaults', async () => {
+    const root = await firstSetupFixture(artifact({
+      name: 'tasks.create',
+      modelName: 'tasks_create',
+      method: 'POST',
+      operationGroup: 'create',
+      riskClass: 'write',
+      requiresApproval: true,
+    }));
+
+    const plan = await createSetupPlan({
+      rootDir: root,
+      artifactPath: '.glirastes/proposed-setup.json',
+    });
+
+    expect(plan.semanticChanges).toEqual([{
+      toolId: id('4'),
+      classification: 'added',
+      fields: ['toolId'],
+      requiresConfirmation: false,
+    }]);
+    expect(plan.requiresConfirmation).toBe(false);
+  });
+
+  it.each([
+    ['an unconfirmed write', {
+      name: 'tasks.create',
+      modelName: 'tasks_create',
+      method: 'POST',
+      operationGroup: 'create',
+      riskClass: 'write',
+      requiresApproval: false,
+    }, ['toolId', 'requiresApproval']],
+    ['a delete below its default risk', {
+      name: 'tasks.delete',
+      modelName: 'tasks_delete',
+      method: 'DELETE',
+      path: '/api/tasks/[id]',
+      operationGroup: 'delete',
+      riskClass: 'write',
+      requiresApproval: true,
+    }, ['toolId', 'riskClass']],
+  ])('keeps %s on a new tool as a confirmable loosening', async (
+    _label,
+    overrides,
+    fields,
+  ) => {
+    const root = await firstSetupFixture(artifact(overrides));
+
+    const plan = await createSetupPlan({
+      rootDir: root,
+      artifactPath: '.glirastes/proposed-setup.json',
+    });
+
+    expect(plan.semanticChanges).toEqual([{
+      toolId: id('4'),
+      classification: 'loosening',
+      fields,
+      requiresConfirmation: true,
+    }]);
+    expect(() => assertSetupPlanConfirmation(plan, {}))
+      .toThrowError(expect.objectContaining({ code: 'E-SEMANTICS-004' }));
+  });
+
+  it('classifies tools missing from the previous artifact as added without confirmation', async () => {
+    const root = await fixture();
+    const empty = { ...artifact(), tools: [], planner: { ...artifact().planner, toolIds: [] } };
+    await writeFile(join(root, '.glirastes/previous-setup-artifact.json'), `${JSON.stringify(empty)}\n`);
+    const plan = await createSetupPlan({ rootDir: root });
+    expect(plan.semanticChanges).toEqual([{
+      toolId: id('4'), classification: 'added', fields: ['toolId'], requiresConfirmation: false,
+    }]);
+    expect(plan.requiresConfirmation).toBe(false);
+    expect(compareArtifacts(undefined, AppSetupArtifactSchema.parse(artifact())))
+      .toEqual([{ toolId: id('4'), classification: 'added', fields: ['toolId'], requiresConfirmation: false }]);
+  });
+
+  it('computes the identical plan from file contents', async () => {
+    const root = await fixture();
+    const read = (path: string) => readFile(join(root, path), 'utf8');
+    const fromFiles = await createSetupPlan({ rootDir: root });
+    const fromContents = createSetupPlanFromContents({
+      mode: 'standalone',
+      paths: {
+        inventory: '.glirastes/foundation-execution-inventory.json',
+        setupArtifact: '.glirastes/setup-artifact.json',
+        canonicalSetupArtifact: '.glirastes/setup-artifact.json',
+        previousSetupArtifact: '.glirastes/previous-setup-artifact.json',
+        promptBundle: '.glirastes/prompt-bundle.json',
+        buildDir: '.glirastes/build',
+        receipt: '.glirastes/setup-receipt.json',
+      },
+      proposed: { path: '.glirastes/setup-artifact.json', raw: await read('.glirastes/setup-artifact.json') },
+      previousRaw: await read('.glirastes/previous-setup-artifact.json'),
+      inventoryRaw: await read('.glirastes/foundation-execution-inventory.json'),
+      promptBundleRaw: await read('.glirastes/prompt-bundle.json'),
+    });
+    expect(fromContents).toEqual(fromFiles);
+  });
+
+  it('does not call network or mutation dependencies', async () => {
+    const root = await fixture();
+    const fetchImpl = vi.fn();
+    vi.stubGlobal('fetch', fetchImpl);
+    const before = await readFile(
+      join(root, '.glirastes/setup-artifact.json'),
+      'utf8',
+    );
+    await createSetupPlan({ rootDir: root });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(await readFile(
+      join(root, '.glirastes/setup-artifact.json'),
+      'utf8',
+    )).toBe(before);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('createSelfSetupPlan', () => {
+  it('compares the committed artifact with itself whatever a previous artifact holds', async () => {
+    const root = await fixture();
+    try {
+      await writeFile(
+        join(root, '.glirastes/previous-setup-artifact.json'),
+        `${JSON.stringify(artifact({ requiresApproval: true }))}\n`,
+      );
+      const withLeftover = await createSetupPlan({ rootDir: root });
+      const self = await createSelfSetupPlan({ rootDir: root });
+
+      expect(withLeftover.requiresConfirmation).toBe(true);
+      expect(self.requiresConfirmation).toBe(false);
+      expect(self.planDigest).not.toBe(withLeftover.planDigest);
+
+      // Without a leftover the file-based plan already is the self-plan, which is
+      // the digest the tools generator records from committed outputs only.
+      await rm(join(root, '.glirastes/previous-setup-artifact.json'));
+      expect(self).toEqual(await createSetupPlan({ rootDir: root }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the Managed sync operation', async () => {
+    const root = await fixture();
+    try {
+      const standalone = await createSelfSetupPlan({ rootDir: root });
+      const managed = await createSelfSetupPlan({ rootDir: root, managed: true });
+
+      expect(standalone.operations.some(({ kind }) => kind === 'sync')).toBe(false);
+      expect(managed.operations.at(-1)?.kind).toBe('sync');
+      expect(managed.planDigest).not.toBe(standalone.planDigest);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('acceptsReceiptPlanDigest', () => {
+  const plan = { planDigest: digest('P') } as SetupPlan;
+  const selfPlan = { planDigest: digest('S') } as SetupPlan;
+
+  it('accepts the current plan digest without computing the self-plan', async () => {
+    const compute = vi.fn();
+    await expect(acceptsReceiptPlanDigest(digest('P'), plan, compute)).resolves.toBe(true);
+    expect(compute).not.toHaveBeenCalled();
+  });
+
+  it('accepts the self-plan digest of a tools-generated receipt', async () => {
+    const compute = vi.fn().mockResolvedValue(selfPlan);
+    await expect(acceptsReceiptPlanDigest(digest('S'), plan, compute)).resolves.toBe(true);
+    expect(compute).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a digest that matches neither plan', async () => {
+    const compute = vi.fn().mockResolvedValue(selfPlan);
+    await expect(acceptsReceiptPlanDigest(digest('Z'), plan, compute)).resolves.toBe(false);
+  });
+
+  it('fails closed when the self-plan cannot be computed', async () => {
+    const compute = vi.fn().mockRejectedValue(new Error('inventory missing'));
+    await expect(acceptsReceiptPlanDigest(digest('S'), plan, compute)).resolves.toBe(false);
+  });
+});

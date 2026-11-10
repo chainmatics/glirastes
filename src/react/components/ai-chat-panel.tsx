@@ -7,7 +7,7 @@ import { MentionInput } from './mention-input.js';
 import { SuggestionBar } from './suggestion-bar.js';
 import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
 import { BulkApprovalCard as DefaultBulkApprovalCard } from './bulk-approval-card.js';
-import { PipelineTimeline as DefaultPipelineTimeline } from './pipeline-timeline.js';
+import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
 import type { AiChatPanelProps, PendingApproval } from '../types.js';
 
 /**
@@ -23,6 +23,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
   const {
     classNames,
     hasMentions,
+    hasCompletions,
     locale,
     isLoading,
     stop,
@@ -31,6 +32,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     pipelineSteps,
     pipelineState,
     pendingApprovals,
+    approvalReminder,
     approve,
     reject,
     isProcessingApproval,
@@ -40,12 +42,16 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     components,
     themeVars,
     themeEffect,
+    unstyled,
   } = useChatContext();
 
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const BulkApprovalCardComponent = components.BulkApprovalCard ?? DefaultBulkApprovalCard;
-  const PipelineTimelineComponent = components.PipelineTimeline ?? DefaultPipelineTimeline;
-  const InputComponent = components.ChatInput ?? (hasMentions ? MentionInput : ChatInput);
+  // The work log lives in each assistant bubble; a pipeline bar only shows
+  // when the app supplies its own component.
+  const PipelineTimelineComponent = components.PipelineTimeline;
+  const InputComponent = components.ChatInput
+    ?? (hasMentions || hasCompletions ? MentionInput : ChatInput);
 
   // Group approvals by tool name for bulk operations
   const { singleApprovals, bulkGroups } = useMemo(() => {
@@ -73,6 +79,11 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     if (!isLoading) return false;
     const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
     if (!lastAssistant) return true;
+    // The activity log already shows a spinner for running tools.
+    if (
+      readActivitySteps(lastAssistant.parts, () => false).length > 0
+      || (readLatestPlan(lastAssistant.parts)?.length ?? 0) >= 2
+    ) return false;
     const hasText = lastAssistant.parts.some(
       p => 'text' in p && typeof p.text === 'string' && p.text.trim().length > 0,
     );
@@ -85,6 +96,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
       data-component="ai-chat-panel"
       data-state={isLoading ? 'loading' : 'idle'}
       data-theme-effect={themeEffect}
+      data-unstyled={unstyled || undefined}
       style={themeVars}
     >
       {error && (
@@ -93,12 +105,14 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
         </div>
       )}
 
-      <PipelineTimelineComponent
-        steps={pipelineSteps}
-        pipelineState={pipelineState}
-        isLoading={isLoading}
-        onStop={stop}
-      />
+      {PipelineTimelineComponent && (
+        <PipelineTimelineComponent
+          steps={pipelineSteps}
+          pipelineState={pipelineState}
+          isLoading={isLoading}
+          onStop={stop}
+        />
+      )}
 
       {messages.length > 0 ? (
         <MessageList />
@@ -140,6 +154,12 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
           isProcessing={isProcessingApproval}
         />
       ))}
+
+      {approvalReminder && pendingApprovals.length > 0 && (
+        <div data-component="approval-reminder" role="status">
+          {locale.approvalPendingHint}
+        </div>
+      )}
 
       {/* Typing indicator */}
       {showTypingIndicator && (

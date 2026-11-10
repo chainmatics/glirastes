@@ -13,11 +13,17 @@ import type {
   ToastPattern,
   AuditEmitter,
   AuditEvent,
+  InferSchema,
+  SchemaLike,
   TelemetrySink,
 } from '../../types.js';
 import { defineTool } from '../../types.js';
-import { z } from 'zod';
 import { zodToCompactDescription } from './zod-compact.js';
+export { createLocalGuardrails } from './local-guardrails.js';
+export {
+  createAdaptiveFastPath,
+  createInMemoryFastPathStorage,
+} from './adaptive-fast-path.js';
 
 // ============================================================================
 // Transport Types
@@ -70,12 +76,40 @@ export interface ExpressInternalApiCallerOptions {
   fetchImpl?: typeof fetch;
 }
 
+export interface HttpEndpointCallerOptions {
+  /**
+   * Origin of the API the tools call, e.g. `http://127.0.0.1:4000`. The app
+   * fixes it; it is never read from the chat request, so a `Host` or
+   * `X-Forwarded-Host` header cannot send a tool call elsewhere. Tool paths
+   * carry the full API path, so the URL has no path of its own.
+   */
+  baseUrl: string;
+  /** The chat request whose user credentials every call carries. */
+  request?: Request;
+  /** Headers of `request` forwarded to the API; `cookie` and `authorization` when absent. */
+  forwardHeaderNames?: ReadonlyArray<string>;
+  /**
+   * Extra headers of every call. A default never stands in for a forwarded
+   * header: one with a forwarded name is dropped, also when the user sent none.
+   */
+  defaultHeaders?: Record<string, string>;
+  fetchImpl?: typeof fetch;
+}
+
 // ============================================================================
 // Tool Execution Context (server-side, adds callEndpoint)
 // ============================================================================
 
 export interface EndpointToolContext extends ToolContext {
   callEndpoint: InternalApiCaller;
+  /**
+   * The endpoint refused a call that passed the tool's input schema (400 or
+   * 422): the contract is wrong (spec 4.7, `tool_contract_rejected`). Called
+   * with the endpoint tool's `toolName` (a dotted definitionId or its
+   * model-facing encoding; the turn recorder resolves either); it must not
+   * throw.
+   */
+  onContractRejected?: (rejection: { toolName: string; status: 400 | 422 }) => void;
 }
 
 // ============================================================================
@@ -84,6 +118,23 @@ export interface EndpointToolContext extends ToolContext {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+const MAX_TOOL_ERROR_MESSAGE_CHARS = 1_000;
+
+function boundedToolFailure(
+  result: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const rawError = result.error;
+  const error = typeof rawError === 'string' && rawError.trim().length > 0
+    ? rawError.slice(0, MAX_TOOL_ERROR_MESSAGE_CHARS)
+    : 'Tool execution failed.';
+
+  return {
+    success: false,
+    error,
+    retryable: result.retryable === true,
+  };
 }
 
 /**
@@ -421,7 +472,7 @@ function buildUiActionsFromPatterns(
  */
 export function normalizeResultUiAction(
   result: unknown,
-  uiActionSchema?: z.ZodTypeAny,
+  uiActionSchema?: SchemaLike,
 ): unknown {
   if (!isRecord(result) || !('uiAction' in result)) return result;
   if (!uiActionSchema) return result; // No schema provided, pass through
@@ -459,10 +510,30 @@ export function normalizeResultUiAction(
 // ============================================================================
 
 /**
+ * `glirastes.*` UI actions belong to the generated UI tools (`ui.navigate`,
+ * `ui.filter.<view>`, `ui.<actionId>`), whose results the chat hands to the
+ * app's bridge without asking again. An endpoint result never carries one, so
+ * data an endpoint returns can neither navigate nor run a client action past
+ * that action's confirmation.
+ */
+function withoutReservedUiActions(
+  uiAction: Record<string, unknown> | Record<string, unknown>[] | undefined,
+): Record<string, unknown> | Record<string, unknown>[] | undefined {
+  const reserved = (action: Record<string, unknown>): boolean => (
+    typeof action.type === 'string' && action.type.startsWith('glirastes.')
+  );
+  if (Array.isArray(uiAction)) {
+    const kept = uiAction.filter((action) => !reserved(action));
+    return kept.length > 0 ? kept : undefined;
+  }
+  return uiAction && !reserved(uiAction) ? uiAction : undefined;
+}
+
+/**
  * Convert an endpoint tool definition into a Tool.
  * Uses callEndpoint from the ToolContext to execute HTTP requests.
  */
-export function endpointToolToTool<TInput extends z.ZodTypeAny>(
+export function endpointToolToTool<TInput extends SchemaLike>(
   endpointTool: AiEndpointToolDefinition<TInput>,
 ): Tool {
   let description = endpointTool.description;
@@ -478,9 +549,9 @@ export function endpointToolToTool<TInput extends z.ZodTypeAny>(
     method: endpointTool.method,
     needsApproval:
       endpointTool.needsApproval ??
-      (endpointTool.method === 'GET' ? false : true),
+      (endpointTool.method === 'GET' || endpointTool.method === 'HEAD' ? false : true),
     execute: async (
-      rawInput: z.infer<TInput>,
+      rawInput: InferSchema<TInput>,
       context: ToolContext,
     ) => {
       const endpointContext = context as EndpointToolContext;
@@ -497,13 +568,15 @@ export function endpointToolToTool<TInput extends z.ZodTypeAny>(
         inputPayload,
       );
 
-      const requestPath =
-        endpointTool.method === 'GET' || endpointTool.method === 'DELETE'
-          ? `${endpointPath}${buildQueryString(requestPayload)}`
-          : endpointPath;
+      const queryOnly = endpointTool.method === 'GET'
+        || endpointTool.method === 'HEAD'
+        || endpointTool.method === 'DELETE';
+      const requestPath = queryOnly
+        ? `${endpointPath}${buildQueryString(requestPayload)}`
+        : endpointPath;
 
       const requestBody =
-        endpointTool.method === 'GET' || endpointTool.method === 'DELETE'
+        queryOnly
           ? undefined
           : Object.keys(requestPayload).length > 0
             ? requestPayload
@@ -516,13 +589,21 @@ export function endpointToolToTool<TInput extends z.ZodTypeAny>(
       });
 
       if (!response.ok) {
+        if (response.status === 400 || response.status === 422) {
+          try {
+            endpointContext.onContractRejected?.({ toolName: endpointTool.toolName, status: response.status });
+          } catch {
+            // Metrics never change a tool result.
+          }
+        }
         return {
           success: false,
           error: response.error ?? `Endpoint failed (${response.status})`,
         };
       }
 
-      const responseData = isRecord(response.data)
+      // A list or scalar answer has no fields of its own, so it travels under `data`.
+      const responseData = isRecord(response.data) && !Array.isArray(response.data)
         ? (response.data as Record<string, unknown>)
         : { data: response.data };
 
@@ -569,10 +650,13 @@ export function endpointToolToTool<TInput extends z.ZodTypeAny>(
         }
       }
 
+      // The response's own uiAction field never reaches the chat unfiltered.
+      const { uiAction: _responseUiAction, ...responseFields } = responseData;
+      const resultUiAction = withoutReservedUiActions(uiAction);
       return {
         success: true,
-        ...responseData,
-        ...(uiAction ? { uiAction } : {}),
+        ...responseFields,
+        ...(resultUiAction ? { uiAction: resultUiAction } : {}),
       };
     },
   });
@@ -625,7 +709,7 @@ function applyUiTemplateValue(
  * Convert a UI tool definition into a Tool.
  * UI tools never call external services — they only produce uiActions.
  */
-export function uiToolToTool<TInput extends z.ZodTypeAny>(
+export function uiToolToTool<TInput extends SchemaLike>(
   uiTool: AiUiToolDefinition<TInput>,
 ): Tool {
   let description = uiTool.description;
@@ -639,7 +723,7 @@ export function uiToolToTool<TInput extends z.ZodTypeAny>(
     inputSchema: uiTool.inputSchema,
     outputSchema: uiTool.outputSchema,
     needsApproval: uiTool.needsApproval ?? false,
-    execute: async (rawInput: z.infer<TInput>) => {
+    execute: async (rawInput: InferSchema<TInput>) => {
       const inputPayload = isRecord(rawInput) ? { ...rawInput } : {};
 
       // Priority: 1) uiPattern (dynamic), 2) uiAction (static template)
@@ -713,8 +797,8 @@ export function uiToolsToRegistry(
  * Options for converting tools to AI SDK tools.
  */
 export interface ToolToAiToolOptions {
-  /** Zod schema for validating uiActions at runtime */
-  uiActionSchema?: z.ZodTypeAny;
+  /** Host schema for validating uiActions at runtime */
+  uiActionSchema?: SchemaLike;
   /** Called when a tool execution fails */
   onError?: (toolId: string, error: unknown) => void;
   /**
@@ -805,30 +889,63 @@ export function toolToAiTool(
 
         // Output schema: parse to strip extra fields, re-attach uiAction for client
         let cleanResult: unknown = result;
-        if (
+        if (isRecord(result) && result.success === false) {
+          cleanResult = boundedToolFailure(result);
+        } else if (
           tool.outputSchema &&
-          isRecord(result) &&
-          (result as Record<string, unknown>).success !== false
+          isRecord(result)
         ) {
-          const parsed = tool.outputSchema.safeParse(result);
+          const rec = result as Record<string, unknown>;
+          let parsed = tool.outputSchema.safeParse(result);
+          if (
+            !parsed.success
+            && rec.uiAction !== undefined
+          ) {
+            const {
+              uiAction: _transportUiAction,
+              ...payloadWithoutUiAction
+            } = rec;
+            parsed = tool.outputSchema.safeParse(payloadWithoutUiAction);
+          }
+          if (!parsed.success && rec.success !== undefined) {
+            const {
+              success: _transportSuccess,
+              uiAction: _transportUiAction,
+              ...declaredPayload
+            } = rec;
+            parsed = tool.outputSchema.safeParse(declaredPayload);
+          }
+          const carriedUnderData = !parsed.success
+            && rec.data !== undefined
+            && (!isRecord(rec.data) || Array.isArray(rec.data));
+          if (carriedUnderData) parsed = tool.outputSchema.safeParse(rec.data);
           if (parsed.success) {
             // Use parsed data (extra fields stripped by Zod)
-            const rec = result as Record<string, unknown>;
             cleanResult = {
-              ...parsed.data as Record<string, unknown>,
+              ...(carriedUnderData ? { data: parsed.data } : parsed.data as Record<string, unknown>),
               // Preserve success flag
               ...(rec.success !== undefined ? { success: rec.success } : {}),
               // Re-attach uiAction for client stream (stripped by schema parse)
               ...(rec.uiAction ? { uiAction: rec.uiAction } : {}),
             };
           } else {
-            // Schema mismatch — warn but pass through unmodified
+            // Schema mismatch — retain bounded diagnostics locally, but never
+            // expose an undeclared backend payload to the model.
             console.warn(
               `[glirastes] Output schema mismatch for tool "${name}":`,
               parsed.error.issues.map(
-                (i) => `${i.path.join('.')}: ${i.message}`,
-              ),
+                (i: { path?: ReadonlyArray<PropertyKey>; message?: string }) =>
+                  `${i.path?.join('.') ?? ''}: ${i.message ?? 'invalid value'}`,
+                ),
             );
+            // The tool ran, and a write may already have happened: report it
+            // as done, so the model neither claims a failure nor calls again.
+            cleanResult = {
+              success: true,
+              outputWithheld: true,
+              message: 'The tool ran, but its result did not match its declared output, so the details are withheld. Do not call it again for the same request.',
+              ...(rec.uiAction ? { uiAction: rec.uiAction } : {}),
+            };
           }
         }
 
@@ -953,6 +1070,19 @@ function toErrorMessage(data: unknown, fallback: string): string {
     if (typeof message === 'string' && message.trim()) return message;
     if (typeof data.error === 'string' && data.error.trim())
       return data.error;
+    // FastAPI: HTTPException returns { detail: string }, a validation error { detail: [{ loc, msg }] }.
+    const detail = data.detail;
+    if (typeof detail === 'string' && detail.trim()) return detail;
+    if (Array.isArray(detail)) {
+      const details = detail
+        .filter(isRecord)
+        .filter((item) => typeof item.msg === 'string' && item.msg.trim())
+        .map((item) => {
+          const location = Array.isArray(item.loc) ? item.loc.filter((part) => typeof part === 'string' || typeof part === 'number').join('.') : '';
+          return location ? `${location}: ${item.msg as string}` : item.msg as string;
+        });
+      if (details.length > 0) return details.join('; ');
+    }
   }
   return fallback;
 }
@@ -1002,8 +1132,9 @@ export function createFetchInternalApiCaller(
 
   return async (request) => {
     const url = new URL(request.path, options.baseUrl).toString();
-    const methodAllowsBody =
-      request.method !== 'GET' && request.method !== 'DELETE';
+    const methodAllowsBody = request.method !== 'GET'
+      && request.method !== 'HEAD'
+      && request.method !== 'DELETE';
 
     const headers: Record<string, string> = {
       ...(options.defaultHeaders ?? {}),
@@ -1074,17 +1205,100 @@ export function createExpressInternalApiCaller(
   });
 }
 
+const HTTP_FORWARDED_HEADERS = ['cookie', 'authorization'];
+
+/**
+ * Endpoint caller for an API on its own origin (a NestJS or FastAPI backend
+ * next to the chat handler): every call goes to the fixed `baseUrl` and
+ * carries only the `cookie` and `authorization` headers the user sent with
+ * the chat request, so the API authorizes the user, never a substitute.
+ */
+export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): InternalApiCaller {
+  const base = new URL(options.baseUrl);
+  if (base.protocol !== 'http:' && base.protocol !== 'https:') {
+    throw new Error('createHttpEndpointCaller: baseUrl must be an http or https URL');
+  }
+  if (base.pathname !== '/' || base.search || base.hash || base.username || base.password) {
+    throw new Error('createHttpEndpointCaller: baseUrl is an origin; tool paths carry the full API path');
+  }
+  const names = new Set((options.forwardHeaderNames ?? HTTP_FORWARDED_HEADERS).map((name) => name.toLowerCase()));
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(options.defaultHeaders ?? {})) {
+    if (!names.has(name.toLowerCase())) headers[name.toLowerCase()] = value;
+  }
+  for (const name of [...names].sort()) {
+    const value = options.request?.headers.get(name);
+    if (value) headers[name] = value;
+  }
+  const call = createFetchInternalApiCaller({
+    baseUrl: base.origin,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    defaultHeaders: headers,
+  });
+  return async (request) => {
+    if (!staysOnOrigin(request.path, base.origin)) {
+      return { ok: false, status: 400, error: 'Endpoint path must be relative to the API' };
+    }
+    return call(request);
+  };
+}
+
+/**
+ * A tool path is relative to the API. An absolute or protocol-relative one
+ * would leave it, and so would one that a URL parser rewrites: it drops tab,
+ * CR and LF anywhere and reads `\` as `/`, so `/<tab>/host` becomes `//host`.
+ * Control characters and `\` are therefore refused, and the resolved URL must
+ * still be on the API's origin.
+ */
+function staysOnOrigin(path: string, origin: string): boolean {
+  if (!path.startsWith('/') || path.startsWith('//')) return false;
+  for (const char of path) {
+    const code = char.codePointAt(0)!;
+    if (code <= 0x1f || code === 0x7f || char === '\\') return false;
+  }
+  try {
+    return new URL(path, origin).origin === origin;
+  } catch {
+    return false;
+  }
+}
+
 // ============================================================================
 // Re-exports
 // ============================================================================
 
 export { zodToCompactDescription } from './zod-compact.js';
+export {
+  uiActionToolToTool,
+  type GeneratedUiAction,
+  type GeneratedUiToolDefinition,
+} from './generated-ui-tool.js';
 
 // ============================================================================
 // Followup Tool
 // ============================================================================
 
 export { createFollowupTool } from './followup-tool.js';
+
+// ============================================================================
+// Clarification Tool
+// ============================================================================
+
+export {
+  createClarificationTool,
+  ClarificationInputSchema,
+  type ClarificationConfig,
+} from './clarification-tool.js';
+
+// ============================================================================
+// Plan Tool
+// ============================================================================
+
+export {
+  createPlanTool,
+  PlanInputSchema,
+  type PlanningConfig,
+} from './plan-tool.js';
 
 // ============================================================================
 // Module Routing

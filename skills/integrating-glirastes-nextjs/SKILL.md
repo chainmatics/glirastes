@@ -1,312 +1,159 @@
 ---
 name: integrating-glirastes-nextjs
-description: Integrating the Glirastes SDK into a Next.js App Router project — chat route handler, VercelAiChat widget, co-located ai-tool.ts files, codegen pipeline. Use when adding AI chat to a Next.js app where Next.js itself is the backend.
-version: 1.0.0
-tags:
-  - glirastes
-  - nextjs
-  - ai
-  - app-router
-triggers:
-  - integrate glirastes
-  - integrate glirastes nextjs
-  - add glirastes to next
-  - add chat to next.js
-  - createAiChatHandler
-  - VercelAiChat
-  - chat route nextjs
-  - ai chat next.js
+description: Use when adding Glirastes chat, source-derived tools, navigation, URL filters, client actions, metrics or speech input to a Next.js App Router application.
 ---
 
 # Integrating Glirastes into Next.js
 
-> **Scope:** Next.js is the only backend in this project. If a separate NestJS / Express backend exists, use [integrating-glirastes-nestjs](../integrating-glirastes-nestjs/SKILL.md) instead — putting the chat route on the real backend avoids duplicate auth and an extra HTTP hop per tool call.
->
-> **Companion skills:**
-> - [maintaining-glirastes-tools](../maintaining-glirastes-tools/SKILL.md) — tool authoring deep-dive, all CLI commands, codegen workflow
-> - [building-glirastes-chat-ui](../building-glirastes-chat-ui/SKILL.md) — chat UI customization, mentions, voice input, action bus
+Read `setting-up-glirastes` first. You, the app's coding agent, do the work;
+Glirastes never calls a model. A fresh Standalone app needs no Platform
+account; preserve an existing Connected or Managed configuration. Tools come
+from the source-derived generator (`glirastes tools refresh`), never from a
+second, hand-maintained catalogue.
 
-## Stack detection
+## Boundaries
 
-Confirm before applying:
+- Keep final authorization in the app: every endpoint keeps its own session
+  and permission checks; `resolvePrincipal` only tells the runtime who asks.
+- Never trust identity, tenant or role fields from the browser. Never
+  substitute one global tenant or disable tenant checks for a default id.
+- Never edit `.glirastes/tool-policy.json`, generated files or the `appId` in
+  `.glirastes/tools.json`; propose `glirastes tools policy` commands instead.
+- The app's model key (`OPENROUTER_API_KEY`) is entered by the developer into
+  the app environment; never read, copy or print it.
+- Business content, prompts and tool results stay in the app. The normal chat
+  path makes no Control Plane request; the one exception is a Connected app's
+  metrics sink, which sends content-free batches off the turn path.
 
-- `next.config.{ts,js,mjs}` exists at the project root → Next.js ✅
-- No `nest-cli.json` or sibling backend workspace
-- `package.json` shows React 19+, Next.js 15+
+## Workflow
 
-If a NestJS backend lives in the same workspace (e.g. `apps/api/`), stop and use the NestJS skill — the chat route belongs there.
+1. Sources in `.glirastes/tools.json`: `next-app` for route handlers
+   (`src/app/api` by default, `{ "kind": "next-app", "apiDir": "app/api" }`
+   otherwise), `next-pages` for navigation, `url-filters` for nuqs or
+   `searchParams` filters, `react-actions` for `useAiClientAction`. Keep the
+   `predev` (`glirastes tools refresh --keep-going`) and `prebuild`
+   (`glirastes tools refresh`) scripts; `glirastes tools refresh --watch` next
+   to `next dev` keeps the tools current while you edit.
+2. Server-only `resolvePrincipal(request)` returns the verified `subjectId`,
+   `tenantId`, roles and attributes from the real session, or `undefined` for
+   an unauthenticated request.
+3. The chat route creates the runtime from the generated tools and spreads
+   one turn into the handler. Peer packages: `ai@^6`, `@ai-sdk/openai@^3`,
+   `@ai-sdk/react@^3`. Restart after a refresh.
 
-## Step 1 — Install
+   ```ts
+   // src/app/api/chat/route.ts
+   import { createOpenAI } from '@ai-sdk/openai';
+   import { createGlirastes } from 'glirastes/runtime';
+   import { createAiChatHandler } from 'glirastes/server/nextjs';
+   import * as generated from '@/generated/glirastes/tools.generated';
+   import { resolvePrincipal } from '@/lib/glirastes-principal';
 
-```bash
-# Core + a model provider
-npm install glirastes @ai-sdk/openai
+   // One instance per app and process, also when routes are bundled apart.
+   const glirastes = createGlirastes({
+     generated,
+     localLimits: {
+       maxModelSteps: 6, maxToolCalls: 8, totalTimeoutMs: 60_000, toolTimeoutMs: 15_000,
+       maxInputTokens: 40_000, maxOutputTokens: 4_000, maxEstimatedCostUsd: 0.5,
+       maxRepeatedFingerprint: 3, maxConsecutiveErrors: 3,
+       delegation: { maxDepth: 1, maxBreadth: 1, sharedBudget: true },
+     },
+   });
+   const openrouter = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY });
+   const systemPrompt = 'Use the tools of this app. Ask one short question when the target is unclear.';
 
-# React UI peers (declared as optional peerDeps in glirastes 0.3.1+)
-npm install @ai-sdk/react react-markdown
+   export const runtime = 'nodejs';
+   export async function POST(request: Request) {
+     const principal = await resolvePrincipal(request);
+     if (!principal) return new Response('Unauthorized', { status: 401 });
+     const turn = await glirastes.chatTurn((runtimeTenantId) => ({ ...principal, tenantId: runtimeTenantId }));
+     return createAiChatHandler({
+       ...turn,
+       model: openrouter.chat('anthropic/claude-sonnet-5.5'),
+       systemPrompt,
+       toolDiscovery: true,
+       onError: (error) => console.error('[chat]', error),
+     })(request);
+   }
+   ```
 
-# Optional: voice input with live waveform
-npm install wavesurfer.js
-```
+   Several routes share the runtime when the `createGlirastes` call moves to
+   a server-only module such as `src/lib/glirastes.ts`.
+   `chatTurn` brings the shared turn guard (`managedRuntime`), the tools of
+   the pinned snapshot, the checked synonyms for `find_tools` and, Connected,
+   the content-free metrics sink; Standalone it makes no network call. Use
+   `.chat(model)`: `createOpenAI(...)(model)` talks to the Responses API,
+   whose usage the handler does not read, so turn costs would stay unknown.
+   A failed turn shows the user a neutral message and logs only the error
+   name; pass `onError` to see the cause. When the route also serves the
+   chat's `@` and `/` list with a GET (`createChatInteractionsHandler`, see
+   `building-glirastes-chat-ui`), give it `turn.managedRuntime` of the same
+   principal, so the list and the turn decide alike. `toolDiscovery: true`
+   offers `find_tools`; it grants no tool. With metrics, an endpoint that
+   refuses a call its schema accepted (400 or 422) is reported as
+   `tool_contract_rejected`, without content.
+4. Mount the navigation bridge once in the root layout, as a client component,
+   so `ui.navigate` and the `ui.filter.*` tools can run:
 
-`@ai-sdk/openai` is the OpenAI provider. Swap for `@ai-sdk/anthropic`, `@ai-sdk/mistral`, etc. — Glirastes accepts any AI SDK v6 provider.
+   ```tsx
+   'use client';
+   import { useRouter } from 'next/navigation';
+   import { useGlirastesNavigationBridge } from 'glirastes/react';
 
-## Step 2 — Environment variables
+   export function GlirastesNavigationBridge() {
+     const router = useRouter();
+     useGlirastesNavigationBridge({ push: (href) => router.push(href) });
+     return null;
+   }
+   ```
 
-Add to `.env.local`:
+   Without the bridge, navigation and filter tools stay disabled
+   (`navigation-bridge-missing`).
+5. Filters: read URL parameters with closed nuqs parsers where the domain is
+   closed (`parseAsStringLiteral([...])`, `parseAsInteger`, `parseAsArrayOf`);
+   `parseAsString` stays open and is reported as `filter-domain-open`.
+6. Client actions: `useAiClientAction('tasks.highlight', handler, contract)`
+   where the state lives, with a Zod payload contract as third argument. A
+   handler that writes through a helper, a Server Action or a mutation hook is
+   flagged (`ui-action-write-unproven`); the developer raises it with
+   `glirastes tools policy raise <tool> write`.
+7. Mount the chat with `building-glirastes-chat-ui`: `VercelAiChat
+   endpoint="/api/chat"` (from `glirastes/react/vercel`) around an
+   `AssistantWorkspace` that holds the page, and an `AssistantToggle` in the
+   top bar. The chat then docks on the right or detaches as a window.
+8. Run `glirastes tools refresh`, the work lists of `setting-up-glirastes`,
+   `glirastes tools check` and `glirastes doctor`, then the real chat test.
+   Connecting is optional: `glirastes connect --base-url <url>`, then
+   `glirastes sync` uploads the technical result.
 
-```
-OPENAI_API_KEY=sk-...
-# Optional — unlocks Glirastes platform features (PII Shield, intent routing, telemetry)
-# GLIRASTES_API_KEY=glir_...
-```
-
-API keys must stay server-side. Next.js Route Handlers run on the server, so this is safe — never reference `OPENAI_API_KEY` from a client component.
-
-## Step 3 — File structure convention
-
-Co-locate `ai-tool.ts` next to the route it wraps. The codegen scanner discovers tools by this convention:
-
-```
-src/app/api/
-├── chat/route.ts                # createAiChatHandler with the registry
-├── tasks/
-│   ├── route.ts                 # The actual API handler
-│   └── ai-tool.ts               # AI-callable wrapper (defineEndpointTool)
-├── tasks/[id]/
-│   ├── route.ts
-│   └── ai-tool.ts
-└── users/search/
-    ├── route.ts
-    └── ai-tool.ts
-
-src/components/
-├── tasks/ai-ui-tool.ts          # UI tool definitions (defineUiTool)
-└── layout/ai-ui-tool.ts
-
-src/generated/ai-tools/
-├── endpoint.generated.ts        # AUTO — produced by `glirastes generate-tools`
-├── ui.generated.ts
-├── modules.generated.ts
-└── action-ids.generated.ts
-```
-
-Ignore the `src/generated/ai-tools/` directory in your editor — it's regenerated by the CLI on every `predev` / `prebuild`.
-
-## Step 4 — Bootstrap your first tool
-
-Use the CLI scaffolder. Pass an existing route file:
-
-```bash
-npx glirastes scaffold --route src/app/api/tasks/route.ts
-# Add --dry-run to preview without writing
-# Add --force to overwrite existing ai-tool.ts
-```
-
-The scaffolder analyzes the route (HTTP methods, path params, body fields, search params) and emits a starter `src/app/api/tasks/ai-tool.ts`:
-
-```ts
-import { z } from 'zod';
-import { defineEndpointTool } from 'glirastes';
-
-export const aiTool = defineEndpointTool({
-  id: 'tasks.list',
-  toolName: 'list_tasks',
-  module: 'task_query',
-  description: 'list tasks. TODO: write a clear description for the AI.',
-  method: 'GET',
-  path: '/api/tasks',
-  inputSchema: z.object({
-    status: z.enum(['open', 'done']).optional(),
-  }),
-  // uiPattern: { type: 'filter-and-navigate', target: 'tasks', filterMapping: { status: 'status' } },
-});
-```
-
-Edit `description` (the LLM reads this to decide when to call the tool), refine the schema, optionally add a `uiPattern`. For the full tool authoring API, see [maintaining-glirastes-tools](../maintaining-glirastes-tools/SKILL.md).
-
-## Step 5 — Wire the chat route handler
-
-Two paths depending on tool count:
-
-### Few tools (≤5) — manual import
-
-```ts
-// src/app/api/chat/route.ts
-import { openai } from '@ai-sdk/openai';
-import { endpointToolsToRegistry } from 'glirastes/server';
-import { createAiChatHandler } from 'glirastes/server/nextjs';
-import { aiTool as listTasks } from '../tasks/ai-tool';
-
-export const POST = createAiChatHandler({
-  tools: endpointToolsToRegistry([listTasks]),
-  model: openai('gpt-4o-mini'),
-  systemPrompt: 'You are a helpful assistant for our app.',
-});
-```
-
-OK as a starting point. The moment you go past a handful of tools, switch to the codegen pipeline below — manual maintenance of the import list breaks down fast.
-
-### Production: codegen pipeline (required for non-trivial apps)
-
-In Glirastes 0.3.x **the canonical Next.js setup is to wire the codegen as a build hook**. Add to `package.json`:
-
-```json
-{
-  "scripts": {
-    "predev":   "glirastes generate-tools --quiet",
-    "prebuild": "glirastes generate-tools --quiet",
-    "ai:scaffold":     "glirastes scaffold",
-    "ai:coverage":     "glirastes coverage",
-    "ai:coverage:ci":  "glirastes coverage --ci",
-    "ai:validate":     "glirastes validate-tools",
-    "ai:validate:ci":  "glirastes validate-tools --ci"
-  }
-}
-```
-
-The `predev` and `prebuild` hooks regenerate the registry on every dev server start and CI build, so the generated files stay in sync with your `*.ai-tool.ts` source-of-truth. Without these hooks the chat route imports would point at stale generated output.
-
-> **Coming in 0.4.0:** `buildToolRegistry` based on `import.meta.glob` / `require.context` will let you skip the codegen step and the build hook entirely. Until then, the codegen pipeline is the supported pattern for any non-trivial Next.js app.
-
-Then import the generated registry instead of individual tools:
-
-```ts
-// src/app/api/chat/route.ts
-import { openai } from '@ai-sdk/openai';
-import { createAiChatHandler } from 'glirastes/server/nextjs';
-import { endpointToolRegistry } from '@/generated/ai-tools/endpoint.generated';
-import { uiToolRegistry } from '@/generated/ai-tools/ui.generated';
-
-export const POST = createAiChatHandler({
-  tools: { ...endpointToolRegistry, ...uiToolRegistry },
-  model: openai('gpt-4o-mini'),
-  systemPrompt: 'You are a helpful assistant for our app.',
-});
-```
-
-The registries are typed as `ToolRegistry` (Record<string, Tool>) — pass them straight to `createAiChatHandler({ tools })`.
-
-## Step 6 — Mount the chat widget
-
-Client-side component, then drop into the root layout:
-
-```tsx
-// src/components/chat/ChatWidget.tsx
-'use client';
-
-import { VercelAiChat } from 'glirastes/react/vercel';
-
-export function ChatWidget() {
-  return <VercelAiChat endpoint="/api/chat" />;
-}
-```
-
-```tsx
-// src/app/layout.tsx
-import { ChatWidget } from '@/components/chat/ChatWidget';
-import 'glirastes/react/styles.css';
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html>
-      <body>
-        {children}
-        <ChatWidget />
-      </body>
-    </html>
-  );
-}
-```
-
-For UI customization (props on `VercelAiChat`, theming, mentions, voice input, custom approval cards), see [building-glirastes-chat-ui](../building-glirastes-chat-ui/SKILL.md).
-
-## Step 7 — Verify
-
-Run the codegen + production build first — surfaces most issues:
+## Commands
 
 ```bash
-npm run ai:validate   # catches malformed ai-tool.ts files
-npm run ai:coverage   # lists routes without ai-tool.ts (informational)
-npm run build         # full Next.js build, runs `predev`/`prebuild` scripts
+glirastes tools refresh
+glirastes tools refresh --watch
+glirastes tools status
+glirastes tools check
+glirastes tools check --integrity-only
+glirastes doctor
 ```
 
-Build output should list `/api/chat` as a dynamic route (`ƒ /api/chat`). Then:
+## Verification
 
-```bash
-npm run dev
-```
+- An unauthenticated, cross-tenant or tampered principal cannot execute tools;
+  the endpoint refuses the call itself.
+- The normal chat path makes no Control Plane request; only a Connected app's
+  metrics sink sends content-free batches.
+- A real prompt performs one successful tool action; a write tool asks first.
+- Adding, changing and deleting a route, a page and a URL filter changes the
+  tools after `glirastes tools refresh`; a removed tool cannot be called.
+- The Docker build runs with `GLIRASTES_TOOLS_MODE=integrity`, so the build's
+  refresh only verifies the committed digest chain.
+- Build, contract, browser, privacy and rollback tests pass.
 
-Open the app, click the floating chat trigger (bottom-right by default), send a message that should fire your tool (*"show me my open tasks"*). The tool result must show up; `uiPattern` actions fire automatically (e.g. `filter-and-navigate` rewrites the URL).
+## Stop conditions
 
-## Step 8 — Hook up frontend UI actions (optional)
-
-If your tools declare `uiPattern: { type: 'open-dialog' | 'open-detail' | 'refresh' | 'toast' }`, the SDK derives an action ID and fires it through the `UiActionBus`. Register handlers anywhere a relevant component mounts:
-
-```tsx
-'use client';
-import { useAiClientAction } from 'glirastes/react';
-import { useRouter } from 'next/navigation';
-
-export function TaskList() {
-  const router = useRouter();
-  useAiClientAction('task-details.open', (payload) => {
-    router.push(`/tasks/${payload?.taskId}`);
-  });
-  // ...
-}
-```
-
-Action IDs are derived from `uiPattern`:
-
-| `uiPattern.type` | Action ID |
-|---|---|
-| `open-detail`, `entity: 'task'` | `task-details.open` |
-| `open-dialog`, `dialog: 'create-task'` | `task-create-dialog.open` |
-| `refresh`, `target: 'tasks'` | `tasks.refresh` |
-| `toast` | dispatched directly via your toast lib (sonner/react-hot-toast) |
-
-`glirastes coverage` reports any UI action ID declared in tools but not handled in `.tsx` files (and vice versa).
-
-## CLI quick reference
-
-| Command | Purpose | Common flags |
-|---|---|---|
-| `glirastes scaffold --route <file>` | Create `ai-tool.ts` next to a `route.ts` | `--dry-run`, `--force` |
-| `glirastes generate-tools` | Scan all `*.ai-tool.ts` files, emit `src/generated/ai-tools/*.generated.ts` | `--quiet` (predev/prebuild) |
-| `glirastes generate-endpoint-tools` | Endpoint registry only | `--quiet` |
-| `glirastes generate-ui-tools` | UI tool registry + action IDs | `--quiet` |
-| `glirastes generate-modules` | Module/intent registry | `--meta @/lib/ai/module-meta` |
-| `glirastes generate-auto` | Auto-detect repo layout, run the right generator | — |
-| `glirastes validate-tools` | Validate naming, duplicates, missing approvals | `--ci`, `--fix`, `--quiet` |
-| `glirastes coverage` | Report routes without `ai-tool.ts`, orphan handlers | `--ci`, `--quiet` |
-| `glirastes test` | Scaffold an AI behavior test file | — |
-| `glirastes generate-skills` | Export current tool registry as Claude Code / Codex skills (for *agents to call your tools*) | `--app-name`, `--base-url`, `--auth bearer` |
-| `glirastes generate-mcp-server` | Export current tool registry as a standalone MCP server project | `--app-name`, `--base-url` |
-| `glirastes generate <openapi.yaml>` | Generate endpoint tools from an OpenAPI spec | `--out <file>` |
-| `glirastes check-upgrade` | Analyze release notes for breaking changes against your code | `--from-version <ver>` |
-| `glirastes sync` | Upload tool schemas to the Glirastes platform (Pro) | `--api-key` (or `GLIRASTES_API_KEY` env) |
-
-For the full deep-dive, see [maintaining-glirastes-tools](../maintaining-glirastes-tools/SKILL.md).
-
-## Common pitfalls
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `Cannot resolve '@ai-sdk/react'` at build | Optional peer not installed | `npm install @ai-sdk/react react-markdown` |
-| `Cannot resolve 'wavesurfer.js/dist/plugins/record.esm.js'` | Voice input components reachable in bundle without peer | Either install `wavesurfer.js` or set `showMic={false}` on `<VercelAiChat />` |
-| Chat widget unstyled | `styles.css` not imported | Add `import 'glirastes/react/styles.css'` to root layout |
-| Tool never fires | `path` mismatches the actual route | Endpoint tool's `path` must match the URL the route handler serves exactly |
-| `OPENAI_API_KEY is not configured` | Env var missing | `.env.local` + restart dev server (Next caches env at startup) |
-| `endpointToolRegistry is undefined` | Codegen script never ran | `npm run predev` or run `glirastes generate-tools` once manually |
-| LLM ignores a tool | Description missing or vague | Rewrite to *"WHEN to call: ... WHAT it returns: ..."* in the description |
-| UI action `task-details.open` fires but nothing happens | No `useAiClientAction` registered | Add handler in a mounted component; verify with `glirastes coverage` |
-| OpenAPI spec generation fails | Spec not validated | Run `glirastes validate <openapi.yaml>` first |
-
-## What this skill does NOT cover
-
-- **NestJS adapter** — see [integrating-glirastes-nestjs](../integrating-glirastes-nestjs/SKILL.md)
-- **Tool authoring deep-dive** (UI patterns, output schemas, approvals, `module`/`sharedWith`, classification metadata) — see [maintaining-glirastes-tools](../maintaining-glirastes-tools/SKILL.md)
-- **Chat UI customization** (theming, mentions, voice input, approval cards, action bus, ChatWindow portal) — see [building-glirastes-chat-ui](../building-glirastes-chat-ui/SKILL.md)
-- **LangGraph transport** — replace `createAiChatHandler` + `VercelAiChat` with the LangGraph variants from `glirastes/server/nextjs` and `glirastes/react/langgraph`
-- **Glirastes platform features** (PII Shield via `createPiiShield`, intent routing via `createLancer`, guardrails, usage telemetry) — opt in via `GLIRASTES_API_KEY` env var; the SDK falls back to free-tier behaviour without it
+Fail closed when there is no principal resolver, no matching local binding or
+no locally authorized tool. If the generator cannot type an endpoint, the tool
+stays disabled with a finding: resolve it with `maintaining-glirastes-tools`
+instead of inventing a permissive schema. A passing Doctor does not prove a
+live action.

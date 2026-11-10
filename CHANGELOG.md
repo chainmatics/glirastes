@@ -7,6 +7,152 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-10
+
+The Foundation release. Its surface differs from 0.4.0; read **Breaking** before
+upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
+
+### Breaking
+
+- Removed exports, deferred and not shipped: `glirastes/server/nestjs`,
+  `glirastes/openapi` and `glirastes/react/langgraph`. Their sources stay in
+  the repository for a later release.
+- `glirastes/server` no longer exports the Platform client (`createLancer`,
+  `ServiceBlockedError` and the `Lancer*` and namespace types) or
+  `createAegisDetector`. Apps connect through `glirastes connect` and
+  `glirastes sync`, and the runtime reads signed revisions through
+  `glirastes/sync`.
+- `glirastes/codegen` no longer exports the scanners, generators and validators
+  of 0.4.0 (`scanEndpointTools`, `scanUiTools`, `scanNestControllers`,
+  `generateEndpointRegistry`, `generateUiRegistry`, `generateModuleRegistry`,
+  `generateAgentSkills`, `generateMcpServer`, `scaffoldAiTool`,
+  `validateAiTools`, `checkAiCoverage`, `syncAssetToGlirastes` and their types).
+  `glirastes tools refresh` derives the tools instead.
+- The CLI commands of 0.4.0 (`generate*`, `validate-tools`, `coverage`,
+  `scaffold`, `test`, `check-upgrade`, `install-skills`) are replaced by `init`,
+  `setup`, `connect`, `sync`, `doctor`, `install`, `validate`, `build`, `scan` and
+  `tools`. `glirastes --help` lists them.
+- `glirastes/server/testing` is ESM only. Its CommonJS entry could never load,
+  because Vitest cannot be required from CommonJS.
+- `typescript`, `ajv` and `ajv-formats` are runtime dependencies (the tools
+  generator needs them). The `wavesurfer.js` peer is gone.
+
+### Added
+
+- `glirastes tools refresh` reports settings the chat cannot set yet: a React
+  context setter with a closed set of values, or the next-themes `setTheme`.
+  The `ui-control-unbound` finding names no tool. In `tools resolve --print`
+  it proposes the `useAiClientAction` registration and where to add it, and
+  the tool comes from that registration on the next refresh.
+  `ui-control-contract-mismatch` flags a client action whose contract allows
+  values that the setter does not take. The developer keeps a control out
+  with `glirastes tools policy exclude-control <file>#<setter> --reason …`
+  (`excludeControls` in `tool-policy.json`).
+
+- `createGlirastes` in `glirastes/runtime` wires an app to Glirastes in one
+  call: pass the generated module and the local limits. It runs Standalone
+  without `GLIRASTES_API_KEY` and Connected with it, keeps one instance per
+  app and process, and `chatTurn(principal)` returns what `createAiChatHandler`
+  needs for a turn (`managedRuntime` with revocations, `loadTools`,
+  `toolSemantics`, `metrics`). Connected, it asks the Platform for the app,
+  environment and runner, registers, reports the code and syncs in the
+  background. Until that works the chat runs on the local code; errors go to
+  `onError` (operation and status only) and are retried. `wrapBindings` lets an
+  app wrap its generated tools. This replaces the connection code apps wrote
+  by hand.
+- `lookupRuntimeConnection` (`glirastes/sync`, `glirastes/runtime`) asks the
+  Platform which app, environment and runner a runtime key belongs to
+  (`GET /v1/runtime/connection`).
+- Tools follow the code: `glirastes tools refresh` derives endpoint, navigation,
+  filter and client-action tools from Next.js, NestJS, OpenAPI (FastAPI),
+  react-router and vue-router sources into committed `.glirastes/` files, and
+  `glirastes tools check` fails CI when they are stale. Write and delete tools
+  ask before they run.
+- `glirastes init` hands setup to your coding agent, with bundled skills under
+  `skills/`; `glirastes setup`, `connect`, `sync` and `doctor` install, pair,
+  upload and diagnose a local setup.
+- New subpaths: `glirastes/contracts`, `glirastes/runtime`, `glirastes/ai-sdk`
+  (also `glirastes/runtime/ai-sdk`), `glirastes/stt`, `glirastes/sync`,
+  `glirastes/adapter/nextjs`, `glirastes/embed` (the `<glirastes-chat>` element
+  for apps without React) and `glirastes/browser` (navigation bridge, query
+  filters and client actions without React).
+- Content-free runtime metrics (tokens, cost with its source, latency, errors,
+  tool use), sent in batches off the turn path and dropped on failure.
+- Generic `@` mentions and `/` commands in the shared chat, and push-to-talk STT.
+- Pro: `glirastes tools enrich --managed` runs the bundled tool skills as a
+  budgeted job on the Platform's model access (optional peer `@ai-sdk/openai`),
+  and `glirastes init --ci github` writes a workflow with the model-free tool
+  check and, for Pro, the managed tool job.
+- `createLocalAiPipeline` (`glirastes/server`) runs the AI pipeline inside the
+  app without the Platform, with focused tool routing by default; pass
+  `routingMode: 'legacy'` for the broad routing.
+- `glirastes --help` and `glirastes --version`. An unknown command fails with
+  `E-SETUP-030` and points to `--help`.
+- `docs/support-matrix.md` and the acceptance documents in `docs/acceptance/`.
+- `AiChatProvider` takes `unstyled` to bring your own styles: widget roots
+  render `data-unstyled`, the shipped stylesheet no longer applies to them, and
+  no theme variables are written.
+- `deChatLocale` from `glirastes/react`: German texts for the whole chat UI.
+
+### Changed
+
+- A connected app needs one variable: `GLIRASTES_API_KEY`. The runtime asks
+  the Platform for the app, environment and runner, so `GLIRASTES_APP_ID`,
+  `GLIRASTES_ENVIRONMENT_ID` and `GLIRASTES_RUNNER_KEY` are gone.
+  `GLIRASTES_CONTROL_PLANE_URL` is optional and defaults to
+  `https://api.glirastes.chainmatics.io`; set it only to self-host or run the
+  Platform locally. The key, not the URL, now switches between Standalone and
+  Connected (`resolveRuntimeMode`); a malformed key or a URL that is not
+  http(s) stops the start with an error that names the variable.
+  `glirastes connect` writes only the key (and the URL for a self-hosted
+  Platform) and removes the three old lines. `glirastes sync` and
+  `glirastes doctor` take app, environment and runner from
+  `.glirastes/platform-connection.json`; `doctor` says when the old variables
+  are still set and no longer needed. `createRuntimeMetricsSinkFromEnv` takes
+  the looked-up connection (`{ connection: { appId, environmentId } }`).
+  `GLIRASTES_CI_KEY` for the Pro CI job is unchanged.
+- The chat context's `send` returns whether the message was taken. It returns
+  false while an approval card waits or the session is not ready; a custom
+  composer should keep the typed text then, as the shipped composers do.
+- Each assistant bubble shows a collapsible work log of its tool calls
+  (`ActivityLog`, `data-component="activity-log"`), like Claude Code: one
+  line with a spinner and the running tool while the turn works, then a
+  summary such as "3 steps done, 1 failed" that expands to the steps in the
+  order they ran, each with a check or an error and the output message or
+  error text when the tool result display mode allows it. A pipeline stop or
+  error is its last line. SDK built-ins are left out, and the typing dots give
+  way to the log once a tool runs. The icons are inline SVG and also work in
+  unstyled mode.
+- `AiChatPanel` no longer renders the pipeline bar on top by default; pass
+  `components.PipelineTimeline` to keep one.
+- `createAiChatHandler` takes `planning` for the built-in `update_plan` tool.
+  The model records a short task list only for requests with several distinct
+  actions and updates its statuses as it works; the turn continues after each
+  call. The bubble shows the latest call above the work log as `PlanChecklist`
+  (`data-component="plan-checklist"`): a check for done items, a spinner for
+  the current one, dimmed pending ones. Plans below two items never show.
+- New locale texts: `activityWorkingLabel`, `activityWaitingLabel`,
+  `activityDoneLabel`, `activityDoneOneLabel`, `activityFailedLabel` and
+  `planTitle`.
+
+### Fixed
+
+- A client action the open page has no handler for no longer reports success.
+  The chat transport sends the action ids the page handles
+  (`glirastesClientActions`), the Next.js handler puts them into
+  `runtime.clientActions`, and the generated tool refuses any other action, so
+  the model cannot claim a dialog opened. Without the report the old behaviour
+  stays.
+- A tool whose result does not match its declared output is reported as done
+  with the details withheld (`outputWithheld: true`) instead of failed, so a
+  write that succeeded is not retried or reported to the user as an error.
+- A message typed while an approval card is open no longer rejects the
+  request. The card stays, the message is held, and the panel shows
+  `approvalPendingHint` until the card is decided.
+- The packed tarball is installed and loaded in the test suite (ESM, CommonJS,
+  the CLI and a strict NodeNext consumer), so an undeclared dependency or a
+  missing file fails before a release.
+
 ## [0.4.0] - 2026-06-25
 
 ### Changed
@@ -187,7 +333,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/chainmatics/glirastes/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/chainmatics/glirastes/compare/v0.3.2...v0.4.0
 [0.2.1]: https://github.com/chainmatics/glirastes/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/chainmatics/glirastes/releases/tag/v0.2.0

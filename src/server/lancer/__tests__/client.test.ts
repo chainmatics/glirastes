@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { createLancer } from '../client';
-import { ServiceBlockedError } from '../errors';
-import type { Lancer } from '../types';
+import { createLancer } from '../client.js';
+import { ServiceBlockedError } from '../errors.js';
+import type { Lancer } from '../types.js';
 
 describe('createLancer', () => {
   let fetchMock: ReturnType<typeof vi.fn>;

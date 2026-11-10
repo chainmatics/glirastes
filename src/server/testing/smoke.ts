@@ -2,12 +2,15 @@ import { describe, it, expect } from 'vitest';
 import type { ModuleDefinition } from '../../types.js';
 import { getToolsByModule } from './helpers.js';
 
+export { TOOL_NAME_PATTERN } from '../../runtime/local-tool-bindings.js';
+import { TOOL_NAME_PATTERN } from '../../runtime/local-tool-bindings.js';
+
 /**
  * Auto-generates smoke tests from module definitions.
  *
  * Tests:
  * - Every module has at least 1 tool
- * - All tool names use snake_case
+ * - All tool names follow the naming convention
  * - No duplicate tool names within a module
  * - If a tool registry is provided, all module tools exist in it
  */
@@ -40,12 +43,12 @@ export function runSmokeTest(
     describe('tool naming conventions', () => {
       const allTools = Object.values(toolsByModule).flat();
 
-      it('all tool names use snake_case', () => {
+      it('all tool names follow the naming convention', () => {
         for (const tool of allTools) {
           expect(
             tool,
-            `Tool "${tool}" should be snake_case`,
-          ).toMatch(/^[a-z][a-z0-9_]*$/);
+            `Tool "${tool}" should be a definitionId or snake_case name`,
+          ).toMatch(TOOL_NAME_PATTERN);
         }
       });
 

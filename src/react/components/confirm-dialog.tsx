@@ -72,6 +72,7 @@ export function ConfirmDialog({
   const dialog = (
     <div
       data-component="confirm-dialog-backdrop"
+      data-unstyled={ctx?.unstyled || undefined}
       style={themeVars}
       onClick={(e) => {
         // Only close when clicking the backdrop itself, not the panel

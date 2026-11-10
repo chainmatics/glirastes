@@ -31,6 +31,7 @@ export type {
 
 // Low-level building blocks (for advanced usage)
 export { runSmokeTest } from './smoke.js';
+export { assertModuleRegistryParity } from './registry-parity.js';
 export { runRoutingTest } from './routing.js';
 export { runGuardrailsTest } from './guardrails.js';
 export { runApprovalTest } from './approvals.js';

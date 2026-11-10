@@ -1,4 +1,14 @@
 import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent } from 'react';
+import type { UiActionBus } from '../browser/ui-action-bus.js';
+import type { ClarificationRequest } from '../contracts/clarification.js';
+import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
+import type { ChatInteractionsConfig, PendingChatCommand } from './interactions/registry.js';
+
+export type {
+  ClarificationOption,
+  ClarificationRequest,
+  ClarificationTarget,
+} from '../contracts/clarification.js';
 
 // ============================================================================
 // Chat Transport — transport-agnostic interface for chat backends
@@ -94,17 +104,29 @@ export interface UseDeepgramTranscriptionOptions {
   baseUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
   getToken?: () => string | null | undefined;
+  /**
+   * The app's own speech provider instead of the Deepgram stream, for example
+   * a `RecordedSttAdapter`. `baseUrl` and `getToken` are then unused. Keep
+   * one instance across renders; a new one ends the running recording.
+   */
+  adapter?: import('./stt/controller.js').SttProviderAdapter;
   onInterimTranscript?: (text: string) => void;
   onError?: (error: string) => void;
 }
 
 export interface UseDeepgramTranscriptionReturn {
+  phase: import('./stt/controller.js').SttSessionPhase;
   isRecording: boolean;
   isConnecting: boolean;
   error: string | null;
   transcript: string;
-  startRecording: () => Promise<void>;
-  stopRecording: () => string;
+  interimTranscript: string;
+  displayTranscript: string;
+  stream: MediaStream | null;
+  startRecording: (previousDraft?: string) => Promise<void>;
+  stopRecording: () => Promise<string>;
+  cancelRecording: () => Promise<string>;
+  retry: () => Promise<void>;
 }
 
 export interface VoiceInputButtonProps {
@@ -120,6 +142,13 @@ export interface VoiceInputButtonProps {
 
 export interface RecordingBarProps {
   isConnecting: boolean;
+  /** The existing authoritative recorder stream; never opens another mic. */
+  stream?: MediaStream | null;
+  /**
+   * Live final plus interim transcript shown next to the waveform. It is
+   * never written into the editor before Stop.
+   */
+  transcript?: string;
   onCancel: () => void;
   onStop: () => void;
   variant: 'trigger' | 'inline';
@@ -202,7 +231,7 @@ export interface PipelineState {
   totalSteps: number;
   finishReason?: string;
   maxSteps: number;
-  stepLimitSource: 'explicit' | 'module' | 'safety';
+  stepLimitSource: 'explicit' | 'module' | 'safety' | 'runtime-budget';
   updatedAt: string;
   message?: string;
 }
@@ -217,6 +246,16 @@ export interface MentionResult {
   label: string;
   description?: string;
   icon?: string;
+  /** Stable list identity when several providers may return the same id. */
+  key?: string;
+  /** Token text after the trigger; defaults to a slug of `label`. */
+  slug?: string;
+  /** Tool-backed commands: the catalog definition to run (see `CompletionItem`). */
+  definitionId?: string;
+  /** Tool-backed commands: fixed arguments for the definition. */
+  args?: Readonly<Record<string, unknown>>;
+  /** Entity actions offered next to this result (see `CompletionItem.actions`). */
+  actions?: ReadonlyArray<CompletionItemAction>;
 }
 
 export interface MentionData {
@@ -231,6 +270,85 @@ export interface MentionConfig {
   resolve: (id: string, type: string) => Promise<MentionData>;
   types: string[];
   serialize?: MentionSerializationConfig;
+}
+
+// ============================================================================
+// Completion Providers ('/' commands and '@' mentions)
+// ============================================================================
+
+/**
+ * What the app UI knows about the signed-in user. Providers use it to hide
+ * entries; it never authorizes anything (the server and the app do).
+ */
+export interface CompletionPermissionContext {
+  readonly roles?: ReadonlyArray<string>;
+  readonly attributes?: Readonly<Record<string, unknown>>;
+}
+
+export interface CompletionItem {
+  /** The app's own stable id; it reaches the model via the mention marker. */
+  id: string;
+  /** Mention type, e.g. `user`, `task`, `command`. */
+  type: string;
+  label: string;
+  description?: string;
+  slug?: string;
+  /**
+   * Tool-backed commands: the catalog definition to run. Set it when `id` is
+   * not the definition id (several commands share one definition) or `args`
+   * are present; it reaches the model next to the id on send.
+   */
+  definitionId?: string;
+  /** Fixed arguments for `definitionId` (needs `definitionId`), e.g. `{ destination: 'overview' }`. */
+  args?: Readonly<Record<string, unknown>>;
+  /**
+   * Context actions of an `@` entity (e.g. "Open", "Complete"), offered next
+   * to it in the list and reachable by keyboard (ArrowRight/ArrowLeft).
+   */
+  actions?: ReadonlyArray<CompletionItemAction>;
+}
+
+export interface CompletionItemAction {
+  /** Action id (`[A-Za-z0-9._-]`, max 200). */
+  id: string;
+  label: string;
+}
+
+export interface CompletionSearchRequest {
+  query: string;
+  trigger: string;
+  /** Aborted when a newer search starts; pass it to `fetch`. */
+  signal: AbortSignal;
+  context: CompletionPermissionContext;
+  limit: number;
+}
+
+export interface ChatCompletionProvider {
+  /** Stable, unique provider id (`[a-z0-9-]`, max 40). */
+  id: string;
+  trigger: '@' | '/';
+  search(
+    request: CompletionSearchRequest,
+  ): Promise<ReadonlyArray<CompletionItem>> | ReadonlyArray<CompletionItem>;
+}
+
+/** A catalog UI tool offered as a `/` command. */
+export interface UiToolCommandSource {
+  readonly definitionId: string;
+  /**
+   * Stable, unique list identity and mention id of this command; defaults to
+   * `definitionId`. One definition can back several commands (a single
+   * `ui.navigate` with a `destination` enum becomes one command per
+   * destination). No `:` or `}`, max 200 characters.
+   */
+  readonly commandId?: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly keywords?: ReadonlyArray<string>;
+  /** Fixed arguments the command passes to the definition, e.g. `{ destination: 'overview' }`. */
+  readonly args?: Readonly<Record<string, unknown>>;
+  /** Empty or omitted: visible to everyone. */
+  readonly allowedRoles?: ReadonlyArray<string>;
 }
 
 export interface MentionSerializationConfig {
@@ -351,12 +469,38 @@ export interface ToolResultDisplayConfig {
   allowlist?: string[];
 }
 
+export interface VoicePushToTalkConfig {
+  /**
+   * Hold this combo to talk; `mod` is ⌘ on macOS and Ctrl elsewhere.
+   * Default `mod+shift+space`. `false` disables only the hotkey. Only one
+   * visible composer per page owns a combo, so it never opens two microphones.
+   */
+  hotkey?: string | false;
+  /**
+   * Holding the mic button at least this long (default 350 ms) stops on
+   * release; a shorter tap toggles recording on.
+   */
+  holdThresholdMs?: number;
+}
+
 export interface VoiceInputConfig {
   enabled?: boolean;
   language?: string;
   baseUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
   getToken?: () => string | null | undefined;
+  /**
+   * Speech provider adapter; defaults to the Deepgram speech-stream adapter.
+   * Keep its identity stable: a new adapter restarts the controller.
+   */
+  adapter?: import('./stt/controller.js').SttProviderAdapter;
+  /** Push-to-talk in addition to tap-to-toggle; `false` keeps toggle only. */
+  pushToTalk?: VoicePushToTalkConfig | false;
+  /**
+   * Pass the current route (e.g. `usePathname()`); a change stops recording
+   * and keeps the speech as editable draft. Back/forward is detected too.
+   */
+  routeKey?: string;
   recordingBar?: {
     enabled?: boolean;
     variant?: 'trigger' | 'inline';
@@ -425,6 +569,16 @@ export interface ChatComponents {
   PipelineTimeline?: ComponentType<PipelineTimelineProps>;
   SuggestionChip?: ComponentType<SuggestionChipProps>;
   MentionChip?: ComponentType<MentionChipProps>;
+  ClarificationCard?: ComponentType<ClarificationCardProps>;
+  /** Form for the missing arguments of a `/` command or entity action. */
+  CommandArgumentsForm?: ComponentType<CommandArgumentsFormProps>;
+}
+
+export interface CommandArgumentsFormProps {
+  pending: PendingChatCommand;
+  /** Values by argument name, and the labels of picked entities. */
+  onSubmit: (values: Readonly<Record<string, string>>, valueLabels: Readonly<Record<string, string>>) => void;
+  onCancel: () => void;
 }
 
 // ============================================================================
@@ -462,6 +616,15 @@ export interface ChatLocale {
   pipelineErrorLabel: string;
   pipelineStepLabel: string;
   pipelineApprovalPendingLabel: string;
+  // Work log of an assistant turn and its optional plan
+  activityWorkingLabel: string;
+  activityWaitingLabel: string;
+  activityDoneLabel: string;         // supports `{count}`
+  activityDoneOneLabel: string;
+  activityFailedLabel: string;       // supports `{count}`
+  planTitle: string;
+  /** Shown when the user sends while an approval card waits for a decision. */
+  approvalPendingHint: string;
 
   // Floating widget / chat window chrome
   chatTitle: string;                 // default header title ("AI Assistant")
@@ -477,10 +640,31 @@ export interface ChatLocale {
   newChatLabel: string;              // "+ New chat" row + default new session title
   noSessionsLabel: string;           // empty state
   sessionsLoadingLabel: string;      // loading state
+  untitledSessionLabel: string;
   deleteSessionAriaLabel: string;
   confirmDeleteSessionPrompt: string;
+  sessionArchiveMessage: string;     // supports `{title}`
   renameSessionAriaLabel: string;
   renameSessionPlaceholder: string;
+
+  // Structured clarification
+  clarificationInputLabel: string;
+  clarificationSubmitButton: string;
+
+  // Speech-to-text
+  retryRecordingAriaLabel: string;
+
+  // `@` and `/` suggestions
+  completionListLabel: string;
+  completionResultsLabel: string;     // supports `{count}`
+
+  // Arguments of `/` commands and entity actions
+  commandArgumentsLabel: string;      // supports `{command}`
+  commandArgumentsSubmit: string;
+  commandArgumentsInvalid: string;
+  commandArgumentsIncomplete: string; // supports `{fields}`: required values still missing, or a person typed but not picked
+  commandArgumentsAnyOption: string;
+  commandArgumentsNoMatches: string;
 }
 
 // ============================================================================
@@ -493,11 +677,18 @@ export type OnBeforeSend = (text: string, mentions: MentionData[]) => string;
 /** Called when a tool produces output — useful for app-specific dispatching */
 export type OnToolResult = (toolName: string, result: unknown) => void;
 
+/** What the chat knows beyond the arguments of the call to approve. */
+export interface ApprovalDescriptionContext {
+  /** Record names the tool results of this conversation reported, by lower-case record id. */
+  names?: ReadonlyMap<string, string>;
+}
+
 /** Formats approval display for a given tool call */
 export type ApprovalDescriptionFn = (
   toolName: string,
   approvalId: string,
   args: unknown,
+  context?: ApprovalDescriptionContext,
 ) => PendingApproval;
 
 /** Translates a pipeline state message (e.g. "Stopped by user.") before rendering. */
@@ -512,6 +703,28 @@ export type StepSummaryFormatter = (step: PipelineStepReport) => string;
 
 export interface AiChatProviderConfig {
   mentions?: MentionConfig;
+  /**
+   * Local compact result components per tool `definitionId` and schema
+   * version. Memoize the array. Unknown tools, outputs that fail every
+   * version's schema, and throwing renderers use the default block.
+   */
+  toolRenderers?: ReadonlyArray<AnyToolResultRenderer>;
+  /**
+   * Generic `/` and `@` providers. Memoize the array: a new identity
+   * rebuilds the search. When set, the composer uses provider search with
+   * keyboard navigation and keeps structured ids on send.
+   */
+  completionProviders?: ReadonlyArray<ChatCompletionProvider>;
+  completionContext?: CompletionPermissionContext;
+  onCompletionProviderError?: (providerId: string, error: unknown) => void;
+  /**
+   * Declarative `@` entities and `/` commands: derived `data` (from
+   * `useChatInteractionsData` or the generated module) plus app definitions
+   * (`defineChatEntity`, `defineChatCommand`). Memoize the object. A `/`
+   * command sent alone runs its tool without the model, through the server's
+   * normal authorization and confirmation.
+   */
+  chatInteractions?: ChatInteractionsConfig;
   toolResults?: ToolResultDisplayConfig;
   voice?: VoiceInputConfig;
   session?: SessionConfig;
@@ -540,7 +753,26 @@ export interface AiChatProviderConfig {
    * ```
    */
   theme?: ChatTheme;
+  /**
+   * `inline` (default) writes the theme as inline `--cm-*` variables on
+   * widget roots. `inherit` leaves them to stylesheets and host variables;
+   * `<glirastes-chat>` uses it so page CSS can theme the shadow root.
+   */
+  themeScope?: 'inline' | 'inherit';
+  /**
+   * Bring your own styles. Widget roots render `data-unstyled`, which turns
+   * every rule of the shipped stylesheet off for them and everything inside,
+   * and no theme variables are written. Markup, `data-*` hooks and
+   * `classNames` stay, so the host stylesheet styles the chat on its own.
+   */
+  unstyled?: boolean;
   onToolResult?: OnToolResult;
+  /**
+   * Bus that receives the UI actions of generated tools (`ui.navigate`,
+   * `ui.filter.<view>`, `ui.<actionId>`) after `onToolResult`. Defaults to
+   * the page-wide bus of `glirastes/browser`.
+   */
+  uiActionBus?: UiActionBus;
   onBeforeSend?: OnBeforeSend;
   approvalDescription?: ApprovalDescriptionFn;
   continueMessage?: string;
@@ -733,15 +965,26 @@ export interface RichMentionInputHandle {
   focus: () => void;
   clear: () => void;
   getValue: () => string;
-  setValue: (value: string) => void;
+  /** Restore text, optionally retaining the ordered identities of its mention tokens. */
+  setValue: (value: string, mentions?: MentionData[]) => void;
   getMentions: () => MentionData[];
   addMention: (mention: MentionData) => void;
+}
+
+/** ARIA wiring of one option in the `@`/`/` list; spread it onto the clickable element. */
+export interface MentionDropdownOptionProps {
+  id: string;
+  role: 'option';
+  'aria-selected': boolean;
+  tabIndex: -1;
 }
 
 export interface MentionDropdownItemProps {
   result: MentionResult;
   isSelected: boolean;
   onClick: () => void;
+  /** Custom items must spread these onto their clickable element for keyboard and screen-reader use. */
+  optionProps?: MentionDropdownOptionProps;
 }
 
 export interface RichMentionInputComponents {
@@ -755,7 +998,8 @@ export interface RichMentionInputProps {
   disabled?: boolean;
   className?: string;
   onChange?: (nextValue: string) => void;
-  onSubmit?: (message: string) => void;
+  /** Receives the text and the structured mentions (chips and commands) still in it. */
+  onSubmit?: (message: string, mentions: MentionData[]) => void;
   /** Search callback for mention autocomplete (BYOS). Return matching results for the given query and trigger character. */
   onSearch?: (query: string, trigger: string) => Promise<MentionResult[]> | MentionResult[];
   /** Mention data to render as inline chips on mount (e.g. pre-filled context from a detail view). */
@@ -764,9 +1008,17 @@ export interface RichMentionInputProps {
   triggers?: string[];
   /** Component overrides for the autocomplete dropdown. */
   components?: RichMentionInputComponents;
+  /** An entity action picked next to a result (mouse, or ArrowRight then Enter). */
+  onEntityAction?: (result: MentionResult, actionId: string) => void;
+  /** Accessible name of the suggestion list. Default `Suggestions`. */
+  listLabel?: string;
+  /** Announced result count; `{count}` is replaced. Default `{count} suggestions`. */
+  resultsLabel?: string;
 }
 
 export interface ChatWindowHeaderRenderProps {
+  /** Insert these controls in a custom header when layoutControls is enabled. */
+  layoutControls?: ReactNode;
   onClose: () => void;
   isDragging: boolean;
   onDragStart: (e: ReactMouseEvent<HTMLElement>) => void;
@@ -793,8 +1045,27 @@ export interface ChatWindowProps {
   className?: string;
   headerClassName?: string;
   bodyClassName?: string;
+  /** Keep this stable across mode changes. false reserves space in the host
+   * flex row for a sidebar; true renders an overlay in document.body. */
   portal?: boolean;
+  mode?: 'floating' | 'sidebar';
+  defaultMode?: 'floating' | 'sidebar';
+  onModeChange?: (mode: 'floating' | 'sidebar') => void;
+  /** Opt into common dock/float/collapse buttons. Default false. */
+  layoutControls?: boolean;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+  /** Initial sidebar width; changed props resize it. Echoing onSidebarWidthChange
+   * into this prop is supported. Floating width/height remain independent. */
+  sidebarWidth?: number;
+  minSidebarWidth?: number;
+  maxSidebarWidth?: number;
+  onSidebarWidthChange?: (width: number) => void;
+  layoutLabels?: Partial<Record<'dock' | 'float' | 'collapse' | 'expand' | 'resize', string>>;
   open?: boolean;
+  /** Preserve child state while closed. Hidden content is inert; consumers must
+   * stop owned media and dismiss external portals when closing. Default false. */
+  keepMounted?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   draggable?: boolean;
@@ -811,6 +1082,9 @@ export interface ChatWindowProps {
   snapRadius?: number;
   edgeThreshold?: number;
   persistDimensions?: boolean | string;
+  /** Set false when the app persists sidebarWidth itself. Floating dimension
+   * persistence remains enabled. Default true. */
+  persistSidebarWidth?: boolean;
   onPositionChange?: (pos: { x: number; y: number } | null) => void;
   onDimensionChange?: (size: { width: number; height: number }) => void;
   resizeHandleClassName?: string;
@@ -854,6 +1128,15 @@ export interface SuggestionBarProps {
   className?: string;
 }
 
+export interface ClarificationCardProps {
+  toolCallId: string;
+  request: ClarificationRequest;
+  /** False once answered or when a newer message exists. */
+  interactive: boolean;
+  onAnswer: (answer: { text: string; optionId?: string }) => void;
+  className?: string;
+}
+
 export interface ToolResultBlockProps {
   toolName: string;
   result: unknown;
@@ -892,6 +1175,10 @@ export interface AiTriggerButtonProps {
   isRecording?: boolean;
   /** Whether voice connection is being established */
   isConnecting?: boolean;
+  /** The single authoritative stream owned by the STT controller */
+  recordingStream?: MediaStream | null;
+  /** Live final plus interim transcript shown while recording */
+  recordingTranscript?: string;
   /** Called when user stops recording (red circle) */
   onStopRecording?: () => void;
   /** Called when user cancels recording (X) */

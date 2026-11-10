@@ -1,0 +1,12 @@
+{
+  "name": "react-nest-separate-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "glirastes tools refresh --root .. && tsc -p . && node dist/main.js",
+    "build": "glirastes tools check --root .. && tsc -p ."
+  },
+  "dependencies": {
+    "@nestjs/platform-express": "11.1.18"
+  }
+}

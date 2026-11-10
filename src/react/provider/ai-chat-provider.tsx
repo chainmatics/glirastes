@@ -21,14 +21,33 @@ import type {
   PipelineStepReport,
   SessionSummary,
 } from '../types.js';
-import { serializeMentionsForSend } from '../utils/mention-markup.js';
+import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
+import { collectEntityNames } from '../utils/entity-names.js';
+import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
+import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
+import { resolveToolResultConfig } from '../utils/tool-result-config.js';
+import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
+import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
+import { createCompletionSearch } from '../completions/completion-search.js';
+import { toChatEntityItem } from '../interactions/definitions.js';
+import {
+  createChatInteractionRegistry,
+  type PendingChatCommand,
+} from '../interactions/registry.js';
+import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
+import { dispatchToolResultUiActions } from '../../browser/client-actions.js';
+import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
+import {
+  CLARIFICATION_MAX_ANSWER_LENGTH,
+  parseClarificationAnswer,
+} from '../../contracts/clarification.js';
 
 // ============================================================================
 // Default locale (English)
 // ============================================================================
 
-import type { ChatLocale } from '../types.js';
+import type { ApprovalDescriptionFn, ChatLocale, ToolLabelConfig } from '../types.js';
 
 export const DEFAULT_LOCALE: ChatLocale = {
   placeholder: 'Type a message...',
@@ -46,6 +65,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   dismissButton: 'Dismiss',
   cancelButton: 'Cancel',
   confirmButton: 'Confirm',
+  approvalPendingHint: 'Please approve or reject the open request first.',
   moreItemsLabel: 'more',
   allCountLabel: 'All {count}',
   pipelineTitle: 'Pipeline',
@@ -56,6 +76,12 @@ export const DEFAULT_LOCALE: ChatLocale = {
   pipelineErrorLabel: 'Error',
   pipelineStepLabel: 'Step',
   pipelineApprovalPendingLabel: 'Approval pending',
+  activityWorkingLabel: 'Working',
+  activityWaitingLabel: 'Waiting for approval',
+  activityDoneLabel: '{count} steps done',
+  activityDoneOneLabel: '1 step done',
+  activityFailedLabel: '{count} failed',
+  planTitle: 'Plan',
   chatTitle: 'AI Assistant',
   closeChatAriaLabel: 'Close chat',
   clearChatAriaLabel: 'Clear conversation',
@@ -67,10 +93,23 @@ export const DEFAULT_LOCALE: ChatLocale = {
   newChatLabel: 'New chat',
   noSessionsLabel: 'No conversations yet',
   sessionsLoadingLabel: 'Loading…',
+  untitledSessionLabel: 'Untitled',
   deleteSessionAriaLabel: 'Delete conversation',
   confirmDeleteSessionPrompt: 'Delete this conversation?',
+  sessionArchiveMessage: '"{title}" will be archived.',
   renameSessionAriaLabel: 'Rename conversation',
   renameSessionPlaceholder: 'Conversation title',
+  clarificationInputLabel: 'Your answer',
+  clarificationSubmitButton: 'Answer',
+  retryRecordingAriaLabel: 'Retry recording',
+  completionListLabel: 'Suggestions',
+  completionResultsLabel: '{count} suggestions',
+  commandArgumentsLabel: 'Details for {command}',
+  commandArgumentsSubmit: 'Run',
+  commandArgumentsInvalid: 'These values are too long.',
+  commandArgumentsIncomplete: 'Please complete: {fields}',
+  commandArgumentsAnyOption: 'Any',
+  commandArgumentsNoMatches: 'No matches',
 };
 
 // ============================================================================
@@ -122,21 +161,6 @@ function getMentionTypesForTrigger(types: string[], trigger: MentionTrigger): st
     return atTypes.length > 0 ? atTypes : types;
   }
   return types;
-}
-
-/** Default approval description — returns raw tool name and JSON args */
-function defaultApprovalDescription(
-  toolName: string,
-  approvalId: string,
-  args: unknown,
-): PendingApproval {
-  return {
-    id: approvalId,
-    toolName,
-    args: isRecord(args) ? (args as Record<string, unknown>) : {},
-    messageId: '',
-    description: toolName,
-  };
 }
 
 /**
@@ -279,7 +303,8 @@ function normalizePipelineState(data: unknown): PipelineState | null {
   if (
     data.stepLimitSource !== 'explicit' &&
     data.stepLimitSource !== 'module' &&
-    data.stepLimitSource !== 'safety'
+    data.stepLimitSource !== 'safety' &&
+    data.stepLimitSource !== 'runtime-budget'
   ) {
     return null;
   }
@@ -345,6 +370,11 @@ export interface AiChatProviderProps extends AiChatProviderConfig {
 export function AiChatProvider({
   transport,
   mentions,
+  completionProviders,
+  completionContext,
+  onCompletionProviderError,
+  chatInteractions,
+  toolRenderers,
   toolResults: userToolResults,
   voice: userVoice,
   session,
@@ -353,7 +383,10 @@ export function AiChatProvider({
   suggestions: userSuggestions,
   locale: userLocale,
   theme: userTheme,
+  themeScope = 'inline',
+  unstyled = false,
   onToolResult,
+  uiActionBus,
   onBeforeSend,
   approvalDescription: userApprovalDescription,
   continueMessage = 'Please continue.',
@@ -362,15 +395,21 @@ export function AiChatProvider({
   stepSummaryFormatter,
   children,
 }: AiChatProviderProps) {
-  // Merge caller-supplied locale overrides with English defaults.
+  // What the chat turn says about its tools (label per model name, app
+  // language) and the language of the page: the defaults of a chat that
+  // configures neither `locale`, `toolLabels` nor `approvalDescription`.
+  const [toolPresentation, setToolPresentation] = useState<ToolPresentation | null>(null);
+  const pageLanguage = usePageLanguage();
+  const language = toolPresentation?.locale ?? pageLanguage;
+  // English defaults, then the built-in texts of the app's language, then the caller's overrides.
   const locale = useMemo<ChatLocale>(
-    () => ({ ...DEFAULT_LOCALE, ...(userLocale ?? {}) }),
-    [userLocale],
+    () => ({ ...DEFAULT_LOCALE, ...languageLocale(language), ...(userLocale ?? {}) }),
+    [userLocale, language],
   );
   // Resolve `theme` prop → CSS variables spread onto widget roots.
   const themeVars = useMemo<CSSProperties>(
-    () => getThemeVars(userTheme) as CSSProperties,
-    [userTheme],
+    () => (themeScope === 'inherit' || unstyled ? {} : getThemeVars(userTheme)) as CSSProperties,
+    [userTheme, themeScope, unstyled],
   );
   const themeEffect = useMemo(() => getThemeEffect(userTheme), [userTheme]);
   const classNames = useMemo(() => userClassNames ?? {}, [userClassNames]);
@@ -380,8 +419,14 @@ export function AiChatProvider({
     [userSuggestions],
   );
   const toolResultConfig = useMemo(
-    () => ({ mode: 'default' as const, allowlist: [], ...userToolResults }),
-    [userToolResults],
+    () => resolveToolResultConfig(userToolResults, Boolean(toolRenderers && toolRenderers.length > 0)),
+    [userToolResults, toolRenderers],
+  );
+  const toolRendererRegistry = useMemo(
+    () => (toolRenderers && toolRenderers.length > 0
+      ? createToolResultRendererRegistry(toolRenderers)
+      : undefined),
+    [toolRenderers],
   );
   const voiceConfig = useMemo(
     () => ({
@@ -392,14 +437,45 @@ export function AiChatProvider({
     }),
     [userVoice],
   );
-  const toolLabels = useMemo(() => userToolLabels ?? {}, [userToolLabels]);
+  // The labels of the turn's tools, each used for one call and for several; the caller's labels win.
+  const toolLabels = useMemo<ToolLabelConfig>(() => ({
+    labels: {
+      ...Object.fromEntries(Object.entries(toolPresentation?.labels ?? {})
+        .map(([name, label]) => [name, { singular: label, plural: label }])),
+      ...(userToolLabels?.labels ?? {}),
+    },
+  }), [toolPresentation, userToolLabels]);
 
-  const approvalDescriptionFn = userApprovalDescription ?? defaultApprovalDescription;
+  // Without the app's own description, an approval names the action by its
+  // label and lists what the call states, instead of the raw tool name alone.
+  const derivedApprovalDescription = useMemo<ApprovalDescriptionFn>(() => {
+    const actions = Object.fromEntries(Object.entries(toolLabels.labels ?? {})
+      .map(([name, label]) => [name, label.singular]));
+    const describe = createApprovalDescriptionGenerator({ toolLabels: actions, dateLocale: language ?? 'en-US' });
+    return (toolName, approvalId, args, context) => {
+      const pending = describe(toolName, approvalId, args, context);
+      return actions[toolName] ? pending : { ...pending, description: toolName };
+    };
+  }, [toolLabels, language]);
+  const approvalDescriptionFn = userApprovalDescription ?? derivedApprovalDescription;
 
   // Approvals state (Map for O(1) lookup)
   const [pendingApprovalsMap, setPendingApprovalsMap] = useState<Map<string, PendingApproval>>(new Map());
-  const [processingApprovalId, setProcessingApprovalId] = useState<string | null>(null);
+  // Set when the user sends while an approval waits; cleared once none waits.
+  const [approvalReminder, setApprovalReminder] = useState(false);
+  useEffect(() => {
+    if (pendingApprovalsMap.size === 0) setApprovalReminder(false);
+  }, [pendingApprovalsMap]);
+  const [processingApprovalIds, setProcessingApprovalIds] = useState<Set<string>>(new Set());
+  const [approvalError, setApprovalError] = useState<Error | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  // A completed load belongs to one session, not to the provider forever.
+  // Otherwise a render with a new id can persist the previous session's rows.
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
+  const [sessionLoadFailure, setSessionLoadFailure] = useState<{ id: string; error: Error } | null>(null);
+  const [sessionRestoreAttempt, setSessionRestoreAttempt] = useState(0);
+  const [isSessionMutating, setIsSessionMutating] = useState(false);
+  const sessionMutationRef = useRef(false);
 
   // ---------------------------------------------------------------------------
   // Multi-session state
@@ -414,6 +490,9 @@ export function AiChatProvider({
   );
   const activeSessionId = session?.activeId ?? uncontrolledActiveId;
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const isBootstrapSentinel = activeSessionId === 'default'
+    && session?.list !== undefined && session.defaultActiveId === undefined
+    && session.activeId === undefined && !sessions.some((entry) => entry.id === 'default');
   const [isSessionsLoading, setIsSessionsLoading] = useState(false);
 
   const sessionsSupported = Boolean(
@@ -446,6 +525,32 @@ export function AiChatProvider({
   const [activeMentions, setActiveMentions] = useState<MentionData[]>([]);
   const [isMentionSearching, setIsMentionSearching] = useState(false);
 
+  const onCompletionProviderErrorRef = useRef(onCompletionProviderError);
+  onCompletionProviderErrorRef.current = onCompletionProviderError;
+  // Declarative `@` entities and `/` commands join the app's own providers.
+  const interactionRegistry = useMemo(
+    () => (chatInteractions
+      ? createChatInteractionRegistry({ ...chatInteractions, context: completionContext })
+      : undefined),
+    [chatInteractions, completionContext],
+  );
+  const allCompletionProviders = useMemo(
+    () => [...(completionProviders ?? []), ...(interactionRegistry?.providers ?? [])],
+    [completionProviders, interactionRegistry],
+  );
+  const completionSearch = useMemo(
+    () => (allCompletionProviders.length > 0
+      ? createCompletionSearch(allCompletionProviders, {
+        context: completionContext,
+        onProviderError: (providerId, error) =>
+          onCompletionProviderErrorRef.current?.(providerId, error),
+      })
+      : undefined),
+    [allCompletionProviders, completionContext],
+  );
+  const [pendingCommand, setPendingCommand] = useState<PendingChatCommand | null>(null);
+  const [composerMentions, setComposerMentions] = useState<MentionData[]>([]);
+
   // Refs for deduplication
   const processedToolCallsRef = useRef<Set<string>>(new Set());
   const handledApprovalIdsRef = useRef<Set<string>>(new Set());
@@ -453,11 +558,19 @@ export function AiChatProvider({
   // Stable refs for callbacks to avoid re-creating transport
   const onToolResultRef = useRef(onToolResult);
   onToolResultRef.current = onToolResult;
+  const uiActionBusRef = useRef(uiActionBus);
+  uiActionBusRef.current = uiActionBus;
   const approvalDescriptionRef = useRef(approvalDescriptionFn);
   approvalDescriptionRef.current = approvalDescriptionFn;
 
   // Data part handler — processes pipeline and truncation events from any transport
   const handleDataPart = useCallback((dataPart: { type: string; data: unknown }) => {
+    if (dataPart.type === 'data-tool-presentation') {
+      const next = parseToolPresentation(dataPart.data);
+      // Every turn sends it again; keep the object while its content is the same.
+      if (next) setToolPresentation((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+      return;
+    }
     if (dataPart.type === 'data-truncation') {
       const data = dataPart.data as { completedTools: string[]; message: string };
       setTruncation({
@@ -500,13 +613,17 @@ export function AiChatProvider({
     messages: rawMessages,
     sendMessage,
     status,
-    error,
+    error: transportError,
     stop: transportStop,
     setMessages,
     addToolApprovalResponse,
   } = resolvedTransport;
 
   const isLoading = status === 'submitted' || status === 'streaming';
+  const streamActiveRef = useRef(isLoading);
+  streamActiveRef.current = isLoading;
+  const sessionNotReady = Boolean(session?.load && loadedSessionId !== activeSessionId);
+  const error = transportError ?? (sessionLoadFailure?.id === activeSessionId ? sessionLoadFailure.error : null);
 
   useEffect(() => {
     if (!error) return;
@@ -517,7 +634,7 @@ export function AiChatProvider({
       maxSteps: prev?.maxSteps ?? 1,
       stepLimitSource: prev?.stepLimitSource ?? 'safety',
       updatedAt: new Date().toISOString(),
-      message: typeof error.message === 'string' ? error.message : 'Pipeline failed.',
+      message: 'Pipeline failed.',
     }));
   }, [error, pipelineSteps.length]);
 
@@ -550,11 +667,21 @@ export function AiChatProvider({
     }
   }, []);
 
+  // An open approval belongs to the chat that asked for it. A host that owns
+  // the active id switches chats without switchSession(), so drop it here.
+  const approvalSessionRef = useRef(activeSessionId);
+  useEffect(() => {
+    if (approvalSessionRef.current === activeSessionId) return;
+    approvalSessionRef.current = activeSessionId;
+    setPendingApprovalsMap(new Map());
+  }, [activeSessionId]);
+
   // Load messages from session whenever the active session changes.
   // Runs on mount and on every switchSession() call.
   useEffect(() => {
     const cfg = sessionRef.current;
     if (!cfg?.load) {
+      setLoadedSessionId(activeSessionId);
       if (!isInitialized) setIsInitialized(true);
       return;
     }
@@ -563,16 +690,15 @@ export function AiChatProvider({
     // active — `'default'` is unlikely to be a valid session id in the
     // consumer's backend, and the auto-select effect (below) will switch
     // us to the first real session as soon as `list()` resolves.
-    const isBootstrapSentinel =
-      activeSessionId === 'default' &&
-      cfg.list !== undefined &&
-      cfg.activeId === undefined;
     if (isBootstrapSentinel) {
       if (!isInitialized) setIsInitialized(true);
       return;
     }
 
     let cancelled = false;
+    setLoadedSessionId(null);
+    setSessionLoadFailure(null);
+    setMessages([] as unknown as typeof rawMessages);
 
     (async () => {
       try {
@@ -580,6 +706,9 @@ export function AiChatProvider({
         if (cancelled) return;
         processedToolCallsRef.current.clear();
         handledApprovalIdsRef.current.clear();
+        // The transport may still have held the previous chat's messages
+        // until now; an approval read from them is not this chat's.
+        setPendingApprovalsMap(new Map());
         // Coerce wire-shape rows (with `content: string`) into SDK
         // messages (with `parts: [...]`) so bridges don't have to.
         const coerced = loaded ? coerceLoadedMessages(loaded as unknown[]) : [];
@@ -592,12 +721,11 @@ export function AiChatProvider({
         } else {
           setMessages([] as unknown as typeof rawMessages);
         }
-      } catch (err) {
+        setLoadedSessionId(activeSessionId);
+      } catch {
         if (cancelled) return;
-        console.warn(
-          `[AiChatProvider] session.load("${activeSessionId}") failed:`,
-          err,
-        );
+        console.warn('[AiChatProvider] session.load failed');
+        setSessionLoadFailure({ id: activeSessionId, error: new Error('Chat history could not be loaded. Reopen this chat to retry.') });
         setMessages([] as unknown as typeof rawMessages);
       } finally {
         if (!cancelled) setIsInitialized(true);
@@ -609,18 +737,19 @@ export function AiChatProvider({
     };
     // rawMessages intentionally excluded — we only re-load on session switch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionId, setMessages, markStoredMessagesAsProcessed]);
+  }, [activeSessionId, setMessages, markStoredMessagesAsProcessed, sessionRestoreAttempt, isBootstrapSentinel]);
 
   // Save messages to session on change (scoped to the active session).
   useEffect(() => {
     if (!isInitialized) return;
+    if (loadedSessionId !== activeSessionId) return;
     if (rawMessages.length === 0) return;
     const cfg = sessionRef.current;
     if (!cfg?.save) return;
     void Promise.resolve(
       cfg.save(activeSessionId, rawMessages as unknown as ChatMessage[]),
     );
-  }, [rawMessages, isInitialized, activeSessionId]);
+  }, [rawMessages, isInitialized, activeSessionId, loadedSessionId]);
 
   // Process tool results and approvals from streaming messages
   useEffect(() => {
@@ -651,7 +780,12 @@ export function AiChatProvider({
           !handledApprovalIdsRef.current.has(toolPart.approval.id)
         ) {
           handledApprovalIdsRef.current.add(toolPart.approval.id);
-          const pending = approvalDescriptionRef.current(toolName, toolPart.approval.id, toolPart.input);
+          const pending = approvalDescriptionRef.current(
+            toolName,
+            toolPart.approval.id,
+            toolPart.input,
+            { names: collectEntityNames(rawMessages) },
+          );
           setPendingApprovalsMap(prev => new Map(prev).set(toolPart.approval!.id, pending));
         }
 
@@ -661,13 +795,21 @@ export function AiChatProvider({
           if (!processedToolCallsRef.current.has(toolCallId)) {
             processedToolCallsRef.current.add(toolCallId);
             onToolResultRef.current?.(toolName, toolPart.output);
+            // Generated UI tools run in the browser through the app's bridge.
+            void dispatchToolResultUiActions(
+              toolPart.output,
+              uiActionBusRef.current ?? getDefaultUiActionBus(),
+            ).catch(() => {
+              console.warn('[glirastes] A generated UI action failed');
+            });
           }
         }
       }
     }
   }, [rawMessages]);
 
-  // Extract suggestions from suggest_followups tool
+  // Extract suggestions from suggest_followups tool, with a strict text
+  // fallback for models that append a trailing Markdown suggestion section.
   useEffect(() => {
     if (rawMessages.length === 0) return;
 
@@ -678,6 +820,7 @@ export function AiChatProvider({
       const message = rawMessages[messageIndex];
       if (message.role !== 'assistant') continue;
 
+      let structuredFollowups: string[] | null = null;
       for (const part of message.parts) {
         if (!('type' in part)) continue;
         const partType = (part as { type: string }).type;
@@ -697,7 +840,21 @@ export function AiChatProvider({
         );
 
         if (followups.length > 0) {
-          latestFollowups = followups.slice(0, count);
+          structuredFollowups = followups.slice(0, count);
+        }
+      }
+
+      if (structuredFollowups && structuredFollowups.length > 0) {
+        latestFollowups = structuredFollowups;
+      } else {
+        for (const part of message.parts) {
+          if (!isRecord(part) || part.type !== 'text' || typeof part.text !== 'string') {
+            continue;
+          }
+          const extracted = extractTrailingFollowupSuggestions(part.text, count);
+          if (extracted.suggestions.length > 0) {
+            latestFollowups = extracted.suggestions;
+          }
         }
       }
 
@@ -773,26 +930,20 @@ export function AiChatProvider({
   }, [mentionQuery, mentionTrigger, mentions]);
 
   // Actions
-  const send = useCallback(async (message: string) => {
+  // The shared tail of every send: transport hygiene, then the transport.
+  const deliver = useCallback(async (processedMessage: string) => {
+    // An open approval is decided on its card. A typed "yes" must not count as
+    // approval, and rejecting it on send dropped requests the user wanted.
+    if (pendingApprovalsMap.size > 0) {
+      setApprovalReminder(true);
+      return;
+    }
+
     // Clear truncation and suggestion chips on new message
     setTruncation(null);
     setSuggestionChips([]);
     setPipelineSteps([]);
     setPipelineState(null);
-
-    // Preprocess message
-    let processedMessage = message;
-    const mentionSerializeConfig = mentions?.serialize;
-    if (mentionSerializeConfig?.enabled !== false) {
-      processedMessage = serializeMentionsForSend(
-        processedMessage,
-        activeMentions,
-        mentionSerializeConfig,
-      );
-    }
-    if (onBeforeSend) {
-      processedMessage = onBeforeSend(processedMessage, activeMentions);
-    }
 
     // Sanitize messages before sending to prevent AI_MissingToolResultsError
     const currentMessages = rawMessages;
@@ -800,19 +951,6 @@ export function AiChatProvider({
     if (sanitized.length !== currentMessages.length || JSON.stringify(sanitized) !== JSON.stringify(currentMessages)) {
       setMessages(sanitized as unknown as typeof rawMessages);
       setPendingApprovalsMap(new Map());
-    }
-
-    // Auto-reject pending approvals when user sends new message
-    if (pendingApprovalsMap.size > 0) {
-      const approvalIds = Array.from(pendingApprovalsMap.keys());
-      setPendingApprovalsMap(new Map());
-      for (const approvalId of approvalIds) {
-        await addToolApprovalResponse({
-          id: approvalId,
-          approved: false,
-          reason: 'Auto-rejected: user sent a new message.',
-        });
-      }
     }
 
     await sendMessage({ text: processedMessage });
@@ -825,12 +963,138 @@ export function AiChatProvider({
     rawMessages,
     setMessages,
     sendMessage,
-    addToolApprovalResponse,
     pendingApprovalsMap,
+  ]);
+
+  const dispatchSend = useCallback(async (
+    message: string,
+    sendOptions?: { mentions?: MentionData[] },
+  ) => {
+    const mentionsForSend = sendOptions?.mentions ?? activeMentions;
+
+    // A `/` command alone runs without the model; missing arguments open its form.
+    const plan = interactionRegistry?.planMessage(message, mentionsForSend);
+    if (plan?.status === 'needs-args') {
+      setPendingCommand(plan.request);
+      return;
+    }
+    if (plan?.status === 'send') {
+      setPendingCommand(null);
+      await deliver(plan.text);
+      return;
+    }
+
+    // Preprocess message
+    let processedMessage = plan?.status === 'prompt' ? plan.text : message;
+    const mentionSerializeConfig = mentions?.serialize;
+    if (mentionSerializeConfig?.enabled !== false) {
+      processedMessage = serializeMentionsForSend(
+        processedMessage,
+        mentionsForSend,
+        mentionSerializeConfig,
+      );
+    }
+    if (onBeforeSend) {
+      processedMessage = onBeforeSend(processedMessage, mentionsForSend);
+    }
+
+    // Typing into the composer while a clarification is open answers it, so
+    // the server resumes the original request instead of starting over.
+    const openClarification = findOpenClarification(
+      rawMessages as unknown as Array<{ role: string; parts: unknown[] }>,
+    );
+    if (
+      openClarification?.request.allowFreeText
+      && processedMessage.trim().length > 0
+      && processedMessage.length <= CLARIFICATION_MAX_ANSWER_LENGTH
+      && !parseClarificationAnswer(processedMessage)
+    ) {
+      processedMessage = clarificationAnswerMessage({
+        toolCallId: openClarification.toolCallId,
+        answer: processedMessage,
+      });
+    }
+
+    await deliver(processedMessage);
+  }, [
+    rawMessages,
+    deliver,
+    interactionRegistry,
     mentions,
     onBeforeSend,
     activeMentions,
   ]);
+
+  // Decides synchronously whether the message is taken, so any composer can
+  // keep the typed text when it is not.
+  const send = useCallback((
+    message: string,
+    sendOptions?: { mentions?: MentionData[] },
+  ): boolean => {
+    if (sessionNotReady || sessionMutationRef.current) return false;
+    if (pendingApprovalsMap.size > 0) {
+      setApprovalReminder(true);
+      return false;
+    }
+    void dispatchSend(message, sendOptions);
+    return true;
+  }, [sessionNotReady, pendingApprovalsMap, dispatchSend]);
+
+  const submitPendingCommand = useCallback((
+    values: Readonly<Record<string, string>>,
+    valueLabels?: Readonly<Record<string, string>>,
+  ): boolean => {
+    if (!pendingCommand || !interactionRegistry || sessionNotReady || sessionMutationRef.current) return false;
+    const plan = interactionRegistry.completeCommand(pendingCommand, values, valueLabels);
+    if (plan.status !== 'send') {
+      setPendingCommand(plan.status === 'needs-args' ? plan.request : null);
+      return plan.status !== 'needs-args';
+    }
+    setPendingCommand(null);
+    void deliver(plan.text);
+    return true;
+  }, [pendingCommand, interactionRegistry, sessionNotReady, deliver]);
+
+  const cancelPendingCommand = useCallback(() => setPendingCommand(null), []);
+
+  const runEntityAction = useCallback((
+    entity: { type: string; id: string; label: string },
+    actionId: string,
+  ) => {
+    if (sessionNotReady || sessionMutationRef.current) return;
+    const plan = interactionRegistry?.planAction(entity, actionId);
+    if (!plan) return;
+    if (plan.status === 'needs-args') {
+      setPendingCommand(plan.request);
+      return;
+    }
+    setPendingCommand(null);
+    void deliver(plan.text);
+  }, [interactionRegistry, sessionNotReady, deliver]);
+
+  const mentionEntity = useCallback(async (type: string, id: string): Promise<boolean> => {
+    const entity = interactionRegistry?.entity(type);
+    if (!entity?.resolve) return false;
+    let item;
+    try {
+      item = toChatEntityItem(await entity.resolve(id));
+    } catch {
+      return false;
+    }
+    if (!item) return false;
+    const resolved = item;
+    setComposerMentions((previous) => [...previous, {
+      id: resolved.id,
+      type,
+      label: resolved.label,
+      displayName: resolved.label,
+      prefix: '@',
+      slug: normalizeMentionSlug(resolved.label),
+    }]);
+    return true;
+  }, [interactionRegistry]);
+
+  const consumeComposerMentions = useCallback(() => setComposerMentions([]), []);
 
   const stop = useCallback(() => {
     setPipelineState((prev) => ({
@@ -860,6 +1124,7 @@ export function AiChatProvider({
     setMentionResults([]);
     setActiveMentions([]);
     setIsMentionSearching(false);
+    setPendingCommand(null);
     setSuggestionChips(suggestionsConfig.staticChips ?? []);
   }, [setMessages, activeSessionId, suggestionsConfig.staticChips]);
 
@@ -888,17 +1153,17 @@ export function AiChatProvider({
       // Auto-select the first session if we're still on the bootstrap
       // sentinel and the consumer doesn't control `activeId` externally.
       if (
+        !streamActiveRef.current &&
         list.length > 0 &&
         cfg.activeId === undefined &&
-        (uncontrolledActiveIdRef.current === 'default' ||
-          !list.some((s) => s.id === uncontrolledActiveIdRef.current))
+        !list.some((s) => s.id === uncontrolledActiveIdRef.current)
       ) {
         const next = list[0].id;
         setUncontrolledActiveId(next);
         cfg.onActiveIdChange?.(next);
       }
-    } catch (err) {
-      console.warn('[AiChatProvider] session.list failed:', err);
+    } catch {
+      console.warn('[AiChatProvider] session.list failed');
     } finally {
       setIsSessionsLoading(false);
     }
@@ -930,7 +1195,11 @@ export function AiChatProvider({
 
   const switchSession = useCallback(
     async (id: string) => {
-      if (id === activeSessionId) return;
+      if (streamActiveRef.current) return;
+      if (id === activeSessionId) {
+        if (sessionLoadFailure?.id === id) setSessionRestoreAttempt((attempt) => attempt + 1);
+        return;
+      }
       // Reset transient UI state before loading new session
       setPendingApprovalsMap(new Map());
       setTruncation(null);
@@ -940,43 +1209,59 @@ export function AiChatProvider({
       setVisibleMessageCount(30);
       applyActiveId(id);
     },
-    [activeSessionId, applyActiveId, suggestionsConfig.staticChips],
+    [activeSessionId, applyActiveId, suggestionsConfig.staticChips, isLoading, sessionLoadFailure],
   );
 
   const createSession = useCallback(
     async (opts?: { title?: string }): Promise<SessionSummary | null> => {
+      if (streamActiveRef.current || sessionMutationRef.current) return null;
       const cfg = sessionRef.current;
       if (!cfg?.create) return null;
-      const created = await cfg.create(opts);
-      await refreshSessions();
-      await switchSession(created.id);
-      return created;
+      sessionMutationRef.current = true;
+      setIsSessionMutating(true);
+      try {
+        const created = await cfg.create(opts);
+        await refreshSessions();
+        await switchSession(created.id);
+        return created;
+      } finally {
+        sessionMutationRef.current = false;
+        setIsSessionMutating(false);
+      }
     },
-    [refreshSessions, switchSession],
+    [refreshSessions, switchSession, isLoading],
   );
 
   const removeSession = useCallback(
     async (id: string) => {
+      if (streamActiveRef.current || sessionMutationRef.current) return;
       const cfg = sessionRef.current;
       if (!cfg?.remove) return;
-      await cfg.remove(id);
-      // Re-fetch first so the fallback target reflects reality
-      const cfgList = cfg.list ? await cfg.list() : [];
-      setSessions(cfgList);
-      if (id === activeSessionId) {
-        const next = cfgList.find((s) => s.id !== id);
-        if (next) {
-          await switchSession(next.id);
-        } else if (cfg.create) {
-          // No sessions left — spin up a fresh one
-          const created = await cfg.create();
-          const refreshed = cfg.list ? await cfg.list() : [created];
-          setSessions(refreshed);
-          await switchSession(created.id);
+      sessionMutationRef.current = true;
+      setIsSessionMutating(true);
+      try {
+        await cfg.remove(id);
+        // Re-fetch first so the fallback target reflects reality
+        const cfgList = cfg.list ? await cfg.list() : [];
+        setSessions(cfgList);
+        if (id === activeSessionId) {
+          const next = cfgList.find((s) => s.id !== id);
+          if (next) {
+            await switchSession(next.id);
+          } else if (cfg.create) {
+            // No sessions left — spin up a fresh one
+            const created = await cfg.create();
+            const refreshed = cfg.list ? await cfg.list() : [created];
+            setSessions(refreshed);
+            await switchSession(created.id);
+          }
         }
+      } finally {
+        sessionMutationRef.current = false;
+        setIsSessionMutating(false);
       }
     },
-    [activeSessionId, switchSession],
+    [activeSessionId, switchSession, isLoading],
   );
 
   const renameSession = useCallback(
@@ -1003,29 +1288,49 @@ export function AiChatProvider({
 
   // Approval handlers
   const approve = useCallback(async (id: string) => {
-    setProcessingApprovalId(id);
-    setPendingApprovalsMap(prev => {
-      const next = new Map(prev);
-      next.delete(id);
-      return next;
-    });
-    await addToolApprovalResponse({ id, approved: true });
-    setProcessingApprovalId(null);
+    setApprovalError(null);
+    setProcessingApprovalIds((prev) => new Set(prev).add(id));
+    try {
+      await addToolApprovalResponse({ id, approved: true });
+      setPendingApprovalsMap((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+    } catch {
+      setApprovalError(new Error('Tool approval response failed.'));
+    } finally {
+      setProcessingApprovalIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }, [addToolApprovalResponse]);
 
   const reject = useCallback(async (id: string) => {
-    setProcessingApprovalId(id);
-    setPendingApprovalsMap(prev => {
-      const next = new Map(prev);
-      next.delete(id);
-      return next;
-    });
-    await addToolApprovalResponse({
-      id,
-      approved: false,
-      reason: 'Rejected by user.',
-    });
-    setProcessingApprovalId(null);
+    setApprovalError(null);
+    setProcessingApprovalIds((prev) => new Set(prev).add(id));
+    try {
+      await addToolApprovalResponse({
+        id,
+        approved: false,
+        reason: 'Rejected by user.',
+      });
+      setPendingApprovalsMap((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+    } catch {
+      setApprovalError(new Error('Tool approval response failed.'));
+    } finally {
+      setProcessingApprovalIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }, [addToolApprovalResponse]);
 
   // Truncation
@@ -1131,16 +1436,19 @@ export function AiChatProvider({
       locale,
       themeVars,
       themeEffect,
+      unstyled,
       suggestions: suggestionsConfig,
       toolLabels,
       toolResults: toolResultConfig,
+      toolRendererRegistry,
       voice: voiceConfig,
       mentionConfig: mentions,
       pipelineMessageTranslator,
       stepSummaryFormatter,
       messages: visibleMessages,
-      isLoading,
-      error: error ?? null,
+      isLoading: isLoading || isSessionMutating || sessionNotReady,
+      isSessionChangeBlocked: isLoading || isSessionMutating,
+      error: error ?? approvalError,
       send,
       stop,
       clear,
@@ -1149,9 +1457,10 @@ export function AiChatProvider({
       pipelineSteps,
       pipelineState,
       pendingApprovals,
+      approvalReminder,
       approve,
       reject,
-      isProcessingApproval: processingApprovalId !== null,
+      isProcessingApproval: processingApprovalIds.size > 0,
       approvalDescription: approvalDescriptionRef.current,
       truncation,
       continueTruncation,
@@ -1168,6 +1477,16 @@ export function AiChatProvider({
       clearActiveMentions,
       isMentionSearching,
       hasMentions: !!mentions,
+      completionSearch,
+      hasCompletions: completionSearch !== undefined,
+      interactions: interactionRegistry,
+      pendingCommand,
+      submitPendingCommand,
+      cancelPendingCommand,
+      runEntityAction,
+      mentionEntity,
+      composerMentions,
+      consumeComposerMentions,
       suggestionChips,
       selectSuggestion,
       refreshSuggestions,
@@ -1188,16 +1507,22 @@ export function AiChatProvider({
       locale,
       themeVars,
       themeEffect,
+      unstyled,
       suggestionsConfig,
       toolLabels,
       toolResultConfig,
+      toolRendererRegistry,
       voiceConfig,
       mentions,
       pipelineMessageTranslator,
       stepSummaryFormatter,
       visibleMessages,
       isLoading,
+      sessionNotReady,
+      isSessionMutating,
+      isBootstrapSentinel,
       error,
+      approvalError,
       send,
       stop,
       clear,
@@ -1206,9 +1531,10 @@ export function AiChatProvider({
       pipelineSteps,
       pipelineState,
       pendingApprovals,
+      approvalReminder,
       approve,
       reject,
-      processingApprovalId,
+      processingApprovalIds,
       truncation,
       continueTruncation,
       dismissTruncation,
@@ -1223,6 +1549,15 @@ export function AiChatProvider({
       removeActiveMention,
       clearActiveMentions,
       isMentionSearching,
+      completionSearch,
+      interactionRegistry,
+      pendingCommand,
+      submitPendingCommand,
+      cancelPendingCommand,
+      runEntityAction,
+      mentionEntity,
+      composerMentions,
+      consumeComposerMentions,
       suggestionChips,
       selectSuggestion,
       refreshSuggestions,

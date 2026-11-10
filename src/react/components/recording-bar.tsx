@@ -1,78 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext } from 'react';
 import { createPortal } from 'react-dom';
+import { ChatContext } from '../provider/chat-context.js';
 import type { RecordingBarProps } from '../types.js';
 import { CancelButton, StopButton } from './recording-controls.js';
-import { loadWaveSurfer } from './wavesurfer-loader.js';
+import { StreamWaveform } from './stream-waveform.js';
 
 function joinClassNames(...values: Array<string | undefined>): string {
   return values.filter(Boolean).join(' ');
-}
-
-function LiveWave({ className }: { className?: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    let disposed = false;
-    const cleanupRef = { current: () => {} };
-
-    // Lazy-load the optional wavesurfer.js peer dep at runtime — see wavesurfer-loader.ts.
-    loadWaveSurfer()
-      .then(({ WaveSurfer, RecordPlugin }) => {
-        if (disposed) return;
-
-        const ws = WaveSurfer.create({
-          container,
-          waveColor: '#000000',
-          height: 28,
-          barWidth: 2,
-          barGap: 1,
-          barRadius: 2,
-          cursorWidth: 0,
-          interact: false,
-          normalize: true,
-        });
-
-        const record = ws.registerPlugin(
-          RecordPlugin.create({
-            scrollingWaveform: true,
-            scrollingWaveformWindow: 5,
-            renderRecordedAudio: false,
-          }),
-        ) as { startMic: () => Promise<MediaStream>; stopMic: () => void; destroy: () => void };
-
-        void record.startMic().catch(() => {
-          // Ignore: mic permissions may be handled by the transcription hook.
-        });
-
-        cleanupRef.current = () => {
-          record.stopMic();
-          record.destroy();
-          ws.destroy();
-        };
-      })
-      .catch((err) => {
-        console.warn(
-          '[RecordingBar] wavesurfer.js is not installed — waveform visualization disabled. Install it with: npm install wavesurfer.js',
-          err,
-        );
-        if (!disposed) setLoadFailed(true);
-      });
-
-    return () => {
-      disposed = true;
-      cleanupRef.current();
-    };
-  }, []);
-
-  if (loadFailed) {
-    return <LoadingDots />;
-  }
-
-  return <div ref={containerRef} className={joinClassNames('glirastes-recording-wave', className)} />;
 }
 
 function LoadingDots() {
@@ -85,8 +19,55 @@ function LoadingDots() {
   );
 }
 
+const MAX_VISIBLE_TRANSCRIPT = 80;
+
+/** First strong letter decides the script direction, like `dir="auto"`. */
+const STARTS_RIGHT_TO_LEFT =
+  /^[^\p{L}]*[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}]/u;
+
+/**
+ * Shows the newest words; the full text stays available as a tooltip.
+ *
+ * The slot can be narrower than the 80-character window, and `overflow:
+ * hidden` keeps the start of a line. The box therefore runs opposite to the
+ * script and the text sits in an isolated child of its own direction: the
+ * clipped side and the ellipsis land on the oldest words, the newest stay
+ * visible, and punctuation keeps its place.
+ */
+function InterimTranscript({ text }: { text?: string }) {
+  const trimmed = text?.trim() ?? '';
+  if (!trimmed) return null;
+  const visible = trimmed.length > MAX_VISIBLE_TRANSCRIPT
+    ? `…${trimmed.slice(-(MAX_VISIBLE_TRANSCRIPT - 1))}`
+    : trimmed;
+  const rtlScript = STARTS_RIGHT_TO_LEFT.test(visible);
+  return (
+    <span
+      data-part="interim-transcript"
+      aria-live="polite"
+      title={trimmed}
+      style={{
+        // Most of the bar goes to the words, not to the waveform.
+        flex: '4 1 0',
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        direction: rtlScript ? 'ltr' : 'rtl',
+        textAlign: 'left',
+        fontSize: '0.8125rem',
+        opacity: 0.85,
+      }}
+    >
+      <bdi dir={rtlScript ? 'rtl' : 'ltr'}>{visible}</bdi>
+    </span>
+  );
+}
+
 function RecordingBarInner({
   isConnecting,
+  stream,
+  transcript,
   onCancel,
   onStop,
   variant,
@@ -100,13 +81,20 @@ function RecordingBarInner({
       className={joinClassNames('glirastes-recording-bar', variant === 'trigger' ? 'glirastes-recording-bar-trigger' : 'glirastes-recording-bar-inline', className)}
       data-component="recording-bar"
       data-variant={variant}
-      style={{ display: 'flex', alignItems: 'center', gap: '8px', ...(variant === 'inline' ? { height: '36px' } : {}) }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        ...(variant === 'inline' ? { width: '100%', height: '36px' } : {}),
+      }}
     >
       <CancelButton onClick={handleCancel} ariaLabel="Aufnahme abbrechen" title="Aufnahme abbrechen" />
 
       <div data-part="wave-container" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
-        {isConnecting ? <LoadingDots /> : <LiveWave />}
+        {isConnecting ? <LoadingDots /> : <StreamWaveform stream={stream} />}
       </div>
+
+      <InterimTranscript text={transcript} />
 
       <StopButton onClick={handleStop} ariaLabel="Aufnahme stoppen" title="Aufnahme stoppen" />
     </div>
@@ -114,11 +102,12 @@ function RecordingBarInner({
 }
 
 export function RecordingBar(props: RecordingBarProps) {
+  const unstyled = useContext(ChatContext)?.unstyled ?? false;
   if (props.variant === 'trigger') {
     if (typeof document === 'undefined') return null;
 
     return createPortal(
-      <div data-component="recording-bar-portal">
+      <div data-component="recording-bar-portal" data-unstyled={unstyled || undefined}>
         <RecordingBarInner {...props} />
       </div>,
       document.body,

@@ -411,6 +411,38 @@ describe('sanitizeModelMessages', () => {
     expect(content).toHaveLength(2); // call-1 + approval-request (call-2 stripped)
   });
 
+  it('keeps an approved call when the same tool message carries the result of another call', () => {
+    // A lookup and an action that needs approval, called in one step: the
+    // converted history puts the lookup result and the approval response into
+    // one tool message. streamText still runs the approved call.
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'delete both' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool-call', toolCallId: 'call-1', toolName: 'list_deleted' },
+          { type: 'tool-call', toolCallId: 'call-2', toolName: 'delete_task' },
+          { type: 'tool-approval-request', approvalId: 'appr-1', toolCallId: 'call-2' },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [
+          { type: 'tool-result', toolCallId: 'call-1', result: [] },
+          { type: 'tool-approval-response', approvalId: 'appr-1', approved: true },
+        ],
+      },
+    ];
+
+    const result = sanitizeModelMessages(messages);
+
+    expect(result).toHaveLength(3);
+    const assistant = result.find((m) => isRecord(m) && m.role === 'assistant') as Record<string, unknown>;
+    expect(assistant.content).toHaveLength(3);
+    const tool = result.at(-1) as Record<string, unknown>;
+    expect(tool.content).toHaveLength(2);
+  });
+
   it('removes historical duplicate assistant tool-call IDs and keeps only latest occurrence', () => {
     // Regression: same toolCallId appears in two assistant messages.
     // OpenAI rejects this with:

@@ -1,0 +1,198 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  AssistantLayoutProvider,
+  DEFAULT_ASSISTANT_LAYOUT_KEY,
+  parseAssistantLayout,
+  defaultAssistantLayout,
+  useAssistantLayout,
+} from '../assistant-layout.js';
+import { AssistantShell, AssistantToggle, DE_ASSISTANT_SHELL_LABELS } from '../assistant-shell.js';
+import { ChatContext, type ChatContextValue } from '../../provider/chat-context.js';
+
+// Node ships its own localStorage stub, so the tests bring a working one.
+let store = new Map<string, string>();
+beforeEach(() => {
+  store = new Map();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => { store.set(key, String(value)); },
+    removeItem: (key: string) => { store.delete(key); },
+    clear: () => store.clear(),
+  });
+  vi.stubGlobal('PointerEvent', MouseEvent);
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+const frame = () => act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+function State() {
+  const { open, mode, defaultMode, collapsed, width } = useAssistantLayout();
+  return <output data-testid="state">{JSON.stringify({ open, mode, defaultMode, collapsed, width })}</output>;
+}
+const state = () => JSON.parse(screen.getByTestId('state').textContent!);
+function mount(props: Partial<React.ComponentProps<typeof AssistantShell>> = {}) {
+  return render(<AssistantLayoutProvider>
+    <div><main data-assistant-main><AssistantToggle /></main><State />
+      <AssistantShell onClear={() => {}} {...props}><textarea aria-label="Draft" /></AssistantShell></div>
+  </AssistantLayoutProvider>);
+}
+
+describe('assistant layout', () => {
+  it.each([null, '{', 'null', '[]', '42', '{"open":"yes","mode":"other","width":"wide"}'])('falls back on invalid storage %s', raw => {
+    expect(parseAssistantLayout(raw)).toEqual(defaultAssistantLayout());
+  });
+
+  it('reopens a closed detached window as a detached window', async () => {
+    mount(); await frame();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
+    expect(state()).toMatchObject({ open: true, mode: 'sidebar' });
+    fireEvent.click(screen.getByRole('button', { name: 'Detach as window' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
+    expect(state()).toMatchObject({ open: true, mode: 'floating' });
+    // Docking is remembered the same way.
+    fireEvent.click(screen.getByRole('button', { name: 'Dock right' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
+    expect(state()).toMatchObject({ open: true, mode: 'sidebar' });
+  });
+
+  it('remembers the detached layout across reloads', async () => {
+    const view = mount(); await frame();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Detach as window' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await frame();
+    view.unmount();
+    mount(); await frame();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
+    expect(screen.getByRole('complementary')).toHaveProperty('dataset.mode', 'floating');
+    expect(JSON.parse(localStorage.getItem(DEFAULT_ASSISTANT_LAYOUT_KEY)!)).toMatchObject({ defaultMode: 'floating' });
+  });
+
+  it('sets the opening layout without moving an open assistant', async () => {
+    function Controls() {
+      const ui = useAssistantLayout();
+      return <><button onClick={() => ui.setDefaultMode('floating')}>Default window</button><button onClick={ui.openChat}>Open</button><button onClick={ui.closeChat}>Close</button><State /></>;
+    }
+    render(<AssistantLayoutProvider storageKey={null}><Controls /></AssistantLayoutProvider>);
+    fireEvent.click(screen.getByText('Open'));
+    fireEvent.click(screen.getByText('Default window'));
+    expect(state()).toMatchObject({ mode: 'sidebar', defaultMode: 'floating' });
+    fireEvent.click(screen.getByText('Close'));
+    fireEvent.click(screen.getByText('Open'));
+    expect(state().mode).toBe('floating');
+  });
+});
+
+describe('AssistantShell', () => {
+  it('collapses to a rail, keeps the draft and exposes the docked width', async () => {
+    mount(); await frame();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'My draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }));
+    expect(screen.getByRole('complementary').style.width).toBe('44px');
+    fireEvent.click(screen.getByRole('button', { name: 'Expand AI assistant' }));
+    expect(screen.getByRole('textbox')).toBe(input);
+    expect(input).toHaveProperty('value', 'My draft');
+    expect(document.documentElement.style.getPropertyValue('--assistant-right-inset')).toBe('420px');
+  });
+
+  it('opens the detached window bottom right with eight resize handles', async () => {
+    mount(); await frame();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Detach as window' }));
+    const shell = screen.getByRole('complementary');
+    expect([shell.style.left, shell.style.top, shell.style.width]).toEqual(['588px', '96px', '420px']);
+    expect(shell.querySelectorAll('[data-resize-edge]')).toHaveLength(8);
+    expect(screen.getByRole('button', { name: 'AI assistant' })).toBeTruthy();
+  });
+
+  it('takes the app icons, labels, classes and button component', async () => {
+    mount({
+      labels: DE_ASSISTANT_SHELL_LABELS,
+      icons: { detach: <i data-testid="detach-icon" /> },
+      classNames: { root: 'my-shell', header: 'my-header' },
+      headerStart: <button>Menu</button>,
+      renderButton: ({ action, label, title, onClick, children }) =>
+        <button className={`app-btn app-${action}`} aria-label={label} title={title} onClick={onClick}>{children}</button>,
+    });
+    await frame();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
+    const shell = screen.getByRole('complementary', { name: 'KI-Assistent' });
+    expect(shell.className).toBe('my-shell');
+    expect(shell.querySelector('header')!.className).toBe('my-header');
+    expect(shell.querySelector('header')!.contains(screen.getByRole('button', { name: 'Menu' }))).toBe(true);
+    const detach = screen.getByRole('button', { name: 'Als Fenster lösen' });
+    expect(detach.className).toBe('app-btn app-detach');
+    expect(detach.contains(screen.getByTestId('detach-icon'))).toBe(true);
+    expect(detach.title).toBe('Als Fenster lösen (Alt+Shift+D)');
+  });
+
+  it('switches layout and collapse with the shared shortcuts', async () => {
+    mount(); await frame();
+    fireEvent.keyDown(window, { key: 'i', code: 'KeyI', ctrlKey: true });
+    expect(state()).toMatchObject({ open: true, mode: 'sidebar' });
+    fireEvent.keyDown(window, { key: 'd', code: 'KeyD', altKey: true, shiftKey: true });
+    expect(state().mode).toBe('floating');
+    fireEvent.keyDown(window, { key: 'd', code: 'KeyD', altKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: 'c', code: 'KeyC', altKey: true, shiftKey: true });
+    expect(state()).toMatchObject({ mode: 'sidebar', collapsed: true });
+  });
+});
+
+describe('several chats in the assistant header', () => {
+  /** What the session switcher reads from the chat; every text is its own key. */
+  const chat = (sessionsSupported: boolean) => ({
+    sessionsSupported,
+    sessions: [{ id: 'default', title: 'Offene Aufträge' }, { id: 's2', title: 'Kunden' }],
+    activeSessionId: 'default',
+    isSessionsLoading: false,
+    isLoading: false,
+    switchSession: vi.fn(), createSession: vi.fn(), removeSession: vi.fn(), renameSession: vi.fn(),
+    locale: new Proxy({}, { get: (_, key) => String(key) }),
+  }) as unknown as ChatContextValue;
+  const mountWith = (value: ChatContextValue, props: Partial<React.ComponentProps<typeof AssistantShell>> = {}) =>
+    render(<ChatContext.Provider value={value}><AssistantLayoutProvider>
+      <AssistantShell {...props}><textarea aria-label="Draft" /></AssistantShell>
+    </AssistantLayoutProvider></ChatContext.Provider>);
+
+  it('lists the chats in place of the title when the chat keeps several', async () => {
+    const { container } = mountWith(chat(true)); await frame();
+    const header = container.querySelector('header[data-element="header"]')!;
+    expect(header.querySelector('[data-component="session-switcher"]')).not.toBeNull();
+    expect(header.querySelector('[data-element="title"]')).toBeNull();
+    expect(header.textContent).toContain('Offene Aufträge');
+  });
+
+  it('keeps the plain title for a chat with one conversation', async () => {
+    const { container } = mountWith(chat(false)); await frame();
+    const header = container.querySelector('header[data-element="header"]')!;
+    expect(header.querySelector('[data-component="session-switcher"]')).toBeNull();
+    expect(header.querySelector('[data-element="title"]')!.textContent).toBe('AI assistant');
+  });
+
+  it('leaves the header to the app that passes its own title', async () => {
+    const { container } = mountWith(chat(true), { headerTitle: <b data-testid="own">Eigene</b> }); await frame();
+    expect(container.querySelector('[data-component="session-switcher"]')).toBeNull();
+    expect(screen.getByTestId('own').textContent).toBe('Eigene');
+  });
+
+  it('starts a new chat with the shortcut when the chat keeps several', async () => {
+    const value = chat(true);
+    mountWith(value); await frame();
+    fireEvent.keyDown(window, { key: 'n', code: 'KeyN', altKey: true, shiftKey: true });
+    expect(value.createSession).toHaveBeenCalledOnce();
+  });
+
+  it('leaves the new chat shortcut to the app that handles it', async () => {
+    const value = chat(true);
+    const onNewChat = vi.fn();
+    mountWith(value, { onNewChat }); await frame();
+    fireEvent.keyDown(window, { key: 'n', code: 'KeyN', altKey: true, shiftKey: true });
+    expect(onNewChat).toHaveBeenCalledOnce();
+    expect(value.createSession).not.toHaveBeenCalled();
+  });
+});

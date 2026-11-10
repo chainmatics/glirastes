@@ -5,3 +5,4 @@
 // Subpath exports (`glirastes/server`, `glirastes/react`, etc.) remain the
 // primary API surface for runtime functionality.
 export * from './types.js';
+export * from './diagnostics/index.js';

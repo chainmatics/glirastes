@@ -24,6 +24,14 @@ export type {
   MentionData,
   MentionConfig,
   MentionSerializationConfig,
+  // Completion providers
+  ChatCompletionProvider,
+  CompletionItem,
+  CompletionItemAction,
+  CompletionPermissionContext,
+  CommandArgumentsFormProps,
+  CompletionSearchRequest,
+  UiToolCommandSource,
   // Session
   SessionConfig,
   SessionSummary,
@@ -44,6 +52,7 @@ export type {
   ToolResultDisplayMode,
   ToolResultDisplayConfig,
   VoiceInputConfig,
+  VoicePushToTalkConfig,
   // Mention chips
   Mention,
   MentionChipProps,
@@ -55,6 +64,7 @@ export type {
   OnBeforeSend,
   OnToolResult,
   ApprovalDescriptionFn,
+  ApprovalDescriptionContext,
   PipelineMessageTranslator,
   StepSummaryFormatter,
   // Provider
@@ -84,6 +94,10 @@ export type {
   SuggestionBarProps,
   AiTriggerButtonProps,
   ToolResultBlockProps,
+  ClarificationCardProps,
+  ClarificationOption,
+  ClarificationRequest,
+  ClarificationTarget,
   MarkdownProps,
   // Transport
   ChatTransport,
@@ -102,6 +116,7 @@ export type {
 
 // Provider
 export { AiChatProvider, type AiChatProviderProps } from './provider/ai-chat-provider.js';
+export { deChatLocale } from './locale-de.js';
 
 // Context (for advanced use cases)
 export { useChatContext } from './provider/chat-context.js';
@@ -113,6 +128,25 @@ export { useApprovals } from './hooks/use-approvals.js';
 export { useMentions } from './hooks/use-mentions.js';
 export { useSuggestions } from './hooks/use-suggestions.js';
 export { useDeepgramTranscription } from './hooks/use-deepgram-transcription.js';
+export { useStt, type UseSttOptions, type UseSttReturn } from './stt/use-stt.js';
+export {
+  SttSessionController,
+  type SttProviderAdapter,
+  type SttProviderConnection,
+  type SttProviderEvents,
+  type SttSessionPhase,
+  type SttSessionSnapshot,
+} from './stt/controller.js';
+export {
+  RecordedSttAdapter,
+  encodeWav,
+  type RecordedSttAdapterOptions,
+} from './stt/recorded.js';
+export {
+  DeepgramSttAdapter,
+  createDeepgramSegmentParser,
+  type DeepgramSttAdapterOptions,
+} from './stt/deepgram.js';
 export { useDragResizePanel } from './hooks/use-drag-resize-panel.js';
 export type {
   UseDragResizePanelOptions,
@@ -121,6 +155,27 @@ export type {
 } from './hooks/use-drag-resize-panel.js';
 export { useDraggablePosition } from './hooks/use-draggable-position.js';
 export { useKeyboardShortcut } from './hooks/use-keyboard-shortcut.js';
+export {
+  useFloatingPanel,
+  type FloatingRect,
+  type FloatingResizeEdge,
+  type UseFloatingPanelOptions,
+  type UseFloatingPanelReturn,
+} from './hooks/use-floating-panel.js';
+export {
+  DEFAULT_CHAT_SHORTCUTS,
+  formatShortcut,
+  matchesShortcut,
+  resolveChatShortcuts,
+  useChatShortcuts,
+  type ChatShortcutAction,
+  type ChatShortcutMap,
+  type UseChatShortcutsOptions,
+} from './hooks/use-chat-shortcuts.js';
+export {
+  DEFAULT_PUSH_TO_TALK_HOTKEY,
+  usePushToTalkHotkey,
+} from './hooks/use-push-to-talk-hotkey.js';
 export type { UseKeyboardShortcutOptions } from './hooks/use-keyboard-shortcut.js';
 export type {
   UseDraggablePositionOptions,
@@ -128,6 +183,43 @@ export type {
 } from './hooks/use-draggable-position.js';
 
 // Components
+export {
+  AssistantLayoutProvider,
+  useAssistantLayout,
+  parseAssistantLayout,
+  defaultAssistantLayout,
+  clampAssistantWidth,
+  DEFAULT_ASSISTANT_LAYOUT_KEY,
+  DEFAULT_ASSISTANT_LAYOUT_LIMITS,
+  type AssistantLayout,
+  type AssistantLayoutLimits,
+  type AssistantLayoutMode,
+  type AssistantLayoutProviderProps,
+  type AssistantLayoutState,
+} from './assistant/assistant-layout.js';
+export {
+  AssistantShell,
+  AssistantToggle,
+  DEFAULT_ASSISTANT_SHELL_ICONS,
+  DEFAULT_ASSISTANT_SHELL_LABELS,
+  DE_ASSISTANT_SHELL_LABELS,
+  type AssistantShellAction,
+  type AssistantShellButtonProps,
+  type AssistantShellClassNames,
+  type AssistantShellIcons,
+  type AssistantShellLabels,
+  type AssistantShellProps,
+  type AssistantShellWindowOptions,
+} from './assistant/assistant-shell.js';
+export {
+  assistantShortcutList,
+  DEFAULT_ASSISTANT_SHORTCUT_LABELS,
+  DE_ASSISTANT_SHORTCUT_LABELS,
+  type AssistantShortcutEntry,
+  type AssistantShortcutLabels,
+  type AssistantShortcutListOptions,
+} from './assistant/assistant-shortcut-list.js';
+export { AssistantWorkspace, type AssistantWorkspaceProps } from './assistant/assistant-workspace.js';
 export { AiChatPanel } from './components/ai-chat-panel.js';
 export { FloatingChatUI, type FloatingChatUIProps } from './components/floating-chat-ui.js';
 export { MessageList } from './components/message-list.js';
@@ -139,6 +231,8 @@ export { ChatWindow } from './components/chat-window.js';
 export { ApprovalCard } from './components/approval-card.js';
 export { BulkApprovalCard } from './components/bulk-approval-card.js';
 export { PipelineTimeline } from './components/pipeline-timeline.js';
+export { ActivityLog, type ActivityLogProps } from './components/activity-log.js';
+export { PlanChecklist, type PlanChecklistProps } from './components/plan-checklist.js';
 export { SuggestionChip } from './components/suggestion-chip.js';
 export { SuggestionBar } from './components/suggestion-bar.js';
 export { MentionChip, MentionChipList } from './components/mention-chip.js';
@@ -146,6 +240,74 @@ export { VoiceInputButton } from './components/voice-input-button.js';
 export { RecordingBar } from './components/recording-bar.js';
 export { AiTriggerButton } from './components/ai-trigger-button.js';
 export { SessionSwitcher, type SessionSwitcherProps } from './components/session-switcher.js';
+export { ClarificationCard } from './components/clarification-card.js';
+
+// Tool result renderers
+export {
+  createToolResultRendererRegistry,
+  defineToolResultRenderer,
+  type AnyToolResultRenderer,
+  type ResolvedToolResultRenderer,
+  type ToolResultRenderer,
+  type ToolResultRendererProps,
+  type ToolResultRendererRegistry,
+} from './tool-renderers/registry.js';
+
+// Completion providers
+export {
+  createCompletionSearch,
+  type CompletionSearch,
+  type CompletionSearchOptions,
+} from './completions/completion-search.js';
+export { createUiToolCommandProvider } from './completions/ui-tool-command-provider.js';
+export { CommandArgumentsForm } from './components/command-arguments-form.js';
+
+// Declarative chat interactions: `@` entities and `/` commands
+export {
+  defineChatCommand,
+  defineChatEntity,
+  entitiesFromData,
+  type ChatCommandDefinition,
+  type ChatEntityAction,
+  type ChatEntityCard,
+  type ChatEntityDefinition,
+  type ChatEntityItem,
+  type ChatEntitySearchContext,
+  type DerivedEntityOptions,
+} from './interactions/definitions.js';
+export {
+  createChatInteractionRegistry,
+  type ChatInteractionRegistry,
+  type ChatInteractionsConfig,
+  type ChatSendPlan,
+  type PendingChatCommand,
+} from './interactions/registry.js';
+export {
+  useChatInteractionsData,
+  type UseChatInteractionsDataOptions,
+} from './interactions/use-chat-interactions-data.js';
+export {
+  formatChatCommandMessage,
+  parseChatCommandMessage,
+  stripChatCommandMarkers,
+  type ChatCommandInvocation,
+} from '../contracts/chat-command.js';
+export {
+  chatText,
+  mergeChatInteractions,
+  parseChatInteractionOverrides,
+  parseChatInteractions,
+  type ChatCommandData,
+  type ChatCommandRun,
+  type ChatEntityActionData,
+  type ChatEntityData,
+  type ChatInteractionArg,
+  type ChatInteractionOverrides,
+  type ChatInteractionsData,
+  type ChatLocaleCode,
+  type ChatText,
+  type ChatToolRun,
+} from '../contracts/chat-interactions.js';
 
 // Bridges
 export {
@@ -159,7 +321,15 @@ export { getThemeVars, CHAT_THEME_PRESETS, DEFAULT_THEME_PRESET } from './themes
 
 // Utilities
 export { mergePipelineSteps } from './utils/merge-pipeline-steps.js';
+export {
+  readActivitySteps,
+  readLatestPlan,
+  type ActivityStep,
+  type ActivityStepStatus,
+} from './utils/activity.js';
+export type { PlanItem, PlanItemStatus } from '../contracts/plan.js';
 export { sanitizeStoredMessages } from './utils/sanitize-stored-messages.js';
+export { createLocalSessionStore, type LocalSessionStoreOptions } from './utils/local-session-store.js';
 export {
   stripContextBlocks,
   parseMentionSegments,
@@ -175,6 +345,15 @@ export {
   createApprovalDescriptionGenerator,
   type ApprovalDescriptionConfig,
 } from './utils/create-approval-description.js';
+export {
+  findOpenClarification,
+  readClarificationPart,
+  type ClarificationPart,
+} from './utils/clarification.js';
+export {
+  formatClarificationAnswer,
+  stripClarificationMarkers,
+} from '../contracts/clarification.js';
 
 // UI action bus + hooks (client action dispatch)
 export * from './ui.js';

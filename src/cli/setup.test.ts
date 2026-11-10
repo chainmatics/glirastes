@@ -1,0 +1,505 @@
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  createRouteSourceFingerprint,
+  discoverFoundationExecutions,
+} from '../codegen/index.js';
+import type { AppSetupArtifact } from '../contracts/index.js';
+import { FoundationDiagnosticError } from '../diagnostics/foundation-diagnostic.js';
+import { CLI_USAGE, runCli } from './index.js';
+
+const id = (suffix: string) => (
+  `019fa9a9-d5f7-7ec3-a3c7-8899de20${suffix.padStart(4, '0')}`
+);
+const digest = (character: string) => `sha256:${character.repeat(43)}`;
+
+async function setupFixture(): Promise<{
+  root: string;
+  artifact: { appId: string; runId: string } & Record<string, unknown>;
+}> {
+  const root = await mkdtemp(join(tmpdir(), 'glirastes-cli-setup-'));
+  const source =
+    'export async function GET() { return Response.json({ ok: true }); }';
+  await mkdir(join(root, 'src/app/api/tasks'), { recursive: true });
+  await mkdir(join(root, '.glirastes'), { recursive: true });
+  await writeFile(
+    join(root, 'src/app/api/tasks/route.ts'),
+    source,
+    'utf8',
+  );
+  const inventory = {
+    schemaVersion: 2 as const,
+    targetAppKey: 'fixture',
+    executions: [{
+      toolId: id('1'),
+      definitionId: 'tasks.list',
+      stableKey: 'GET /api/tasks',
+      executionKind: 'endpoint' as const,
+      sourceFile: 'src/app/api/tasks/route.ts',
+      sourceFingerprint: createRouteSourceFingerprint(
+        source,
+        'GET',
+        '/api/tasks',
+      ),
+      inputSchemaDigest: digest('A'),
+      outputSchemaDigest: digest('B'),
+      method: 'GET' as const,
+      path: '/api/tasks',
+    }],
+  };
+  await writeFile(
+    join(root, '.glirastes/local-execution-inventory.v2.json'),
+    JSON.stringify(inventory),
+    'utf8',
+  );
+  const discovery = await discoverFoundationExecutions({ rootDir: root, inventory });
+  const artifact = {
+    schemaVersion: 1,
+    artifactId: id('2'),
+    runId: id('3'),
+    appId: id('4'),
+    discoveryDigest: discovery.inventoryDigest,
+    assessmentMode: 'interview',
+    status: 'ready',
+    tools: [{
+      toolId: id('1'),
+      sourceFingerprint: inventory.executions[0].sourceFingerprint,
+      name: 'tasks.list',
+      description: 'List visible tasks.',
+      modelName: 'tasks_list',
+      module: 'tasks',
+      sharedWith: [],
+      usageHints: ['Use for visible task lists.'],
+      presentation: {
+        locale: 'en-US',
+        singular: 'Task list',
+        plural: 'Task lists',
+        approval: 'Show task list',
+      },
+      executionKind: 'endpoint',
+      method: 'GET',
+      path: '/api/tasks',
+      operationGroup: 'read',
+      riskClass: 'safe-read',
+      enabled: true,
+      requiresApproval: false,
+      inputSchemaDigest: digest('A'),
+      outputSchemaDigest: digest('B'),
+    }],
+    planner: {
+      plannerId: id('5'),
+      modelBindingRef: 'model-standard',
+      promptBindingRef: 'prompt-v1',
+      budgetProfileRef: 'interactive-default',
+      toolIds: [id('1')],
+    },
+    prompts: {
+      bundleDigest: digest('D'),
+      artifactRef: 'registry://fixture/prompts/v1',
+      plannerDigest: digest('E'),
+      appBehaviorDigest: digest('F'),
+      responseStyleDigest: digest('G'),
+      capabilityFragmentDigests: {},
+    },
+    warnings: [],
+    generatedAt: '2026-07-30T10:00:00.000Z',
+  };
+  await writeFile(
+    join(root, '.glirastes/app-setup.json'),
+    JSON.stringify(artifact),
+    'utf8',
+  );
+  await writeFile(
+    join(root, '.glirastes/setup-artifact.json'),
+    JSON.stringify(artifact),
+    'utf8',
+  );
+  await writeFile(
+    join(root, 'package.json'),
+    JSON.stringify({
+      name: 'fixture',
+      dependencies: { next: '16.0.0' },
+      glirastes: {
+        principal: 'server-verified',
+        setupArtifact: '.glirastes/app-setup.json',
+        inventory: '.glirastes/local-execution-inventory.v2.json',
+        promptBundle: '.glirastes/prompt-bundle.json',
+      },
+    }),
+    'utf8',
+  );
+  await writeFile(
+    join(root, '.glirastes/prompt-bundle.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      appId: artifact.appId,
+      artifactRef: 'local://fixture/prompts',
+      sections: {
+        planner: 'Plan safely.',
+        appBehavior: 'Use the fixture.',
+        responseStyle: 'Be concise.',
+        capabilityFragments: {},
+      },
+    }),
+    'utf8',
+  );
+  return { root, artifact };
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+describe('glirastes setup', () => {
+  it('documents direct setup and keeps the legacy wizard explicit', async () => {
+    expect(CLI_USAGE).toMatch(
+      /glirastes setup \[--dry-run\].*glirastes connect --base-url.*glirastes sync.*glirastes setup guided/s,
+    );
+  });
+
+  it('prints a read-only deterministic dry-run without credentials or network', async () => {
+    const { root } = await setupFixture();
+    const fetchImpl = vi.fn();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetchImpl);
+    vi.stubEnv('GLIRASTES_API_KEY', '');
+    const before = await readFile(
+      join(root, '.glirastes/app-setup.json'),
+      'utf8',
+    );
+
+    await runCli([
+      'setup', '--dry-run', '--json', '--root', root,
+      '--artifact', '.glirastes/app-setup.json',
+    ]);
+
+    const plan = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(plan.planDigest).toMatch(/^sha256:/);
+    expect(plan.operations.map((operation: { kind: string }) => operation.kind))
+      .toEqual(['validate', 'adopt', 'build', 'receipt']);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(await readFile(
+      join(root, '.glirastes/app-setup.json'),
+      'utf8',
+    )).toBe(before);
+    expect(await readFile(
+      join(root, '.glirastes/local-execution-inventory.v2.json'),
+      'utf8',
+    )).toBeTruthy();
+    log.mockRestore();
+  });
+
+  it('resolves the app and artifacts without repeated flags', async () => {
+    const { root } = await setupFixture();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runCli(['setup', '--dry-run', '--json', '--root', root]);
+
+    const plan = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(plan.counts.tools).toBe(1);
+    expect(plan.operations.map((operation: { kind: string }) => operation.kind))
+      .toEqual(['validate', 'adopt', 'build', 'receipt']);
+    log.mockRestore();
+  });
+
+  it('applies the detected Standalone plan and asks for one restart', async () => {
+    const { root } = await setupFixture();
+    const fetchImpl = vi.fn();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetchImpl);
+
+    await runCli(['setup', '--root', root]);
+
+    const receipt = JSON.parse(await readFile(
+      join(root, '.glirastes/setup-receipt.json'), 'utf8'));
+    expect(receipt).toMatchObject({
+      schemaVersion: 1,
+      mode: 'standalone',
+      appId: id('4'),
+      toolCount: 1,
+      restartRequired: true,
+    });
+    expect(log.mock.calls.flat().join('\n')).toMatch(/restart/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it('reports a stable scoped diagnostic when the app identity is missing', async () => {
+    vi.stubEnv('GLIRASTES_CONTROL_PLANE_URL', 'https://control.example');
+    vi.stubEnv('GLIRASTES_APP_ID', '');
+    vi.stubEnv('GLIRASTES_API_KEY', 'local-only-secret');
+
+    await expect(runCli([
+      'setup', 'status', '--run-id', id('9'), '--quiet',
+    ])).rejects.toMatchObject({
+      code: 'E-SCOPE-001',
+      operation: 'setup.connection',
+    } satisfies Partial<FoundationDiagnosticError>);
+  });
+
+  it('scans the positive inventory locally without network access', async () => {
+    const { root } = await setupFixture();
+    const fetchImpl = vi.fn();
+    vi.stubGlobal('fetch', fetchImpl);
+
+    await runCli([
+      'setup',
+      'scan',
+      '--root',
+      root,
+      '--execution-inventory',
+      '.glirastes/local-execution-inventory.v2.json',
+      '--output',
+      '.glirastes/setup-discovery.json',
+      '--quiet',
+    ]);
+
+    const discovery = JSON.parse(await readFile(
+      join(root, '.glirastes/setup-discovery.json'),
+      'utf8',
+    ));
+    expect(discovery.executions).toHaveLength(1);
+    expect(discovery.executions[0].toolId).toBe(id('1'));
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('keeps setup sync as an adapter to canonical Connected sync', async () => {
+    const { root, artifact } = await setupFixture();
+    await runCli(['setup', '--root', root]);
+    const environmentId = id('9');
+    await writeFile(join(root, '.glirastes/platform-connection.json'), JSON.stringify({
+      schemaVersion: 1,
+      baseUrl: 'https://control.example',
+      appId: artifact.appId,
+      environmentId,
+      runnerKey: 'fixture-runner',
+    }));
+    await writeFile(join(root, '.env.local'), [
+      'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+      `GLIRASTES_APP_ID=${artifact.appId}`,
+      `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
+      'GLIRASTES_RUNNER_KEY=fixture-runner',
+      'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+      '',
+    ].join('\n'));
+    const response = (status: string) => new Response(JSON.stringify({
+      runId: artifact.runId,
+      appId: artifact.appId,
+      status,
+      updatedAt: '2026-07-30T10:00:00.000Z',
+    }), { status: status === 'discovering' ? 201 : 200 });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response('discovering'))
+      .mockResolvedValueOnce(response('ready'));
+    vi.stubGlobal('fetch', fetchImpl);
+
+    await runCli([
+      'setup',
+      'sync',
+      '--root',
+      root,
+      '--quiet',
+    ], {
+      sync: {
+        env: {},
+        isGitIgnored: vi.fn().mockResolvedValue(true),
+      },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    for (const [url] of fetchImpl.mock.calls) {
+      expect(url).toContain(`/v2/apps/${artifact.appId}/runtime-setup`);
+      expect(url).not.toContain('environment');
+    }
+  });
+
+  it('keeps setup guided on its explicit assessed-artifact upload path', async () => {
+    const { root, artifact } = await setupFixture();
+    await writeFile(
+      join(root, '.glirastes/foundation-execution-inventory.json'),
+      await readFile(
+        join(root, '.glirastes/local-execution-inventory.v2.json'),
+        'utf8',
+      ),
+    );
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        runId: artifact.runId,
+        appId: artifact.appId,
+        status: 'discovering',
+        updatedAt: '2026-07-30T10:00:00.000Z',
+      }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        runId: artifact.runId,
+        appId: artifact.appId,
+        status: 'ready',
+        updatedAt: '2026-07-30T10:00:00.000Z',
+      })));
+    vi.stubGlobal('fetch', fetchImpl);
+    vi.stubEnv('GLIRASTES_API_KEY', 'guided-setup-secret');
+
+    await runCli([
+      'setup', 'guided',
+      '--root', root,
+      '--assessment', 'manual',
+      '--artifact', '.glirastes/app-setup.json',
+      '--base-url', 'https://control.example',
+      '--app-id', artifact.appId,
+    ]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+      `https://control.example/v2/apps/${artifact.appId}/runtime-setup/runs`,
+      `https://control.example/v2/apps/${artifact.appId}`
+        + `/runtime-setup/runs/${artifact.runId}/artifact`,
+    ]);
+  });
+
+  it('keeps setup --managed as an adapter to the same Connected sync', async () => {
+    const { root, artifact } = await setupFixture();
+    const environmentId = id('9');
+    await writeFile(join(root, '.glirastes/platform-connection.json'), JSON.stringify({
+      schemaVersion: 1,
+      baseUrl: 'https://control.example',
+      appId: artifact.appId,
+      environmentId,
+      runnerKey: 'fixture-runner',
+    }));
+    await writeFile(join(root, '.env.local'), [
+      'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+      `GLIRASTES_APP_ID=${artifact.appId}`,
+      `GLIRASTES_ENVIRONMENT_ID=${environmentId}`,
+      'GLIRASTES_RUNNER_KEY=fixture-runner',
+      'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+      '',
+    ].join('\n'));
+    const createRun = vi.fn().mockResolvedValue({
+      runId: artifact.runId,
+      appId: artifact.appId,
+      status: 'ready',
+      updatedAt: '2026-08-14T10:00:00.000Z',
+    });
+    const uploadArtifact = vi.fn().mockResolvedValue({
+      runId: artifact.runId,
+      appId: artifact.appId,
+      status: 'ready',
+      updatedAt: '2026-08-14T10:00:00.000Z',
+    });
+
+    await runCli(['setup', '--managed', '--root', root], {
+      sync: {
+        env: {},
+        isGitIgnored: vi.fn().mockResolvedValue(true),
+        clientFactory: vi.fn(() => ({
+          syncArtifact: async (value: AppSetupArtifact) => {
+            await createRun({
+              runId: value.runId,
+              assessmentMode: value.assessmentMode,
+              discoveryDigest: value.discoveryDigest,
+            });
+            return uploadArtifact(value);
+          },
+        })),
+      },
+    });
+
+    expect(createRun).toHaveBeenCalledOnce();
+    expect(uploadArtifact).toHaveBeenCalledOnce();
+    expect(JSON.parse(await readFile(
+      join(root, '.glirastes/setup-receipt.json'),
+      'utf8',
+    ))).toMatchObject({ mode: 'managed', appId: artifact.appId });
+  });
+
+  it('resumes a run status without an environment ID', async () => {
+    const { root, artifact } = await setupFixture();
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      runId: artifact.runId,
+      appId: artifact.appId,
+      status: 'waiting_for_interview',
+      progress: { completed: 2, total: 4 },
+      updatedAt: '2026-07-30T10:00:00.000Z',
+    })));
+    vi.stubGlobal('fetch', fetchImpl);
+    vi.stubEnv('GLIRASTES_API_KEY', 'setup-secret');
+
+    await runCli([
+      'setup',
+      'status',
+      '--root',
+      root,
+      '--run-id',
+      String(artifact.runId),
+      '--base-url',
+      'https://control.example',
+      '--app-id',
+      String(artifact.appId),
+      '--quiet',
+    ]);
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(
+      `https://control.example/v2/apps/${artifact.appId}`
+        + `/runtime-setup/runs/${artifact.runId}`,
+    );
+  });
+
+  it('sends the canonical GLIRASTES_API_KEY and ignores the retired name', async () => {
+    const { root, artifact } = await setupFixture();
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      runId: artifact.runId,
+      appId: artifact.appId,
+      status: 'ready',
+      updatedAt: '2026-07-30T10:00:00.000Z',
+    })));
+    vi.stubGlobal('fetch', fetchImpl);
+    // The retired setup-specific name must not shadow the canonical one.
+    vi.stubEnv('GLIRASTES_SETUP_API_KEY', 'retired-name');
+    vi.stubEnv('GLIRASTES_API_KEY', 'one-key');
+
+    await runCli([
+      'setup',
+      'status',
+      '--root',
+      root,
+      '--run-id',
+      String(artifact.runId),
+      '--base-url',
+      'https://control.example',
+      '--app-id',
+      String(artifact.appId),
+      '--quiet',
+    ]);
+
+    const headers = new Headers(
+      (fetchImpl.mock.calls[0]?.[1] as RequestInit).headers,
+    );
+    expect(headers.get('authorization')).toBe('Bearer one-key');
+  });
+
+  it('fails before network access when app setup credentials are missing', async () => {
+    const { root, artifact } = await setupFixture();
+    const fetchImpl = vi.fn();
+    vi.stubGlobal('fetch', fetchImpl);
+    // The retired name alone must not satisfy the requirement.
+    vi.stubEnv('GLIRASTES_SETUP_API_KEY', 'retired-name');
+    vi.stubEnv('GLIRASTES_API_KEY', '');
+
+    await expect(runCli([
+      'setup',
+      'status',
+      '--root',
+      root,
+      '--run-id',
+      String(artifact.runId),
+      '--base-url',
+      'https://control.example',
+      '--app-id',
+      String(artifact.appId),
+      '--quiet',
+    ])).rejects.toThrow('GLIRASTES_API_KEY');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});

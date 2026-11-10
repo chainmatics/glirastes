@@ -1,4 +1,3 @@
-import type { z } from 'zod';
 import type {
   ToolContext,
   ToolRegistry,
@@ -13,15 +12,27 @@ import type {
   PiiShield,
   TelemetrySink,
   PromptOverride,
+  SchemaLike,
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
-import type { InternalApiCaller } from '../../core/index.js';
+import type { ClarificationConfig, InternalApiCaller, PlanningConfig } from '../../core/index.js';
+import type {
+  Principal,
+  SecurityRevocation,
+} from '../../../contracts/index.js';
+import type {
+  ManagedTurnBudgetSignal,
+  RuntimeMetricsSink,
+  RuntimePriceTable,
+  ToolSearchSemanticsMap,
+  TurnSnapshot,
+} from '../../../runtime/index.js';
 
 // ============================================================================
 // withAiTool - Route Wrapper Types
 // ============================================================================
 
-export interface WithAiToolOptions<TInput extends z.ZodTypeAny = z.ZodTypeAny> {
+export interface WithAiToolOptions<TInput extends SchemaLike = SchemaLike> {
   toolName: string;
   id?: string;
   module?: string;
@@ -47,7 +58,11 @@ export type AiToolRouteHandler = ((
 // ============================================================================
 
 export type LoadTools = (
-  context: ToolContext & { callEndpoint: InternalApiCaller },
+  context: ToolContext & {
+    callEndpoint: InternalApiCaller;
+    /** Immutable signed revision set pinned before dynamic tools are loaded. */
+    turnSnapshot?: TurnSnapshot;
+  },
 ) => ToolRegistry | Promise<ToolRegistry>;
 
 export interface GuardrailResult {
@@ -74,7 +89,48 @@ export type IntentRouter = (
   allToolNames: string[],
 ) => IntentRoutingResult | Promise<IntentRoutingResult>;
 
-export type StepLimitSource = 'explicit' | 'module' | 'safety';
+export type StepLimitSource =
+  | 'explicit'
+  | 'module'
+  | 'safety'
+  | 'runtime-budget';
+
+export interface ResolveTurnSnapshotContext {
+  request: Request;
+  turnId: string;
+  principal: Principal;
+}
+
+export interface ManagedLocalRuntimeConfig {
+  /**
+   * Resolve identity exclusively from a verified server-side session.
+   * Returning undefined fails closed before model or tool processing.
+   */
+  resolvePrincipal: (
+    request: Request,
+  ) => Principal | undefined | Promise<Principal | undefined>;
+
+  /**
+   * Return the immutable snapshot pinned for this turn. Approval
+   * continuations must return the same snapshot for the same turnId.
+   */
+  resolveTurnSnapshot: (
+    context: ResolveTurnSnapshotContext,
+  ) => TurnSnapshot | Promise<TurnSnapshot>;
+
+  /** Load current signed security revocations before every tool call. */
+  loadRevocations?: (
+    context: {
+      request: Request;
+      snapshot: TurnSnapshot;
+    },
+  ) => ReadonlyArray<SecurityRevocation> | Promise<ReadonlyArray<SecurityRevocation>>;
+
+  /** Receives content-free local budget state transitions. */
+  onBudgetSignal?: (
+    signal: ManagedTurnBudgetSignal,
+  ) => void | Promise<void>;
+}
 
 export interface StepUsage {
   inputTokens: number;
@@ -119,6 +175,27 @@ export interface AiChatHandlerConfig {
   tools?: ToolRegistry;
 
   /**
+   * Managed-local runtime boundary. When configured, the handler verifies a
+   * server principal, pins one turn snapshot, and guards every tool locally.
+   */
+  managedRuntime?: ManagedLocalRuntimeConfig;
+
+  /**
+   * Enable local `find_tools` recovery. With managedRuntime (managed or
+   * standalone source) discovery is pinned to the turn snapshot and its
+   * authorization; without it the per-request registry is the deployed,
+   * app-authorized tool set. false preserves static scoping.
+   */
+  toolDiscovery?: boolean;
+
+  /**
+   * Search-only synonyms keyed by model-facing tool name (for example from
+   * generated tool semantics). They improve `find_tools` ranking and never
+   * make a tool eligible or reach the model.
+   */
+  toolSemantics?: ToolSearchSemanticsMap;
+
+  /**
    * Dynamic tool loader. Used in legacy mode (without pipeline).
    * When `tools` is provided, loadTools is ignored.
    */
@@ -139,6 +216,22 @@ export interface AiChatHandlerConfig {
   followups?: FollowupsConfig;
 
   /**
+   * Built-in structured clarification (`ask_clarification`). The model asks
+   * one targeted question inside its normal step (no extra planner call);
+   * the turn ends after the question, and the UI's answer resumes the
+   * original request. Omit to keep the tool unavailable.
+   */
+  clarification?: ClarificationConfig;
+
+  /**
+   * Built-in task list (`update_plan`). The model records a short plan only
+   * for requests with several distinct actions and updates its statuses as
+   * it works; the chat UI shows the latest call as a checklist. The turn
+   * continues after each call. Omit to keep the tool unavailable.
+   */
+  planning?: PlanningConfig;
+
+  /**
    * Model or model-resolver. Optional when pipeline `ModelSelectorConfig`
    * entries include an `instance` field — the adapter falls back to
    * `pipelineResult.model.instance` automatically.
@@ -155,9 +248,14 @@ export interface AiChatHandlerConfig {
         routing?: IntentRoutingResult;
         pipelineResult?: PipelineResult;
         currentDate: Date;
+        /**
+         * Revision set pinned for this turn. It lets a consumer assemble the
+         * prompt against exactly the revisions the turn started with.
+         */
+        turnSnapshot?: TurnSnapshot;
       }) => string);
   locale?: string;
-  uiActionSchema?: z.ZodTypeAny;
+  uiActionSchema?: SchemaLike;
   maxOutputTokens?: number;
   temperature?: number;
   /**
@@ -187,7 +285,8 @@ export interface AiChatHandlerConfig {
   maxConversationHistoryPairs?: number;
 
   /**
-   * @deprecated Use `pipeline` instead. Ignored when `pipeline` is set.
+   * The app's own input check. Runs before the pipeline or the intent router,
+   * also with `pipeline` set; a refusal answers 400 without any model call.
    */
   guardrails?: GuardrailHook;
 
@@ -234,12 +333,13 @@ export interface AiChatHandlerConfig {
   onAudit?: AuditEmitter;
 
   /**
-   * Remote telemetry sink for forwarding audit events to Glirastes.
+   * Legacy remote telemetry sink (Lancer, `/v1/proctor/events`).
    *
-   * Pass `lancer.telemetry` to enable monitoring on the Glirastes dashboard
-   * — works with both Free and Pro API keys. When combined with `pipeline`,
-   * Pro-tier telemetry is handled by server-pro; this field additionally
-   * forwards adapter-level session events.
+   * Not available with `managedRuntime`: the Foundation control plane does
+   * not serve the Proctor endpoint and these audit payloads are not
+   * content-free, so `createAiChatHandler` refuses the combination. Use
+   * `metrics` there. Without `managedRuntime` the legacy behaviour is
+   * unchanged:
    *
    * ```typescript
    * const lancer = createLancer({ apiKey: process.env.GLIRASTES_API_KEY! });
@@ -247,6 +347,43 @@ export interface AiChatHandlerConfig {
    * ```
    */
   telemetry?: TelemetrySink;
+
+  /**
+   * Content-free turn metrics (TechnicalRuntimeEvent v2) for the Glirastes
+   * Platform, e.g. `metrics` from `createGlirastes(...).chatTurn()` in
+   * `glirastes/runtime`. One event per turn (tokens, cost with provenance,
+   * latency, outcome, tool ids); never prompts, messages, arguments, results
+   * or secrets. Recording is synchronous and cheap, delivery happens later
+   * off the turn, and a failing sink never blocks or fails a turn.
+   */
+  metrics?: RuntimeMetricsSink;
+
+  /**
+   * Prices for models whose provider reports no cost (`source:
+   * 'price-table'`). A provider-reported cost (OpenRouter `usage.cost`)
+   * always wins; without either a turn's cost stays unknown (`null`), never
+   * 0. A known cost also counts against the turn's `maxEstimatedCostUsd`.
+   */
+  modelPricing?: RuntimePriceTable;
+
+  /**
+   * Direct chat commands (`/` commands and entity actions of the chat UI,
+   * default `true`): a user message that is exactly one command marker runs
+   * its tool without a model call, through the same registry, guard,
+   * confirmation, audit, PII shield and metrics as a model turn. Routing,
+   * guardrails and the model are skipped. `false` sends such a message to
+   * the model like any other text.
+   */
+  directCommands?: boolean;
+
+  /**
+   * The caller endpoint tools of one chat request use. When absent, calls go
+   * to the origin the chat request arrived on and carry only its cookie
+   * (`createInternalApiCallerFromRequest`). An API on its own origin, or one
+   * that authenticates by `Authorization` header, passes
+   * `(request) => createHttpEndpointCaller({ baseUrl, request })`.
+   */
+  endpointCaller?: (request: Request) => InternalApiCaller;
 
   /**
    * Lancer client for runtime prompt and model overrides (Pro feature).
@@ -298,6 +435,7 @@ export type { PromptOverride };
 
 // Re-export pipeline types for consumer convenience
 export type { AiPipeline, FollowupsConfig, PipelineResult };
+export type { ClarificationConfig, PlanningConfig };
 
 // ============================================================================
 // Server Action Helper Types
@@ -308,7 +446,7 @@ export interface ExecuteToolOptions {
   input: unknown;
   tools: ToolRegistry;
   locale?: string;
-  uiActionSchema?: z.ZodTypeAny;
+  uiActionSchema?: SchemaLike;
 }
 
 export interface ExecuteToolResult {

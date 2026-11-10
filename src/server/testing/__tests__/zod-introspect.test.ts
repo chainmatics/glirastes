@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { z as z3 } from 'zod-v3';
+import { createJsonSchemaLike } from '../../../runtime/json-schema.js';
 import {
   getArrayElement,
   getArrayMax,
@@ -18,6 +20,54 @@ import {
 // shape fails loudly here, instead of silently producing empty test suites.
 
 describe('zod-introspect', () => {
+  describe('generated JSON schemas', () => {
+    it('reads fields, required state, enums, arrays, and formats', () => {
+      const schema = createJsonSchemaLike({
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          state: { type: 'string', enum: ['open', 'closed'] },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            maxItems: 3,
+          },
+        },
+        required: ['id', 'tags'],
+      });
+      const shape = getObjectShape(schema);
+
+      expect(shape).not.toBeNull();
+      expect(getBaseType(shape?.id)).toBe('string');
+      expect(isUuidString(shape?.id)).toBe(true);
+      expect(isOptional(shape?.id)).toBe(false);
+      expect(isOptional(shape?.state)).toBe(true);
+      expect(getEnumValues(shape?.state)).toEqual(['open', 'closed']);
+      expect(getBaseType(shape?.tags)).toBe('array');
+      expect(getSchemaType(getArrayElement(shape?.tags))).toBe('string');
+      expect(getArrayMax(shape?.tags)).toBe(3);
+    });
+  });
+
+  describe('Zod 3 host schemas', () => {
+    it('reads objects, wrappers, enums, arrays, and constraints', () => {
+      const schema = z3.object({
+        id: z3.string().uuid(),
+        state: z3.enum(['open', 'closed']).optional(),
+        tags: z3.array(z3.string()).max(3),
+      });
+      const shape = getObjectShape(schema);
+
+      expect(shape).not.toBeNull();
+      expect(getBaseType(shape?.id)).toBe('string');
+      expect(isUuidString(shape?.id)).toBe(true);
+      expect(isOptional(shape?.state)).toBe(true);
+      expect(getEnumValues(shape?.state)).toEqual(['open', 'closed']);
+      expect(getBaseType(shape?.tags)).toBe('array');
+      expect(getArrayMax(shape?.tags)).toBe(3);
+    });
+  });
+
   describe('getSchemaType', () => {
     it('reports base type tags', () => {
       expect(getSchemaType(z.string())).toBe('string');

@@ -17,6 +17,47 @@ export {
   type PrepareModelMessagesOptions,
 } from './prepare-model-messages.js';
 export { executeTool } from './server-action-helper.js';
+export {
+  createHybridToolDiscovery,
+  NON_DOMAIN_TOOL_NAMES,
+  type HybridToolDiscovery,
+} from './tool-discovery.js';
+export {
+  applyClarificationResume,
+  resolveClarificationResume,
+  type ClarificationResume,
+} from './clarification-resume.js';
+export {
+  createChatInteractionsHandler,
+  type ChatInteractionsHandlerConfig,
+} from './chat-interactions-handler.js';
+export {
+  createRecordingTranscriptionHandler,
+  DEFAULT_RECORDING_LANGUAGES,
+  type RecordingTranscriptionHandlerConfig,
+} from './recording-transcription-handler.js';
+export {
+  resolveDirectCommand,
+  runDirectCommand,
+  stripChatCommandMessages,
+  type DirectCommandRequest,
+  type RunDirectCommandOptions,
+} from './direct-command.js';
+export {
+  formatChatCommandMessage,
+  parseChatCommandMessage,
+  type ChatCommandInvocation,
+} from '../../../contracts/chat-command.js';
+export {
+  chatText,
+  mergeChatInteractions,
+  parseChatInteractionOverrides,
+  parseChatInteractions,
+  type ChatCommandData,
+  type ChatEntityData,
+  type ChatInteractionOverrides,
+  type ChatInteractionsData,
+} from '../../../contracts/chat-interactions.js';
 
 // Re-export from server-node for convenience
 export { createNextInternalApiCaller } from '../../core/index.js';
@@ -40,6 +81,10 @@ export type {
   ExecuteToolResult,
   // Re-exported from glirastes
   AiPipeline,
+  ClarificationConfig,
+  PlanningConfig,
   FollowupsConfig,
   PipelineResult,
+  ManagedLocalRuntimeConfig,
+  ResolveTurnSnapshotContext,
 } from './types.js';

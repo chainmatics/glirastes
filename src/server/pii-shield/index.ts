@@ -1,5 +1,9 @@
 // Factory
 export { createPiiShield } from './create-pii-shield.js';
+export {
+  createRegexPiiDetector,
+  type RegexPiiDetectorConfig,
+} from './regex-detector.js';
 
 // Aegis (Pro) detector adapter
 export { createAegisDetector } from './aegis-detector.js';

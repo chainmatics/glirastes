@@ -1,6 +1,8 @@
 /** Schema-like object that can validate values (compatible with Zod, Valibot, etc.) */
 interface SafeParseable {
-  safeParse(value: unknown): { success: true; data: Record<string, unknown> } | { success: false; error: { issues: unknown[] } };
+  safeParse(value: unknown):
+    | { success: true; data: Record<string, unknown> }
+    | { success: false; error: { issues: ReadonlyArray<unknown> } };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -155,7 +157,7 @@ export function createToolResultHandler(
         if (uiActionSchema) {
           const parsed = uiActionSchema.safeParse(candidate);
           if (!parsed.success) {
-            console.warn('[AI Chat] Invalid uiAction dropped:', parsed.error.issues);
+            console.warn('[AI Chat] Invalid uiAction dropped');
             continue;
           }
           uiAction = parsed.data;
