@@ -301,7 +301,9 @@ window reopens as a window. `defaultMode="floating"` opens detached first.
   alt+shift+C collapses, alt+shift+N starts a new chat (with `onNewChat`),
   alt+shift+I focuses the input. Pass `shortcuts={{ newChat: 'alt+shift+k',
   toggleCollapse: false }}` when the app already uses one; `formatShortcut`
-  shows a combination as ⌘I or Ctrl+I.
+  shows a combination as ⌘I or Ctrl+I. `assistantShortcutList({ shortcuts,
+  language })` gives the active ones with labels (German ships) for the
+  app's shortcut overview.
 - Look: `icons`, `labels` (`DE_ASSISTANT_SHELL_LABELS` ships German),
   `classNames`, `renderButton` for the app's own button component, the
   `headerStart` / `headerTitle` / `headerActions` slots, `window` for the
@@ -343,6 +345,24 @@ Use the SDK STT controller as the only recording state machine:
 example the pathname) so navigation stops recording and keeps the speech as
 draft; back/forward, session switches and unmount release the microphone as
 well. `voice.adapter` plugs in another provider; keep its identity stable.
+
+A finished recording (`RecordedSttAdapter`, `audio/wav` to
+`/api/ai/speech-recognize`) needs one route; the app's transcription service
+(any `POST /v1/audio/transcriptions` server) stays on the server:
+
+```ts
+// src/app/api/ai/speech-recognize/route.ts
+import { createRecordingTranscriptionHandler } from 'glirastes/server/nextjs';
+import { resolvePrincipal } from '@/lib/glirastes-principal';
+
+export const runtime = 'nodejs';
+export const POST = createRecordingTranscriptionHandler({
+  authorize: async (request) => Boolean(await resolvePrincipal(request)),
+  url: process.env.STT_RECORDING_URL,
+  apiKey: process.env.STT_RECORDING_API_KEY,
+  model: process.env.STT_RECORDING_MODEL,
+});
+```
 
 `useStt` is the hook, `VoiceInputButton` and `RecordingBar` the surface. Speech
 traffic goes directly between the target app's local provider adapter and its

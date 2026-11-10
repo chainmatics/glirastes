@@ -32,6 +32,11 @@ export {
   type ChatInteractionsHandlerConfig,
 } from './chat-interactions-handler.js';
 export {
+  createRecordingTranscriptionHandler,
+  DEFAULT_RECORDING_LANGUAGES,
+  type RecordingTranscriptionHandlerConfig,
+} from './recording-transcription-handler.js';
+export {
   resolveDirectCommand,
   runDirectCommand,
   stripChatCommandMessages,

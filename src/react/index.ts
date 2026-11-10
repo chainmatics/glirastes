@@ -211,6 +211,14 @@ export {
   type AssistantShellProps,
   type AssistantShellWindowOptions,
 } from './assistant/assistant-shell.js';
+export {
+  assistantShortcutList,
+  DEFAULT_ASSISTANT_SHORTCUT_LABELS,
+  DE_ASSISTANT_SHORTCUT_LABELS,
+  type AssistantShortcutEntry,
+  type AssistantShortcutLabels,
+  type AssistantShortcutListOptions,
+} from './assistant/assistant-shortcut-list.js';
 export { AssistantWorkspace, type AssistantWorkspaceProps } from './assistant/assistant-workspace.js';
 export { AiChatPanel } from './components/ai-chat-panel.js';
 export { FloatingChatUI, type FloatingChatUIProps } from './components/floating-chat-ui.js';
