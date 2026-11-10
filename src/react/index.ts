@@ -151,6 +151,23 @@ export type {
 export { useDraggablePosition } from './hooks/use-draggable-position.js';
 export { useKeyboardShortcut } from './hooks/use-keyboard-shortcut.js';
 export {
+  useFloatingPanel,
+  type FloatingRect,
+  type FloatingResizeEdge,
+  type UseFloatingPanelOptions,
+  type UseFloatingPanelReturn,
+} from './hooks/use-floating-panel.js';
+export {
+  DEFAULT_CHAT_SHORTCUTS,
+  formatShortcut,
+  matchesShortcut,
+  resolveChatShortcuts,
+  useChatShortcuts,
+  type ChatShortcutAction,
+  type ChatShortcutMap,
+  type UseChatShortcutsOptions,
+} from './hooks/use-chat-shortcuts.js';
+export {
   DEFAULT_PUSH_TO_TALK_HOTKEY,
   usePushToTalkHotkey,
 } from './hooks/use-push-to-talk-hotkey.js';
