@@ -277,7 +277,9 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
 ```
 
 The workspace is a row that fills its parent: the page on the left, the
-docked assistant on the right. It folds to a rail, takes the whole row on
+docked assistant on the right. The parent needs a height (for example
+`html, body { height: 100dvh }` or a full-height app frame); otherwise the
+docked assistant is only as tall as the page content. It folds to a rail, takes the whole row on
 narrow screens, and publishes its width as `--assistant-right-inset` for
 fixed elements of the page. Detaching or docking is remembered, so a closed
 window reopens as a window. `defaultMode="floating"` opens detached first.
