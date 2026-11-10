@@ -424,12 +424,21 @@ async function defaultStreamHandler(
     });
   };
 
+  let providerErrorReported = false;
   const stream = createUIMessageStream({
-    onError: () => 'AI request failed',
+    // A turn can also fail outside the provider call, e.g. on a model object
+    // from an unsupported AI SDK version. The client gets the generic text,
+    // the app's error callback the cause.
+    onError: (error) => {
+      if (!providerErrorReported) {
+        providerErrorReported = true;
+        onStreamError?.(error);
+      }
+      return 'AI request failed';
+    },
     execute: async ({ writer }) => {
       let totalSteps = 0;
       let finalStateWritten = false;
-      let providerErrorReported = false;
       // Cost of the running model step, read from its raw stream chunks.
       let stepRawCostUsd: number | null = null;
 
@@ -717,7 +726,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     guardrails,
     intentRouter,
     wrapHandler,
-    onError,
+    onError: onErrorConfig,
     onToolError,
     onPipelineResult,
     onStepReport,
@@ -730,6 +739,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     directCommands = true,
     endpointCaller = createInternalApiCallerFromRequest,
   } = config;
+  // Without a callback a failed turn would only say "AI request failed" to
+  // the user and nothing to the developer. Name only: provider errors can
+  // carry request and response content.
+  const onError = onErrorConfig ?? ((error: unknown) => {
+    const name = error instanceof Error ? error.name : typeof error;
+    console.error(`[glirastes] AI chat turn failed (${name}). Pass onError to createAiChatHandler to see the cause.`);
+  });
 
   // The Proctor endpoint behind Lancer telemetry is not served by the
   // Foundation control plane and its audit payloads are not content-free;
