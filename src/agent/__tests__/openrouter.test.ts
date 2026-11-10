@@ -41,6 +41,26 @@ describe('managed job model access', () => {
     expect([result.response.modelId, stepCostUsd(result.steps[0]!)]).toEqual(['anthropic/claude-sonnet-5.5', 0.0042]);
   });
 
+  it('lets OpenRouter cache the growing prompt of an Anthropic model, and no other', async () => {
+    const bodyFor = async (modelId: string) => {
+      const fetchImpl = vi.fn(async () => completion(0.001));
+      const model = createJobModel({
+        createOpenAI: createOpenAI as never,
+        baseUrl: 'https://openrouter.ai/api/v1',
+        apiKey: JOB_KEY,
+        model: modelId,
+        routing: ROUTING,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      });
+      await generateText({ model, prompt: 'Beschreibe die Tools.' });
+      const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+      return JSON.parse(String(init.body)) as Record<string, unknown>;
+    };
+
+    expect((await bodyFor('anthropic/claude-sonnet-5.5')).cache_control).toEqual({ type: 'ephemeral' });
+    expect(await bodyFor('openai/gpt-6.1-sol')).not.toHaveProperty('cache_control');
+  });
+
   it('leaves requests without a JSON body untouched', async () => {
     const base = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}'));
     const routed = withJobRouting(ROUTING, base as unknown as typeof fetch);

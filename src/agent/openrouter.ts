@@ -6,6 +6,9 @@ import type { LanguageModel } from 'ai';
  * (`provider: { data_collection: 'deny', zdr: true, require_parameters: true }`,
  * `usage: { include: true }`) merged into every completion request, and a
  * start check that the pinned model supports tools and structured output.
+ * For an Anthropic model the request also asks OpenRouter to cache the
+ * prompt: the tool loop resends the skills, the work list and every earlier
+ * step on each call, so the cache carries most of the input.
  */
 
 export type ModelAccessCode = 'models_unreachable' | 'model_unsupported';
@@ -90,7 +93,10 @@ export function createJobModel(options: {
     baseURL: options.baseUrl,
     apiKey: options.apiKey,
     name: 'openrouter',
-    fetch: withJobRouting(options.routing, options.fetchImpl),
+    fetch: withJobRouting(
+      options.model.startsWith('anthropic/') ? { ...options.routing, cache_control: { type: 'ephemeral' } } : options.routing,
+      options.fetchImpl,
+    ),
   }).chat(options.model);
 }
 
