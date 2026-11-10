@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { deChatLocale } from '../../locale-de.js';
+import { assistantShellLabelsFor, DE_ASSISTANT_SHELL_LABELS, DEFAULT_ASSISTANT_SHELL_LABELS } from '../../assistant/assistant-shell.js';
 import { languageLocale, parseToolPresentation } from '../tool-presentation.js';
 
 describe('the tool wording a chat turn sends', () => {
@@ -35,5 +36,13 @@ describe('the chat texts of a language', () => {
     for (const language of ['en', 'en-US', 'fr-FR', 'den', '', undefined, null]) {
       expect(languageLocale(language)).toEqual({});
     }
+  });
+});
+
+describe('the labels of the assistant frame', () => {
+  it('are German on a German page and English otherwise', () => {
+    expect(assistantShellLabelsFor('de-DE')).toBe(DE_ASSISTANT_SHELL_LABELS);
+    expect(assistantShellLabelsFor('en')).toBe(DEFAULT_ASSISTANT_SHELL_LABELS);
+    expect(assistantShellLabelsFor(null)).toBe(DEFAULT_ASSISTANT_SHELL_LABELS);
   });
 });

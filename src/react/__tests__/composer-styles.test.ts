@@ -68,4 +68,17 @@ describe('shipped styles for the new chat surfaces', () => {
     expect(rule('[data-component="ai-chat-panel"] [data-component="recording-bar"]'))
       .toContain('min-width: 0');
   });
+
+  it('styles only the assistant frame\'s own buttons, not the chat\'s approve, reject and send inside it', () => {
+    // A bare `[data-action]` under the shell also matched the approval card's buttons: 0 padding, no background.
+    expect(plain).not.toMatch(/\[data-component="assistant-shell"\] \[data-action\]( \{|:hover)/);
+    const own = rule('[data-component="assistant-shell"] :is(header[data-element="header"], [data-element="rail"]) > [data-action]');
+    expect(own).toContain('padding: 0');
+    expect(rule('[data-component="ai-chat-panel"] [data-action="approve"]')).toContain('padding: 0.375rem 0.875rem');
+  });
+
+  it('sets the label and the value of an approval detail apart', () => {
+    expect(rule('[data-component="ai-chat-panel"] [data-element="detail-line"]')).toContain('display: flex');
+    expect(rule('[data-component="ai-chat-panel"] [data-element="detail-label"]::after')).toContain('content: ":"');
+  });
 });

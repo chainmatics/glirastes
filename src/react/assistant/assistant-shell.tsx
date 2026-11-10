@@ -5,6 +5,7 @@ import { useCallback, useContext, useEffect, useRef, useState, type CSSPropertie
 import { ChatContext } from '../provider/chat-context.js';
 import { formatShortcut, useChatShortcuts, type ChatShortcutMap } from '../hooks/use-chat-shortcuts.js';
 import { useFloatingPanel, type FloatingResizeEdge } from '../hooks/use-floating-panel.js';
+import { isGerman, usePageLanguage } from '../utils/tool-presentation.js';
 import { useAssistantLayout } from './assistant-layout.js';
 
 /** A built-in button of the shell, for `renderButton`. */
@@ -88,6 +89,11 @@ export const DE_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freeze({
   resize: 'Breite des KI-Assistenten',
   windowHeader: 'Chatfenster: Pfeiltasten verschieben, Alt und Pfeiltasten ändern die Größe, Doppelklick setzt zurück',
 });
+
+/** The built-in labels for the language of the page; an app's own `labels` still override them. */
+export function assistantShellLabelsFor(language: string | null | undefined): AssistantShellLabels {
+  return isGerman(language) ? DE_ASSISTANT_SHELL_LABELS : DEFAULT_ASSISTANT_SHELL_LABELS;
+}
 
 const svg = (children: ReactNode) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
@@ -198,7 +204,7 @@ export function AssistantToggle({ icon, label, className, showLabel = true, rend
 }) {
   const layout = useAssistantLayout();
   const unstyled = useContext(ChatContext)?.unstyled;
-  const text = label ?? DEFAULT_ASSISTANT_SHELL_LABELS.toggle;
+  const text = label ?? assistantShellLabelsFor(usePageLanguage()).toggle;
   return (renderButton ?? defaultButton(unstyled))({
     action: 'toggle', label: text, title: text, pressed: layout.open, onClick: layout.toggleChat, className,
     children: <>{icon ?? DEFAULT_ASSISTANT_SHELL_ICONS.assistant}{showLabel && <span data-element="label">{text}</span>}</>,
@@ -288,7 +294,7 @@ export function AssistantShell({
   const ui = useAssistantLayout();
   const chat = useContext(ChatContext);
   const icons = { ...DEFAULT_ASSISTANT_SHELL_ICONS, ...iconOverrides };
-  const labels = { ...DEFAULT_ASSISTANT_SHELL_LABELS, ...labelOverrides };
+  const labels = { ...assistantShellLabelsFor(usePageLanguage()), ...labelOverrides };
   const render = renderButton ?? defaultButton(chat?.unstyled);
   const button = (props: Omit<AssistantShellButtonProps, 'className'>) =>
     render({ ...props, className: props.action === 'bubble' ? classNames.bubble : classNames.button });

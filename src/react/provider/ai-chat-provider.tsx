@@ -25,7 +25,8 @@ import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { collectEntityNames } from '../utils/entity-names.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
-import { languageLocale, parseToolPresentation, type ToolPresentation } from '../utils/tool-presentation.js';
+import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
+import { resolveToolResultConfig } from '../utils/tool-result-config.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
@@ -398,11 +399,7 @@ export function AiChatProvider({
   // language) and the language of the page: the defaults of a chat that
   // configures neither `locale`, `toolLabels` nor `approvalDescription`.
   const [toolPresentation, setToolPresentation] = useState<ToolPresentation | null>(null);
-  const [pageLanguage, setPageLanguage] = useState<string | null>(null);
-  useEffect(() => {
-    // After mount, so the server render and the first client render agree.
-    setPageLanguage(document.documentElement.lang || null);
-  }, []);
+  const pageLanguage = usePageLanguage();
   const language = toolPresentation?.locale ?? pageLanguage;
   // English defaults, then the built-in texts of the app's language, then the caller's overrides.
   const locale = useMemo<ChatLocale>(
@@ -422,8 +419,8 @@ export function AiChatProvider({
     [userSuggestions],
   );
   const toolResultConfig = useMemo(
-    () => ({ mode: 'default' as const, allowlist: [], ...userToolResults }),
-    [userToolResults],
+    () => resolveToolResultConfig(userToolResults, Boolean(toolRenderers && toolRenderers.length > 0)),
+    [userToolResults, toolRenderers],
   );
   const toolRendererRegistry = useMemo(
     () => (toolRenderers && toolRenderers.length > 0

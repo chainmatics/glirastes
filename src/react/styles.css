@@ -322,6 +322,24 @@
   font-size: 12px;
   color: #78350f;
 }
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="detail-line"] {
+  display: flex;
+  gap: 0.5rem;
+  line-height: 1.5;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="detail-label"] {
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+  opacity: 0.75;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="detail-label"]::after {
+  content: ":";
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="detail-value"] {
+  min-width: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="approval-card"] [data-element="actions"],
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="bulk-approval-card"] [data-element="actions"] {
   display: flex;
@@ -1435,7 +1453,7 @@
   font-size: 0.875rem;
   font-weight: 600;
 }
-[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action] {
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) :is(header[data-element="header"], [data-element="rail"]) > [data-action] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1449,7 +1467,7 @@
   color: var(--cm-text-muted);
   cursor: pointer;
 }
-[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action]:hover {
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) :is(header[data-element="header"], [data-element="rail"]) > [data-action]:hover {
   background: var(--cm-primary-tint);
   color: var(--cm-text);
 }
@@ -1460,7 +1478,7 @@
   height: 100%;
   padding: 0.5rem 0;
 }
-[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="expand"] {
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="rail"] > [data-action="expand"] {
   flex: 1 1 0%;
   width: 100%;
   height: auto;

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { deChatLocale } from '../locale-de.js';
 import type { ChatLocale } from '../types.js';
 
@@ -29,5 +30,22 @@ export function parseToolPresentation(data: unknown): ToolPresentation | null {
  * language without built-in texts, which keeps the English defaults.
  */
 export function languageLocale(language: string | null | undefined): Partial<ChatLocale> {
-  return /^de(?:-|$)/i.test(language ?? '') ? deChatLocale : {};
+  return isGerman(language) ? deChatLocale : {};
+}
+
+/** Whether a language tag is German (`de`, `de-AT`). */
+export function isGerman(language: string | null | undefined): boolean {
+  return /^de(?:-|$)/i.test(language ?? '');
+}
+
+/**
+ * The `lang` of the page, read after mount so the server render and the first
+ * client render agree; null until then and for a page without one.
+ */
+export function usePageLanguage(): string | null {
+  const [language, setLanguage] = useState<string | null>(null);
+  useEffect(() => {
+    setLanguage(document.documentElement.lang || null);
+  }, []);
+  return language;
 }
