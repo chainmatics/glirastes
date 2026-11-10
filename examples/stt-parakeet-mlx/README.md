@@ -14,7 +14,7 @@ browser (RecordedSttAdapter) -> app route -> transcription service
 transcription API. It is for local development and listens on 127.0.0.1.
 
 ```sh
-uv run examples/stt-parakeet-mlx/server.py   # first start downloads about 670 MB
+uv run examples/stt-parakeet-mlx/server.py   # first start downloads a few hundred MB
 curl -F file=@recording.wav http://127.0.0.1:8765/v1/audio/transcriptions
 ```
 
