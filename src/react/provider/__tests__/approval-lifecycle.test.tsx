@@ -164,6 +164,31 @@ describe('AiChatProvider approval lifecycle', () => {
     expect(approvalDescription.mock.calls[0][3]?.names?.get(taskId)).toBe('Angebot Meier');
   });
 
+  it('leaves an open approval behind when the host switches to another chat', async () => {
+    const withApproval = createTransport(vi.fn());
+    const empty = { ...createTransport(vi.fn()), messages: [] };
+    const load = async () => [];
+
+    const view = render(
+      <AiChatProvider transport={withApproval} session={{ activeId: 'chat-a', load }}>
+        <ApprovalProbe />
+      </AiChatProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-count').textContent).toBe('1');
+    });
+
+    view.rerender(
+      <AiChatProvider transport={empty} session={{ activeId: 'chat-b', load }}>
+        <ApprovalProbe />
+      </AiChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-count').textContent).toBe('0');
+    });
+  });
+
   it('removes an approval only after the transport confirms it', async () => {
     let resolveResponse: (() => void) | undefined;
     const response = new Promise<void>((resolve) => {

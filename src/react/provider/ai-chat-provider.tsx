@@ -649,6 +649,15 @@ export function AiChatProvider({
     }
   }, []);
 
+  // An open approval belongs to the chat that asked for it. A host that owns
+  // the active id switches chats without switchSession(), so drop it here.
+  const approvalSessionRef = useRef(activeSessionId);
+  useEffect(() => {
+    if (approvalSessionRef.current === activeSessionId) return;
+    approvalSessionRef.current = activeSessionId;
+    setPendingApprovalsMap(new Map());
+  }, [activeSessionId]);
+
   // Load messages from session whenever the active session changes.
   // Runs on mount and on every switchSession() call.
   useEffect(() => {
