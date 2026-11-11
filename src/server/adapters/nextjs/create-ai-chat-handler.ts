@@ -21,6 +21,7 @@ import {
   assertUnambiguousToolHistory,
   bindApprovalRequests,
   createApprovalExecutionGate,
+  defaultApprovalStore,
   enforceApprovalBindings,
   gateApprovalTools,
   resolveApprovalBinder,
@@ -776,7 +777,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     endpointCaller = createInternalApiCallerFromRequest,
     approvalSecret,
     approvalMaxAgeMs,
-    approvalStore,
+    approvalStore: configuredApprovalStore,
     allowedOrigins,
     crossOriginProtection,
     maxBodyBytes,
@@ -798,6 +799,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       + 'managedRuntime; use metrics for content-free runtime metrics',
     );
   }
+  // Single use without configuration: one process's memory. Instances that
+  // share a secret need a shared store to refuse a replay across instances.
+  const approvalStore = configuredApprovalStore ?? defaultApprovalStore();
   const modelPricing = configuredModelPricing
     ? RuntimePriceTableSchema.parse(configuredModelPricing)
     : undefined;

@@ -5,6 +5,7 @@ import {
   canonicalJson,
   createApprovalBinder,
   createApprovalExecutionGate,
+  createMemoryApprovalStore,
   enforceApprovalBindings,
   resolveApprovalBinder,
 } from '../approval-binding.js';
@@ -475,5 +476,46 @@ describe('createApprovalExecutionGate', () => {
     gate.recordDecision({ toolName: 'tasks_archive', toolCallId: 'call-1', needed: false });
     expect(() => gate.authorize({ toolName: 'tasks_archive', toolCallId: 'call-1', input: { id: 'other' } }))
       .toThrow(refusal('approval_not_verified'));
+  });
+});
+
+describe('createMemoryApprovalStore', () => {
+  it('consumes an id once until it expires', async () => {
+    let now = 1_000;
+    const store = createMemoryApprovalStore({ now: () => now });
+    expect(await store.consume('a', 5_000)).toBe(true);
+    expect(await store.consume('a', 5_000)).toBe(false);
+    expect(await store.consume('b', 5_000)).toBe(true);
+    now = 10_000_000;
+    // An expired approval never verifies again, so its entry may go.
+    expect(await store.consume('a', 20_000_000)).toBe(true);
+  });
+
+  it('is bounded: when full of live entries it fails closed instead of forgetting one', async () => {
+    let now = 1_000;
+    const store = createMemoryApprovalStore({ maxEntries: 2, now: () => now });
+    expect(await store.consume('a', 100_000)).toBe(true);
+    expect(await store.consume('b', 5_000)).toBe(true);
+    await expect(Promise.resolve().then(() => store.consume('c', 100_000))).rejects.toThrow(/full/);
+    // Live entries are kept: neither id becomes usable again.
+    expect(await store.consume('a', 100_000)).toBe(false);
+    expect(await store.consume('b', 5_000)).toBe(false);
+    // Once one has expired (with the clock skew margin), there is room again.
+    now = 5_000 + 61_000;
+    expect(await store.consume('c', 200_000)).toBe(true);
+  });
+
+  it('turns a full store into approval_store_unavailable', async () => {
+    const binder = createApprovalBinder({ secret: SECRET });
+    const store = createMemoryApprovalStore({ maxEntries: 1 });
+    const approved = (toolCallId: string) => ({
+      id: 'u1', role: 'assistant', parts: [{
+        type: 'tool-tasks_archive', toolCallId, state: 'approval-responded', input: call.input,
+        approval: { id: binder.issue({ ...call, toolCallId }), approved: true },
+      }],
+    });
+    expect((await enforceApprovalBindings([approved('c1')], { binder, store })).denied).toEqual([]);
+    expect((await enforceApprovalBindings([approved('c2')], { binder, store })).denied)
+      .toEqual([{ toolCallId: 'c2', code: 'approval_store_unavailable' }]);
   });
 });

@@ -214,6 +214,24 @@ describe('approval binding through the chat handler', () => {
     expect(archive).toHaveBeenCalledTimes(1);
   });
 
+  it('single-use without any store: the same approved history posted again does not run again (p3)', async () => {
+    const { config, archive, model } = setup();
+    const { handler, message } = await firstTurn(config);
+    const approved = answered(message, true);
+    for (let i = 0; i < 3; i += 1) await streamChunks(await handler(post([user, approved])));
+    expect(archive).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(model.doStreamCalls.at(-1)!.prompt)).toContain('approval_already_used');
+  });
+
+  it('single-use without any store also holds across two handlers of one process', async () => {
+    const { config, archive } = setup();
+    const { handler, message } = await firstTurn(config);
+    const approved = answered(message, true);
+    await streamChunks(await handler(post([user, approved])));
+    await streamChunks(await createAiChatHandler(config)(post([user, approved])));
+    expect(archive).toHaveBeenCalledTimes(1);
+  });
+
   it('single-use holds for every other spelling of the approval id (p4)', async () => {
     const seen = new Set<string>();
     const approvalStore = { consume: vi.fn(async (id: string) => (seen.has(id) ? false : (seen.add(id), true))) };

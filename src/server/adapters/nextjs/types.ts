@@ -412,12 +412,19 @@ export interface AiChatHandlerConfig {
   approvalMaxAgeMs?: number;
 
   /**
-   * Optional single-use store. `consume(approvalId, expiresAtMs)` must
-   * atomically record the id and return `false` when it was recorded before.
-   * Without it, the handler can only refuse an approved call whose own
-   * history already holds a result; the same approved history sent twice
-   * before the first result reaches the client runs twice, within
-   * `approvalMaxAgeMs`. Entries may be dropped after `expiresAtMs`.
+   * Single-use store for approvals. `consume(approvalId, expiresAtMs)` must
+   * atomically record the id and return `false` when it was recorded before;
+   * it receives the canonical id of a verified approval. Entries may be
+   * dropped after `expiresAtMs`. A throw refuses the approval
+   * (`approval_store_unavailable`).
+   *
+   * Default: a bounded store in this process's memory, shared by every
+   * handler of the process (10,000 live approvals; when full, further
+   * approvals are refused, not run). It makes a single instance replay-safe.
+   * Several instances that share `GLIRASTES_APPROVAL_SECRET` need a shared
+   * store (e.g. Redis `SET key 1 NX PXAT expiresAtMs`): with the default, an
+   * approved history replayed to another instance runs there once more,
+   * within `approvalMaxAgeMs`.
    */
   approvalStore?: ApprovalStore;
 

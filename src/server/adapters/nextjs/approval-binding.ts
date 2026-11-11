@@ -50,6 +50,51 @@ export interface ApprovalStore {
   consume: (approvalId: string, expiresAtMs: number) => boolean | Promise<boolean>;
 }
 
+/** Default size of the in-process single-use store. */
+export const DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES = 10_000;
+
+/**
+ * A single-use store in this process's memory. Each id is kept until its
+ * approval has expired (plus the allowed clock skew), after which it can no
+ * longer verify anyway. The store is bounded: when it holds `maxEntries` live
+ * ids, `consume` throws, which the handler reports as
+ * `approval_store_unavailable`, rather than forgetting a live id and letting
+ * it run again.
+ *
+ * It protects one process only. Instances behind a load balancer each have
+ * their own memory, so an approved history replayed to another instance runs
+ * there again unless they share an `approvalStore`.
+ */
+export function createMemoryApprovalStore(options: { maxEntries?: number; now?: () => number } = {}): ApprovalStore {
+  const maxEntries = options.maxEntries ?? DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES;
+  const now = options.now ?? Date.now;
+  const entries = new Map<string, number>();
+  const purge = (at: number) => {
+    for (const [id, keepUntil] of entries) if (keepUntil <= at) entries.delete(id);
+  };
+  return {
+    consume: (approvalId, expiresAtMs) => {
+      const at = now();
+      const keepUntil = entries.get(approvalId);
+      if (keepUntil !== undefined && keepUntil > at) return false;
+      if (keepUntil === undefined && entries.size >= maxEntries) purge(at);
+      if (keepUntil === undefined && entries.size >= maxEntries) {
+        throw new Error('The in-process approval store is full');
+      }
+      entries.set(approvalId, expiresAtMs + CLOCK_SKEW_MS);
+      return true;
+    },
+  };
+}
+
+let processApprovalStore: ApprovalStore | undefined;
+
+/** The in-process store every handler of this process shares when none is configured. */
+export function defaultApprovalStore(): ApprovalStore {
+  processApprovalStore ??= createMemoryApprovalStore();
+  return processApprovalStore;
+}
+
 export interface ApprovalCall {
   readonly toolCallId: string;
   readonly toolName: string;
