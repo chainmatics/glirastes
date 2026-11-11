@@ -218,6 +218,17 @@ function isError(finding: ToolFinding): boolean {
   return finding.severity === 'error';
 }
 
+/**
+ * Error findings that fail the run (exit 1, unless --keep-going) but still let
+ * every other tool be generated and written: the one affected route has no
+ * enabled tool, nothing else depends on it.
+ */
+const NON_BLOCKING_ERROR_CODES: ReadonlySet<string> = new Set(['route-declared-twice']);
+
+function isBlocking(finding: ToolFinding): boolean {
+  return isError(finding) && !NON_BLOCKING_ERROR_CODES.has(finding.code);
+}
+
 function sortExcluded(excluded: ReadonlyArray<ExcludedTool>): ExcludedTool[] {
   return [...excluded].sort((left, right) => compareCodeUnits(left.stableKey, right.stableKey));
 }
@@ -453,7 +464,7 @@ async function generate(
     excluded.push(...observation.excluded ?? []);
     complete &&= observation.complete;
   }
-  if (!complete || findings.some(isError)) return result();
+  if (!complete || findings.some(isBlocking)) return result();
   const definitionOwners = new Map<string, string>();
   for (const tool of observed) {
     const owner = definitionOwners.get(tool.execution.definitionId);
@@ -463,7 +474,7 @@ async function generate(
     }
     definitionOwners.set(tool.execution.definitionId, tool.execution.stableKey);
   }
-  if (findings.some(isError)) return result();
+  if (findings.some(isBlocking)) return result();
 
   let generation: ExecutionGenerationResult;
   try {
@@ -492,7 +503,9 @@ async function generate(
   for (const execution of inventory.executions) {
     const tool = observedByKey.get(execution.stableKey);
     if (!tool) throw new Error(`No observation for ${execution.stableKey}`);
-    const reportedAttention = tool.findings.some((finding) => finding.severity === 'needs_attention');
+    const reportedAttention = tool.findings.some((finding) => (
+      finding.severity === 'needs_attention' || NON_BLOCKING_ERROR_CODES.has(finding.code)
+    ));
     // A tool without a contract can never be bound by the generated module.
     if (!reportedAttention && !tool.contract) {
       findings.push(toolFinding('input-contract-unresolved', 'needs_attention', execution.stableKey,
@@ -677,7 +690,7 @@ async function generate(
   for (const view of toolViews) {
     view.findings = sortFindings(findings.filter((finding) => finding.subjectRef === view.stableKey));
   }
-  if (findings.some(isError)) return result({ changes: generation.changes });
+  if (findings.some(isBlocking)) return result({ changes: generation.changes });
 
   const stableFindings = findings.filter((finding) => !TRANSIENT_FINDING_CODES.has(finding.code));
   const built = buildSetupArtifact({
