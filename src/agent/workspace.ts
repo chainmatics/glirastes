@@ -223,6 +223,27 @@ export class Workspace {
     return { path: relative, bytes };
   }
 
+  /**
+   * Rewrites one writable JSON file from its current content, so a caller can
+   * add entries without the model resending the whole file. A missing or
+   * unreadable file starts as `{}`; the result passes the checks of writeFile.
+   */
+  async updateJson(
+    path: string,
+    update: (current: Record<string, unknown>) => Record<string, unknown>,
+  ): Promise<{ path: string; bytes: number }> {
+    const relative = normalize(path);
+    if (!this.options.writableFiles.includes(relative)) throw new WorkspaceRefusal('write_not_allowed');
+    let current: Record<string, unknown> = {};
+    try {
+      const value: unknown = JSON.parse(await readFile(join(this.options.root, relative), 'utf8'));
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) current = value as Record<string, unknown>;
+    } catch {
+      current = {};
+    }
+    return this.writeFile(relative, JSON.stringify(update(current), null, 2));
+  }
+
   private async accessible(path: string, directory: boolean): Promise<string> {
     const relative = normalize(path);
     if (deniedPath(relative)) throw new WorkspaceRefusal('path_denied');

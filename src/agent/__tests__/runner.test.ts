@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { APICallError } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runSkillJob, type JobTools, type RefreshSummary } from '../runner.js';
+import { HEADLESS_INSTRUCTIONS, runSkillJob, type JobPlan, type JobTools, type RefreshSummary, type TaskReport } from '../runner.js';
 import { Workspace } from '../workspace.js';
 
 const MODEL = 'anthropic/claude-sonnet-5.5';
@@ -16,6 +16,12 @@ const SKILLS = [
 ];
 const WORKLISTS = { describe: { kind: 'describe', items: [{ stableKey: 'GET /api/tasks', gaps: ['description-templated'] }] } };
 const SEMANTICS = JSON.stringify({ schemaVersion: 1, tools: { 'GET /api/tasks': { description: 'Lists the tasks.' } } });
+
+/** A plan that hands out the given work lists one after the other. */
+function plan(...lists: Array<Record<string, unknown>>): JobPlan {
+  let index = 0;
+  return { next: async () => (index < lists.length ? { id: `task-${index + 1}`, worklists: lists[index++]!, open: 1 } : null) };
+}
 
 let root: string;
 
@@ -97,7 +103,7 @@ describe('managed skill runner', () => {
     const jobTools = tools([clean]);
 
     const result = await runSkillJob({
-      model, modelId: MODEL, skills: SKILLS, worklists: WORKLISTS, workspace: workspace(),
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS), workspace: workspace(),
       tools: jobTools, budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
     });
 
@@ -107,12 +113,13 @@ describe('managed skill runner', () => {
       servedModel: MODEL,
       usage: { inputTokens: 300, outputTokens: 30, costUsd: 0.875 },
       refresh: clean,
+      tasks: 1,
     });
     const first = model.doGenerateCalls[0]!;
     expect(first.prompt[0]).toEqual({ role: 'system', content: `${SKILLS[0]!.text}\n\n${SKILLS[1]!.text}` });
-    expect(first.prompt[1]).toEqual({ role: 'user', content: [{ type: 'text', text: JSON.stringify({ worklists: WORKLISTS }) }] });
+    expect(first.prompt[1]).toEqual({ role: 'user', content: [{ type: 'text', text: JSON.stringify({ instructions: HEADLESS_INSTRUCTIONS, worklists: WORKLISTS }) }] });
     expect(first.tools?.map((definition) => definition.name).sort())
-      .toEqual(['grep', 'list_files', 'read_file', 'run_eval', 'run_refresh', 'write_file']);
+      .toEqual(['grep', 'list_files', 'read_file', 'run_eval', 'run_refresh', 'upsert_resolutions', 'upsert_semantics', 'write_file']);
     expect(await readFile(join(root, '.glirastes/tool-semantics.json'), 'utf8')).toBe(`${SEMANTICS}\n`);
     expect(jobTools.refresh).toHaveBeenCalledTimes(1);
   });
@@ -124,7 +131,7 @@ describe('managed skill runner', () => {
     ]);
 
     const result = await runSkillJob({
-      model, modelId: MODEL, skills: SKILLS, worklists: WORKLISTS, workspace: workspace(),
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS), workspace: workspace(),
       tools: tools([clean]), budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
     });
 
@@ -138,7 +145,7 @@ describe('managed skill runner', () => {
     const jobTools = tools([rejected, rejected, rejected]);
 
     const result = await runSkillJob({
-      model, modelId: MODEL, skills: SKILLS, worklists: WORKLISTS, workspace: workspace(),
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS), workspace: workspace(),
       tools: jobTools, budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
     });
 
@@ -153,7 +160,7 @@ describe('managed skill runner', () => {
 
   it('stops at the job budget, at the key limit and at the deadline', async () => {
     const run = (model: MockLanguageModelV3, now = NOW) => runSkillJob({
-      model, modelId: MODEL, skills: SKILLS, worklists: WORKLISTS, workspace: workspace(),
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS), workspace: workspace(),
       tools: tools([clean]), budgetUsd: 2, deadline: DEADLINE, now: () => now,
     });
     const spending = scripted([{ calls: [{ name: 'list_files', input: {} }], cost: 1.5 }]);
@@ -177,10 +184,96 @@ describe('managed skill runner', () => {
   it('keeps an unknown cost unknown, never 0', async () => {
     const result = await runSkillJob({
       model: scripted([{ calls: [{ name: 'list_files', input: {} }], cost: 0.01 }, {}]),
-      modelId: MODEL, skills: SKILLS, worklists: WORKLISTS, workspace: workspace(),
+      modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS), workspace: workspace(),
       tools: tools([clean]), budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
     });
 
     expect(result.usage).toEqual({ inputTokens: 200, outputTokens: 20, costUsd: null });
+  });
+  it('works the plan task by task, each in a fresh conversation, and reports every task', async () => {
+    const second = { describe: { kind: 'describe', items: [{ stableKey: 'GET /api/teams', gaps: ['examples-missing'] }] } };
+    const model = scripted([
+      { calls: [{ name: 'list_files', input: {} }], cost: 0.01 },
+      { cost: 0.01 },
+      { cost: 0.01 },
+    ]);
+    const reports: TaskReport[] = [];
+
+    const result = await runSkillJob({
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS, second), workspace: workspace(),
+      tools: tools([clean]), budgetUsd: 2, deadline: DEADLINE, now: () => NOW, onTask: (report) => { reports.push(report); },
+    });
+
+    expect([result.outcome, result.tasks, model.doGenerateCalls.length]).toEqual(['completed', 2, 3]);
+    const lastCall = model.doGenerateCalls[2]!;
+    expect(lastCall.prompt).toHaveLength(2);
+    expect(JSON.stringify(lastCall.prompt[1])).toContain('GET /api/teams');
+    expect(JSON.stringify(lastCall.prompt[1])).not.toContain('GET /api/tasks');
+    expect(reports).toEqual([
+      { id: 'task-1', open: 1, steps: 2, finishReason: 'stop', repaired: false },
+      { id: 'task-2', open: 1, steps: 1, finishReason: 'stop', repaired: false },
+    ]);
+  });
+
+  it('adds semantics and resolution entries by stable key and keeps every other entry', async () => {
+    await writeFile(join(root, '.glirastes/tool-semantics.json'), JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'GET /api/a', description: 'A.', title: { de: 'Mensch' }, origin: { title: 'human' } },
+        { stableKey: 'GET /api/b', description: 'B.' },
+      ],
+    }));
+    await writeFile(join(root, '.glirastes/tool-resolutions.json'), JSON.stringify({ schemaVersion: 1, tools: { 'GET /api/b': { riskClass: 'safe-read' } } }));
+    const model = scripted([
+      { calls: [{ name: 'upsert_semantics', input: { entries: [
+        { stableKey: 'GET /api/a', description: 'Lists a.', origin: { description: 'agent' } },
+        { stableKey: 'GET /api/c', description: 'Lists c.' },
+      ] } }], cost: 0.01 },
+      { calls: [{ name: 'upsert_resolutions', input: { entries: { 'POST /api/c': { riskClass: 'write' } } } }], cost: 0.01 },
+      { cost: 0.01 },
+    ]);
+
+    await runSkillJob({
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS), workspace: workspace(),
+      tools: tools([clean]), budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
+    });
+
+    expect(JSON.parse(await readFile(join(root, '.glirastes/tool-semantics.json'), 'utf8'))).toEqual({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'GET /api/a', description: 'Lists a.', title: { de: 'Mensch' }, origin: { title: 'human', description: 'agent' } },
+        { stableKey: 'GET /api/b', description: 'B.' },
+        { stableKey: 'GET /api/c', description: 'Lists c.' },
+      ],
+    });
+    expect(JSON.parse(await readFile(join(root, '.glirastes/tool-resolutions.json'), 'utf8'))).toEqual({
+      schemaVersion: 1,
+      tools: { 'GET /api/b': { riskClass: 'safe-read' }, 'POST /api/c': { riskClass: 'write' } },
+    });
+  });
+
+  it('takes no further task once the budget is spent', async () => {
+    const model = scripted([{ cost: 2.5 }]);
+
+    const result = await runSkillJob({
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS, WORKLISTS, WORKLISTS), workspace: workspace(),
+      tools: tools([clean]), budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
+    });
+
+    expect([result.outcome, result.reasonCode, result.tasks, model.doGenerateCalls.length])
+      .toEqual(['budget_stopped', 'job_budget_reached', 1, 1]);
+  });
+
+  it('repairs only entries rejected in the current task, not ones an earlier task left', async () => {
+    const model = scripted([{ cost: 0.01 }]);
+    const jobTools = tools([rejected, rejected, rejected, rejected]);
+
+    const result = await runSkillJob({
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS, WORKLISTS), workspace: workspace(),
+      tools: jobTools, budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
+    });
+
+    // Task 1: run, repair. Task 2: run only, the rejection is already known.
+    expect([result.repairRounds, result.tasks, model.doGenerateCalls.length]).toEqual([1, 2, 3]);
   });
 });

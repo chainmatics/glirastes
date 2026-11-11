@@ -146,6 +146,53 @@ function writingModel(sideEffect?: () => Promise<void>, content: (prompt: unknow
   });
 }
 
+const TEAMS_ROUTE = "declare function getSession(): Promise<unknown>;\n"
+  + 'export async function GET() { await getSession(); return Response.json({ teams: [] as string[] }); }\n';
+
+type PromptMessage = { role: string; content: Array<{ type: string; text?: string }> | string };
+
+/** The stable keys of the describe items in a task's user message. */
+function describeKeys(prompt: unknown): string[] {
+  const user = (prompt as PromptMessage[]).find((message) => message.role === 'user')!;
+  const text = typeof user.content === 'string' ? user.content : user.content[0]!.text!;
+  const { worklists } = JSON.parse(text) as { worklists: { describe?: { items: Array<{ stableKey: string }> } } };
+  return (worklists.describe?.items ?? []).map((item) => item.stableKey);
+}
+
+/** Describes the tools of each task through upsert_semantics; `only` leaves the other tools untouched. */
+function upsertingModel(only: (stableKey: string) => boolean = () => true) {
+  let id = 0;
+  const tasks: string[][] = [];
+  const model = new MockLanguageModelV3({
+    doGenerate: async ({ prompt }) => {
+      id += 1;
+      const answered = (prompt as PromptMessage[]).some((message) => message.role === 'tool');
+      const keys = describeKeys(prompt);
+      if (!answered) tasks.push(keys);
+      const entries = keys.filter(only).map((stableKey) => ({
+        stableKey,
+        description: `Handles ${stableKey} for the signed-in user. Use it when the user asks for exactly this; no other tool fits.`,
+        synonyms: { en: ['items', 'entries'] },
+        examples: { en: [`run ${stableKey}`, `please do ${stableKey}`, `I need ${stableKey} now`] },
+      }));
+      const call = !answered && entries.length > 0;
+      return {
+        content: call
+          ? [{ type: 'tool-call' as const, toolCallId: `call-${id}`, toolName: 'upsert_semantics', input: JSON.stringify({ entries }) }]
+          : [{ type: 'text' as const, text: 'Done.' }],
+        finishReason: { unified: call ? 'tool-calls' as const : 'stop' as const, raw: undefined },
+        usage: {
+          inputTokens: { total: 100, noCache: 100, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 20, text: 20, reasoning: undefined },
+        },
+        warnings: [],
+        response: { id: `gen-${id}`, modelId: MODEL, timestamp: new Date('2026-10-22T12:00:00.000Z'), body: { usage: { cost: 0.01 } } },
+      };
+    },
+  });
+  return { model, tasks };
+}
+
 function run(fixture: AppFixture, env: Record<string, string>, options: {
   platform: Platform;
   model?: MockLanguageModelV3;
@@ -343,6 +390,71 @@ describe('glirastes tools enrich --managed', () => {
     expect(JSON.parse(out[0]!)).toEqual({ schemaVersion: 1, status: 'failed', code: 'managed_config_missing' });
     expect(Object.keys(TOOLS_SUBCOMMANDS)).toContain('enrich');
   });
+
+  it('works only the tools a pull request changed and leaves the backlog to the base branch', async () => {
+    const fixture = await committedApp('main');
+    await git(fixture, 'push', '--quiet', 'origin', 'main');
+    await git(fixture, 'switch', '--quiet', '-c', 'feature/teams');
+    await fixture.write('src/app/api/teams/route.ts', TEAMS_ROUTE);
+    await git(fixture, 'add', '.');
+    await git(fixture, 'commit', '--quiet', '-m', 'feat: teams api');
+    // The workflow refreshes before the job; the outputs are not committed yet.
+    expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
+    const api = platform();
+    const { model, tasks } = upsertingModel();
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/teams' }, { platform: api, model });
+
+    expect(await result.code).toBe(0);
+    expect(api.requests[0]!.items.map((item) => item.stableKey)).toEqual(['GET /api/teams']);
+    expect(api.requests[0]!.firstRun).toBe(false);
+    expect(tasks).toEqual([['GET /api/teams']]);
+    expect(api.ledgers[0]!.items.map((item) => [item.stableKey, item.state])).toEqual([['GET /api/teams', 'described']]);
+    const committed = JSON.parse(await git(fixture, 'show', 'HEAD:.glirastes/tool-semantics.json')) as { tools: Array<{ stableKey: string }> };
+    expect(committed.tools.map((entry) => entry.stableKey)).toEqual(['GET /api/teams']);
+    expect(result.out).toContain('glirastes tools enrich: scope=changed items=1');
+  }, 240_000);
+
+  it('describes module by module and reports a job that leaves tools untouched as partial', async () => {
+    const fixture = await committedApp('feature/tasks');
+    await fixture.write('src/app/api/teams/route.ts', TEAMS_ROUTE);
+    await git(fixture, 'add', '.');
+    await git(fixture, 'commit', '--quiet', '-m', 'feat: teams api');
+    expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
+    const api = platform();
+    const { model, tasks } = upsertingModel((stableKey) => stableKey.includes('/api/tasks'));
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model });
+
+    expect(await result.code).toBe(0);
+    // One task per module, each with only its own tools; the untouched module gets exactly one more task.
+    expect(tasks.map((keys) => [...keys].sort())).toEqual([['GET /api/tasks', 'POST /api/tasks'], ['GET /api/teams'], ['GET /api/teams']]);
+    expect(JSON.parse(result.out.at(-1)!)).toMatchObject({
+      status: 'partial', code: 'items_remaining', outcome: 'committed', items: { total: 3, described: 2, unchanged: 1 },
+    });
+    expect(api.ledgers[0]).toMatchObject({ outcome: 'committed', reasonCode: 'items_remaining' });
+    expect(result.out).toContain('glirastes tools enrich: 1 of 3 items are still open');
+    expect(result.out.filter((line) => line.startsWith('glirastes tools enrich: task '))).toEqual([
+      'glirastes tools enrich: task describe:tasks items=2 steps=2 finish=stop',
+      'glirastes tools enrich: task describe:teams items=1 steps=1 finish=stop',
+      'glirastes tools enrich: task describe:teams items=1 steps=1 finish=stop',
+    ]);
+  }, 240_000);
+
+  it('fails a job that closes no item, whatever the model says', async () => {
+    const fixture = await committedApp('feature/tasks');
+    const api = platform();
+    const before = await git(fixture, 'rev-parse', 'HEAD');
+    const { model, tasks } = upsertingModel(() => false);
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model });
+
+    expect(await result.code).toBe(1);
+    expect(JSON.parse(result.out.at(-1)!)).toMatchObject({ status: 'failed', code: 'no_progress', outcome: 'failed' });
+    expect(api.ledgers[0]).toMatchObject({ outcome: 'failed', reasonCode: 'no_progress', changedFiles: 0 });
+    expect(tasks).toHaveLength(2);
+    expect(await git(fixture, 'rev-parse', 'HEAD')).toBe(before);
+  }, 240_000);
 
   it('refuses a BYOK key OpenRouter rejects before the Platform reserves a job', async () => {
     const fixture = await createAppFixture();

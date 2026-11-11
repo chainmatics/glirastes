@@ -141,4 +141,22 @@ describe('managed job workspace', () => {
       'write_content_refused', 'write_exists',
     ]);
   });
+  it('updates a writable JSON file from its current content and keeps the write checks', async () => {
+    await put('.glirastes/tool-semantics.json', '{"schemaVersion":1,"tools":[{"stableKey":"GET /api/a","description":"A."}]}\n');
+    const files = workspace();
+
+    await files.updateJson('.glirastes/tool-semantics.json', (current) => ({
+      ...current,
+      tools: [...(current.tools as unknown[]), { stableKey: 'GET /api/b', description: 'B.' }],
+    }));
+
+    const written = JSON.parse(await readFile(join(root, '.glirastes/tool-semantics.json'), 'utf8')) as { tools: unknown[] };
+    expect(written.tools).toEqual([
+      { stableKey: 'GET /api/a', description: 'A.' },
+      { stableKey: 'GET /api/b', description: 'B.' },
+    ]);
+    expect(await refusal(files.updateJson('src/lib/db.ts', (current) => current))).toBe('write_not_allowed');
+    expect(await refusal(files.updateJson('.glirastes/tool-resolutions.json', () => ({ tools: 'x'.repeat(600 * 1024) }))))
+      .toBe('write_too_large');
+  });
 });
