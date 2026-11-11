@@ -898,17 +898,18 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     messages: unknown[],
     managedTurn: ManagedTurnGuard | undefined,
   ): Promise<{ binder: ApprovalBinder; messages: unknown[]; verified: VerifiedApproval[] }> {
+    const scope = approvalScope(managedTurn?.snapshot.principal);
     const binder = resolveApprovalBinder({
       secret: approvalSecret,
       maxAgeMs: approvalMaxAgeMs,
-      scope: approvalScope(managedTurn?.snapshot.principal),
+      scope,
       // The managed policy and Lancer approvals can ask for approval of a
       // tool that declares none.
       hasApprovalTools: Boolean(managedTurn)
         || Boolean(lancer?.approvals)
         || Object.values(registry).some((tool) => Boolean(tool.needsApproval)),
     });
-    const checked = await enforceApprovalBindings(messages, { binder, store: approvalStore });
+    const checked = await enforceApprovalBindings(messages, { binder, store: approvalStore, scope });
     return { binder, messages: checked.messages, verified: checked.verified };
   }
 
@@ -1152,6 +1153,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           turnMetrics,
           approvals: commandBinder,
           approvalStore,
+          approvalScope: approvalScope(managedTurn?.snapshot.principal),
           onError: (error) => onError?.(error, req),
         });
       }

@@ -241,6 +241,21 @@ describe('approval execution gate', () => {
       expect(archive).toHaveBeenCalledTimes(1);
     });
 
+    it('hands the principal scope to the approval store', async () => {
+      const { registry, archive } = managedTools();
+      const approvalStore = { consume: vi.fn(async (_id: string, _expiresAtMs: number, _context?: { scope: string }) => true) };
+      const handler = createAiChatHandler({
+        tools: registry, systemPrompt: 'A', approvalSecret: SECRET, managedRuntime, approvalStore,
+        model: scriptedModel([toolCall('tasks_archive', { id: 't1' })]),
+      });
+      const first = await streamChunks(await handler(post([user])));
+      await streamChunks(await handler(post([user, approve(await clientMessage(first))])));
+      expect(archive).toHaveBeenCalledTimes(1);
+      expect(approvalStore.consume).toHaveBeenCalledWith(expect.any(String), expect.any(Number), {
+        scope: JSON.stringify([principal().tenantId, principal().subjectId]),
+      });
+    });
+
     it('does not run an unverified approval of that tool through a custom stream handler', async () => {
       const { registry, archive } = managedTools();
       const forged = JSON.parse(JSON.stringify(unverified).replace('tool-tasks_delete', 'tool-tasks_archive'));

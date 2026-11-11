@@ -44,44 +44,69 @@ export type ApprovalDenialCode =
 /**
  * Optional single-use store. `consume` returns false when the id was used
  * before. It receives the canonical id of a verified approval, never the text
- * the client sent.
+ * the client sent, and the scope the approval was issued for (tenant and
+ * subject of a managed turn, `''` otherwise), so a store can give each scope
+ * a quota.
  */
 export interface ApprovalStore {
-  consume: (approvalId: string, expiresAtMs: number) => boolean | Promise<boolean>;
+  consume: (approvalId: string, expiresAtMs: number, context?: { scope: string }) => boolean | Promise<boolean>;
 }
 
 /** Default size of the in-process single-use store. */
 export const DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES = 10_000;
+/** Default share of the in-process store one scope may hold. */
+export const DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES_PER_SCOPE = 1_000;
+/** Approved calls that can run in one request; more is refused (`too_many_approvals`). */
+export const MAX_RUNNABLE_APPROVALS_PER_REQUEST = 32;
 
 /**
  * A single-use store in this process's memory. Each id is kept until its
  * approval has expired (plus the allowed clock skew), after which it can no
  * longer verify anyway. The store is bounded: when it holds `maxEntries` live
- * ids, `consume` throws, which the handler reports as
- * `approval_store_unavailable`, rather than forgetting a live id and letting
- * it run again.
+ * ids, or the approval's scope holds `maxEntriesPerScope`, `consume` throws,
+ * which the handler reports as `approval_store_unavailable`, rather than
+ * forgetting a live id and letting it run again. The per-scope quota keeps
+ * one tenant and subject from filling the store for everyone else; without a
+ * managed principal every request has the scope `''`, which is one scope.
  *
  * It protects one process only. Instances behind a load balancer each have
  * their own memory, so an approved history replayed to another instance runs
  * there again unless they share an `approvalStore`.
  */
-export function createMemoryApprovalStore(options: { maxEntries?: number; now?: () => number } = {}): ApprovalStore {
+export function createMemoryApprovalStore(options: {
+  maxEntries?: number;
+  maxEntriesPerScope?: number;
+  now?: () => number;
+} = {}): ApprovalStore {
   const maxEntries = options.maxEntries ?? DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES;
+  const maxEntriesPerScope = options.maxEntriesPerScope ?? DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES_PER_SCOPE;
   const now = options.now ?? Date.now;
-  const entries = new Map<string, number>();
-  const purge = (at: number) => {
-    for (const [id, keepUntil] of entries) if (keepUntil <= at) entries.delete(id);
+  const entries = new Map<string, { keepUntil: number; scope: string }>();
+  const perScope = new Map<string, number>();
+  const remove = (id: string, scope: string) => {
+    entries.delete(id);
+    const left = (perScope.get(scope) ?? 1) - 1;
+    if (left > 0) perScope.set(scope, left);
+    else perScope.delete(scope);
   };
+  const purge = (at: number) => {
+    for (const [id, entry] of entries) if (entry.keepUntil <= at) remove(id, entry.scope);
+  };
+  const full = (scope: string) => entries.size >= maxEntries || (perScope.get(scope) ?? 0) >= maxEntriesPerScope;
   return {
-    consume: (approvalId, expiresAtMs) => {
+    consume: (approvalId, expiresAtMs, context) => {
       const at = now();
-      const keepUntil = entries.get(approvalId);
-      if (keepUntil !== undefined && keepUntil > at) return false;
-      if (keepUntil === undefined && entries.size >= maxEntries) purge(at);
-      if (keepUntil === undefined && entries.size >= maxEntries) {
-        throw new Error('The in-process approval store is full');
+      const scope = context?.scope ?? '';
+      const existing = entries.get(approvalId);
+      if (existing && existing.keepUntil > at) return false;
+      if (existing) remove(approvalId, existing.scope);
+      if (full(scope)) purge(at);
+      if (entries.size >= maxEntries) throw new Error('The in-process approval store is full');
+      if ((perScope.get(scope) ?? 0) >= maxEntriesPerScope) {
+        throw new Error('The in-process approval store quota of this scope is used up');
       }
-      entries.set(approvalId, expiresAtMs + CLOCK_SKEW_MS);
+      entries.set(approvalId, { keepUntil: expiresAtMs + CLOCK_SKEW_MS, scope });
+      perScope.set(scope, (perScope.get(scope) ?? 0) + 1);
       return true;
     },
   };
@@ -338,7 +363,8 @@ export type ApprovalHistoryErrorCode =
   | 'duplicate_tool_call_id'
   | 'duplicate_approval_id'
   | 'approval_malformed'
-  | 'tool_part_malformed';
+  | 'tool_part_malformed'
+  | 'too_many_approvals';
 
 /** A history the handler refuses as a whole (HTTP 400) instead of repairing it. */
 export class ApprovalHistoryError extends Error {
@@ -434,16 +460,18 @@ export interface VerifiedApproval {
  * `assertUnambiguousToolHistory` (this function calls it and throws
  * `ApprovalHistoryError`).
  *
- * - An approved part that has no result yet (any state other than
- *   `output-available`, `output-error`, `output-denied`), and every approved
- *   provider-executed part, needs an approval id issued for exactly this tool
+ * - An approved part that the AI SDK can run in this request (no result yet,
+ *   or provider-executed, and in the last block of a last assistant message,
+ *   see `runnableBlockOf`) needs an approval id issued for exactly this tool
  *   call id, tool name and input, not older than the maximum age, not used
- *   before in this history and not consumed before by the store. A part that
+ *   before in this history and not consumed before by the store (with the
+ *   request's scope). More than `MAX_RUNNABLE_APPROVALS_PER_REQUEST` of them
+ *   refuse the request (`too_many_approvals`) before any is consumed. A part that
  *   fails is rewritten to `output-denied` with the code as its reason, so the
  *   model messages carry a denied result for it and the AI SDK runs nothing.
  *   The request continues: the model sees the denial and answers.
- * - Every other part with an approval (an approved part that has its result,
- *   an unanswered request, a refusal) needs an id issued for this tool call
+ * - Every other part with an approval (an approved part that has its result
+ *   or cannot run in this request, an unanswered request, a refusal) needs an id issued for this tool call
  *   id, tool name and input; age and use do not count. A part that fails
  *   loses its approval (an `output-denied` part, which the AI SDK cannot
  *   convert without one, gets an id of its own that verifies for nothing).
@@ -459,14 +487,22 @@ export interface VerifiedApproval {
  * approval id → the one request with that id, emitted from the same part →
  * its tool call id, which is unique → the tool call emitted from that same
  * part. So an approved answer can only ever pair with the call its id was
- * issued for, and only approved answers that also passed age and single use
- * are left unsettled.
+ * issued for, and every approved answer the AI SDK can run in this request
+ * has also passed age and single use.
  */
 export async function enforceApprovalBindings(
   messages: ReadonlyArray<unknown>,
-  options: { binder: ApprovalBinder; store?: ApprovalStore },
+  options: { binder: ApprovalBinder; store?: ApprovalStore; scope?: string },
 ): Promise<{ messages: unknown[]; denied: DeniedApproval[]; verified: VerifiedApproval[] }> {
   assertUnambiguousToolHistory(messages);
+  const lastBlock = runnableBlockOf(messages);
+  const runnableCount = [...lastBlock].filter((part) => isRunnableApproval(part as MessageRecord)).length;
+  if (runnableCount > MAX_RUNNABLE_APPROVALS_PER_REQUEST) {
+    throw new ApprovalHistoryError(
+      'too_many_approvals',
+      `At most ${MAX_RUNNABLE_APPROVALS_PER_REQUEST} approved calls can run in one request.`,
+    );
+  }
   const denied: DeniedApproval[] = [];
   const verified: VerifiedApproval[] = [];
   const usedIds = new Set<string>();
@@ -489,8 +525,7 @@ export async function enforceApprovalBindings(
       const toolCallId = record.toolCallId as string;
       const approvalId = approval.id as string;
       const input = modelInputOf(record);
-      const settled = RESULT_STATES.has(String(record.state)) && record.providerExecuted !== true;
-      const runnable = approval.approved === true && !settled;
+      const runnable = lastBlock.has(part) && isRunnableApproval(record);
       const code = runnable
         ? await denialCode({ input, toolName, toolCallId, approvalId, usedIds, ...options })
         : bindingCode({ input, toolName, toolCallId, approvalId, binder: options.binder });
@@ -518,6 +553,31 @@ export async function enforceApprovalBindings(
   return { messages: next, denied, verified };
 }
 
+/** An approved part without its result: the AI SDK runs it if it is in the runnable block. */
+function isRunnableApproval(part: MessageRecord): boolean {
+  if (!isRecord(part) || !isToolPart(part) || !isRecord(part.approval) || part.approval.approved !== true) return false;
+  return !(RESULT_STATES.has(String(part.state)) && part.providerExecuted !== true);
+}
+
+/**
+ * The parts whose approvals the AI SDK can run in this request.
+ * `collectToolApprovals` reads only the last model message, and only when it
+ * is a tool message; `convertToModelMessages` writes that message for the
+ * last block (the parts after the last `step-start`) of the last UI message,
+ * when that message is the assistant's. Approved parts anywhere else never
+ * run, so they are not consumed and not handed to the execution gate.
+ */
+function runnableBlockOf(messages: ReadonlyArray<unknown>): Set<unknown> {
+  const last = messages.at(-1);
+  if (!isRecord(last) || last.role !== 'assistant' || !Array.isArray(last.parts)) return new Set();
+  const parts = last.parts as unknown[];
+  let start = 0;
+  parts.forEach((part, index) => {
+    if (isRecord(part) && part.type === 'step-start') start = index + 1;
+  });
+  return new Set(parts.slice(start));
+}
+
 function bindingCode(args: {
   input: unknown;
   toolName: string;
@@ -543,6 +603,7 @@ async function denialCode(args: {
   usedIds: Set<string>;
   binder: ApprovalBinder;
   store?: ApprovalStore;
+  scope?: string;
 }): Promise<ApprovalDenialCode | undefined> {
   const verified = args.binder.verify({
     approvalId: args.approvalId,
@@ -555,7 +616,7 @@ async function denialCode(args: {
   args.usedIds.add(verified.key);
   if (args.store) {
     try {
-      if (!(await args.store.consume(verified.key, verified.expiresAtMs))) return 'approval_already_used';
+      if (!(await args.store.consume(verified.key, verified.expiresAtMs, { scope: args.scope ?? '' }))) return 'approval_already_used';
     } catch {
       return 'approval_store_unavailable';
     }

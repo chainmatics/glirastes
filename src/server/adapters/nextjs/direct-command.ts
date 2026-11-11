@@ -199,6 +199,8 @@ export interface RunDirectCommandOptions {
   approvals?: ApprovalBinder;
   /** Optional single-use store for verified approvals. */
   approvalStore?: ApprovalStore;
+  /** The scope handed to the store with each approval (see `approvalScope`); default `''`. */
+  approvalScope?: string;
   onError?: (error: unknown) => void;
   /** Suffix of the tool call and approval ids; default 20 random hex characters. */
   generateId?: () => string;
@@ -290,7 +292,7 @@ export async function runDirectCommand(options: RunDirectCommandOptions): Promis
           }
           if (options.approvalStore) {
             try {
-              if (!(await options.approvalStore.consume(verified.key, verified.expiresAtMs))) {
+              if (!(await options.approvalStore.consume(verified.key, verified.expiresAtMs, { scope: options.approvalScope ?? '' }))) {
                 refuse('approval_already_used');
                 return;
               }

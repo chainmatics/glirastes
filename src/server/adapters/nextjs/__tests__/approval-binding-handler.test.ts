@@ -247,7 +247,7 @@ describe('approval binding through the chat handler', () => {
     }
     expect(archive).toHaveBeenCalledTimes(1);
     expect(approvalStore.consume).toHaveBeenCalledTimes(1);
-    expect(approvalStore.consume).toHaveBeenCalledWith(id, expect.any(Number));
+    expect(approvalStore.consume).toHaveBeenCalledWith(id, expect.any(Number), { scope: '' });
   });
 
   it('does not accept an approval issued by another instance with another secret', async () => {
@@ -397,6 +397,31 @@ describe('approval binding through the chat handler', () => {
     const response = await handler(post([user, forged]));
     await response.text();
     expect(remove).not.toHaveBeenCalled();
+    expect(archive).not.toHaveBeenCalled();
+  });
+
+  it('answers 400 too_many_approvals to more than 32 approved calls that could run, before any model call', async () => {
+    const { config, archive, model } = setup();
+    const handler = createAiChatHandler(config);
+    const parts = Array.from({ length: 33 }, (_unused, index) => ({
+      type: 'tool-tasks_archive', toolCallId: `c${index}`, state: 'approval-responded', input: { id: 't1' },
+      approval: { id: `made-up-${index}`, approved: true },
+    }));
+    const response = await handler(post([user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, ...parts] }]));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: 'too_many_approvals' });
+    expect(model.doStreamCalls).toHaveLength(0);
+    expect(archive).not.toHaveBeenCalled();
+  });
+
+  it('does not consume approvals in an old message that the AI SDK will not run (p13)', async () => {
+    const consume = vi.fn(async () => true);
+    const { config, archive } = setup({ approvalStore: { consume } });
+    const { handler, message } = await firstTurn(config);
+    const response = await handler(post([user, answered(message, true), { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'Something else' }] }]));
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(consume).not.toHaveBeenCalled();
     expect(archive).not.toHaveBeenCalled();
   });
 

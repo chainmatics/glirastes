@@ -444,7 +444,7 @@ describe('enforceApprovalBindings', () => {
     expect((await enforceApprovalBindings(messages, { binder, store })).denied).toEqual([]);
     const again = await enforceApprovalBindings(messages, { binder, store });
     expect(again.denied).toEqual([{ toolCallId: 'call-1', code: 'approval_already_used' }]);
-    expect(store.consume).toHaveBeenCalledWith(expect.stringMatching(/^glirastes-approval\.v1\./), expect.any(Number));
+    expect(store.consume).toHaveBeenCalledWith(expect.stringMatching(/^glirastes-approval\.v1\./), expect.any(Number), { scope: '' });
   });
 
   it('does not touch the store for a forged approval', async () => {
@@ -530,6 +530,116 @@ describe('the installed AI SDK and settled approved parts', () => {
   });
 });
 
+describe('which approved parts the installed AI SDK can run', () => {
+  // `collectToolApprovals` reads only the last model message, and only when
+  // it is a tool message: the one `convertToModelMessages` writes for the
+  // last block (after the last step-start) of the last UI message, when that
+  // message is the assistant's. An approved part anywhere else never runs.
+  const approvedPart = (toolCallId: string) => ({
+    type: 'tool-tasks_delete', toolCallId, state: 'approval-responded', input: { id: toolCallId },
+    approval: { id: `made-up-${toolCallId}`, approved: true },
+  });
+  const text = (value: string) => ({ type: 'text', text: value, state: 'done' });
+  async function executed(uiMessages: unknown[]) {
+    const { convertToModelMessages, streamText, tool, jsonSchema } = await import('ai');
+    const { MockLanguageModelV3, convertArrayToReadableStream } = await import('ai/test');
+    const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: 'stream-start', warnings: [] },
+          { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 1, text: 1, reasoning: undefined } } },
+        ] as never),
+      }),
+    });
+    const result = streamText({
+      model,
+      messages: await convertToModelMessages(uiMessages as never, { ignoreIncompleteToolCalls: true }),
+      tools: { tasks_delete: tool({ inputSchema: jsonSchema({ type: 'object' }), execute }) as never },
+    });
+    await result.consumeStream();
+    return execute.mock.calls.map((entry) => (entry[0] as { id: string }).id);
+  }
+  const user = { id: 'u1', role: 'user', parts: [text('go')] };
+
+  it('runs the approved parts of the last block of a last assistant message', async () => {
+    expect(await executed([user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, approvedPart('c1'), approvedPart('c2')] }]))
+      .toEqual(['c1', 'c2']);
+    expect(await executed([user, { id: 'a1', role: 'assistant', parts: [approvedPart('c1')] }])).toEqual(['c1']);
+  });
+
+  it('runs no approved part of an earlier block, an earlier message or before a user message', async () => {
+    expect(await executed([user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, approvedPart('old'), { type: 'step-start' }, text('later')] }]))
+      .toEqual([]);
+    expect(await executed([user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, approvedPart('old')] }, { id: 'u2', role: 'user', parts: [text('next')] }]))
+      .toEqual([]);
+    expect(await executed([
+      user,
+      { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, approvedPart('old')] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'step-start' }, approvedPart('new')] },
+    ])).toEqual(['new']);
+  });
+});
+
+describe('approvals that cannot run in this request (p13)', () => {
+  const binder = createApprovalBinder({ secret: SECRET });
+  const approved = (toolCallId: string) => {
+    const bound = { ...call, toolCallId };
+    return { type: `tool-${call.toolName}`, toolCallId, state: 'approval-responded', input: call.input, approval: { id: binder.issue(bound), approved: true } };
+  };
+  const user = { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'go' }] };
+
+  it('consumes and hands to the gate only the approvals of the last block of a last assistant message', async () => {
+    const store = { consume: vi.fn(async () => true) };
+    const result = await enforceApprovalBindings([
+      user,
+      { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, approved('old-1')] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'and' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'step-start' }, approved('old-2'), { type: 'step-start' }, approved('now')] },
+    ], { binder, store });
+    expect(store.consume).toHaveBeenCalledTimes(1);
+    expect(result.verified.map((entry) => entry.toolCallId)).toEqual(['now']);
+    expect(result.denied).toEqual([]);
+  });
+
+  it('consumes nothing when the history ends with a user message', async () => {
+    const store = { consume: vi.fn(async () => true) };
+    const result = await enforceApprovalBindings([
+      user,
+      { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, approved('c1'), approved('c2')] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'and' }] },
+    ], { binder, store });
+    expect(store.consume).not.toHaveBeenCalled();
+    expect(result.verified).toEqual([]);
+  });
+
+  it('still takes the approval away from a part that cannot run when its id was not issued for it', async () => {
+    const forged = { ...approved('old'), approval: { id: 'made-up', approved: true } };
+    const result = await enforceApprovalBindings([
+      user,
+      { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, forged] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'and' }] },
+    ], { binder });
+    expect((result.messages[1] as { parts: Array<Record<string, unknown>> }).parts[1]).not.toHaveProperty('approval');
+  });
+
+  it('refuses more than 32 approvals that could run in one request with too_many_approvals, before consuming any', async () => {
+    const store = { consume: vi.fn(async () => true) };
+    const parts = Array.from({ length: 33 }, (_unused, index) => approved(`c${index}`));
+    await expect(enforceApprovalBindings([user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, ...parts] }], { binder, store }))
+      .rejects.toMatchObject({ name: 'ApprovalHistoryError', code: 'too_many_approvals' });
+    expect(store.consume).not.toHaveBeenCalled();
+    const ok = await enforceApprovalBindings([user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, ...parts.slice(0, 32)] }], { binder, store });
+    expect(ok.verified).toHaveLength(32);
+  });
+
+  it('passes the scope to the store', async () => {
+    const store = { consume: vi.fn(async () => true) };
+    await enforceApprovalBindings([user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, approved('c1')] }], { binder, store, scope: 'tenant-a' });
+    expect(store.consume).toHaveBeenCalledWith(expect.any(String), expect.any(Number), { scope: 'tenant-a' });
+  });
+});
+
 describe('createApprovalExecutionGate', () => {
   const verified = [{ toolCallId: 'call-1', toolName: 'tasks_archive', input: { id: 't1', flags: { a: 1, b: 2 } } }];
   const refusal = (code: string) => expect.objectContaining({ code });
@@ -597,6 +707,29 @@ describe('createMemoryApprovalStore', () => {
     // Once one has expired (with the clock skew margin), there is room again.
     now = 5_000 + 61_000;
     expect(await store.consume('c', 200_000)).toBe(true);
+  });
+
+  it('gives each scope a quota, so one scope cannot fill the store for the others', async () => {
+    const store = createMemoryApprovalStore({ maxEntries: 10, maxEntriesPerScope: 2, now: () => 1_000 });
+    expect(await store.consume('a1', 100_000, { scope: 'tenant-a' })).toBe(true);
+    expect(await store.consume('a2', 100_000, { scope: 'tenant-a' })).toBe(true);
+    await expect(Promise.resolve().then(() => store.consume('a3', 100_000, { scope: 'tenant-a' }))).rejects.toThrow(/quota/);
+    expect(await store.consume('b1', 100_000, { scope: 'tenant-b' })).toBe(true);
+    // Without a scope, every caller shares the scope ''.
+    expect(await store.consume('n1', 100_000)).toBe(true);
+    expect(await store.consume('n2', 100_000, { scope: '' })).toBe(true);
+    await expect(Promise.resolve().then(() => store.consume('n3', 100_000))).rejects.toThrow(/quota/);
+    // A used id stays used, also when its scope is full.
+    expect(await store.consume('a1', 100_000, { scope: 'tenant-a' })).toBe(false);
+  });
+
+  it('frees a scope quota when its entries expire', async () => {
+    let now = 1_000;
+    const store = createMemoryApprovalStore({ maxEntriesPerScope: 1, now: () => now });
+    expect(await store.consume('a1', 5_000, { scope: 's' })).toBe(true);
+    await expect(Promise.resolve().then(() => store.consume('a2', 5_000, { scope: 's' }))).rejects.toThrow(/quota/);
+    now = 5_000 + 61_000;
+    expect(await store.consume('a2', 200_000, { scope: 's' })).toBe(true);
   });
 
   it('turns a full store into approval_store_unavailable', async () => {

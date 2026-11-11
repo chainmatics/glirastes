@@ -274,6 +274,25 @@ describe('runDirectCommand', () => {
       expect(fixture.execute).toHaveBeenCalledTimes(1);
     });
 
+    it('hands the approval scope to the store', async () => {
+      const fixture = await asked();
+      const consume = vi.fn(async (_id: string, _expiresAtMs: number, _context?: { scope: string }) => true);
+      await chunks(await runDirectCommand({
+        command: fixture.answer(fixture.approvalId), registry: fixture.tools, tools: fixture.aiTools, approvals: binder,
+        approvalStore: { consume }, approvalScope: 'scope-a',
+      }));
+      expect(consume).toHaveBeenCalledWith(expect.any(String), expect.any(Number), { scope: 'scope-a' });
+      expect(fixture.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('issues at most one approval per request', async () => {
+      const fixture = registry({ needsApproval: true });
+      const output = await chunks(await runDirectCommand({
+        command: resolveDirectCommand([user(listCommand)])!, registry: fixture.tools, tools: fixture.aiTools, approvals: binder,
+      }));
+      expect(output.filter((chunk) => chunk.type === 'tool-approval-request')).toHaveLength(1);
+    });
+
     it('fails closed when no binder is given: it neither asks nor runs', async () => {
       const { tools, aiTools, execute } = registry({ needsApproval: true });
       const output = await chunks(await runDirectCommand({ command: resolveDirectCommand([user(listCommand)])!, registry: tools, tools: aiTools }));
