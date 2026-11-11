@@ -13,8 +13,10 @@ import {
  * Checks x-forwarded-host/host headers, falls back to req.url.
  */
 export function extractOrigin(req: Request): string {
-  const forwardedHost = req.headers.get('x-forwarded-host');
-  const forwardedProto = req.headers.get('x-forwarded-proto') ?? 'https';
+  // A chain of proxies may list several values; the first one is what the
+  // outermost proxy saw from the client.
+  const forwardedHost = firstForwardedValue(req.headers.get('x-forwarded-host'));
+  const forwardedProto = firstForwardedValue(req.headers.get('x-forwarded-proto')) ?? 'https';
 
   if (forwardedHost) {
     return `${forwardedProto}://${forwardedHost}`;
@@ -32,6 +34,11 @@ export function extractOrigin(req: Request): string {
   } catch {
     return 'http://localhost:3000';
   }
+}
+
+function firstForwardedValue(value: string | null): string | undefined {
+  const first = value?.split(',')[0]?.trim();
+  return first ? first : undefined;
 }
 
 /**

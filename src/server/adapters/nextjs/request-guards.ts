@@ -25,24 +25,30 @@ const json = (status: number, error: string, message: string): Response => new R
  * the content type must be JSON, which a cross-origin page cannot send
  * without a preflight; and a browser cross-origin request is refused:
  *
+ * - `Origin: null` (a sandboxed or opaque origin) is always refused.
  * - `Sec-Fetch-Site`, when present, must be `same-origin` (or `none`, a
- *   navigation by the user); `same-site` and `cross-site` are refused.
+ *   navigation by the user); `same-site` and `cross-site` pass only with an
+ *   `Origin` listed in `allowedOrigins`.
  * - Otherwise `Origin`, when present, must be the request's own origin
- *   (forwarded host and protocol included) or one of `allowedOrigins`.
+ *   (first value of the forwarded host and protocol included) or one of
+ *   `allowedOrigins`.
  * - A request with neither header is not from a browser (server to server).
  */
 export function checkRequestHeaders(req: Request, options: RequestGuardOptions = {}): Response | undefined {
   if (options.crossOriginProtection !== false) {
     const site = req.headers.get('sec-fetch-site');
+    const origin = req.headers.get('origin');
+    const refused = () => json(403, 'cross_origin_request_refused', 'Cross-origin requests are not allowed.');
+    if (origin === 'null') return refused();
     if (site !== null) {
+      // The browser's own verdict. Another site or subdomain passes only with
+      // an Origin the app listed itself; the request's own origin does not
+      // count here, because the browser says the request is not from it.
       if (site !== 'same-origin' && site !== 'none') {
-        return json(403, 'cross_origin_request_refused', 'Cross-origin requests are not allowed.');
+        if (origin === null || !configuredOrigins(options.allowedOrigins).has(origin)) return refused();
       }
-    } else {
-      const origin = req.headers.get('origin');
-      if (origin !== null && !ownOrigins(req, options.allowedOrigins).has(origin)) {
-        return json(403, 'cross_origin_request_refused', 'Cross-origin requests are not allowed.');
-      }
+    } else if (origin !== null && !ownOrigins(req, options.allowedOrigins).has(origin)) {
+      return refused();
     }
   }
   const mediaType = (req.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
@@ -52,8 +58,12 @@ export function checkRequestHeaders(req: Request, options: RequestGuardOptions =
   return undefined;
 }
 
+function configuredOrigins(allowed: ReadonlyArray<string> = []): Set<string> {
+  return new Set(allowed.map((origin) => origin.replace(/\/+$/, '')).filter((origin) => origin !== 'null'));
+}
+
 function ownOrigins(req: Request, allowed: ReadonlyArray<string> = []): Set<string> {
-  const origins = new Set<string>(allowed.map((origin) => origin.replace(/\/+$/, '')));
+  const origins = configuredOrigins(allowed);
   origins.add(extractOrigin(req));
   try {
     origins.add(new URL(req.url).origin);

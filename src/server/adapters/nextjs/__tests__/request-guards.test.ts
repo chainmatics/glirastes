@@ -124,8 +124,47 @@ describe('cross-origin requests', () => {
     expect(allowed.status).toBe(200);
     await allowed.text();
     expect((await handler(post({ origin: 'https://evil.example' }))).status).toBe(403);
-    // allowedOrigins does not open Sec-Fetch-Site: cross-site.
-    expect((await handler(post({ origin: 'https://admin.example', 'sec-fetch-site': 'cross-site' }))).status).toBe(403);
+  });
+
+  it.each(['same-site', 'cross-site'])(
+    'accepts an Origin from allowedOrigins that a browser sends with Sec-Fetch-Site %s (p9)', async (site) => {
+      const { handler } = setup({ allowedOrigins: ['https://admin.example/'] });
+      const response = await handler(post({ origin: 'https://admin.example', 'sec-fetch-site': site }));
+      expect(response.status).toBe(200);
+      await response.text();
+    },
+  );
+
+  it.each([
+    ['without Origin', {}],
+    ['with a foreign Origin', { origin: 'https://evil.example' }],
+    ['with the own Origin (the browser says it is not)', { origin: 'https://app.example' }],
+    ['with Origin null', { origin: 'null' }],
+  ])('still refuses Sec-Fetch-Site cross-site %s', async (_label, headers) => {
+    const { handler, model } = setup({ allowedOrigins: ['https://admin.example', 'null'] });
+    const response = await handler(post({ 'sec-fetch-site': 'cross-site', ...headers }));
+    expect(response.status).toBe(403);
+    expect(model.doStreamCalls).toHaveLength(0);
+  });
+
+  it('refuses Origin null even when allowedOrigins lists it', async () => {
+    const { handler } = setup({ allowedOrigins: ['null'] });
+    expect((await handler(post({ origin: 'null' }))).status).toBe(403);
+  });
+
+  it('reads the first value of comma-separated forwarded host and protocol (p9)', async () => {
+    const { handler } = setup();
+    const chained = (origin: string) => post(
+      { origin, 'x-forwarded-host': 'app.example, internal', 'x-forwarded-proto': 'https,http' },
+      body,
+      'http://internal:3000/api/chat',
+    );
+    const ok = await handler(chained('https://app.example'));
+    expect(ok.status).toBe(200);
+    await ok.text();
+    // The later values (what an inner proxy saw) are not trusted.
+    expect((await handler(chained('https://internal'))).status).toBe(403);
+    expect((await handler(chained('http://internal'))).status).toBe(403);
   });
 
   it('can be switched off for an app that authenticates without cookies', async () => {

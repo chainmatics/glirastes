@@ -431,9 +431,10 @@ export interface AiChatHandlerConfig {
   /**
    * Origins, besides the request's own, whose pages may post to the handler
    * from a browser, e.g. `['https://admin.example.com']`. The request's own
-   * origin is taken from `x-forwarded-host` / `x-forwarded-proto` when a
-   * proxy sets them. Does not open requests the browser marks
-   * `Sec-Fetch-Site: cross-site` or `same-site`.
+   * origin is taken from `x-forwarded-host` / `x-forwarded-proto` (the first
+   * value of each) when a proxy sets them. A browser request from a listed
+   * origin passes also when the browser marks it `Sec-Fetch-Site:
+   * same-site` or `cross-site`; `Origin: null` is never accepted.
    */
   allowedOrigins?: ReadonlyArray<string>;
 
@@ -441,8 +442,9 @@ export interface AiChatHandlerConfig {
    * Browser cross-origin protection, on by default. A page on another site
    * can make a browser post to the chat route with the user's cookie, so the
    * handler refuses (403) a request with `Sec-Fetch-Site` other than
-   * `same-origin` / `none`, or, without that header, with an `Origin` that is
-   * neither its own nor in `allowedOrigins`. Requests with neither header
+   * `same-origin` / `none` unless its `Origin` is in `allowedOrigins`, or,
+   * without that header, with an `Origin` that is neither its own nor in
+   * `allowedOrigins`, and always `Origin: null`. Requests with neither header
    * (server to server) pass.
    *
    * `false` turns this off, and only an app whose chat route does not
