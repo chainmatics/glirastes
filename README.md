@@ -109,11 +109,17 @@ export async function POST(request: Request) {
 
 The handler protects the route for you. Set `GLIRASTES_APPROVAL_SECRET` (at
 least 16 characters, the same on every instance) before production: it binds
-each approval the handler asks for to the tool call, so a forged or replayed
-chat history cannot run a tool; production refuses to serve approvals without
-it. The handler also answers 415 to a body that is not `application/json`,
-403 to a browser request from another origin (list yours in `allowedOrigins`)
-and 413 above `maxBodyBytes` (1 MB).
+each approval the handler asks for to the tool call, so a forged chat history
+cannot run a tool; production refuses to serve approvals without it. Each
+approval runs once per process; with several instances, pass a shared
+`approvalStore` (e.g. Redis), or a replayed history can run once more on
+another instance. The handler also answers 415 to a body that is not
+`application/json`, 403 to a browser request from another origin (list yours
+in `allowedOrigins`), 413 above `maxBodyBytes` (1 MB) and 400 to a history
+that repeats a tool call id (`duplicate_tool_call_id`).
+
+`executeTool` and routes built from `glirastes/runtime/ai-sdk` alone run a tool
+without these approval checks; give them only input your server has authorized.
 
 **5. Mount the chat** and the navigation bridge (client components):
 

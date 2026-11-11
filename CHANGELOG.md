@@ -37,16 +37,36 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 - `typescript`, `ajv` and `ajv-formats` are runtime dependencies (the tools
   generator needs them). The `wavesurfer.js` peer is gone.
 - `createAiChatHandler` binds every approval it asks for to the tool call and
-  refuses an approved call it did not ask for. A handler whose tools can ask
-  for approval needs `GLIRASTES_APPROVAL_SECRET` (or `approvalSecret`) when
+  refuses an approved call it did not ask for. A handler whose approvals can
+  occur needs `GLIRASTES_APPROVAL_SECRET` (or `approvalSecret`) when
   `NODE_ENV` is `production`; without it every request fails with HTTP 500
-  (`approval_secret_missing`). Outside production a random per-process secret
+  (`approval_secret_missing`). Approvals can occur when a tool declares
+  `needsApproval`, when the handler runs a managed runtime turn (its policy
+  can ask for approval of any tool), and when Lancer approvals are
+  configured (`lancer.approvals`). Outside production a random per-process secret
   is derived and one warning is logged. Approvals issued before the upgrade,
   by another secret or by another process without the shared secret are
   refused (`approval_not_issued`), and so is an approval older than 15
   minutes (`approval_expired`). A custom `streamHandler` that lets tools ask
   for approval must pipe its UI stream through `ctx.bindApprovalRequests`.
   `runDirectCommand` takes `approvals` and asks for no confirmation without it.
+- Each approval runs at most once per process by default: without an
+  `approvalStore`, the handler records it in a bounded in-process store
+  shared by every handler of the process (10,000 live approvals; when it is
+  full, further approvals are denied with `approval_store_unavailable`
+  instead of run). Several instances must pass a shared `approvalStore`;
+  with the default, a replayed approved history can run once more on another
+  instance within `approvalMaxAgeMs`.
+- `createAiChatHandler` answers 400 to a chat history that repeats a tool call
+  id (`duplicate_tool_call_id`) or whose `approval.approved` is not a boolean
+  (`approval_malformed`), before anything runs. The chat UI keeps one part
+  per tool call id, so only a hand-built or tampered history is affected; a
+  provider that reuses tool call ids across turns is refused too.
+- A tool whose input schema transforms its input (Zod `transform`,
+  `default`, `coerce`) receives the schema output exactly once. The chat
+  history, the UI tool part and `onStepFinish` now hold the input the model
+  sent, not the transformed one, because the approval is bound to that input.
+  Code that read transformed values from the tool part must parse them again.
 - `createAiChatHandler` answers 415 unless the body is `application/json`, 403
   to a browser cross-origin request, and 413 above 1 MB. A page on another
   origin that calls the route (a separate front end, an admin app) needs
@@ -189,15 +209,31 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   client's input. The approval id now carries an HMAC over tool call id, tool
   name, canonical input and issue time. The server checks it before anything
   runs and denies the call otherwise; the request continues and the model sees
-  the denial. This covers model turns and direct commands. Without an
-  `approvalStore`, the same approved history sent twice before the first
-  result reaches the client can still run twice within `approvalMaxAgeMs`.
+  the denial. This covers model turns and direct commands. Each approved
+  call runs at most once per process (see **Breaking**), and the tool itself
+  checks a per-request execution gate, also under a custom `streamHandler`:
+  a call runs only when this request verified its approval or the tool did
+  not need one. A second part with the same tool call id can no longer take
+  over a valid approval, and an approval id is accepted only in the exact
+  spelling the server issued (another base64url spelling of the same MAC, a
+  padded or zero-prefixed id, no longer counts as a fresh approval).
+- The approval hash keeps an own `__proto__` key of the input, so an approval
+  no longer verifies after such a key was added. The managed approval scope
+  encodes tenant and subject as a JSON array, so ids containing `:` cannot
+  make two principals share approvals.
+- `allowedOrigins` admits a listed origin also when the browser marks the
+  request `Sec-Fetch-Site: same-site` or `cross-site` (a sibling subdomain or
+  a separate front end); before, every such request got 403. An unlisted
+  origin still gets 403, and `Origin: null` is always refused. A
+  comma-separated `x-forwarded-host` or `x-forwarded-proto` is read by its
+  first value.
 - A tool runs with its input validated against its input schema, also an
   approved call taken from the history: undeclared fields are rejected by
   strict schemas and stripped by the others.
-- A path parameter of `.` or `..` (also percent-encoded, even repeatedly) no
+- A path parameter with a `.` or `..` segment (split at `/` or `\`, also
+  percent-encoded, even repeatedly, e.g. `x/../../admin` or `..%2fadmin`) no
   longer reaches another route. Endpoint tools refuse it with a tool error and
-  send nothing.
+  send nothing. Values such as `v1..2` or `.hidden` still pass.
 - `--help` prints the usage of every command instead of running it.
 - `glirastes init` at a monorepo root finds the apps in its workspace
   packages.
