@@ -76,7 +76,8 @@ function ownOrigins(req: Request, allowed: ReadonlyArray<string> = []): Set<stri
 const tooLarge = (): Response => json(413, 'payload_too_large', 'The request body is too large.');
 
 /**
- * Reads the JSON body, or answers 413 once it exceeds `maxBytes`. The declared
+ * Reads the JSON body, or answers 413 once it exceeds `maxBytes` and 400
+ * (`invalid_json`) when it does not parse. The declared
  * `Content-Length` is checked before the body is read, and the bytes actually
  * read are counted, because the header may be absent (chunked) or wrong.
  */
@@ -109,5 +110,10 @@ export async function readJsonBody(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return { ok: true, value: JSON.parse(new TextDecoder().decode(bytes)) };
+  try {
+    return { ok: true, value: JSON.parse(new TextDecoder().decode(bytes)) };
+  } catch {
+    // A client error, not a server failure: no 500 and no onError.
+    return { ok: false, response: json(400, 'invalid_json', 'The request body is not valid JSON.') };
+  }
 }

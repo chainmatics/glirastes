@@ -224,3 +224,15 @@ describe('body size', () => {
     await response.text();
   });
 });
+
+describe('malformed body', () => {
+  it.each(['{not json', '', '{"messages": [}'])('answers 400 invalid_json to %j without calling onError or the model', async (text) => {
+    const onError = vi.fn();
+    const { handler, model } = setup({ onError });
+    const response = await handler(post({}, text));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: 'invalid_json' });
+    expect(onError).not.toHaveBeenCalled();
+    expect(model.doStreamCalls).toHaveLength(0);
+  });
+});
