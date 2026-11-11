@@ -226,14 +226,16 @@ describe('nest endpoint source', () => {
     expect(observed.findings[0]!.message).toContain('enables versioning');
   });
 
-  it('reports two handlers for one route as E-INVENTORY-010 and an @All route as an exclusion', async () => {
+  it('reports two handlers for one route as route-declared-twice and an @All route as an exclusion', async () => {
     const app = await createAppFixture({
       ...APP,
       'src/tasks.controller.ts': CONTROLLER.replace('{ Body, Controller,', '{ All, Body, Controller,').replace("@Options()", "@All('any')\n  any() {\n    return {};\n  }\n  @Get()\n  again() {\n    return [];\n  }\n  @Options()"),
     }, { toolsConfig: { sources: [{ kind: 'nest' }] } });
     const observed = await createNestEndpointSource().observe(context(app.root));
 
-    expect(observed.findings).toContainEqual(expect.objectContaining({ code: 'E-INVENTORY-010', severity: 'error' }));
+    expect(observed.findings).toEqual([]);
+    const twice = byKey(observed.observations).get('GET /api/tasks')!;
+    expect(twice.findings).toContainEqual(expect.objectContaining({ code: 'route-declared-twice', severity: 'error' }));
     expect(observed.excluded).toContainEqual({ stableKey: 'ALL /api/tasks/any', reason: 'unsupported-method', origin: 'code' });
   });
 
