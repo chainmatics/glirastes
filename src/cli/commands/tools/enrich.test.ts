@@ -341,6 +341,16 @@ describe('glirastes tools enrich --managed', () => {
     expect(Object.keys(TOOLS_SUBCOMMANDS)).toContain('enrich');
   });
 
+  it('names a CI secret that is not a CI key instead of failing generically', async () => {
+    const fixture = await createAppFixture();
+    const out: string[] = [];
+    const env = { GLIRASTES_CI_KEY: 'sk-or-v1-not-a-ci-key', GLIRASTES_CONTROL_PLANE_URL: 'https://platform.example' };
+    const deps = { cwd: fixture.root, env, log: (line: string) => { out.push(line); }, error: (line: string) => { out.push(line); } };
+
+    expect(await runToolsCommand(['enrich', '--managed', '--json'], deps)).toBe(1);
+    expect(JSON.parse(out[0]!)).toEqual({ schemaVersion: 1, status: 'failed', code: 'ci_key_invalid' });
+  });
+
   it('keeps @ai-sdk/openai out of every module but the lazy loader of tools enrich', async () => {
     const sources: string[] = [];
     const walk = async (dir: string): Promise<void> => {

@@ -105,6 +105,11 @@ export class ToolJobRequestError extends Error {
   }
 }
 
+/** The shape of a CI key the Platform issues: `gl_` and 32 base62 characters. */
+export function isCiKey(value: string): boolean {
+  return /^gl_[A-Za-z0-9]{32}$/.test(value);
+}
+
 export class PlatformToolJobs {
   private readonly fetchImpl: typeof fetch;
 
@@ -114,7 +119,7 @@ export class PlatformToolJobs {
     ciKey: string;
     fetchImpl?: typeof fetch;
   }) {
-    if (!/^gl_[A-Za-z0-9]{32}$/.test(options.ciKey)) {
+    if (!isCiKey(options.ciKey)) {
       throw new ToolJobRequestError('ci_key_invalid', undefined);
     }
     this.fetchImpl = options.fetchImpl ?? fetch;

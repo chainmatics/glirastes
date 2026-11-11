@@ -12,6 +12,7 @@ import {
 } from '../../../agent/git.js';
 import { createJobModel, ModelAccessError, selectJobModel, type CreateOpenAI } from '../../../agent/openrouter.js';
 import {
+  isCiKey,
   PlatformToolJobs,
   TOOL_JOB_ITEM_LIMIT,
   ToolJobRequestError,
@@ -203,6 +204,8 @@ export async function runToolsEnrich(
   const ciKey = io.env.GLIRASTES_CI_KEY?.trim();
   const baseUrl = io.env.GLIRASTES_CONTROL_PLANE_URL?.trim();
   if (!ciKey || !baseUrl) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'managed_config_missing' });
+  // A secret pasted from the wrong clipboard is named, before any work starts.
+  if (!isCiKey(ciKey)) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'ci_key_invalid' });
   const config = loadToolsConfig(root);
   const repository = new GitRepository(root, exec);
   const head = await repository.head();
