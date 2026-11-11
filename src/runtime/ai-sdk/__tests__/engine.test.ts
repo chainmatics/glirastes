@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { createAiSdkTools } from '../engine.js';
+import {
+  AI_SDK_APPROVAL_GATE,
+  AI_SDK_APPROVAL_GATE_PASSED,
+  createAiSdkTools,
+  type AiSdkApprovalGate,
+} from '../engine.js';
 import { createJsonSchemaLike } from '../../json-schema.js';
 
 describe('createAiSdkTools', () => {
@@ -175,5 +180,193 @@ describe('createAiSdkTools', () => {
 
     await rejection;
     vi.useRealTimers();
+  });
+
+  describe('input validation at execution', () => {
+    const strictTool = () => {
+      const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+      const tools = createAiSdkTools({
+        tools: {
+          update_app: {
+            description: 'Update an app.',
+            parameters: z.object({ appId: z.string().min(1), name: z.string() }).strict(),
+            execute,
+          },
+        },
+      });
+      return { tools, execute };
+    };
+
+    it('rejects input with a field the schema does not declare before the tool runs', async () => {
+      const { tools, execute } = strictTool();
+      await expect(tools.update_app!.execute!(
+        { appId: 'a1', name: 'x', extraField: 'not-in-schema' },
+        {} as never,
+      )).rejects.toThrow(/extraField/);
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('rejects input that does not match the schema before the tool runs', async () => {
+      const { tools, execute } = strictTool();
+      await expect(tools.update_app!.execute!({ appId: '', name: 'x' }, {} as never)).rejects.toThrow(/appId/);
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('runs the tool with the parsed input, so a schema that strips unknown fields strips them', async () => {
+      const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+      const tools = createAiSdkTools({
+        tools: { note: { description: 'Note.', parameters: z.object({ text: z.string() }), execute } },
+      });
+      await tools.note!.execute!({ text: 'hi', extra: 1 }, {} as never);
+      expect(execute).toHaveBeenCalledWith({ text: 'hi' }, expect.anything());
+    });
+
+    it('validates generated JSON schemas the same way', async () => {
+      const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+      const tools = createAiSdkTools({
+        tools: {
+          create_task: {
+            description: 'Create task.',
+            parameters: createJsonSchemaLike({
+              type: 'object', additionalProperties: false, properties: { title: { type: 'string' } }, required: ['title'],
+            }),
+            execute,
+          },
+        },
+      });
+      await expect(tools.create_task!.execute!({ title: 't', extra: true }, {} as never)).rejects.toThrow();
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('keeps the model input for the AI SDK and hands the tool the schema output once', async () => {
+      // The transform makes the parsed value unfit for the schema's own input.
+      const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+      const needsApproval = vi.fn(async (_input: unknown) => false);
+      const tools = createAiSdkTools({
+        tools: { count: { description: 'Count.', parameters: z.object({ n: z.string().transform((value) => value.length) }), execute, needsApproval } },
+      });
+      const inputSchema = tools.count!.inputSchema as { validate: (value: unknown) => Promise<{ success: boolean; value: unknown }> };
+      const parsed = await inputSchema.validate({ n: 'abc' });
+      expect(parsed).toMatchObject({ success: true, value: { n: 'abc' } });
+      expect(await inputSchema.validate({ n: 1 })).toMatchObject({ success: false });
+      await (tools.count!.needsApproval as (input: unknown, options: unknown) => Promise<boolean>)(parsed.value, {});
+      expect(needsApproval).toHaveBeenCalledWith({ n: 3 }, expect.anything());
+      await tools.count!.execute!(parsed.value, {} as never);
+      expect(execute).toHaveBeenCalledWith({ n: 3 }, expect.anything());
+    });
+  });
+
+  describe('approval gate carried by the tool', () => {
+    function gated(extra: Record<string, unknown> = {}) {
+      const decisions: Array<{ toolName: string; toolCallId: string | undefined; needed: boolean }> = [];
+      const authorized: Array<{ toolName: string; toolCallId: string | undefined; input: unknown }> = [];
+      let allow = false;
+      const gate: AiSdkApprovalGate = {
+        recordDecision: (call) => { decisions.push(call); },
+        authorize: (call) => {
+          authorized.push(call);
+          if (!allow) throw new Error('approval_not_verified');
+        },
+      };
+      const execute = vi.fn(async (_input: unknown, _options?: unknown) => ({ ok: true }));
+      const source = {
+        description: 'Archive.', parameters: z.object({ id: z.string() }), execute,
+        needsApproval: async (input: { id: string }) => input.id === 'ask',
+        [AI_SDK_APPROVAL_GATE]: gate,
+      };
+      const tools = createAiSdkTools({ tools: { tasks_archive: source }, ...extra });
+      return { tools, execute, decisions, authorized, gate, allow: () => { allow = true; } };
+    }
+
+    it('asks the gate before anything runs and runs nothing it refuses', async () => {
+      const beforeToolCall = vi.fn();
+      const { tools, execute, authorized } = gated({ beforeToolCall });
+      await expect(tools.tasks_archive!.execute!({ id: 't1' }, { toolCallId: 'c1' } as never)).rejects.toThrow(/approval_not_verified/);
+      expect(authorized).toEqual([{ toolName: 'tasks_archive', toolCallId: 'c1', input: { id: 't1' } }]);
+      expect(beforeToolCall).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('marks an authorized execution for the source tool', async () => {
+      const { tools, execute, gate, allow } = gated();
+      allow();
+      await tools.tasks_archive!.execute!({ id: 't1' }, { toolCallId: 'c1' } as never);
+      expect(execute.mock.calls[0]![1]).toMatchObject({ toolCallId: 'c1', [AI_SDK_APPROVAL_GATE_PASSED]: gate });
+    });
+
+    it('reports every needsApproval answer with its tool call id', async () => {
+      const { tools, decisions } = gated();
+      const needsApproval = tools.tasks_archive!.needsApproval as (input: unknown, options: unknown) => Promise<boolean>;
+      expect(await needsApproval({ id: 'ask' }, { toolCallId: 'c1' })).toBe(true);
+      expect(await needsApproval({ id: 't1' }, { toolCallId: 'c2' })).toBe(false);
+      expect(decisions).toEqual([
+        { toolName: 'tasks_archive', toolCallId: 'c1', needed: true },
+        { toolName: 'tasks_archive', toolCallId: 'c2', needed: false },
+      ]);
+    });
+
+    it('reports the managed resolveApproval answer instead when there is one', async () => {
+      const { tools, decisions } = gated({ resolveApproval: async () => true });
+      const needsApproval = tools.tasks_archive!.needsApproval as (input: unknown, options: unknown) => Promise<boolean>;
+      expect(await needsApproval({ id: 't1' }, { toolCallId: 'c3' })).toBe(true);
+      expect(decisions).toEqual([{ toolName: 'tasks_archive', toolCallId: 'c3', needed: true }]);
+    });
+  });
+
+  describe('one schema run per tool call (p18)', () => {
+    function counted() {
+      let runs = 0;
+      let ticket = 0;
+      const seen: Record<string, unknown[]> = { needsApproval: [], execute: [], after: [] };
+      const parameters = z.object({ amount: z.number() }).transform((value) => {
+        runs += 1;
+        ticket += 1;
+        return { ...value, ticket };
+      });
+      const tools = createAiSdkTools({
+        tools: {
+          pay: {
+            description: 'Pay.',
+            parameters,
+            needsApproval: (input: unknown) => { seen.needsApproval!.push(input); return false; },
+            execute: async (input: unknown) => { seen.execute!.push(input); return { ok: true }; },
+          },
+        },
+        afterToolCall: ({ input }) => { seen.after!.push(input); },
+      });
+      return { tool: tools.pay!, seen, runs: () => runs };
+    }
+
+    it('validates, decides and executes a live call on one schema output', async () => {
+      const { tool, seen, runs } = counted();
+      const raw = { amount: 5 };
+      const validate = (tool.inputSchema as { validate: (value: unknown) => Promise<{ success: boolean; value?: unknown }> }).validate;
+      const checked = await validate(raw);
+      expect(checked).toEqual({ success: true, value: raw });
+      const options = { toolCallId: 'c1', messages: [] };
+      expect(await (tool.needsApproval as (input: unknown, extra: unknown) => Promise<boolean>)(checked.value, options)).toBe(false);
+      await tool.execute!(checked.value, options);
+      expect(runs()).toBe(1);
+      expect(seen.needsApproval).toEqual([{ amount: 5, ticket: 1 }]);
+      expect(seen.execute).toEqual([{ amount: 5, ticket: 1 }]);
+      expect(seen.after).toEqual([{ amount: 5, ticket: 1 }]);
+    });
+
+    it('parses again when the input object changed after validation', async () => {
+      const { tool, seen, runs } = counted();
+      const raw: { amount: number } = { amount: 5 };
+      await (tool.inputSchema as { validate: (value: unknown) => Promise<unknown> }).validate(raw);
+      raw.amount = 500;
+      await tool.execute!(raw, { toolCallId: 'c1', messages: [] });
+      expect(runs()).toBe(2);
+      expect(seen.execute).toEqual([{ amount: 500, ticket: 2 }]);
+    });
+
+    it('parses an approved call taken from the history once', async () => {
+      const { tool, seen, runs } = counted();
+      await tool.execute!({ amount: 500 }, { toolCallId: 'c1', messages: [] });
+      expect(runs()).toBe(1);
+      expect(seen.execute).toEqual([{ amount: 500, ticket: 1 }]);
+    });
   });
 });

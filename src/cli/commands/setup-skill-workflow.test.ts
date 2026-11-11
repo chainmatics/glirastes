@@ -69,14 +69,21 @@ describe('bundled local-first setup workflow', () => {
 
   it('keeps the web companion within what the chat handler calls the API with', async () => {
     const source = await readFile(join(findPackageSkillsDir(), 'integrating-glirastes-web/SKILL.md'), 'utf8');
-    // The default caller forwards the chat request's cookie to its own origin; an API on its own
-    // origin uses createHttpEndpointCaller, which forwards only cookie and authorization
-    // (see chat-handler-internal-caller.test.ts and http-endpoint-caller.test.ts).
-    for (const required of ['same origin', 'session cookie', 'open gap', 'endpointCaller', 'createHttpEndpointCaller',
+    // The default caller forwards the chat request's cookie to the server's own listen origin; an
+    // API in another process, also under the same public origin, uses createHttpEndpointCaller,
+    // which forwards only cookie and authorization (see chat-handler-internal-caller.test.ts and
+    // http-endpoint-caller.test.ts), or trustForwardedHeaders behind a proxy.
+    for (const required of ['same public origin', 'listens on', 'trustForwardedHeaders', 'session cookie', 'open gap', 'endpointCaller', 'createHttpEndpointCaller',
       '`cookie` and `authorization` headers', '| `nest` |', '| `react-router` |', '| `openapi` |', '| `vue-router` |',
       'examples/vue-fastapi', 'Python 3.12', 'include_in_schema=False', 'x-glirastes-effect']) {
       expect(source).toContain(required);
     }
+    // Outside Next.js the default origin is whatever the adapter put into the Request URL.
+    for (const required of ['outside Next.js it is whatever your adapter puts', 'never from `Host`', 'fixed `baseUrl`']) {
+      expect(source).toContain(required);
+    }
+    expect(source).not.toMatch(/needs\s+nothing\s+more/);
+    expect(source).not.toContain('the client could name');
     expect(source).not.toContain('createFetchInternalApiCaller');
     expect(source).not.toContain('defaultHeaders');
     expect(source).not.toContain('NestJS controllers, FastAPI');

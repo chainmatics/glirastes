@@ -213,10 +213,39 @@ export function buildPath(
           `Missing required path parameter: "${paramName}" for ${pathTemplate}`,
         );
       }
+      const text = String(value);
+      if (isDotSegment(text)) {
+        throw new Error(
+          `Invalid path parameter "${paramName}" for ${pathTemplate}: "." and ".." segments are not allowed`,
+        );
+      }
       delete payload[paramName];
-      return encodeURIComponent(String(value));
+      return encodeURIComponent(text);
     },
   );
+}
+
+/**
+ * `.` and `..` are path segments, not values: a URL parser (or the API's
+ * router) resolves them and the request lands on another route. A value is
+ * refused when, at any stage of percent-decoding it again and again, one of
+ * its segments (split at `/` and `\`) is `.` or `..`, because a proxy or
+ * framework in front of the API may decode once or several times, and some
+ * treat a backslash as a slash. Decoding is lenient (a malformed escape is
+ * left as it is, the valid ones around it are decoded) and stops at a fixed
+ * point; a value that has not reached one after a few rounds is refused.
+ */
+const MAX_DECODING_ROUNDS = 8;
+
+function isDotSegment(value: string): boolean {
+  let current = value;
+  for (let round = 0; round <= MAX_DECODING_ROUNDS; round += 1) {
+    if (current.split(/[\\/]/).some((segment) => segment === '.' || segment === '..')) return true;
+    const decoded = current.replace(/%([0-9a-fA-F]{2})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    if (decoded === current) return false;
+    current = decoded;
+  }
+  return true;
 }
 
 export function stripPathParams(

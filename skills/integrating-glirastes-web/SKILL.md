@@ -50,16 +50,39 @@ runtime next to it and a Vite Vue frontend).
    `glirastes/server/nextjs`, despite the name) takes a Web `Request` and
    returns a `Response`; adapt your framework's request object to it.
 2. Endpoint tools call the API with the user's own credentials. By default
-   `createAiChatHandler` sends each call to the origin the chat request
-   arrived on and forwards only its session cookie, so an API on the
-   same origin as the handler (a reverse proxy or the dev server routes
-   `/api` to the backend) needs nothing more. For an API on its own origin, or one that
-   authenticates by bearer token, pass
+   `createAiChatHandler` sends each call to the origin of the Web
+   `Request` URL it was given and forwards only the chat request's session
+   cookie. It does not read `Host` or `x-forwarded-host` itself, but the
+   origin is only as fixed as that URL: Next.js builds it from the address
+   its server listens on (behind a proxy, for example
+   `http://localhost:3000`); outside Next.js it is whatever your adapter puts
+   into the `Request` URL. An adapter that builds the URL from the `Host`
+   header (as many Express or NestJS examples do) lets any client choose
+   where the calls, with the user's cookie, go. Outside Next.js, therefore
+   either pass `endpointCaller` with a fixed `baseUrl` (below) or build the
+   `Request` URL from a fixed origin of your own, never from `Host`. When the API runs in another process, also when a front proxy
+   puts it under the same public origin as the handler (a proxy that routes
+   `/api` to the backend, as 0.4.0 apps often did), the default calls miss
+   it: pass
    `endpointCaller: (request) => createHttpEndpointCaller({ baseUrl: apiOrigin, request })`
-   (from `glirastes/server`): every call goes to that fixed origin and
-   carries only the `cookie` and `authorization` headers of that chat
-   request. Do not use a service account or add credentials the user did not
+   (from `glirastes/server`) with the API's fixed origin as the handler's
+   server can reach it (the public origin or an internal address). Every
+   call goes to that origin and carries only the
+   `cookie` and `authorization` headers of that chat request. Do the same for an API on
+   its own origin and for one that authenticates by bearer token. Only when
+   every request reaches the handler through a proxy that sets
+   `x-forwarded-host` may you set `trustForwardedHeaders: true` instead;
+   if the handler can also be reached directly, any client can then point
+   the calls, with the user's cookie, at any host. An API served by the
+   handler's own server (a NestJS app that also mounts the handler) is
+   reached by the default only when the adapter builds the `Request` URL
+   from that server's fixed own origin. Do not use a service account or add credentials the user did not
    send; an API that needs another credential is an open gap (step 5).
+   Tell the user to set `GLIRASTES_APPROVAL_SECRET` (at least 16 random
+   characters, the same on every instance) in production: the handler signs the
+   approvals it asks for with it and refuses to serve approvals without it. A
+   front end on another origin than the handler must be listed in
+   `allowedOrigins`.
    In NestJS, validate input with a Zod pipe (`@Body(new ZodValidationPipe(schema))`,
    `@Query(...)`) or with `createZodDto` and a global `ZodValidationPipe`,
    guard with `@UseGuards` or a global guard, and keep `@Controller` paths and

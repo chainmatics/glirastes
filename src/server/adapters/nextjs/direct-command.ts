@@ -14,6 +14,7 @@ import { UNKNOWN_TURN_COST } from '../../../runtime/metrics/cost.js';
 import type { TurnMetricsRecorder } from '../../../runtime/metrics/turn-recorder.js';
 import type { PiiShield, ToolRegistry } from '../../../types.js';
 import { NON_DOMAIN_TOOL_NAMES } from './tool-discovery.js';
+import type { ApprovalBinder, ApprovalStore } from './approval-binding.js';
 
 /** A direct command in the latest user message, and where its turn stands. */
 export interface DirectCommandRequest {
@@ -22,6 +23,8 @@ export interface DirectCommandRequest {
   /** The user's answer to this command's confirmation request. */
   readonly approval?: {
     readonly toolCallId: string;
+    /** The approval id the client sent back; `runDirectCommand` verifies its binding. */
+    readonly approvalId: string;
     readonly approved: boolean;
   };
   /** The command already ran or was refused; nothing is left to do. */
@@ -59,7 +62,14 @@ export function resolveDirectCommand(messages: ReadonlyArray<unknown>): DirectCo
   const parts = isRecord(next) && next.role === 'assistant' && Array.isArray(next.parts) ? next.parts : [];
   const call = parts.find((part): part is MessageRecord => isRecord(part) && isChatCommandToolCallId(part.toolCallId));
   if (call?.state === 'approval-responded' && isRecord(call.approval)) {
-    return { ...parsed, approval: { toolCallId: call.toolCallId as string, approved: call.approval.approved === true } };
+    return {
+      ...parsed,
+      approval: {
+        toolCallId: call.toolCallId as string,
+        approvalId: typeof call.approval.id === 'string' ? call.approval.id : '',
+        approved: call.approval.approved === true,
+      },
+    };
   }
   return { ...parsed, settled: true };
 }
@@ -180,6 +190,17 @@ export interface RunDirectCommandOptions {
   tools: Record<string, unknown>;
   managedTurn?: ManagedTurnGuard;
   turnMetrics?: TurnMetricsRecorder;
+  /**
+   * Binds the approval request to the command's tool call and verifies the
+   * answer. Without it a tool that needs confirmation neither asks nor runs
+   * (`approval_binding_unavailable`): an unbound approval would let a forged
+   * history run the command.
+   */
+  approvals?: ApprovalBinder;
+  /** Optional single-use store for verified approvals. */
+  approvalStore?: ApprovalStore;
+  /** The scope handed to the store with each approval (see `approvalScope`); default `''`. */
+  approvalScope?: string;
   onError?: (error: unknown) => void;
   /** Suffix of the tool call and approval ids; default 20 random hex characters. */
   generateId?: () => string;
@@ -252,6 +273,35 @@ export async function runDirectCommand(options: RunDirectCommandOptions): Promis
           end(0, 0);
           return;
         }
+        if (command.approval) {
+          // The approval comes from the client's history: it runs only if
+          // this server asked for exactly this call.
+          const refuse = (code: string) => {
+            writer.write({ type: 'tool-output-error', toolCallId, errorText: code });
+            end(0, 0);
+          };
+          const verified = options.approvals?.verify({
+            approvalId: command.approval.approvalId,
+            toolCallId,
+            toolName: name,
+            input: command.invocation.args,
+          });
+          if (!verified?.ok) {
+            refuse(verified?.code ?? 'approval_not_issued');
+            return;
+          }
+          if (options.approvalStore) {
+            try {
+              if (!(await options.approvalStore.consume(verified.key, verified.expiresAtMs, { scope: options.approvalScope ?? '' }))) {
+                refuse('approval_already_used');
+                return;
+              }
+            } catch {
+              refuse('approval_store_unavailable');
+              return;
+            }
+          }
+        }
         const tool = createAiSdkTools({
           tools: { [name]: options.tools[name] },
           ...(managedTurn
@@ -269,21 +319,32 @@ export async function runDirectCommand(options: RunDirectCommandOptions): Promis
           let needsApproval: boolean;
           try {
             needsApproval = typeof tool.needsApproval === 'function'
-              ? Boolean(await (tool.needsApproval as (input: unknown, options: unknown) => unknown)(parsed.data, executionOptions))
+              ? Boolean(await (tool.needsApproval as (input: unknown, options: unknown) => unknown)(command.invocation.args, executionOptions))
               : tool.needsApproval === true;
           } catch (error) {
             fail(failureCode(error));
             return;
           }
           if (needsApproval) {
-            writer.write({ type: 'tool-approval-request', approvalId: `glirastes-approval-${nextId()}`, toolCallId });
+            if (!options.approvals) {
+              writer.write({ type: 'tool-output-error', toolCallId, errorText: 'approval_binding_unavailable' });
+              end(0, 0);
+              return;
+            }
+            writer.write({
+              type: 'tool-approval-request',
+              approvalId: options.approvals.issue({ toolCallId, toolName: name, input: command.invocation.args }),
+              toolCallId,
+            });
             end(0, 0);
             return;
           }
         }
         let output: unknown;
         try {
-          output = await tool.execute!(parsed.data, executionOptions);
+          // The wrapped tool parses the arguments itself and hands the tool
+          // the schema output once; parsing them here first would parse twice.
+          output = await tool.execute!(command.invocation.args, executionOptions);
         } catch (error) {
           fail(failureCode(error));
           return;

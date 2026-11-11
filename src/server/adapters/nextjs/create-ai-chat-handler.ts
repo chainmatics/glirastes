@@ -14,6 +14,22 @@ import {
   resolveClarificationResume,
 } from './clarification-resume.js';
 import { scopePipelineTools } from './scope-pipeline-tools.js';
+import { checkRequestHeaders, readJsonBody } from './request-guards.js';
+import {
+  ApprovalHistoryError,
+  ApprovalSecretMissingError,
+  approvalScope,
+  assertApprovalMaxAge,
+  assertUnambiguousToolHistory,
+  bindApprovalRequests,
+  createApprovalExecutionGate,
+  defaultApprovalStore,
+  enforceApprovalBindings,
+  gateApprovalTools,
+  resolveApprovalBinder,
+  type ApprovalBinder,
+  type VerifiedApproval,
+} from './approval-binding.js';
 import {
   pseudonymizeCommandToolInputs,
   resolveDirectCommand,
@@ -74,7 +90,17 @@ import {
  * calls streamText() themselves with full type safety.
  */
 export interface StreamHandlerContext {
-  /** AI tools (output of toolsToAiTools, RBAC-filtered) */
+  /**
+   * AI tools (output of toolsToAiTools, RBAC-filtered). Every tool that can
+   * ask for approval carries the execution gate of this request: it executes
+   * only for an approval the handler verified (exact tool call id, tool name
+   * and input, once) or for a live call whose `needsApproval` answered false,
+   * and refuses with `approval_not_verified` otherwise, also when the stream
+   * handler builds its own AI SDK tools from these objects. The gate needs the
+   * options the AI SDK passes (`toolCallId`): a stream handler that calls
+   * `tools[name].execute(input)` itself, without them, is refused for every
+   * tool that can ask for approval.
+   */
   tools: Record<string, unknown>;
   /** Processed messages (after guardrails, sliced to context window) */
   messages: unknown[];
@@ -124,6 +150,14 @@ export interface StreamHandlerContext {
   turnMetrics?: TurnMetricsRecorder;
   /** Price table configured on the handler (`modelPricing`). */
   modelPricing?: RuntimePriceTable;
+  /**
+   * Binds the approval requests of a UI message stream to the tool calls
+   * they announce. The built-in stream handler pipes its UI stream through
+   * this. A custom stream handler that lets tools ask for approval must do
+   * the same with the stream it returns; an approval it issues otherwise is
+   * refused on the next request (`approval_not_issued`).
+   */
+  bindApprovalRequests?: <T extends { type: string }>(stream: ReadableStream<T>) => ReadableStream<T>;
 }
 
 /**
@@ -140,6 +174,11 @@ export interface AiChatHandlerFullConfig extends AiChatHandlerConfig {
    * This is where the consumer calls streamText() / toDataStreamResponse().
    *
    * When omitted, the built-in default handler is used.
+   *
+   * The handler ignores a client-set `providerExecuted` flag only on tools of
+   * its own registry: for an approval-gated tool that a custom stream handler
+   * adds itself, a client can set the flag on the approved part, and the
+   * approval is then consumed without the call running.
    */
   streamHandler?: (ctx: StreamHandlerContext) => Promise<Response>;
 }
@@ -651,7 +690,8 @@ async function defaultStreamHandler(
         },
       });
 
-      writer.merge(result.toUIMessageStream({ onError: () => 'AI request failed' }));
+      const uiStream = result.toUIMessageStream({ onError: () => 'AI request failed' });
+      writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
       } catch (error) {
@@ -744,8 +784,17 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     metrics,
     modelPricing: configuredModelPricing,
     directCommands = true,
-    endpointCaller = createInternalApiCallerFromRequest,
+    trustForwardedHeaders = false,
+    endpointCaller = (request: Request) => createInternalApiCallerFromRequest(request, { trustForwardedHeaders }),
+    approvalSecret,
+    approvalMaxAgeMs,
+    approvalStore: configuredApprovalStore,
+    approvalScope: approvalScopeOf,
+    allowedOrigins,
+    crossOriginProtection,
+    maxBodyBytes,
   } = config;
+  if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
   // Without a callback a failed turn would only say "AI request failed" to
   // the user and nothing to the developer. Name only: provider errors can
   // carry request and response content.
@@ -763,6 +812,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       + 'managedRuntime; use metrics for content-free runtime metrics',
     );
   }
+  // Single use without configuration: one process's memory. Instances that
+  // share a secret need a shared store to refuse a replay across instances.
+  const approvalStore = configuredApprovalStore ?? defaultApprovalStore();
   const modelPricing = configuredModelPricing
     ? RuntimePriceTableSchema.parse(configuredModelPricing)
     : undefined;
@@ -847,17 +899,116 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     return kept;
   };
 
+  /**
+   * The approval binder of a request, and the history with every approved
+   * call that this server did not issue (or that is expired or used) denied.
+   * Runs once the registry is known: whether tools can ask for approval
+   * decides if a missing secret is an error.
+   */
+  /**
+   * Who an approval of this request is for: the managed principal, else the
+   * app's `approvalScope(req)` (encoded as a one-element JSON array, so it
+   * cannot equal a managed scope), else `''`: the approval is then bound to
+   * no user, and `storeScopeOf` keeps the quota per caller instead.
+   */
+  async function requestApprovalScope(req: Request, managedTurn: ManagedTurnGuard | undefined): Promise<string> {
+    if (managedTurn) return approvalScope(managedTurn.snapshot.principal);
+    if (!approvalScopeOf) return '';
+    const scope = await approvalScopeOf(req);
+    if (typeof scope !== 'string') throw new TypeError('approvalScope must return a string');
+    return JSON.stringify([scope]);
+  }
+
+  /**
+   * The scope the approval store counts a request's approvals under. With a
+   * managed principal or `approvalScope`, the signed scope. Otherwise a key
+   * per caller derived from the request's credentials (`Authorization`, else
+   * `Cookie`), HMAC-ed with the approval secret and never kept raw, so one
+   * caller with fixed credentials cannot use up everyone's quota (varying
+   * them gives a fresh quota; only the store's global limit bounds that).
+   * It only partitions the quota: it
+   * is not signed into the approval id (a cookie may rotate between the
+   * approval request and its answer), and single use is checked by the
+   * approval id across all keys. A request without credentials has `''`.
+   */
+  function storeScopeOf(req: Request, scope: string, binder: ApprovalBinder): string {
+    if (scope !== '') return scope;
+    const credentials = req.headers.get('authorization') ?? req.headers.get('cookie');
+    if (!credentials || !binder.callerQuotaKey) return '';
+    return binder.callerQuotaKey(credentials);
+  }
+
+  async function secureApprovals(
+    req: Request,
+    registry: ToolRegistry,
+    messages: unknown[],
+    managedTurn: ManagedTurnGuard | undefined,
+    scope: string,
+  ): Promise<{ binder: ApprovalBinder; storeScope: string; messages: unknown[]; verified: VerifiedApproval[] }> {
+    const binder = resolveApprovalBinder({
+      secret: approvalSecret,
+      maxAgeMs: approvalMaxAgeMs,
+      scope,
+      // The managed policy and Lancer approvals can ask for approval of a
+      // tool that declares none.
+      hasApprovalTools: Boolean(managedTurn)
+        || Boolean(lancer?.approvals)
+        || Object.values(registry).some((tool) => Boolean(tool.needsApproval)),
+    });
+    const storeScope = storeScopeOf(req, scope, binder);
+    const checked = await enforceApprovalBindings(messages, {
+      binder, store: approvalStore, scope: storeScope, localToolNames: new Set(Object.keys(registry)),
+    });
+    return { binder, storeScope, messages: checked.messages, verified: checked.verified };
+  }
+
+  /**
+   * The tools handed to the stream handler, each one that can ask for
+   * approval behind the execution gate of this request: it runs only for an
+   * approval verified above (exact tool call id, tool name and input) or for
+   * a live call whose `needsApproval` said no. A managed policy can ask for
+   * approval of any domain tool, so with a managed turn every domain tool is
+   * gated; the handler's own built-ins are not.
+   */
+  function gateTools<T extends Record<string, unknown>>(
+    tools: T,
+    verified: ReadonlyArray<VerifiedApproval>,
+    managedTurn: ManagedTurnGuard | undefined,
+    builtinNames: ReadonlyArray<string>,
+  ): T {
+    return gateApprovalTools(
+      tools,
+      createApprovalExecutionGate(verified),
+      (name, tool) => Boolean(tool.needsApproval) || (Boolean(managedTurn) && !builtinNames.includes(name)),
+    );
+  }
+
   async function handler(req: Request): Promise<Response> {
+    const refused = checkRequestHeaders(req, { allowedOrigins, crossOriginProtection });
+    if (refused) return refused;
     reportDefaultsOnce();
     let turnMetrics: TurnMetricsRecorder | undefined;
     try {
-      const { messages: requestMessages, glirastesClientActions } = await req.json();
+      const body = await readJsonBody(req, maxBodyBytes);
+      if (!body.ok) return body.response;
+      const { messages: requestMessages, glirastesClientActions } = body.value as {
+        messages?: unknown;
+        glirastesClientActions?: unknown;
+      };
 
       if (!Array.isArray(requestMessages)) {
         return new Response(
           JSON.stringify({ error: 'messages must be an array' }),
           { status: 400, headers: { 'Content-Type': 'application/json' } },
         );
+      }
+      // A history the AI SDK could read in two ways (a tool call id in two
+      // parts, a non-boolean approval answer) is refused before anything else.
+      try {
+        assertUnambiguousToolHistory(requestMessages);
+      } catch (error) {
+        if (error instanceof ApprovalHistoryError) return approvalHistoryRefusal(error);
+        throw error;
       }
 
       // A direct command (`/` command or entity action) runs its tool without
@@ -875,7 +1026,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           : requestMessages);
 
       // Build tool context
-      const toolContext = buildToolContext(req, { locale });
+      const toolContext = buildToolContext(req, { locale, trustForwardedHeaders });
       const clientActions = readClientActions(glirastesClientActions);
       if (clientActions) toolContext.runtime = { ...toolContext.runtime, clientActions };
       const requestStart = Date.now();
@@ -1034,6 +1185,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ...contractRejectionReporter(turnMetrics),
         };
         const registry = staticTools ?? await loadTools!(endpointToolContext);
+        const commandScope = await requestApprovalScope(req, managedTurn);
+        const { binder: commandBinder, storeScope: commandStoreScope } = await secureApprovals(req, registry, [], managedTurn, commandScope);
         let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, toolOptions);
         // The result stays in the chat history that later model turns send to the model.
         if (piiShield) {
@@ -1048,6 +1201,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           tools: commandTools,
           managedTurn,
           turnMetrics,
+          approvals: commandBinder,
+          approvalStore,
+          approvalScope: commandStoreScope,
           onError: (error) => onError?.(error, req),
         });
       }
@@ -1101,6 +1257,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           registry,
           [followupTool, clarificationTool, planTool],
         );
+        const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
+        processedMessages = pipelineApprovals.messages;
 
         // Extract user input for pipeline
         let userText = clarificationResume?.routingText
@@ -1196,6 +1354,19 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           // focused selection.
           aiTools = keepAlwaysOn(aiTools, unscopedAiTools);
         }
+        // An approval verified (and consumed) above answers a call that an
+        // earlier request already routed. Routing for this request must not
+        // turn that approved call into a tool error, so its tool stays in the
+        // set (the AI SDK runs approved calls from `tools`, not `activeTools`).
+        // Only tools with a verified approval come back; a new call to one of
+        // them still needs its own approval. A guardrail block keeps no tools,
+        // so the approved call then ends as a tool error and is not run.
+        if (!pipelineResult.blocked) {
+          for (const { toolName } of pipelineApprovals.verified) {
+            const approvedTool = unscopedAiTools[toolName];
+            if (approvedTool && !aiTools[toolName]) aiTools = { ...aiTools, [toolName]: approvedTool };
+          }
+        }
 
         // Resolve model — config callback > pipeline instance > error
         let model: unknown;
@@ -1287,6 +1458,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (lancer?.approvals) {
           aiTools = wrapToolsWithLancerApprovals(aiTools, lancer.approvals, sessionId) as typeof aiTools;
         }
+        aiTools = gateTools(aiTools, pipelineApprovals.verified, managedTurn, handlerBuiltinNames);
 
         const pipelineStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
           sessionId,
@@ -1318,6 +1490,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           handlerBuiltinToolNames: discoveryController
             ? [...handlerBuiltinNames, 'find_tools']
             : handlerBuiltinNames,
+          bindApprovalRequests: (stream) => bindApprovalRequests(stream, pipelineApprovals.binder),
         });
       }
 
@@ -1345,6 +1518,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       registry = withAlwaysOnBuiltins(registry);
       const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool, planTool]);
+      const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
+      processedMessages = legacyApprovals.messages;
       const allToolNames = Object.keys(registry)
         .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
 
@@ -1432,6 +1607,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (lancer?.approvals) {
         aiTools = wrapToolsWithLancerApprovals(aiTools, lancer.approvals, legacySessionId || sessionId) as typeof aiTools;
       }
+      aiTools = gateTools(aiTools, legacyApprovals.verified, managedTurn, handlerBuiltinNames);
 
       const legacyStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
         sessionId: legacySessionId || sessionId,
@@ -1463,10 +1639,21 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         handlerBuiltinToolNames: discoveryController
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,
+        bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder),
       });
     } catch (error) {
+      if (error instanceof ApprovalHistoryError) {
+        turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
+        return approvalHistoryRefusal(error);
+      }
       turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
       onError?.(error, req);
+      if (error instanceof ApprovalSecretMissingError) {
+        return new Response(
+          JSON.stringify({ error: error.code, message: error.message }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
       return new Response(
         JSON.stringify({ error: 'AI request failed' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } },
@@ -1508,6 +1695,13 @@ function deriveSessionId(messages: unknown[]): string {
     }
   }
   return `ai-${globalThis.crypto.randomUUID()}`;
+}
+
+function approvalHistoryRefusal(error: ApprovalHistoryError): Response {
+  return new Response(
+    JSON.stringify({ error: error.code, message: error.message }),
+    { status: 400, headers: { 'Content-Type': 'application/json' } },
+  );
 }
 
 async function anonymizeMessages(
