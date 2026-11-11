@@ -16,7 +16,9 @@ import {
 import { scopePipelineTools } from './scope-pipeline-tools.js';
 import { checkRequestHeaders, readJsonBody } from './request-guards.js';
 import {
+  ApprovalHistoryError,
   ApprovalSecretMissingError,
+  assertUnambiguousToolHistory,
   bindApprovalRequests,
   enforceApprovalBindings,
   resolveApprovalBinder,
@@ -912,6 +914,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           { status: 400, headers: { 'Content-Type': 'application/json' } },
         );
       }
+      // A history the AI SDK could read in two ways (a tool call id in two
+      // parts, a non-boolean approval answer) is refused before anything else.
+      try {
+        assertUnambiguousToolHistory(requestMessages);
+      } catch (error) {
+        if (error instanceof ApprovalHistoryError) return approvalHistoryRefusal(error);
+        throw error;
+      }
 
       // A direct command (`/` command or entity action) runs its tool without
       // the model; the model sees earlier commands only by their label.
@@ -1527,6 +1537,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder),
       });
     } catch (error) {
+      if (error instanceof ApprovalHistoryError) {
+        turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
+        return approvalHistoryRefusal(error);
+      }
       turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
       onError?.(error, req);
       if (error instanceof ApprovalSecretMissingError) {
@@ -1576,6 +1590,13 @@ function deriveSessionId(messages: unknown[]): string {
     }
   }
   return `ai-${globalThis.crypto.randomUUID()}`;
+}
+
+function approvalHistoryRefusal(error: ApprovalHistoryError): Response {
+  return new Response(
+    JSON.stringify({ error: error.code, message: error.message }),
+    { status: 400, headers: { 'Content-Type': 'application/json' } },
+  );
 }
 
 async function anonymizeMessages(
