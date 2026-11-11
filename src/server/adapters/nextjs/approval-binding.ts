@@ -41,7 +41,11 @@ export type ApprovalDenialCode =
   | 'approval_already_used'
   | 'approval_store_unavailable';
 
-/** Optional single-use store. `consume` returns false when the id was used before. */
+/**
+ * Optional single-use store. `consume` returns false when the id was used
+ * before. It receives the canonical id of a verified approval, never the text
+ * the client sent.
+ */
 export interface ApprovalStore {
   consume: (approvalId: string, expiresAtMs: number) => boolean | Promise<boolean>;
 }
@@ -53,7 +57,12 @@ export interface ApprovalCall {
 }
 
 export type ApprovalVerification =
-  | { readonly ok: true; readonly expiresAtMs: number }
+  /**
+   * `key` names the approval for single use: the canonical id, rebuilt from
+   * the issue time, the nonce and the MAC this binder computed, never from the
+   * presented text.
+   */
+  | { readonly ok: true; readonly expiresAtMs: number; readonly key: string }
   | { readonly ok: false; readonly code: 'approval_not_issued' | 'approval_expired' };
 
 export interface ApprovalBinder {
@@ -72,6 +81,17 @@ export class ApprovalSecretMissingError extends Error {
     );
     this.name = 'ApprovalSecretMissingError';
   }
+}
+
+const NONCE_BYTES = 16;
+const MAC_BYTES = 32;
+/** A decimal without sign or leading zeros, as `String(Date.now())` writes it. */
+const CANONICAL_ISSUED_AT = /^(?:0|[1-9]\d{0,15})$/;
+
+function isCanonicalBase64Url(text: string, bytes: number): boolean {
+  if (!/^[A-Za-z0-9_-]+$/.test(text)) return false;
+  const decoded = Buffer.from(text, 'base64url');
+  return decoded.length === bytes && decoded.toString('base64url') === text;
 }
 
 /** JSON with sorted keys, so an input hashes the same after any JSON round trip. */
@@ -115,21 +135,29 @@ export function createApprovalBinder(options: {
     maxAgeMs,
     issue: (call) => {
       const issuedAt = String(now());
-      const nonce = randomBytes(16).toString('base64url');
+      const nonce = randomBytes(NONCE_BYTES).toString('base64url');
       return `${ID_PREFIX}${issuedAt}.${nonce}.${mac(issuedAt, nonce, call).toString('base64url')}`;
     },
     verify: (call) => {
       const notIssued = { ok: false, code: 'approval_not_issued' } as const;
       if (typeof call.approvalId !== 'string' || !call.approvalId.startsWith(ID_PREFIX)) return notIssued;
       const [issuedAt, nonce, presented, ...rest] = call.approvalId.slice(ID_PREFIX.length).split('.');
-      if (!issuedAt || !nonce || !presented || rest.length > 0 || !/^\d{1,16}$/.test(issuedAt)) return notIssued;
+      // Every segment must be spelled exactly as `issue` spells it: Node's
+      // base64url decoder accepts padding, stray characters and changed low
+      // bits, which would give one approval many ids.
+      if (!issuedAt || !nonce || !presented || rest.length > 0 || !CANONICAL_ISSUED_AT.test(issuedAt)) return notIssued;
+      if (!isCanonicalBase64Url(nonce, NONCE_BYTES) || !isCanonicalBase64Url(presented, MAC_BYTES)) return notIssued;
       const expected = mac(issuedAt, nonce, call);
       const actual = Buffer.from(presented, 'base64url');
       if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return notIssued;
       const age = now() - Number(issuedAt);
       if (age < -CLOCK_SKEW_MS) return notIssued;
       if (age > maxAgeMs) return { ok: false, code: 'approval_expired' };
-      return { ok: true, expiresAtMs: Number(issuedAt) + maxAgeMs };
+      return {
+        ok: true,
+        expiresAtMs: Number(issuedAt) + maxAgeMs,
+        key: `${ID_PREFIX}${issuedAt}.${nonce}.${expected.toString('base64url')}`,
+      };
     },
   };
 }
@@ -330,7 +358,6 @@ export async function enforceApprovalBindings(
       const code = settled
         ? bindingCode({ record, toolName, toolCallId, approvalId, binder: options.binder })
         : await denialCode({ record, toolName, toolCallId, approvalId, usedIds, ...options });
-      usedIds.add(approvalId);
       if (!code) {
         if (!settled && record.providerExecuted !== true) verified.push({ toolCallId, toolName, input: record.input });
         parts.push(part);
@@ -372,7 +399,7 @@ async function denialCode(args: {
   toolName: string;
   toolCallId: string;
   approvalId: string;
-  usedIds: ReadonlySet<string>;
+  usedIds: Set<string>;
   binder: ApprovalBinder;
   store?: ApprovalStore;
 }): Promise<ApprovalDenialCode | undefined> {
@@ -383,10 +410,11 @@ async function denialCode(args: {
     input: args.record.input,
   });
   if (!verified.ok) return verified.code;
-  if (args.usedIds.has(args.approvalId)) return 'approval_already_used';
+  if (args.usedIds.has(verified.key)) return 'approval_already_used';
+  args.usedIds.add(verified.key);
   if (args.store) {
     try {
-      if (!(await args.store.consume(args.approvalId, verified.expiresAtMs))) return 'approval_already_used';
+      if (!(await args.store.consume(verified.key, verified.expiresAtMs))) return 'approval_already_used';
     } catch {
       return 'approval_store_unavailable';
     }

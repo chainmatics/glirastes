@@ -217,6 +217,21 @@ describe('runDirectCommand', () => {
       expect(fixture.execute).not.toHaveBeenCalled();
     });
 
+    it('keeps single use for another spelling of the same id (padding, a changed low bit)', async () => {
+      const fixture = await asked();
+      const seen = new Set<string>();
+      const approvalStore = { consume: async (id: string) => (seen.has(id) ? false : (seen.add(id), true)) };
+      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+      const id = fixture.approvalId;
+      const flipped = id.slice(0, -1) + alphabet[alphabet.indexOf(id.at(-1)!) ^ 1];
+      for (const variant of [id, `${id}=`, flipped, `${id}!`]) {
+        await chunks(await runDirectCommand({
+          command: fixture.answer(variant), registry: fixture.tools, tools: fixture.aiTools, approvals: binder, approvalStore,
+        }));
+      }
+      expect(fixture.execute).toHaveBeenCalledTimes(1);
+    });
+
     it('runs an approval once when a single-use store is configured', async () => {
       const fixture = await asked();
       const seen = new Set<string>();

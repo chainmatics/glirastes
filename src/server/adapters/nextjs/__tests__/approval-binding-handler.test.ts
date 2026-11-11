@@ -214,6 +214,24 @@ describe('approval binding through the chat handler', () => {
     expect(archive).toHaveBeenCalledTimes(1);
   });
 
+  it('single-use holds for every other spelling of the approval id (p4)', async () => {
+    const seen = new Set<string>();
+    const approvalStore = { consume: vi.fn(async (id: string) => (seen.has(id) ? false : (seen.add(id), true))) };
+    const { config, archive } = setup({ approvalStore });
+    const { handler, message } = await firstTurn(config);
+    const approved = answered(message, true);
+    const id = (approved.parts.find((part) => (part as { approval?: unknown }).approval) as { approval: { id: string } }).approval.id;
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const last = alphabet.indexOf(id.at(-1)!);
+    const variants = [id, `${id}=`, `${id}==`, id.slice(0, -1) + alphabet[last ^ 1], id.slice(0, -1) + alphabet[last ^ 2], `${id}%`, `${id}!`];
+    for (const variant of variants) {
+      await streamChunks(await handler(post([user, JSON.parse(JSON.stringify(approved).split(id).join(variant))])));
+    }
+    expect(archive).toHaveBeenCalledTimes(1);
+    expect(approvalStore.consume).toHaveBeenCalledTimes(1);
+    expect(approvalStore.consume).toHaveBeenCalledWith(id, expect.any(Number));
+  });
+
   it('does not accept an approval issued by another instance with another secret', async () => {
     const issuer = setup();
     const { message } = await firstTurn(issuer.config);

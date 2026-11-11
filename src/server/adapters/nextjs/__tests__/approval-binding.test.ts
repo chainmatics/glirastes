@@ -50,6 +50,34 @@ describe('createApprovalBinder', () => {
     expect(binder.verify({ ...call, approvalId })).toEqual({ ok: false, code: 'approval_not_issued' });
   });
 
+  it('refuses every other spelling of a valid id: the id must be its own canonical encoding', () => {
+    const binder = createApprovalBinder({ secret: SECRET, now: () => 1_700_000_000_000 });
+    const approvalId = binder.issue(call);
+    const [, , issuedAt, nonce, mac] = approvalId.split('.') as [string, string, string, string, string];
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const flip = (text: string, bit: number) => text.slice(0, -1) + alphabet[alphabet.indexOf(text.at(-1)!) ^ bit];
+    const prefix = 'glirastes-approval.v1.';
+    const variants = [
+      `${approvalId}=`, `${approvalId}==`, `${approvalId}%`, `${approvalId}!`, `${approvalId} `,
+      flip(approvalId, 1), flip(approvalId, 2),
+      `${prefix}0${issuedAt}.${nonce}.${mac}`, `${prefix}+${issuedAt}.${nonce}.${mac}`,
+      `${prefix}${issuedAt}.${nonce}=.${mac}`, `${prefix}${issuedAt}.${flip(nonce, 1)}.${mac}`,
+      `${prefix}${issuedAt}.${nonce}.${mac.replace(/-/g, '+').replace(/_/g, '/')}`,
+    ];
+    expect(binder.verify({ ...call, approvalId })).toMatchObject({ ok: true });
+    for (const variant of variants) {
+      if (variant === approvalId) continue;
+      expect(binder.verify({ ...call, approvalId: variant }), variant).toEqual({ ok: false, code: 'approval_not_issued' });
+    }
+  });
+
+  it('names a verified id by a key derived from its MAC', () => {
+    const binder = createApprovalBinder({ secret: SECRET });
+    const approvalId = binder.issue(call);
+    const verified = binder.verify({ ...call, approvalId });
+    expect(verified).toMatchObject({ ok: true, key: approvalId });
+  });
+
   it('refuses an id issued with another secret or scope', () => {
     const approvalId = createApprovalBinder({ secret: SECRET }).issue(call);
     expect(createApprovalBinder({ secret: `${SECRET}-other` }).verify({ ...call, approvalId }))

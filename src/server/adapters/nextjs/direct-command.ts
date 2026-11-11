@@ -290,7 +290,7 @@ export async function runDirectCommand(options: RunDirectCommandOptions): Promis
           }
           if (options.approvalStore) {
             try {
-              if (!(await options.approvalStore.consume(command.approval.approvalId, verified.expiresAtMs))) {
+              if (!(await options.approvalStore.consume(verified.key, verified.expiresAtMs))) {
                 refuse('approval_already_used');
                 return;
               }
