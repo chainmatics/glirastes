@@ -17,9 +17,12 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 - **Endpoint tools call the chat handler's own server, not the public
   origin.** The default endpoint caller and `runtime.origin`
   (`extractOrigin`, `buildRuntimeContext`, `buildToolContext`) use the origin
-  of the chat request's URL, which is the address the server listens on
-  (behind a proxy, for example `http://localhost:3000`), and ignore `Host`,
-  `x-forwarded-host` and `x-forwarded-proto`. 0.4.0 used those headers, so
+  of the chat request's URL and ignore `Host`, `x-forwarded-host` and
+  `x-forwarded-proto`. In Next.js that URL comes from the address the server
+  listens on (behind a proxy, for example `http://localhost:3000`); outside
+  Next.js it is whatever the adapter puts into the Web `Request` URL, so an
+  adapter must build it from a fixed own origin, never from `Host`, or pass
+  `endpointCaller` with a fixed `baseUrl`. 0.4.0 used those headers, so
   any client that reached the app directly could point the server's tool
   calls, with the user's cookie, at any host (`169.254.169.254`, an internal
   service). An app whose API runs in another process, also one that a front

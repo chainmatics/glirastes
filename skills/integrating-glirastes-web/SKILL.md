@@ -50,12 +50,17 @@ runtime next to it and a Vite Vue frontend).
    `glirastes/server/nextjs`, despite the name) takes a Web `Request` and
    returns a `Response`; adapt your framework's request object to it.
 2. Endpoint tools call the API with the user's own credentials. By default
-   `createAiChatHandler` sends each call to the origin of the chat
-   request's URL, which is the address the handler's own server listens on
-   (behind a proxy, for example `http://localhost:3000`), never to a `Host`
-   or `x-forwarded-host` the client could name, and forwards only its
-   session cookie. That reaches only routes the handler's own server
-   serves. When the API runs in another process, also when a front proxy
+   `createAiChatHandler` sends each call to the origin of the Web
+   `Request` URL it was given and forwards only the chat request's session
+   cookie. It does not read `Host` or `x-forwarded-host` itself, but the
+   origin is only as fixed as that URL: Next.js builds it from the address
+   its server listens on (behind a proxy, for example
+   `http://localhost:3000`); outside Next.js it is whatever your adapter puts
+   into the `Request` URL. An adapter that builds the URL from the `Host`
+   header (as many Express or NestJS examples do) lets any client choose
+   where the calls, with the user's cookie, go. Outside Next.js, therefore
+   either pass `endpointCaller` with a fixed `baseUrl` (below) or build the
+   `Request` URL from a fixed origin of your own, never from `Host`. When the API runs in another process, also when a front proxy
    puts it under the same public origin as the handler (a proxy that routes
    `/api` to the backend, as 0.4.0 apps often did), the default calls miss
    it: pass
@@ -69,8 +74,9 @@ runtime next to it and a Vite Vue frontend).
    `x-forwarded-host` may you set `trustForwardedHeaders: true` instead;
    if the handler can also be reached directly, any client can then point
    the calls, with the user's cookie, at any host. An API served by the
-   handler's own server (a NestJS app that also mounts the handler) needs
-   nothing more. Do not use a service account or add credentials the user did not
+   handler's own server (a NestJS app that also mounts the handler) is
+   reached by the default only when the adapter builds the `Request` URL
+   from that server's fixed own origin. Do not use a service account or add credentials the user did not
    send; an API that needs another credential is an open gap (step 5).
    Tell the user to set `GLIRASTES_APPROVAL_SECRET` (at least 16 random
    characters, the same on every instance) in production: the handler signs the

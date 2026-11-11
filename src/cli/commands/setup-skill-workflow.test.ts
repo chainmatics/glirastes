@@ -78,6 +78,12 @@ describe('bundled local-first setup workflow', () => {
       'examples/vue-fastapi', 'Python 3.12', 'include_in_schema=False', 'x-glirastes-effect']) {
       expect(source).toContain(required);
     }
+    // Outside Next.js the default origin is whatever the adapter put into the Request URL.
+    for (const required of ['outside Next.js it is whatever your adapter puts', 'never from `Host`', 'fixed `baseUrl`']) {
+      expect(source).toContain(required);
+    }
+    expect(source).not.toMatch(/needs\s+nothing\s+more/);
+    expect(source).not.toContain('the client could name');
     expect(source).not.toContain('createFetchInternalApiCaller');
     expect(source).not.toContain('defaultHeaders');
     expect(source).not.toContain('NestJS controllers, FastAPI');
