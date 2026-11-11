@@ -4,6 +4,7 @@ import { createAppFixture, removeAppFixtures } from '../../codegen/tools/__tests
 import { ToolsConfigSchema } from '../../codegen/tools/config.js';
 import { LocalPromptBundleSchema } from './validate-build.js';
 import { AGENT_HINT_START, scaffoldToolsInputs } from './init-scaffold.js';
+import { runToolsPipeline } from '../../codegen/tools/pipeline.js';
 import { runToolsCommand } from './tools/index.js';
 
 afterEach(removeAppFixtures);
@@ -94,4 +95,71 @@ describe('glirastes init scaffold', () => {
     expect((await stat(app.path('package.json'))).mode & 0o777).toBe(0o644);
     expect((await stat(app.path('AGENTS.md'))).mode & 0o777).toBe(0o664);
   }, 60_000);
+
+  describe('at a monorepo root', () => {
+    const ROOT_PACKAGE = JSON.stringify({ name: 'platform', private: true, workspaces: ['apps/*', 'packages/*'] });
+    const CONTROLLER = "import { Controller, Get } from '@nestjs/common';\n"
+      + "@Controller('members')\nexport class MembersController {\n  @Get()\n  list() {\n    return [];\n  }\n}\n";
+    const monorepo = (files: Record<string, string> = {}) => createAppFixture({
+      'package.json': ROOT_PACKAGE,
+      'apps/api/package.json': JSON.stringify({ name: '@platform/api', dependencies: { '@nestjs/core': '11', '@nestjs/common': '11' } }),
+      'apps/api/src/tasks.controller.ts': CONTROLLER,
+      'apps/citadel/package.json': JSON.stringify({ name: '@platform/citadel', dependencies: { next: '15', nuqs: '2' } }),
+      'apps/citadel/src/app/api/tasks/route.ts': ROUTE,
+      'apps/citadel/src/app/page.tsx': 'export default function Page() { return null; }\n',
+      'packages/db/package.json': JSON.stringify({ name: '@platform/db' }),
+      ...files,
+    }, { withoutToolsConfig: true, withoutPromptBundle: true });
+
+    it('writes one source per workspace app with root-relative paths and says which', async () => {
+      const app = await monorepo();
+      const scaffold = await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
+      const config = ToolsConfigSchema.parse(JSON.parse(await app.read('.glirastes/tools.json')));
+      expect(config.sources).toEqual([
+        { kind: 'nest', srcDir: 'apps/api/src' },
+        { kind: 'next-app', apiDir: 'apps/citadel/src/app/api' },
+        { kind: 'next-pages', appDir: 'apps/citadel/src/app', srcDir: 'apps/citadel/src' },
+        { kind: 'url-filters', appDir: 'apps/citadel/src/app', srcDir: 'apps/citadel/src' },
+        { kind: 'react-actions', srcDir: 'apps/citadel/src' },
+      ]);
+      expect(scaffold.written).toContain('.glirastes/tools.json');
+      expect(scaffold.notes.join('\n')).toContain('nest apps/api/src');
+      expect(scaffold.notes.join('\n')).toContain('next-app apps/citadel/src/app/api');
+    }, 60_000);
+
+    it('writes a configuration that refresh reads for the nest app', async () => {
+      const app = await monorepo();
+      await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
+      const result = await runToolsPipeline({ root: app.root, mode: 'write', keepGoing: true });
+      expect(result.tools.map((tool) => tool.stableKey)).toContain('GET /members');
+    }, 60_000);
+
+    it('never writes a path outside the root', async () => {
+      const app = await monorepo({ 'package.json': JSON.stringify({ name: 'platform', workspaces: ['../outside/*', '/abs/*', 'apps/*'] }) });
+      await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
+      const raw = await app.read('.glirastes/tools.json');
+      expect(raw).not.toContain('..');
+      expect(raw).toContain('apps/api/src');
+    }, 60_000);
+
+    it('names the skill in one line when the workspaces hold no supported app', async () => {
+      const app = await createAppFixture({
+        'package.json': ROOT_PACKAGE, 'packages/db/package.json': JSON.stringify({ name: '@platform/db' }),
+      }, { withoutToolsConfig: true, withoutPromptBundle: true });
+      const scaffold = await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
+      expect(scaffold.written).not.toContain('.glirastes/tools.json');
+      expect(scaffold.notes).toEqual([expect.stringMatching(/No supported app.*workspaces.*integrating-glirastes-web/)]);
+    }, 60_000);
+
+    it('leaves a root without workspaces as before', async () => {
+      const app = await createAppFixture({
+        'package.json': JSON.stringify({ name: 'plain' }),
+        'apps/api/package.json': JSON.stringify({ dependencies: { '@nestjs/core': '11' } }),
+        'apps/api/src/tasks.controller.ts': CONTROLLER,
+      }, { withoutToolsConfig: true, withoutPromptBundle: true });
+      const scaffold = await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
+      expect(scaffold.written).not.toContain('.glirastes/tools.json');
+      expect(scaffold.notes).toEqual(['No Next.js app: integrating-glirastes-web describes .glirastes/tools.json for this stack.']);
+    }, 60_000);
+  });
 });
