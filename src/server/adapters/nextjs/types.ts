@@ -438,10 +438,11 @@ export interface AiChatHandlerConfig {
    * request are consumed.
    *
    * Default: a bounded store in this process's memory, shared by every
-   * handler of the process (10,000 live approvals, at most 1,000 of them per
+   * handler of the process (20,000 live approvals, at most 200 of them per
    * scope; when either is full, further approvals are refused, not run). All
-   * requests without a managed principal share the scope `''`, so together
-   * they hold at most 1,000. It makes a single instance replay-safe.
+   * requests without a managed principal and without `approvalScope` share
+   * the scope `''`, so together they hold at most 200. It makes a single
+   * instance replay-safe.
    * Several instances that share `GLIRASTES_APPROVAL_SECRET` need a shared
    * store (e.g. Redis `SET key 1 NX PXAT expiresAtMs`): with the default, an
    * approved history replayed to another instance runs there once more,
@@ -458,7 +459,7 @@ export interface AiChatHandlerConfig {
    *
    * Without it and without a managed runtime, every user shares the scope
    * `''`: approvals are not bound to a user, and the default store's quota
-   * of 1,000 live approvals is shared by all of them, so one signed-in user
+   * of 200 live approvals is shared by all of them, so one signed-in user
    * who approves enough of their own calls can have every further approval
    * refused (`approval_store_unavailable`) for up to the maximum age.
    */

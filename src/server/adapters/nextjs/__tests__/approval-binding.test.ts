@@ -877,6 +877,21 @@ describe('createMemoryApprovalStore', () => {
     expect(await store.consume('a1', 100_000, { scope: 'tenant-a' })).toBe(false);
   });
 
+  it('with the defaults, 99 scopes that use up their quota leave room for another scope', async () => {
+    const store = createMemoryApprovalStore({ now: () => 1_000 });
+    let scopes = 0;
+    for (; scopes < 99; scopes += 1) {
+      for (let entry = 0; ; entry += 1) {
+        try {
+          await store.consume(`s${scopes}-${entry}`, 100_000, { scope: `s${scopes}` });
+        } catch {
+          break;
+        }
+      }
+    }
+    expect(await store.consume('newcomer', 100_000, { scope: 'newcomer' })).toBe(true);
+  });
+
   it('frees a scope quota when its entries expire', async () => {
     let now = 1_000;
     const store = createMemoryApprovalStore({ maxEntriesPerScope: 1, now: () => now });

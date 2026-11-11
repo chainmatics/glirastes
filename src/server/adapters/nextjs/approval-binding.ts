@@ -57,10 +57,14 @@ export interface ApprovalStore {
   consume: (approvalId: string, expiresAtMs: number, context?: { scope: string }) => boolean | Promise<boolean>;
 }
 
-/** Default size of the in-process single-use store. */
-export const DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES = 10_000;
+/**
+ * Default size of the in-process single-use store (a few MB at most). With
+ * the per-scope default, at least 100 scopes must use up their quota before
+ * the store is full for everyone.
+ */
+export const DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES = 20_000;
 /** Default share of the in-process store one scope may hold. */
-export const DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES_PER_SCOPE = 1_000;
+export const DEFAULT_MEMORY_APPROVAL_STORE_ENTRIES_PER_SCOPE = 200;
 /** Approved calls that can run in one request; more is refused (`too_many_approvals`). */
 export const MAX_RUNNABLE_APPROVALS_PER_REQUEST = 32;
 
