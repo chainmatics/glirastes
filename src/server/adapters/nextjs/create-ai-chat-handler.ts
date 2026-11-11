@@ -913,7 +913,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         || Boolean(lancer?.approvals)
         || Object.values(registry).some((tool) => Boolean(tool.needsApproval)),
     });
-    const checked = await enforceApprovalBindings(messages, { binder, store: approvalStore, scope });
+    const checked = await enforceApprovalBindings(messages, {
+      binder, store: approvalStore, scope, localToolNames: new Set(Object.keys(registry)),
+    });
     return { binder, messages: checked.messages, verified: checked.verified };
   }
 

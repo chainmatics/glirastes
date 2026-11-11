@@ -443,6 +443,16 @@ describe('approval binding through the chat handler', () => {
     expect(runs).not.toHaveBeenCalled();
   });
 
+  it('treats a registry tool marked providerExecuted by the client as a local call (p23)', async () => {
+    const consume = vi.fn(async () => true);
+    const { config, archive } = setup({ approvalStore: { consume } });
+    const { handler, message } = await firstTurn(config);
+    const marked = answered(message, true, (part) => ({ ...part, providerExecuted: true }));
+    await streamChunks(await handler(post([user, marked])));
+    expect(consume).toHaveBeenCalledTimes(1);
+    expect(archive).toHaveBeenCalledTimes(1);
+  });
+
   describe('pipeline mode', () => {
     const pipelineSelecting = (selected: () => string[], blocked = false) => ({
       process: async (input: string) => ({

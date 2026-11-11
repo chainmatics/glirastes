@@ -675,6 +675,32 @@ describe('approvals that cannot run in this request (p13)', () => {
     expect(ok.verified).toHaveLength(32);
   });
 
+  it('ignores a client-supplied providerExecuted on a tool of the local registry (p23)', async () => {
+    const store = { consume: vi.fn(async () => true) };
+    const marked = { ...approved('c1'), providerExecuted: true };
+    const settled = { ...approved('c2'), state: 'output-available', output: { ok: 1 }, providerExecuted: true };
+    const result = await enforceApprovalBindings(
+      [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, settled, marked] }],
+      { binder, store, localToolNames: new Set([call.toolName]) },
+    );
+    const parts = (result.messages[1] as { parts: Array<Record<string, unknown>> }).parts;
+    expect(parts[1]).not.toHaveProperty('providerExecuted');
+    expect(parts[2]).not.toHaveProperty('providerExecuted');
+    // c1 is now an ordinary local approval: consumed once and handed to the gate, so it runs;
+    // c2 holds its result and is not consumed.
+    expect(store.consume).toHaveBeenCalledTimes(1);
+    expect(result.verified.map((entry) => entry.toolCallId)).toEqual(['c1']);
+  });
+
+  it('keeps providerExecuted on a tool that is not in the local registry', async () => {
+    const providerPart = { ...approved('c1'), state: 'output-available', output: { ok: 1 }, providerExecuted: true };
+    const result = await enforceApprovalBindings(
+      [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, providerPart] }],
+      { binder, localToolNames: new Set(['something_else']) },
+    );
+    expect((result.messages[1] as { parts: Array<Record<string, unknown>> }).parts[1]).toMatchObject({ providerExecuted: true });
+  });
+
   it('passes the scope to the store', async () => {
     const store = { consume: vi.fn(async () => true) };
     await enforceApprovalBindings([user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, approved('c1')] }], { binder, store, scope: 'tenant-a' });

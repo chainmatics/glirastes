@@ -514,8 +514,20 @@ export interface VerifiedApproval {
  */
 export async function enforceApprovalBindings(
   messages: ReadonlyArray<unknown>,
-  options: { binder: ApprovalBinder; store?: ApprovalStore; scope?: string },
+  options: {
+    binder: ApprovalBinder;
+    store?: ApprovalStore;
+    scope?: string;
+    /**
+     * The tools this server runs itself. A client cannot mark one of them as
+     * provider-executed: the flag is removed from their parts, so an approved
+     * part of a local tool is always checked, consumed and run as a local
+     * call (and never consumed for a run that does not happen).
+     */
+    localToolNames?: ReadonlySet<string>;
+  },
 ): Promise<{ messages: unknown[]; denied: DeniedApproval[]; verified: VerifiedApproval[] }> {
+  if (options.localToolNames) messages = withoutLocalProviderExecuted(messages, options.localToolNames);
   assertUnambiguousToolHistory(messages);
   const lastBlock = runnableBlockOf(messages);
   const runnableCount = [...lastBlock].filter((part) => isRunnableApproval(part as MessageRecord)).length;
@@ -582,6 +594,23 @@ export async function enforceApprovalBindings(
     next.push(changed ? { ...message, parts } : message);
   }
   return { messages: next, denied, verified };
+}
+
+/** The history with `providerExecuted` removed from every part of a local tool. */
+function withoutLocalProviderExecuted(messages: ReadonlyArray<unknown>, local: ReadonlySet<string>): unknown[] {
+  return messages.map((message) => {
+    if (!isRecord(message) || !Array.isArray(message.parts)) return message;
+    let changed = false;
+    const parts = message.parts.map((part) => {
+      if (!isRecord(part) || !isToolPart(part) || !('providerExecuted' in part)) return part;
+      const toolName = toolNameOf(part);
+      if (toolName === undefined || !local.has(toolName)) return part;
+      changed = true;
+      const { providerExecuted: _ignored, ...rest } = part;
+      return rest;
+    });
+    return changed ? { ...message, parts } : message;
+  });
 }
 
 /** An approved part without a result of any kind: the AI SDK may run it. */
