@@ -63,7 +63,7 @@ describe('glirastes init --ci github', () => {
 
     expect(enrich).toContain("|| (github.event_name == 'push' && github.ref == 'refs/heads/main')");
     expect(enrich).toContain('      contents: write\n      pull-requests: write\n');
-    expect(enrich).toContain('          GH_TOKEN: ${{ github.token }}\n');
+    expect(enrich).toContain('          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}\n');
   });
 
   it('runs on every environment branch asked for and opens the pull request against that branch', () => {
@@ -92,6 +92,25 @@ describe('glirastes init --ci github', () => {
     expect(githubToolsWorkflow({ packageManager: 'bun' })).not.toMatch(/workflow_dispatch|GLIRASTES_FIRST_RUN|GLIRASTES_BEFORE_SHA/);
   });
 
+  it("pushes as a GitHub App when one is configured, so the bot's commits get their checks without approval", () => {
+    for (const options of [{ enrichOn: ['staging'], environment: 'staging' }, {}]) {
+      const enrich = job(githubToolsWorkflow({ packageManager: 'bun', ...options }), 'glirastes-tools-enrich');
+      const managed = 'environment' in options ? "vars.GLIRASTES_MANAGED_TOOLS == 'true' && " : '';
+
+      expect(enrich).toContain('      - uses: actions/create-github-app-token@v2\n'
+        + '        id: bot\n'
+        + `        if: ${managed}vars.GLIRASTES_BOT_APP_ID != ''\n`
+        + '        with:\n'
+        + '          app-id: ${{ vars.GLIRASTES_BOT_APP_ID }}\n'
+        + '          private-key: ${{ secrets.GLIRASTES_BOT_APP_PRIVATE_KEY }}\n');
+      expect(enrich.indexOf('create-github-app-token')).toBeLessThan(enrich.indexOf('actions/checkout@v4'));
+      // Without an app, the job keeps the workflow token.
+      expect(enrich).toContain('          token: ${{ steps.bot.outputs.token || github.token }}\n');
+    }
+    const staging = job(githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'] }), 'glirastes-tools-enrich');
+    expect(staging).toContain('          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}\n');
+  });
+
   it('refuses a branch name that is not one', async () => {
     await expect(writeCiWorkflow({ root, provider: 'github', enrichOn: ['staging', 'a b'] }))
       .rejects.toEqual(new CiWorkflowError('ci_branch_invalid'));
@@ -117,8 +136,8 @@ describe('glirastes init --ci github', () => {
     expect(workflow).toContain('# GLIRASTES_MANAGED_TOOLS of the GitHub environment staging is "true"');
     // A job-level `if` cannot see environment variables, so every step checks the switch.
     expect(enrich).not.toContain("vars.GLIRASTES_MANAGED_TOOLS == 'true' && (");
-    expect(steps.match(/      - (uses|run): /g)).toHaveLength(5);
-    expect(steps.match(/        if: vars.GLIRASTES_MANAGED_TOOLS == 'true'\n/g)).toHaveLength(5);
+    expect(steps.match(/      - (uses|run): /g)).toHaveLength(6);
+    expect(steps.match(/        if: vars.GLIRASTES_MANAGED_TOOLS == 'true'/g)).toHaveLength(6);
     expect(job(workflow, 'glirastes-tools')).not.toMatch(/environment|vars\./);
     expect(githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'] })).not.toContain('environment:');
   });

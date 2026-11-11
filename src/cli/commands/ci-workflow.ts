@@ -174,10 +174,18 @@ export function githubToolsWorkflow(options: {
     '      contents: write',
     ...(onPush ? ['      pull-requests: write'] : []),
     '    steps:',
+    // Commits pushed with the workflow token start no checks without approval; a GitHub App's token does.
+    '      - uses: actions/create-github-app-token@v2',
+    '        id: bot',
+    `        if: ${environment === undefined ? '' : "vars.GLIRASTES_MANAGED_TOOLS == 'true' && "}vars.GLIRASTES_BOT_APP_ID != ''`,
+    '        with:',
+    '          app-id: ${{ vars.GLIRASTES_BOT_APP_ID }}',
+    '          private-key: ${{ secrets.GLIRASTES_BOT_APP_PRIVATE_KEY }}',
     ...gated([
       '      - uses: actions/checkout@v4',
       '        with:',
       '          ref: ${{ github.head_ref || github.ref_name }}',
+      '          token: ${{ steps.bot.outputs.token || github.token }}',
       ...setup.steps,
       `      - run: ${setup.install}`,
       `      - run: ${setup.run} tools refresh --mode write --keep-going`,
@@ -190,7 +198,7 @@ export function githubToolsWorkflow(options: {
     ...(onPush ? [
       // A pull request names its target, a push its own branch: there the bot opens a pull request.
       '          GLIRASTES_BASE_BRANCH: ${{ github.base_ref || github.ref_name }}',
-      '          GH_TOKEN: ${{ github.token }}',
+      '          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}',
       '          GLIRASTES_BEFORE_SHA: ${{ github.event.before }}',
       "          GLIRASTES_FIRST_RUN: ${{ github.event_name == 'workflow_dispatch' }}",
     ] : []),
