@@ -47,7 +47,10 @@ material questions that the code and earlier decisions cannot answer.
    behaviour and response style), the `predev`/`prebuild` scripts and the hint
    in `AGENTS.md`/`CLAUDE.md`. Set `locale` to the app's language. For a
    separate backend or a non-React frontend, configure the sources as
-   `integrating-glirastes-web` describes.
+   `integrating-glirastes-web` describes. At a monorepo root whose
+   `package.json` declares `workspaces`, init looks into those packages for a
+   NestJS `src` and a Next.js app and writes their sources with root-relative
+   paths; check the sources it lists.
 3. Run `glirastes tools refresh`. It lists added, changed, removed and excluded
    tools and ends with the open agent work. New tools are active immediately:
    GET runs directly, POST/PUT/PATCH ask first, delete, financial and external

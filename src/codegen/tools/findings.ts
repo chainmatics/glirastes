@@ -32,6 +32,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'prompt-bundle-missing': 'Create .glirastes/prompt-bundle.json for this app (glirastes init sets it up).',
   'prompt-bundle-invalid': 'Fix .glirastes/prompt-bundle.json: it must match its schema and this appId.',
   'generation-state-invalid': 'Restore the generated .glirastes file from git, or resolve its merge by keeping both sides, then rerun refresh.',
+  'route-declared-twice': 'Declare the route in one controller only (or rename one path), then run glirastes tools refresh; to keep it out of the chat instead, glirastes tools policy exclude "<METHOD> <path>". Every other tool is generated meanwhile.',
   'E-INVENTORY-010': 'Resolve the duplicate tool identity reported above, then rerun glirastes tools refresh.',
   'E-INVENTORY-011': 'Replace export * in route files and fix unreadable or linked sources so every route, page and UI action can be enumerated.',
   'E-POLICY-001': 'Fix .glirastes/tool-policy.json so it matches its schema; policy can only restrict what the code allows.',

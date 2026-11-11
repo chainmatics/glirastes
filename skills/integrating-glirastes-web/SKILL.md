@@ -35,6 +35,8 @@ replace the generator with a hand-written tool list.
 | vue-router routes of `createRouter({ routes: [...] })` | yes | `vue-router` |
 | JSX `<Route>` trees, OpenAPI 3.0 or YAML exports, `<script>` blocks in another language than ts or js | not yet | report as an open gap |
 
+If two NestJS controllers declare the same method and path, `glirastes tools refresh` reports one `route-declared-twice` error naming both files, gives that route no enabled tool and still generates every other tool; remove one declaration, or exclude the route with `glirastes tools policy exclude`.
+
 Two reference apps in the SDK show the sources together:
 `examples/react-nest-separate` (a NestJS API on its own origin and a Vite
 React frontend) and `examples/vue-fastapi` (a FastAPI API, a small Node chat

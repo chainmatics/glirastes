@@ -87,6 +87,7 @@ export const PRODUCT_REFUSALS: ReadonlySet<string> = new Set([
   'tool_generation_not_enabled',
   'tool_job_already_running',
   'tool_jobs_monthly_budget_exhausted',
+  'usage_overage_ceiling_reached',
 ]);
 
 const CODE = /^[a-z][a-z0-9_.-]{1,63}$/;
