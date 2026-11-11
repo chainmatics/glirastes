@@ -425,7 +425,7 @@ export interface AiChatHandlerConfig {
    * milliseconds. Default 15 minutes. The expiry is signed into the approval
    * id; an answer after it, or after the issue time plus this handler's own
    * `approvalMaxAgeMs` if that is earlier, is refused with `approval_expired`.
-   * Must be a number above 0 and at most 24 hours; anything else makes
+   * Must be a whole number above 0 and at most 24 hours; anything else makes
    * `createAiChatHandler` throw a `RangeError`.
    */
   approvalMaxAgeMs?: number;

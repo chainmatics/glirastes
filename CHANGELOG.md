@@ -72,9 +72,9 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   (`glirastes-approval.v1.<issued>.<expires>.<nonce>.<mac>`) carries its
   expiry under the MAC; an answer after it, or after the issue time plus the
   answering handler's `approvalMaxAgeMs` (15 minutes) if that is earlier, is
-  refused (`approval_expired`). `approvalMaxAgeMs` must be above 0 and at
-  most 24 hours, or `createAiChatHandler` throws. The format stays `v1`
-  because no earlier release issued signed ids. The MAC also covers the
+  refused (`approval_expired`). `approvalMaxAgeMs` must be a whole number
+  above 0 and at most 24 hours, or `createAiChatHandler` throws. The format
+  stays `v1` because no earlier release issued signed ids. The MAC also covers the
   scope: the managed principal's tenant and subject, else the new
   `approvalScope(request)` option, else `''`, so without either an approval
   is not bound to a user. A custom `streamHandler` that lets tools ask

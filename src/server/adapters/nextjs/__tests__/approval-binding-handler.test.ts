@@ -475,7 +475,8 @@ describe('approval binding through the chat handler', () => {
 
   it('refuses an absurd approvalMaxAgeMs when the handler is created (p31)', () => {
     const { config } = setup();
-    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 24 * 60 * 60_000 + 1, 1e21, '60000' as unknown as number]) {
+    // A fractional age would sign an expiry that the canonical integer format never verifies.
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 24 * 60 * 60_000 + 1, 1e21, '60000' as unknown as number, 0.5, 60_000.5]) {
       expect(() => createAiChatHandler({ ...config, approvalMaxAgeMs: value })).toThrow(/approvalMaxAgeMs/);
     }
     for (const value of [1, 15 * 60_000, 24 * 60 * 60_000]) {
