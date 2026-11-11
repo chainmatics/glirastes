@@ -110,7 +110,7 @@ describe('endpoint caller of the chat handler', () => {
       { 'x-forwarded-host': 'attacker.example, app.example', 'x-forwarded-proto': 'https, https' },
       { 'x-forwarded-host': '169.254.169.254', 'x-forwarded-proto': 'http' },
       { host: 'attacker.example' },
-    ]) {
+    ] as Array<Record<string, string>>) {
       const caller = await callerFor(chatRequest('http://internal:3000/api/chat', { cookie: 'session=victim', ...headers }, mode === 'direct command' ? directCommand : 'Tasks'), mode);
       await caller({ method: 'GET', path: '/api/tasks' });
     }

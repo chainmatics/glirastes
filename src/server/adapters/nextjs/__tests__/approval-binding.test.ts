@@ -59,7 +59,7 @@ describe('non-finite numbers (p20)', () => {
     const binder = createApprovalBinder({ secret: SECRET });
     const input = { limit: Infinity };
     expect(() => binder.issue({ toolCallId: 'c', toolName: 't', input })).toThrow(/finite/);
-    const stream = bindApprovalRequests(new ReadableStream({
+    const stream = bindApprovalRequests(new ReadableStream<{ type: string; [key: string]: unknown }>({
       start(controller) {
         controller.enqueue({ type: 'tool-input-available', toolCallId: 'c', toolName: 't', input });
         controller.enqueue({ type: 'tool-approval-request', approvalId: 'sdk-generated', toolCallId: 'c' });
