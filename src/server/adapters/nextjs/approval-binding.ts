@@ -32,6 +32,15 @@ import {
  */
 
 export const DEFAULT_APPROVAL_MAX_AGE_MS = 15 * 60_000;
+/** The longest `approvalMaxAgeMs` accepted: 24 hours. */
+export const MAX_APPROVAL_MAX_AGE_MS = 24 * 60 * 60_000;
+
+/** Throws unless `value` is a usable maximum approval age: a finite number above 0 and at most 24 hours. */
+export function assertApprovalMaxAge(value: unknown): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > MAX_APPROVAL_MAX_AGE_MS) {
+    throw new RangeError(`approvalMaxAgeMs must be a number above 0 and at most ${MAX_APPROVAL_MAX_AGE_MS} (24 hours)`);
+  }
+}
 export const APPROVAL_SECRET_ENV = 'GLIRASTES_APPROVAL_SECRET';
 
 const ID_PREFIX = 'glirastes-approval.v1.';
@@ -223,9 +232,7 @@ export function createApprovalBinder(options: {
     throw new Error(`The approval secret must be a string of at least ${MIN_SECRET_LENGTH} characters`);
   }
   const maxAgeMs = options.maxAgeMs ?? DEFAULT_APPROVAL_MAX_AGE_MS;
-  if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0) {
-    throw new RangeError('approvalMaxAgeMs must be a positive finite number');
-  }
+  assertApprovalMaxAge(maxAgeMs);
   const now = options.now ?? Date.now;
   const scope = options.scope ?? '';
 

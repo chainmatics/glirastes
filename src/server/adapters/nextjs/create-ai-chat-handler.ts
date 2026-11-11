@@ -19,6 +19,7 @@ import {
   ApprovalHistoryError,
   ApprovalSecretMissingError,
   approvalScope,
+  assertApprovalMaxAge,
   assertUnambiguousToolHistory,
   bindApprovalRequests,
   createApprovalExecutionGate,
@@ -788,6 +789,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     crossOriginProtection,
     maxBodyBytes,
   } = config;
+  if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
   // Without a callback a failed turn would only say "AI request failed" to
   // the user and nothing to the developer. Name only: provider errors can
   // carry request and response content.
