@@ -434,17 +434,23 @@ export interface AiChatHandlerConfig {
    * Single-use store for approvals. `consume(approvalId, expiresAtMs,
    * { scope })` must atomically record the id and return `false` when it was
    * recorded before; it receives the canonical id of a verified approval and
-   * the principal's scope (`''` without a managed principal). Entries may be
-   * dropped after `expiresAtMs`. A throw refuses the approval
+   * a quota scope. Single use is by id alone, across all scopes: an id
+   * consumed under one scope must be refused under every other. The scope
+   * only says whose quota the entry counts against: the managed principal's
+   * scope, else the `approvalScope` value (both also signed into the id),
+   * else a per-caller key `caller:<hmac>` derived from the request's
+   * `Authorization` header, or its `Cookie` header without one (HMAC-SHA-256
+   * under the approval secret; the raw credentials are never passed or kept),
+   * else `''` for a request without credentials. Entries may be dropped after
+   * `expiresAtMs`. A throw refuses the approval
    * (`approval_store_unavailable`). Only approvals the AI SDK can run in this
    * request are consumed.
    *
    * Default: a bounded store in this process's memory, shared by every
    * handler of the process (20,000 live approvals, at most 200 of them per
-   * scope; when either is full, further approvals are refused, not run). All
-   * requests without a managed principal and without `approvalScope` share
-   * the scope `''`, so together they hold at most 200. It makes a single
-   * instance replay-safe.
+   * scope; when either is full, further approvals are refused, not run). An
+   * entry, and the count of its scope, exists only for a genuine approval
+   * that was consumed. It makes a single instance replay-safe.
    * Several instances that share `GLIRASTES_APPROVAL_SECRET` need a shared
    * store (e.g. Redis `SET key 1 NX PXAT expiresAtMs`): with the default, an
    * approved history replayed to another instance runs there once more,
@@ -459,11 +465,13 @@ export interface AiChatHandlerConfig {
    * id, so an approval issued to one user does not verify for another, and
    * it is the scope of the approval store's per-scope quota.
    *
-   * Without it and without a managed runtime, every user shares the scope
-   * `''`: approvals are not bound to a user, and the default store's quota
-   * of 200 live approvals is shared by all of them, so one signed-in user
-   * who approves enough of their own calls can have every further approval
-   * refused (`approval_store_unavailable`) for up to the maximum age.
+   * Without it and without a managed runtime, approvals are not bound to a
+   * user, and the store's quota is kept per caller, keyed by a hash of the
+   * request's `Authorization` or `Cookie` header (requests without either
+   * share one quota). That key is not signed into the approval id, because a
+   * cookie may change between the approval request and its answer. Set this
+   * option when the app identifies users another way, or to also bind each
+   * approval to its user.
    */
   approvalScope?: (request: Request) => string | Promise<string>;
 

@@ -160,6 +160,12 @@ export interface ApprovalBinder {
   issue: (call: ApprovalCall) => string;
   verify: (call: ApprovalCall & { approvalId: string }) => ApprovalVerification;
   readonly maxAgeMs: number;
+  /**
+   * A store quota key for a caller's credentials: `caller:` and an
+   * HMAC-SHA-256 of them under the approval secret. The credentials are not
+   * kept; the key reveals nothing about them without the secret.
+   */
+  callerQuotaKey?: (credentials: string) => string;
 }
 
 export class ApprovalSecretMissingError extends Error {
@@ -242,6 +248,10 @@ export function createApprovalBinder(options: {
 
   return {
     maxAgeMs,
+    callerQuotaKey: (credentials) => `caller:${createHmac('sha256', options.secret)
+      .update('glirastes-approval-quota-key\0')
+      .update(credentials)
+      .digest('base64url')}`,
     issue: (call) => {
       const issued = now();
       const issuedAt = String(issued);

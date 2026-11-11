@@ -903,7 +903,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   /**
    * Who an approval of this request is for: the managed principal, else the
    * app's `approvalScope(req)` (encoded as a one-element JSON array, so it
-   * cannot equal a managed scope), else `''`, which every such request shares.
+   * cannot equal a managed scope), else `''`: the approval is then bound to
+   * no user, and `storeScopeOf` keeps the quota per caller instead.
    */
   async function requestApprovalScope(req: Request, managedTurn: ManagedTurnGuard | undefined): Promise<string> {
     if (managedTurn) return approvalScope(managedTurn.snapshot.principal);
@@ -913,12 +914,30 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     return JSON.stringify([scope]);
   }
 
+  /**
+   * The scope the approval store counts a request's approvals under. With a
+   * managed principal or `approvalScope`, the signed scope. Otherwise a key
+   * per caller derived from the request's credentials (`Authorization`, else
+   * `Cookie`), HMAC-ed with the approval secret and never kept raw, so one
+   * caller cannot use up everyone's quota. It only partitions the quota: it
+   * is not signed into the approval id (a cookie may rotate between the
+   * approval request and its answer), and single use is checked by the
+   * approval id across all keys. A request without credentials has `''`.
+   */
+  function storeScopeOf(req: Request, scope: string, binder: ApprovalBinder): string {
+    if (scope !== '') return scope;
+    const credentials = req.headers.get('authorization') ?? req.headers.get('cookie');
+    if (!credentials || !binder.callerQuotaKey) return '';
+    return binder.callerQuotaKey(credentials);
+  }
+
   async function secureApprovals(
+    req: Request,
     registry: ToolRegistry,
     messages: unknown[],
     managedTurn: ManagedTurnGuard | undefined,
     scope: string,
-  ): Promise<{ binder: ApprovalBinder; messages: unknown[]; verified: VerifiedApproval[] }> {
+  ): Promise<{ binder: ApprovalBinder; storeScope: string; messages: unknown[]; verified: VerifiedApproval[] }> {
     const binder = resolveApprovalBinder({
       secret: approvalSecret,
       maxAgeMs: approvalMaxAgeMs,
@@ -929,10 +948,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         || Boolean(lancer?.approvals)
         || Object.values(registry).some((tool) => Boolean(tool.needsApproval)),
     });
+    const storeScope = storeScopeOf(req, scope, binder);
     const checked = await enforceApprovalBindings(messages, {
-      binder, store: approvalStore, scope, localToolNames: new Set(Object.keys(registry)),
+      binder, store: approvalStore, scope: storeScope, localToolNames: new Set(Object.keys(registry)),
     });
-    return { binder, messages: checked.messages, verified: checked.verified };
+    return { binder, storeScope, messages: checked.messages, verified: checked.verified };
   }
 
   /**
@@ -1159,7 +1179,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         };
         const registry = staticTools ?? await loadTools!(endpointToolContext);
         const commandScope = await requestApprovalScope(req, managedTurn);
-        const { binder: commandBinder } = await secureApprovals(registry, [], managedTurn, commandScope);
+        const { binder: commandBinder, storeScope: commandStoreScope } = await secureApprovals(req, registry, [], managedTurn, commandScope);
         let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, toolOptions);
         // The result stays in the chat history that later model turns send to the model.
         if (piiShield) {
@@ -1176,7 +1196,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           turnMetrics,
           approvals: commandBinder,
           approvalStore,
-          approvalScope: commandScope,
+          approvalScope: commandStoreScope,
           onError: (error) => onError?.(error, req),
         });
       }
@@ -1230,7 +1250,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           registry,
           [followupTool, clarificationTool, planTool],
         );
-        const pipelineApprovals = await secureApprovals(registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
+        const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
         processedMessages = pipelineApprovals.messages;
 
         // Extract user input for pipeline
@@ -1491,7 +1511,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       registry = withAlwaysOnBuiltins(registry);
       const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool, planTool]);
-      const legacyApprovals = await secureApprovals(registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
+      const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
       processedMessages = legacyApprovals.messages;
       const allToolNames = Object.keys(registry)
         .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
