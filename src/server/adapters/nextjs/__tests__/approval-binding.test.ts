@@ -205,7 +205,7 @@ describe('createApprovalBinder', () => {
     const issuer = createApprovalBinder({ secret: SECRET, maxAgeMs: 60 * 60_000, now: () => now });
     const strict = createApprovalBinder({ secret: SECRET, maxAgeMs: 60_000, now: () => now });
     const approvalId = issuer.issue(call);
-    expect(strict.verify({ ...call, approvalId })).toMatchObject({ ok: true, expiresAtMs: 1_000_000 + 60_000 });
+    expect(strict.verify({ ...call, approvalId })).toMatchObject({ ok: true, expiresAtMs: 1_000_000 + 60 * 60_000 });
     now += 60_001;
     expect(strict.verify({ ...call, approvalId })).toEqual({ ok: false, code: 'approval_expired' });
     expect(issuer.verify({ ...call, approvalId })).toMatchObject({ ok: true });
@@ -791,6 +791,37 @@ describe('every approved call the AI SDK can run passed every check (p21, p24, p
     expect((trailing.messages[1] as { parts: Array<Record<string, unknown>> }).parts[1]).toMatchObject({
       state: 'output-denied', approval: { approved: false, reason: 'approval_not_runnable' },
     });
+  });
+});
+
+describe('single use across handlers with different maximum ages (p26)', () => {
+  it('a call consumed by a handler with a short maximum age does not run again on one with a longer', async () => {
+    let now = 1_000_000;
+    const clock = () => now;
+    const issuer = createApprovalBinder({ secret: SECRET, now: clock });
+    const short = createApprovalBinder({ secret: SECRET, maxAgeMs: 5_000, now: clock });
+    const long = createApprovalBinder({ secret: SECRET, now: clock });
+    const store = createMemoryApprovalStore({ now: clock });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'go' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, {
+        type: `tool-${call.toolName}`, toolCallId: call.toolCallId, state: 'approval-responded', input: call.input,
+        approval: { id: issuer.issue(call), approved: true },
+      }] },
+    ];
+    expect((await enforceApprovalBindings(history, { binder: short, store })).verified).toHaveLength(1);
+    for (const later of [0, 3 * 60_000, 14 * 60_000]) {
+      now = 1_000_000 + later;
+      const again = await enforceApprovalBindings(history, { binder: long, store });
+      expect(again.verified).toEqual([]);
+      expect(again.denied).toEqual([{ toolCallId: call.toolCallId, code: 'approval_already_used' }]);
+    }
+  });
+
+  it('hands the store the signed expiry, not the shorter one of the verifying handler', () => {
+    const issuer = createApprovalBinder({ secret: SECRET, now: () => 1_000_000 });
+    const short = createApprovalBinder({ secret: SECRET, maxAgeMs: 5_000, now: () => 1_000_000 });
+    expect(short.verify({ ...call, approvalId: issuer.issue(call) })).toMatchObject({ ok: true, expiresAtMs: 1_000_000 + 15 * 60_000 });
   });
 });
 

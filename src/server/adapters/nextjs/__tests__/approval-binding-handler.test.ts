@@ -453,6 +453,26 @@ describe('approval binding through the chat handler', () => {
     expect(archive).toHaveBeenCalledTimes(1);
   });
 
+  it('single use holds across two handlers with different maximum ages (p26)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(1_800_000_000_000);
+      const { createMemoryApprovalStore } = await import('../approval-binding.js');
+      const store = createMemoryApprovalStore();
+      const { config, archive } = setup({ approvalStore: store });
+      const long = createAiChatHandler(config);
+      const short = createAiChatHandler({ ...config, model: callingModel(), approvalMaxAgeMs: 5_000 });
+      const message = await clientMessage(await streamChunks(await long(post([user]))));
+      await streamChunks(await short(post([user, answered(message, true)])));
+      expect(archive).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(1_800_000_000_000 + 3 * 60_000);
+      await streamChunks(await long(post([user, answered(message, true)])));
+      expect(archive).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe('approvalScope option', () => {
     const asUser = (name: string, messages: unknown[]) => new Request('https://app.example/api/chat', {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-user': name }, body: JSON.stringify({ messages }),

@@ -139,7 +139,10 @@ export type ApprovalVerification =
   /**
    * `key` names the approval for single use: the canonical id, rebuilt from
    * the issue time, the nonce and the MAC this binder computed, never from the
-   * presented text.
+   * presented text. `expiresAtMs` is the signed expiry: the latest moment any
+   * handler with this secret can accept the approval, so a single-use store
+   * must keep the key until then, even when this handler's own maximum age
+   * ends earlier.
    */
   | { readonly ok: true; readonly expiresAtMs: number; readonly key: string }
   | { readonly ok: false; readonly code: 'approval_not_issued' | 'approval_expired' };
@@ -260,11 +263,10 @@ export function createApprovalBinder(options: {
       const at = now();
       if (at - Number(issuedAt) < -CLOCK_SKEW_MS) return notIssued;
       // The issuer's signed expiry, and this handler's own maximum age.
-      const expiresAtMs = Math.min(Number(expiresAt), Number(issuedAt) + maxAgeMs);
-      if (at > expiresAtMs) return { ok: false, code: 'approval_expired' };
+      if (at > Math.min(Number(expiresAt), Number(issuedAt) + maxAgeMs)) return { ok: false, code: 'approval_expired' };
       return {
         ok: true,
-        expiresAtMs,
+        expiresAtMs: Number(expiresAt),
         key: `${ID_PREFIX}${issuedAt}.${expiresAt}.${nonce}.${expected.toString('base64url')}`,
       };
     },
