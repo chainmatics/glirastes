@@ -271,11 +271,16 @@ describe('approval binding through the chat handler', () => {
     vi.stubEnv('GLIRASTES_APPROVAL_SECRET', '');
     vi.stubEnv('NODE_ENV', 'test');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // A fresh module, so the once-per-process warning has not been given yet.
+    vi.resetModules();
+    const fresh = await import('../create-ai-chat-handler.js');
     const { config, archive } = setup({ approvalSecret: undefined });
-    const { handler, message } = await firstTurn(config);
+    const handler = fresh.createAiChatHandler(config);
+    const message = await clientMessage(await streamChunks(await handler(post([user]))));
     await streamChunks(await handler(post([user, answered(message, true)])));
+    await streamChunks(await fresh.createAiChatHandler(config)(post([user])));
     expect(archive).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls.filter(([text]) => String(text).includes('GLIRASTES_APPROVAL_SECRET')).length).toBeLessThanOrEqual(1);
+    expect(warn.mock.calls.filter(([text]) => String(text).includes('GLIRASTES_APPROVAL_SECRET'))).toHaveLength(1);
   });
 
   it('fails closed in production when approval tools exist and no secret is set', async () => {
