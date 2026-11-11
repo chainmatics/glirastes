@@ -40,6 +40,49 @@ describe('canonicalJson', () => {
   });
 });
 
+describe('non-finite numbers (p20)', () => {
+  it('canonicalJson refuses Infinity and NaN instead of writing null', () => {
+    expect(() => canonicalJson(JSON.parse('{"limit":1e999}'))).toThrow(/finite/);
+    expect(() => canonicalJson({ a: [Number.NaN] })).toThrow(/finite/);
+    expect(() => canonicalJson({ a: -Infinity })).toThrow(/finite/);
+  });
+
+  it('does not verify an approval for null against an input that says 1e999', () => {
+    const binder = createApprovalBinder({ secret: SECRET });
+    const approvalId = binder.issue({ toolCallId: 'c', toolName: 't', input: { limit: null } });
+    expect(binder.verify({ approvalId, toolCallId: 'c', toolName: 't', input: JSON.parse('{"limit":1e999}') }))
+      .toEqual({ ok: false, code: 'approval_not_issued' });
+  });
+
+  it('issues no verifiable id for an input that cannot be hashed', async () => {
+    const binder = createApprovalBinder({ secret: SECRET });
+    const input = { limit: Infinity };
+    expect(() => binder.issue({ toolCallId: 'c', toolName: 't', input })).toThrow(/finite/);
+    const stream = bindApprovalRequests(new ReadableStream({
+      start(controller) {
+        controller.enqueue({ type: 'tool-input-available', toolCallId: 'c', toolName: 't', input });
+        controller.enqueue({ type: 'tool-approval-request', approvalId: 'sdk-generated', toolCallId: 'c' });
+        controller.close();
+      },
+    }) as ReadableStream<{ type: string }>, binder);
+    const out: Array<Record<string, unknown>> = [];
+    const reader = stream.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out.push(value as Record<string, unknown>);
+    }
+    const request = out.find((chunk) => chunk.type === 'tool-approval-request')!;
+    expect(binder.verify({ approvalId: request.approvalId as string, toolCallId: 'c', toolName: 't', input: { limit: null } }))
+      .toMatchObject({ ok: false });
+  });
+
+  it('the execution gate refuses a non-finite input', () => {
+    const gate = createApprovalExecutionGate([{ toolCallId: 'c', toolName: 't', input: { limit: null } }]);
+    expect(() => gate.authorize({ toolName: 't', toolCallId: 'c', input: { limit: Infinity } })).toThrow(/approval_not_verified/);
+  });
+});
+
 describe('approvalScope', () => {
   it('is empty without a principal', () => {
     expect(approvalScope(undefined)).toBe('');

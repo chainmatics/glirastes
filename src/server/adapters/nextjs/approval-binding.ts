@@ -139,12 +139,20 @@ function isCanonicalBase64Url(text: string, bytes: number): boolean {
   return decoded.length === bytes && decoded.toString('base64url') === text;
 }
 
-/** JSON with sorted keys, so an input hashes the same after any JSON round trip. */
+/**
+ * JSON with sorted keys, so an input hashes the same after any JSON round
+ * trip. A non-finite number (`JSON.parse` turns `1e999` into `Infinity`)
+ * throws a RangeError: `JSON.stringify` would write it as `null`, so an
+ * approval for `null` would also hold for it.
+ */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value)) ?? 'null';
 }
 
 function sortKeys(value: unknown): unknown {
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new RangeError('An approval input must contain only finite numbers');
+  }
   if (Array.isArray(value)) return value.map((item) => sortKeys(item === undefined ? null : item));
   if (typeof value !== 'object' || value === null) return value;
   // No prototype: an own `__proto__` key (JSON.parse creates one) must stay a
@@ -204,7 +212,12 @@ export function createApprovalBinder(options: {
       // bits, which would give one approval many ids.
       if (!issuedAt || !nonce || !presented || rest.length > 0 || !CANONICAL_ISSUED_AT.test(issuedAt)) return notIssued;
       if (!isCanonicalBase64Url(nonce, NONCE_BYTES) || !isCanonicalBase64Url(presented, MAC_BYTES)) return notIssued;
-      const expected = mac(issuedAt, nonce, call);
+      let expected: Buffer;
+      try {
+        expected = mac(issuedAt, nonce, call);
+      } catch {
+        return notIssued;
+      }
       const actual = Buffer.from(presented, 'base64url');
       if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return notIssued;
       const age = now() - Number(issuedAt);
@@ -278,8 +291,18 @@ export function bindApprovalRequests<T extends Chunk>(
       if (record.type === 'tool-approval-request' && typeof record.toolCallId === 'string') {
         const announced = calls.get(record.toolCallId);
         if (announced) {
-          controller.enqueue({ ...chunk, approvalId: binder.issue({ toolCallId: record.toolCallId, ...announced }) });
-          return;
+          let approvalId: string | undefined;
+          try {
+            approvalId = binder.issue({ toolCallId: record.toolCallId, ...announced });
+          } catch {
+            // An input that cannot be hashed (a non-finite number) gets no
+            // bound id; the AI SDK's own id never verifies, so the approval
+            // can be answered but never runs.
+          }
+          if (approvalId) {
+            controller.enqueue({ ...chunk, approvalId });
+            return;
+          }
         }
       }
       controller.enqueue(chunk);
@@ -523,7 +546,7 @@ export function createApprovalExecutionGate(verified: ReadonlyArray<VerifiedAppr
       const approval = approvals.get(toolCallId);
       if (approval) {
         if (executed.has(toolCallId)) throw new ApprovalExecutionRefusedError('approval_already_used', toolName);
-        if (approval.toolName !== toolName || approval.input !== canonicalJson(input)) {
+        if (approval.toolName !== toolName || approval.input !== canonicalOrUndefined(input)) {
           throw new ApprovalExecutionRefusedError('approval_not_verified', toolName);
         }
         executed.add(toolCallId);
@@ -536,6 +559,14 @@ export function createApprovalExecutionGate(verified: ReadonlyArray<VerifiedAppr
       throw new ApprovalExecutionRefusedError('approval_not_verified', toolName);
     },
   };
+}
+
+function canonicalOrUndefined(value: unknown): string | undefined {
+  try {
+    return canonicalJson(value);
+  } catch {
+    return undefined;
+  }
 }
 
 interface GateableTool {
