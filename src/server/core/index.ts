@@ -216,7 +216,7 @@ export function buildPath(
       const text = String(value);
       if (isDotSegment(text)) {
         throw new Error(
-          `Invalid path parameter "${paramName}" for ${pathTemplate}: "." and ".." are not allowed`,
+          `Invalid path parameter "${paramName}" for ${pathTemplate}: "." and ".." segments are not allowed`,
         );
       }
       delete payload[paramName];
@@ -227,24 +227,25 @@ export function buildPath(
 
 /**
  * `.` and `..` are path segments, not values: a URL parser (or the API's
- * router) resolves them and the request lands on another route. They are
- * refused also when they only appear after percent-decoding, once or several
- * times, because a proxy or framework in front of the API may decode.
+ * router) resolves them and the request lands on another route. A value is
+ * refused when, at any stage of percent-decoding it again and again, one of
+ * its segments (split at `/` and `\`) is `.` or `..`, because a proxy or
+ * framework in front of the API may decode once or several times, and some
+ * treat a backslash as a slash. Decoding is lenient (a malformed escape is
+ * left as it is, the valid ones around it are decoded) and stops at a fixed
+ * point; a value that has not reached one after a few rounds is refused.
  */
+const MAX_DECODING_ROUNDS = 8;
+
 function isDotSegment(value: string): boolean {
   let current = value;
-  for (let round = 0; round < 4; round += 1) {
-    if (current === '.' || current === '..') return true;
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(current);
-    } catch {
-      return false;
-    }
+  for (let round = 0; round <= MAX_DECODING_ROUNDS; round += 1) {
+    if (current.split(/[\\/]/).some((segment) => segment === '.' || segment === '..')) return true;
+    const decoded = current.replace(/%([0-9a-fA-F]{2})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)));
     if (decoded === current) return false;
     current = decoded;
   }
-  return false;
+  return true;
 }
 
 export function stripPathParams(
