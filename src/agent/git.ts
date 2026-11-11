@@ -102,12 +102,13 @@ export class GitRepository {
   }
 
   /**
-   * A file as the base branch on origin has it, or `null` when the branch or
-   * the file cannot be read (a shallow CI checkout fetches the branch first).
+   * A file as a branch or commit on origin has it: `undefined` when the ref
+   * cannot be fetched, `null` when it has no such file. A shallow CI checkout
+   * does not carry the ref, so it is fetched first.
    */
-  async baseFile(base: string, path: string): Promise<string | null> {
-    const fetched = await this.exec('git', ['fetch', '--quiet', '--depth=1', 'origin', base], { cwd: this.root });
-    if (fetched.code !== 0) return null;
+  async fileAt(ref: string, path: string): Promise<string | null | undefined> {
+    const fetched = await this.exec('git', ['fetch', '--quiet', '--depth=1', 'origin', ref], { cwd: this.root });
+    if (fetched.code !== 0) return undefined;
     const shown = await this.exec('git', ['show', `FETCH_HEAD:${path}`], { cwd: this.root });
     return shown.code === 0 ? shown.stdout : null;
   }

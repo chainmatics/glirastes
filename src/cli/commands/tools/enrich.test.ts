@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { BOT_MARKER, BOT_NAME, execFileRunner, type Exec } from '../../../agent/git.js';
 import type { ToolJobLedger, ToolJobRequest } from '../../../agent/platform-jobs.js';
 import { createAppFixture, FIXTURE_APP_ID, removeAppFixtures, SDK_ROOT, type AppFixture } from '../../../codegen/tools/__tests__/app-fixture.js';
+import { jobDeadline } from './enrich.js';
 import { runToolsCommand, TOOLS_SUBCOMMANDS } from './index.js';
 
 const ROUTE = "declare function getSession(): Promise<unknown>;\n"
@@ -64,10 +65,17 @@ async function committedApp(branch: string): Promise<AppFixture> {
   expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
   await git(fixture, 'init', '--quiet', '--bare', '.origin.git');
   await fixture.write('.gitignore', '.origin.git/\n');
-  await git(fixture, 'init', '--quiet', `--initial-branch=${branch}`);
+  await git(fixture, 'init', '--quiet', '--initial-branch=main');
   await git(fixture, 'config', 'user.name', 'Developer');
   await git(fixture, 'config', 'user.email', 'developer@example.com');
   await git(fixture, 'remote', 'add', 'origin', join(fixture.root, '.origin.git'));
+  await git(fixture, 'add', '.gitignore');
+  await git(fixture, 'commit', '--quiet', '-m', 'chore: init');
+  if (branch !== 'main') {
+    // The base branch exists on origin and has no tool outputs yet: the pull request adopts Glirastes.
+    await git(fixture, 'push', '--quiet', 'origin', 'main');
+    await git(fixture, 'switch', '--quiet', '-c', branch);
+  }
   await git(fixture, 'add', '.');
   await git(fixture, 'commit', '--quiet', '-m', 'feat: tasks api');
   return fixture;
@@ -199,10 +207,12 @@ function run(fixture: AppFixture, env: Record<string, string>, options: {
   pullRequests?: string[][];
   out?: string[];
   exec?: Exec;
+  args?: string[];
+  checkpointEvery?: number;
 }) {
   const loadOpenAI = vi.fn(async () => (() => ({ chat: () => options.model ?? writingModel() })) as never);
   const out = options.out ?? [];
-  const code = runToolsCommand(['enrich', '--managed', '--json'], {
+  const code = runToolsCommand(['enrich', '--managed', '--json', ...(options.args ?? [])], {
     cwd: fixture.root,
     env: {
       GLIRASTES_CI_KEY: CI_KEY,
@@ -216,6 +226,7 @@ function run(fixture: AppFixture, env: Record<string, string>, options: {
       exec: options.exec ?? execWith(options.pullRequests ?? []),
       fetchImpl: options.platform.fetchImpl,
       loadOpenAI,
+      ...(options.checkpointEvery ? { checkpointEvery: options.checkpointEvery } : {}),
       now: () => new Date('2026-10-22T12:00:00.000Z'),
     },
   });
@@ -283,11 +294,12 @@ describe('glirastes tools enrich --managed', () => {
     const api = platform();
     const pullRequests: string[][] = [];
 
-    const result = run(fixture, { GITHUB_REF_NAME: 'main' }, { platform: api, pullRequests });
+    const result = run(fixture, { GITHUB_REF_NAME: 'main' }, { platform: api, pullRequests, args: ['--first-run'] });
 
     expect(await result.code).toBe(0);
     const head = await git(fixture, 'rev-parse', 'HEAD');
     const branch = `glirastes/tools-${(await git(fixture, 'rev-parse', 'HEAD~1')).slice(0, 12)}`;
+    expect(api.requests[0]!.firstRun).toBe(true);
     expect(JSON.parse(result.out.at(-1)!)).toMatchObject({
       status: 'finished', outcome: 'pull_request', commitSha: head, pullRequest: 'https://github.com/acme/app/pull/12',
     });
@@ -456,6 +468,73 @@ describe('glirastes tools enrich --managed', () => {
     expect(tasks).toHaveLength(2);
     expect(await git(fixture, 'rev-parse', 'HEAD')).toBe(before);
   }, 240_000);
+
+  it('works after a push only what the push changed, and the backlog only on request', async () => {
+    const fixture = await committedApp('main');
+    await git(fixture, 'push', '--quiet', 'origin', 'main');
+    const pushedBefore = await git(fixture, 'rev-parse', 'HEAD');
+    await fixture.write('src/app/api/teams/route.ts', TEAMS_ROUTE);
+    await git(fixture, 'add', '.');
+    await git(fixture, 'commit', '--quiet', '-m', 'feat: teams api');
+    expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
+    const api = platform();
+
+    // No earlier state to compare with (a new branch, a manual start): nothing runs without --first-run.
+    const unbounded = run(fixture, { GITHUB_REF_NAME: 'main', GLIRASTES_BEFORE_SHA: '0'.repeat(40) }, { platform: api });
+    expect(await unbounded.code).toBe(0);
+    expect(JSON.parse(unbounded.out.at(-1)!)).toEqual({ schemaVersion: 1, status: 'skipped', code: 'backlog_needs_first_run' });
+    expect(api.requests).toHaveLength(0);
+
+    const { model, tasks } = upsertingModel();
+    const pushed = run(fixture, { GITHUB_REF_NAME: 'main', GLIRASTES_BEFORE_SHA: pushedBefore }, { platform: api, model });
+    expect(await pushed.code).toBe(0);
+    expect(api.requests[0]!.items.map((item) => item.stableKey)).toEqual(['GET /api/teams']);
+    expect(tasks).toEqual([['GET /api/teams']]);
+    expect(JSON.parse(pushed.out.at(-1)!)).toMatchObject({ status: 'finished', outcome: 'pull_request' });
+  }, 240_000);
+
+  it('fails before any request when the base branch cannot be read', async () => {
+    const fixture = await committedApp('feature/tasks');
+    const api = platform();
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, args: ['--base', 'release'] });
+
+    expect(await result.code).toBe(1);
+    expect(JSON.parse(result.out.at(-1)!)).toEqual({ schemaVersion: 1, status: 'failed', code: 'base_unreadable' });
+    expect([api.requests.length, result.loadOpenAI.mock.calls.length]).toEqual([0, 0]);
+  }, 240_000);
+
+  it('commits finished tasks along the way, so a cancelled run loses at most the last ones', async () => {
+    const fixture = await committedApp('feature/tasks');
+    await fixture.write('src/app/api/teams/route.ts', TEAMS_ROUTE);
+    await git(fixture, 'add', '.');
+    await git(fixture, 'commit', '--quiet', '-m', 'feat: teams api');
+    expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
+    const start = await git(fixture, 'rev-parse', 'HEAD');
+    const api = platform();
+    const { model } = upsertingModel();
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model, checkpointEvery: 1 });
+
+    expect(await result.code).toBe(0);
+    const summary = JSON.parse(result.out.at(-1)!) as { commitSha: string };
+    const botCommits = (await git(fixture, 'log', '--format=%an', `${start}..HEAD`)).split('\n');
+    // The modules run side by side, so one checkpoint may already hold both; it is made before the run ends.
+    expect(botCommits.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(botCommits)).toEqual(new Set([BOT_NAME]));
+    expect(result.out.some((line) => line.startsWith('glirastes tools enrich: checkpoint '))).toBe(true);
+    expect(await git(fixture, 'rev-parse', 'HEAD')).toBe(summary.commitSha);
+    expect(await git(fixture, '--git-dir', '.origin.git', 'rev-parse', 'refs/heads/feature/tasks')).toBe(summary.commitSha);
+    expect(await git(fixture, 'status', '--porcelain')).toBe('');
+    expect(api.ledgers[0]).toMatchObject({ outcome: 'committed', commitSha: summary.commitSha });
+    expect(api.ledgers[0]!.changedFiles).toBeGreaterThanOrEqual(6);
+  }, 240_000);
+
+  it('ends its work well before the CI job is cancelled and before the job key expires', () => {
+    const started = new Date('2026-10-22T12:00:00.000Z').getTime();
+    expect(jobDeadline(started, '2026-10-22T13:00:00.000Z').toISOString()).toBe('2026-10-22T12:40:00.000Z');
+    expect(jobDeadline(started, '2026-10-22T12:20:00.000Z').toISOString()).toBe('2026-10-22T12:20:00.000Z');
+  });
 
   it('refuses a BYOK key OpenRouter rejects before the Platform reserves a job', async () => {
     const fixture = await createAppFixture();
