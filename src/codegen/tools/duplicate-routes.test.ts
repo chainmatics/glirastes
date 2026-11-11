@@ -40,7 +40,7 @@ describe('a route declared by two controllers', () => {
     expect(finding[0]).toMatchObject({ severity: 'error', subjectRef: 'GET /v1/tenant/usage' });
     expect(finding[0]!.message).toContain('src/usage-a.controller.ts');
     expect(finding[0]!.message).toContain('src/usage-b.controller.ts');
-    const byKey = new Map(result.tools.map((tool) => [tool.stableKey, tool] as const));
+    const byKey = new Map((result.tools ?? []).map((tool) => [tool.stableKey, tool] as const));
     expect(byKey.get('GET /v1/other/ping')?.enabled).toBe(true);
     expect(byKey.get('GET /v1/tenant/usage')).toMatchObject({ enabled: false, contract: null });
     expect(await app.read(TOOLS_PATHS.inventory)).toContain('GET /v1/other/ping');
@@ -52,7 +52,7 @@ describe('a route declared by two controllers', () => {
 
     expect(result.wrote).toBe(true);
     expect(result.findings.some((entry) => entry.code === 'route-declared-twice')).toBe(true);
-    expect(result.tools.find((tool) => tool.stableKey === 'GET /v1/other/ping')?.enabled).toBe(true);
+    expect((result.tools ?? []).find((tool) => tool.stableKey === 'GET /v1/other/ping')?.enabled).toBe(true);
   });
 
   it('reports a route declared three times once, naming all three files', async () => {
@@ -73,6 +73,6 @@ describe('a route declared by two controllers', () => {
     const result = await runToolsPipeline({ root: app.root, mode: 'write' });
 
     expect(result.findings.some((entry) => entry.code === 'route-declared-twice')).toBe(false);
-    expect(result.tools.map((tool) => tool.stableKey)).toEqual(['GET /v1/other/ping']);
+    expect((result.tools ?? []).map((tool) => tool.stableKey)).toEqual(['GET /v1/other/ping']);
   });
 });

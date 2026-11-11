@@ -131,7 +131,7 @@ describe('glirastes init scaffold', () => {
       const app = await monorepo();
       await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
       const result = await runToolsPipeline({ root: app.root, mode: 'write', keepGoing: true });
-      expect(result.tools.map((tool) => tool.stableKey)).toContain('GET /members');
+      expect((result.tools ?? []).map((tool) => tool.stableKey)).toContain('GET /members');
     }, 60_000);
 
     it('never writes a path outside the root', async () => {
