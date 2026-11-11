@@ -422,6 +422,38 @@ export interface AiChatHandlerConfig {
   approvalStore?: ApprovalStore;
 
   /**
+   * Origins, besides the request's own, whose pages may post to the handler
+   * from a browser, e.g. `['https://admin.example.com']`. The request's own
+   * origin is taken from `x-forwarded-host` / `x-forwarded-proto` when a
+   * proxy sets them. Does not open requests the browser marks
+   * `Sec-Fetch-Site: cross-site` or `same-site`.
+   */
+  allowedOrigins?: ReadonlyArray<string>;
+
+  /**
+   * Browser cross-origin protection, on by default. A page on another site
+   * can make a browser post to the chat route with the user's cookie, so the
+   * handler refuses (403) a request with `Sec-Fetch-Site` other than
+   * `same-origin` / `none`, or, without that header, with an `Origin` that is
+   * neither its own nor in `allowedOrigins`. Requests with neither header
+   * (server to server) pass.
+   *
+   * `false` turns this off, and only an app whose chat route does not
+   * authenticate by cookie may do so (a bearer token the page adds itself,
+   * which a cross-origin page does not have). With cookie authentication it
+   * re-opens cross-site request forgery: any page the user visits could send
+   * chat turns, and run tools, as the user. The JSON content type check stays.
+   */
+  crossOriginProtection?: boolean;
+
+  /**
+   * Largest request body in bytes. Default 1,000,000. A larger body is
+   * answered with 413 before it is parsed; the limit counts the bytes read,
+   * not only the declared `Content-Length`.
+   */
+  maxBodyBytes?: number;
+
+  /**
    * Lancer client for runtime prompt and model overrides (Pro feature).
    *
    * When provided, the adapter fetches prompt overrides from Glirastes

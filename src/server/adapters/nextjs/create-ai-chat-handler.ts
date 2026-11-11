@@ -14,6 +14,7 @@ import {
   resolveClarificationResume,
 } from './clarification-resume.js';
 import { scopePipelineTools } from './scope-pipeline-tools.js';
+import { checkRequestHeaders, readJsonBody } from './request-guards.js';
 import {
   ApprovalSecretMissingError,
   bindApprovalRequests,
@@ -764,6 +765,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     approvalSecret,
     approvalMaxAgeMs,
     approvalStore,
+    allowedOrigins,
+    crossOriginProtection,
+    maxBodyBytes,
   } = config;
   // Without a callback a failed turn would only say "AI request failed" to
   // the user and nothing to the developer. Name only: provider errors can
@@ -890,10 +894,17 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
 
   async function handler(req: Request): Promise<Response> {
+    const refused = checkRequestHeaders(req, { allowedOrigins, crossOriginProtection });
+    if (refused) return refused;
     reportDefaultsOnce();
     let turnMetrics: TurnMetricsRecorder | undefined;
     try {
-      const { messages: requestMessages, glirastesClientActions } = await req.json();
+      const body = await readJsonBody(req, maxBodyBytes);
+      if (!body.ok) return body.response;
+      const { messages: requestMessages, glirastesClientActions } = body.value as {
+        messages?: unknown;
+        glirastesClientActions?: unknown;
+      };
 
       if (!Array.isArray(requestMessages)) {
         return new Response(
