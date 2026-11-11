@@ -312,4 +312,61 @@ describe('createAiSdkTools', () => {
       expect(decisions).toEqual([{ toolName: 'tasks_archive', toolCallId: 'c3', needed: true }]);
     });
   });
+
+  describe('one schema run per tool call (p18)', () => {
+    function counted() {
+      let runs = 0;
+      let ticket = 0;
+      const seen: Record<string, unknown[]> = { needsApproval: [], execute: [], after: [] };
+      const parameters = z.object({ amount: z.number() }).transform((value) => {
+        runs += 1;
+        ticket += 1;
+        return { ...value, ticket };
+      });
+      const tools = createAiSdkTools({
+        tools: {
+          pay: {
+            description: 'Pay.',
+            parameters,
+            needsApproval: (input: unknown) => { seen.needsApproval!.push(input); return false; },
+            execute: async (input: unknown) => { seen.execute!.push(input); return { ok: true }; },
+          },
+        },
+        afterToolCall: ({ input }) => { seen.after!.push(input); },
+      });
+      return { tool: tools.pay!, seen, runs: () => runs };
+    }
+
+    it('validates, decides and executes a live call on one schema output', async () => {
+      const { tool, seen, runs } = counted();
+      const raw = { amount: 5 };
+      const validate = (tool.inputSchema as { validate: (value: unknown) => Promise<{ success: boolean; value?: unknown }> }).validate;
+      const checked = await validate(raw);
+      expect(checked).toEqual({ success: true, value: raw });
+      const options = { toolCallId: 'c1', messages: [] };
+      expect(await (tool.needsApproval as (input: unknown, extra: unknown) => Promise<boolean>)(checked.value, options)).toBe(false);
+      await tool.execute!(checked.value, options);
+      expect(runs()).toBe(1);
+      expect(seen.needsApproval).toEqual([{ amount: 5, ticket: 1 }]);
+      expect(seen.execute).toEqual([{ amount: 5, ticket: 1 }]);
+      expect(seen.after).toEqual([{ amount: 5, ticket: 1 }]);
+    });
+
+    it('parses again when the input object changed after validation', async () => {
+      const { tool, seen, runs } = counted();
+      const raw: { amount: number } = { amount: 5 };
+      await (tool.inputSchema as { validate: (value: unknown) => Promise<unknown> }).validate(raw);
+      raw.amount = 500;
+      await tool.execute!(raw, { toolCallId: 'c1', messages: [] });
+      expect(runs()).toBe(2);
+      expect(seen.execute).toEqual([{ amount: 500, ticket: 2 }]);
+    });
+
+    it('parses an approved call taken from the history once', async () => {
+      const { tool, seen, runs } = counted();
+      await tool.execute!({ amount: 500 }, { toolCallId: 'c1', messages: [] });
+      expect(runs()).toBe(1);
+      expect(seen.execute).toEqual([{ amount: 500, ticket: 1 }]);
+    });
+  });
 });

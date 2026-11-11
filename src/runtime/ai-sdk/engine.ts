@@ -96,8 +96,9 @@ function isJsonSchemaLike(value: unknown): value is {
  * checks but returns the model's own input unchanged, so the history and the
  * approval binding hold exactly what the model wrote (JSON, which survives
  * the round trip through the client), and the schema output (transforms,
- * defaults, stripped keys) is produced here and reaches `needsApproval`,
- * `resolveApproval` and the tool's `execute`, each exactly once.
+ * defaults, stripped keys) is produced here, once per tool call, and the same
+ * value reaches `needsApproval`, `resolveApproval`, the tool's `execute`,
+ * `afterToolCall` and `onToolError`.
  */
 type InputSchema = ReturnType<typeof jsonSchema> | ReturnType<typeof zodSchema>;
 type ValidationResult = { success: true; value: unknown } | { success: false; error: Error };
@@ -164,18 +165,35 @@ export function createAiSdkTools(
       : decide ?? baseNeedsApproval;
     const inputSchema = toAiSdkInputSchema(source.parameters);
     const validateInput = inputSchema.validate as ((value: unknown) => ValidationResult | PromiseLike<ValidationResult>) | undefined;
+    // One schema run per tool call. The AI SDK hands the object `validate`
+    // checked on to `needsApproval` and `execute` unchanged, so its schema
+    // output is kept here and reused, as long as the object still serializes
+    // the same: `needsApproval` decides on exactly the value that executes,
+    // even for a schema whose output differs from run to run.
+    const parsedInputs = new WeakMap<object, { snapshot: string; value: unknown }>();
+    const remember = (rawInput: unknown, value: unknown) => {
+      const snapshot = typeof rawInput === 'object' && rawInput !== null ? snapshotOf(rawInput) : undefined;
+      if (snapshot !== undefined) parsedInputs.set(rawInput as object, { snapshot, value });
+    };
     if (validateInput) {
       (inputSchema as { validate: typeof validateInput }).validate = async (value) => {
         const result = await validateInput(value);
-        return result.success ? { success: true, value } : result;
+        if (!result.success) return result;
+        remember(value, result.value);
+        return { success: true, value };
       };
     }
     const parseInput = async (rawInput: unknown): Promise<unknown> => {
       if (!validateInput) return rawInput;
+      if (typeof rawInput === 'object' && rawInput !== null) {
+        const known = parsedInputs.get(rawInput);
+        if (known && known.snapshot === snapshotOf(rawInput)) return known.value;
+      }
       const checked = await validateInput(rawInput);
       if (!checked.success) {
         throw new Error(`Invalid input for tool "${toolName}": ${checked.error.message}`);
       }
+      remember(rawInput, checked.value);
       return checked.value;
     };
     wrapped[toolName] = tool({
@@ -225,6 +243,15 @@ export function createAiSdkTools(
   }
 
   return wrapped;
+}
+
+function snapshotOf(value: object): string | undefined {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    // Not JSON (a cycle, a BigInt): not remembered, parsed at every use.
+    return undefined;
+  }
 }
 
 async function withTimeout<T>(
