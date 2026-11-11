@@ -902,8 +902,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       secret: approvalSecret,
       maxAgeMs: approvalMaxAgeMs,
       scope: principal ? `${principal.tenantId}:${principal.subjectId}` : '',
-      // The managed policy can ask for approval of a tool that declares none.
-      hasApprovalTools: Boolean(managedTurn) || Object.values(registry).some((tool) => Boolean(tool.needsApproval)),
+      // The managed policy and Lancer approvals can ask for approval of a
+      // tool that declares none.
+      hasApprovalTools: Boolean(managedTurn)
+        || Boolean(lancer?.approvals)
+        || Object.values(registry).some((tool) => Boolean(tool.needsApproval)),
     });
     const checked = await enforceApprovalBindings(messages, { binder, store: approvalStore });
     return { binder, messages: checked.messages, verified: checked.verified };

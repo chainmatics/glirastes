@@ -472,6 +472,31 @@ describe('approval binding through the chat handler', () => {
     expect(ran).toEqual([{ n: 3 }]);
   });
 
+  it('fails closed in production without a secret when lancer.approvals can ask for approval', async () => {
+    vi.stubEnv('GLIRASTES_APPROVAL_SECRET', '');
+    vi.stubEnv('NODE_ENV', 'production');
+    const model = callingModel('tasks_list', {});
+    const list = vi.fn(async () => ({ tasks: [] }));
+    const registry: ToolRegistry = {
+      tasks_list: defineTool({ id: 'tasks.list', description: 'List.', inputSchema: z.object({}).strict(), execute: list }),
+    };
+    const lancer = {
+      approvals: {
+        check: vi.fn(async () => ({ required: true, requestId: 'r1' })),
+        decide: vi.fn(async () => undefined),
+        resolve: vi.fn(async () => undefined),
+        hashInput: () => 'hash',
+      },
+      config: { fetch: vi.fn(async () => ({})), reportModels: vi.fn(async () => undefined) },
+    };
+    const handler = createAiChatHandler({ tools: registry, model, systemPrompt: 'Assistant', lancer: lancer as never, onError: vi.fn() });
+    const response = await handler(post([user]));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: 'approval_secret_missing' });
+    expect(model.doStreamCalls).toHaveLength(0);
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it('serves a registry without approval tools in production without a secret', async () => {
     vi.stubEnv('GLIRASTES_APPROVAL_SECRET', '');
     vi.stubEnv('NODE_ENV', 'production');
