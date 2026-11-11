@@ -924,7 +924,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
    * managed principal or `approvalScope`, the signed scope. Otherwise a key
    * per caller derived from the request's credentials (`Authorization`, else
    * `Cookie`), HMAC-ed with the approval secret and never kept raw, so one
-   * caller cannot use up everyone's quota. It only partitions the quota: it
+   * caller with fixed credentials cannot use up everyone's quota (varying
+   * them gives a fresh quota; only the store's global limit bounds that).
+   * It only partitions the quota: it
    * is not signed into the approval id (a cookie may rotate between the
    * approval request and its answer), and single use is checked by the
    * approval id across all keys. A request without credentials has `''`.

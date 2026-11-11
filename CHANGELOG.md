@@ -109,7 +109,10 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   credentials (an HMAC-SHA-256 under the approval secret of the
   `Authorization` header, else the `Cookie` header; the raw value is never
   kept), so one signed-in user who fills their quota does not block other
-  users. Only requests without any credentials share one quota. This key
+  users. Only requests without any credentials share one quota. A caller
+  who varies their credentials gets a fresh quota per value, so against
+  that only the global limit of 20,000 holds, and each entry costs a real
+  approved execution. This key
   partitions the quota only; it is not signed into the approval id (a
   cookie may change between the request for an approval and its answer),
   and single use holds by approval id across all keys. Apps that identify
