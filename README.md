@@ -1,24 +1,22 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
-    <img src=".github/assets/logo-light.svg" alt="glirastes" width="320">
-  </picture>
+  <img src=".github/assets/logo.png" alt="Glirastes logo: an orange mycelium mark" width="120">
 </p>
 
 <h1 align="center">Glirastes</h1>
 
 <p align="center">
-  <em>The chat that operates your app. Tools from your code, execution in your app.</em>
+  <em>The agentic framework that takes root in your product.</em>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/glirastes"><img src="https://img.shields.io/npm/v/glirastes?style=flat-square&color=6366f1" alt="npm version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-6366f1?style=flat-square" alt="License: Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/node-%E2%89%A5%2020.6-6366f1?style=flat-square" alt="Node >= 20.6">
-  <img src="https://img.shields.io/badge/TypeScript-ready-6366f1?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+  <a href="https://www.npmjs.com/package/glirastes"><img src="https://img.shields.io/npm/v/glirastes?style=flat-square&color=f2a618" alt="npm version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-f2a618?style=flat-square" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/node-%E2%89%A5%2020.6-f2a618?style=flat-square" alt="Node >= 20.6">
+  <img src="https://img.shields.io/badge/TypeScript-ready-f2a618?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
 </p>
 
 <p align="center">
+  <a href="https://glirastes.io"><b>Website</b></a> ·
   <a href="#quickstart-nextjs-app-router"><b>Quickstart</b></a> ·
   <a href="docs/"><b>Docs</b></a> ·
   <a href="skills/"><b>Skills</b></a> ·
@@ -26,14 +24,22 @@
 </p>
 
 <p align="center">
-  <img src=".github/assets/hero.gif" width="100%" alt="A task board app with the Glirastes chat docked on the right. The user asks to move the Q4 report to Finance and assign it to Lena; the assistant looks up the task and the person, asks for approval of tasks.update, and after Approve the card moves to the Finance column with Lena as assignee.">
+  <a href="https://glirastes.io"><img src=".github/assets/hero-landing.gif" width="100%" alt="The glirastes.io hero: an orange mycelium network pulses behind the headline &quot;The agentic framework that takes root in your product.&quot; and the npm install glirastes command."></a>
 </p>
 
-Glirastes is a TypeScript SDK that adds an embedded chat to your app which
-operates the app for the user: it calls your endpoints, navigates, sets
-filters and triggers UI actions. The tools come from your code, everything runs
-inside your app, and the optional Glirastes Platform manages reviewed
-configuration and rollouts without ever seeing prompts or business data.
+Glirastes is a TypeScript SDK for an embedded chat that operates your app: it
+calls your endpoints, navigates, sets filters and triggers UI actions. The tools
+come from your code, everything runs inside your app, and the optional Glirastes
+Platform manages reviewed configuration and rollouts without ever seeing prompts
+or business data.
+
+## See it in action
+
+<p align="center">
+  <img src=".github/assets/chat-demo.gif" width="100%" alt="A task board app with the Glirastes chat docked on the right. The user asks to move the Q4 report to Finance and assign it to Lena; the assistant looks up the task and the person, asks for approval of tasks.update, and after Approve the card moves to the Finance column with Lena as assignee.">
+</p>
+
+<p align="center"><sub>One request moves a card on a task board: the chat finds the task and the person, asks for approval of <code>tasks.update</code>, then acts.</sub></p>
 
 ## Quickstart (Next.js App Router)
 
