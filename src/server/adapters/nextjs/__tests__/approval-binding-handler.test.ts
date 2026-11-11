@@ -62,7 +62,7 @@ const user = { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Archive t1
 async function clientMessage(chunks: Array<Record<string, unknown>>): Promise<UIMessage> {
   let last: UIMessage | undefined;
   for await (const message of readUIMessageStream({
-    stream: new ReadableStream({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } }),
+    stream: new ReadableStream({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk as never); controller.close(); } }),
   })) last = message;
   return JSON.parse(JSON.stringify(last)) as UIMessage;
 }
