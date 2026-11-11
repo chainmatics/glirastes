@@ -185,6 +185,25 @@ describe('cross-origin requests', () => {
     await ok.text();
   });
 
+  it('accepts the Host header origin with https and http behind a TLS proxy, for a browser without Sec-Fetch-Site (p30)', async () => {
+    const { handler } = setup();
+    for (const origin of ['https://chat.example.com', 'http://chat.example.com']) {
+      const ok = await handler(post({ origin, host: 'chat.example.com' }, body, 'http://localhost:3000/api/chat'));
+      expect(ok.status).toBe(200);
+      await ok.text();
+    }
+    const refused = await handler(post({ origin: 'https://evil.example', host: 'chat.example.com' }, body, 'http://localhost:3000/api/chat'));
+    expect(refused.status).toBe(403);
+    const otherPort = await handler(post({ origin: 'https://chat.example.com:8443', host: 'chat.example.com' }, body, 'http://localhost:3000/api/chat'));
+    expect(otherPort.status).toBe(403);
+  });
+
+  it('leaves the endpoint caller on the request URL origin whatever Host says', async () => {
+    const { extractOrigin } = await import('../context-helpers.js');
+    const request = new Request('http://localhost:3000/api/chat', { headers: { host: 'chat.example.com', origin: 'https://chat.example.com' } });
+    expect(extractOrigin(request)).toBe('http://localhost:3000');
+  });
+
   it('can be switched off for an app that authenticates without cookies', async () => {
     const { handler } = setup({ crossOriginProtection: false });
     const response = await handler(post({ origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' }));

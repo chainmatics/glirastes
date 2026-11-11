@@ -65,20 +65,28 @@ function lastForwardedValue(value: string | null): string | undefined {
 
 /**
  * The origins a browser on the app's public address may send as `Origin`,
- * for the cross-origin check only: the request URL's origin, the Host
- * header's, and the first forwarded host and protocol (what the outermost
- * proxy saw). The check consults them only for a browser that sends no
- * `Sec-Fetch-Site`, and a browser cannot add `Host` or `x-forwarded-*` to a
- * cross-origin request (they are forbidden or need a CORS preflight, which
- * the JSON content type needs anyway), so a client that sets them carries
- * no victim's cookie.
+ * for the cross-origin check only, never for the endpoint caller: the
+ * request URL's origin, the Host header with `https` and with `http`, and
+ * the first forwarded host and protocol (what the outermost proxy saw).
+ *
+ * Both schemes for Host, because behind a TLS-terminating proxy the request
+ * URL says `http` while the browser's Origin says `https`. This does not
+ * widen what a cross-origin page can do: the browser sets `Host` itself to
+ * the host it sends the request to, a page cannot choose it (it is a
+ * forbidden header), and `x-forwarded-*` would need a CORS preflight, which
+ * the JSON content type needs anyway. A request whose Origin matches the
+ * Host was therefore sent by a page of that very host; a client that sets
+ * these headers itself is not a browser and carries no victim's cookie. The
+ * one thing added is the plain-http page of the same host, which only a
+ * network attacker could serve, and only where the host is reachable over
+ * http without HSTS. The check consults these origins only for a browser
+ * that sends no `Sec-Fetch-Site`.
  */
 export function publicOrigins(req: Request): string[] {
   const own = requestUrlOrigin(req);
-  const protocol = new URL(own).protocol;
   const origins = [own];
   const host = req.headers.get('host');
-  if (host) origins.push(`${protocol}//${host}`);
+  if (host) origins.push(`https://${host}`, `http://${host}`);
   const forwardedHost = req.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
   if (forwardedHost) {
     const forwardedProto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'https';
