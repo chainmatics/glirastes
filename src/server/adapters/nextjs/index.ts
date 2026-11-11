@@ -9,6 +9,7 @@ export {
   buildRuntimeContext,
   buildToolContext,
   createInternalApiCallerFromRequest,
+  type OriginOptions,
 } from './context-helpers.js';
 export { sanitizeModelMessages } from './sanitize-model-messages.js';
 export {

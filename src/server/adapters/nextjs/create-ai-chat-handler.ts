@@ -775,7 +775,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     metrics,
     modelPricing: configuredModelPricing,
     directCommands = true,
-    endpointCaller = createInternalApiCallerFromRequest,
+    trustForwardedHeaders = false,
+    endpointCaller = (request: Request) => createInternalApiCallerFromRequest(request, { trustForwardedHeaders }),
     approvalSecret,
     approvalMaxAgeMs,
     approvalStore: configuredApprovalStore,
@@ -977,7 +978,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           : requestMessages);
 
       // Build tool context
-      const toolContext = buildToolContext(req, { locale });
+      const toolContext = buildToolContext(req, { locale, trustForwardedHeaders });
       const clientActions = readClientActions(glirastesClientActions);
       if (clientActions) toolContext.runtime = { ...toolContext.runtime, clientActions };
       const requestStart = Date.now();

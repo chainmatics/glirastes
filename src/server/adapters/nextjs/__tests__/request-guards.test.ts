@@ -167,6 +167,24 @@ describe('cross-origin requests', () => {
     expect((await handler(chained('http://internal'))).status).toBe(403);
   });
 
+  it('does not let a forwarded host equal to the sender\'s own origin pass a cross-site browser request', async () => {
+    const { handler, model } = setup();
+    for (const site of ['cross-site', 'same-site']) {
+      const response = await handler(post(
+        { origin: 'https://evil.example', 'sec-fetch-site': site, 'x-forwarded-host': 'evil.example', 'x-forwarded-proto': 'https', host: 'evil.example' },
+      ));
+      expect(response.status).toBe(403);
+    }
+    expect(model.doStreamCalls).toHaveLength(0);
+  });
+
+  it('accepts the Host header origin of a browser without Sec-Fetch-Site', async () => {
+    const { handler } = setup();
+    const ok = await handler(post({ origin: 'https://chat.example.com', host: 'chat.example.com' }, body, 'https://localhost:3000/api/chat'));
+    expect(ok.status).toBe(200);
+    await ok.text();
+  });
+
   it('can be switched off for an app that authenticates without cookies', async () => {
     const { handler } = setup({ crossOriginProtection: false });
     const response = await handler(post({ origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' }));

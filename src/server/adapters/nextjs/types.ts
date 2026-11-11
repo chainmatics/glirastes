@@ -379,12 +379,28 @@ export interface AiChatHandlerConfig {
 
   /**
    * The caller endpoint tools of one chat request use. When absent, calls go
-   * to the origin the chat request arrived on and carry only its cookie
-   * (`createInternalApiCallerFromRequest`). An API on its own origin, or one
-   * that authenticates by `Authorization` header, passes
+   * to the origin of the chat request's URL and carry only its cookie
+   * (`createInternalApiCallerFromRequest`); `Host` and `x-forwarded-host` are
+   * not read unless `trustForwardedHeaders` is set. An API on its own origin,
+   * an app that cannot reach itself under its request URL, or one that
+   * authenticates by `Authorization` header, passes
    * `(request) => createHttpEndpointCaller({ baseUrl, request })`.
    */
   endpointCaller?: (request: Request) => InternalApiCaller;
+
+  /**
+   * Let the default endpoint caller and `runtime.origin` take the origin from
+   * `x-forwarded-host` / `x-forwarded-proto` (their last value, which the
+   * proxy nearest to the app set). Default `false`.
+   *
+   * Set it only when every request reaches the app through a proxy that sets
+   * or appends these headers. Anyone who can reach the app directly can put
+   * any host there, including internal addresses, and endpoint tools then
+   * send the user's cookie to it. A fixed `endpointCaller` with
+   * `createHttpEndpointCaller({ baseUrl })` is safer. The cross-origin check
+   * does not depend on this option.
+   */
+  trustForwardedHeaders?: boolean;
 
   /**
    * Secret that binds every approval the handler asks for to the tool call it

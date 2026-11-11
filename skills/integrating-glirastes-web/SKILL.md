@@ -50,10 +50,12 @@ runtime next to it and a Vite Vue frontend).
    `glirastes/server/nextjs`, despite the name) takes a Web `Request` and
    returns a `Response`; adapt your framework's request object to it.
 2. Endpoint tools call the API with the user's own credentials. By default
-   `createAiChatHandler` sends each call to the origin the chat request
-   arrived on and forwards only its session cookie, so an API on the
+   `createAiChatHandler` sends each call to the origin of the chat
+   request's URL (never to a `Host` or `x-forwarded-host` the client could
+   name) and forwards only its session cookie, so an API on the
    same origin as the handler (a reverse proxy or the dev server routes
-   `/api` to the backend) needs nothing more. For an API on its own origin, or one that
+   `/api` to the backend) needs nothing more. For an API on its own origin,
+   an app that cannot reach itself under its request URL, or one that
    authenticates by bearer token, pass
    `endpointCaller: (request) => createHttpEndpointCaller({ baseUrl: apiOrigin, request })`
    (from `glirastes/server`): every call goes to that fixed origin and

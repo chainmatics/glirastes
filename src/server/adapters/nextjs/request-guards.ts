@@ -1,4 +1,4 @@
-import { extractOrigin } from './context-helpers.js';
+import { publicOrigins } from './context-helpers.js';
 
 /** Default cap on the request body of the chat handler: 1 MB. */
 export const DEFAULT_MAX_BODY_BYTES = 1_000_000;
@@ -29,9 +29,9 @@ const json = (status: number, error: string, message: string): Response => new R
  * - `Sec-Fetch-Site`, when present, must be `same-origin` (or `none`, a
  *   navigation by the user); `same-site` and `cross-site` pass only with an
  *   `Origin` listed in `allowedOrigins`.
- * - Otherwise `Origin`, when present, must be the request's own origin
- *   (first value of the forwarded host and protocol included) or one of
- *   `allowedOrigins`.
+ * - Otherwise `Origin`, when present, must be the request's own origin (the
+ *   request URL's, the Host header's, or the first forwarded host and
+ *   protocol, see `publicOrigins`) or one of `allowedOrigins`.
  * - A request with neither header is not from a browser (server to server).
  */
 export function checkRequestHeaders(req: Request, options: RequestGuardOptions = {}): Response | undefined {
@@ -64,12 +64,7 @@ function configuredOrigins(allowed: ReadonlyArray<string> = []): Set<string> {
 
 function ownOrigins(req: Request, allowed: ReadonlyArray<string> = []): Set<string> {
   const origins = configuredOrigins(allowed);
-  origins.add(extractOrigin(req));
-  try {
-    origins.add(new URL(req.url).origin);
-  } catch {
-    // extractOrigin has the fallback.
-  }
+  for (const origin of publicOrigins(req)) origins.add(origin);
   return origins;
 }
 
