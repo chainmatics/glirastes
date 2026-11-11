@@ -55,7 +55,18 @@ function isJsonSchemaLike(value: unknown): value is {
   );
 }
 
-function toAiSdkInputSchema(parameters: unknown) {
+/**
+ * The AI SDK validates a model-written call before it executes it, but it
+ * runs an approved call from the message history without validating its
+ * input again, and that history comes from the client. Every execution
+ * therefore validates here. A value the SDK's own `validate` just produced is
+ * remembered by identity and not parsed a second time, because the parsed
+ * value of a schema with a transform does not parse again.
+ */
+type InputSchema = ReturnType<typeof jsonSchema> | ReturnType<typeof zodSchema>;
+type ValidationResult = { success: true; value: unknown } | { success: false; error: Error };
+
+function toAiSdkInputSchema(parameters: unknown): InputSchema {
   if (!isJsonSchemaLike(parameters)) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return zodSchema(parameters as any);
@@ -95,14 +106,34 @@ export function createAiSdkTools(
     const needsApproval = options.resolveApproval
       ? (input: unknown) => options.resolveApproval!({ toolName, input })
       : source.needsApproval;
+    const inputSchema = toAiSdkInputSchema(source.parameters);
+    const validateInput = inputSchema.validate as ((value: unknown) => ValidationResult | PromiseLike<ValidationResult>) | undefined;
+    const sdkValidated = new WeakSet<object>();
+    if (validateInput) {
+      (inputSchema as { validate: typeof validateInput }).validate = async (value) => {
+        const result = await validateInput(value);
+        if (result.success && typeof result.value === 'object' && result.value !== null) {
+          sdkValidated.add(result.value);
+        }
+        return result;
+      };
+    }
     wrapped[toolName] = tool({
       description: source.description,
-      inputSchema: toAiSdkInputSchema(source.parameters),
+      inputSchema,
       needsApproval: needsApproval as Parameters<typeof tool>[0]['needsApproval'],
-      execute: async (input: unknown, executionOptions: unknown) => {
-        await options.beforeToolCall?.({ toolName, input });
+      execute: async (rawInput: unknown, executionOptions: unknown) => {
+        await options.beforeToolCall?.({ toolName, input: rawInput });
         const startedAt = now();
+        let input = rawInput;
         try {
+          if (validateInput && !(typeof rawInput === 'object' && rawInput !== null && sdkValidated.has(rawInput))) {
+            const checked = await validateInput(rawInput);
+            if (!checked.success) {
+              throw new Error(`Invalid input for tool "${toolName}": ${checked.error.message}`);
+            }
+            input = checked.value;
+          }
           const execution = Promise.resolve(source.execute(input, executionOptions));
           const result = options.toolTimeoutMs === undefined
             ? await execution

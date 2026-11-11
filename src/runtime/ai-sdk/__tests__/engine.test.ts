@@ -176,4 +176,74 @@ describe('createAiSdkTools', () => {
     await rejection;
     vi.useRealTimers();
   });
+
+  describe('input validation at execution', () => {
+    const strictTool = () => {
+      const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+      const tools = createAiSdkTools({
+        tools: {
+          update_app: {
+            description: 'Update an app.',
+            parameters: z.object({ appId: z.string().min(1), name: z.string() }).strict(),
+            execute,
+          },
+        },
+      });
+      return { tools, execute };
+    };
+
+    it('rejects input with a field the schema does not declare before the tool runs', async () => {
+      const { tools, execute } = strictTool();
+      await expect(tools.update_app!.execute!(
+        { appId: 'a1', name: 'x', extraField: 'not-in-schema' },
+        {} as never,
+      )).rejects.toThrow(/extraField/);
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('rejects input that does not match the schema before the tool runs', async () => {
+      const { tools, execute } = strictTool();
+      await expect(tools.update_app!.execute!({ appId: '', name: 'x' }, {} as never)).rejects.toThrow(/appId/);
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('runs the tool with the parsed input, so a schema that strips unknown fields strips them', async () => {
+      const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+      const tools = createAiSdkTools({
+        tools: { note: { description: 'Note.', parameters: z.object({ text: z.string() }), execute } },
+      });
+      await tools.note!.execute!({ text: 'hi', extra: 1 }, {} as never);
+      expect(execute).toHaveBeenCalledWith({ text: 'hi' }, expect.anything());
+    });
+
+    it('validates generated JSON schemas the same way', async () => {
+      const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+      const tools = createAiSdkTools({
+        tools: {
+          create_task: {
+            description: 'Create task.',
+            parameters: createJsonSchemaLike({
+              type: 'object', additionalProperties: false, properties: { title: { type: 'string' } }, required: ['title'],
+            }),
+            execute,
+          },
+        },
+      });
+      await expect(tools.create_task!.execute!({ title: 't', extra: true }, {} as never)).rejects.toThrow();
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('does not validate a second time what the AI SDK already validated', async () => {
+      // The transform makes the parsed value unfit for the schema's own input.
+      const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+      const tools = createAiSdkTools({
+        tools: { count: { description: 'Count.', parameters: z.object({ n: z.string().transform((value) => value.length) }), execute } },
+      });
+      const inputSchema = tools.count!.inputSchema as { validate: (value: unknown) => Promise<{ success: boolean; value: unknown }> };
+      const parsed = await inputSchema.validate({ n: 'abc' });
+      expect(parsed).toMatchObject({ success: true, value: { n: 3 } });
+      await tools.count!.execute!(parsed.value, {} as never);
+      expect(execute).toHaveBeenCalledWith({ n: 3 }, expect.anything());
+    });
+  });
 });
