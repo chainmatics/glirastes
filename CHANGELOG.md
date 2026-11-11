@@ -160,6 +160,14 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 
 ### Fixed
 
+- `--help` prints the usage of every command instead of running it.
+- `glirastes init` at a monorepo root finds the apps in its workspace
+  packages.
+- A NestJS route that is declared twice is reported as the finding
+  `route-declared-twice`; `glirastes tools refresh` keeps generating the other
+  tools.
+- A managed tool job that the Platform stops at the workspace's overage
+  ceiling ends green and says why (`usage_overage_ceiling_reached`).
 - A client action the open page has no handler for no longer reports success.
 - `glirastes tools enrich` names a malformed CI key (`ci_key_invalid`) and
   checks an own OpenRouter key before the Platform reserves a job
