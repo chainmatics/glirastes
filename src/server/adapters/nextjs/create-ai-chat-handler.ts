@@ -1305,6 +1305,19 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           // focused selection.
           aiTools = keepAlwaysOn(aiTools, unscopedAiTools);
         }
+        // An approval verified (and consumed) above answers a call that an
+        // earlier request already routed. Routing for this request must not
+        // turn that approved call into a tool error, so its tool stays in the
+        // set (the AI SDK runs approved calls from `tools`, not `activeTools`).
+        // Only tools with a verified approval come back; a new call to one of
+        // them still needs its own approval. A guardrail block keeps no tools,
+        // so the approved call then ends as a tool error and is not run.
+        if (!pipelineResult.blocked) {
+          for (const { toolName } of pipelineApprovals.verified) {
+            const approvedTool = unscopedAiTools[toolName];
+            if (approvedTool && !aiTools[toolName]) aiTools = { ...aiTools, [toolName]: approvedTool };
+          }
+        }
 
         // Resolve model — config callback > pipeline instance > error
         let model: unknown;

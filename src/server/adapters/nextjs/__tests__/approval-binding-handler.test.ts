@@ -425,6 +425,51 @@ describe('approval binding through the chat handler', () => {
     expect(archive).not.toHaveBeenCalled();
   });
 
+  describe('pipeline mode', () => {
+    const pipelineSelecting = (selected: () => string[], blocked = false) => ({
+      process: async (input: string) => ({
+        model: { modelId: 'm' }, tools: selected(), toolSelection: 'explicit' as const, sanitizedInput: input,
+        intent: { intent: 'x', confidence: 1 }, module: null, followupsEnabled: false, ...(blocked ? { blocked: true } : {}),
+      }),
+    });
+
+    it('runs an approved call although the continuation’s tool selection leaves its tool out (p15)', async () => {
+      let selection = ['tasks_archive'];
+      const { config, archive } = setup({ pipeline: pipelineSelecting(() => selection) as never });
+      const { handler, message } = await firstTurn(config);
+      selection = [];
+      const second = await streamChunks(await handler(post([user, answered(message, true)])));
+      expect(second.find((chunk) => chunk.type === 'tool-output-available')).toMatchObject({ toolCallId: 'call-1', output: { archived: 't1' } });
+      expect(second.some((chunk) => chunk.type === 'tool-output-error')).toBe(false);
+      expect(archive).toHaveBeenCalledTimes(1);
+      expect(archive.mock.calls[0]![0]).toEqual({ id: 't1' });
+    });
+
+    it('adds back only the approved tool, not every tool the selection left out', async () => {
+      let selection = ['tasks_archive'];
+      const { config } = setup({ pipeline: pipelineSelecting(() => selection) as never });
+      const { message } = await firstTurn(config);
+      selection = [];
+      const seen: string[][] = [];
+      const inspecting = createAiChatHandler({
+        ...config,
+        streamHandler: async (ctx) => { seen.push(Object.keys(ctx.tools)); return new Response('ok'); },
+      });
+      await (await inspecting(post([user, answered(message, true)]))).text();
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toContain('tasks_archive');
+      expect(seen[0]).not.toContain('tasks_delete');
+    });
+
+    it('does not run an approved call when the guardrails block the continuation', async () => {
+      const { config, archive } = setup({ pipeline: pipelineSelecting(() => ['tasks_archive']) as never });
+      const { message } = await firstTurn(config);
+      const blocking = createAiChatHandler({ ...config, pipeline: pipelineSelecting(() => [], true) as never });
+      await streamChunks(await blocking(post([user, answered(message, true)])));
+      expect(archive).not.toHaveBeenCalled();
+    });
+  });
+
   it('runs nothing for a made-up denial, and a refusal needs no issued id', async () => {
     const { config, archive, remove } = setup();
     const handler = createAiChatHandler(config);
