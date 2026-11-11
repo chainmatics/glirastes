@@ -96,14 +96,20 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   process, until its signed expiry (also when the consuming handler has a
   shorter `approvalMaxAgeMs`). The store holds 20,000 live approvals, at
   most 200 per scope; when either is full, further approvals are denied
-  with `approval_store_unavailable` instead of run. Every request without a
-  managed principal and without `approvalScope` has the scope `''`, which
-  counts as one scope: all users of such an app share 200 live approvals,
-  and one signed-in user who approves enough of their own calls can have
-  everyone's further approvals refused for up to the maximum age. Set
-  `approvalScope` to give each user their own. `ApprovalStore.consume`
-  receives the signed expiry and the scope as a third argument
-  (`{ scope }`). Several instances must pass a shared `approvalStore`; with
+  with `approval_store_unavailable` instead of run. The quota is per
+  caller without configuration: a request without a managed principal and
+  without `approvalScope` counts against a key derived from its
+  credentials (an HMAC-SHA-256 under the approval secret of the
+  `Authorization` header, else the `Cookie` header; the raw value is never
+  kept), so one signed-in user who fills their quota does not block other
+  users. Only requests without any credentials share one quota. This key
+  partitions the quota only; it is not signed into the approval id (a
+  cookie may change between the request for an approval and its answer),
+  and single use holds by approval id across all keys. Apps that identify
+  users another way set `approvalScope`, which also binds each approval to
+  its user. `ApprovalStore.consume` receives the signed expiry and the
+  quota scope as a third argument (`{ scope }`: the managed or
+  `approvalScope` scope, else `caller:<hmac>`, else `''`). Several instances must pass a shared `approvalStore`; with
   the default, a replayed approved history can run once more on another
   instance before the approval expires.
 - `createAiChatHandler` answers 400 before anything runs to a body that is

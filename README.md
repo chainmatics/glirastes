@@ -115,9 +115,11 @@ each approval the handler asks for to that tool call, its input, an expiry
 runs nothing; production refuses to serve approvals without it. An approved
 call runs only when every check passed in that request; any other approved
 call without a result in the history is denied. With the default in-process store, each
-approval runs at most once per process within its lifetime, and each user
-holds at most 200 live approvals (without a managed runtime and without
-`approvalScope`, all users share those 200). With several instances, pass a
+approval runs at most once per process within its lifetime, and each caller
+holds at most 200 live approvals. Without a managed runtime or
+`approvalScope`, the caller is told apart by a keyed hash of the request's
+`Authorization` or `Cookie` header (only requests without credentials share
+one quota); `approvalScope` also binds each approval to its user. With several instances, pass a
 shared `approvalStore` (e.g. Redis), or a replayed history can run once more
 on another instance. The handler also answers 415 to a body that is not
 `application/json`, 403 to a browser request from another origin (list yours
