@@ -221,13 +221,13 @@ export async function changedSince(repository: GitRepository, ref: string, resul
   const digests = new Map<string, unknown>();
   try {
     const file = JSON.parse(text ?? '{}') as { tools?: Array<{ stableKey?: unknown; contract?: { interfaceDigest?: unknown } }> };
-    // A tool without a contract has no digest on either side; that is the same interface, not a change.
+    // The file stores a digest only with a contract. A tool that had none and has none is backlog, not a change.
     for (const tool of Array.isArray(file.tools) ? file.tools : []) digests.set(String(tool.stableKey), tool.contract?.interfaceDigest ?? null);
   } catch {
     // An unreadable file describes no tool: everything counts as changed.
   }
   return new Set((result.tools ?? [])
-    .filter((tool) => !digests.has(tool.stableKey) || digests.get(tool.stableKey) !== (tool.interfaceDigest ?? null))
+    .filter((tool) => !digests.has(tool.stableKey) || digests.get(tool.stableKey) !== (tool.contract ? tool.interfaceDigest : null))
     .map((tool) => tool.stableKey));
 }
 

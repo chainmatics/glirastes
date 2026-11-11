@@ -544,11 +544,13 @@ describe('glirastes tools enrich --managed', () => {
       { stableKey: 'GET /api/c', contract: { interfaceDigest: 'sha256:old' } },
     ] });
     const repository = { fileAt: async () => base } as never;
+    const contract = {};
     const result = { tools: [
-      { stableKey: 'GET /api/a', interfaceDigest: 'sha256:a' },
-      { stableKey: 'UI theme.set', interfaceDigest: null },
-      { stableKey: 'GET /api/c', interfaceDigest: 'sha256:new' },
-      { stableKey: 'GET /api/d', interfaceDigest: null },
+      { stableKey: 'GET /api/a', interfaceDigest: 'sha256:a', contract },
+      // The code has an interface, but no contract was ever resolved: backlog on both sides.
+      { stableKey: 'UI theme.set', interfaceDigest: 'sha256:code', contract: null },
+      { stableKey: 'GET /api/c', interfaceDigest: 'sha256:new', contract },
+      { stableKey: 'GET /api/d', interfaceDigest: 'sha256:d', contract: null },
     ] } as never;
 
     expect([...(await changedSince(repository, 'main', result))!]).toEqual(['GET /api/c', 'GET /api/d']);
