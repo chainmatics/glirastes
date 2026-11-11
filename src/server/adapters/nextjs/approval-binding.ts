@@ -147,7 +147,10 @@ export function canonicalJson(value: unknown): string {
 function sortKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => sortKeys(item === undefined ? null : item));
   if (typeof value !== 'object' || value === null) return value;
-  const sorted: Record<string, unknown> = {};
+  // No prototype: an own `__proto__` key (JSON.parse creates one) must stay a
+  // key. On a plain object the assignment would set the prototype and the key
+  // would drop out of the JSON, so two different inputs would share a MAC.
+  const sorted: Record<string, unknown> = Object.create(null);
   for (const key of Object.keys(value).sort()) {
     const entry = (value as Record<string, unknown>)[key];
     if (entry !== undefined) sorted[key] = sortKeys(entry);

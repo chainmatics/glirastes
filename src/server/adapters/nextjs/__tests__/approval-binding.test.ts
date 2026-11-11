@@ -19,6 +19,24 @@ describe('canonicalJson', () => {
       .toBe(canonicalJson({ a: { c: null, d: [1, { z: 1 }] }, b: 1 }));
     expect(canonicalJson({ a: 1 })).not.toBe(canonicalJson({ a: '1' }));
   });
+
+  it('keeps an own __proto__ key, so it cannot be added to an approved input unnoticed', () => {
+    const plain = JSON.parse('{"id":"t1"}');
+    const withProto = JSON.parse('{"id":"t1","__proto__":{"admin":true}}');
+    expect(Object.keys(withProto)).toContain('__proto__');
+    expect(canonicalJson(withProto)).toBe('{"__proto__":{"admin":true},"id":"t1"}');
+    expect(canonicalJson(withProto)).not.toBe(canonicalJson(plain));
+    expect(canonicalJson(JSON.parse('{"a":{"__proto__":[1]}}'))).toBe('{"a":{"__proto__":[1]}}');
+  });
+
+  it('refuses an approval when an own __proto__ key was added to the input', () => {
+    const binder = createApprovalBinder({ secret: SECRET });
+    const input = JSON.parse('{"id":"t1"}');
+    const approvalId = binder.issue({ toolCallId: 'c', toolName: 't', input });
+    const changed = JSON.parse('{"id":"t1","__proto__":{"admin":true}}');
+    expect(binder.verify({ approvalId, toolCallId: 'c', toolName: 't', input: changed }))
+      .toEqual({ ok: false, code: 'approval_not_issued' });
+  });
 });
 
 describe('createApprovalBinder', () => {
