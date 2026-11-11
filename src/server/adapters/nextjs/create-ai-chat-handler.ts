@@ -18,6 +18,7 @@ import { checkRequestHeaders, readJsonBody } from './request-guards.js';
 import {
   ApprovalHistoryError,
   ApprovalSecretMissingError,
+  approvalScope,
   assertUnambiguousToolHistory,
   bindApprovalRequests,
   createApprovalExecutionGate,
@@ -897,11 +898,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     messages: unknown[],
     managedTurn: ManagedTurnGuard | undefined,
   ): Promise<{ binder: ApprovalBinder; messages: unknown[]; verified: VerifiedApproval[] }> {
-    const principal = managedTurn?.snapshot.principal;
     const binder = resolveApprovalBinder({
       secret: approvalSecret,
       maxAgeMs: approvalMaxAgeMs,
-      scope: principal ? `${principal.tenantId}:${principal.subjectId}` : '',
+      scope: approvalScope(managedTurn?.snapshot.principal),
       // The managed policy and Lancer approvals can ask for approval of a
       // tool that declares none.
       hasApprovalTools: Boolean(managedTurn)

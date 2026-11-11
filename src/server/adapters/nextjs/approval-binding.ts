@@ -158,6 +158,15 @@ function sortKeys(value: unknown): unknown {
   return sorted;
 }
 
+/**
+ * The binder scope of a principal. Tenant and subject are encoded as a JSON
+ * array, so ids that contain a separator cannot make two principals share a
+ * scope (`acme:ops` + `alice` and `acme` + `ops:alice`).
+ */
+export function approvalScope(principal: { tenantId: string; subjectId: string } | undefined): string {
+  return principal ? JSON.stringify([principal.tenantId, principal.subjectId]) : '';
+}
+
 export function createApprovalBinder(options: {
   secret: string;
   /** Who the approval is for, e.g. tenant and subject; part of the MAC. */

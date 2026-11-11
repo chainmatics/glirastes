@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   assertUnambiguousToolHistory,
   bindApprovalRequests,
+  approvalScope,
   canonicalJson,
   createApprovalBinder,
   createApprovalExecutionGate,
@@ -35,6 +36,22 @@ describe('canonicalJson', () => {
     const approvalId = binder.issue({ toolCallId: 'c', toolName: 't', input });
     const changed = JSON.parse('{"id":"t1","__proto__":{"admin":true}}');
     expect(binder.verify({ approvalId, toolCallId: 'c', toolName: 't', input: changed }))
+      .toEqual({ ok: false, code: 'approval_not_issued' });
+  });
+});
+
+describe('approvalScope', () => {
+  it('is empty without a principal', () => {
+    expect(approvalScope(undefined)).toBe('');
+  });
+
+  it('keeps tenant and subject apart when either contains the separator', () => {
+    const a = approvalScope({ tenantId: 'acme:ops', subjectId: 'alice' });
+    const b = approvalScope({ tenantId: 'acme', subjectId: 'ops:alice' });
+    expect(a).not.toBe(b);
+    const call2 = { toolCallId: 'c', toolName: 't', input: {} };
+    const approvalId = createApprovalBinder({ secret: SECRET, scope: a }).issue(call2);
+    expect(createApprovalBinder({ secret: SECRET, scope: b }).verify({ ...call2, approvalId }))
       .toEqual({ ok: false, code: 'approval_not_issued' });
   });
 });
