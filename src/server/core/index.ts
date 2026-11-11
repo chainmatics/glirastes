@@ -213,10 +213,38 @@ export function buildPath(
           `Missing required path parameter: "${paramName}" for ${pathTemplate}`,
         );
       }
+      const text = String(value);
+      if (isDotSegment(text)) {
+        throw new Error(
+          `Invalid path parameter "${paramName}" for ${pathTemplate}: "." and ".." are not allowed`,
+        );
+      }
       delete payload[paramName];
-      return encodeURIComponent(String(value));
+      return encodeURIComponent(text);
     },
   );
+}
+
+/**
+ * `.` and `..` are path segments, not values: a URL parser (or the API's
+ * router) resolves them and the request lands on another route. They are
+ * refused also when they only appear after percent-decoding, once or several
+ * times, because a proxy or framework in front of the API may decode.
+ */
+function isDotSegment(value: string): boolean {
+  let current = value;
+  for (let round = 0; round < 4; round += 1) {
+    if (current === '.' || current === '..') return true;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      return false;
+    }
+    if (decoded === current) return false;
+    current = decoded;
+  }
+  return false;
 }
 
 export function stripPathParams(
