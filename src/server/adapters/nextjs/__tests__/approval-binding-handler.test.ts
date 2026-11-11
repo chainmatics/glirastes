@@ -453,6 +453,49 @@ describe('approval binding through the chat handler', () => {
     expect(archive).toHaveBeenCalledTimes(1);
   });
 
+  describe('approvalScope option', () => {
+    const asUser = (name: string, messages: unknown[]) => new Request('https://app.example/api/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-user': name }, body: JSON.stringify({ messages }),
+    });
+    const scopeOf = (request: Request) => request.headers.get('x-user') ?? '';
+
+    it('scopes the store per user without a managed runtime', async () => {
+      const consume = vi.fn(async () => true);
+      const { config, archive } = setup({ approvalStore: { consume }, approvalScope: scopeOf });
+      const handler = createAiChatHandler(config);
+      const message = await clientMessage(await streamChunks(await handler(asUser('alice', [user]))));
+      await streamChunks(await handler(asUser('alice', [user, answered(message, true)])));
+      expect(archive).toHaveBeenCalledTimes(1);
+      expect(consume).toHaveBeenCalledWith(expect.any(String), expect.any(Number), { scope: JSON.stringify(['alice']) });
+    });
+
+    it('binds an approval to the user it was issued for', async () => {
+      const { config, archive } = setup({ approvalScope: scopeOf });
+      const handler = createAiChatHandler(config);
+      const message = await clientMessage(await streamChunks(await handler(asUser('alice', [user]))));
+      await streamChunks(await handler(asUser('mallory', [user, answered(message, true)])));
+      expect(archive).not.toHaveBeenCalled();
+      await streamChunks(await handler(asUser('alice', [user, answered(message, true)])));
+      expect(archive).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives each user an own store quota, so one user cannot use up another\'s', async () => {
+      const { createMemoryApprovalStore } = await import('../approval-binding.js');
+      for (const [scoped, bobRuns] of [[true, 1], [false, 0]] as const) {
+        const { config, archive } = setup({
+          approvalStore: createMemoryApprovalStore({ maxEntriesPerScope: 1 }),
+          ...(scoped ? { approvalScope: scopeOf } : {}),
+        });
+        for (const name of ['alice', 'bob']) {
+          const handler = createAiChatHandler({ ...config, model: callingModel() });
+          const message = await clientMessage(await streamChunks(await handler(asUser(name, [user]))));
+          await streamChunks(await handler(asUser(name, [user, answered(message, true)])));
+        }
+        expect(archive).toHaveBeenCalledTimes(1 + bobRuns);
+      }
+    });
+  });
+
   describe('pipeline mode', () => {
     const pipelineSelecting = (selected: () => string[], blocked = false) => ({
       process: async (input: string) => ({

@@ -450,6 +450,21 @@ export interface AiChatHandlerConfig {
   approvalStore?: ApprovalStore;
 
   /**
+   * Who an approval is for when the handler runs without a managed runtime
+   * (with one, the managed principal's tenant and subject are used), e.g.
+   * `(req) => session(req).userId`. The value is signed into every approval
+   * id, so an approval issued to one user does not verify for another, and
+   * it is the scope of the approval store's per-scope quota.
+   *
+   * Without it and without a managed runtime, every user shares the scope
+   * `''`: approvals are not bound to a user, and the default store's quota
+   * of 1,000 live approvals is shared by all of them, so one signed-in user
+   * who approves enough of their own calls can have every further approval
+   * refused (`approval_store_unavailable`) for up to the maximum age.
+   */
+  approvalScope?: (request: Request) => string | Promise<string>;
+
+  /**
    * Origins, besides the request's own, whose pages may post to the handler
    * from a browser, e.g. `['https://admin.example.com']`. The request's own
    * origin is taken from `x-forwarded-host` / `x-forwarded-proto` (the first

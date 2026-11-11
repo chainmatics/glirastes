@@ -783,6 +783,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     approvalSecret,
     approvalMaxAgeMs,
     approvalStore: configuredApprovalStore,
+    approvalScope: approvalScopeOf,
     allowedOrigins,
     crossOriginProtection,
     maxBodyBytes,
@@ -897,12 +898,25 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
    * Runs once the registry is known: whether tools can ask for approval
    * decides if a missing secret is an error.
    */
+  /**
+   * Who an approval of this request is for: the managed principal, else the
+   * app's `approvalScope(req)` (encoded as a one-element JSON array, so it
+   * cannot equal a managed scope), else `''`, which every such request shares.
+   */
+  async function requestApprovalScope(req: Request, managedTurn: ManagedTurnGuard | undefined): Promise<string> {
+    if (managedTurn) return approvalScope(managedTurn.snapshot.principal);
+    if (!approvalScopeOf) return '';
+    const scope = await approvalScopeOf(req);
+    if (typeof scope !== 'string') throw new TypeError('approvalScope must return a string');
+    return JSON.stringify([scope]);
+  }
+
   async function secureApprovals(
     registry: ToolRegistry,
     messages: unknown[],
     managedTurn: ManagedTurnGuard | undefined,
+    scope: string,
   ): Promise<{ binder: ApprovalBinder; messages: unknown[]; verified: VerifiedApproval[] }> {
-    const scope = approvalScope(managedTurn?.snapshot.principal);
     const binder = resolveApprovalBinder({
       secret: approvalSecret,
       maxAgeMs: approvalMaxAgeMs,
@@ -1142,7 +1156,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ...contractRejectionReporter(turnMetrics),
         };
         const registry = staticTools ?? await loadTools!(endpointToolContext);
-        const { binder: commandBinder } = await secureApprovals(registry, [], managedTurn);
+        const commandScope = await requestApprovalScope(req, managedTurn);
+        const { binder: commandBinder } = await secureApprovals(registry, [], managedTurn, commandScope);
         let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, toolOptions);
         // The result stays in the chat history that later model turns send to the model.
         if (piiShield) {
@@ -1159,7 +1174,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           turnMetrics,
           approvals: commandBinder,
           approvalStore,
-          approvalScope: approvalScope(managedTurn?.snapshot.principal),
+          approvalScope: commandScope,
           onError: (error) => onError?.(error, req),
         });
       }
@@ -1213,7 +1228,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           registry,
           [followupTool, clarificationTool, planTool],
         );
-        const pipelineApprovals = await secureApprovals(registry, processedMessages, managedTurn);
+        const pipelineApprovals = await secureApprovals(registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
         processedMessages = pipelineApprovals.messages;
 
         // Extract user input for pipeline
@@ -1474,7 +1489,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       registry = withAlwaysOnBuiltins(registry);
       const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool, planTool]);
-      const legacyApprovals = await secureApprovals(registry, processedMessages, managedTurn);
+      const legacyApprovals = await secureApprovals(registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
       processedMessages = legacyApprovals.messages;
       const allToolNames = Object.keys(registry)
         .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
