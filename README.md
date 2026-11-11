@@ -1,424 +1,345 @@
-# Glirastes
+<p align="center">
+  <img src=".github/assets/logo.png" alt="Glirastes logo: an orange mycelium mark" width="120">
+</p>
 
-Glirastes is a TypeScript SDK for operating application features through an embedded chat.
-Execution is local; the optional Platform manages connected instances and revisions.
-The target environment keeps prompts, model calls, credentials, business data,
-tool arguments/results, and final authorization. The Glirastes Platform is the
-Control Plane for reviewed configuration, immutable signed revisions,
-approvals, rollout, and content-free technical health.
+<h1 align="center">Glirastes</h1>
 
-> `0.5.0` is the first Foundation release. Its surface differs from
-> `glirastes@0.4.0`; [CHANGELOG.md](CHANGELOG.md) lists the breaking changes.
-> [docs/support-matrix.md](docs/support-matrix.md) says which stacks are
-> detected, integrated and automatically checked.
+<p align="center">
+  <em>The agentic framework that takes root in your product.</em>
+</p>
 
-## Foundation guarantees
+<p align="center">
+  <a href="https://www.npmjs.com/package/glirastes"><img src="https://img.shields.io/npm/v/glirastes?style=flat-square&color=f2a618" alt="npm version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-f2a618?style=flat-square" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/node-%E2%89%A5%2020.6-f2a618?style=flat-square" alt="Node >= 20.6">
+  <img src="https://img.shields.io/badge/TypeScript-ready-f2a618?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+</p>
 
-- No Control Plane hop in a normal interactive turn.
-- Server-verified principals and fail-closed local tool authorization.
-- One pinned model/tool/policy snapshot per user turn.
-- Immediate security revocations before the next tool call.
-- Local multidimensional budgets, loop detection, timeouts, and circuit
-  breakers.
-- Vercel AI SDK 6 as the reference engine behind framework-neutral contracts.
-- Local route discovery and assessment artifacts without mandatory decorators.
-- One React chat implementation with provider-neutral push-to-talk STT.
+<p align="center">
+  <a href="https://glirastes.io"><b>Website</b></a> ·
+  <a href="#quickstart-nextjs-app-router"><b>Quickstart</b></a> ·
+  <a href="docs/"><b>Docs</b></a> ·
+  <a href="skills/"><b>Skills</b></a> ·
+  <a href="CHANGELOG.md"><b>Changelog</b></a>
+</p>
 
-## Package surface
+<p align="center">
+  <a href="https://glirastes.io"><img src=".github/assets/hero-landing.gif" width="100%" alt="The glirastes.io hero: an orange mycelium network pulses behind the headline &quot;The agentic framework that takes root in your product.&quot; and the npm install glirastes command."></a>
+</p>
 
-| Import | Purpose |
-|---|---|
-| `glirastes/contracts` | Principals, budgets, manifests, revisions, deployments |
-| `glirastes/runtime` | Local authorization, pinned turns, budgets, durable stores |
-| `glirastes/ai-sdk` | Vercel AI SDK reference engine |
-| `glirastes/runtime/ai-sdk` | Vercel AI SDK reference-engine adapter |
-| `glirastes/stt` | Provider-neutral recording state machine and STT adapters |
-| `glirastes/react` | Chat composition, sessions, actions, STT |
-| `glirastes/react/vercel` | AI SDK React transport and `VercelAiChat` |
-| `glirastes/adapter/nextjs` | Next.js application adapter |
-| `glirastes/server/nextjs` | Next.js chat handler |
-| `glirastes/sync` | Signed revision cache, rollout selection, revocations |
+Glirastes is a TypeScript SDK for an embedded chat that operates your app: it
+calls your endpoints, navigates, sets filters and triggers UI actions. The tools
+come from your code, everything runs inside your app, and the optional Glirastes
+Platform manages reviewed configuration and rollouts without ever seeing prompts
+or business data.
 
-NestJS, LangGraph and the older generator surfaces remain in source for later
-acceptance; they are not exported by this Foundation package.
+## See it in action
 
-`glirastes tools refresh` reads Next.js route handlers and pages, NestJS
-controllers (`nest`), react-router route objects (`react-router`), URL
-filters and client actions. `examples/react-nest-separate` is the reference
-app for a NestJS API on its own origin with a Vite React frontend; its chat
-controller passes `createHttpEndpointCaller` so tools call the API with the
-user's cookie or bearer token. FastAPI apps are read through their committed
-OpenAPI export (`openapi`), Vue apps through `vue-router` and the script
-blocks of `.vue` files; `examples/vue-fastapi` is that reference app, with a
-small Node chat runtime next to the FastAPI API. Its tests need Python 3.12
-with `api/requirements.txt` installed and are skipped, visibly, without it.
+<p align="center">
+  <img src=".github/assets/chat-demo.gif" width="100%" alt="A task board app with the Glirastes chat docked on the right. The user asks to move the Q4 report to Finance and assign it to Lena; the assistant looks up the task and the person, asks for approval of tasks.update, and after Approve the card moves to the Finance column with Lena as assignee.">
+</p>
 
-## Focused local intent routing
+<p align="center"><sub>One request moves a card on a task board: the chat finds the task and the person, asks for approval of <code>tasks.update</code>, then acts.</sub></p>
 
-`createLocalAiPipeline` now defaults to focused routing. Confident intents get
-their module tools plus its explicitly shared dependencies. Medium-confidence
-intents expand only to shared tools of declared `relatedModules`. Uncertain or
-unknown intents do not receive the full domain-tool catalogue.
+## Quickstart (Next.js App Router)
 
-The local pipeline marks its selection as explicit, so the Next.js handler
-preserves even an empty selection. With managed-turn `toolDiscovery` enabled,
-the existing local `find_tools` mechanism can load eligible tools on demand;
-otherwise the model can ask a clarifying question without domain tools.
-Selection does not replace endpoint authorization or turn guards.
-
-For migration, `createLocalAiPipeline({ ...config, routingMode: 'legacy' })`
-retains broad routing and the historical empty-selection convention. Direct
-`createAiRouter` consumers keep legacy defaults unless they select
-`routingMode: 'focused'`. Existing custom pipelines remain compatible; they
-can return `toolSelection: 'explicit'` to opt into exact selection semantics.
-
-Routing audit callbacks report strategy, module and tool count without raw
-input. Smaller tool selections are not a claimed measured token/latency gain:
-benchmark successful representative tasks in the target app.
-
-## Route discovery boundaries
-
-The scanner and execution-inventory verifier share syntax-tree recognition of
-named function exports, constant arrow/function handlers and local aliases
-such as `export { handler as GET }`. Comments and strings are not exports.
-Syntax errors and unresolved wrappers/re-exports appear as bounded findings
-in the local scan artifact. Legacy `scan --sync` refuses a partial scan rather
-than treating undiscovered operations as removed; existing bindings remain
-unchanged.
-
-The TypeScript parser is a Node-side tooling dependency, not imported by the
-React, server-handler or runtime entry points. Discovery never executes scanned
-application source and does not automatically approve candidates. Dependency
-graph resolution, automatic assessments and watch/build orchestration remain
-separate MVP work; recognizing an export alone does not create a ready tool.
-
-## Agent-led setup (local Foundation checkout)
-
-With this SDK installed in the app, start its existing coding agent:
-
-```bash
-npx --no-install glirastes init
-```
-
-Inside a Codex or Claude session, the command installs project-local skills and
-returns the integration task to that same agent. The agent must continue through
-source-derived bindings, UI integration and a real authorized tool action; the
-command does not report those as completed just because skills were installed.
-From an interactive terminal, choose an installed CLI (`--agent codex` or
-`--agent claude` if needed). It runs with its existing model and permission
-settings. No additional assessment key, provider switch or permission bypass is
-added. Its login is not a transferable credential for the app's chat model.
-
-Preview without changes or an agent process:
-
-```bash
-npx --no-install glirastes init --agent codex --dry-run --json
-```
-
-`--root` selects the app directory. Modified installed skills are preserved;
-the agent also receives the bundled canonical workflow to reconcile safely.
-`--json` is available for preview and same-session continuation, not an external
-interactive agent's terminal stream. JSON never prompts for a host choice.
-An existing agent session cannot launch a different nested agent through init.
-Both init and `setup inspect` skip implicit environment-file loading.
-
-After an external agent exits, init runs the real offline Doctor. A nonzero
-agent exit, failed checks or zero tools are not success. The interactive CLI may
-stay open until you exit it; Doctor runs afterward. A passing Doctor still is
-not live tool-action evidence. Fresh-app timing is measured in the user test
-([docs/acceptance/](docs/acceptance/user-test-protocol.md)); the initializer
-does not imply support for every framework (see the
-[support matrix](docs/support-matrix.md)).
-
-## Next.js local validation and optional connection
-
-Install the SDK, an AI SDK provider, and the React peers:
+**1. Install** the SDK and the chat peers (Node >= 20.6):
 
 ```bash
 npm install glirastes @ai-sdk/openai @ai-sdk/react react-markdown
 ```
 
-Once the app has its positive execution inventory, curated setup artifact,
-prompt bundle, and server-verified principal declaration, the complete local
-setup is three commands with no repeated app or artifact flags:
+**2. Initialize.** Run it inside your Codex or Claude Code session, or from a
+terminal with `--agent codex|claude`:
 
 ```bash
-npx glirastes setup --dry-run
-npx glirastes setup
-npx glirastes doctor
+npx --no-install glirastes init
 ```
 
-The dry run is deterministic, read-only, and network-silent. Normal setup
-validates the same plan, requires the exact plan digest for any semantic
-loosening, and atomically adopts the complete local artifact set. Standalone is
-the default and never contacts the Control Plane. Restart the application after
-setup because Standalone materializes its runtime snapshot only at boot.
+`init` writes `.glirastes/tools.json`, `.glirastes/prompt-bundle.json`, the
+`predev` / `prebuild` scripts (`glirastes tools refresh`) and a short hint in
+`AGENTS.md` / `CLAUDE.md`, installs the [agent skills](#agent-skills) and hands
+the integration to your coding agent. Existing files are never replaced.
+`--dry-run --json` previews without writing anything.
 
-To add the optional Connected Free Control Plane without repeating setup, pair
-the already validated local app once:
+**3. Derive the tools** from your routes, pages, URL filters and client actions:
 
 ```bash
-npx glirastes connect --base-url https://platform.example.com
+npx glirastes tools refresh
 ```
 
-The CLI opens only the verification URL returned by that Control Plane, waits
-for browser approval, and writes the app-scoped connection atomically. The
-local secret target must already be ignored by Git. Pairing never uploads
-prompts, schemas, source, credentials, tool arguments, results, or business
-content. Restart the application after connecting.
+This writes the committed `.glirastes/` tool files and the generated module
+`src/generated/glirastes/tools.generated.ts`.
 
-### Standalone and Connected
-
-A connected app needs one variable, `GLIRASTES_API_KEY`. `connect` writes it
-to `.env.local`; in production set it like any other secret. The runtime asks
-the Platform which app, environment and runner the key belongs to.
-`GLIRASTES_CONTROL_PLANE_URL` is only for a self-hosted or local Platform; the
-default is `https://api.glirastes.chainmatics.io`. Without the key the app runs
-Standalone and makes no network call. `GLIRASTES_APP_ID`,
-`GLIRASTES_ENVIRONMENT_ID` and `GLIRASTES_RUNNER_KEY` are no longer needed;
-`glirastes doctor` tells you when they are still set.
-
-The app wires this with one module:
+**4. Add the chat route.** Identity comes from your verified session; your
+endpoints keep their own authorization.
 
 ```ts
-// src/lib/glirastes.ts (server only)
+// src/app/api/chat/route.ts
+import { createOpenAI } from '@ai-sdk/openai';
 import { createGlirastes } from 'glirastes/runtime';
+import { createAiChatHandler } from 'glirastes/server/nextjs';
 import * as generated from '@/generated/glirastes/tools.generated';
+import { resolvePrincipal } from '@/lib/glirastes-principal'; // your session lookup
 
-export const glirastes = createGlirastes({
+const glirastes = createGlirastes({
   generated,
   localLimits: {
-    maxModelSteps: 12, maxToolCalls: 16, totalTimeoutMs: 60_000, toolTimeoutMs: 15_000,
+    maxModelSteps: 6, maxToolCalls: 8, totalTimeoutMs: 60_000, toolTimeoutMs: 15_000,
     maxInputTokens: 40_000, maxOutputTokens: 4_000, maxEstimatedCostUsd: 0.5,
     maxRepeatedFingerprint: 3, maxConsecutiveErrors: 3,
     delegation: { maxDepth: 1, maxBreadth: 1, sharedBudget: true },
   },
 });
-```
+const openrouter = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY });
 
-and spreads one turn into the chat handler:
-
-```ts
-// app/api/ai/chat/route.ts
-import { createAiChatHandler } from 'glirastes/server/nextjs';
-import { glirastes } from '@/lib/glirastes';
-
-export async function POST(req: Request) {
-  const user = await requireSessionUser(req); // your verified session
-  const turn = await glirastes.chatTurn((runtimeTenantId) => ({
-    subjectId: user.id,
-    tenantId: runtimeTenantId,
-    roles: user.roles,
-    attributes: { localTenantId: user.tenantId },
-  }));
-  return createAiChatHandler({ ...turn, model, systemPrompt, toolDiscovery: true })(req);
+export const runtime = 'nodejs';
+export async function POST(request: Request) {
+  const principal = await resolvePrincipal(request); // { subjectId, tenantId, roles, attributes }
+  if (!principal) return new Response('Unauthorized', { status: 401 });
+  const turn = await glirastes.chatTurn((runtimeTenantId) => ({ ...principal, tenantId: runtimeTenantId }));
+  return createAiChatHandler({
+    ...turn,
+    model: openrouter.chat('anthropic/claude-sonnet-5.5'),
+    systemPrompt: 'Use the tools of this app. Ask one short question when the target is unclear.',
+    toolDiscovery: true,
+  })(request);
 }
 ```
 
-`createGlirastes` keeps one instance per app and process, also when Next.js
-bundles routes separately. Connected, the first `chatTurn()` or `ready()`
-looks up the connection, registers the runner, reports the code and syncs in
-the background; it waits at most five seconds for that and never fails the
-turn. Until the first deployment is accepted, and whenever the Platform cannot
-be reached, the chat runs on the local code. Errors go to `onError` with the
-operation and status only, and the runtime retries. A key that belongs to
-another app is reported and never switches the app. To start the connection at
-server start, call `void glirastes.ready()` from `instrumentation.ts`. To wrap
-the generated tools (for example to add write feedback), pass
-`wrapBindings: (bindings) => …`.
-
-After local setup changes, synchronize the already validated canonical
-artifact without repeating setup, discovery, or assessment:
-
-```bash
-npx glirastes sync
-npx glirastes doctor
-```
-
-`sync` verifies the current setup receipt, app and environment scope, tracked
-connection descriptor, and ignored project-local secret before it contacts the
-Control Plane. It creates or resumes only the app-scoped setup run and uploads
-the identical artifact idempotently. It never creates an environment, publishes
-a revision, activates a deployment, or changes the network-silent Local
-default. `doctor` performs the same local Connected checks without a network
-request and never prints credential values.
-
-`doctor` explains local checks in plain language and gives one next action when
-something needs attention. Use `doctor --verbose` for technical codes or
-`doctor --json` for the structured agent-readable report. A passing Doctor is
-not proof that the Platform is reachable, an update is active, or a chat/tool
-action has succeeded; those require separate live checks. Fresh projects still
-need their local integration generated before setup can validate it.
-
-For local coding-agent intake before any Glirastes artifacts exist, run
-`glirastes setup inspect --json` from the app folder. It reports separate
-manifest components and declared Next.js, React, Vue, NestJS or FastAPI markers;
-it does not pair unrelated components or certify framework support, installed
-runtimes, authentication, or executable tools. Node package manifests and direct
-Python requirements are inspected; `pyproject.toml` presence is only a Python
-hint, not parsed dependency evidence. Linked, hidden, generated and dependency
-directories are skipped, with bounded traversal and findings for incomplete or
-invalid input. No source code or scripts are executed, environment files are
-not read, and nothing is sent to the Platform. This local-only report is not a
-sync artifact or a finished one-command integration.
-
-Inspection rechecks canonical paths as it traverses and reads them, including
-directories replaced by links after discovery. It is not an OS filesystem
-sandbox: run it against a trusted, stable checkout, not one being adversarially
-rewritten concurrently.
-
-Managed setup is always explicit:
-
-```bash
-npx glirastes setup --managed
-npx glirastes doctor --managed
-```
-
-It requires an existing app plus the app-scoped Control Plane connection. Setup
-never creates an app or environment and never bypasses publication, approval,
-signing, health, activation, or rollback gates.
-
-Scan existing routes without changing them:
-
-```bash
-npx glirastes scan
-```
-
-This route-only scan is not the fresh agent workflow or automatic UI discovery.
-The agent assesses actual local code and generates validated local metadata;
-Platform review is optional. Local prompts and executable schemas never go to
-the Platform. Preserve existing reviewed policy and identity when connected.
-
-The earlier `glirastes setup sync` form remains a compatibility adapter.
-New integrations should use the explicit `setup`,
-`connect`, `sync`, and `doctor` lifecycle above. The legacy route-import flow
-remains separately available for migrations that still regenerate bindings:
-
-```bash
-npm run glirastes:sync
-```
-
-That migration script should call `glirastes scan --sync`, pass its generated
-local execution inventory, and regenerate the target-specific local registry.
-No provider secret, tool credential, raw prompt, argument, result, or business
-content is uploaded. Bounded technical capability descriptions may be synced.
-
-Every integration must provide a server-only resolver:
-
-```ts
-resolvePrincipal(request) => {
-  subjectId,
-  tenantId,
-  roles,
-  attributes,
-}
-```
-
-All fields come from the verified server session or trusted identity source,
-never from unchecked client fields. The actual endpoint remains the final
-authorization boundary.
-
-Mount the shipped UI instead of copying it:
+**5. Mount the chat** and the navigation bridge (client components):
 
 ```tsx
 'use client';
-
+import { useRouter } from 'next/navigation';
+import { useGlirastesNavigationBridge } from 'glirastes/react';
 import { VercelAiChat } from 'glirastes/react/vercel';
 import 'glirastes/react/styles.css';
 
-export function ChatWidget() {
-  return <VercelAiChat endpoint="/api/ai/chat" />;
+export function Assistant() {
+  const router = useRouter();
+  useGlirastesNavigationBridge({ push: (href) => router.push(href) });
+  return <VercelAiChat endpoint="/api/chat" />;
 }
 ```
 
-Use themes, slots, session adapters, tool renderers, and
-`useAiClientAction` for product-specific UX.
+**6. Run** `npm run dev` (the `predev` script refreshes the tools), then check
+the setup with `npx glirastes doctor`.
 
-To style the chat entirely yourself, pass `unstyled` to `AiChatProvider`. The
-widget roots then render `data-unstyled`, no shipped rule matches them or
-anything inside, and no theme variables are written. Markup, `data-component`
-and `data-element` hooks and `classNames` stay, so your stylesheet takes over.
+The full walkthrough, including filters, client actions, `@` mentions and `/`
+commands, is the bundled skill
+[`integrating-glirastes-nextjs`](skills/integrating-glirastes-nextjs/SKILL.md).
 
-For German texts pass `locale={deChatLocale}` (from `glirastes/react`), or
-spread it and override single texts. If you build your own composer on
-`useChatContext().send`, clear the input only when `send` returns true: it
-returns false while an approval card waits for a decision.
+## How it works
 
-For a sidebar that can float or collapse, place the same widget alongside your
-page in a bounded-height flex row. No custom chat implementation is needed:
+- **Execution is local.** The model call, the tool loop and every tool call
+  run in your app's server. A normal chat turn makes no request to the
+  Platform.
+- **Your app keeps the sensitive parts.** Prompts, model calls and provider
+  keys, secrets, business data, tool arguments and results, and final
+  authorization stay in the app. `resolvePrincipal` only says who asks; each
+  endpoint still checks its own session and permissions.
+- **Guard rails per turn.** Each turn runs on one pinned tool and policy
+  snapshot, with local budgets (steps, tool calls, tokens, cost, timeouts),
+  loop detection and fail-closed authorization. Write and delete tools ask
+  the user before they run.
+- **The Platform gets metadata only.** A connected app sends content-free
+  metrics (tokens, cost, latency, errors, tool use) in batches off the turn
+  path, and receives signed configuration revisions.
 
-```tsx
-<div style={{ display: 'flex', height: '100dvh', minWidth: 0 }}>
-  <main style={{ flex: 1, minWidth: 0 }}>{children}</main>
-  <VercelAiChat endpoint="/api/ai/chat" portal={false}
-    defaultMode="sidebar" layoutControls keepMounted />
-</div>
+## Tools from your code
+
+`glirastes tools refresh` derives endpoint, navigation, filter and
+client-action tools from Next.js, NestJS, OpenAPI (FastAPI), react-router and
+vue-router sources, and from `useAiClientAction` registrations. The output is
+committed with the code; `glirastes tools check` fails CI when it is stale.
+
+```bash
+glirastes tools refresh           # derive tools (--watch next to `next dev`)
+glirastes tools status            # what the chat can do
+glirastes tools check             # verify committed outputs, no model, no network
+glirastes tools eval              # every example sentence finds its tool
 ```
 
-`keepMounted` retains unsent input while closed; `portal={false}` reserves app
-space in sidebar mode. Keep portal placement stable when switching modes.
-`open`/`onOpenChange`, `mode`/`onModeChange`, `collapsed`/`onCollapsedChange`,
-sidebar width bounds and `layoutLabels` support app-owned controls/preferences.
-The built-in input finalizes recording when hidden and keeps its text editable;
-custom inputs or external media/portals still own their cleanup. These options
-also work with the transport-independent `FloatingChatUI` inside your provider.
+**Policy.** Reads run directly, writes ask first, deletes and anything
+external or financial always ask. Change that locally with
+`glirastes tools policy` (`show`, `disable`, `confirm`, `relax`, `raise`,
+`roles`, `exclude`, ...); it writes `.glirastes/tool-policy.json`. See
+[docs/tool-policy.md](docs/tool-policy.md).
 
-## Speech-to-text
+**Describing tools.** Glirastes itself never calls a model. Descriptions,
+synonyms and example calls are written by a coding agent from work lists:
 
-The React STT controller owns exactly one state machine and microphone stream.
-It supports push-to-talk, visible interim text, lossless finalization,
-edit-before-send, and explicit stop/cancel/retry/cleanup semantics. Capture and
-provider traffic stay in the target environment. TTS and full duplex voice are
-outside the first foundation.
+- **Free:** your own coding agent works through `glirastes tools resolve --print`
+  and `glirastes tools describe --print` with the shipped skills
+  `maintaining-glirastes-tools` and `describing-glirastes-tools`, and you
+  commit the result.
+- **Pro:** the managed CI tool agent (`glirastes tools enrich --managed`)
+  runs the same skills in your CI, only on the tools a pull request or push
+  changed, and commits the result as `glirastes-bot`. Model requests go
+  through OpenRouter with the routing the Platform grants for the job (no
+  data collection, zero data retention), or your own key in
+  `GLIRASTES_TOOLS_OPENROUTER_KEY`. Requires the optional peer
+  `@ai-sdk/openai`.
 
-## Durable local execution
+## CI
 
-Simple interactive chat may remain ephemeral. Asynchronous, scheduled,
-unattended, or restart-resumable execution must pass the durable-store gate.
-`glirastes/runtime` includes a PostgreSQL adapter for:
+```bash
+npx glirastes init --ci github [--enrich-on staging,main] [--ci-environment staging]
+```
 
-- tenant/owner-scoped conversations with visibility and retention;
-- monotonic resumable checkpoints;
-- idempotent tool-execution claims and completion evidence.
+writes `.github/workflows/glirastes-tools.yml` for your package manager with
+two jobs:
 
-See [local runtime persistence](./docs/runtime-persistence.md).
+| Job | What it does | Needs |
+|---|---|---|
+| `glirastes-tools` | `tools check` and `tools eval` on every pull request and push to `main` | nothing: no secrets, no model |
+| `glirastes-tools-enrich` (Pro) | runs the managed tool agent on pull requests and commits into the PR branch | variable `GLIRASTES_MANAGED_TOOLS=true`, variable `GLIRASTES_CONTROL_PLANE_URL`, secret `GLIRASTES_CI_KEY` |
 
-## Managed revision sync
+- `--enrich-on <branch,...>` (or `--enrich-on-main`) also runs the agent
+  after pushes to those branches; there it opens a pull request instead of
+  committing, and the workflow gets a manual start that works the whole
+  backlog once.
+- `--ci-environment <name>` reads the three values from that GitHub
+  environment instead of the repository.
+- Set the variable `GLIRASTES_BOT_APP_ID` and the secret
+  `GLIRASTES_BOT_APP_PRIVATE_KEY` to push as a GitHub App, so the bot's
+  commits and pull requests trigger your checks. Without them the job uses
+  the workflow token.
+- An existing workflow with other content is refused unless you pass `--force`.
 
-`glirastes/sync` verifies Ed25519 signatures, hashes, typed payloads,
-environment scope, and local bindings before activation. It supports push with
-polling fallback, last-known-good, stable/canary selection, pinning, health
-gates, rollback, and persisted security revocations.
+## Chat UI & speech
 
-See [managed local runtime sync](./docs/managed-runtime-sync.md) and
-[tool policy](./docs/tool-policy.md) for what local policy and Platform
-decisions may change, including the Platform relaxation of a confirmation.
+`glirastes/react` ships one chat implementation; `VercelAiChat` from
+`glirastes/react/vercel` connects it to the AI SDK route.
+
+- Docked sidebar or floating window (`AssistantWorkspace`, `AssistantToggle`),
+  themes, slots, tool result renderers and approval cards.
+- `useAiClientAction(id, handler, contract)` lets the chat drive UI state;
+  `refresh` turns each registration into a tool.
+- Generic `@` mentions and `/` commands derived from your tools
+  ([docs/chat-interactions.md](docs/chat-interactions.md)).
+- A per-message work log of tool calls and an optional plan checklist.
+- `unstyled` to bring your own CSS; `deChatLocale` for German texts.
+- Push-to-talk speech input through one STT controller (`voice` config,
+  `glirastes/stt` adapters, `createRecordingTranscriptionHandler` for a
+  server-side transcription route). Audio goes from the app to its own
+  provider, never through Glirastes.
+- Without React: the `<glirastes-chat>` element from `glirastes/embed` and the
+  bridge in `glirastes/browser`.
+
+See the skill [`building-glirastes-chat-ui`](skills/building-glirastes-chat-ui/SKILL.md).
+
+## Standalone and Connected
+
+| | Standalone | Connected |
+|---|---|---|
+| Trigger | no `GLIRASTES_API_KEY` | `GLIRASTES_API_KEY` is set |
+| Network | none | Platform lookup, registration, sync and metrics, all off the turn path |
+| Config | local code and `.glirastes/` | reviewed, signed, immutable revisions with rollouts and revocations |
+
+`createGlirastes` from `glirastes/runtime` handles both. Connected, it falls
+back to the local code whenever the Platform is unreachable and reports errors
+to `onError` (operation and status only). `GLIRASTES_CONTROL_PLANE_URL` is
+optional and defaults to `https://api.glirastes.chainmatics.io`; set it only
+for a self-hosted or local Platform.
+
+```bash
+npx glirastes connect --base-url <platform-url>   # pair the app, writes GLIRASTES_API_KEY
+npx glirastes sync                                # upload the current local setup
+npx glirastes doctor                              # local checks, no network
+```
+
+The **Glirastes Platform** is the optional control plane: reviewed tool
+configuration, signed immutable revisions, staged rollouts, approvals and
+content-free health. **Free** covers the local SDK, the local skill workflow
+and a connected app; **Pro** adds the managed CI tool agent. Details:
+[docs/managed-runtime-sync.md](docs/managed-runtime-sync.md),
+[docs/runtime-persistence.md](docs/runtime-persistence.md).
+
+## Package surface
+
+| Import | Purpose |
+|---|---|
+| `glirastes` | Shared types, tool definition helpers and diagnostics |
+| `glirastes/runtime` | `createGlirastes`, local authorization, pinned turns, budgets, durable stores |
+| `glirastes/server` | Server pipeline, including `createLocalAiPipeline` |
+| `glirastes/server/nextjs` | Next.js handlers: `createAiChatHandler`, `createChatInteractionsHandler`, `createRecordingTranscriptionHandler` (alias `glirastes/adapter/nextjs`) |
+| `glirastes/server/testing` | Test helpers for tool setups without model calls (ESM only) |
+| `glirastes/react` | Chat UI, provider, hooks, client actions, navigation bridge, STT |
+| `glirastes/react/vercel` | AI SDK transport and `VercelAiChat` |
+| `glirastes/react/styles.css` | Shipped chat styles |
+| `glirastes/stt` | Provider-neutral STT controller and adapters |
+| `glirastes/ai-sdk` | Vercel AI SDK reference engine (alias `glirastes/runtime/ai-sdk`) |
+| `glirastes/contracts` | Principals, budgets, manifests, revisions, deployments |
+| `glirastes/sync` | Signed revision cache, rollout selection, revocations |
+| `glirastes/embed` | `<glirastes-chat>` element for apps without React |
+| `glirastes/browser` | Navigation bridge, query filters and client actions without React |
+| `glirastes/codegen` | Route scanning and execution-inventory discovery used by the CLI |
+
+## CLI reference
+
+| Command | Purpose |
+|---|---|
+| `glirastes init [--agent codex\|claude] [--dry-run] [--json]` | Scaffold inputs, install skills, hand setup to your coding agent |
+| `glirastes init --ci github [...]` | Write the GitHub tools workflow ([CI](#ci)) |
+| `glirastes tools refresh [--watch] [--mode write\|frozen\|integrity]` | Derive tools from the code |
+| `glirastes tools check [--strict] [--integrity-only]` | Verify committed tool outputs |
+| `glirastes tools status` | Show what the chat can do |
+| `glirastes tools resolve --print` | Work list of open findings for your agent |
+| `glirastes tools describe --print [<tool>...\|--all]` | Work list of descriptions, synonyms and examples |
+| `glirastes tools eval` | Check that example sentences find their tool |
+| `glirastes tools verify <tool>...\|--all` | Confirm agent-written contracts after review |
+| `glirastes tools policy <...>` | Change the local tool policy |
+| `glirastes tools enrich --managed [--first-run] [--base <branch>]` | Pro, CI only: run the managed tool agent |
+| `glirastes setup [--dry-run] [--managed]` | Validate and install the local setup artifacts |
+| `glirastes setup inspect` | Inspect project manifests before integration |
+| `glirastes connect --base-url <url>` | Pair the app with the Platform |
+| `glirastes sync` | Upload the current local setup |
+| `glirastes doctor [--managed] [--verbose] [--json]` | Diagnose the local setup |
+| `glirastes install [--host a,b]` | Install the agent skills only |
+
+`glirastes --help` lists every command and flag; `glirastes tools` and
+`glirastes tools policy` print their own usage.
 
 ## Agent skills
 
-Install the bundled foundation skills with:
+The package ships seven skills in [`skills/`](skills/README.md) for your
+existing coding agent (Codex, Claude Code, Gemini): `setting-up-glirastes`,
+`integrating-glirastes-nextjs`, `integrating-glirastes-web`,
+`maintaining-glirastes-tools`, `describing-glirastes-tools`,
+`building-glirastes-chat-ui` and `migrating-to-glirastes`. `glirastes init`
+installs them; `glirastes install --host codex --with-setup-skills` installs
+them without starting setup.
 
-```bash
-npx --no-install glirastes install --host codex --with-setup-skills
-```
+## Support matrix
 
-They teach local agent integration, source-derived tool maintenance and the
-React/STT contract. Installation alone does not integrate an app. `init` above
-connects installation to the selected agent workflow. See [skills](./skills/README.md).
+Next.js 15 App Router, React (Vite, react-router) + NestJS 11 and Vue 3 +
+FastAPI are integrated and automatically checked. Exact levels and evidence:
+[docs/support-matrix.md](docs/support-matrix.md).
 
-## Foundation verification
+## Docs
 
-Before promotion, prove:
+- [Support matrix](docs/support-matrix.md)
+- [Tool policy](docs/tool-policy.md)
+- [Chat interactions (`@` and `/`)](docs/chat-interactions.md)
+- [Managed runtime sync](docs/managed-runtime-sync.md)
+- [Runtime persistence](docs/runtime-persistence.md)
+- [0.5.0 acceptance](docs/acceptance/0.5.0-acceptance.md)
+- [Agent skills](skills/README.md)
+- Examples: [`examples/`](examples/)
 
-- fresh app → agent setup → base UI → first real tool action in under five
-  minutes, with no mandatory Platform account;
-- negative principal, role manipulation, cross-tenant, approval replay, and
-  revocation tests;
-- no content egress on the normal chat path;
-- unit, contract, integration, browser, migration, and rollback tests;
-- UI behavior, STT quality/finalization latency, server latency, and bundle
-  size against the target-app baseline.
+## Upgrading from 0.4
 
-## License
+`0.5.0` is the first Foundation release. Its surface differs from
+`glirastes@0.4.0`: exports, codegen APIs and CLI commands were removed or
+replaced. Read **Breaking** in [CHANGELOG.md](CHANGELOG.md) before upgrading;
+the skill [`migrating-to-glirastes`](skills/migrating-to-glirastes/SKILL.md)
+covers moving off `@chainmatics/agentic-*`.
 
-Apache-2.0
+## Security & License
+
+Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).

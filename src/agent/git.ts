@@ -101,6 +101,18 @@ export class GitRepository {
     return new Set(result.stdout.split('\n').filter((path) => path !== ''));
   }
 
+  /**
+   * A file as a branch or commit on origin has it: `undefined` when the ref
+   * cannot be fetched, `null` when it has no such file. A shallow CI checkout
+   * does not carry the ref, so it is fetched first.
+   */
+  async fileAt(ref: string, path: string): Promise<string | null | undefined> {
+    const fetched = await this.exec('git', ['fetch', '--quiet', '--depth=1', 'origin', ref], { cwd: this.root });
+    if (fetched.code !== 0) return undefined;
+    const shown = await this.exec('git', ['show', `FETCH_HEAD:${path}`], { cwd: this.root });
+    return shown.code === 0 ? shown.stdout : null;
+  }
+
   async switchToNewBranch(name: string): Promise<void> {
     await this.git(['switch', '-c', name], 'git_branch_failed');
   }

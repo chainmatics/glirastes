@@ -47,7 +47,10 @@ material questions that the code and earlier decisions cannot answer.
    behaviour and response style), the `predev`/`prebuild` scripts and the hint
    in `AGENTS.md`/`CLAUDE.md`. Set `locale` to the app's language. For a
    separate backend or a non-React frontend, configure the sources as
-   `integrating-glirastes-web` describes.
+   `integrating-glirastes-web` describes. At a monorepo root whose
+   `package.json` declares `workspaces`, init looks into those packages for a
+   NestJS `src` and a Next.js app and writes their sources with root-relative
+   paths; check the sources it lists.
 3. Run `glirastes tools refresh`. It lists added, changed, removed and excluded
    tools and ends with the open agent work. New tools are active immediately:
    GET runs directly, POST/PUT/PATCH ask first, delete, financial and external
@@ -108,16 +111,23 @@ no model on every pull request and push to `main`.
 - Free: you work through the resolve and describe lists locally, as in the
   workflow above, and commit the result. The workflow's second job,
   `glirastes-tools-enrich`, stays off; nothing else is needed.
-- Pro: the managed CI runner works the same lists in `glirastes-tools-enrich`
-  and commits them as `glirastes-bot` on the pull request branch (with
+- Pro: the managed CI runner works the same lists in `glirastes-tools-enrich`,
+  automatically only for the tools a pull request or push changed, and
+  commits them as `glirastes-bot` on the pull request branch. The backlog of
+  an app that was never described runs once on request: start the workflow
+  by hand (it then passes the first-run budget), or work the lists locally
+  as in Free. (With
   `--enrich-on-main` also after pushes to `main`, through a pull request;
   `--enrich-on staging,main` names every branch an environment deploys from,
-  and the pull request goes against that branch). It
+  and the pull request goes against that branch.) It
   runs only once the developer sets the repository variable
   `GLIRASTES_MANAGED_TOOLS` to `true`, the variable
   `GLIRASTES_CONTROL_PLANE_URL` and the secret `GLIRASTES_CI_KEY` from the
   Platform. Never set them, read them or ask for their values; name them for
-  the developer. Review its commits like your own.
+  the developer. Review its commits like your own. When the repository's
+  production already keeps Glirastes values in repository variables, or a
+  staging Platform needs its own key, add `--ci-environment <name>`: the job
+  then reads all three from that GitHub environment.
 
 ## Commands
 

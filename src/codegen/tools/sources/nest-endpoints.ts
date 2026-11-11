@@ -51,6 +51,8 @@ interface NestEntry {
   className: string;
   methodName: string;
   classGuarded: boolean;
+  /** Set when more than one controller declares this route; lists every file that does. */
+  declaredTwice?: { files: string[] };
 }
 
 interface NestApp {
@@ -184,6 +186,8 @@ function enumerate(
   const entries = new Map<string, NestEntry>();
   const excluded = new Map<string, ExcludedTool>();
   const findings: ToolFinding[] = [];
+  /** Every file that declares a route more than once, in scan order. */
+  const duplicates = new Map<string, string[]>();
   for (const { file, ast, imports } of files) {
     for (const statement of ast.statements) {
       if (!ts.isClassDeclaration(statement)) continue;
@@ -218,8 +222,10 @@ function enumerate(
           }
           const existing = entries.get(stableKey);
           if (existing) {
-            findings.push(toolFinding('E-INVENTORY-010', 'error', stableKey,
-              `${existing.className}.${existing.methodName} and ${className}.${member.name.text} both handle ${stableKey}.`));
+            const declaredIn = duplicates.get(stableKey) ?? [existing.sourceFile];
+            if (!declaredIn.includes(file.path)) declaredIn.push(file.path);
+            duplicates.set(stableKey, declaredIn);
+            existing.declaredTwice = { files: declaredIn };
             continue;
           }
           entries.set(stableKey, {
@@ -392,6 +398,16 @@ function observeEntry(
   analysis: NestAnalysis | undefined,
   member: ts.MethodDeclaration | undefined,
 ): NestPiece {
+  if (entry.declaredTwice) {
+    // Which handler the route means is unknowable, so it gets no contract; the finding blocks the CI check, not the other tools.
+    return {
+      entry,
+      findings: [toolFinding('route-declared-twice', 'error', entry.stableKey,
+        `${entry.stableKey} is declared in ${entry.declaredTwice.files.join(' and ')}; the route has no tool until only one declaration is left.`)],
+      evidence: { authEvidence: false, externalCall: false },
+      files: [...entry.declaredTwice.files].sort(compareCodeUnits),
+    };
+  }
   if (!analysis || !member?.body) {
     return {
       entry,

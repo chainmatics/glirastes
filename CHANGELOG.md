@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-11-10
+## [0.5.0] - 2026-11-11
 
 The Foundation release. Its surface differs from 0.4.0; read **Breaking** before
 upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
@@ -83,6 +83,21 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   budgeted job on the Platform's model access (optional peer `@ai-sdk/openai`),
   and `glirastes init --ci github` writes a workflow with the model-free tool
   check and, for Pro, the managed tool job.
+- `glirastes init --ci github --ci-environment <name>` puts the managed tool
+  job into that GitHub environment, so its `GLIRASTES_CI_KEY`,
+  `GLIRASTES_CONTROL_PLANE_URL` and `GLIRASTES_MANAGED_TOOLS` stay apart from
+  repository values (for example a staging Platform with its own key).
+- `glirastes init --ci github --enrich-on <branch,...>` also runs the managed
+  tool job after pushes to those branches, through a pull request against the
+  branch, and adds a manual start that works the whole tool backlog once
+  (`glirastes tools enrich --managed --first-run`).
+- The managed tool job pushes its commits and pull requests with a GitHub App
+  token when the variable `GLIRASTES_BOT_APP_ID` and the secret
+  `GLIRASTES_BOT_APP_PRIVATE_KEY` are set, so they start the repository's
+  checks; without them it keeps the workflow token.
+- `glirastes tools enrich --managed` routes model requests through OpenRouter
+  with the routing rules the Platform grants for the job, or with your own key
+  in `GLIRASTES_TOOLS_OPENROUTER_KEY`.
 - `createLocalAiPipeline` (`glirastes/server`) runs the AI pipeline inside the
   app without the Platform, with focused tool routing by default; pass
   `routingMode: 'legacy'` for the broad routing.
@@ -131,13 +146,37 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   call. The bubble shows the latest call above the work log as `PlanChecklist`
   (`data-component="plan-checklist"`): a check for done items, a spinner for
   the current one, dimmed pending ones. Plans below two items never show.
+- The managed tool job works one small task at a time (the resolve list, then
+  up to eight tools of one module), four tasks side by side, and writes
+  entries by stable key so finished work is kept. Automatic runs work only
+  what changed (a pull request against its base, a push against the commit
+  before it); the backlog runs only with `--first-run`. The model work ends
+  ten minutes before the CI timeout and long runs commit every five tasks. A
+  run that leaves tools open reports `partial`, one that closes nothing fails
+  with `no_progress`.
 - New locale texts: `activityWorkingLabel`, `activityWaitingLabel`,
   `activityDoneLabel`, `activityDoneOneLabel`, `activityFailedLabel` and
   `planTitle`.
 
 ### Fixed
 
+- `--help` prints the usage of every command instead of running it.
+- `glirastes init` at a monorepo root finds the apps in its workspace
+  packages.
+- A NestJS route that is declared twice is reported as the finding
+  `route-declared-twice`; `glirastes tools refresh` keeps generating the other
+  tools.
+- A managed tool job that the Platform stops at the workspace's overage
+  ceiling ends green and says why (`usage_overage_ceiling_reached`).
 - A client action the open page has no handler for no longer reports success.
+- `glirastes tools enrich` names a malformed CI key (`ci_key_invalid`) and
+  checks an own OpenRouter key before the Platform reserves a job
+  (`byok_key_invalid`).
+- A tool without a contract, or one still unresolved, no longer counts as
+  changed in the managed job's diff.
+- A managed tool job that closed nothing no longer commits or opens a pull
+  request.
+- The generated workflow header names the GitHub environment it reads.
   The chat transport sends the action ids the page handles
   (`glirastesClientActions`), the Next.js handler puts them into
   `runtime.clientActions`, and the generated tool refuses any other action, so

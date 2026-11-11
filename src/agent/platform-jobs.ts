@@ -87,6 +87,7 @@ export const PRODUCT_REFUSALS: ReadonlySet<string> = new Set([
   'tool_generation_not_enabled',
   'tool_job_already_running',
   'tool_jobs_monthly_budget_exhausted',
+  'usage_overage_ceiling_reached',
 ]);
 
 const CODE = /^[a-z][a-z0-9_.-]{1,63}$/;
@@ -105,6 +106,11 @@ export class ToolJobRequestError extends Error {
   }
 }
 
+/** The shape of a CI key the Platform issues: `gl_` and 32 base62 characters. */
+export function isCiKey(value: string): boolean {
+  return /^gl_[A-Za-z0-9]{32}$/.test(value);
+}
+
 export class PlatformToolJobs {
   private readonly fetchImpl: typeof fetch;
 
@@ -114,7 +120,7 @@ export class PlatformToolJobs {
     ciKey: string;
     fetchImpl?: typeof fetch;
   }) {
-    if (!/^gl_[A-Za-z0-9]{32}$/.test(options.ciKey)) {
+    if (!isCiKey(options.ciKey)) {
       throw new ToolJobRequestError('ci_key_invalid', undefined);
     }
     this.fetchImpl = options.fetchImpl ?? fetch;

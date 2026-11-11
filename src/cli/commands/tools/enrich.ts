@@ -12,6 +12,7 @@ import {
 } from '../../../agent/git.js';
 import { createJobModel, ModelAccessError, selectJobModel, type CreateOpenAI } from '../../../agent/openrouter.js';
 import {
+  isCiKey,
   PlatformToolJobs,
   TOOL_JOB_ITEM_LIMIT,
   ToolJobRequestError,
@@ -19,12 +20,14 @@ import {
   type ToolJobLedger,
   type ToolJobOutcome,
 } from '../../../agent/platform-jobs.js';
-import { runSkillJob, type JobSkill, type RefreshSummary, type SkillJobResult } from '../../../agent/runner.js';
+import { runSkillJob, type JobPlan, type JobSkill, type RefreshSummary, type SkillJobResult } from '../../../agent/runner.js';
 import { Workspace } from '../../../agent/workspace.js';
+import { ENRICH_TIMEOUT_MINUTES } from '../ci-workflow.js';
 import { loadToolsConfig, TOOLS_PATHS } from '../../../codegen/tools/config.js';
 import { ToolContractsFileSchema } from '../../../codegen/tools/files.js';
 import { evaluateRouting } from '../../../codegen/tools/routing-eval.js';
 import { requiredLanguages } from '../../../codegen/tools/semantics.js';
+import type { ToolsPipelineResult } from '../../../codegen/tools/pipeline.js';
 import { buildDescribeWorklist, buildResolveWorklist } from '../../../codegen/tools/worklist.js';
 import { AppSetupArtifactSchema } from '../../../contracts/index.js';
 import { findPackageSkillsDir } from '../install-skills.js';
@@ -40,6 +43,25 @@ const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const DISCOVERY_DIGEST = /^sha256:[A-Za-z0-9_-]{43}$/;
 const BRANCH = /^(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/;
 const MODEL_ID = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i;
+/** Tools of one module the model describes in one task. */
+export const MAX_TASK_TOOLS = 8;
+/** A tool none of whose gaps closed gets one more task, never a third. */
+const MAX_ITEM_ATTEMPTS = 2;
+/** A work list this long is an app's backlog: the Platform grants the first-run budget. */
+const FIRST_RUN_ITEMS = 20;
+/** Finished tasks between two commits of a long run. */
+const CHECKPOINT_TASKS = 5;
+/** Left of the CI job's timeout for the last refresh, the commit, the push and the ledger. */
+const CI_TAIL_MINUTES = 10;
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * When the model work ends: before the CI job is cancelled (which would lose
+ * the uncommitted work and the ledger) and before the job key expires.
+ */
+export function jobDeadline(startedMs: number, expiresAt: string): Date {
+  return new Date(Math.min(new Date(expiresAt).getTime(), startedMs + (ENRICH_TIMEOUT_MINUTES - CI_TAIL_MINUTES) * 60_000));
+}
 
 export interface EnrichDependencies {
   exec?: Exec;
@@ -47,11 +69,14 @@ export interface EnrichDependencies {
   /** Loads `@ai-sdk/openai` on demand; only `tools enrich --managed` ever does. */
   loadOpenAI?: () => Promise<CreateOpenAI>;
   now?: () => Date;
+  /** Finished tasks between two commits; tests lower it. */
+  checkpointEvery?: number;
 }
 
 interface EnrichSummary {
   schemaVersion: 1;
-  status: 'skipped' | 'finished' | 'failed';
+  /** `partial`: the job closed some items and left others untouched (`items.unchanged`). */
+  status: 'skipped' | 'finished' | 'partial' | 'failed';
   code?: string;
   jobId?: string;
   outcome?: ToolJobOutcome;
@@ -172,6 +197,40 @@ async function readSkills(): Promise<JobSkill[]> {
   })));
 }
 
+/** Only an explicit 401 counts; an OpenRouter outage is left to the model step. */
+async function openRouterRejects(apiKey: string, fetchImpl: typeof fetch): Promise<boolean> {
+  try {
+    const response = await fetchImpl(`${OPENROUTER_BASE_URL}/key`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
+    return response.status === 401;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The stable keys an automatic run works: tools that `ref` (the base branch
+ * of a pull request, the commit before a push) does not have or has with
+ * another interface. `undefined` when the ref cannot be read.
+ */
+export async function changedSince(repository: GitRepository, ref: string, result: ToolsPipelineResult): Promise<Set<string> | undefined> {
+  const text = await repository.fileAt(ref, TOOLS_PATHS.contracts);
+  if (text === undefined) return undefined;
+  const digests = new Map<string, unknown>();
+  try {
+    const file = JSON.parse(text ?? '{}') as { tools?: Array<{ stableKey?: unknown; contract?: { interfaceDigest?: unknown } }> };
+    // The file stores a digest only with a contract. A tool that had none and has none is backlog, not a change.
+    for (const tool of Array.isArray(file.tools) ? file.tools : []) digests.set(String(tool.stableKey), tool.contract?.interfaceDigest ?? null);
+  } catch {
+    // An unreadable file describes no tool: everything counts as changed.
+  }
+  return new Set((result.tools ?? [])
+    .filter((tool) => !digests.has(tool.stableKey) || digests.get(tool.stableKey) !== (tool.contract ? tool.interfaceDigest : null))
+    .map((tool) => tool.stableKey));
+}
+
 async function currentBranch(exec: Exec, root: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   const fromCi = env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME;
   if (fromCi) return fromCi;
@@ -203,6 +262,13 @@ export async function runToolsEnrich(
   const ciKey = io.env.GLIRASTES_CI_KEY?.trim();
   const baseUrl = io.env.GLIRASTES_CONTROL_PLANE_URL?.trim();
   if (!ciKey || !baseUrl) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'managed_config_missing' });
+  // A secret pasted from the wrong clipboard is named, before any work starts.
+  if (!isCiKey(ciKey)) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'ci_key_invalid' });
+  // A BYOK key OpenRouter rejects fails here, before the Platform reserves a job.
+  const byokKey = io.env.GLIRASTES_TOOLS_OPENROUTER_KEY?.trim();
+  if (byokKey && await openRouterRejects(byokKey, deps.fetchImpl ?? fetch)) {
+    return report(io, json, { schemaVersion: 1, status: 'failed', code: 'byok_key_invalid' });
+  }
   const config = loadToolsConfig(root);
   const repository = new GitRepository(root, exec);
   const head = await repository.head();
@@ -211,18 +277,46 @@ export async function runToolsEnrich(
     return report(io, json, { schemaVersion: 1, status: 'failed', code: 'branch_unknown' });
   }
 
-  const worklists = async () => {
-    const result = await io.runPipeline({ root, mode: 'frozen', keepGoing: true });
-    const resolveList = buildResolveWorklist(result);
-    const describeList = buildDescribeWorklist(result, {
+  // An automatic run works what changed: a pull request against its base, a push against the commit before it.
+  // Everything else is the backlog, which only --first-run works.
+  let scope: Set<string> | null = null;
+  const listsOf = (result: ToolsPipelineResult) => {
+    const allResolve = buildResolveWorklist(result);
+    const allDescribe = buildDescribeWorklist(result, {
       root,
       locale: config.locale,
       languages: requiredLanguages(config.locale),
       writeContracts: config.enrich.writeContracts === true,
     });
+    const keys = scope;
+    const resolveList = keys === null ? allResolve : {
+      ...allResolve,
+      items: allResolve.items.filter((item) => item.toolId !== null && keys.has(item.stableKey)),
+    };
+    const describeItems = keys === null ? allDescribe.items : allDescribe.items.filter((item) => keys.has(item.stableKey));
+    const describeList = keys === null ? allDescribe : {
+      ...allDescribe,
+      items: describeItems,
+      modules: allDescribe.modules
+        .map((entry) => ({ module: entry.module, tools: entry.tools.filter((tool) => describeItems.some((item) => item.tool === tool)) }))
+        .filter((entry) => entry.tools.length > 0),
+    };
     return { result, resolveList, describeList, items: jobItems(resolveList.items, describeList.items) };
   };
-  const before = await worklists();
+  const worklists = async () => listsOf(await io.runPipeline({ root, mode: 'frozen', keepGoing: true }));
+  const initial = await io.runPipeline({ root, mode: 'frozen', keepGoing: true });
+  // The generated workflow sets GLIRASTES_FIRST_RUN on its manual start.
+  const firstRun = args.flags.has('--first-run') || io.env.GLIRASTES_FIRST_RUN === 'true';
+  if (!firstRun) {
+    const beforeSha = io.env.GLIRASTES_BEFORE_SHA?.trim() ?? '';
+    const ref = branch !== base ? base : COMMIT_SHA.test(beforeSha) && !/^0+$/.test(beforeSha) ? beforeSha : undefined;
+    if (ref === undefined) return report(io, json, { schemaVersion: 1, status: 'skipped', code: 'backlog_needs_first_run' });
+    const changed = await changedSince(repository, ref, initial);
+    if (changed === undefined) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'base_unreadable' });
+    scope = changed;
+  }
+  const before = listsOf(initial);
+  io.error(`glirastes tools enrich: scope=${scope === null ? 'all' : 'changed'} items=${before.items.length}`);
   const skip = loopGuard(head, before.items.length);
   if (skip) return report(io, json, { schemaVersion: 1, status: 'skipped', code: skip });
 
@@ -248,7 +342,7 @@ export async function runToolsEnrich(
       discoveryDigest: artifact.discoveryDigest,
       commitSha: head.sha,
       branch,
-      firstRun: args.flags.has('--first-run'),
+      firstRun: firstRun || before.items.length > FIRST_RUN_ITEMS,
       items: before.items,
     });
   } catch (error) {
@@ -287,7 +381,8 @@ export async function runToolsEnrich(
     for (const item of body.items) counts[item.state] += 1;
     return {
       schemaVersion: 1,
-      status: outcome === 'failed' ? 'failed' : 'finished',
+      status: outcome === 'failed' || input.reasonCode === 'no_progress' ? 'failed'
+        : input.reasonCode === 'items_remaining' ? 'partial' : 'finished',
       ...(input.reasonCode ? { code: input.reasonCode } : {}),
       jobId: grant.jobId,
       outcome,
@@ -347,8 +442,18 @@ export async function runToolsEnrich(
         ? before.describeList.items.flatMap((item) => (item.targets.contract ? [item.targets.contract.file] : []))
         : [],
     });
-    const refresh = async (): Promise<RefreshSummary> => {
+    let latest = before.result;
+    // Tasks run side by side; the generator and the git steps run one at a time.
+    let queue: Promise<unknown> = Promise.resolve();
+    const inTurn = <T>(step: () => Promise<T>): Promise<T> => {
+      const turn = queue.then(step);
+      queue = turn.catch(() => undefined);
+      return turn;
+    };
+    const refresh = (): Promise<RefreshSummary> => inTurn(refreshNow);
+    const refreshNow = async (): Promise<RefreshSummary> => {
       const result = await io.runPipeline({ root, mode: 'write', keepGoing: true });
+      latest = result;
       for (const path of Object.keys(result.outputs)) allowed.files.add(path);
       return {
         findings: result.findings.slice(0, 200).map(({ code, subjectRef, message }) => ({ code, subjectRef, message })),
@@ -362,22 +467,105 @@ export async function runToolsEnrich(
       return { failed: evaluation.summary.failed, failures: evaluation.tools.filter((tool) => tool.failures.length > 0).slice(0, 50) };
     };
 
+    // Commits go to the branch of a pull request, and on the base branch to a bot branch that ends in a pull request.
+    const message = `chore(glirastes): describe tools ${BOT_MARKER}\n\nGlirastes-Job: ${grant.jobId}`;
+    const committedPaths = new Set<string>();
+    let lastSha: string | undefined;
+    let botBranch: string | undefined;
+    const commitChanged = async (paths: ReadonlyArray<string>): Promise<void> => {
+      if (branch === base && !botBranch) {
+        botBranch = `glirastes/tools-${head.sha.slice(0, 12)}`;
+        await repository.switchToNewBranch(botBranch);
+      }
+      lastSha = await repository.commit(paths, message);
+      await repository.push(botBranch ?? branch);
+      for (const path of paths) committedPaths.add(path);
+    };
     const written = new Map(await Promise.all([TOOLS_PATHS.semantics, TOOLS_PATHS.resolutions]
       .map(async (path) => [path, await readText(join(root, path))] as const)));
+    /** A commit of what is finished so far; a problem here is left to the final commit to report. */
+    const checkpoint = (): Promise<void> => inTurn(async () => {
+      try {
+        if (await stampAgentModel(root, written, modelId)) await refreshNow();
+        for (const path of workspace.written) allowed.files.add(path);
+        const paths = await repository.changedPaths();
+        if (paths.length === 0 || pathViolations(paths, allowed).length > 0) return;
+        await commitChanged(paths);
+        io.error(`glirastes tools enrich: checkpoint ${lastSha!.slice(0, 7)}`);
+      } catch (error) {
+        if (!(error instanceof GitCommandError)) throw error;
+      }
+    });
+    let finishedTasks = 0;
+
+    // The runner asks for one task at a time; each is cut from the state the last refresh left.
+    const attempts = new Map<string, { count: number; gaps: ReadonlyArray<string> }>();
+    let resolveOffered = false;
+    /** Tools a running task holds; nobody else gets them until it is over. */
+    const inFlight = new Set<string>();
+    const plan: JobPlan = {
+      finished: (task) => {
+        for (const key of task.keys) inFlight.delete(key);
+      },
+      next: async () => {
+        const lists = listsOf(latest);
+        if (!resolveOffered) {
+          resolveOffered = true;
+          const agentItems = lists.resolveList.items.filter((item) => item.owner === 'agent');
+          if (agentItems.length > 0) {
+            return {
+              id: 'resolve',
+              worklists: { resolve: { ...lists.resolveList, items: agentItems } },
+              open: agentItems.length,
+              keys: agentItems.map((item) => item.stableKey),
+              exclusive: true,
+            };
+          }
+        }
+        const candidates = lists.describeList.items.filter((item) => {
+          if (inFlight.has(item.stableKey)) return false;
+          const tried = attempts.get(item.stableKey);
+          if (!tried) return true;
+          // Again only when the first task closed none of its gaps.
+          return tried.count < MAX_ITEM_ATTEMPTS && tried.gaps.every((gap) => (item.gaps as string[]).includes(gap));
+        });
+        const first = candidates[0];
+        if (!first) return null;
+        const chunk = candidates.filter((item) => item.module === first.module).slice(0, MAX_TASK_TOOLS);
+        for (const item of chunk) {
+          inFlight.add(item.stableKey);
+          const tried = attempts.get(item.stableKey);
+          attempts.set(item.stableKey, { count: (tried?.count ?? 0) + 1, gaps: tried?.gaps ?? [...item.gaps] });
+        }
+        return {
+          id: `describe:${first.module}`,
+          worklists: {
+            describe: { ...lists.describeList, modules: [{ module: first.module, tools: chunk.map((item) => item.tool) }], items: chunk },
+          },
+          open: chunk.length,
+          keys: chunk.map((item) => item.stableKey),
+        };
+      },
+    };
     const run = await runSkillJob({
       model,
       modelId,
       skills: await readSkills(),
-      worklists: { resolve: before.resolveList, describe: before.describeList },
+      plan,
+      onTask: async (task) => {
+        io.error(`glirastes tools enrich: task ${task.id} items=${task.open} steps=${task.steps} finish=${task.finishReason}${task.repaired ? ' repaired' : ''}`);
+        finishedTasks += 1;
+        if (finishedTasks % (deps.checkpointEvery ?? CHECKPOINT_TASKS) === 0) await checkpoint();
+      },
       workspace,
       tools: { refresh, evaluate },
       budgetUsd: grant.budgetUsd,
-      deadline: new Date(grant.expiresAt),
+      deadline: jobDeadline(started, grant.expiresAt),
       now,
     });
-    if (run.outcome === 'failed') return finish('failed', { reasonCode: run.reasonCode ?? 'model_error', run, model: modelId });
     const ranModel = MODEL_ID.test(run.servedModel) ? run.servedModel : modelId;
-    if (await stampAgentModel(root, written, ranModel) || !run.refresh) await refresh();
+    // A failed run stopped mid-task: the outputs follow what earlier tasks wrote.
+    if (await stampAgentModel(root, written, ranModel) || !run.refresh || run.outcome === 'failed') await refresh();
 
     for (const path of workspace.written) allowed.files.add(path);
     const changed = await repository.changedPaths();
@@ -402,31 +590,35 @@ export async function runToolsEnrich(
         ? { stableKey: item.stableKey, state, reasonCode: 'gaps-remaining' }
         : { stableKey: item.stableKey, state };
     });
-    const outcomeOf = (committed: ToolJobOutcome): ToolJobOutcome => (run.outcome === 'completed' ? committed : run.outcome);
-    if (changed.length === 0) {
-      return finish(outcomeOf('no_change'), { ...(run.reasonCode ? { reasonCode: run.reasonCode } : {}), run, model: modelId, states });
+    const closed = states.filter((item) => item.state === 'resolved' || item.state === 'described').length;
+    const untouched = states.filter((item) => item.state === 'unchanged').length;
+    // A run that failed after closing items keeps them; one that closed nothing is a failure, whatever the model said.
+    if (run.outcome === 'failed' && closed === 0) {
+      return finish('failed', { reasonCode: run.reasonCode ?? 'model_error', run, model: modelId });
     }
-
-    const message = `chore(glirastes): describe tools ${BOT_MARKER}\n\nGlirastes-Job: ${grant.jobId}`;
-    const reason = run.reasonCode ? { reasonCode: run.reasonCode } : {};
+    const reasonCode = run.reasonCode ?? (closed === 0 ? 'no_progress' : untouched > 0 ? 'items_remaining' : undefined);
+    const reason = reasonCode ? { reasonCode } : {};
+    const outcomeOf = (committed: ToolJobOutcome): ToolJobOutcome => (
+      run.outcome === 'completed' || run.outcome === 'failed' ? committed : run.outcome
+    );
+    if (untouched > 0) io.error(`glirastes tools enrich: ${untouched} of ${states.length} items are still open`);
+    // Nothing closed and nothing checkpointed: refreshed outputs alone are no reason to commit or open a pull request.
+    if (lastSha === undefined && (changed.length === 0 || closed === 0)) {
+      return finish(closed === 0 ? 'failed' : outcomeOf('no_change'), { ...reason, run, model: modelId, states });
+    }
     try {
-      if (branch === base) {
-        // Started on the base branch: the bot never pushes there, it opens a pull request.
-        const botBranch = `glirastes/tools-${head.sha.slice(0, 12)}`;
-        await repository.switchToNewBranch(botBranch);
-        const commitSha = await repository.commit(changed, message);
-        await repository.push(botBranch);
+      if (changed.length > 0) await commitChanged(changed);
+      const done = { ...reason, run, model: modelId, committed: [...committedPaths], commitSha: lastSha!, states };
+      if (botBranch) {
         const pullRequest = await repository.openPullRequest({
           base,
           head: botBranch,
           title: `chore(glirastes): describe tools ${BOT_MARKER}`,
           body: `Glirastes job ${grant.jobId} wrote tool descriptions, schemas and their generated outputs. Review them, then run glirastes tools verify.`,
         });
-        return await finish(outcomeOf('pull_request'), { ...reason, run, model: modelId, committed: changed, commitSha, pullRequest, states });
+        return await finish(outcomeOf('pull_request'), { ...done, pullRequest });
       }
-      const commitSha = await repository.commit(changed, message);
-      await repository.push(branch);
-      return await finish(outcomeOf('committed'), { ...reason, run, model: modelId, committed: changed, commitSha, states });
+      return await finish(outcomeOf('committed'), done);
     } catch (error) {
       if (error instanceof GitCommandError) return finish('failed', { reasonCode: error.code, run, model: modelId });
       throw error;

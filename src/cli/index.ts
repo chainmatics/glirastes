@@ -83,7 +83,7 @@ function hasFlag(args: string[], flag: string): boolean {
 export const CLI_USAGE =
   'Usage: glirastes init [--agent codex|claude] [--root] [--dry-run] [--json]\n'
   + '         start integration with your existing coding agent\n'
-  + '       glirastes init --ci github [--enrich-on <branch,...>] [--enrich-on-main] [--force] [--root] [--json]\n'
+  + '       glirastes init --ci github [--enrich-on <branch,...>] [--enrich-on-main] [--ci-environment <name>] [--force] [--root] [--json]\n'
   + '         write the GitHub workflow: model-free tool check, Pro managed tool job\n'
   + '       glirastes setup [--dry-run] [--managed] [--json]\n'
   + '         detect, validate and atomically install local artifacts\n'
@@ -107,6 +107,17 @@ export const CLI_USAGE =
   + '         derive chat tools from the code, check them, show them and print agent work lists\n';
 
 const HELP_FLAGS = new Set(['--help', '-h', 'help']);
+
+/** The usage entries of one command, cut out of the overview (an entry is its line plus indented notes). */
+function commandUsage(command: string): string {
+  const entries: string[][] = [];
+  for (const line of CLI_USAGE.trimEnd().split('\n')) {
+    if (/^(Usage:|\s{7})\s*glirastes /.test(line)) entries.push([line]);
+    else entries.at(-1)?.push(line);
+  }
+  const mine = entries.filter((entry) => new RegExp(`glirastes ${command}( |$)`).test(entry[0]!));
+  return mine.flat().map((line) => line.replace(/^Usage: /, '')).join('\n');
+}
 const VERSION_FLAGS = new Set(['--version', '-v']);
 
 /** Version of the installed glirastes package (src/cli and dist/cli both sit two levels below it). */
@@ -695,6 +706,11 @@ export async function runCli(
     console.log(packageVersion());
     return;
   }
+  if (rest.some((arg) => arg === '--help' || arg === '-h')) {
+    // Every command answers --help/-h before it parses or writes anything.
+    console.log(commandUsage(command));
+    return;
+  }
   if (command === 'init') {
     const ci = getFlagValue(rest, '--ci');
     if (ci !== undefined) {
@@ -704,6 +720,7 @@ export async function runCli(
         provider: ci,
         enrichOnMain: hasFlag(rest, '--enrich-on-main'),
         enrichOn: (getFlagValue(rest, '--enrich-on') ?? '').split(',').map((branch) => branch.trim()).filter(Boolean),
+        ...(getFlagValue(rest, '--ci-environment') !== undefined ? { environment: getFlagValue(rest, '--ci-environment') } : {}),
         force: hasFlag(rest, '--force'),
       });
       console.log(hasFlag(rest, '--json') ? JSON.stringify(written) : `${written.path}: ${written.status}`);

@@ -92,6 +92,7 @@ describe('Platform tool jobs', () => {
     for (const code of ['tool_generation_not_enabled', 'tool_job_already_running', 'tool_jobs_monthly_budget_exhausted']) {
       expect((await refusal(409, { code })).productRefusal).toBe(true);
     }
+    expect(new ToolJobRequestError('usage_overage_ceiling_reached', 402).productRefusal).toBe(true);
   });
 
   it('never repeats a key or a malformed grant in its errors', async () => {

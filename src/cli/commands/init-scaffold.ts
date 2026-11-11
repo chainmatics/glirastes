@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { TOOLS_PATHS } from '../../codegen/tools/config.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import { writeArtifactSetAtomically } from './atomic-artifact-write.js';
+import { detectWorkspaceSources } from './workspace-sources.js';
 
 /**
  * What `glirastes init` writes deterministically before the coding agent
@@ -165,7 +166,23 @@ export async function scaffoldToolsInputs(options: {
       }, null, 2)}\n`);
       notes.push('Set "locale" in .glirastes/tools.json to the language of the app (e.g. "de-DE").');
     } else {
-      notes.push('No Next.js app: integrating-glirastes-web describes .glirastes/tools.json for this stack.');
+      const workspaces = await detectWorkspaceSources(root, packageJson);
+      if (workspaces.sources.length > 0) {
+        add(TOOLS_PATHS.config, `${JSON.stringify({
+          schemaVersion: 1,
+          appId,
+          targetAppKey: key,
+          locale: 'en',
+          sources: workspaces.sources,
+        }, null, 2)}\n`);
+        notes.push(`Sources found in the workspaces for .glirastes/tools.json: ${workspaces.described.join(', ')}.`);
+        notes.push(...workspaces.notes);
+        notes.push('Set "locale" in .glirastes/tools.json to the language of the app (e.g. "de-DE").');
+      } else if (workspaces.declared) {
+        notes.push(`No supported app found in the workspaces (${workspaces.patterns.join(', ')}): integrating-glirastes-web describes .glirastes/tools.json for this stack.`);
+      } else {
+        notes.push('No Next.js app: integrating-glirastes-web describes .glirastes/tools.json for this stack.');
+      }
     }
   }
   if (!existsSync(join(root, TOOLS_PATHS.promptBundle))) {

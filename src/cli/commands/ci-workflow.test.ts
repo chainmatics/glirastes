@@ -63,7 +63,7 @@ describe('glirastes init --ci github', () => {
 
     expect(enrich).toContain("|| (github.event_name == 'push' && github.ref == 'refs/heads/main')");
     expect(enrich).toContain('      contents: write\n      pull-requests: write\n');
-    expect(enrich).toContain('          GH_TOKEN: ${{ github.token }}\n');
+    expect(enrich).toContain('          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}\n');
   });
 
   it('runs on every environment branch asked for and opens the pull request against that branch', () => {
@@ -80,6 +80,37 @@ describe('glirastes init --ci github', () => {
       .toBe(githubToolsWorkflow({ packageManager: 'bun', enrichOnMain: true }));
   });
 
+  it('compares a push with the commit before it and works the backlog only on a manual start', () => {
+    const workflow = githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'] });
+    const enrich = job(workflow, 'glirastes-tools-enrich');
+
+    expect(workflow).toContain("  push:\n    branches: [main, staging]\n  workflow_dispatch:\n");
+    expect(enrich).toContain("|| github.event_name == 'workflow_dispatch'");
+    expect(enrich).toContain('          GLIRASTES_BEFORE_SHA: ${{ github.event.before }}\n');
+    expect(enrich).toContain("          GLIRASTES_FIRST_RUN: ${{ github.event_name == 'workflow_dispatch' }}\n");
+    // A repository that runs the job on pull requests only has no manual start: the bot could not open a pull request.
+    expect(githubToolsWorkflow({ packageManager: 'bun' })).not.toMatch(/workflow_dispatch|GLIRASTES_FIRST_RUN|GLIRASTES_BEFORE_SHA/);
+  });
+
+  it("pushes as a GitHub App when one is configured, so the bot's commits get their checks without approval", () => {
+    for (const options of [{ enrichOn: ['staging'], environment: 'staging' }, {}]) {
+      const enrich = job(githubToolsWorkflow({ packageManager: 'bun', ...options }), 'glirastes-tools-enrich');
+      const managed = 'environment' in options ? "vars.GLIRASTES_MANAGED_TOOLS == 'true' && " : '';
+
+      expect(enrich).toContain('      - uses: actions/create-github-app-token@v2\n'
+        + '        id: bot\n'
+        + `        if: ${managed}vars.GLIRASTES_BOT_APP_ID != ''\n`
+        + '        with:\n'
+        + '          app-id: ${{ vars.GLIRASTES_BOT_APP_ID }}\n'
+        + '          private-key: ${{ secrets.GLIRASTES_BOT_APP_PRIVATE_KEY }}\n');
+      expect(enrich.indexOf('create-github-app-token')).toBeLessThan(enrich.indexOf('actions/checkout@v4'));
+      // Without an app, the job keeps the workflow token.
+      expect(enrich).toContain('          token: ${{ steps.bot.outputs.token || github.token }}\n');
+    }
+    const staging = job(githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'] }), 'glirastes-tools-enrich');
+    expect(staging).toContain('          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}\n');
+  });
+
   it('refuses a branch name that is not one', async () => {
     await expect(writeCiWorkflow({ root, provider: 'github', enrichOn: ['staging', 'a b'] }))
       .rejects.toEqual(new CiWorkflowError('ci_branch_invalid'));
@@ -94,6 +125,35 @@ describe('glirastes init --ci github', () => {
 
     expect(await readFile(join(root, CI_WORKFLOW_PATH), 'utf8'))
       .toBe(githubToolsWorkflow({ packageManager: 'npm', enrichOn: ['staging', 'main'] }));
+  });
+
+  it("reads the managed job's keys from a GitHub environment on request", () => {
+    const workflow = githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'], environment: 'staging' });
+    const enrich = job(workflow, 'glirastes-tools-enrich');
+    const steps = enrich.slice(enrich.indexOf('    steps:\n'));
+
+    expect(enrich).toContain('    environment: staging\n');
+    expect(workflow).toContain('# GLIRASTES_MANAGED_TOOLS of the GitHub environment staging is "true"');
+    // A job-level `if` cannot see environment variables, so every step checks the switch.
+    expect(enrich).not.toContain("vars.GLIRASTES_MANAGED_TOOLS == 'true' && (");
+    expect(steps.match(/      - (uses|run): /g)).toHaveLength(6);
+    expect(steps.match(/        if: vars.GLIRASTES_MANAGED_TOOLS == 'true'/g)).toHaveLength(6);
+    expect(job(workflow, 'glirastes-tools')).not.toMatch(/environment|vars\./);
+    expect(githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'] })).not.toContain('environment:');
+  });
+
+  it('refuses an environment name that is not one', async () => {
+    await expect(writeCiWorkflow({ root, provider: 'github', environment: "x' || true" }))
+      .rejects.toEqual(new CiWorkflowError('ci_environment_invalid'));
+  });
+
+  it('takes the environment from --ci-environment', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await runCli(['init', '--ci', 'github', '--enrich-on', 'staging', '--ci-environment', 'staging', '--root', root, '--json'], { init: { ask: vi.fn() } as never });
+
+    expect(await readFile(join(root, CI_WORKFLOW_PATH), 'utf8'))
+      .toBe(githubToolsWorkflow({ packageManager: 'npm', enrichOn: ['staging'], environment: 'staging' }));
   });
 
   it('uses the package manager of the lockfile', async () => {
