@@ -58,8 +58,15 @@ export function checkRequestHeaders(req: Request, options: RequestGuardOptions =
   return undefined;
 }
 
+/** `value` without its trailing slashes; a plain loop, linear in the length (no regular expression). */
+function withoutTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f) end -= 1;
+  return value.slice(0, end);
+}
+
 function configuredOrigins(allowed: ReadonlyArray<string> = []): Set<string> {
-  return new Set(allowed.map((origin) => origin.replace(/\/+$/, '')).filter((origin) => origin !== 'null'));
+  return new Set(allowed.map(withoutTrailingSlashes).filter((origin) => origin !== 'null'));
 }
 
 function ownOrigins(req: Request, allowed: ReadonlyArray<string> = []): Set<string> {

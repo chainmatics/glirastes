@@ -118,6 +118,18 @@ describe('cross-origin requests', () => {
     await response.text();
   });
 
+  it('trims trailing slashes of allowedOrigins in linear time (CodeQL js/polynomial-redos)', async () => {
+    const hostile = `https://admin.example${'/'.repeat(100_000)}x`;
+    const { handler } = setup({ allowedOrigins: [hostile, 'https://front.example///'] });
+    const started = performance.now();
+    const refused = await handler(post({ origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' }));
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(refused.status).toBe(403);
+    const ok = await handler(post({ origin: 'https://front.example', 'sec-fetch-site': 'cross-site' }));
+    expect(ok.status).toBe(200);
+    await ok.text();
+  });
+
   it('accepts an Origin from allowedOrigins', async () => {
     const { handler } = setup({ allowedOrigins: ['https://admin.example'] });
     const allowed = await handler(post({ origin: 'https://admin.example' }));
