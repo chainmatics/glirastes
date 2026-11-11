@@ -15,6 +15,7 @@ import type {
   SchemaLike,
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
+import type { ApprovalStore } from './approval-binding.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig } from '../../core/index.js';
 import type {
   Principal,
@@ -384,6 +385,41 @@ export interface AiChatHandlerConfig {
    * `(request) => createHttpEndpointCaller({ baseUrl, request })`.
    */
   endpointCaller?: (request: Request) => InternalApiCaller;
+
+  /**
+   * Secret that binds every approval the handler asks for to the tool call it
+   * was asked for (HMAC-SHA-256 over tool call id, tool name, input and issue
+   * time). The browser sends the whole chat history back with the user's
+   * answer, and the AI SDK runs the approved call from that history; without
+   * the binding, a forged or replayed history would run any tool with any
+   * input. At least 16 characters, the same on every instance that can serve
+   * the second request of an approval. Falls back to the
+   * `GLIRASTES_APPROVAL_SECRET` environment variable.
+   *
+   * Without a secret, a handler whose tools can ask for approval derives a
+   * random per-process secret outside production and logs one warning; with
+   * `NODE_ENV=production` it refuses requests with HTTP 500
+   * (`approval_secret_missing`) instead. Approvals issued before an upgrade,
+   * by another secret or by another process are refused, not run.
+   */
+  approvalSecret?: string;
+
+  /**
+   * How long an approval stays valid after the handler asked for it, in
+   * milliseconds. Default 15 minutes. A later answer is refused with
+   * `approval_expired`.
+   */
+  approvalMaxAgeMs?: number;
+
+  /**
+   * Optional single-use store. `consume(approvalId, expiresAtMs)` must
+   * atomically record the id and return `false` when it was recorded before.
+   * Without it, the handler can only refuse an approved call whose own
+   * history already holds a result; the same approved history sent twice
+   * before the first result reaches the client runs twice, within
+   * `approvalMaxAgeMs`. Entries may be dropped after `expiresAtMs`.
+   */
+  approvalStore?: ApprovalStore;
 
   /**
    * Lancer client for runtime prompt and model overrides (Pro feature).

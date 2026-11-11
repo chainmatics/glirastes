@@ -15,6 +15,13 @@ import {
 } from './clarification-resume.js';
 import { scopePipelineTools } from './scope-pipeline-tools.js';
 import {
+  ApprovalSecretMissingError,
+  bindApprovalRequests,
+  enforceApprovalBindings,
+  resolveApprovalBinder,
+  type ApprovalBinder,
+} from './approval-binding.js';
+import {
   pseudonymizeCommandToolInputs,
   resolveDirectCommand,
   runDirectCommand,
@@ -124,6 +131,14 @@ export interface StreamHandlerContext {
   turnMetrics?: TurnMetricsRecorder;
   /** Price table configured on the handler (`modelPricing`). */
   modelPricing?: RuntimePriceTable;
+  /**
+   * Binds the approval requests of a UI message stream to the tool calls
+   * they announce. The built-in stream handler pipes its UI stream through
+   * this. A custom stream handler that lets tools ask for approval must do
+   * the same with the stream it returns; an approval it issues otherwise is
+   * refused on the next request (`approval_not_issued`).
+   */
+  bindApprovalRequests?: <T extends { type: string }>(stream: ReadableStream<T>) => ReadableStream<T>;
 }
 
 /**
@@ -651,7 +666,8 @@ async function defaultStreamHandler(
         },
       });
 
-      writer.merge(result.toUIMessageStream({ onError: () => 'AI request failed' }));
+      const uiStream = result.toUIMessageStream({ onError: () => 'AI request failed' });
+      writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
       } catch (error) {
@@ -745,6 +761,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     modelPricing: configuredModelPricing,
     directCommands = true,
     endpointCaller = createInternalApiCallerFromRequest,
+    approvalSecret,
+    approvalMaxAgeMs,
+    approvalStore,
   } = config;
   // Without a callback a failed turn would only say "AI request failed" to
   // the user and nothing to the developer. Name only: provider errors can
@@ -846,6 +865,29 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     }
     return kept;
   };
+
+  /**
+   * The approval binder of a request, and the history with every approved
+   * call that this server did not issue (or that is expired or used) denied.
+   * Runs once the registry is known: whether tools can ask for approval
+   * decides if a missing secret is an error.
+   */
+  async function secureApprovals(
+    registry: ToolRegistry,
+    messages: unknown[],
+    managedTurn: ManagedTurnGuard | undefined,
+  ): Promise<{ binder: ApprovalBinder; messages: unknown[] }> {
+    const principal = managedTurn?.snapshot.principal;
+    const binder = resolveApprovalBinder({
+      secret: approvalSecret,
+      maxAgeMs: approvalMaxAgeMs,
+      scope: principal ? `${principal.tenantId}:${principal.subjectId}` : '',
+      // The managed policy can ask for approval of a tool that declares none.
+      hasApprovalTools: Boolean(managedTurn) || Object.values(registry).some((tool) => Boolean(tool.needsApproval)),
+    });
+    const checked = await enforceApprovalBindings(messages, { binder, store: approvalStore });
+    return { binder, messages: checked.messages };
+  }
 
   async function handler(req: Request): Promise<Response> {
     reportDefaultsOnce();
@@ -1034,6 +1076,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ...contractRejectionReporter(turnMetrics),
         };
         const registry = staticTools ?? await loadTools!(endpointToolContext);
+        const { binder: commandBinder } = await secureApprovals(registry, [], managedTurn);
         let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, toolOptions);
         // The result stays in the chat history that later model turns send to the model.
         if (piiShield) {
@@ -1048,6 +1091,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           tools: commandTools,
           managedTurn,
           turnMetrics,
+          approvals: commandBinder,
+          approvalStore,
           onError: (error) => onError?.(error, req),
         });
       }
@@ -1101,6 +1146,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           registry,
           [followupTool, clarificationTool, planTool],
         );
+        const pipelineApprovals = await secureApprovals(registry, processedMessages, managedTurn);
+        processedMessages = pipelineApprovals.messages;
 
         // Extract user input for pipeline
         let userText = clarificationResume?.routingText
@@ -1318,6 +1365,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           handlerBuiltinToolNames: discoveryController
             ? [...handlerBuiltinNames, 'find_tools']
             : handlerBuiltinNames,
+          bindApprovalRequests: (stream) => bindApprovalRequests(stream, pipelineApprovals.binder),
         });
       }
 
@@ -1345,6 +1393,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       registry = withAlwaysOnBuiltins(registry);
       const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool, planTool]);
+      const legacyApprovals = await secureApprovals(registry, processedMessages, managedTurn);
+      processedMessages = legacyApprovals.messages;
       const allToolNames = Object.keys(registry)
         .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
 
@@ -1463,10 +1513,17 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         handlerBuiltinToolNames: discoveryController
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,
+        bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder),
       });
     } catch (error) {
       turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
       onError?.(error, req);
+      if (error instanceof ApprovalSecretMissingError) {
+        return new Response(
+          JSON.stringify({ error: error.code, message: error.message }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
       return new Response(
         JSON.stringify({ error: 'AI request failed' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } },

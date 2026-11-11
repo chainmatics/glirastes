@@ -36,6 +36,7 @@ export {
   DEFAULT_RECORDING_LANGUAGES,
   type RecordingTranscriptionHandlerConfig,
 } from './recording-transcription-handler.js';
+export type { ApprovalStore, ApprovalDenialCode } from './approval-binding.js';
 export {
   resolveDirectCommand,
   runDirectCommand,

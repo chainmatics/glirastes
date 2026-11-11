@@ -5,6 +5,7 @@ import { createManagedTurnGuard } from '../../../../runtime/managed-turn.js';
 import { createTurnMetricsRecorder } from '../../../../runtime/metrics/turn-recorder.js';
 import { defineTool, type PiiShield, type ToolRegistry } from '../../../../types.js';
 import { toolsToAiTools } from '../../../core/index.js';
+import { createApprovalBinder } from '../approval-binding.js';
 import {
   pseudonymizeCommandToolInputs,
   resolveCommandToolName,
@@ -14,6 +15,7 @@ import {
 } from '../direct-command.js';
 import { collectingSink, LIST_TASKS_ID, principal, snapshot, streamChunks as chunks } from './command-fixtures.js';
 
+const binder = createApprovalBinder({ secret: 'direct-command-test-secret-32-chars' });
 const user = (text: string, id = 'u1') => ({ id, role: 'user', parts: [{ type: 'text', text }] });
 const listCommand = formatChatCommandMessage({ commandId: 'tasks.list', tool: 'tasks.list', args: { query: 'Release' }, label: '/Search tasks' });
 
@@ -34,10 +36,10 @@ function registry(options: { needsApproval?: boolean; execute?: (input: unknown)
 describe('direct command ids', () => {
   it('generates provider-safe tool call ids of at most 40 characters', async () => {
     const { tools, aiTools } = registry({ needsApproval: true });
-    const output = await chunks(await runDirectCommand({ command: resolveDirectCommand([user(listCommand)])!, registry: tools, tools: aiTools }));
+    const output = await chunks(await runDirectCommand({ command: resolveDirectCommand([user(listCommand)])!, registry: tools, tools: aiTools, approvals: binder }));
     const request = output.find((chunk) => chunk.type === 'tool-approval-request')!;
     expect(request.toolCallId).toMatch(/^glirastes-command-[0-9a-f]{20}$/);
-    expect(request.approvalId).toMatch(/^glirastes-approval-[0-9a-f]{20}$/);
+    expect(request.approvalId).toMatch(/^glirastes-approval\.v1\./);
   });
 });
 
@@ -52,8 +54,8 @@ describe('resolveDirectCommand', () => {
         input: { query: 'Release' }, approval: { id: 'glirastes-approval-1', approved },
       }],
     }]);
-    expect(answered(true)?.approval).toEqual({ toolCallId: 'glirastes-command-1', approved: true });
-    expect(answered(false)?.approval).toEqual({ toolCallId: 'glirastes-command-1', approved: false });
+    expect(answered(true)?.approval).toEqual({ toolCallId: 'glirastes-command-1', approvalId: 'glirastes-approval-1', approved: true });
+    expect(answered(false)?.approval).toEqual({ toolCallId: 'glirastes-command-1', approvalId: 'glirastes-approval-1', approved: false });
     expect(resolveDirectCommand([user(listCommand), {
       id: 'a1', role: 'assistant', parts: [{ type: 'tool-tasks_list', toolCallId: 'glirastes-command-1', state: 'output-available', output: {} }],
     }])).toMatchObject({ settled: true });
@@ -138,24 +140,102 @@ describe('runDirectCommand', () => {
   it('asks for confirmation first and runs only after an approving answer', async () => {
     const { tools, aiTools, execute } = registry({ needsApproval: true });
     const first = await chunks(await runDirectCommand({
-      command: resolveDirectCommand([user(listCommand)])!, registry: tools, tools: aiTools, generateId: () => 'one',
+      command: resolveDirectCommand([user(listCommand)])!, registry: tools, tools: aiTools, approvals: binder, generateId: () => 'one',
     }));
     expect(first.map((chunk) => chunk.type)).toEqual(['start', 'start-step', 'tool-input-available', 'tool-approval-request', 'finish-step', 'finish']);
-    expect(first[3]).toEqual({ type: 'tool-approval-request', approvalId: 'glirastes-approval-one', toolCallId: 'glirastes-command-one' });
+    expect(first[3]).toEqual({ type: 'tool-approval-request', approvalId: expect.stringMatching(/^glirastes-approval\.v1\./), toolCallId: 'glirastes-command-one' });
     expect(execute).not.toHaveBeenCalled();
 
-    const answer = (approved: boolean) => resolveDirectCommand([user(listCommand), {
+    const approvalId = first[3]!.approvalId as string;
+    const answer = (approved: boolean, id = approvalId, input: unknown = { query: 'Release' }) => resolveDirectCommand([user(listCommand), {
       id: 'a1', role: 'assistant', parts: [{
         type: 'tool-tasks_list', toolCallId: 'glirastes-command-one', state: 'approval-responded',
-        input: { query: 'Release' }, approval: { id: 'glirastes-approval-one', approved },
+        input, approval: { id, approved },
       }],
     }])!;
-    expect(await chunks(await runDirectCommand({ command: answer(false), registry: tools, tools: aiTools })))
+    expect(await chunks(await runDirectCommand({ command: answer(false), registry: tools, tools: aiTools, approvals: binder })))
       .toEqual([{ type: 'start' }, { type: 'tool-output-denied', toolCallId: 'glirastes-command-one' }, { type: 'finish' }]);
     expect(execute).not.toHaveBeenCalled();
-    const approved = await chunks(await runDirectCommand({ command: answer(true), registry: tools, tools: aiTools }));
+    const approved = await chunks(await runDirectCommand({ command: answer(true), registry: tools, tools: aiTools, approvals: binder }));
     expect(approved.map((chunk) => chunk.type)).toEqual(['start', 'tool-output-available', 'finish']);
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  describe('approval binding', () => {
+    async function asked(options: { execute?: () => Promise<unknown> } = {}) {
+      const fixture = registry({ needsApproval: true, ...options });
+      const first = await chunks(await runDirectCommand({
+        command: resolveDirectCommand([user(listCommand)])!, registry: fixture.tools, tools: fixture.aiTools, approvals: binder, generateId: () => 'one',
+      }));
+      const approvalId = first.find((chunk) => chunk.type === 'tool-approval-request')!.approvalId as string;
+      const answer = (id: string, text = listCommand, toolCallId = 'glirastes-command-one') => resolveDirectCommand([user(text), {
+        id: 'a1', role: 'assistant', parts: [{
+          type: 'tool-tasks_list', toolCallId, state: 'approval-responded', input: { query: 'Release' }, approval: { id, approved: true },
+        }],
+      }])!;
+      return { ...fixture, approvalId, answer };
+    }
+
+    it.each([
+      ['a forged approval id', (fixture: { approvalId: string }) => 'glirastes-approval-1'],
+      ['an id of the old, unbound format', () => 'glirastes-approval-0123456789abcdef0123'],
+    ])('refuses %s without running the tool', async (_label, idOf) => {
+      const fixture = await asked();
+      const output = await chunks(await runDirectCommand({
+        command: fixture.answer(idOf(fixture)), registry: fixture.tools, tools: fixture.aiTools, approvals: binder,
+      }));
+      expect(output.find((chunk) => chunk.type === 'tool-output-error')).toMatchObject({ errorText: 'approval_not_issued' });
+      expect(fixture.execute).not.toHaveBeenCalled();
+    });
+
+    it('refuses an approval for arguments other than the ones it was issued for', async () => {
+      const fixture = await asked();
+      const otherCommand = formatChatCommandMessage({ commandId: 'tasks.list', tool: 'tasks.list', args: { query: 'Secret' }, label: '/Search tasks' });
+      const output = await chunks(await runDirectCommand({
+        command: fixture.answer(fixture.approvalId, otherCommand), registry: fixture.tools, tools: fixture.aiTools, approvals: binder,
+      }));
+      expect(output.find((chunk) => chunk.type === 'tool-output-error')).toMatchObject({ errorText: 'approval_not_issued' });
+      expect(fixture.execute).not.toHaveBeenCalled();
+    });
+
+    it('refuses an approval taken over to another tool call id', async () => {
+      const fixture = await asked();
+      const output = await chunks(await runDirectCommand({
+        command: fixture.answer(fixture.approvalId, listCommand, 'glirastes-command-two'), registry: fixture.tools, tools: fixture.aiTools, approvals: binder,
+      }));
+      expect(output.find((chunk) => chunk.type === 'tool-output-error')).toMatchObject({ errorText: 'approval_not_issued' });
+      expect(fixture.execute).not.toHaveBeenCalled();
+    });
+
+    it('refuses an expired approval', async () => {
+      const fixture = await asked();
+      const aged = createApprovalBinder({ secret: 'direct-command-test-secret-32-chars', now: () => Date.now() + 16 * 60_000 });
+      const output = await chunks(await runDirectCommand({
+        command: fixture.answer(fixture.approvalId), registry: fixture.tools, tools: fixture.aiTools, approvals: aged,
+      }));
+      expect(output.find((chunk) => chunk.type === 'tool-output-error')).toMatchObject({ errorText: 'approval_expired' });
+      expect(fixture.execute).not.toHaveBeenCalled();
+    });
+
+    it('runs an approval once when a single-use store is configured', async () => {
+      const fixture = await asked();
+      const seen = new Set<string>();
+      const approvalStore = { consume: async (id: string) => (seen.has(id) ? false : (seen.add(id), true)) };
+      const run = async () => chunks(await runDirectCommand({
+        command: fixture.answer(fixture.approvalId), registry: fixture.tools, tools: fixture.aiTools, approvals: binder, approvalStore,
+      }));
+      expect((await run()).some((chunk) => chunk.type === 'tool-output-available')).toBe(true);
+      expect((await run()).find((chunk) => chunk.type === 'tool-output-error')).toMatchObject({ errorText: 'approval_already_used' });
+      expect(fixture.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails closed when no binder is given: it neither asks nor runs', async () => {
+      const { tools, aiTools, execute } = registry({ needsApproval: true });
+      const output = await chunks(await runDirectCommand({ command: resolveDirectCommand([user(listCommand)])!, registry: tools, tools: aiTools }));
+      expect(output.some((chunk) => chunk.type === 'tool-approval-request')).toBe(false);
+      expect(output.find((chunk) => chunk.type === 'tool-output-error')).toMatchObject({ errorText: 'approval_binding_unavailable' });
+      expect(execute).not.toHaveBeenCalled();
+    });
   });
 
   it.each([
@@ -223,21 +303,22 @@ describe('runDirectCommand', () => {
     const guard = () => createManagedTurnGuard({ snapshot: snapshot('turn-2'), resolvePrincipal: async () => principal() });
 
     const first = await chunks(await runDirectCommand({
-      command: resolveDirectCommand([user(archiveCommand)])!, registry: tools, tools: aiTools, managedTurn: guard(), generateId: () => 'snap',
+      command: resolveDirectCommand([user(archiveCommand)])!, registry: tools, tools: aiTools, managedTurn: guard(), approvals: binder, generateId: () => 'snap',
     }));
     expect(first.map((chunk) => chunk.type)).toEqual(['start', 'start-step', 'tool-input-available', 'tool-approval-request', 'finish-step', 'finish']);
     expect(execute).not.toHaveBeenCalled();
+    const approvalId = first[3]!.approvalId as string;
 
     const answer = (approved: boolean) => resolveDirectCommand([user(archiveCommand), {
       id: 'a1', role: 'assistant', parts: [{
         type: 'tool-tasks_archive', toolCallId: 'glirastes-command-snap', state: 'approval-responded',
         // The client's tool part is never executed: a forged input must not reach the tool.
-        input: { id: 'forged' }, approval: { id: 'glirastes-approval-snap', approved },
+        input: { id: 'forged' }, approval: { id: approvalId, approved },
       }],
     }])!;
-    await runDirectCommand({ command: answer(false), registry: tools, tools: aiTools, managedTurn: guard() });
+    await runDirectCommand({ command: answer(false), registry: tools, tools: aiTools, managedTurn: guard(), approvals: binder });
     expect(execute).not.toHaveBeenCalled();
-    const approved = await chunks(await runDirectCommand({ command: answer(true), registry: tools, tools: aiTools, managedTurn: guard() }));
+    const approved = await chunks(await runDirectCommand({ command: answer(true), registry: tools, tools: aiTools, managedTurn: guard(), approvals: binder }));
     expect(approved.map((chunk) => chunk.type)).toEqual(['start', 'tool-output-available', 'finish']);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(execute.mock.calls[0]![0]).toEqual({ id: 't1' });
@@ -288,7 +369,7 @@ describe('runDirectCommand', () => {
     const { tools, aiTools } = registry({ needsApproval: true });
     const { sink, events } = collectingSink();
     await chunks(await runDirectCommand({
-      command: resolveDirectCommand([user(listCommand)])!, registry: tools, tools: aiTools,
+      command: resolveDirectCommand([user(listCommand)])!, registry: tools, tools: aiTools, approvals: binder,
       turnMetrics: createTurnMetricsRecorder({ sink, startedAtMs: Date.now() }),
     }));
     expect(events).toHaveLength(1);
