@@ -80,7 +80,7 @@ interface Platform {
   urls: string[];
 }
 
-function platform(options: { refuse?: { status: number; code: string } } = {}): Platform {
+function platform(options: { refuse?: { status: number; code: string }; byokKeyStatus?: number } = {}): Platform {
   const requests: ToolJobRequest[] = [];
   const ledgers: ToolJobLedger[] = [];
   const urls: string[] = [];
@@ -88,6 +88,9 @@ function platform(options: { refuse?: { status: number; code: string } } = {}): 
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     urls.push(`${init?.method ?? 'GET'} ${url}`);
+    if (url === 'https://openrouter.ai/api/v1/key' && options.byokKeyStatus) {
+      return json(options.byokKeyStatus, options.byokKeyStatus === 200 ? { data: { label: 'sk-or-v1-abc...' } } : { error: { code: 401 } });
+    }
     if (url === 'https://openrouter.ai/api/v1/models') {
       return json(200, { data: [{ id: MODEL, supported_parameters: ['tools', 'structured_outputs'] }] });
     }
@@ -339,6 +342,16 @@ describe('glirastes tools enrich --managed', () => {
     expect(await runToolsCommand(['enrich', '--managed', '--json'], deps)).toBe(1);
     expect(JSON.parse(out[0]!)).toEqual({ schemaVersion: 1, status: 'failed', code: 'managed_config_missing' });
     expect(Object.keys(TOOLS_SUBCOMMANDS)).toContain('enrich');
+  });
+
+  it('refuses a BYOK key OpenRouter rejects before the Platform reserves a job', async () => {
+    const fixture = await createAppFixture();
+    const api = platform({ byokKeyStatus: 401 });
+    const result = run(fixture, { GLIRASTES_TOOLS_OPENROUTER_KEY: 'sk-or-v1-revoked' }, { platform: api });
+
+    expect(await result.code).toBe(1);
+    expect(JSON.parse(result.out.at(-1)!)).toEqual({ schemaVersion: 1, status: 'failed', code: 'byok_key_invalid' });
+    expect([api.requests.length, api.ledgers.length, result.loadOpenAI.mock.calls.length]).toEqual([0, 0, 0]);
   });
 
   it('names a CI secret that is not a CI key instead of failing generically', async () => {

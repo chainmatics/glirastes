@@ -173,6 +173,19 @@ async function readSkills(): Promise<JobSkill[]> {
   })));
 }
 
+/** Only an explicit 401 counts; an OpenRouter outage is left to the model step. */
+async function openRouterRejects(apiKey: string, fetchImpl: typeof fetch): Promise<boolean> {
+  try {
+    const response = await fetchImpl(`${OPENROUTER_BASE_URL}/key`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
+    return response.status === 401;
+  } catch {
+    return false;
+  }
+}
+
 async function currentBranch(exec: Exec, root: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   const fromCi = env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME;
   if (fromCi) return fromCi;
@@ -206,6 +219,11 @@ export async function runToolsEnrich(
   if (!ciKey || !baseUrl) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'managed_config_missing' });
   // A secret pasted from the wrong clipboard is named, before any work starts.
   if (!isCiKey(ciKey)) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'ci_key_invalid' });
+  // A BYOK key OpenRouter rejects fails here, before the Platform reserves a job.
+  const byokKey = io.env.GLIRASTES_TOOLS_OPENROUTER_KEY?.trim();
+  if (byokKey && await openRouterRejects(byokKey, deps.fetchImpl ?? fetch)) {
+    return report(io, json, { schemaVersion: 1, status: 'failed', code: 'byok_key_invalid' });
+  }
   const config = loadToolsConfig(root);
   const repository = new GitRepository(root, exec);
   const head = await repository.head();
