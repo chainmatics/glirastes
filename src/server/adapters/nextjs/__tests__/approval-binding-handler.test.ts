@@ -411,6 +411,67 @@ describe('approval binding through the chat handler', () => {
     expect(archive).not.toHaveBeenCalled();
   });
 
+  describe('tools whose input schema transforms (p7)', () => {
+    async function roundTrip(inputSchema: z.ZodType, modelInput: unknown, approvalCheck?: (input: unknown) => boolean) {
+      const ran: unknown[] = [];
+      const asked: unknown[] = [];
+      const registry: ToolRegistry = {
+        tasks_archive: defineTool({
+          id: 'tasks.archive', description: 'Archive.', inputSchema,
+          needsApproval: approvalCheck
+            ? async (input: unknown) => { asked.push(input); return approvalCheck(input); }
+            : true,
+          execute: async (input: unknown) => { ran.push(input); return { success: true }; },
+        }),
+      };
+      const handler = createAiChatHandler({
+        tools: registry, model: callingModel('tasks_archive', modelInput), systemPrompt: 'A', approvalSecret: SECRET,
+      });
+      const first = await streamChunks(await handler(post([user])));
+      const shown = first.find((chunk) => chunk.type === 'tool-input-available')?.input;
+      const second = await streamChunks(await handler(post([user, answered(await clientMessage(first), true)])));
+      return { ran, asked, shown, second };
+    }
+
+    it('shows and binds the input the model wrote, and runs the tool once with the schema output', async () => {
+      const { ran, shown, second } = await roundTrip(z.object({ id: z.string().transform((value) => Number(value)) }), { id: '7' });
+      expect(shown).toEqual({ id: '7' });
+      expect(ran).toEqual([{ id: 7 }]);
+      expect(second.find((chunk) => chunk.type === 'tool-output-available')).toBeDefined();
+    });
+
+    it('works with a strict transforming schema and with defaults', async () => {
+      const strict = await roundTrip(z.object({ id: z.string().transform((value) => Number(value)) }).strict(), { id: '7' });
+      expect(strict.ran).toEqual([{ id: 7 }]);
+      const defaults = await roundTrip(z.object({ id: z.string(), mode: z.string().default('soft') }).strict(), { id: 't1' });
+      expect(defaults.shown).toEqual({ id: 't1' });
+      expect(defaults.ran).toEqual([{ id: 't1', mode: 'soft' }]);
+    });
+
+    it('hands needsApproval the schema output', async () => {
+      const { asked, ran } = await roundTrip(
+        z.object({ id: z.string().transform((value) => Number(value)) }),
+        { id: '7' },
+        (input) => (input as { id: unknown }).id === 7,
+      );
+      expect(asked).toEqual([{ id: 7 }]);
+      expect(ran).toEqual([{ id: 7 }]);
+    });
+  });
+
+  it('runs a live transforming tool that needs no approval once with the schema output', async () => {
+    const ran: unknown[] = [];
+    const registry: ToolRegistry = {
+      tasks_count: defineTool({
+        id: 'tasks.count', description: 'Count.', inputSchema: z.object({ n: z.string().transform((value) => value.length) }),
+        execute: async (input: unknown) => { ran.push(input); return { success: true }; },
+      }),
+    };
+    const handler = createAiChatHandler({ tools: registry, model: callingModel('tasks_count', { n: 'abc' }), systemPrompt: 'A', approvalSecret: SECRET });
+    await streamChunks(await handler(post([user])));
+    expect(ran).toEqual([{ n: 3 }]);
+  });
+
   it('serves a registry without approval tools in production without a secret', async () => {
     vi.stubEnv('GLIRASTES_APPROVAL_SECRET', '');
     vi.stubEnv('NODE_ENV', 'production');

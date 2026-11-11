@@ -238,15 +238,19 @@ describe('createAiSdkTools', () => {
       expect(execute).not.toHaveBeenCalled();
     });
 
-    it('does not validate a second time what the AI SDK already validated', async () => {
+    it('keeps the model input for the AI SDK and hands the tool the schema output once', async () => {
       // The transform makes the parsed value unfit for the schema's own input.
       const execute = vi.fn(async (_input: unknown) => ({ ok: true }));
+      const needsApproval = vi.fn(async (_input: unknown) => false);
       const tools = createAiSdkTools({
-        tools: { count: { description: 'Count.', parameters: z.object({ n: z.string().transform((value) => value.length) }), execute } },
+        tools: { count: { description: 'Count.', parameters: z.object({ n: z.string().transform((value) => value.length) }), execute, needsApproval } },
       });
       const inputSchema = tools.count!.inputSchema as { validate: (value: unknown) => Promise<{ success: boolean; value: unknown }> };
       const parsed = await inputSchema.validate({ n: 'abc' });
-      expect(parsed).toMatchObject({ success: true, value: { n: 3 } });
+      expect(parsed).toMatchObject({ success: true, value: { n: 'abc' } });
+      expect(await inputSchema.validate({ n: 1 })).toMatchObject({ success: false });
+      await (tools.count!.needsApproval as (input: unknown, options: unknown) => Promise<boolean>)(parsed.value, {});
+      expect(needsApproval).toHaveBeenCalledWith({ n: 3 }, expect.anything());
       await tools.count!.execute!(parsed.value, {} as never);
       expect(execute).toHaveBeenCalledWith({ n: 3 }, expect.anything());
     });

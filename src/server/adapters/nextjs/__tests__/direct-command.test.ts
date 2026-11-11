@@ -33,6 +33,36 @@ function registry(options: { needsApproval?: boolean; execute?: (input: unknown)
   return { tools, execute, aiTools: toolsToAiTools(tools, { currentDate: new Date(), locale: 'en-US' }) };
 }
 
+describe('direct commands with a transforming input schema', () => {
+  it('runs the tool once with the schema output, also after an approval', async () => {
+    const ran: unknown[] = [];
+    const asked: unknown[] = [];
+    const tools: ToolRegistry = {
+      tasks_count: defineTool({
+        id: 'tasks.count', description: 'Count.', inputSchema: z.object({ n: z.string().transform((value) => value.length) }).strict(),
+        needsApproval: async (input: unknown) => { asked.push(input); return true; },
+        execute: async (input: unknown) => { ran.push(input); return { success: true }; },
+      }),
+    };
+    const aiTools = toolsToAiTools(tools, { currentDate: new Date(), locale: 'en-US' });
+    const command = formatChatCommandMessage({ commandId: 'tasks.count', tool: 'tasks.count', args: { n: 'abc' }, label: '/Count' });
+    const first = await chunks(await runDirectCommand({
+      command: resolveDirectCommand([user(command)])!, registry: tools, tools: aiTools, approvals: binder, generateId: () => 'one',
+    }));
+    const request = first.find((chunk) => chunk.type === 'tool-approval-request')!;
+    expect(asked).toEqual([{ n: 3 }]);
+    const answer = resolveDirectCommand([user(command), {
+      id: 'a1', role: 'assistant', parts: [{
+        type: 'tool-tasks_count', toolCallId: request.toolCallId, state: 'approval-responded',
+        input: { n: 'abc' }, approval: { id: request.approvalId, approved: true },
+      }],
+    }])!;
+    const output = await chunks(await runDirectCommand({ command: answer, registry: tools, tools: aiTools, approvals: binder }));
+    expect(output.find((chunk) => chunk.type === 'tool-output-available')).toBeDefined();
+    expect(ran).toEqual([{ n: 3 }]);
+  });
+});
+
 describe('direct command ids', () => {
   it('generates provider-safe tool call ids of at most 40 characters', async () => {
     const { tools, aiTools } = registry({ needsApproval: true });

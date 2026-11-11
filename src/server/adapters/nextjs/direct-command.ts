@@ -317,7 +317,7 @@ export async function runDirectCommand(options: RunDirectCommandOptions): Promis
           let needsApproval: boolean;
           try {
             needsApproval = typeof tool.needsApproval === 'function'
-              ? Boolean(await (tool.needsApproval as (input: unknown, options: unknown) => unknown)(parsed.data, executionOptions))
+              ? Boolean(await (tool.needsApproval as (input: unknown, options: unknown) => unknown)(command.invocation.args, executionOptions))
               : tool.needsApproval === true;
           } catch (error) {
             fail(failureCode(error));
@@ -340,7 +340,9 @@ export async function runDirectCommand(options: RunDirectCommandOptions): Promis
         }
         let output: unknown;
         try {
-          output = await tool.execute!(parsed.data, executionOptions);
+          // The wrapped tool parses the arguments itself and hands the tool
+          // the schema output once; parsing them here first would parse twice.
+          output = await tool.execute!(command.invocation.args, executionOptions);
         } catch (error) {
           fail(failureCode(error));
           return;

@@ -88,9 +88,16 @@ function isJsonSchemaLike(value: unknown): value is {
  * The AI SDK validates a model-written call before it executes it, but it
  * runs an approved call from the message history without validating its
  * input again, and that history comes from the client. Every execution
- * therefore validates here. A value the SDK's own `validate` just produced is
- * remembered by identity and not parsed a second time, because the parsed
- * value of a schema with a transform does not parse again.
+ * therefore validates here.
+ *
+ * The AI SDK keeps whatever `validate` returns as the call's input: in the
+ * UI stream, in the history the client sends back, and as the input of an
+ * approved call on the next request. The wrapper's `validate` therefore
+ * checks but returns the model's own input unchanged, so the history and the
+ * approval binding hold exactly what the model wrote (JSON, which survives
+ * the round trip through the client), and the schema output (transforms,
+ * defaults, stripped keys) is produced here and reaches `needsApproval`,
+ * `resolveApproval` and the tool's `execute`, each exactly once.
  */
 type InputSchema = ReturnType<typeof jsonSchema> | ReturnType<typeof zodSchema>;
 type ValidationResult = { success: true; value: unknown } | { success: false; error: Error };
@@ -136,27 +143,41 @@ export function createAiSdkTools(
     const baseNeedsApproval = options.resolveApproval
       ? (input: unknown) => options.resolveApproval!({ toolName, input })
       : source.needsApproval;
+    const decide = typeof baseNeedsApproval === 'function'
+      ? async (rawInput: unknown, approvalOptions?: unknown): Promise<boolean> => {
+        let input: unknown;
+        try {
+          input = await parseInput(rawInput);
+        } catch {
+          // The AI SDK validated the call just before; ask rather than guess.
+          return true;
+        }
+        return Boolean(await (baseNeedsApproval as (value: unknown, extra?: unknown) => unknown)(input, approvalOptions));
+      }
+      : undefined;
     const needsApproval = gate
-      ? async (input: unknown, approvalOptions?: { toolCallId?: string }) => {
-        const needed = typeof baseNeedsApproval === 'function'
-          ? Boolean(await (baseNeedsApproval as (value: unknown, extra?: unknown) => unknown)(input, approvalOptions))
-          : baseNeedsApproval === true;
+      ? async (rawInput: unknown, approvalOptions?: { toolCallId?: string }) => {
+        const needed = decide ? await decide(rawInput, approvalOptions) : baseNeedsApproval === true;
         gate.recordDecision({ toolName, toolCallId: approvalOptions?.toolCallId, needed });
         return needed;
       }
-      : baseNeedsApproval;
+      : decide ?? baseNeedsApproval;
     const inputSchema = toAiSdkInputSchema(source.parameters);
     const validateInput = inputSchema.validate as ((value: unknown) => ValidationResult | PromiseLike<ValidationResult>) | undefined;
-    const sdkValidated = new WeakSet<object>();
     if (validateInput) {
       (inputSchema as { validate: typeof validateInput }).validate = async (value) => {
         const result = await validateInput(value);
-        if (result.success && typeof result.value === 'object' && result.value !== null) {
-          sdkValidated.add(result.value);
-        }
-        return result;
+        return result.success ? { success: true, value } : result;
       };
     }
+    const parseInput = async (rawInput: unknown): Promise<unknown> => {
+      if (!validateInput) return rawInput;
+      const checked = await validateInput(rawInput);
+      if (!checked.success) {
+        throw new Error(`Invalid input for tool "${toolName}": ${checked.error.message}`);
+      }
+      return checked.value;
+    };
     wrapped[toolName] = tool({
       description: source.description,
       inputSchema,
@@ -173,13 +194,7 @@ export function createAiSdkTools(
         const startedAt = now();
         let input = rawInput;
         try {
-          if (validateInput && !(typeof rawInput === 'object' && rawInput !== null && sdkValidated.has(rawInput))) {
-            const checked = await validateInput(rawInput);
-            if (!checked.success) {
-              throw new Error(`Invalid input for tool "${toolName}": ${checked.error.message}`);
-            }
-            input = checked.value;
-          }
+          input = await parseInput(rawInput);
           const sourceOptions = gate
             ? { ...(executionOptions as object | undefined), [AI_SDK_APPROVAL_GATE_PASSED]: gate }
             : executionOptions;
