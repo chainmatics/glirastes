@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { BOT_MARKER, BOT_NAME, execFileRunner, type Exec } from '../../../agent/git.js';
 import type { ToolJobLedger, ToolJobRequest } from '../../../agent/platform-jobs.js';
 import { createAppFixture, FIXTURE_APP_ID, removeAppFixtures, SDK_ROOT, type AppFixture } from '../../../codegen/tools/__tests__/app-fixture.js';
-import { jobDeadline } from './enrich.js';
+import { changedSince, jobDeadline } from './enrich.js';
 import { runToolsCommand, TOOLS_SUBCOMMANDS } from './index.js';
 
 const ROUTE = "declare function getSession(): Promise<unknown>;\n"
@@ -536,6 +536,23 @@ describe('glirastes tools enrich --managed', () => {
     expect(api.ledgers[0]).toMatchObject({ outcome: 'committed', commitSha: summary.commitSha });
     expect(api.ledgers[0]!.changedFiles).toBeGreaterThanOrEqual(6);
   }, 240_000);
+
+  it('counts a tool without a contract as unchanged when the base has it without one too', async () => {
+    const base = JSON.stringify({ tools: [
+      { stableKey: 'GET /api/a', contract: { interfaceDigest: 'sha256:a' } },
+      { stableKey: 'UI theme.set', contract: null },
+      { stableKey: 'GET /api/c', contract: { interfaceDigest: 'sha256:old' } },
+    ] });
+    const repository = { fileAt: async () => base } as never;
+    const result = { tools: [
+      { stableKey: 'GET /api/a', interfaceDigest: 'sha256:a' },
+      { stableKey: 'UI theme.set', interfaceDigest: null },
+      { stableKey: 'GET /api/c', interfaceDigest: 'sha256:new' },
+      { stableKey: 'GET /api/d', interfaceDigest: null },
+    ] } as never;
+
+    expect([...(await changedSince(repository, 'main', result))!]).toEqual(['GET /api/c', 'GET /api/d']);
+  });
 
   it('ends its work well before the CI job is cancelled and before the job key expires', () => {
     const started = new Date('2026-10-22T12:00:00.000Z').getTime();

@@ -215,18 +215,19 @@ async function openRouterRejects(apiKey: string, fetchImpl: typeof fetch): Promi
  * of a pull request, the commit before a push) does not have or has with
  * another interface. `undefined` when the ref cannot be read.
  */
-async function changedSince(repository: GitRepository, ref: string, result: ToolsPipelineResult): Promise<Set<string> | undefined> {
+export async function changedSince(repository: GitRepository, ref: string, result: ToolsPipelineResult): Promise<Set<string> | undefined> {
   const text = await repository.fileAt(ref, TOOLS_PATHS.contracts);
   if (text === undefined) return undefined;
   const digests = new Map<string, unknown>();
   try {
     const file = JSON.parse(text ?? '{}') as { tools?: Array<{ stableKey?: unknown; contract?: { interfaceDigest?: unknown } }> };
-    for (const tool of Array.isArray(file.tools) ? file.tools : []) digests.set(String(tool.stableKey), tool.contract?.interfaceDigest);
+    // A tool without a contract has no digest on either side; that is the same interface, not a change.
+    for (const tool of Array.isArray(file.tools) ? file.tools : []) digests.set(String(tool.stableKey), tool.contract?.interfaceDigest ?? null);
   } catch {
     // An unreadable file describes no tool: everything counts as changed.
   }
   return new Set((result.tools ?? [])
-    .filter((tool) => !digests.has(tool.stableKey) || digests.get(tool.stableKey) !== tool.interfaceDigest)
+    .filter((tool) => !digests.has(tool.stableKey) || digests.get(tool.stableKey) !== (tool.interfaceDigest ?? null))
     .map((tool) => tool.stableKey));
 }
 
