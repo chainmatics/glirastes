@@ -174,6 +174,11 @@ export interface AiChatHandlerFullConfig extends AiChatHandlerConfig {
    * This is where the consumer calls streamText() / toDataStreamResponse().
    *
    * When omitted, the built-in default handler is used.
+   *
+   * The handler ignores a client-set `providerExecuted` flag only on tools of
+   * its own registry: for an approval-gated tool that a custom stream handler
+   * adds itself, a client can set the flag on the approved part, and the
+   * approval is then consumed without the call running.
    */
   streamHandler?: (ctx: StreamHandlerContext) => Promise<Response>;
 }

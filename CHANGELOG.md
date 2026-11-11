@@ -81,7 +81,10 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   for approval must pipe its UI stream through `ctx.bindApprovalRequests`,
   and must let the AI SDK call the tools: `ctx.tools[name].execute(input)`
   called without the AI SDK's options (`toolCallId`) is refused
-  (`approval_not_verified`) for every tool that can ask for approval.
+  (`approval_not_verified`) for every tool that can ask for approval. A
+  client-set `providerExecuted` flag is ignored only on tools of the
+  handler's registry: on an approval-gated tool that a custom `streamHandler`
+  adds itself, it makes the approval be consumed without the call running.
   `runDirectCommand` takes `approvals` and asks for no confirmation without it;
   one direct command issues at most one approval.
 - An approved call runs only when it passed every check in this request:
