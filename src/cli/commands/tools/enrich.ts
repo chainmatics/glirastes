@@ -418,7 +418,15 @@ export async function runToolsEnrich(
         : [],
     });
     let latest = before.result;
-    const refresh = async (): Promise<RefreshSummary> => {
+    // Tasks run side by side; the generator and the git steps run one at a time.
+    let queue: Promise<unknown> = Promise.resolve();
+    const inTurn = <T>(step: () => Promise<T>): Promise<T> => {
+      const turn = queue.then(step);
+      queue = turn.catch(() => undefined);
+      return turn;
+    };
+    const refresh = (): Promise<RefreshSummary> => inTurn(refreshNow);
+    const refreshNow = async (): Promise<RefreshSummary> => {
       const result = await io.runPipeline({ root, mode: 'write', keepGoing: true });
       latest = result;
       for (const path of Object.keys(result.outputs)) allowed.files.add(path);
@@ -439,17 +447,29 @@ export async function runToolsEnrich(
     // The runner asks for one task at a time; each is cut from the state the last refresh left.
     const attempts = new Map<string, { count: number; gaps: ReadonlyArray<string> }>();
     let resolveOffered = false;
+    /** Tools a running task holds; nobody else gets them until it is over. */
+    const inFlight = new Set<string>();
     const plan: JobPlan = {
+      finished: (task) => {
+        for (const key of task.keys) inFlight.delete(key);
+      },
       next: async () => {
         const lists = listsOf(latest);
         if (!resolveOffered) {
           resolveOffered = true;
           const agentItems = lists.resolveList.items.filter((item) => item.owner === 'agent');
           if (agentItems.length > 0) {
-            return { id: 'resolve', worklists: { resolve: { ...lists.resolveList, items: agentItems } }, open: agentItems.length };
+            return {
+              id: 'resolve',
+              worklists: { resolve: { ...lists.resolveList, items: agentItems } },
+              open: agentItems.length,
+              keys: agentItems.map((item) => item.stableKey),
+              exclusive: true,
+            };
           }
         }
         const candidates = lists.describeList.items.filter((item) => {
+          if (inFlight.has(item.stableKey)) return false;
           const tried = attempts.get(item.stableKey);
           if (!tried) return true;
           // Again only when the first task closed none of its gaps.
@@ -459,6 +479,7 @@ export async function runToolsEnrich(
         if (!first) return null;
         const chunk = candidates.filter((item) => item.module === first.module).slice(0, MAX_TASK_TOOLS);
         for (const item of chunk) {
+          inFlight.add(item.stableKey);
           const tried = attempts.get(item.stableKey);
           attempts.set(item.stableKey, { count: (tried?.count ?? 0) + 1, gaps: tried?.gaps ?? [...item.gaps] });
         }
@@ -468,6 +489,7 @@ export async function runToolsEnrich(
             describe: { ...lists.describeList, modules: [{ module: first.module, tools: chunk.map((item) => item.tool) }], items: chunk },
           },
           open: chunk.length,
+          keys: chunk.map((item) => item.stableKey),
         };
       },
     };

@@ -428,13 +428,14 @@ describe('glirastes tools enrich --managed', () => {
 
     expect(await result.code).toBe(0);
     // One task per module, each with only its own tools; the untouched module gets exactly one more task.
-    expect(tasks.map((keys) => [...keys].sort())).toEqual([['GET /api/tasks', 'POST /api/tasks'], ['GET /api/teams'], ['GET /api/teams']]);
+    expect(tasks.map((keys) => [...keys].sort().join()).sort()).toEqual(['GET /api/tasks,POST /api/tasks', 'GET /api/teams', 'GET /api/teams']);
     expect(JSON.parse(result.out.at(-1)!)).toMatchObject({
       status: 'partial', code: 'items_remaining', outcome: 'committed', items: { total: 3, described: 2, unchanged: 1 },
     });
     expect(api.ledgers[0]).toMatchObject({ outcome: 'committed', reasonCode: 'items_remaining' });
     expect(result.out).toContain('glirastes tools enrich: 1 of 3 items are still open');
-    expect(result.out.filter((line) => line.startsWith('glirastes tools enrich: task '))).toEqual([
+    // The modules run side by side, so the order of the lines is not fixed.
+    expect(result.out.filter((line) => line.startsWith('glirastes tools enrich: task ')).sort()).toEqual([
       'glirastes tools enrich: task describe:tasks items=2 steps=2 finish=stop',
       'glirastes tools enrich: task describe:teams items=1 steps=1 finish=stop',
       'glirastes tools enrich: task describe:teams items=1 steps=1 finish=stop',

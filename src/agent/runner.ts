@@ -17,6 +17,8 @@ import { Workspace, WorkspaceRefusal } from './workspace.js';
 export const MAX_JOB_STEPS = 60;
 /** Tasks of one job; the budget and the deadline normally end it earlier. */
 export const MAX_JOB_TASKS = 120;
+/** Tasks that run side by side; most of a task is waiting for the model. */
+export const TASK_CONCURRENCY = 4;
 /** Explicit, so a provider default never cuts a tool call short. */
 export const MAX_OUTPUT_TOKENS = 16_000;
 /** The only words the runner adds to the skills: nobody answers a question in CI. */
@@ -38,6 +40,7 @@ export interface RefreshSummary {
 }
 
 export interface JobTools {
+  /** May be called by several tasks at once; the caller runs one refresh at a time. */
   refresh(): Promise<RefreshSummary>;
   evaluate(): Promise<{ failed: number; failures: unknown[] }>;
 }
@@ -48,11 +51,17 @@ export interface JobTask {
   worklists: Record<string, unknown>;
   /** Open items of the task, for the report. */
   open: number;
+  /** Stable keys of the task: a rejected entry is repaired by the task that owns it. */
+  keys: ReadonlyArray<string>;
+  /** Runs alone, before anything else starts (the resolve list changes what the tools are). */
+  exclusive?: boolean;
 }
 
 /** Hands out the next task from the current state of the repository; `null` when nothing is left. */
 export interface JobPlan {
   next(): Promise<JobTask | null>;
+  /** Called once a task and its refresh are over, so the plan can hand its open items out again. */
+  finished?(task: JobTask): void;
 }
 
 /** Content-free facts about one finished task, for the CI log. */
@@ -190,7 +199,8 @@ export async function runSkillJob(input: {
   deadline: Date;
   now?: () => Date;
   maxSteps?: number;
-  onTask?: (report: TaskReport) => void;
+  onTask?: (report: TaskReport) => void | Promise<void>;
+  concurrency?: number;
 }): Promise<SkillJobResult> {
   const now = input.now ?? (() => new Date());
   const remaining = input.deadline.getTime() - now().getTime() - DEADLINE_MARGIN_MS;
@@ -222,41 +232,82 @@ export async function runSkillJob(input: {
   /** Entries an earlier task left rejected; a later task does not pay for them again. */
   const knownRejected = new Set<string>();
   const result = () => ({ repairRounds, servedModel, usage, ...(refresh ? { refresh } : {}), tasks });
+  const stopped = () => tasks >= MAX_JOB_TASKS || spent() || signal.aborted;
+  const runTask = async (task: JobTask): Promise<void> => {
+    let messages: ModelMessage[] = [{
+      role: 'user',
+      content: JSON.stringify({ instructions: HEADLESS_INSTRUCTIONS, worklists: task.worklists }),
+    }];
+    let steps = 0;
+    let finishReason = 'unknown';
+    let repaired = false;
+    for (;;) {
+      const round = await generateText({
+        model: input.model, system, messages, tools, stopWhen, abortSignal: signal, maxOutputTokens: MAX_OUTPUT_TOKENS,
+      });
+      add(round.steps);
+      steps += round.steps.length;
+      finishReason = round.finishReason;
+      servedModel = round.response.modelId || servedModel;
+      const summary = await input.tools.refresh();
+      refresh = summary;
+      const rejected = summary.findings.filter((finding) => finding.code === 'resolution-rejected'
+        && !knownRejected.has(finding.subjectRef)
+        && (task.keys.length === 0 || task.keys.includes(finding.subjectRef)));
+      if (rejected.length === 0 || repaired || spent() || signal.aborted) break;
+      repaired = true;
+      repairRounds = 1;
+      messages = [
+        ...messages,
+        ...round.response.messages,
+        { role: 'user', content: JSON.stringify({ rejected }) },
+      ];
+    }
+    for (const finding of refresh?.findings ?? []) {
+      if (finding.code === 'resolution-rejected' && (task.keys.length === 0 || task.keys.includes(finding.subjectRef))) {
+        knownRejected.add(finding.subjectRef);
+      }
+    }
+    input.plan.finished?.(task);
+    await input.onTask?.({ id: task.id, open: task.open, steps, finishReason, repaired });
+  };
   try {
-    while (tasks < MAX_JOB_TASKS && !spent() && !signal.aborted) {
+    // Exclusive tasks first, one at a time; then a pool that keeps asking the plan.
+    let seed: JobTask | null = null;
+    while (!stopped()) {
       const task = await input.plan.next();
       if (!task) break;
       tasks += 1;
-      let messages: ModelMessage[] = [{
-        role: 'user',
-        content: JSON.stringify({ instructions: HEADLESS_INSTRUCTIONS, worklists: task.worklists }),
-      }];
-      let steps = 0;
-      let finishReason = 'unknown';
-      let repaired = false;
-      for (;;) {
-        const round = await generateText({
-          model: input.model, system, messages, tools, stopWhen, abortSignal: signal, maxOutputTokens: MAX_OUTPUT_TOKENS,
-        });
-        add(round.steps);
-        steps += round.steps.length;
-        finishReason = round.finishReason;
-        servedModel = round.response.modelId || servedModel;
-        refresh = await input.tools.refresh();
-        const rejected = refresh.findings
-          .filter((finding) => finding.code === 'resolution-rejected' && !knownRejected.has(finding.subjectRef));
-        if (rejected.length === 0 || repaired || spent() || signal.aborted) break;
-        repaired = true;
-        repairRounds = 1;
-        messages = [
-          ...messages,
-          ...round.response.messages,
-          { role: 'user', content: JSON.stringify({ rejected }) },
-        ];
+      if (!task.exclusive) {
+        seed = task;
+        break;
       }
-      for (const finding of refresh.findings) if (finding.code === 'resolution-rejected') knownRejected.add(finding.subjectRef);
-      input.onTask?.({ id: task.id, open: task.open, steps, finishReason, repaired });
+      await runTask(task);
     }
+    let failed: unknown;
+    const worker = async (first: JobTask | null): Promise<void> => {
+      let task = first;
+      for (;;) {
+        if (!task) {
+          if (failed !== undefined || stopped()) return;
+          task = await input.plan.next();
+          if (!task) return;
+          tasks += 1;
+        }
+        try {
+          await runTask(task);
+        } catch (error) {
+          failed ??= error;
+          return;
+        }
+        task = null;
+      }
+    };
+    if (seed) {
+      const size = Math.max(1, input.concurrency ?? TASK_CONCURRENCY);
+      await Promise.all(Array.from({ length: size }, (_, index) => worker(index === 0 ? seed : null)));
+    }
+    if (failed !== undefined) throw failed;
   } catch (error) {
     return { ...failure(error, signal), ...result() };
   }

@@ -234,15 +234,22 @@ export class Workspace {
   ): Promise<{ path: string; bytes: number }> {
     const relative = normalize(path);
     if (!this.options.writableFiles.includes(relative)) throw new WorkspaceRefusal('write_not_allowed');
-    let current: Record<string, unknown> = {};
-    try {
-      const value: unknown = JSON.parse(await readFile(join(this.options.root, relative), 'utf8'));
-      if (value !== null && typeof value === 'object' && !Array.isArray(value)) current = value as Record<string, unknown>;
-    } catch {
-      current = {};
-    }
-    return this.writeFile(relative, JSON.stringify(update(current), null, 2));
+    // One update at a time: tasks that run side by side must not overwrite each other's entries.
+    const turn = this.updates.then(async () => {
+      let current: Record<string, unknown> = {};
+      try {
+        const value: unknown = JSON.parse(await readFile(join(this.options.root, relative), 'utf8'));
+        if (value !== null && typeof value === 'object' && !Array.isArray(value)) current = value as Record<string, unknown>;
+      } catch {
+        current = {};
+      }
+      return this.writeFile(relative, JSON.stringify(update(current), null, 2));
+    });
+    this.updates = turn.catch(() => undefined);
+    return turn;
   }
+
+  private updates: Promise<unknown> = Promise.resolve();
 
   private async accessible(path: string, directory: boolean): Promise<string> {
     const relative = normalize(path);

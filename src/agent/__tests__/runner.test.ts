@@ -20,7 +20,7 @@ const SEMANTICS = JSON.stringify({ schemaVersion: 1, tools: { 'GET /api/tasks': 
 /** A plan that hands out the given work lists one after the other. */
 function plan(...lists: Array<Record<string, unknown>>): JobPlan {
   let index = 0;
-  return { next: async () => (index < lists.length ? { id: `task-${index + 1}`, worklists: lists[index++]!, open: 1 } : null) };
+  return { next: async () => (index < lists.length ? { id: `task-${index + 1}`, worklists: lists[index++]!, open: 1, keys: ['GET /api/tasks'] } : null) };
 }
 
 let root: string;
@@ -200,7 +200,7 @@ describe('managed skill runner', () => {
     const reports: TaskReport[] = [];
 
     const result = await runSkillJob({
-      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS, second), workspace: workspace(),
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS, second), workspace: workspace(), concurrency: 1,
       tools: tools([clean]), budgetUsd: 2, deadline: DEADLINE, now: () => NOW, onTask: (report) => { reports.push(report); },
     });
 
@@ -256,7 +256,7 @@ describe('managed skill runner', () => {
     const model = scripted([{ cost: 2.5 }]);
 
     const result = await runSkillJob({
-      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS, WORKLISTS, WORKLISTS), workspace: workspace(),
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS, WORKLISTS, WORKLISTS), workspace: workspace(), concurrency: 1,
       tools: tools([clean]), budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
     });
 
@@ -269,11 +269,61 @@ describe('managed skill runner', () => {
     const jobTools = tools([rejected, rejected, rejected, rejected]);
 
     const result = await runSkillJob({
-      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS, WORKLISTS), workspace: workspace(),
+      model, modelId: MODEL, skills: SKILLS, plan: plan(WORKLISTS, WORKLISTS), workspace: workspace(), concurrency: 1,
       tools: jobTools, budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
     });
 
     // Task 1: run, repair. Task 2: run only, the rejection is already known.
     expect([result.repairRounds, result.tasks, model.doGenerateCalls.length]).toEqual([1, 2, 3]);
+  });
+  it('runs several tasks at once, the first one of an exclusive task alone, and loses no entry', async () => {
+    let running = 0;
+    let peak = 0;
+    const startedWhile: Record<string, number> = {};
+    let id = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async ({ prompt }) => {
+        id += 1;
+        const text = JSON.stringify(prompt);
+        const key = /task-key-(\d)/.exec(text)![0];
+        const answered = prompt.some((message) => message.role === 'tool');
+        if (!answered) {
+          running += 1;
+          peak = Math.max(peak, running);
+          startedWhile[key] = running;
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        } else {
+          running -= 1;
+        }
+        return {
+          content: answered
+            ? [{ type: 'text' as const, text: 'Done.' }]
+            : [{ type: 'tool-call' as const, toolCallId: `call-${id}`, toolName: 'upsert_semantics', input: JSON.stringify({ entries: [{ stableKey: key, description: 'D.' }] }) }],
+          finishReason: { unified: answered ? 'stop' as const : 'tool-calls' as const, raw: undefined },
+          usage: usage(10, 1),
+          warnings: [],
+          response: { id: `gen-${id}`, modelId: MODEL, timestamp: NOW, body: { usage: { cost: 0.01 } } },
+        };
+      },
+    });
+    let index = 0;
+    const queue: JobPlan = {
+      next: async () => {
+        index += 1;
+        return index > 6 ? null : { id: `t${index}`, worklists: { key: `task-key-${index}` }, open: 1, keys: [], exclusive: index === 1 };
+      },
+    };
+
+    const result = await runSkillJob({
+      model, modelId: MODEL, skills: SKILLS, plan: queue, workspace: workspace(),
+      tools: tools([clean]), budgetUsd: 2, deadline: DEADLINE, now: () => NOW,
+    });
+
+    expect([result.outcome, result.tasks]).toEqual(['completed', 6]);
+    expect(startedWhile['task-key-1']).toBe(1);
+    expect(peak).toBe(4);
+    const written = JSON.parse(await readFile(join(root, '.glirastes/tool-semantics.json'), 'utf8')) as { tools: Array<{ stableKey: string }> };
+    expect(written.tools.map((entry) => entry.stableKey).sort())
+      .toEqual(['task-key-1', 'task-key-2', 'task-key-3', 'task-key-4', 'task-key-5', 'task-key-6']);
   });
 });
