@@ -602,7 +602,8 @@ export async function runToolsEnrich(
       run.outcome === 'completed' || run.outcome === 'failed' ? committed : run.outcome
     );
     if (untouched > 0) io.error(`glirastes tools enrich: ${untouched} of ${states.length} items are still open`);
-    if (changed.length === 0 && lastSha === undefined) {
+    // Nothing closed and nothing checkpointed: refreshed outputs alone are no reason to commit or open a pull request.
+    if (lastSha === undefined && (changed.length === 0 || closed === 0)) {
       return finish(closed === 0 ? 'failed' : outcomeOf('no_change'), { ...reason, run, model: modelId, states });
     }
     try {

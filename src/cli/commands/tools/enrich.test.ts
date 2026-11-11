@@ -469,6 +469,24 @@ describe('glirastes tools enrich --managed', () => {
     expect(await git(fixture, 'rev-parse', 'HEAD')).toBe(before);
   }, 240_000);
 
+  it('commits nothing and opens no pull request when the job closes no item but the refresh rewrote outputs', async () => {
+    const fixture = await committedApp('feature/tasks');
+    // Stale generated output on the branch: the job's refresh rewrites it, the model closes nothing.
+    await fixture.write('src/generated/glirastes/tools.generated.ts', '// stale\n');
+    await git(fixture, 'commit', '--quiet', '-am', 'chore: stale output');
+    const before = await git(fixture, 'rev-parse', 'HEAD');
+    const api = platform();
+    const { model } = upsertingModel(() => false);
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model });
+
+    expect(await result.code).toBe(1);
+    expect(JSON.parse(result.out.at(-1)!)).toMatchObject({ status: 'failed', code: 'no_progress', outcome: 'failed' });
+    expect(JSON.parse(result.out.at(-1)!).pullRequest).toBeUndefined();
+    expect(api.ledgers[0]).toMatchObject({ outcome: 'failed', reasonCode: 'no_progress', changedFiles: 0 });
+    expect(await git(fixture, 'rev-parse', 'HEAD')).toBe(before);
+  }, 240_000);
+
   it('works after a push only what the push changed, and the backlog only on request', async () => {
     const fixture = await committedApp('main');
     await git(fixture, 'push', '--quiet', 'origin', 'main');
