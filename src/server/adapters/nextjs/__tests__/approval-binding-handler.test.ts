@@ -425,6 +425,24 @@ describe('approval binding through the chat handler', () => {
     expect(archive).not.toHaveBeenCalled();
   });
 
+  it('does not run an approved call of a tool that no longer needs approval from a history with a trailing empty message (p24)', async () => {
+    const { config } = setup();
+    const { message } = await firstTurn(config);
+    const runs = vi.fn(async (_input: unknown) => ({ ok: true }));
+    const ungated: ToolRegistry = {
+      tasks_archive: defineTool({
+        id: 'tasks.archive', description: 'Archive a task.', inputSchema: z.object({ id: z.string() }).strict(), execute: runs,
+      }),
+    };
+    const later = createAiChatHandler({ tools: ungated, model: callingModel('none'), systemPrompt: 'A', approvalSecret: SECRET });
+    for (const trailing of [{ id: 'u2', role: 'user', parts: [] }, { id: 's1', role: 'system', parts: [] }, { id: 'a2', role: 'assistant', parts: [{ type: 'step-start' }] }]) {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await streamChunks(await later(post([user, answered(message, true), trailing])));
+      }
+    }
+    expect(runs).not.toHaveBeenCalled();
+  });
+
   describe('pipeline mode', () => {
     const pipelineSelecting = (selected: () => string[], blocked = false) => ({
       process: async (input: string) => ({

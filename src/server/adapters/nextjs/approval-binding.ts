@@ -43,7 +43,8 @@ export type ApprovalDenialCode =
   | 'approval_not_issued'
   | 'approval_expired'
   | 'approval_already_used'
-  | 'approval_store_unavailable';
+  | 'approval_store_unavailable'
+  | 'approval_not_runnable';
 
 /**
  * Optional single-use store. `consume` returns false when the id was used
@@ -479,25 +480,37 @@ export interface VerifiedApproval {
  *   fails is rewritten to `output-denied` with the code as its reason, so the
  *   model messages carry a denied result for it and the AI SDK runs nothing.
  *   The request continues: the model sees the denial and answers.
- * - Every other part with an approval (an approved part that has its result
- *   or cannot run in this request, an unanswered request, a refusal) needs an id issued for this tool call
- *   id, tool name and input; age and use do not count. A part that fails
- *   loses its approval (an `output-denied` part, which the AI SDK cannot
- *   convert without one, gets an id of its own that verifies for nothing).
- *   Such parts are not refused, because an honest history holds them after a
- *   secret rotation, a restart of a process without a configured secret, or
- *   from 0.4.0; they run nothing either way.
+ * - Every other approved part without a result (an earlier block, an
+ *   earlier message, a history with any trailing message) is rewritten to
+ *   `output-denied` with the reason `approval_not_runnable` (or
+ *   `approval_not_issued` with an id that verifies for nothing, when its id
+ *   was not issued for it). It is neither consumed nor handed to the gate.
+ * - Every other part with an approval (one that holds its result, an
+ *   unanswered request, a refusal) needs an id issued for this tool call id,
+ *   tool name and input; age and use do not count. A part that fails loses
+ *   its approval (an `output-denied` part, which the AI SDK cannot convert
+ *   without one, gets an id of its own that verifies for nothing). Such parts
+ *   are not refused, because an honest history holds them after a secret
+ *   rotation, a restart of a process without a configured secret, or from
+ *   0.4.0; they run nothing either way.
  *
- * The invariant this establishes, together with `assertUnambiguousToolHistory`:
- * every approval id left in the history belongs to exactly one tool part and
- * was issued for that part's tool call id, tool name and model input (the
- * input `convertToModelMessages` writes, `rawInput` for an `output-error`
- * part without input). The AI SDK pairs an approved answer with a call by
- * approval id → the one request with that id, emitted from the same part →
- * its tool call id, which is unique → the tool call emitted from that same
- * part. So an approved answer can only ever pair with the call its id was
- * issued for, and every approved answer the AI SDK can run in this request
- * has also passed age and single use.
+ * The invariants this establishes, together with `assertUnambiguousToolHistory`:
+ *
+ * 1. Every approved part without a result that is left in the history is in
+ *    `verified`, so it passed binding, age, single use and the cap. Every
+ *    other approved part either holds its result or is denied. The AI SDK
+ *    runs an approved call only from a part without a result, so it can run
+ *    only verified calls, whatever it treats as the last step; this does not
+ *    depend on predicting which shapes it runs (tested against the installed
+ *    `ai` for the shapes the reviews found).
+ * 2. Every approval id left in the history belongs to exactly one tool part
+ *    and was issued for that part's tool call id, tool name and model input
+ *    (the input `convertToModelMessages` writes, `rawInput` for an
+ *    `output-error` part without input). The AI SDK pairs an approved answer
+ *    with a call by approval id → the one request with that id, emitted from
+ *    the same part → its tool call id, which is unique → the tool call
+ *    emitted from that same part. So an approved answer can only ever pair
+ *    with the call its id was issued for.
  */
 export async function enforceApprovalBindings(
   messages: ReadonlyArray<unknown>,
@@ -537,7 +550,8 @@ export async function enforceApprovalBindings(
       const runnable = lastBlock.has(part) && isRunnableApproval(record);
       const code = runnable
         ? await denialCode({ input, toolName, toolCallId, approvalId, usedIds, ...options })
-        : bindingCode({ input, toolName, toolCallId, approvalId, binder: options.binder });
+        : bindingCode({ input, toolName, toolCallId, approvalId, binder: options.binder })
+          ?? (isUnsettledApproval(record) ? 'approval_not_runnable' : undefined);
       if (!code) {
         if (runnable && record.providerExecuted !== true) verified.push({ toolCallId, toolName, input });
         parts.push(part);
@@ -547,6 +561,14 @@ export async function enforceApprovalBindings(
       if (runnable) {
         denied.push({ toolCallId, code });
         parts.push({ ...record, state: 'output-denied', approval: { id: approvalId, approved: false, reason: code } });
+        continue;
+      }
+      if (isUnsettledApproval(record)) {
+        // Approved, no result, and not checked for age and single use: denied,
+        // so the AI SDK cannot run it, whatever shape the history has.
+        denied.push({ toolCallId, code });
+        const id = code === 'approval_not_issued' ? `glirastes-approval-unbound.${toolCallId}` : approvalId;
+        parts.push({ ...record, state: 'output-denied', approval: { id, approved: false, reason: code } });
         continue;
       }
       if (approval.approved === true) denied.push({ toolCallId, code });
@@ -562,6 +584,11 @@ export async function enforceApprovalBindings(
   return { messages: next, denied, verified };
 }
 
+/** An approved part without a result of any kind: the AI SDK may run it. */
+function isUnsettledApproval(part: MessageRecord): boolean {
+  return isRecord(part.approval) && part.approval.approved === true && !RESULT_STATES.has(String(part.state));
+}
+
 /** An approved part without its result: the AI SDK runs it if it is in the runnable block. */
 function isRunnableApproval(part: MessageRecord): boolean {
   if (!isRecord(part) || !isToolPart(part) || !isRecord(part.approval) || part.approval.approved !== true) return false;
@@ -573,8 +600,10 @@ function isRunnableApproval(part: MessageRecord): boolean {
  * `collectToolApprovals` reads only the last model message, and only when it
  * is a tool message; `convertToModelMessages` writes that message for the
  * last block (the parts after the last `step-start`) of the last UI message,
- * when that message is the assistant's. Approved parts anywhere else never
- * run, so they are not consumed and not handed to the execution gate.
+ * when that message is the assistant's. Only these are checked in full,
+ * consumed and handed to the execution gate; an approved part without a
+ * result anywhere else is denied (`approval_not_runnable`), so a shape in
+ * which the AI SDK would still run it cannot skip age and single use.
  */
 function runnableBlockOf(messages: ReadonlyArray<unknown>): Set<unknown> {
   const last = messages.at(-1);

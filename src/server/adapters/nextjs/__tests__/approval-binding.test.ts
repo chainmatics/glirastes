@@ -635,7 +635,10 @@ describe('approvals that cannot run in this request (p13)', () => {
     ], { binder, store });
     expect(store.consume).toHaveBeenCalledTimes(1);
     expect(result.verified.map((entry) => entry.toolCallId)).toEqual(['now']);
-    expect(result.denied).toEqual([]);
+    expect(result.denied).toEqual([
+      { toolCallId: 'old-1', code: 'approval_not_runnable' },
+      { toolCallId: 'old-2', code: 'approval_not_runnable' },
+    ]);
   });
 
   it('consumes nothing when the history ends with a user message', async () => {
@@ -649,14 +652,17 @@ describe('approvals that cannot run in this request (p13)', () => {
     expect(result.verified).toEqual([]);
   });
 
-  it('still takes the approval away from a part that cannot run when its id was not issued for it', async () => {
+  it('denies a part that cannot run, and unbinds its id when it was not issued for it', async () => {
     const forged = { ...approved('old'), approval: { id: 'made-up', approved: true } };
     const result = await enforceApprovalBindings([
       user,
       { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, forged] },
       { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'and' }] },
     ], { binder });
-    expect((result.messages[1] as { parts: Array<Record<string, unknown>> }).parts[1]).not.toHaveProperty('approval');
+    expect((result.messages[1] as { parts: Array<Record<string, unknown>> }).parts[1]).toMatchObject({
+      state: 'output-denied', approval: { id: 'glirastes-approval-unbound.old', approved: false, reason: 'approval_not_issued' },
+    });
+    expect(result.denied).toEqual([{ toolCallId: 'old', code: 'approval_not_issued' }]);
   });
 
   it('refuses more than 32 approvals that could run in one request with too_many_approvals, before consuming any', async () => {
@@ -673,6 +679,92 @@ describe('approvals that cannot run in this request (p13)', () => {
     const store = { consume: vi.fn(async () => true) };
     await enforceApprovalBindings([user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, approved('c1')] }], { binder, store, scope: 'tenant-a' });
     expect(store.consume).toHaveBeenCalledWith(expect.any(String), expect.any(Number), { scope: 'tenant-a' });
+  });
+});
+
+describe('every approved call the AI SDK can run passed every check (p21, p24, p25)', () => {
+  const user = { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'go' }] };
+  const issuer = createApprovalBinder({ secret: SECRET });
+  const approvedPart = (toolCallId = 'call-1') => ({
+    type: `tool-${call.toolName}`, toolCallId, state: 'approval-responded', input: call.input,
+    approval: { id: issuer.issue({ ...call, toolCallId }), approved: true },
+  });
+  // Every shape the reviews found, plus the honest one. The approved part is
+  // the only tool part with an approval in each.
+  const shapes: Record<string, (part: Record<string, unknown>) => unknown[]> = {
+    honest: (part) => [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, part] }],
+    'honest without step-start': (part) => [user, { id: 'a1', role: 'assistant', parts: [part] }],
+    'trailing user, parts []': (part) => [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, part] }, { id: 'u2', role: 'user', parts: [] }],
+    'trailing user, only a data part': (part) => [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, part] }, { id: 'u2', role: 'user', parts: [{ type: 'data-x', data: {} }] }],
+    'trailing system, parts []': (part) => [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, part] }, { id: 's1', role: 'system', parts: [] }],
+    'trailing assistant, parts []': (part) => [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, part] }, { id: 'a2', role: 'assistant', parts: [] }],
+    'trailing assistant, only step-start': (part) => [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, part] }, { id: 'a2', role: 'assistant', parts: [{ type: 'step-start' }] }],
+    'step-start + source-url after': (part) => [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, part, { type: 'step-start' }, { type: 'source-url', sourceId: 's', url: 'https://x.example' }] }],
+    'step-start + input-available part after': (part) => [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, part, { type: 'step-start' }, { type: 'tool-tasks_archive', toolCallId: 'other', state: 'input-available', input: { id: 'x' } }] }],
+    'trailing user with text': (part) => [user, { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, part] }, { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'next' }] }],
+  };
+  /** The model messages of the built-in handler, and two a custom stream handler may build. */
+  const converters: Record<string, (messages: unknown[]) => Promise<unknown[]>> = {
+    'built-in (prepareModelMessages)': async (messages) => {
+      const { prepareModelMessages } = await import('../prepare-model-messages.js');
+      return prepareModelMessages(messages as never, { maxContextMessages: 50 });
+    },
+    'convertToModelMessages': async (messages) => convertToModelMessages(messages as never),
+    'convert + ignoreIncompleteToolCalls + pruneMessages': async (messages) => {
+      const { pruneMessages } = await import('ai');
+      return pruneMessages({ messages: await convertToModelMessages(messages as never, { ignoreIncompleteToolCalls: true }), emptyMessages: 'remove' });
+    },
+  };
+  /** The tool call ids the installed AI SDK executes for these model messages. */
+  async function executed(modelMessages: unknown[]) {
+    const { streamText, tool, jsonSchema } = await import('ai');
+    const { MockLanguageModelV3, convertArrayToReadableStream } = await import('ai/test');
+    const execute = vi.fn(async (_input: unknown, _options: { toolCallId: string }) => ({ ok: true }));
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: 'stream-start', warnings: [] },
+          { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 1, text: 1, reasoning: undefined } } },
+        ] as never),
+      }),
+    });
+    try {
+      const result = streamText({
+        model, messages: modelMessages as never,
+        tools: { [call.toolName]: tool({ inputSchema: jsonSchema({ type: 'object' }), execute }) as never },
+      });
+      await result.consumeStream();
+    } catch {
+      // A prompt the AI SDK rejects runs nothing.
+    }
+    return execute.mock.calls.map((entry) => entry[1].toolCallId);
+  }
+
+  for (const [shape, build] of Object.entries(shapes)) {
+    for (const [converter, convert] of Object.entries(converters)) {
+      it(`${shape} / ${converter}: runs only verified calls, and an expired approval not at all`, async () => {
+        const part = approvedPart();
+        for (const verifier of [issuer, createApprovalBinder({ secret: SECRET, maxAgeMs: 1, now: () => Date.now() + 60_000 })]) {
+          const result = await enforceApprovalBindings(build(part), { binder: verifier, store: createMemoryApprovalStore() });
+          const ran = await executed(await convert(result.messages));
+          const verified = result.verified.map((entry) => entry.toolCallId);
+          for (const id of ran) expect(verified).toContain(id);
+          if (verifier !== issuer) expect(ran).toEqual([]);
+        }
+      });
+    }
+  }
+
+  it('runs the honest shape once, and denies a part outside the runnable block with approval_not_runnable', async () => {
+    const part = approvedPart();
+    const honest = await enforceApprovalBindings(shapes.honest!(part), { binder: issuer, store: createMemoryApprovalStore() });
+    expect(await executed(await converters['built-in (prepareModelMessages)']!(honest.messages))).toEqual(['call-1']);
+    const trailing = await enforceApprovalBindings(shapes['trailing user, parts []']!(part), { binder: issuer, store: createMemoryApprovalStore() });
+    expect(trailing.verified).toEqual([]);
+    expect(trailing.denied).toEqual([{ toolCallId: 'call-1', code: 'approval_not_runnable' }]);
+    expect((trailing.messages[1] as { parts: Array<Record<string, unknown>> }).parts[1]).toMatchObject({
+      state: 'output-denied', approval: { approved: false, reason: 'approval_not_runnable' },
+    });
   });
 });
 
