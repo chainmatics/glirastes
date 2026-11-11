@@ -1,4 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+  AI_SDK_APPROVAL_GATE,
+  AI_SDK_APPROVAL_GATE_PASSED,
+  type AiSdkApprovalGate,
+} from '../../../runtime/ai-sdk/engine.js';
 
 /**
  * Approvals the server asked for, bound to the call they were asked for.
@@ -265,6 +270,13 @@ export interface DeniedApproval {
   readonly code: ApprovalDenialCode;
 }
 
+/** An approved call of the history that passed every check of this request. */
+export interface VerifiedApproval {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly input: unknown;
+}
+
 /**
  * Checks, before anything runs, every tool part of the request history that
  * carries an answered approval, whatever its state and whether or not the
@@ -291,9 +303,10 @@ export interface DeniedApproval {
 export async function enforceApprovalBindings(
   messages: ReadonlyArray<unknown>,
   options: { binder: ApprovalBinder; store?: ApprovalStore },
-): Promise<{ messages: unknown[]; denied: DeniedApproval[] }> {
+): Promise<{ messages: unknown[]; denied: DeniedApproval[]; verified: VerifiedApproval[] }> {
   assertUnambiguousToolHistory(messages);
   const denied: DeniedApproval[] = [];
+  const verified: VerifiedApproval[] = [];
   const usedIds = new Set<string>();
   const next: unknown[] = [];
   for (const message of messages) {
@@ -319,6 +332,7 @@ export async function enforceApprovalBindings(
         : await denialCode({ record, toolName, toolCallId, approvalId, usedIds, ...options });
       usedIds.add(approvalId);
       if (!code) {
+        if (!settled && record.providerExecuted !== true) verified.push({ toolCallId, toolName, input: record.input });
         parts.push(part);
         continue;
       }
@@ -333,7 +347,7 @@ export async function enforceApprovalBindings(
     }
     next.push(changed ? { ...message, parts } : message);
   }
-  return { messages: next, denied };
+  return { messages: next, denied, verified };
 }
 
 function bindingCode(args: {
@@ -378,4 +392,112 @@ async function denialCode(args: {
     }
   }
   return undefined;
+}
+
+/** Why the execution gate refused a call; the tool error the model sees starts with it. */
+export type ApprovalExecutionRefusal = 'approval_not_verified' | 'approval_already_used';
+
+export class ApprovalExecutionRefusedError extends Error {
+  constructor(readonly code: ApprovalExecutionRefusal, toolName: string) {
+    super(`${code}: the call of "${toolName}" was not approved for this tool call and input`);
+    this.name = 'ApprovalExecutionRefusedError';
+  }
+}
+
+/**
+ * The second layer of the binding, checked where the tool executes.
+ *
+ * The AI SDK never executes a call within the run whose `needsApproval`
+ * answered true: it emits the approval request and the run ends (traced in
+ * `ai` 6.0: `runToolsTransformation` stops at `isApprovalNeeded`, and only
+ * `collectToolApprovals` on the next request's history executes an approved
+ * call). So a gated tool executes only
+ *
+ * - for an approval this request verified, with exactly its tool call id,
+ *   tool name and canonical input, once; or
+ * - for a live call whose `needsApproval` this run answered with false.
+ *
+ * Everything else, including a call whose `needsApproval` was never asked,
+ * is refused.
+ */
+export function createApprovalExecutionGate(verified: ReadonlyArray<VerifiedApproval>): AiSdkApprovalGate {
+  const approvals = new Map(verified.map((entry) => [entry.toolCallId, {
+    toolName: entry.toolName,
+    input: canonicalJson(entry.input),
+  }]));
+  const executed = new Set<string>();
+  const liveWithoutApproval = new Map<string, string>();
+  return {
+    recordDecision: ({ toolName, toolCallId, needed }) => {
+      if (typeof toolCallId !== 'string' || approvals.has(toolCallId)) return;
+      if (needed) liveWithoutApproval.delete(toolCallId);
+      else liveWithoutApproval.set(toolCallId, toolName);
+    },
+    authorize: ({ toolName, toolCallId, input }) => {
+      if (typeof toolCallId !== 'string') throw new ApprovalExecutionRefusedError('approval_not_verified', toolName);
+      const approval = approvals.get(toolCallId);
+      if (approval) {
+        if (executed.has(toolCallId)) throw new ApprovalExecutionRefusedError('approval_already_used', toolName);
+        if (approval.toolName !== toolName || approval.input !== canonicalJson(input)) {
+          throw new ApprovalExecutionRefusedError('approval_not_verified', toolName);
+        }
+        executed.add(toolCallId);
+        return;
+      }
+      if (liveWithoutApproval.get(toolCallId) === toolName) {
+        liveWithoutApproval.delete(toolCallId);
+        return;
+      }
+      throw new ApprovalExecutionRefusedError('approval_not_verified', toolName);
+    },
+  };
+}
+
+interface GateableTool {
+  needsApproval?: unknown;
+  execute?: (input: unknown, options?: unknown) => unknown;
+  [key: string]: unknown;
+}
+
+/**
+ * Puts the gate on every tool for which `isGated` says it can ask for
+ * approval. The gated tool records its own `needsApproval` answers and checks
+ * the gate in its own `execute`, so a stream handler that builds AI SDK tools
+ * from these objects itself is held to the gate as well; `createAiSdkTools`
+ * finds the gate on the tool and checks it with the input before validation.
+ */
+export function gateApprovalTools<T extends Record<string, unknown>>(
+  tools: T,
+  gate: AiSdkApprovalGate,
+  isGated: (toolName: string, tool: GateableTool) => boolean,
+): T {
+  const gated: Record<string, unknown> = {};
+  for (const [toolName, raw] of Object.entries(tools)) {
+    const tool = raw as GateableTool;
+    if (typeof raw !== 'object' || raw === null || typeof tool.execute !== 'function' || !isGated(toolName, tool)) {
+      gated[toolName] = raw;
+      continue;
+    }
+    const original = tool.needsApproval;
+    const execute = tool.execute;
+    gated[toolName] = {
+      ...tool,
+      [AI_SDK_APPROVAL_GATE]: gate,
+      needsApproval: async (input: unknown, options?: { toolCallId?: string }) => {
+        const needed = typeof original === 'function'
+          ? Boolean(await (original as (value: unknown, extra?: unknown) => unknown)(input, options))
+          : original === true;
+        gate.recordDecision({ toolName, toolCallId: options?.toolCallId, needed });
+        return needed;
+      },
+      execute: async (input: unknown, options?: unknown) => {
+        const passed = (options as { [AI_SDK_APPROVAL_GATE_PASSED]?: unknown } | undefined)?.[AI_SDK_APPROVAL_GATE_PASSED];
+        if (passed !== gate) {
+          gate.authorize({ toolName, toolCallId: (options as { toolCallId?: string } | undefined)?.toolCallId, input });
+        }
+        return execute(input, options);
+      },
+    };
+  }
+  return gated as T;
 }

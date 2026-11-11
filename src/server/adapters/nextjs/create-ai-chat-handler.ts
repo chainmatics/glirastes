@@ -20,9 +20,12 @@ import {
   ApprovalSecretMissingError,
   assertUnambiguousToolHistory,
   bindApprovalRequests,
+  createApprovalExecutionGate,
   enforceApprovalBindings,
+  gateApprovalTools,
   resolveApprovalBinder,
   type ApprovalBinder,
+  type VerifiedApproval,
 } from './approval-binding.js';
 import {
   pseudonymizeCommandToolInputs,
@@ -84,7 +87,14 @@ import {
  * calls streamText() themselves with full type safety.
  */
 export interface StreamHandlerContext {
-  /** AI tools (output of toolsToAiTools, RBAC-filtered) */
+  /**
+   * AI tools (output of toolsToAiTools, RBAC-filtered). Every tool that can
+   * ask for approval carries the execution gate of this request: it executes
+   * only for an approval the handler verified (exact tool call id, tool name
+   * and input, once) or for a live call whose `needsApproval` answered false,
+   * and refuses with `approval_not_verified` otherwise, also when the stream
+   * handler builds its own AI SDK tools from these objects.
+   */
   tools: Record<string, unknown>;
   /** Processed messages (after guardrails, sliced to context window) */
   messages: unknown[];
@@ -882,7 +892,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     registry: ToolRegistry,
     messages: unknown[],
     managedTurn: ManagedTurnGuard | undefined,
-  ): Promise<{ binder: ApprovalBinder; messages: unknown[] }> {
+  ): Promise<{ binder: ApprovalBinder; messages: unknown[]; verified: VerifiedApproval[] }> {
     const principal = managedTurn?.snapshot.principal;
     const binder = resolveApprovalBinder({
       secret: approvalSecret,
@@ -892,7 +902,28 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       hasApprovalTools: Boolean(managedTurn) || Object.values(registry).some((tool) => Boolean(tool.needsApproval)),
     });
     const checked = await enforceApprovalBindings(messages, { binder, store: approvalStore });
-    return { binder, messages: checked.messages };
+    return { binder, messages: checked.messages, verified: checked.verified };
+  }
+
+  /**
+   * The tools handed to the stream handler, each one that can ask for
+   * approval behind the execution gate of this request: it runs only for an
+   * approval verified above (exact tool call id, tool name and input) or for
+   * a live call whose `needsApproval` said no. A managed policy can ask for
+   * approval of any domain tool, so with a managed turn every domain tool is
+   * gated; the handler's own built-ins are not.
+   */
+  function gateTools<T extends Record<string, unknown>>(
+    tools: T,
+    verified: ReadonlyArray<VerifiedApproval>,
+    managedTurn: ManagedTurnGuard | undefined,
+    builtinNames: ReadonlyArray<string>,
+  ): T {
+    return gateApprovalTools(
+      tools,
+      createApprovalExecutionGate(verified),
+      (name, tool) => Boolean(tool.needsApproval) || (Boolean(managedTurn) && !builtinNames.includes(name)),
+    );
   }
 
   async function handler(req: Request): Promise<Response> {
@@ -1355,6 +1386,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (lancer?.approvals) {
           aiTools = wrapToolsWithLancerApprovals(aiTools, lancer.approvals, sessionId) as typeof aiTools;
         }
+        aiTools = gateTools(aiTools, pipelineApprovals.verified, managedTurn, handlerBuiltinNames);
 
         const pipelineStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
           sessionId,
@@ -1503,6 +1535,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (lancer?.approvals) {
         aiTools = wrapToolsWithLancerApprovals(aiTools, lancer.approvals, legacySessionId || sessionId) as typeof aiTools;
       }
+      aiTools = gateTools(aiTools, legacyApprovals.verified, managedTurn, handlerBuiltinNames);
 
       const legacyStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
         sessionId: legacySessionId || sessionId,

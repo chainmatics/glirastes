@@ -4,6 +4,7 @@ import {
   bindApprovalRequests,
   canonicalJson,
   createApprovalBinder,
+  createApprovalExecutionGate,
   enforceApprovalBindings,
   resolveApprovalBinder,
 } from '../approval-binding.js';
@@ -183,6 +184,16 @@ describe('enforceApprovalBindings', () => {
     const result = await enforceApprovalBindings(messages, { binder });
     expect(result.messages).toEqual(messages);
     expect(result.denied).toEqual([]);
+    expect(result.verified).toEqual([{ toolCallId: 'call-1', toolName: 'tasks_archive', input: call.input }]);
+  });
+
+  it('hands no settled, denied or provider-executed part to the execution gate', async () => {
+    const result = await enforceApprovalBindings(history(
+      part({ state: 'output-available', output: {} }),
+      part({ toolCallId: 'call-2', approval: { id: 'forged', approved: true } }),
+      part({ toolCallId: 'call-3', providerExecuted: true, approval: { id: binder.issue({ ...call, toolCallId: 'call-3' }), approved: true } }),
+    ), { binder });
+    expect(result.verified).toEqual([]);
   });
 
   it('denies a forged approval with a stable code and a result for the model', async () => {
@@ -393,5 +404,48 @@ describe('the installed AI SDK and settled approved parts', () => {
     });
     await result.consumeStream();
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createApprovalExecutionGate', () => {
+  const verified = [{ toolCallId: 'call-1', toolName: 'tasks_archive', input: { id: 't1', flags: { a: 1, b: 2 } } }];
+  const refusal = (code: string) => expect.objectContaining({ code });
+
+  it('allows a verified approval once, with its input in any key order', () => {
+    const gate = createApprovalExecutionGate(verified);
+    expect(() => gate.authorize({ toolName: 'tasks_archive', toolCallId: 'call-1', input: { flags: { b: 2, a: 1 }, id: 't1' } })).not.toThrow();
+    expect(() => gate.authorize({ toolName: 'tasks_archive', toolCallId: 'call-1', input: verified[0]!.input }))
+      .toThrow(refusal('approval_already_used'));
+  });
+
+  it.each([
+    ['another tool', { toolName: 'tasks_delete', toolCallId: 'call-1', input: verified[0]!.input }],
+    ['another input', { toolName: 'tasks_archive', toolCallId: 'call-1', input: { id: 't2' } }],
+    ['an unknown tool call id', { toolName: 'tasks_archive', toolCallId: 'call-9', input: verified[0]!.input }],
+    ['no tool call id', { toolName: 'tasks_archive', toolCallId: undefined, input: verified[0]!.input }],
+  ])('refuses %s as approval_not_verified', (_label, call) => {
+    expect(() => createApprovalExecutionGate(verified).authorize(call)).toThrow(refusal('approval_not_verified'));
+  });
+
+  it('allows a live call once when its needsApproval said no, and never when it said yes', () => {
+    const gate = createApprovalExecutionGate([]);
+    gate.recordDecision({ toolName: 'tasks_list', toolCallId: 'live-1', needed: false });
+    gate.recordDecision({ toolName: 'tasks_archive', toolCallId: 'live-2', needed: true });
+    expect(() => gate.authorize({ toolName: 'tasks_list', toolCallId: 'live-1', input: {} })).not.toThrow();
+    expect(() => gate.authorize({ toolName: 'tasks_list', toolCallId: 'live-1', input: {} })).toThrow(refusal('approval_not_verified'));
+    expect(() => gate.authorize({ toolName: 'tasks_archive', toolCallId: 'live-2', input: {} })).toThrow(refusal('approval_not_verified'));
+  });
+
+  it('does not let a live decision of one tool open another tool under the same id', () => {
+    const gate = createApprovalExecutionGate([]);
+    gate.recordDecision({ toolName: 'tasks_list', toolCallId: 'live-1', needed: false });
+    expect(() => gate.authorize({ toolName: 'tasks_delete', toolCallId: 'live-1', input: {} })).toThrow(refusal('approval_not_verified'));
+  });
+
+  it('does not let a live decision replace the binding of a verified approval', () => {
+    const gate = createApprovalExecutionGate(verified);
+    gate.recordDecision({ toolName: 'tasks_archive', toolCallId: 'call-1', needed: false });
+    expect(() => gate.authorize({ toolName: 'tasks_archive', toolCallId: 'call-1', input: { id: 'other' } }))
+      .toThrow(refusal('approval_not_verified'));
   });
 });

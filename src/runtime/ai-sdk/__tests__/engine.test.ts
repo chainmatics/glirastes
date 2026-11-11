@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { createAiSdkTools } from '../engine.js';
+import {
+  AI_SDK_APPROVAL_GATE,
+  AI_SDK_APPROVAL_GATE_PASSED,
+  createAiSdkTools,
+  type AiSdkApprovalGate,
+} from '../engine.js';
 import { createJsonSchemaLike } from '../../json-schema.js';
 
 describe('createAiSdkTools', () => {
@@ -244,6 +249,63 @@ describe('createAiSdkTools', () => {
       expect(parsed).toMatchObject({ success: true, value: { n: 3 } });
       await tools.count!.execute!(parsed.value, {} as never);
       expect(execute).toHaveBeenCalledWith({ n: 3 }, expect.anything());
+    });
+  });
+
+  describe('approval gate carried by the tool', () => {
+    function gated(extra: Record<string, unknown> = {}) {
+      const decisions: Array<{ toolName: string; toolCallId: string | undefined; needed: boolean }> = [];
+      const authorized: Array<{ toolName: string; toolCallId: string | undefined; input: unknown }> = [];
+      let allow = false;
+      const gate: AiSdkApprovalGate = {
+        recordDecision: (call) => { decisions.push(call); },
+        authorize: (call) => {
+          authorized.push(call);
+          if (!allow) throw new Error('approval_not_verified');
+        },
+      };
+      const execute = vi.fn(async (_input: unknown, _options?: unknown) => ({ ok: true }));
+      const source = {
+        description: 'Archive.', parameters: z.object({ id: z.string() }), execute,
+        needsApproval: async (input: { id: string }) => input.id === 'ask',
+        [AI_SDK_APPROVAL_GATE]: gate,
+      };
+      const tools = createAiSdkTools({ tools: { tasks_archive: source }, ...extra });
+      return { tools, execute, decisions, authorized, gate, allow: () => { allow = true; } };
+    }
+
+    it('asks the gate before anything runs and runs nothing it refuses', async () => {
+      const beforeToolCall = vi.fn();
+      const { tools, execute, authorized } = gated({ beforeToolCall });
+      await expect(tools.tasks_archive!.execute!({ id: 't1' }, { toolCallId: 'c1' } as never)).rejects.toThrow(/approval_not_verified/);
+      expect(authorized).toEqual([{ toolName: 'tasks_archive', toolCallId: 'c1', input: { id: 't1' } }]);
+      expect(beforeToolCall).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('marks an authorized execution for the source tool', async () => {
+      const { tools, execute, gate, allow } = gated();
+      allow();
+      await tools.tasks_archive!.execute!({ id: 't1' }, { toolCallId: 'c1' } as never);
+      expect(execute.mock.calls[0]![1]).toMatchObject({ toolCallId: 'c1', [AI_SDK_APPROVAL_GATE_PASSED]: gate });
+    });
+
+    it('reports every needsApproval answer with its tool call id', async () => {
+      const { tools, decisions } = gated();
+      const needsApproval = tools.tasks_archive!.needsApproval as (input: unknown, options: unknown) => Promise<boolean>;
+      expect(await needsApproval({ id: 'ask' }, { toolCallId: 'c1' })).toBe(true);
+      expect(await needsApproval({ id: 't1' }, { toolCallId: 'c2' })).toBe(false);
+      expect(decisions).toEqual([
+        { toolName: 'tasks_archive', toolCallId: 'c1', needed: true },
+        { toolName: 'tasks_archive', toolCallId: 'c2', needed: false },
+      ]);
+    });
+
+    it('reports the managed resolveApproval answer instead when there is one', async () => {
+      const { tools, decisions } = gated({ resolveApproval: async () => true });
+      const needsApproval = tools.tasks_archive!.needsApproval as (input: unknown, options: unknown) => Promise<boolean>;
+      expect(await needsApproval({ id: 't1' }, { toolCallId: 'c3' })).toBe(true);
+      expect(decisions).toEqual([{ toolName: 'tasks_archive', toolCallId: 'c3', needed: true }]);
     });
   });
 });
