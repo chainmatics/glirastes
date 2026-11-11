@@ -133,16 +133,18 @@ describe('createApprovalBinder', () => {
   it('refuses every other spelling of a valid id: the id must be its own canonical encoding', () => {
     const binder = createApprovalBinder({ secret: SECRET, now: () => 1_700_000_000_000 });
     const approvalId = binder.issue(call);
-    const [, , issuedAt, nonce, mac] = approvalId.split('.') as [string, string, string, string, string];
+    const [, , issuedAt, expiresAt, nonce, mac] = approvalId.split('.') as [string, string, string, string, string, string];
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
     const flip = (text: string, bit: number) => text.slice(0, -1) + alphabet[alphabet.indexOf(text.at(-1)!) ^ bit];
     const prefix = 'glirastes-approval.v1.';
     const variants = [
       `${approvalId}=`, `${approvalId}==`, `${approvalId}%`, `${approvalId}!`, `${approvalId} `,
       flip(approvalId, 1), flip(approvalId, 2),
-      `${prefix}0${issuedAt}.${nonce}.${mac}`, `${prefix}+${issuedAt}.${nonce}.${mac}`,
-      `${prefix}${issuedAt}.${nonce}=.${mac}`, `${prefix}${issuedAt}.${flip(nonce, 1)}.${mac}`,
-      `${prefix}${issuedAt}.${nonce}.${mac.replace(/-/g, '+').replace(/_/g, '/')}`,
+      `${prefix}0${issuedAt}.${expiresAt}.${nonce}.${mac}`, `${prefix}+${issuedAt}.${expiresAt}.${nonce}.${mac}`,
+      `${prefix}${issuedAt}.0${expiresAt}.${nonce}.${mac}`, `${prefix}${issuedAt}.${expiresAt}.0.${nonce}.${mac}`,
+      `${prefix}${issuedAt}.${expiresAt}.${nonce}=.${mac}`, `${prefix}${issuedAt}.${expiresAt}.${flip(nonce, 1)}.${mac}`,
+      `${prefix}${issuedAt}.${expiresAt}.${nonce}.${mac.replace(/-/g, '+').replace(/_/g, '/')}`,
+      `${prefix}${issuedAt}.${nonce}.${mac}`,
     ];
     expect(binder.verify({ ...call, approvalId })).toMatchObject({ ok: true });
     for (const variant of variants) {
@@ -183,6 +185,40 @@ describe('createApprovalBinder', () => {
     const shortId = short.issue(call);
     now += 1001;
     expect(short.verify({ ...call, approvalId: shortId })).toEqual({ ok: false, code: 'approval_expired' });
+  });
+
+  it('signs the expiry into the id: a handler with a longer maximum age still honours the issuer\'s', () => {
+    let now = 1_000_000;
+    const issuer = createApprovalBinder({ secret: SECRET, maxAgeMs: 60_000, now: () => now });
+    const lenient = createApprovalBinder({ secret: SECRET, maxAgeMs: 60 * 60_000, now: () => now });
+    const approvalId = issuer.issue(call);
+    expect(approvalId.split('.').slice(2, 4)).toEqual([String(now), String(now + 60_000)]);
+    now += 60_000;
+    expect(lenient.verify({ ...call, approvalId })).toMatchObject({ ok: true, expiresAtMs: 1_000_000 + 60_000 });
+    now += 1;
+    expect(lenient.verify({ ...call, approvalId })).toEqual({ ok: false, code: 'approval_expired' });
+    expect(issuer.verify({ ...call, approvalId })).toEqual({ ok: false, code: 'approval_expired' });
+  });
+
+  it('a handler with a shorter maximum age applies its own as well', () => {
+    let now = 1_000_000;
+    const issuer = createApprovalBinder({ secret: SECRET, maxAgeMs: 60 * 60_000, now: () => now });
+    const strict = createApprovalBinder({ secret: SECRET, maxAgeMs: 60_000, now: () => now });
+    const approvalId = issuer.issue(call);
+    expect(strict.verify({ ...call, approvalId })).toMatchObject({ ok: true, expiresAtMs: 1_000_000 + 60_000 });
+    now += 60_001;
+    expect(strict.verify({ ...call, approvalId })).toEqual({ ok: false, code: 'approval_expired' });
+    expect(issuer.verify({ ...call, approvalId })).toMatchObject({ ok: true });
+  });
+
+  it('refuses an id whose expiry was changed', () => {
+    const now = 1_000_000;
+    const binder = createApprovalBinder({ secret: SECRET, now: () => now });
+    const parts = binder.issue(call).split('.');
+    for (const expiresAt of [String(Number(parts[3]) + 1), String(Number(parts[3]) * 10), parts[2]!]) {
+      const changed = [...parts.slice(0, 3), expiresAt, ...parts.slice(4)].join('.');
+      expect(binder.verify({ ...call, approvalId: changed })).toEqual({ ok: false, code: 'approval_not_issued' });
+    }
   });
 
   it('refuses an id issued in the future', () => {

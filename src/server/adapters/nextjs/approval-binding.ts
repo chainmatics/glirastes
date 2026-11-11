@@ -20,11 +20,15 @@ import {
  * an approval request survives that round trip (the stream chunk has only
  * `approvalId` and `toolCallId`). The id has the form
  *
- *   glirastes-approval.v1.<issuedAtMs>.<nonce>.<mac>
+ *   glirastes-approval.v1.<issuedAtMs>.<expiresAtMs>.<nonce>.<mac>
  *
  * where `mac` is an HMAC-SHA-256, keyed with a server secret, over the issue
- * time, the nonce, the scope, the tool call id, the tool name and the
- * canonical JSON of the input.
+ * time, the expiry, the nonce, the scope, the tool call id, the tool name and
+ * the canonical JSON of the input. The expiry is the issuing handler's
+ * decision and is signed, so a handler with a longer `approvalMaxAgeMs` that
+ * shares the secret cannot accept what the issuer would refuse; the verifier
+ * applies its own maximum age on top. (The format gained the expiry before
+ * 0.5.0 was published, which is why it is still `v1`.)
  */
 
 export const DEFAULT_APPROVAL_MAX_AGE_MS = 15 * 60_000;
@@ -156,7 +160,7 @@ export class ApprovalSecretMissingError extends Error {
 const NONCE_BYTES = 16;
 const MAC_BYTES = 32;
 /** A decimal without sign or leading zeros, as `String(Date.now())` writes it. */
-const CANONICAL_ISSUED_AT = /^(?:0|[1-9]\d{0,15})$/;
+const CANONICAL_TIME = /^(?:0|[1-9]\d{0,15})$/;
 
 function isCanonicalBase64Url(text: string, bytes: number): boolean {
   if (!/^[A-Za-z0-9_-]+$/.test(text)) return false;
@@ -217,41 +221,46 @@ export function createApprovalBinder(options: {
   const now = options.now ?? Date.now;
   const scope = options.scope ?? '';
 
-  const mac = (issuedAt: string, nonce: string, call: ApprovalCall): Buffer => createHmac('sha256', options.secret)
-    .update(JSON.stringify(['v1', issuedAt, nonce, scope, call.toolCallId, call.toolName, canonicalJson(call.input)]))
+  const mac = (issuedAt: string, expiresAt: string, nonce: string, call: ApprovalCall): Buffer => createHmac('sha256', options.secret)
+    .update(JSON.stringify(['v1', issuedAt, expiresAt, nonce, scope, call.toolCallId, call.toolName, canonicalJson(call.input)]))
     .digest();
 
   return {
     maxAgeMs,
     issue: (call) => {
-      const issuedAt = String(now());
+      const issued = now();
+      const issuedAt = String(issued);
+      const expiresAt = String(issued + maxAgeMs);
       const nonce = randomBytes(NONCE_BYTES).toString('base64url');
-      return `${ID_PREFIX}${issuedAt}.${nonce}.${mac(issuedAt, nonce, call).toString('base64url')}`;
+      return `${ID_PREFIX}${issuedAt}.${expiresAt}.${nonce}.${mac(issuedAt, expiresAt, nonce, call).toString('base64url')}`;
     },
     verify: (call) => {
       const notIssued = { ok: false, code: 'approval_not_issued' } as const;
       if (typeof call.approvalId !== 'string' || !call.approvalId.startsWith(ID_PREFIX)) return notIssued;
-      const [issuedAt, nonce, presented, ...rest] = call.approvalId.slice(ID_PREFIX.length).split('.');
+      const [issuedAt, expiresAt, nonce, presented, ...rest] = call.approvalId.slice(ID_PREFIX.length).split('.');
       // Every segment must be spelled exactly as `issue` spells it: Node's
       // base64url decoder accepts padding, stray characters and changed low
       // bits, which would give one approval many ids.
-      if (!issuedAt || !nonce || !presented || rest.length > 0 || !CANONICAL_ISSUED_AT.test(issuedAt)) return notIssued;
+      if (!issuedAt || !expiresAt || !nonce || !presented || rest.length > 0) return notIssued;
+      if (!CANONICAL_TIME.test(issuedAt) || !CANONICAL_TIME.test(expiresAt)) return notIssued;
       if (!isCanonicalBase64Url(nonce, NONCE_BYTES) || !isCanonicalBase64Url(presented, MAC_BYTES)) return notIssued;
       let expected: Buffer;
       try {
-        expected = mac(issuedAt, nonce, call);
+        expected = mac(issuedAt, expiresAt, nonce, call);
       } catch {
         return notIssued;
       }
       const actual = Buffer.from(presented, 'base64url');
       if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return notIssued;
-      const age = now() - Number(issuedAt);
-      if (age < -CLOCK_SKEW_MS) return notIssued;
-      if (age > maxAgeMs) return { ok: false, code: 'approval_expired' };
+      const at = now();
+      if (at - Number(issuedAt) < -CLOCK_SKEW_MS) return notIssued;
+      // The issuer's signed expiry, and this handler's own maximum age.
+      const expiresAtMs = Math.min(Number(expiresAt), Number(issuedAt) + maxAgeMs);
+      if (at > expiresAtMs) return { ok: false, code: 'approval_expired' };
       return {
         ok: true,
-        expiresAtMs: Number(issuedAt) + maxAgeMs,
-        key: `${ID_PREFIX}${issuedAt}.${nonce}.${expected.toString('base64url')}`,
+        expiresAtMs,
+        key: `${ID_PREFIX}${issuedAt}.${expiresAt}.${nonce}.${expected.toString('base64url')}`,
       };
     },
   };
