@@ -261,6 +261,8 @@ The core logic lives in server-core. Adapters plug it into your framework.
 
 `createAiChatHandler()` — creates a Next.js App Router route handler. Handles auth, message prep, intent routing (legacy or pipeline), RBAC filtering, and streaming. Emits `PipelineStepReport` events for real-time progress in the UI.
 
+Request protection, on by default: the body must be `application/json` (415), a browser request must come from the handler's own origin or from `allowedOrigins` (403; `crossOriginProtection: false` turns this off for apps that authenticate without cookies), and the body is capped at `maxBodyBytes`, 1 MB (413). Approvals are bound to the tool call they were asked for: the handler signs the approval id (HMAC-SHA-256 over tool call id, tool name, input and issue time) with `approvalSecret` / `GLIRASTES_APPROVAL_SECRET` and runs an approved call only if the id verifies, is younger than `approvalMaxAgeMs` (15 minutes) and has no result yet; `approvalStore` adds single use. Production refuses to serve approvals without the secret.
+
 ### adapter-nestjs
 
 Uses decorators (`@AiModule()`, `@AiTool()`, `@AiParam()`) on NestJS controllers. `scanNestJsControllers()` introspects metadata at runtime and auto-builds endpoint tool definitions from decorated methods. No manual ai-tool.ts files needed.

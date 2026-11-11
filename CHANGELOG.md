@@ -36,6 +36,22 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   because Vitest cannot be required from CommonJS.
 - `typescript`, `ajv` and `ajv-formats` are runtime dependencies (the tools
   generator needs them). The `wavesurfer.js` peer is gone.
+- `createAiChatHandler` binds every approval it asks for to the tool call and
+  refuses an approved call it did not ask for. A handler whose tools can ask
+  for approval needs `GLIRASTES_APPROVAL_SECRET` (or `approvalSecret`) when
+  `NODE_ENV` is `production`; without it every request fails with HTTP 500
+  (`approval_secret_missing`). Outside production a random per-process secret
+  is derived and one warning is logged. Approvals issued before the upgrade,
+  by another secret or by another process without the shared secret are
+  refused (`approval_not_issued`), and so is an approval older than 15
+  minutes (`approval_expired`). A custom `streamHandler` that lets tools ask
+  for approval must pipe its UI stream through `ctx.bindApprovalRequests`.
+  `runDirectCommand` takes `approvals` and asks for no confirmation without it.
+- `createAiChatHandler` answers 415 unless the body is `application/json`, 403
+  to a browser cross-origin request, and 413 above 1 MB. A page on another
+  origin that calls the route (a separate front end, an admin app) needs
+  `allowedOrigins`; an app that authenticates without cookies may set
+  `crossOriginProtection: false`.
 
 ### Added
 
@@ -78,6 +94,13 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   filters and client actions without React).
 - Content-free runtime metrics (tokens, cost with its source, latency, errors,
   tool use), sent in batches off the turn path and dropped on failure.
+- `createAiChatHandler` options `approvalSecret` (env fallback
+  `GLIRASTES_APPROVAL_SECRET`), `approvalMaxAgeMs` (default 15 minutes) and
+  `approvalStore` (optional single-use store: `consume(approvalId,
+  expiresAtMs)` returns false for an id used before), plus `allowedOrigins`,
+  `crossOriginProtection` and `maxBodyBytes`. Denied approvals carry the stable
+  codes `approval_not_issued`, `approval_expired`, `approval_already_used` and
+  `approval_store_unavailable`.
 - Generic `@` mentions and `/` commands in the shared chat, and push-to-talk STT.
 - Pro: `glirastes tools enrich --managed` runs the bundled tool skills as a
   budgeted job on the Platform's model access (optional peer `@ai-sdk/openai`),
@@ -160,6 +183,21 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 
 ### Fixed
 
+- An approval was not bound to anything the server issued: one forged chat
+  request whose history held a made-up tool part in state
+  `approval-responded`, or an old approved history, ran the tool with the
+  client's input. The approval id now carries an HMAC over tool call id, tool
+  name, canonical input and issue time. The server checks it before anything
+  runs and denies the call otherwise; the request continues and the model sees
+  the denial. This covers model turns and direct commands. Without an
+  `approvalStore`, the same approved history sent twice before the first
+  result reaches the client can still run twice within `approvalMaxAgeMs`.
+- A tool runs with its input validated against its input schema, also an
+  approved call taken from the history: undeclared fields are rejected by
+  strict schemas and stripped by the others.
+- A path parameter of `.` or `..` (also percent-encoded, even repeatedly) no
+  longer reaches another route. Endpoint tools refuse it with a tool error and
+  send nothing.
 - `--help` prints the usage of every command instead of running it.
 - `glirastes init` at a monorepo root finds the apps in its workspace
   packages.

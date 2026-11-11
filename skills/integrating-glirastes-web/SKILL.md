@@ -60,6 +60,11 @@ runtime next to it and a Vite Vue frontend).
    carries only the `cookie` and `authorization` headers of that chat
    request. Do not use a service account or add credentials the user did not
    send; an API that needs another credential is an open gap (step 5).
+   Tell the user to set `GLIRASTES_APPROVAL_SECRET` (at least 16 random
+   characters, the same on every instance) in production: the handler signs the
+   approvals it asks for with it and refuses to serve approvals without it. A
+   front end on another origin than the handler must be listed in
+   `allowedOrigins`.
    In NestJS, validate input with a Zod pipe (`@Body(new ZodValidationPipe(schema))`,
    `@Query(...)`) or with `createZodDto` and a global `ZodValidationPipe`,
    guard with `@UseGuards` or a global guard, and keep `@Controller` paths and

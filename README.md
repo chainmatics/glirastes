@@ -107,6 +107,14 @@ export async function POST(request: Request) {
 }
 ```
 
+The handler protects the route for you. Set `GLIRASTES_APPROVAL_SECRET` (at
+least 16 characters, the same on every instance) before production: it binds
+each approval the handler asks for to the tool call, so a forged or replayed
+chat history cannot run a tool; production refuses to serve approvals without
+it. The handler also answers 415 to a body that is not `application/json`,
+403 to a browser request from another origin (list yours in `allowedOrigins`)
+and 413 above `maxBodyBytes` (1 MB).
+
 **5. Mount the chat** and the navigation bridge (client components):
 
 ```tsx
