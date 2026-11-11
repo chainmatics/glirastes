@@ -59,11 +59,24 @@ export type ApprovalDenialCode =
   | 'approval_not_runnable';
 
 /**
- * Optional single-use store. `consume` returns false when the id was used
- * before. It receives the canonical id of a verified approval, never the text
- * the client sent, and the scope the approval was issued for (tenant and
- * subject of a managed turn, `''` otherwise), so a store can give each scope
- * a quota.
+ * Optional single-use store. `consume(approvalId, expiresAtMs, { scope })`
+ * returns false when the id was used before, in any scope: single use is by
+ * id alone. It is called only for an approval that verified and is about to
+ * run, so forged ids never reach it.
+ *
+ * - `approvalId`: the canonical id of the verified approval, never the text
+ *   the client sent.
+ * - `expiresAtMs`: the expiry signed into the id; keep the id at least until
+ *   then.
+ * - `scope`: the quota scope, for limiting how many live ids one caller may
+ *   hold. It is `JSON.stringify([tenantId, subjectId])` for a managed turn,
+ *   else `JSON.stringify([value])` with the value `approvalScope(request)`
+ *   returned, else `caller:<hmac>` (base64url HMAC-SHA-256 under the approval secret of
+ *   the request's `Authorization` header, else its `Cookie` header; the raw
+ *   header is never passed), else `''` for a request without credentials.
+ *   The `caller:` key is not signed into the id and can change between the
+ *   request for an approval and its answer; use it for quotas, never for
+ *   single use.
  */
 export interface ApprovalStore {
   consume: (approvalId: string, expiresAtMs: number, context?: { scope: string }) => boolean | Promise<boolean>;
@@ -87,8 +100,13 @@ export const MAX_RUNNABLE_APPROVALS_PER_REQUEST = 32;
  * ids, or the approval's scope holds `maxEntriesPerScope`, `consume` throws,
  * which the handler reports as `approval_store_unavailable`, rather than
  * forgetting a live id and letting it run again. The per-scope quota keeps
- * one tenant and subject from filling the store for everyone else; without a
- * managed principal every request has the scope `''`, which is one scope.
+ * one scope from filling the store for everyone else. The scope is the one
+ * `ApprovalStore` describes: the managed tenant and subject, else
+ * `approvalScope`, else a key derived from the request's credentials
+ * (`caller:<hmac>`), else `''`, which all requests without credentials share.
+ * A caller who varies their credentials gets a fresh quota per value; the
+ * global `maxEntries` still bounds them, and only consumed genuine approvals
+ * create entries.
  *
  * It protects one process only. Instances behind a load balancer each have
  * their own memory, so an approved history replayed to another instance runs

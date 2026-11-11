@@ -88,7 +88,8 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   it is an approved part without a result in the last step of the last
   assistant message, its id verifies, it is unexpired, and it is consumed
   once. Every other approved part without a result is rewritten to a denial
-  (`approval_not_runnable`) before the model messages are built, whatever
+  before the model messages are built (`approval_not_runnable`, or
+  `approval_not_issued` when its id was not issued for that call), whatever
   follows it in the history (a trailing empty user, system or assistant
   message no longer lets an earlier approval run). A `providerExecuted` flag
   on a part of a tool in the handler's own registry is ignored, so such a
@@ -110,9 +111,11 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   cookie may change between the request for an approval and its answer),
   and single use holds by approval id across all keys. Apps that identify
   users another way set `approvalScope`, which also binds each approval to
-  its user. `ApprovalStore.consume` receives the signed expiry and the
-  quota scope as a third argument (`{ scope }`: the managed or
-  `approvalScope` scope, else `caller:<hmac>`, else `''`). Several instances must pass a shared `approvalStore`; with
+  its user. `ApprovalStore.consume(approvalId, expiresAtMs, { scope })`
+  receives the signed expiry as its second argument and the quota scope as
+  its third (`{ scope }`: the managed or `approvalScope` scope, else
+  `caller:<hmac>`, else `''`). Several instances must pass a shared
+  `approvalStore`; with
   the default, a replayed approved history can run once more on another
   instance before the approval expires.
 - `createAiChatHandler` answers 400 before anything runs to a body that is
