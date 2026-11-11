@@ -315,12 +315,30 @@ type MessageRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is MessageRecord => typeof value === 'object' && value !== null && !Array.isArray(value);
 const RESULT_STATES = new Set(['output-available', 'output-error', 'output-denied']);
 
+/** A UI tool part as the AI SDK recognizes one (`isToolUIPart`). */
+function isToolPart(part: MessageRecord): boolean {
+  return typeof part.type === 'string' && (part.type.startsWith('tool-') || part.type === 'dynamic-tool');
+}
+
 function toolNameOf(part: MessageRecord): string | undefined {
-  if (part.type === 'dynamic-tool') return typeof part.toolName === 'string' ? part.toolName : undefined;
+  if (part.type === 'dynamic-tool') return typeof part.toolName === 'string' && part.toolName ? part.toolName : undefined;
   return typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice('tool-'.length) : undefined;
 }
 
-export type ApprovalHistoryErrorCode = 'duplicate_tool_call_id' | 'approval_malformed';
+/**
+ * The input of the tool call that `convertToModelMessages` writes for a part,
+ * which is what the AI SDK would execute: for `output-error` it falls back to
+ * `rawInput`.
+ */
+function modelInputOf(part: MessageRecord): unknown {
+  return part.state === 'output-error' && part.input == null && 'rawInput' in part ? part.rawInput : part.input;
+}
+
+export type ApprovalHistoryErrorCode =
+  | 'duplicate_tool_call_id'
+  | 'duplicate_approval_id'
+  | 'approval_malformed'
+  | 'tool_part_malformed';
 
 /** A history the handler refuses as a whole (HTTP 400) instead of repairing it. */
 export class ApprovalHistoryError extends Error {
@@ -333,42 +351,66 @@ export class ApprovalHistoryError extends Error {
 /**
  * Refuses a history that the AI SDK could read in more than one way.
  *
- * - A tool call id may belong to one tool part only, in the whole history.
- *   The AI SDK maps an approval response to a tool call by the tool call id
- *   alone (`collectToolApprovals` keeps the last tool call of an id, and the
- *   model message sanitizer keeps the first one of a message), so a second
- *   part with the same id can lend its tool name and input to the approval of
- *   the other one. The AI SDK's own client never writes such a history: its
- *   UI message reducer (`updateToolPart` / `updateDynamicToolPart` in
- *   `processUIMessageStream`) updates the existing part of a tool call id in
- *   place, also for a provider-executed tool whose result arrives later, and
- *   an approval continuation goes on in the same assistant message. There is
- *   therefore no legitimate shape with a repeated id, and none is allowed.
- * - `approval.approved`, when set, must be a boolean. The AI SDK turns any
- *   value other than `null` / `undefined` into an approval response and treats
- *   a truthy one as approved.
+ * - Every tool part has a string tool call id, and a dynamic tool part a
+ *   tool name that is a non-empty string (`tool_part_malformed`): the AI SDK
+ *   converts any value and looks the tool up with it.
+ * - A tool call id may belong to one tool part only, in the whole history
+ *   (`duplicate_tool_call_id`). The AI SDK maps an approval response to a
+ *   tool call by the tool call id alone (`collectToolApprovals` keeps the last
+ *   tool call of an id, and the model message sanitizer keeps the first one of
+ *   a message), so a second part with the same id can lend its tool name and
+ *   input to the approval of the other one.
+ * - An approval id may belong to one tool part only, in the whole history
+ *   (`duplicate_approval_id`). Every part with an `approval` becomes an
+ *   approval request with that id, and `collectToolApprovals` keeps the last
+ *   request of an id, so a copy of a genuine id on another part would take
+ *   over the genuine part's approved answer.
+ * - An `approval` is an object with a non-empty string `id`, and its
+ *   `approved`, when set, is a boolean (`approval_malformed`). The AI SDK
+ *   turns any value other than `null` / `undefined` into an approval response
+ *   and treats a truthy one as approved.
+ *
+ * The AI SDK's own client never writes any of these: its UI message reducer
+ * (`updateToolPart` / `updateDynamicToolPart` in `processUIMessageStream`)
+ * updates the existing part of a tool call id in place, also for a
+ * provider-executed tool whose result arrives later, an approval continuation
+ * goes on in the same assistant message, and every approval request carries
+ * its own id. There is therefore no legitimate shape with a repeated id, and
+ * none is allowed.
  */
 export function assertUnambiguousToolHistory(messages: ReadonlyArray<unknown>): void {
-  const seen = new Set<string>();
+  const toolCallIds = new Set<string>();
+  const approvalIds = new Set<string>();
   for (const message of messages) {
     if (!isRecord(message) || !Array.isArray(message.parts)) continue;
     for (const part of message.parts) {
-      if (!isRecord(part) || !toolNameOf(part)) continue;
-      const approval = isRecord(part.approval) ? part.approval : undefined;
-      if (part.approval !== undefined && part.approval !== null && !approval) {
-        throw new ApprovalHistoryError('approval_malformed', 'A tool part carries an approval that is not an object.');
-      }
-      if (approval && approval.approved !== undefined && approval.approved !== null && typeof approval.approved !== 'boolean') {
-        throw new ApprovalHistoryError('approval_malformed', 'approval.approved must be true or false.');
+      if (!isRecord(part) || !isToolPart(part)) continue;
+      if (!toolNameOf(part)) {
+        throw new ApprovalHistoryError('tool_part_malformed', 'A dynamic tool part has no tool name.');
       }
       if (typeof part.toolCallId !== 'string') {
-        if (approval) throw new ApprovalHistoryError('approval_malformed', 'A tool part with an approval has no tool call id.');
-        continue;
+        throw new ApprovalHistoryError('tool_part_malformed', 'A tool part has no tool call id.');
       }
-      if (seen.has(part.toolCallId)) {
+      if (toolCallIds.has(part.toolCallId)) {
         throw new ApprovalHistoryError('duplicate_tool_call_id', 'A tool call id appears in more than one tool part.');
       }
-      seen.add(part.toolCallId);
+      toolCallIds.add(part.toolCallId);
+      if (part.approval !== undefined && part.approval !== null) {
+        const approval = part.approval;
+        if (!isRecord(approval)) {
+          throw new ApprovalHistoryError('approval_malformed', 'A tool part carries an approval that is not an object.');
+        }
+        if (typeof approval.id !== 'string' || approval.id === '') {
+          throw new ApprovalHistoryError('approval_malformed', 'An approval has no id.');
+        }
+        if (approval.approved !== undefined && approval.approved !== null && typeof approval.approved !== 'boolean') {
+          throw new ApprovalHistoryError('approval_malformed', 'approval.approved must be true or false.');
+        }
+        if (approvalIds.has(approval.id)) {
+          throw new ApprovalHistoryError('duplicate_approval_id', 'An approval id appears in more than one tool part.');
+        }
+        approvalIds.add(approval.id);
+      }
     }
   }
 }
@@ -387,26 +429,38 @@ export interface VerifiedApproval {
 
 /**
  * Checks, before anything runs, every tool part of the request history that
- * carries an answered approval, whatever its state and whether or not the
- * provider executed it: `convertToModelMessages` emits an approval response
- * for each of them. The history must first pass
+ * carries an approval, whatever its state, its answer and whether or not the
+ * provider executed it. The history must first pass
  * `assertUnambiguousToolHistory` (this function calls it and throws
  * `ApprovalHistoryError`).
  *
- * - A refusal (`approved: false`) is left alone: the AI SDK runs nothing for
- *   it, whatever its id says.
- * - A part that has no result yet (any state other than `output-available`,
- *   `output-error`, `output-denied`), and every provider-executed part, needs
- *   an approval id issued for exactly this tool call id, tool name and input,
- *   not older than the maximum age, not used before in this history and not
- *   consumed before by the store. A part that fails is rewritten to
- *   `output-denied` with the code as its reason, so the model messages carry a
- *   denied result for it and the AI SDK runs nothing. The request continues:
- *   the model sees the denial and answers.
- * - A part that already has its result is only checked for the binding (it
- *   may be older than the maximum age, and its id was used when it ran). The
- *   AI SDK emits the result with it, so it never runs again. A part whose id
- *   was not issued for it loses its approval and keeps its result.
+ * - An approved part that has no result yet (any state other than
+ *   `output-available`, `output-error`, `output-denied`), and every approved
+ *   provider-executed part, needs an approval id issued for exactly this tool
+ *   call id, tool name and input, not older than the maximum age, not used
+ *   before in this history and not consumed before by the store. A part that
+ *   fails is rewritten to `output-denied` with the code as its reason, so the
+ *   model messages carry a denied result for it and the AI SDK runs nothing.
+ *   The request continues: the model sees the denial and answers.
+ * - Every other part with an approval (an approved part that has its result,
+ *   an unanswered request, a refusal) needs an id issued for this tool call
+ *   id, tool name and input; age and use do not count. A part that fails
+ *   loses its approval (an `output-denied` part, which the AI SDK cannot
+ *   convert without one, gets an id of its own that verifies for nothing).
+ *   Such parts are not refused, because an honest history holds them after a
+ *   secret rotation, a restart of a process without a configured secret, or
+ *   from 0.4.0; they run nothing either way.
+ *
+ * The invariant this establishes, together with `assertUnambiguousToolHistory`:
+ * every approval id left in the history belongs to exactly one tool part and
+ * was issued for that part's tool call id, tool name and model input (the
+ * input `convertToModelMessages` writes, `rawInput` for an `output-error`
+ * part without input). The AI SDK pairs an approved answer with a call by
+ * approval id → the one request with that id, emitted from the same part →
+ * its tool call id, which is unique → the tool call emitted from that same
+ * part. So an approved answer can only ever pair with the call its id was
+ * issued for, and only approved answers that also passed age and single use
+ * are left unsettled.
  */
 export async function enforceApprovalBindings(
   messages: ReadonlyArray<unknown>,
@@ -425,31 +479,38 @@ export async function enforceApprovalBindings(
     let changed = false;
     const parts: unknown[] = [];
     for (const part of message.parts) {
-      const toolName = isRecord(part) ? toolNameOf(part) : undefined;
+      const toolName = isRecord(part) && isToolPart(part) ? toolNameOf(part) : undefined;
       const approval = isRecord(part) && isRecord(part.approval) ? part.approval : undefined;
-      if (!toolName || approval?.approved !== true) {
+      if (!toolName || !approval) {
         parts.push(part);
         continue;
       }
       const record = part as MessageRecord;
       const toolCallId = record.toolCallId as string;
-      const approvalId = typeof approval.id === 'string' ? approval.id : '';
+      const approvalId = approval.id as string;
+      const input = modelInputOf(record);
       const settled = RESULT_STATES.has(String(record.state)) && record.providerExecuted !== true;
-      const code = settled
-        ? bindingCode({ record, toolName, toolCallId, approvalId, binder: options.binder })
-        : await denialCode({ record, toolName, toolCallId, approvalId, usedIds, ...options });
+      const runnable = approval.approved === true && !settled;
+      const code = runnable
+        ? await denialCode({ input, toolName, toolCallId, approvalId, usedIds, ...options })
+        : bindingCode({ input, toolName, toolCallId, approvalId, binder: options.binder });
       if (!code) {
-        if (!settled && record.providerExecuted !== true) verified.push({ toolCallId, toolName, input: record.input });
+        if (runnable && record.providerExecuted !== true) verified.push({ toolCallId, toolName, input });
         parts.push(part);
         continue;
       }
-      denied.push({ toolCallId, code });
       changed = true;
-      if (settled) {
+      if (runnable) {
+        denied.push({ toolCallId, code });
+        parts.push({ ...record, state: 'output-denied', approval: { id: approvalId, approved: false, reason: code } });
+        continue;
+      }
+      if (approval.approved === true) denied.push({ toolCallId, code });
+      if (record.state === 'output-denied') {
+        parts.push({ ...record, approval: { ...approval, id: `glirastes-approval-unbound.${toolCallId}`, approved: false } });
+      } else {
         const { approval: _dropped, ...withoutApproval } = record;
         parts.push(withoutApproval);
-      } else {
-        parts.push({ ...record, state: 'output-denied', approval: { id: approvalId, approved: false, reason: code } });
       }
     }
     next.push(changed ? { ...message, parts } : message);
@@ -458,7 +519,7 @@ export async function enforceApprovalBindings(
 }
 
 function bindingCode(args: {
-  record: MessageRecord;
+  input: unknown;
   toolName: string;
   toolCallId: string;
   approvalId: string;
@@ -468,14 +529,14 @@ function bindingCode(args: {
     approvalId: args.approvalId,
     toolCallId: args.toolCallId,
     toolName: args.toolName,
-    input: args.record.input,
+    input: args.input,
   });
   // Only the binding counts here: an executed call may be older than the maximum age.
   return !verified.ok && verified.code === 'approval_not_issued' ? 'approval_not_issued' : undefined;
 }
 
 async function denialCode(args: {
-  record: MessageRecord;
+  input: unknown;
   toolName: string;
   toolCallId: string;
   approvalId: string;
@@ -487,7 +548,7 @@ async function denialCode(args: {
     approvalId: args.approvalId,
     toolCallId: args.toolCallId,
     toolName: args.toolName,
-    input: args.record.input,
+    input: args.input,
   });
   if (!verified.ok) return verified.code;
   if (args.usedIds.has(verified.key)) return 'approval_already_used';
