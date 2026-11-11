@@ -80,6 +80,18 @@ describe('glirastes init --ci github', () => {
       .toBe(githubToolsWorkflow({ packageManager: 'bun', enrichOnMain: true }));
   });
 
+  it('compares a push with the commit before it and works the backlog only on a manual start', () => {
+    const workflow = githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'] });
+    const enrich = job(workflow, 'glirastes-tools-enrich');
+
+    expect(workflow).toContain("  push:\n    branches: [main, staging]\n  workflow_dispatch:\n");
+    expect(enrich).toContain("|| github.event_name == 'workflow_dispatch'");
+    expect(enrich).toContain('          GLIRASTES_BEFORE_SHA: ${{ github.event.before }}\n');
+    expect(enrich).toContain("          GLIRASTES_FIRST_RUN: ${{ github.event_name == 'workflow_dispatch' }}\n");
+    // A repository that runs the job on pull requests only has no manual start: the bot could not open a pull request.
+    expect(githubToolsWorkflow({ packageManager: 'bun' })).not.toMatch(/workflow_dispatch|GLIRASTES_FIRST_RUN|GLIRASTES_BEFORE_SHA/);
+  });
+
   it('refuses a branch name that is not one', async () => {
     await expect(writeCiWorkflow({ root, provider: 'github', enrichOn: ['staging', 'a b'] }))
       .rejects.toEqual(new CiWorkflowError('ci_branch_invalid'));

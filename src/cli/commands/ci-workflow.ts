@@ -117,13 +117,16 @@ export function githubToolsWorkflow(options: {
   const refs = branches.map((branch) => `github.ref == 'refs/heads/${branch}'`).join(' || ');
   const trigger = onPush
     ? "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)\n"
-      + `        || (github.event_name == 'push' && ${branches.length > 1 ? `(${refs})` : refs})`
+      + `        || (github.event_name == 'push' && ${branches.length > 1 ? `(${refs})` : refs})\n`
+      // A manual start works the backlog; every automatic run works only what changed.
+      + "        || github.event_name == 'workflow_dispatch'"
     : "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository";
   const pushBranches = [...new Set(['main', ...branches])].map(yamlBranch).join(', ');
   return [
     '# Written by `glirastes init --ci github`.',
     '# glirastes-tools checks the committed tool outputs without secrets or models.',
-    '# glirastes-tools-enrich (Glirastes Pro) describes open tools in a managed job and',
+    '# glirastes-tools-enrich (Glirastes Pro) describes the tools a pull request or push',
+    '# changed in a managed job (a manual start works the whole backlog) and',
     ...(environment === undefined
       ? [
         '# commits them as glirastes-bot; it runs once the repository variable',
@@ -140,6 +143,7 @@ export function githubToolsWorkflow(options: {
     '  pull_request:',
     '  push:',
     `    branches: [${pushBranches}]`,
+    ...(onPush ? ['  workflow_dispatch:'] : []),
     '',
     'permissions:',
     '  contents: read',
@@ -159,7 +163,7 @@ export function githubToolsWorkflow(options: {
     '    if: >-',
     ...(environment === undefined
       ? ["      vars.GLIRASTES_MANAGED_TOOLS == 'true' && (", `        ${trigger}`, '      )']
-      : [`      ${trigger.replace('\n        ', '\n      ')}`]),
+      : [`      ${trigger.replaceAll('\n        ', '\n      ')}`]),
     ...(environment === undefined ? [] : [`    environment: ${environment}`]),
     '    runs-on: ubuntu-latest',
     `    timeout-minutes: ${ENRICH_TIMEOUT_MINUTES}`,
@@ -187,6 +191,8 @@ export function githubToolsWorkflow(options: {
       // A pull request names its target, a push its own branch: there the bot opens a pull request.
       '          GLIRASTES_BASE_BRANCH: ${{ github.base_ref || github.ref_name }}',
       '          GH_TOKEN: ${{ github.token }}',
+      '          GLIRASTES_BEFORE_SHA: ${{ github.event.before }}',
+      "          GLIRASTES_FIRST_RUN: ${{ github.event_name == 'workflow_dispatch' }}",
     ] : []),
     '',
   ].join('\n');

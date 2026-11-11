@@ -482,8 +482,15 @@ describe('glirastes tools enrich --managed', () => {
     // No earlier state to compare with (a new branch, a manual start): nothing runs without --first-run.
     const unbounded = run(fixture, { GITHUB_REF_NAME: 'main', GLIRASTES_BEFORE_SHA: '0'.repeat(40) }, { platform: api });
     expect(await unbounded.code).toBe(0);
+    expect(api.requests).toHaveLength(0);
     expect(JSON.parse(unbounded.out.at(-1)!)).toEqual({ schemaVersion: 1, status: 'skipped', code: 'backlog_needs_first_run' });
     expect(api.requests).toHaveLength(0);
+
+    // The workflow's manual start sets GLIRASTES_FIRST_RUN: the whole backlog, with the first-run budget.
+    const manual = run(fixture, { GITHUB_REF_NAME: 'main', GLIRASTES_FIRST_RUN: 'true' }, { platform: platform({ refuse: { status: 402, code: 'tool_generation_requires_pro' } }) });
+    expect(await manual.code).toBe(0);
+    expect(JSON.parse(manual.out.at(-1)!)).toMatchObject({ code: 'tool_generation_requires_pro' });
+    expect(manual.out).toContain('glirastes tools enrich: scope=all items=3');
 
     const { model, tasks } = upsertingModel();
     const pushed = run(fixture, { GITHUB_REF_NAME: 'main', GLIRASTES_BEFORE_SHA: pushedBefore }, { platform: api, model });

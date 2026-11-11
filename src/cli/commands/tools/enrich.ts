@@ -304,7 +304,9 @@ export async function runToolsEnrich(
   };
   const worklists = async () => listsOf(await io.runPipeline({ root, mode: 'frozen', keepGoing: true }));
   const initial = await io.runPipeline({ root, mode: 'frozen', keepGoing: true });
-  if (!args.flags.has('--first-run')) {
+  // The generated workflow sets GLIRASTES_FIRST_RUN on its manual start.
+  const firstRun = args.flags.has('--first-run') || io.env.GLIRASTES_FIRST_RUN === 'true';
+  if (!firstRun) {
     const beforeSha = io.env.GLIRASTES_BEFORE_SHA?.trim() ?? '';
     const ref = branch !== base ? base : COMMIT_SHA.test(beforeSha) && !/^0+$/.test(beforeSha) ? beforeSha : undefined;
     if (ref === undefined) return report(io, json, { schemaVersion: 1, status: 'skipped', code: 'backlog_needs_first_run' });
@@ -339,7 +341,7 @@ export async function runToolsEnrich(
       discoveryDigest: artifact.discoveryDigest,
       commitSha: head.sha,
       branch,
-      firstRun: args.flags.has('--first-run') || before.items.length > FIRST_RUN_ITEMS,
+      firstRun: firstRun || before.items.length > FIRST_RUN_ITEMS,
       items: before.items,
     });
   } catch (error) {
