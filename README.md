@@ -108,15 +108,21 @@ export async function POST(request: Request) {
 ```
 
 The handler protects the route for you. Set `GLIRASTES_APPROVAL_SECRET` (at
-least 16 characters, the same on every instance) before production: it binds
-each approval the handler asks for to the tool call, so a forged chat history
-cannot run a tool; production refuses to serve approvals without it. Each
-approval runs once per process; with several instances, pass a shared
-`approvalStore` (e.g. Redis), or a replayed history can run once more on
-another instance. The handler also answers 415 to a body that is not
-`application/json`, 403 to a browser request from another origin (list yours
-in `allowedOrigins`), 413 above `maxBodyBytes` (1 MB) and 400 to a history
-that repeats a tool call id (`duplicate_tool_call_id`).
+least 16 characters, the same on every instance) before production: it signs
+each approval the handler asks for to that tool call, its input, the user and
+an expiry (15 minutes by default), so an approval in a forged or edited chat
+history runs nothing; production refuses to serve approvals without it. With
+the default store each approval runs at most once per process; with several
+instances, pass a shared `approvalStore` (e.g. Redis), or a replayed history
+can run once more on another instance. The handler also answers 415 to a body
+that is not `application/json`, 403 to a browser request from another origin
+(list yours in `allowedOrigins`), 413 above `maxBodyBytes` (1 MB), and 400 to a
+body that is not JSON (`invalid_json`), to a history that repeats a tool call
+id or an approval id (`duplicate_tool_call_id`, `duplicate_approval_id`), to a
+malformed tool part or approval (`tool_part_malformed`, `approval_malformed`)
+and to more than 32 approved calls in one request (`too_many_approvals`).
+Endpoint tools call the origin of the request URL; set `trustForwardedHeaders`
+only behind a proxy that sets `x-forwarded-host` (see the option's docs).
 
 `executeTool` and routes built from `glirastes/runtime/ai-sdk` alone run a tool
 without these approval checks; give them only input your server has authorized.

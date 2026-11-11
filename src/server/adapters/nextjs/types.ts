@@ -404,8 +404,8 @@ export interface AiChatHandlerConfig {
 
   /**
    * Secret that binds every approval the handler asks for to the tool call it
-   * was asked for (HMAC-SHA-256 over tool call id, tool name, input and issue
-   * time). The browser sends the whole chat history back with the user's
+   * was asked for (HMAC-SHA-256 over tool call id, tool name, input, issue
+   * time, expiry and the principal's scope). The browser sends the whole chat history back with the user's
    * answer, and the AI SDK runs the approved call from that history; without
    * the binding, a forged or replayed history would run any tool with any
    * input. At least 16 characters, the same on every instance that can serve
@@ -422,21 +422,26 @@ export interface AiChatHandlerConfig {
 
   /**
    * How long an approval stays valid after the handler asked for it, in
-   * milliseconds. Default 15 minutes. A later answer is refused with
-   * `approval_expired`.
+   * milliseconds. Default 15 minutes. The expiry is signed into the approval
+   * id; an answer after it, or after the issue time plus this handler's own
+   * `approvalMaxAgeMs` if that is earlier, is refused with `approval_expired`.
    */
   approvalMaxAgeMs?: number;
 
   /**
-   * Single-use store for approvals. `consume(approvalId, expiresAtMs)` must
-   * atomically record the id and return `false` when it was recorded before;
-   * it receives the canonical id of a verified approval. Entries may be
+   * Single-use store for approvals. `consume(approvalId, expiresAtMs,
+   * { scope })` must atomically record the id and return `false` when it was
+   * recorded before; it receives the canonical id of a verified approval and
+   * the principal's scope (`''` without a managed principal). Entries may be
    * dropped after `expiresAtMs`. A throw refuses the approval
-   * (`approval_store_unavailable`).
+   * (`approval_store_unavailable`). Only approvals the AI SDK can run in this
+   * request are consumed.
    *
    * Default: a bounded store in this process's memory, shared by every
-   * handler of the process (10,000 live approvals; when full, further
-   * approvals are refused, not run). It makes a single instance replay-safe.
+   * handler of the process (10,000 live approvals, at most 1,000 of them per
+   * scope; when either is full, further approvals are refused, not run). All
+   * requests without a managed principal share the scope `''`, so together
+   * they hold at most 1,000. It makes a single instance replay-safe.
    * Several instances that share `GLIRASTES_APPROVAL_SECRET` need a shared
    * store (e.g. Redis `SET key 1 NX PXAT expiresAtMs`): with the default, an
    * approved history replayed to another instance runs there once more,

@@ -46,24 +46,64 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   configured (`lancer.approvals`). Outside production a random per-process secret
   is derived and one warning is logged. Approvals issued before the upgrade,
   by another secret or by another process without the shared secret are
-  refused (`approval_not_issued`), and so is an approval older than 15
-  minutes (`approval_expired`). A custom `streamHandler` that lets tools ask
-  for approval must pipe its UI stream through `ctx.bindApprovalRequests`.
-  `runDirectCommand` takes `approvals` and asks for no confirmation without it.
+  refused (`approval_not_issued`). The approval id
+  (`glirastes-approval.v1.<issued>.<expires>.<nonce>.<mac>`) carries its
+  expiry under the MAC; an answer after it, or after the issue time plus the
+  answering handler's `approvalMaxAgeMs` (15 minutes) if that is earlier, is
+  refused (`approval_expired`). The format stays `v1` because no earlier
+  release issued signed ids. A custom `streamHandler` that lets tools ask
+  for approval must pipe its UI stream through `ctx.bindApprovalRequests`,
+  and must let the AI SDK call the tools: `ctx.tools[name].execute(input)`
+  called without the AI SDK's options (`toolCallId`) is refused
+  (`approval_not_verified`) for every tool that can ask for approval.
+  `runDirectCommand` takes `approvals` and asks for no confirmation without it;
+  one direct command issues at most one approval.
 - Each approval runs at most once per process by default: without an
   `approvalStore`, the handler records it in a bounded in-process store
-  shared by every handler of the process (10,000 live approvals; when it is
-  full, further approvals are denied with `approval_store_unavailable`
-  instead of run). Several instances must pass a shared `approvalStore`;
-  with the default, a replayed approved history can run once more on another
-  instance within `approvalMaxAgeMs`.
-- `createAiChatHandler` answers 400 to a chat history that repeats a tool call
-  id (`duplicate_tool_call_id`) or whose `approval.approved` is not a boolean
-  (`approval_malformed`), before anything runs. The chat UI keeps one part
-  per tool call id, so only a hand-built or tampered history is affected; a
-  provider that reuses tool call ids across turns is refused too.
-- A tool whose input schema transforms its input (Zod `transform`,
-  `default`, `coerce`) receives the schema output exactly once. The chat
+  shared by every handler of the process (10,000 live approvals, at most
+  1,000 per scope; when either is full, further approvals are denied with
+  `approval_store_unavailable` instead of run). The scope is the managed
+  principal's tenant and subject; every request without a managed principal
+  has the scope `''`, which counts as one scope, so an app without a managed
+  runtime holds at most 1,000 live approvals for all its users together.
+  `ApprovalStore.consume` receives the scope as a third argument
+  (`{ scope }`). Only approved calls the AI SDK runs in this request (those
+  in the last step of the last assistant message) are consumed. Several
+  instances must pass a shared `approvalStore`; with the default, a replayed
+  approved history can run once more on another instance within
+  `approvalMaxAgeMs`.
+- `createAiChatHandler` answers 400 before anything runs to a body that is
+  not valid JSON (`invalid_json`, without calling `onError`), to a chat
+  history that repeats a tool call id (`duplicate_tool_call_id`) or an
+  approval id on two tool parts (`duplicate_approval_id`), to a tool part
+  whose `toolName` or `toolCallId` is not a string (`tool_part_malformed`),
+  to an approval that is not an object with a non-empty string `id` and a
+  boolean, null or missing `approved` (`approval_malformed`), and to more
+  than 32 approved calls that could run in one request
+  (`too_many_approvals`). The chat UI keeps one part per tool call id and
+  approval, so only a hand-built or tampered history is affected; a provider
+  that reuses tool call ids across turns is refused too.
+- A tool part in the history whose approval id does not verify for that
+  part's own call loses its approval before the model sees the history; an
+  approved one is reported as denied. A history from 0.4.0, or from before a
+  secret rotation or restart without a shared secret, is still served, with
+  those approvals removed.
+- Endpoint tools no longer call the host a client names. The default
+  endpoint caller and `runtime.origin` (`extractOrigin`,
+  `buildRuntimeContext`, `buildToolContext`) use the origin of the request
+  URL and ignore `Host`, `x-forwarded-host` and `x-forwarded-proto`; before,
+  any client that reached the app directly could point the server's tool
+  calls, with the user's cookie, at any host (`169.254.169.254`, an internal
+  service). A deployment whose request URL is not the public or a reachable
+  origin (behind a proxy that rewrites the host) passes
+  `trustForwardedHeaders: true`, which reads the last `x-forwarded-host` /
+  `x-forwarded-proto` value, only when every request comes through a proxy
+  that sets them; otherwise it passes `endpointCaller: (request) =>
+  createHttpEndpointCaller({ baseUrl, request })`.
+- A tool's input schema runs once per tool call; `needsApproval`, the hooks
+  and `execute` receive that one result. A tool whose input schema transforms
+  its input (Zod `transform`, `default`, `coerce`) receives the schema output
+  exactly once. The chat
   history, the UI tool part and `onStepFinish` now hold the input the model
   sent, not the transformed one, because the approval is bound to that input.
   Code that read transformed values from the tool part must parse them again.
@@ -117,10 +157,11 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 - `createAiChatHandler` options `approvalSecret` (env fallback
   `GLIRASTES_APPROVAL_SECRET`), `approvalMaxAgeMs` (default 15 minutes) and
   `approvalStore` (optional single-use store: `consume(approvalId,
-  expiresAtMs)` returns false for an id used before), plus `allowedOrigins`,
-  `crossOriginProtection` and `maxBodyBytes`. Denied approvals carry the stable
-  codes `approval_not_issued`, `approval_expired`, `approval_already_used` and
-  `approval_store_unavailable`.
+  expiresAtMs, { scope })` returns false for an id used before), plus
+  `allowedOrigins`, `crossOriginProtection`, `maxBodyBytes` and
+  `trustForwardedHeaders` (default `false`; see **Breaking**). Denied
+  approvals carry the stable codes `approval_not_issued`, `approval_expired`,
+  `approval_already_used` and `approval_store_unavailable`.
 - Generic `@` mentions and `/` commands in the shared chat, and push-to-talk STT.
 - Pro: `glirastes tools enrich --managed` runs the bundled tool skills as a
   budgeted job on the Platform's model access (optional peer `@ai-sdk/openai`),
@@ -207,14 +248,16 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
   request whose history held a made-up tool part in state
   `approval-responded`, or an old approved history, ran the tool with the
   client's input. The approval id now carries an HMAC over tool call id, tool
-  name, canonical input and issue time. The server checks it before anything
-  runs and denies the call otherwise; the request continues and the model sees
+  name, canonical input, issue time, expiry and the principal's scope. The
+  server checks it before anything runs and denies the call otherwise; the request continues and the model sees
   the denial. This covers model turns and direct commands. Each approved
   call runs at most once per process (see **Breaking**), and the tool itself
   checks a per-request execution gate, also under a custom `streamHandler`:
   a call runs only when this request verified its approval or the tool did
   not need one. A second part with the same tool call id can no longer take
-  over a valid approval, and an approval id is accepted only in the exact
+  over a valid approval, a copy of a valid approval id on another tool part
+  is refused (`duplicate_approval_id`) instead of running that part's call,
+  and an approval id is accepted only in the exact
   spelling the server issued (another base64url spelling of the same MAC, a
   padded or zero-prefixed id, no longer counts as a fresh approval).
 - The approval hash keeps an own `__proto__` key of the input, so an approval
@@ -224,9 +267,17 @@ upgrading. Omnify stays on 0.4.0 until it is migrated on purpose.
 - `allowedOrigins` admits a listed origin also when the browser marks the
   request `Sec-Fetch-Site: same-site` or `cross-site` (a sibling subdomain or
   a separate front end); before, every such request got 403. An unlisted
-  origin still gets 403, and `Origin: null` is always refused. A
-  comma-separated `x-forwarded-host` or `x-forwarded-proto` is read by its
-  first value.
+  origin still gets 403, and `Origin: null` is always refused. A request
+  without `Sec-Fetch-Site` may still match the own origin by its `Host` or
+  first `x-forwarded-host` value; a request the browser marks `same-site` or
+  `cross-site` passes only with an `Origin` listed in `allowedOrigins`.
+- The canonical JSON under the approval MAC refuses non-finite numbers, so an
+  input such as `1e999` (Infinity) no longer verifies against an approval
+  issued for `null`.
+- In pipeline mode an approved call no longer fails when the pipeline's tool
+  selection for the continuation leaves its tool out; the tool of every
+  verified approval stays in the tool set unless the guardrails block the
+  request.
 - A tool runs with its input validated against its input schema, also an
   approved call taken from the history: undeclared fields are rejected by
   strict schemas and stripped by the others.

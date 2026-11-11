@@ -95,7 +95,10 @@ export interface StreamHandlerContext {
    * only for an approval the handler verified (exact tool call id, tool name
    * and input, once) or for a live call whose `needsApproval` answered false,
    * and refuses with `approval_not_verified` otherwise, also when the stream
-   * handler builds its own AI SDK tools from these objects.
+   * handler builds its own AI SDK tools from these objects. The gate needs the
+   * options the AI SDK passes (`toolCallId`): a stream handler that calls
+   * `tools[name].execute(input)` itself, without them, is refused for every
+   * tool that can ask for approval.
    */
   tools: Record<string, unknown>;
   /** Processed messages (after guardrails, sliced to context window) */
