@@ -60,6 +60,7 @@ import {
 } from './context-helpers.js';
 import { prepareModelMessages, wrapToolsForVercelAi } from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
+import { isSilentTurn, silentTurnFallbackText, withSilentTurnFallback } from './silent-turn-fallback.js';
 import { toolPresentationOf } from './tool-presentation.js';
 import { PrincipalSchema } from '../../../contracts/index.js';
 import {
@@ -91,6 +92,8 @@ import { defaultIntentRouterFor, previousTurnScope } from './default-intent-rout
  * calls streamText() themselves with full type safety.
  */
 export interface StreamHandlerContext {
+  /** Locale of the chat, for texts the handler writes itself. */
+  locale?: string;
   /**
    * AI tools (output of toolsToAiTools, RBAC-filtered). Every tool that can
    * ask for approval carries the execution gate of this request: it executes
@@ -647,11 +650,13 @@ async function defaultStreamHandler(
                 : event.finishReason === 'error'
                   ? 'error'
                   : 'completed';
+          // The user gets the fallback text; the Platform sees the failure.
+          const silent = status === 'completed' && isSilentTurn(event.steps);
           ctx.turnMetrics?.finish({
-            status,
+            status: silent ? 'error' : status,
             errorCode: status === 'safety-stop'
               ? stoppedByBudget ? 'budget_exhausted' : 'step_limit'
-              : status === 'error' ? 'model_error' : null,
+              : status === 'error' || silent ? 'model_error' : null,
           });
 
           if (!finalStateWritten) {
@@ -670,7 +675,9 @@ async function defaultStreamHandler(
                     ? isSafetyStop
                       ? 'Paused at step safety cap. You can continue or stop.'
                       : 'Paused at configured step cap.'
-                    : undefined,
+                    : silent
+                      ? 'The model returned no answer.'
+                      : undefined,
               }),
             );
             finalStateWritten = true;
@@ -691,7 +698,10 @@ async function defaultStreamHandler(
         },
       });
 
-      const uiStream = result.toUIMessageStream({ onError: () => 'AI request failed' });
+      const uiStream = withSilentTurnFallback(
+        result.toUIMessageStream({ onError: () => 'AI request failed' }),
+        silentTurnFallbackText(ctx.locale),
+      );
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
@@ -1482,6 +1492,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxOutputTokens,
           temperature,
           maxContextMessages,
+        locale,
           modelTier: pipelineResult.model.modelId,
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
@@ -1645,6 +1656,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         maxOutputTokens,
         temperature,
         maxContextMessages,
+        locale,
         modelTier: routing?.modelTier,
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,
