@@ -16,6 +16,7 @@ import type {
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import type { ApprovalStore } from './approval-binding.js';
+import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig } from '../../core/index.js';
 import type {
   Principal,
@@ -188,6 +189,16 @@ export interface AiChatHandlerConfig {
    * app-authorized tool set. false preserves static scoping.
    */
   toolDiscovery?: boolean;
+
+  /**
+   * Built-in start-set routing for `toolDiscovery` without `intentRouter`
+   * (default on): modules derived from the tool metadata, the request
+   * classified locally (German and English), the previous turn's tools kept
+   * for follow-ups. A turn starts with a small set plus `find_tools` and
+   * never with more than the principal may use. `false` starts every turn
+   * with all eligible tools; an object tunes the start set.
+   */
+  intentRouting?: boolean | DefaultIntentRoutingOptions;
 
   /**
    * Search-only synonyms keyed by model-facing tool name (for example from

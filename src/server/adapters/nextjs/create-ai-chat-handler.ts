@@ -81,6 +81,7 @@ import {
   NON_DOMAIN_TOOL_NAMES,
   type HybridToolDiscovery,
 } from './tool-discovery.js';
+import { defaultIntentRouterFor, previousTurnScope } from './default-intent-routing.js';
 
 /**
  * Callback that the consumer provides to stream the AI response.
@@ -772,6 +773,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     maxConversationHistoryPairs = 4,
     guardrails,
     intentRouter,
+    intentRouting = true,
     wrapHandler,
     onError: onErrorConfig,
     onToolError,
@@ -1532,10 +1534,24 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       // Intent routing
       let routing: IntentRoutingResult | undefined;
+      let defaultStartToolNames: string[] | undefined;
       if (intentRouter) {
         const text = clarificationResume?.routingText
           ?? extractLastUserText(processedMessages);
         routing = await intentRouter(text, allToolNames);
+      } else if (enableToolDiscovery && intentRouting !== false) {
+        // Routing only picks the start set; discovery stays bounded by what
+        // this principal may use and can always widen it.
+        const manifest = managedTurn?.snapshot.manifestRevision;
+        defaultStartToolNames = defaultIntentRouterFor({
+          registry,
+          ...(manifest ? { manifest: { revisionId: manifest.revisionId, tools: manifest.tools } } : {}),
+          semantics: toolSemantics,
+          ...(typeof intentRouting === 'object' ? { options: intentRouting } : {}),
+        }).route({
+          text: clarificationResume?.routingText ?? extractLastUserText(processedMessages),
+          previous: previousTurnScope(processedMessages),
+        }).toolNames;
       }
 
       // Convert to AI tools
@@ -1554,7 +1570,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       const discoveryController = await buildDiscovery(
         registry,
-        routing?.toolNames?.length ? routing.toolNames : allToolNames,
+        routing?.toolNames?.length ? routing.toolNames : defaultStartToolNames ?? allToolNames,
         handlerBuiltinNames,
       );
       if (discoveryController) {

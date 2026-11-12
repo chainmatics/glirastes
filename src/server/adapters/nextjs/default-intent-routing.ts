@@ -174,7 +174,7 @@ export function createDefaultIntentRouter(
       .map((tool) => tool.name));
   };
 
-  return Object.freeze({
+  const router: DefaultIntentRouter = {
     route({ text, previous }) {
       const carried = (previous?.toolNames ?? [])
         .filter((name) => byName.has(name))
@@ -204,7 +204,8 @@ export function createDefaultIntentRouter(
             : 'low',
       };
     },
-  });
+  };
+  return Object.freeze(router);
 }
 
 function isRead(tool: RoutableTool): boolean {
@@ -303,4 +304,46 @@ export function previousTurnScope(messages: ReadonlyArray<unknown>): PreviousTur
     }
   }
   return { toolNames, userTexts };
+}
+
+const ROUTER_CACHE_SIZE = 16;
+const NO_SEMANTICS = {};
+const routerCaches = new WeakMap<object, Map<string, DefaultIntentRouter>>();
+
+/**
+ * The default router for one turn's registry. Manifest metadata (module,
+ * kind, hints) is used when the turn is pinned to a snapshot. Routers are
+ * cached per semantics object, tool set, revision and options.
+ */
+export function defaultIntentRouterFor(input: {
+  registry: ToolRegistry;
+  manifest?: {
+    revisionId: string;
+    tools: Parameters<typeof routableToolsFromManifest>[0];
+  };
+  semantics?: ToolSearchSemanticsMap;
+  options?: DefaultIntentRoutingOptions;
+}): DefaultIntentRouter {
+  const names = Object.keys(input.registry).sort();
+  const identity = input.manifest
+    ? [input.manifest.revisionId, names]
+    : names.map((name) => [name, input.registry[name]?.id, input.registry[name]?.description]);
+  const key = JSON.stringify([identity, input.options ?? null]);
+  const cacheOwner = input.semantics ?? NO_SEMANTICS;
+  let cache = routerCaches.get(cacheOwner);
+  if (!cache) {
+    cache = new Map();
+    routerCaches.set(cacheOwner, cache);
+  }
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const available = new Set(names);
+  const tools = input.manifest
+    ? routableToolsFromManifest(input.manifest.tools, input.semantics)
+      .filter((tool) => available.has(tool.name))
+    : routableToolsFromRegistry(input.registry, input.semantics);
+  const router = createDefaultIntentRouter(tools, input.options);
+  cache.set(key, router);
+  if (cache.size > ROUTER_CACHE_SIZE) cache.delete(cache.keys().next().value!);
+  return router;
 }

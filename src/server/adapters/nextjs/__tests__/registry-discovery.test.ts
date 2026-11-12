@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { defineTool } from '../../../../types.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
 import type { StreamHandlerContext } from '../create-ai-chat-handler.js';
+import {
+  fixtureModelName,
+  ROUTING_FIXTURE_SYNONYMS,
+  ROUTING_FIXTURE_TOOLS,
+} from './fixtures/routing-app-tools.js';
 
 const registry = {
   list_tasks: defineTool({
@@ -94,5 +99,75 @@ describe('find_tools without a runtime source (registry mode)', () => {
     });
     await handler(request('Liste'));
     expect(names).toEqual(['list_tasks']);
+  });
+});
+
+describe('default intent routing with discovery and no intentRouter', () => {
+  const appRegistry = Object.fromEntries(ROUTING_FIXTURE_TOOLS.map((tool) => [
+    fixtureModelName(tool.name),
+    defineTool({
+      id: tool.name, description: tool.description, method: tool.method,
+      inputSchema: z.object({}), execute: async () => ({ ok: true }),
+    }),
+  ]));
+
+  function conversation(messages: unknown[]) {
+    return new Request('https://app.example/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    });
+  }
+
+  async function activeFor(body: Request, extra: Record<string, unknown> = {}) {
+    let context: StreamHandlerContext | undefined;
+    const handler = createAiChatHandler({
+      tools: appRegistry,
+      model: {},
+      systemPrompt: 'Assistant',
+      toolDiscovery: true,
+      toolSemantics: ROUTING_FIXTURE_SYNONYMS,
+      ...extra,
+      streamHandler: async (ctx) => {
+        context = ctx;
+        return new Response('ok');
+      },
+    });
+    expect((await handler(body)).status).toBe(200);
+    return { active: [...context!.toolDiscovery!.activeToolNames()], context: context! };
+  }
+
+  it('starts with a small relevant set instead of every tool', async () => {
+    const { active, context } = await activeFor(request('Lege eine neue Aufgabe an'));
+    expect(active).toContain('tasks_create');
+    expect(active).toContain('find_tools');
+    expect(active.length).toBeLessThanOrEqual(15);
+    // Every eligible tool stays callable through discovery.
+    expect(Object.keys(context.tools).length).toBeGreaterThan(100);
+  });
+
+  it('keeps the previous turn\'s tool for a follow-up without domain words', async () => {
+    const { active } = await activeFor(conversation([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Nur offene Aufgaben mit hoher Priorität' }] },
+      { id: 'a1', role: 'assistant', parts: [
+        { type: 'tool-ui_tasks_filters_apply', toolCallId: 'c1', state: 'output-available', input: {}, output: { ok: true } },
+        { type: 'text', text: 'Erledigt.' },
+      ] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'okay aber bitte wieder auf den Filter den wir eben hatten' }] },
+    ]));
+    expect(active).toContain('ui_tasks_filters_apply');
+    expect(active.length).toBeLessThanOrEqual(15);
+  });
+
+  it('keeps every tool active with intentRouting: false', async () => {
+    const { active } = await activeFor(request('Lege eine neue Aufgabe an'), { intentRouting: false });
+    expect(active.length).toBeGreaterThan(100);
+  });
+
+  it('accepts tuning options', async () => {
+    const { active } = await activeFor(request('Hallo'), {
+      intentRouting: { maxStartTools: 2, alwaysAvailable: ['dashboard_get'] },
+    });
+    expect(active).toEqual(['dashboard_get', 'find_tools']);
   });
 });

@@ -38,6 +38,7 @@ export {
   type RecordingTranscriptionHandlerConfig,
 } from './recording-transcription-handler.js';
 export type { ApprovalStore, ApprovalDenialCode } from './approval-binding.js';
+export type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 export {
   resolveDirectCommand,
   runDirectCommand,
