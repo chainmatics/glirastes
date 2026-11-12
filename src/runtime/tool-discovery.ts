@@ -33,6 +33,8 @@ export interface TurnToolDiscoveryOptions {
  */
 export interface ToolSearchSemantics {
   readonly synonyms?: ReadonlyArray<string>;
+  /** Example requests; only the default intent router of the chat handler reads them. */
+  readonly examples?: ReadonlyArray<string>;
 }
 
 export type ToolSearchSemanticsMap = Readonly<Record<string, ToolSearchSemantics>>;
