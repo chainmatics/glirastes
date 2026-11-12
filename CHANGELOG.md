@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Default intent routing in `createAiChatHandler`: with `toolDiscovery` and no `intentRouter`, a turn starts with a small tool set instead of every tool. Modules come from the generated tool metadata (module, kind, method, usage hints, synonyms; fragments like `tasksReminder` join `tasks`, `ui.*` tools join the domain they name), the request is classified locally with the existing heuristics (German and English), and `ui_navigate` plus `find_tools` are always there. A weak request keeps a small default set, never all tools. Follow-ups keep the tools the previous turn called and, when the new message has no domain words, the previous request's modules. Tune with `intentRouting: { maxStartTools, alwaysAvailable }` or `examples` in `toolSemantics`; `intentRouting: false` restores the old start set. Routing only narrows: the start set is cut to what discovery already allows the principal.
+- `history` option: the current turn goes to the model complete, the previous turn with compacted tool results (arrays to the first 10 items plus a count, strings to 300 characters), older turns as text, at most 6 earlier turns within an estimated 4000 tokens. `history: false` keeps the earlier slice-and-prune.
+- `promptCaching` (default on): the system prompt and the newest message carry cache breakpoints for `@ai-sdk/anthropic` and `@openrouter/ai-sdk-provider`, and tools are sent active first in a stable order so tools found mid-turn append to the cached prefix.
+
+### Fixed
+
+- A turn whose model returned no visible output (no text, reasoning only, no tool call) ended as an empty bubble and counted as `completed`. The chat now shows a short fallback text (German or English by `locale`) and the turn metric reports `error` / `model_error`.
+- `uiAction` was not removed from tool results before they went back to the model: AI SDK 6 nests results under `output.value`, which the strip did not read.
+
 ## [0.5.1] - 2026-11-12
 
 ### Changed

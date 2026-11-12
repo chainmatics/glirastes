@@ -113,6 +113,8 @@ export async function POST(request: Request) {
 ```
 
 Budgets default to safe values; pass `localLimits: { maxToolCalls: 4 }` to override single fields.
+`toolDiscovery: true` turns on routing: each turn starts with the few tools the
+request needs plus `find_tools`, not the whole tool list (see [How it works](#how-it-works)).
 
 Before production set `GLIRASTES_APPROVAL_SECRET` (at least 16 characters, the
 same on every instance): it signs each approval so a forged or edited chat
@@ -155,6 +157,18 @@ commands, is the bundled skill
   snapshot, with local budgets (steps, tool calls, tokens, cost, timeouts),
   loop detection and fail-closed authorization. Write and delete tools ask
   the user before they run.
+- **Small start set per turn.** With `toolDiscovery`, the handler groups the
+  generated tools into modules (module, kind, usage hints, synonyms), matches
+  the request locally in German and English and starts the turn with those
+  tools, `ui_navigate` and `find_tools`; the model widens the set with
+  `find_tools` when it needs more. A follow-up keeps the tools of the previous
+  turn. Tune it with `intentRouting: { maxStartTools, alwaysAvailable }` or
+  `examples` in `toolSemantics`, replace it with your own `intentRouter`, or
+  turn it off with `intentRouting: false`. Routing never grants a tool the
+  user may not use.
+- **Lean history.** Earlier turns go to the model compacted (`history`), and
+  the system prompt and tools stay a stable, cacheable prefix
+  (`promptCaching`).
 - **The Platform gets metadata only.** A connected app sends content-free
   metrics (tokens, cost, latency, errors, tool use) in batches off the turn
   path, and receives signed configuration revisions.
