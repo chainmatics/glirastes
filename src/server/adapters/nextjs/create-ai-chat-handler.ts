@@ -100,6 +100,8 @@ export interface StreamHandlerContext {
   locale?: string;
   /** How earlier turns are sent to the model (see `AiChatHandlerConfig.history`). */
   history?: HistoryOptions | false;
+  /** Cache breakpoints and a stable tool order (see `AiChatHandlerConfig.promptCaching`). */
+  promptCaching?: boolean;
   /**
    * AI tools (output of toolsToAiTools, RBAC-filtered). Every tool that can
    * ask for approval carries the execution gate of this request: it executes
@@ -414,6 +416,40 @@ function createPipelineState(options: {
   };
 }
 
+// Namespaces of providers with explicit breakpoints; other providers ignore
+// them and cache a stable prefix on their own (OpenAI, Gemini, DeepSeek).
+const CACHE_BREAKPOINT = {
+  anthropic: { cacheControl: { type: 'ephemeral' } },
+  openrouter: { cacheControl: { type: 'ephemeral' } },
+} as const;
+
+/** System prompt (with the tools before it) and the newest message as cache breakpoints. */
+function withCacheBreakpoints(systemPrompt: string, messages: unknown[]): unknown[] {
+  const marked = messages.map((message, index) => {
+    if (index !== messages.length - 1) return message;
+    const record = message as { providerOptions?: Record<string, unknown> };
+    return { ...record, providerOptions: { ...record.providerOptions, ...CACHE_BREAKPOINT } };
+  });
+  return systemPrompt
+    ? [{ role: 'system', content: systemPrompt, providerOptions: CACHE_BREAKPOINT }, ...marked]
+    : marked;
+}
+
+/**
+ * Providers serialize tools in object order. Active tools first, the rest
+ * behind them, so tools discovered mid-turn append instead of shifting the
+ * cached prefix.
+ */
+function orderToolsForCaching(
+  tools: Record<string, unknown>,
+  activeNames: ReadonlyArray<string>,
+): Record<string, unknown> {
+  const ordered: Record<string, unknown> = {};
+  for (const name of activeNames) if (name in tools) ordered[name] = tools[name];
+  for (const [name, tool] of Object.entries(tools)) if (!(name in ordered)) ordered[name] = tool;
+  return ordered;
+}
+
 /**
  * Built-in default stream handler.
  *
@@ -448,10 +484,17 @@ async function defaultStreamHandler(
   if (Object.keys(builtinTools).length > 0) {
     Object.assign(vercelTools, wrapToolsForVercelAi(builtinTools));
   }
+  const orderedTools = ctx.toolDiscovery
+    ? orderToolsForCaching(vercelTools, ctx.toolDiscovery.activeToolNames())
+    : vercelTools;
+  const promptCaching = ctx.promptCaching !== false;
   const modelMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
     { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
   );
+  const promptMessages = promptCaching
+    ? withCacheBreakpoints(ctx.systemPrompt, modelMessages)
+    : modelMessages;
 
   let wasTruncated = false;
   // At the runtime budget the turn blocks further tools and gets one bounded
@@ -521,9 +564,9 @@ async function defaultStreamHandler(
 
       const result = streamText({
         model: ctx.model as Parameters<typeof streamText>[0]['model'],
-        messages: modelMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
-        system: ctx.systemPrompt,
-        tools: vercelTools as Parameters<typeof streamText>[0]['tools'],
+        messages: promptMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
+        ...(promptCaching ? {} : { system: ctx.systemPrompt }),
+        tools: orderedTools as Parameters<typeof streamText>[0]['tools'],
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
@@ -791,6 +834,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     intentRouter,
     intentRouting = true,
     history,
+    promptCaching,
     wrapHandler,
     onError: onErrorConfig,
     onToolError,
@@ -1501,6 +1545,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxContextMessages,
         locale,
         history,
+        promptCaching,
           modelTier: pipelineResult.model.modelId,
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
@@ -1666,6 +1711,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         maxContextMessages,
         locale,
         history,
+        promptCaching,
         modelTier: routing?.modelTier,
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,

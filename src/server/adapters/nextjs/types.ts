@@ -299,6 +299,14 @@ export interface AiChatHandlerConfig {
    */
   history?: HistoryOptions | false;
   /**
+   * Prompt caching hints (default `true`): the system prompt and the newest
+   * message carry cache breakpoints for providers that need explicit ones
+   * (`@ai-sdk/anthropic`, `@openrouter/ai-sdk-provider`), and tools are sent
+   * active first in a stable order. Providers that cache a stable prefix
+   * automatically ignore the breakpoints. `false` sends `system` as before.
+   */
+  promptCaching?: boolean;
+  /**
    * Number of recent user/assistant text pairs to include as conversation
    * history for intent classification. Helps the classifier understand
    * follow-up messages. Defaults to 4.
