@@ -203,6 +203,32 @@ it('measures the history budget on long earlier answers', async () => {
   expect(JSON.stringify(current)).toContain('Zusammenfassung 5');
 });
 
+describe('prepareModelMessages with long pasted text', () => {
+  it('never drops the previous turn; an oversized text is cut to head and tail', async () => {
+    const out = await prepareModelMessages([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: `START ${'Clause text. '.repeat(1500)}END` }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Got it.' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'Summarize clause 3' }] },
+    ] as UIMessage[], { maxContextMessages: 12 });
+    const text = JSON.stringify(out);
+    expect(text).toContain('Clause text');
+    expect(text).toContain('START');
+    expect(text).toContain('END');
+    expect(text).toContain('characters omitted');
+    expect(text).toContain('Got it.');
+  });
+
+  it('never cuts the current user message', async () => {
+    const pasted = `START ${'Clause text. '.repeat(3000)}END`;
+    const out = await prepareModelMessages([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Hallo' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Hi.' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: pasted }] },
+    ] as UIMessage[]);
+    expect(JSON.stringify(out)).toContain(JSON.stringify(pasted).slice(1, -1));
+  });
+});
+
 describe('compactToolOutput', () => {
   it('is deterministic and keeps short values untouched', () => {
     const value = { id: 'a', list: [1, 2, 3], note: 'kurz' };

@@ -67,6 +67,8 @@ const HISTORY_DEFAULTS = {
   maxStringLength: 300,
 } as const;
 const MAX_COMPACT_DEPTH = 6;
+const CHARS_PER_TOKEN = 4;
+const MIN_TEXT_SHARE = 1_000;
 
 /**
  * Convert UI messages into sanitized model messages ready for `streamText()`.
@@ -118,7 +120,7 @@ interface ModelMessageLike {
 }
 
 function estimateTokens(messages: ReadonlyArray<unknown>): number {
-  return Math.ceil(JSON.stringify(messages).length / 4);
+  return Math.ceil(JSON.stringify(messages).length / CHARS_PER_TOKEN);
 }
 
 /** Splits model messages into turns, each starting at a user message. */
@@ -171,10 +173,38 @@ function withCompactedResults(
   });
 }
 
+/** Cuts text longer than its share of `maxChars` to head and tail. */
+function withTruncatedTexts(turn: ModelMessageLike[], maxChars: number): ModelMessageLike[] {
+  const texts = turn.flatMap((message) => (typeof message.content === 'string'
+    ? [message.content]
+    : Array.isArray(message.content)
+      ? (message.content as Array<{ type?: unknown; text?: unknown }>)
+        .filter((part) => part.type === 'text' && typeof part.text === 'string')
+        .map((part) => part.text as string)
+      : []));
+  const share = Math.max(MIN_TEXT_SHARE, Math.floor(maxChars / Math.max(1, texts.length)));
+  const cut = (text: string) => {
+    if (text.length <= share) return text;
+    const head = Math.floor(share * 0.7);
+    const tail = share - head;
+    return `${text.slice(0, head)}\n[… ${text.length - share} characters omitted …]\n${text.slice(-tail)}`;
+  };
+  return turn.map((message) => (typeof message.content === 'string'
+    ? { ...message, content: cut(message.content) }
+    : Array.isArray(message.content)
+      ? {
+          ...message,
+          content: (message.content as Array<{ type?: unknown; text?: unknown }>).map((part) =>
+            (part.type === 'text' && typeof part.text === 'string' ? { ...part, text: cut(part.text) } : part)),
+        }
+      : message));
+}
+
 /**
- * The current turn stays complete. Earlier turns: the newest `toolTurns` keep
- * their tool calls with compacted results, older ones keep only their text,
- * at most `maxTurns`, within `maxTokens` and `maxCtx` messages.
+ * The current turn stays complete. The previous turn is always sent: with
+ * compacted tool results, as text when that does not fit, oversized text cut
+ * to head and tail. Older turns go as text, at most `maxTurns`, within what
+ * `maxTokens` and `maxCtx` leave.
  */
 function turnAwareHistory(
   messages: ModelMessageLike[],
@@ -183,25 +213,29 @@ function turnAwareHistory(
 ): ModelMessageLike[] {
   const turns = splitTurns(messages);
   const current = turns.pop() ?? [];
-  if (current.length >= maxCtx) return current.slice(-maxCtx);
-
   const earlier = turns.slice(-Math.max(0, limits.maxTurns)).map((turn, index, all) =>
     index >= all.length - limits.toolTurns
       ? withCompactedResults(turn, limits)
       : textOnly(turn));
+  let previous = earlier.pop();
+  if (!previous) return current;
 
-  const fits = () =>
-    earlier.flat().length + current.length <= maxCtx
-    && estimateTokens(earlier.flat()) <= limits.maxTokens;
-  while (earlier.length > 0 && !fits()) {
-    // The newest earlier turn falls back to text before it is dropped.
-    if (earlier.length === 1 && earlier[0]!.some((message) => message.role === 'tool')) {
-      earlier[0] = textOnly(earlier[0]!);
-      continue;
-    }
+  const tooLarge = (turn: ModelMessageLike[]) =>
+    estimateTokens(turn) > limits.maxTokens || turn.length + current.length > maxCtx;
+  if (tooLarge(previous)) previous = textOnly(previous);
+  if (estimateTokens(previous) > limits.maxTokens) {
+    previous = withTruncatedTexts(previous, limits.maxTokens * CHARS_PER_TOKEN);
+  }
+
+  const tokenRoom = limits.maxTokens - estimateTokens(previous);
+  const messageRoom = maxCtx - current.length - previous.length;
+  while (
+    earlier.length > 0
+    && (estimateTokens(earlier.flat()) > tokenRoom || earlier.flat().length > messageRoom)
+  ) {
     earlier.shift();
   }
-  return [...earlier.flat(), ...current];
+  return [...earlier.flat(), ...previous, ...current];
 }
 
 /**
