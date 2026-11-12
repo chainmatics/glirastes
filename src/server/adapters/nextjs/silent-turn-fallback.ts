@@ -20,6 +20,18 @@ export function isSilentTurn(steps: ReadonlyArray<{
   return steps.every((step) => step.text.trim() === '' && step.toolCalls.length === 0);
 }
 
+/**
+ * True when the request answers tool approvals: the AI SDK runs (or denies)
+ * those calls before the first model step, outside `steps`, and the chat
+ * shows their output.
+ */
+export function resumesToolApprovals(modelMessages: ReadonlyArray<unknown>): boolean {
+  const last = modelMessages.at(-1) as { role?: unknown; content?: unknown } | undefined;
+  return last?.role === 'tool'
+    && Array.isArray(last.content)
+    && last.content.some((part) => (part as { type?: unknown }).type === 'tool-approval-response');
+}
+
 /** Inserts the fallback text before `finish` when the stream showed nothing. */
 export function withSilentTurnFallback<T>(
   source: ReadableStream<T>,

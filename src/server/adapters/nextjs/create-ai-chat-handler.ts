@@ -64,7 +64,12 @@ import {
   type HistoryOptions,
 } from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
-import { isSilentTurn, silentTurnFallbackText, withSilentTurnFallback } from './silent-turn-fallback.js';
+import {
+  isSilentTurn,
+  resumesToolApprovals,
+  silentTurnFallbackText,
+  withSilentTurnFallback,
+} from './silent-turn-fallback.js';
 import { toolPresentationOf } from './tool-presentation.js';
 import { PrincipalSchema } from '../../../contracts/index.js';
 import {
@@ -492,6 +497,8 @@ async function defaultStreamHandler(
     ctx.messages as UIMessage[],
     { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
   );
+  // Executed approvals are visible output for the stream and the metric alike.
+  const resumedApprovals = resumesToolApprovals(modelMessages);
   const promptMessages = promptCaching
     ? withCacheBreakpoints(ctx.systemPrompt, modelMessages)
     : modelMessages;
@@ -700,7 +707,9 @@ async function defaultStreamHandler(
                   ? 'error'
                   : 'completed';
           // The user gets the fallback text; the Platform sees the failure.
-          const silent = status === 'completed' && isSilentTurn(event.steps);
+          const silent = status === 'completed'
+            && !resumedApprovals
+            && isSilentTurn(event.steps);
           ctx.turnMetrics?.finish({
             status: silent ? 'error' : status,
             errorCode: status === 'safety-stop'
@@ -747,10 +756,12 @@ async function defaultStreamHandler(
         },
       });
 
-      const uiStream = withSilentTurnFallback(
-        result.toUIMessageStream({ onError: () => 'AI request failed' }),
-        silentTurnFallbackText(ctx.locale),
-      );
+      const uiStream = resumedApprovals
+        ? result.toUIMessageStream({ onError: () => 'AI request failed' })
+        : withSilentTurnFallback(
+          result.toUIMessageStream({ onError: () => 'AI request failed' }),
+          silentTurnFallbackText(ctx.locale),
+        );
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
