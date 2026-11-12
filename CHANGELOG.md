@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0-connect.0] - 2026-11-12
+
+Prerelease on the `next` dist-tag for the staging rollout of Connect once.
+
 ### Changed
 
 - Connect once: `glirastes connect` issues one app connection key per run (90 days by default, 1 year or no expiry, chosen in Citadel) and writes it to `.env.local` as `GLIRASTES_API_KEY`. `.glirastes/platform-connection.json` no longer holds an environment id. Against an old Platform the CLI falls back to the per-environment pairing.
@@ -584,7 +588,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.7.0-connect.0...HEAD
+[0.7.0-connect.0]: https://github.com/chainmatics/glirastes/compare/v0.6.0...v0.7.0-connect.0
 [0.6.0]: https://github.com/chainmatics/glirastes/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/chainmatics/glirastes/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/chainmatics/glirastes/compare/v0.4.0...v0.5.0
