@@ -54,12 +54,18 @@ import { resolveRuntimeConnectionConfig } from 'glirastes/runtime';
 import { lookupRuntimeConnection } from 'glirastes/sync';
 
 const config = resolveRuntimeConnectionConfig(process.env); // undefined in Standalone
-const connection = config && await lookupRuntimeConnection(config);
-// { baseUrl, appId, environmentId, runnerKey }
+const connection = config && await lookupRuntimeConnection({
+  ...config,
+  environment: process.env.GLIRASTES_ENVIRONMENT,
+  nodeEnv: process.env.NODE_ENV,
+});
+// { baseUrl, appId, environmentId: string | null, runnerKey, mode }
+// mode is 'environment', or 'development' (environmentId is null) without a name
 ```
 
 `GET /v1/runtime/connection` with the `x-api-key` header answers
-`{ schemaVersion: 1, appId, environmentId, runnerKey }`, 401 for an invalid
+`{ schemaVersion: 1, appId, environmentId, runnerKey, mode }`, with
+`environmentId` null in development mode, 401 for an invalid
 key, and 409 `{ code: 'connection_key_unbound' }` for a key that no pairing
 issued. Errors carry the operation and the status only. The looked-up `appId`
 must match the setup artifact of the code; a different app is an error.
