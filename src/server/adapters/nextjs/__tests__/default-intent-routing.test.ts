@@ -109,6 +109,18 @@ describe('previousTurnScope', () => {
     expect(scope.userTexts).toEqual(['Zeig offene Aufgaben']);
   });
 
+  it('includes tools of the current turn on an approval continuation', () => {
+    const scope = previousTurnScope([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Lösche das Projekt' }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [{ type: 'tool-projects_delete', toolCallId: 'c1', state: 'approval-responded', approval: { id: 'x', approved: true } }],
+      },
+    ]);
+    expect(scope.toolNames).toEqual(['projects_delete']);
+  });
+
   it('is empty for a first message', () => {
     expect(previousTurnScope([
       { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Hallo' }] },

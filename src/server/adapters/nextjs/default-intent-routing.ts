@@ -26,7 +26,7 @@ export interface DefaultIntentRoutingOptions {
 }
 
 export interface PreviousTurnScope {
-  /** Domain tools the last assistant turn called, oldest first. */
+  /** Domain tools the last assistant turn and the current turn called, oldest first. */
   toolNames: string[];
   /** Earlier user texts, oldest first (the newest is the request before this one). */
   userTexts: string[];
@@ -269,32 +269,42 @@ export function routableToolsFromRegistry(
     });
 }
 
+function toolNamesOf(parts: ReadonlyArray<Record<string, unknown>>): string[] {
+  return parts.flatMap((part) => {
+    const name = typeof part.type === 'string' && part.type.startsWith('tool-')
+      ? part.type.slice(5)
+      : part.type === 'dynamic-tool' && typeof part.toolName === 'string'
+        ? part.toolName
+        : undefined;
+    return name && !SDK_TOOL_NAMES.has(name) ? [name] : [];
+  });
+}
+
 /**
  * Scope of the previous turn from the UI history: tools the last assistant
- * message called, and the user texts before the current request.
+ * message before the current request called, tools already called in the
+ * current turn (approval or client-tool continuations), and the user texts
+ * before the current request.
  */
 export function previousTurnScope(messages: ReadonlyArray<unknown>): PreviousTurnScope {
   const list = messages as ReadonlyArray<{ role?: unknown; parts?: unknown }>;
+  const partsOf = (message: { parts?: unknown } | undefined) =>
+    (Array.isArray(message?.parts) ? message.parts as Array<Record<string, unknown>> : []);
   let current = list.length - 1;
   while (current >= 0 && list[current]?.role !== 'user') current--;
   const toolNames: string[] = [];
+  const addTools = (names: string[]) => {
+    for (const name of names) if (!toolNames.includes(name)) toolNames.push(name);
+  };
   const userTexts: string[] = [];
   let assistantSeen = false;
   for (let i = current - 1; i >= 0; i--) {
     const message = list[i];
-    const parts = Array.isArray(message?.parts) ? message.parts as Array<Record<string, unknown>> : [];
     if (message?.role === 'assistant' && !assistantSeen) {
       assistantSeen = true;
-      for (const part of parts) {
-        const name = typeof part.type === 'string' && part.type.startsWith('tool-')
-          ? part.type.slice(5)
-          : part.type === 'dynamic-tool' && typeof part.toolName === 'string'
-            ? part.toolName
-            : undefined;
-        if (name && !SDK_TOOL_NAMES.has(name) && !toolNames.includes(name)) toolNames.push(name);
-      }
+      addTools(toolNamesOf(partsOf(message)));
     } else if (message?.role === 'user') {
-      const text = parts
+      const text = partsOf(message)
         .filter((part) => part.type === 'text' && typeof part.text === 'string')
         .map((part) => part.text as string)
         .join(' ')
@@ -302,6 +312,9 @@ export function previousTurnScope(messages: ReadonlyArray<unknown>): PreviousTur
       if (text) userTexts.unshift(text);
       if (userTexts.length >= 2) break;
     }
+  }
+  for (const message of list.slice(current + 1)) {
+    if (message?.role === 'assistant') addTools(toolNamesOf(partsOf(message)));
   }
   return { toolNames, userTexts };
 }
