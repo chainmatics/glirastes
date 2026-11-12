@@ -293,6 +293,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
 
   const reportedNotBound = new Set<string>();
   let warnedNoEnvironment = false;
+  let notedNoReference = false;
 
   const lookupConnection = async (): Promise<ResolvedRuntimeConnection | undefined> => {
     if (!config) return undefined;
@@ -341,7 +342,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     await closing?.close().catch(onError);
   };
 
-  /** Returns true when the Platform withdrew the place and the lookup must start over. */
+  /** Returns true when the lookup must start over: the Platform withdrew the place, or no reference environment exists yet. */
   const runConnection = async (connection: ResolvedRuntimeConnection): Promise<boolean> => {
     if (!config) return false;
     if (connection.appId !== appId) {
@@ -354,8 +355,13 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     if (environmentId === null) {
       resolved = connection;
       connectedBase = localSource({ targetAppId: connection.appId });
-      return false;
+      if (!notedNoReference) {
+        notedNoReference = true;
+        console.info('[glirastes] No reference environment yet; running on local code and checking again.');
+      }
+      return true;
     }
+    notedNoReference = false;
 
     let placeLost = false;
     let sync: ReturnType<typeof createManagedRuntimeSync>;

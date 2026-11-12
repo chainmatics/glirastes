@@ -76,9 +76,13 @@ function binding(): GeneratedToolBinding {
   } satisfies GeneratedEndpointToolBinding;
 }
 
-function generated(appId = APP_ID): GeneratedToolModule & { toolSearchSemantics: Record<string, { synonyms: string[] }> } {
+function generated(appId = APP_ID, toolPatch: Record<string, unknown> = {}): GeneratedToolModule & { toolSearchSemantics: Record<string, { synonyms: string[] }> } {
   return {
-    setupArtifact: setupArtifact(appId),
+    setupArtifact: (() => {
+      const artifact = setupArtifact(appId);
+      Object.assign(artifact.tools[0]!, toolPatch);
+      return artifact;
+    })(),
     createToolBindings: () => [binding()],
     toolSearchSemantics: { [TOOL_ID]: { synonyms: ['todos'] } },
   };
@@ -100,7 +104,10 @@ function revision(
   };
 }
 
-function activeDeployment(privateKey: KeyObject): RuntimeDeploymentBundle {
+function activeDeployment(
+  privateKey: KeyObject,
+  toolOverrides: Array<Record<string, unknown>> = [],
+): RuntimeDeploymentBundle {
   const common = {
     schemaVersion: 1 as const, revision: 1, tenantId: TENANT_ID, targetAppId: APP_ID,
     publishedAt: '2026-07-29T00:00:00.000Z',
@@ -121,7 +128,7 @@ function activeDeployment(privateKey: KeyObject): RuntimeDeploymentBundle {
     }),
     policyRevision: revision(privateKey, {
       ...common, revisionId: id('3908'), revisionType: 'policy', environmentId: ENVIRONMENT_ID,
-      payload: { budget: limits, toolPolicies: [] },
+      payload: { budget: limits, toolPolicies: [], ...(toolOverrides.length ? { toolOverrides } : {}) },
     }),
     updatedAt: '2026-07-29T00:01:00.000Z',
   };
@@ -522,6 +529,68 @@ describe('createGlirastes connected', () => {
     const forbidden = /\/(register|heartbeat|capabilities|leases)|\/metrics|\/runtime-setup/;
     expect(http.calls.filter(({ url }) => forbidden.test(url))).toEqual([]);
     expect(glirastes.metrics).toBeUndefined();
+  });
+
+  const developmentLookup = () => json({
+    schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'dev-abcdefghijklm',
+  });
+
+  async function developmentPolicy(
+    toolOverrides: Array<Record<string, unknown>>,
+    toolPatch: Record<string, unknown> = {},
+  ) {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({
+      deployments: [activeDeployment(privateKey, toolOverrides)], publicKey, lookup: [developmentLookup],
+    });
+    const glirastes = track(createGlirastes({
+      generated: generated(APP_ID, toolPatch), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError: vi.fn(),
+    }));
+    await glirastes.ready();
+    const snapshot = glirastes.currentSource().resolveTurnSnapshot({ turnId: 't-1', principal: principal(TENANT_ID) });
+    return snapshot.policyRevision.toolPolicies.find((policy) => policy.toolId === TOOL_ID);
+  }
+
+  it('disables a tool locally that the reference revision disables', async () => {
+    expect(await developmentPolicy([{ toolId: TOOL_ID, enabled: false }])).toMatchObject({ enabled: false });
+  });
+
+  it('puts a tool on confirmation that the reference revision restricts', async () => {
+    expect(await developmentPolicy([{ toolId: TOOL_ID, requiresApproval: true }]))
+      .toMatchObject({ enabled: true, requiresApproval: true });
+  });
+
+  it('keeps a stricter local code rule against a looser reference revision', async () => {
+    const policy = await developmentPolicy(
+      [{ toolId: TOOL_ID, requiresApproval: false, riskClass: 'safe-read' }],
+      { riskClass: 'delete', operationGroup: 'delete', requiresApproval: true },
+    );
+    expect(policy).toMatchObject({ requiresApproval: true, riskClass: 'delete' });
+  });
+
+  it('keeps polling in a development connection without a reference environment', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({
+      deployments: [activeDeployment(privateKey)], publicKey,
+      lookup: [
+        () => json({ schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: null, runnerKey: 'dev-abcdefghijklm' }),
+        developmentLookup,
+      ],
+    });
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 20, onError,
+    }));
+
+    await glirastes.ready();
+    expect(http.calls.some(({ url }) => url.includes('/sync?'))).toBe(false);
+
+    await vi.waitFor(() => expect(glirastes.accepted()).toBeDefined(), { timeout: 1_000 });
+    expect(glirastes.connection()).toMatchObject({ environmentId: ENVIRONMENT_ID });
+    expect(http.calls.some(({ url }) => url.includes('/sync?runnerKey=dev-abcdefghijklm'))).toBe(true);
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('sends the runner key on the push stream of a development connection', async () => {
