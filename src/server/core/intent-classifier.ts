@@ -205,23 +205,7 @@ export function classifyWithHeuristics(
   modules: ModuleDefinition[],
   locale?: string,
 ): IntentClassification {
-  const stemmer = stemmerForLocale(locale);
-  const raw = rawTokenize(message);
-  const inputTokens = toSet(raw);
-  const inputStems = stemTokens(raw, stemmer);
-  const inputTrigrams = charTrigrams(message);
-
-  if (inputTokens.size === 0 || modules.length === 0) {
-    return { intent: 'ambiguous', confidence: 0 };
-  }
-
-  const scored = modules.map((m) => ({
-    moduleId: m.id,
-    score: scoreModule(inputTokens, inputStems, inputTrigrams, m, stemmer),
-  }));
-
-  scored.sort((a, b) => b.score - a.score);
-  const best = scored[0];
+  const best = rankModulesWithHeuristics(message, modules, locale)[0];
 
   if (!best || best.score < 0.15) {
     return { intent: 'ambiguous', confidence: 0 };
@@ -232,6 +216,28 @@ export function classifyWithHeuristics(
     best.score >= 0.5 ? 0.93 : best.score >= 0.4 ? 0.86 : 0.72;
 
   return { intent: best.moduleId, confidence };
+}
+
+/** Raw heuristic scores of all modules, best first; empty without input tokens. */
+export function rankModulesWithHeuristics(
+  message: string,
+  modules: ReadonlyArray<ModuleDefinition>,
+  locale?: string,
+): Array<{ moduleId: string; score: number }> {
+  const stemmer = stemmerForLocale(locale);
+  const raw = rawTokenize(message);
+  const inputTokens = toSet(raw);
+  const inputStems = stemTokens(raw, stemmer);
+  const inputTrigrams = charTrigrams(message);
+
+  if (inputTokens.size === 0 || modules.length === 0) return [];
+
+  return modules
+    .map((m) => ({
+      moduleId: m.id,
+      score: scoreModule(inputTokens, inputStems, inputTrigrams, m, stemmer),
+    }))
+    .sort((a, b) => b.score - a.score);
 }
 
 // ============================================================================
