@@ -38,6 +38,7 @@ import {
 import type { RuntimeMetricsSink } from './metrics/turn-recorder.js';
 import { policyOverlayFromRevision } from './policy-overlay.js';
 import { resolveRuntimeConnectionConfig } from './runtime-mode.js';
+import { SDK_VERSION } from './sdk-version.js';
 import type { ToolSearchSemanticsMap } from './tool-discovery.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
 
@@ -69,7 +70,7 @@ export interface CreateGlirastesOptions {
    * code whatever is reported here.
    */
   onError?: (error: unknown) => void;
-  /** The app version reported at runner registration. */
+  /** The app version reported at runner registration. Defaults to `GLIRASTES_BUILD_ID`, else `glirastes@<sdk version>`. */
   version?: string;
   /** A technical runtime label reported at registration, e.g. `nextjs`. */
   runtime?: string;
@@ -295,7 +296,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         appId: connection.appId,
         environmentId: connection.environmentId,
         runnerKey: connection.runnerKey,
-        version: options.version ?? '0.0.0',
+        version: options.version?.trim() || env.GLIRASTES_BUILD_ID?.trim() || `glirastes@${SDK_VERSION}`,
         stateStore: store,
         setupArtifact: options.generated.setupArtifact,
         // A deployment that names a tool this code lacks, or has changed, keeps running on the local tool.
