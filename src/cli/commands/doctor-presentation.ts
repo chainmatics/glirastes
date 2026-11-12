@@ -13,6 +13,7 @@ const LABELS = new Map([
   ['connection-credential', 'Local connection credentials'],
   ['connection-scope', 'App and environment match'],
   ['connection-obsolete-variables', 'Unneeded connection settings'],
+  ['connection-environment-bound', 'Connection scope'],
   ['runtime-mode', 'Runtime connection settings'],
 ]);
 
@@ -45,6 +46,8 @@ const NEXT_ACTIONS = new Map([
     'Ask your coding agent to check the ignored, project-local credential file. Keep credentials out of Git and chat; do not disable the storage check.'],
   ['remove-obsolete-connection-variables',
     'GLIRASTES_APP_ID, GLIRASTES_ENVIRONMENT_ID and GLIRASTES_RUNNER_KEY are no longer needed. Remove them from the environment; a connected app needs only GLIRASTES_API_KEY.'],
+  ['reconnect-for-app-key',
+    'This is an environment-bound connection; run `glirastes connect` again to use one key for all environments.'],
   ['align-explicit-runtime-mode',
     'Ask your coding agent to align the local runtime settings with the intended connection. Do not silently switch a connected app to standalone.'],
 ]);

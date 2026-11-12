@@ -33,7 +33,7 @@ export const PlatformConnectionDescriptorSchema = z.object({
   schemaVersion: z.literal(1),
   baseUrl: SafeControlPlaneUrlSchema,
   appId: uuid,
-  environmentId: uuid,
+  environmentId: uuid.optional(),
   runnerKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
 }).strict();
 
@@ -42,6 +42,7 @@ export const PairingStartRequestSchema = z.object({
   localAppId: uuid,
   localAppName: z.string().trim().min(1).max(100),
   artifactDigest: digest,
+  capabilities: z.object({ appConnection: z.literal(1) }).strict().optional(),
 }).strict();
 
 export const PairingStartResponseSchema = z.object({
@@ -68,7 +69,9 @@ const PairingExpiredResultSchema = z.object({
 
 const PairingConnectedResultSchema = z.object({
   status: z.literal('connected'),
-  connection: PlatformConnectionDescriptorSchema,
+  connection: PlatformConnectionDescriptorSchema.extend({
+    environmentId: uuid.nullable().optional(),
+  }),
   apiKey: z.string().regex(/^gl_[A-Za-z0-9]{32,128}$/),
 }).strict();
 

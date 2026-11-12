@@ -62,7 +62,7 @@ function plan() {
   };
 }
 
-function connectedClient() {
+function connectedClient(environment: string | null = environmentId) {
   return {
     startPairing: vi.fn().mockResolvedValue({
       schemaVersion: 1 as const,
@@ -78,7 +78,7 @@ function connectedClient() {
         schemaVersion: 1 as const,
         baseUrl: 'https://control.example',
         appId,
-        environmentId,
+        environmentId: environment,
         runnerKey: 'server-value-must-not-win',
       },
       apiKey,
@@ -168,6 +168,7 @@ describe('glirastes connect command', () => {
       localAppId: appId,
       localAppName: '@example/fixture-app',
       artifactDigest,
+      capabilities: { appConnection: 1 },
     }, undefined);
     const output = log.mock.calls.flat().join('\n');
     expect(output).toContain('https://platform.example/connect/pair');
@@ -203,6 +204,31 @@ describe('glirastes connect command', () => {
     });
     expect(output).not.toContain(deviceCode);
     expect(output).not.toContain(apiKey);
+  });
+
+  it('writes an app connection without environmentId and reports null', async () => {
+    const rootDir = await fixture();
+    const client = connectedClient(null);
+    const log = vi.fn();
+    const materialize = vi.fn().mockResolvedValue({});
+    await runConnect({ rootDir, baseUrl: 'https://control.example', json: true }, {
+      createPlan: vi.fn().mockResolvedValue(plan()),
+      preflight: vi.fn().mockResolvedValue({
+        projectRoot: rootDir,
+        environmentPath: join(rootDir, '.env.local'),
+        descriptorPath: join(rootDir, '.glirastes/platform-connection.json'),
+      }),
+      clientFactory: vi.fn(() => client),
+      openBrowser: vi.fn(),
+      materialize,
+      createRunnerKey: () => 'local-runner',
+      log,
+    });
+
+    expect(JSON.parse(log.mock.calls.flat().join('\n'))).toEqual({
+      schemaVersion: 1, status: 'connected', appId, environmentId: null,
+    });
+    expect(materialize.mock.calls[0]?.[0].connection).not.toHaveProperty('environmentId');
   });
 
   it('requires a current setup receipt before starting or consuming pairing', async () => {

@@ -106,7 +106,16 @@ export class RuntimeConnectClient {
     signal?: AbortSignal,
   ): Promise<PairingStartResponse> {
     const body = PairingStartRequestSchema.parse(input);
-    const value = await this.request('', body, signal);
+    let value: unknown;
+    const rejection: { status?: number } = {};
+    try {
+      value = await this.request('', body, signal, rejection);
+    } catch (error) {
+      // An older Platform rejects the unknown field; retry once without it.
+      if (rejection.status !== 400 || body.capabilities === undefined) throw error;
+      const { capabilities: _capabilities, ...legacy } = body;
+      value = await this.request('', legacy, signal);
+    }
     const parsed = PairingStartResponseSchema.safeParse(value);
     if (!parsed.success) {
       throw diagnostic(
@@ -234,6 +243,7 @@ export class RuntimeConnectClient {
     suffix: '' | '/token',
     body: unknown,
     signal?: AbortSignal,
+    rejection?: { status?: number },
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -261,6 +271,7 @@ export class RuntimeConnectClient {
       );
     }
     if (!response.ok) {
+      if (rejection) rejection.status = response.status;
       throw diagnostic(
         'E-CONNECT-REQUEST',
         `The Control Plane pairing request failed (${response.status}).`,

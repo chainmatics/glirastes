@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { PlatformConnectionDescriptorSchema } from '../../contracts/index.js';
 import {
   connectionDescriptorPath,
   renderConnectionDescriptor,
@@ -22,6 +23,14 @@ describe('connection descriptor', () => {
     expect(JSON.parse(rendered)).toEqual(connection);
     expect(rendered.endsWith('\n')).toBe(true);
     expect(rendered).not.toMatch(/apiKey|credential|secret/i);
+  });
+
+  it('renders and parses a descriptor without environmentId', () => {
+    const { environmentId: _unused, ...appConnection } = connection;
+    const rendered = renderConnectionDescriptor(appConnection);
+    expect(JSON.parse(rendered)).toEqual(appConnection);
+    expect(JSON.parse(rendered)).not.toHaveProperty('environmentId');
+    expect(PlatformConnectionDescriptorSchema.safeParse(connection).success).toBe(true);
   });
 
   it('uses the tracked descriptor path inside .glirastes', () => {

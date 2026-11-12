@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -276,6 +276,22 @@ describe('runSync', () => {
     expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ appId }));
     const output = JSON.parse(String(vi.mocked(deps.value.log!).mock.calls[0]?.[0]));
     expect(output).toMatchObject({ appId, environmentId });
+  });
+
+  it('syncs for the app when the descriptor has no environmentId', async () => {
+    const rootDir = await fixture({ descriptorEnvironmentId: '' });
+    const raw = await readFile(join(rootDir, '.glirastes/platform-connection.json'), 'utf8');
+    const { environmentId: _unused, ...rest } = JSON.parse(raw);
+    await writeFile(join(rootDir, '.glirastes/platform-connection.json'), JSON.stringify(rest));
+    const deps = dependencies();
+
+    await runSync({ rootDir }, deps.value);
+    await runSync({ rootDir, json: true }, deps.value);
+
+    const calls = vi.mocked(deps.value.log!).mock.calls;
+    expect(String(calls[0]?.[0])).toContain(`for app ${appId}:`);
+    expect(String(calls[0]?.[0])).not.toContain('environment');
+    expect(JSON.parse(String(calls[1]?.[0]))).not.toHaveProperty('environmentId');
   });
 
   it('fills a partial process credential set only from verified .env.local', async () => {
