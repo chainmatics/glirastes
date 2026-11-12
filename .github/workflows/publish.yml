@@ -74,5 +74,6 @@ jobs:
       # Auth is via GitHub OIDC (Trusted Publishing) — no token needed.
       # Configure the trusted publisher for this repo + workflow on npmjs.com:
       # npm package → Settings → Trusted Publisher → GitHub Actions.
+      # Prereleases (x.y.z-id.n) go to the `next` dist-tag so `latest` stays on the stable line.
       - name: Publish to npm with provenance
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --tag "$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"

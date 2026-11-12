@@ -70,7 +70,7 @@ describe('release workflows', () => {
       'bun run build',
       'bun install --frozen-lockfile --cwd examples/react-nest-separate/api',
       'bun run test',
-      'npm publish --access public --provenance',
+      `npm publish --access public --provenance --tag "$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"`,
     ]);
   });
 });
@@ -79,7 +79,7 @@ describe('release notes', () => {
   const manifest = JSON.parse(read('package.json')) as { version: string; exports: Record<string, unknown> };
   const changelog = read('CHANGELOG.md');
 
-  const releases = [...changelog.matchAll(/^## \[(\d+\.\d+\.\d+)\] - (Unreleased|\d{4}-\d{2}-\d{2})$/gm)];
+  const releases = [...changelog.matchAll(/^## \[(\d+\.\d+\.\d+(?:-[0-9a-z.]+)?)\] - (Unreleased|\d{4}-\d{2}-\d{2})$/gm)];
 
   it('opens the CHANGELOG with the package version and a compare link', () => {
     expect(releases[0]?.[1]).toBe(manifest.version);
