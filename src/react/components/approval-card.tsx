@@ -1,5 +1,55 @@
+import { useState } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import type { ApprovalCardProps } from '../types.js';
+
+const COLLAPSED_ITEMS = 2;
+const LONG_TEXT_LENGTH = 100;
+
+function DetailValue({ value, items }: { value: string; items?: string[] }) {
+  const { locale } = useChatContext();
+  const [expanded, setExpanded] = useState(false);
+  const isList = !!items && items.length > COLLAPSED_ITEMS;
+  const isLong = !isList && value.length > LONG_TEXT_LENGTH;
+
+  if (!isList && !isLong) {
+    return <span data-element="detail-value">{value}</span>;
+  }
+
+  const hidden = isList ? items.length - COLLAPSED_ITEMS : 0;
+  const toggleLabel = expanded
+    ? locale.showLessLabel
+    : isList
+      ? locale.showAllItemsLabel.replace('{count}', String(items.length))
+      : locale.showMoreLabel;
+
+  return (
+    <span data-element="detail-value" data-expanded={expanded ? '' : undefined}>
+      {isList && expanded ? (
+        <ul data-element="detail-items">
+          {items.map((item, i) => (
+            <li key={i}>{item}</li>
+          ))}
+        </ul>
+      ) : isList ? (
+        <span data-element="detail-summary">
+          {items.slice(0, COLLAPSED_ITEMS).join(', ')} +{hidden} {locale.moreItemsLabel}
+        </span>
+      ) : (
+        <span data-element="detail-text" data-collapsed={expanded ? undefined : ''}>
+          {value}
+        </span>
+      )}
+      <button
+        type="button"
+        data-element="detail-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        {toggleLabel}
+      </button>
+    </span>
+  );
+}
 
 /**
  * Single tool approval card with rich detail display.
@@ -48,7 +98,7 @@ export function ApprovalCard({
             return (
               <div key={i} data-element="detail-line">
                 <span data-element="detail-label">{label}</span>
-                <span data-element="detail-value">{value}</span>
+                <DetailValue value={value} items={approval.detailItems?.[i]} />
               </div>
             );
           })}

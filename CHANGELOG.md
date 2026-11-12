@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The runner registers with `GLIRASTES_BUILD_ID`, else `glirastes@<sdk version>`, instead of `0.0.0` when `createGlirastes` gets no `version`.
 - The default Platform URL is now `https://api.glirastes.io`; the previous `api.glirastes.chainmatics.io` host did not resolve, so connected apps without `GLIRASTES_CONTROL_PLANE_URL` never reached the Platform.
+- The approval card no longer hides what you approve: array values show the first two items plus "+N weitere" with an expandable one-item-per-line list, and long text expands to wrap fully (`aria-expanded`, German and English locale strings).
 
 ## [0.5.0] - 2026-11-11
 
