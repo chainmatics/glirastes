@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Connect once: `glirastes connect` issues one app connection key per run (90 days by default, 1 year or no expiry, chosen in Citadel) and writes it to `.env.local` as `GLIRASTES_API_KEY`. `.glirastes/platform-connection.json` no longer holds an environment id. Against an old Platform the CLI falls back to the per-environment pairing.
+- Deployments name their environment with `GLIRASTES_ENVIRONMENT=<environment key>` (`^[a-z0-9][a-z0-9-]{0,63}$`) and share the one `GLIRASTES_API_KEY`. An unknown name creates a pending request in Citadel; the app serves local tools and re-checks on an interval until an owner or admin approves it within the plan's places.
+- Without `GLIRASTES_ENVIRONMENT` the app runs as a read-only development connection that follows the reference environment, never registers and sends no health or metrics. With `NODE_ENV=production` it logs a warning.
+- Environment-bound keys from older pairings keep working. `glirastes doctor` suggests running `glirastes connect` again.
+- README, `docs/managed-runtime-sync.md` and `setting-up-glirastes` describe the new model.
+
 ## [0.6.0] - 2026-11-12
 
 Defaults of `createAiChatHandler` change; see Changed for each opt-out.
