@@ -428,12 +428,26 @@ const CACHE_BREAKPOINT = {
   openrouter: { cacheControl: { type: 'ephemeral' } },
 } as const;
 
+function mergeCacheBreakpoint(
+  providerOptions: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...providerOptions };
+  for (const [provider, options] of Object.entries(CACHE_BREAKPOINT)) {
+    const existing = merged[provider];
+    merged[provider] = {
+      ...(existing && typeof existing === 'object' ? existing : {}),
+      ...options,
+    };
+  }
+  return merged;
+}
+
 /** System prompt (with the tools before it) and the newest message as cache breakpoints. */
-function withCacheBreakpoints(systemPrompt: string, messages: unknown[]): unknown[] {
+export function withCacheBreakpoints(systemPrompt: string, messages: unknown[]): unknown[] {
   const marked = messages.map((message, index) => {
     if (index !== messages.length - 1) return message;
     const record = message as { providerOptions?: Record<string, unknown> };
-    return { ...record, providerOptions: { ...record.providerOptions, ...CACHE_BREAKPOINT } };
+    return { ...record, providerOptions: mergeCacheBreakpoint(record.providerOptions) };
   });
   return systemPrompt
     ? [{ role: 'system', content: systemPrompt, providerOptions: CACHE_BREAKPOINT }, ...marked]

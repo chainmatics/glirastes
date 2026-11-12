@@ -2,7 +2,7 @@ import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { defineTool } from '../../../../types.js';
-import { createAiChatHandler } from '../create-ai-chat-handler.js';
+import { createAiChatHandler, withCacheBreakpoints } from '../create-ai-chat-handler.js';
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
@@ -76,6 +76,23 @@ describe('prompt caching', () => {
     expect(names[0]).toEqual(names[1]);
     expect(names[0]![0]).toBe('find_tools');
     expect(names[0]).toContain('tasks_create');
+  });
+
+  it('merges the breakpoint into provider options the message already has', () => {
+    const [, last] = withCacheBreakpoints('S', [{
+      role: 'user',
+      content: [{ type: 'text', text: 'Hallo' }],
+      providerOptions: {
+        anthropic: { sendReasoning: false },
+        openrouter: { reasoning: { effort: 'low' } },
+        openai: { store: false },
+      },
+    }]) as Array<{ providerOptions: Record<string, unknown> }>;
+    expect(last!.providerOptions).toEqual({
+      anthropic: { sendReasoning: false, cacheControl: { type: 'ephemeral' } },
+      openrouter: { reasoning: { effort: 'low' }, cacheControl: { type: 'ephemeral' } },
+      openai: { store: false },
+    });
   });
 
   it('can be switched off', async () => {
