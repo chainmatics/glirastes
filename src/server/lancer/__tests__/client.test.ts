@@ -104,7 +104,7 @@ describe('createLancer', () => {
 
       expect(result).toEqual(apiResult);
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('https://api.glirastes.chainmatics.io/v1/primus/classify');
+      expect(url).toBe('https://api.glirastes.io/v1/primus/classify');
       expect(JSON.parse(init.body)).toEqual({ message: 'hello', modules: ['mod-1'] });
     });
 
@@ -144,7 +144,7 @@ describe('createLancer', () => {
       ]);
 
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('https://api.glirastes.chainmatics.io/v1/warden/check');
+      expect(url).toBe('https://api.glirastes.io/v1/warden/check');
       expect(JSON.parse(init.body)).toEqual({ input: 'bad input', policies: ['no-profanity'] });
     });
 
@@ -191,7 +191,7 @@ describe('createLancer', () => {
 
       expect(result).toEqual(apiResult);
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('https://api.glirastes.chainmatics.io/v1/aegis/analyze');
+      expect(url).toBe('https://api.glirastes.io/v1/aegis/analyze');
       expect(JSON.parse(init.body)).toEqual({ text: 'a@b.com', locales: ['en'], mode: 'pseudonymize', sessionId: undefined });
     });
 
@@ -221,7 +221,7 @@ describe('createLancer', () => {
 
       expect(result).toBe('a@b.com');
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('https://api.glirastes.chainmatics.io/v1/aegis/rehydrate');
+      expect(url).toBe('https://api.glirastes.io/v1/aegis/rehydrate');
       expect(JSON.parse(init.body)).toEqual({ text: '<EMAIL>', mappingToken: 'tok-123' });
     });
 
@@ -257,7 +257,7 @@ describe('createLancer', () => {
 
       expect(result).toEqual(apiResult);
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('https://api.glirastes.chainmatics.io/v1/aegis/check-leakage');
+      expect(url).toBe('https://api.glirastes.io/v1/aegis/check-leakage');
       expect(JSON.parse(init.body)).toEqual({ text: 'leaked@test.com', mappingToken: 'tok-123', locales: ['en'] });
     });
 
@@ -285,7 +285,7 @@ describe('createLancer', () => {
 
       expect(fetchMock).toHaveBeenCalledOnce();
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('https://api.glirastes.chainmatics.io/v1/proctor/events');
+      expect(url).toBe('https://api.glirastes.io/v1/proctor/events');
       const body = JSON.parse(init.body as string);
       expect(body.events).toHaveLength(1);
       expect(body.events[0].eventType).toBe('test');

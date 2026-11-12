@@ -1,7 +1,7 @@
 export type RuntimeMode = 'standalone' | 'managed';
 
 /** The hosted Glirastes Platform. Set `GLIRASTES_CONTROL_PLANE_URL` only to self-host or run it locally. */
-export const DEFAULT_CONTROL_PLANE_URL = 'https://api.glirastes.chainmatics.io';
+export const DEFAULT_CONTROL_PLANE_URL = 'https://api.glirastes.io';
 
 /** The shape of a runtime key issued by `glirastes connect`. */
 export const RUNTIME_API_KEY_PATTERN = /^gl_[A-Za-z0-9]{32,128}$/;

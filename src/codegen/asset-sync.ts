@@ -1,6 +1,6 @@
 export interface AssetSyncOptions {
   apiKey: string;
-  glirasterUrl: string; // default: 'https://api.glirastes.chainmatics.io'
+  glirasterUrl: string; // default: DEFAULT_CONTROL_PLANE_URL
   name: string;
   type: 'skill' | 'mcp-server';
   version: string;

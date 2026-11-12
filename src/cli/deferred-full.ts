@@ -21,6 +21,7 @@ import {
   RuntimeSetupClient,
   type RouteScanUpload,
 } from '../sync/runtime-setup-client.js';
+import { DEFAULT_CONTROL_PLANE_URL } from '../runtime/runtime-mode.js';
 
 type CommandName =
   | 'generate'
@@ -343,7 +344,7 @@ export async function runCli(args: string[]): Promise<void> {
     const shouldSync = rest.includes('--sync') || remote;
     if (shouldSync) {
       const apiKey = getFlagValue(rest, '--glirastes-key') ?? process.env.GLIRASTES_API_KEY;
-      const glirasterUrl = getFlagValue(rest, '--glirastes-url') ?? process.env.GLIRASTES_URL ?? 'https://api.glirastes.chainmatics.io';
+      const glirasterUrl = getFlagValue(rest, '--glirastes-url') ?? process.env.GLIRASTES_URL ?? DEFAULT_CONTROL_PLANE_URL;
       if (!apiKey) {
         console.warn('⚠ --sync/--remote requires GLIRASTES_API_KEY or --glirastes-key');
       } else {
@@ -423,7 +424,7 @@ export async function runCli(args: string[]): Promise<void> {
     const shouldSync = rest.includes('--sync') || remote;
     if (shouldSync) {
       const apiKey = getFlagValue(rest, '--glirastes-key') ?? process.env.GLIRASTES_API_KEY;
-      const glirasterUrl = getFlagValue(rest, '--glirastes-url') ?? process.env.GLIRASTES_URL ?? 'https://api.glirastes.chainmatics.io';
+      const glirasterUrl = getFlagValue(rest, '--glirastes-url') ?? process.env.GLIRASTES_URL ?? DEFAULT_CONTROL_PLANE_URL;
       if (!apiKey) {
         console.warn('⚠ --sync/--remote requires GLIRASTES_API_KEY or --glirastes-key');
       } else {
@@ -616,7 +617,7 @@ export async function runCli(args: string[]): Promise<void> {
   // Sync tool schemas to Glirastes platform
   if (command === 'sync') {
     const apiKey = getFlagValue(rest, '--api-key') ?? process.env.GLIRASTES_API_KEY ?? process.env.CHAINMATICS_API_KEY;
-    const baseUrl = getFlagValue(rest, '--url') ?? process.env.GLIRASTES_URL ?? 'https://api.glirastes.chainmatics.io';
+    const baseUrl = getFlagValue(rest, '--url') ?? process.env.GLIRASTES_URL ?? DEFAULT_CONTROL_PLANE_URL;
 
     if (!apiKey) {
       throw new Error(

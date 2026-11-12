@@ -12,7 +12,7 @@ Most apps never call `glirastes/sync` directly. `createGlirastes` from
 
 A connected app sets one variable, `GLIRASTES_API_KEY`.
 `GLIRASTES_CONTROL_PLANE_URL` is optional (default
-`https://api.glirastes.chainmatics.io`). The runtime asks the Platform which
+`https://api.glirastes.io`). The runtime asks the Platform which
 app, environment and runner the key belongs to:
 
 ```ts

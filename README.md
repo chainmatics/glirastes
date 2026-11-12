@@ -274,7 +274,7 @@ See the skill [`building-glirastes-chat-ui`](skills/building-glirastes-chat-ui/S
 `createGlirastes` from `glirastes/runtime` handles both. Connected, it falls
 back to the local code whenever the Platform is unreachable and reports errors
 to `onError` (operation and status only). `GLIRASTES_CONTROL_PLANE_URL` is
-optional and defaults to `https://api.glirastes.chainmatics.io`; set it only
+optional and defaults to `https://api.glirastes.io`; set it only
 for a self-hosted or local Platform.
 
 ```bash
