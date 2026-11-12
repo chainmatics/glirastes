@@ -684,6 +684,38 @@ describe('createGlirastes connected', () => {
     await vi.waitFor(() => expect(glirastes.accepted()).toBeDefined(), { timeout: 1_000 });
   });
 
+  it('looks up again when a development connection is read-only rejected and binds to the new reference', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const NEW_ENVIRONMENT_ID = id('3902');
+    const dev = (environmentId: string) => () => json({
+      schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId, runnerKey: 'dev-abcdefghijklm',
+    });
+    const base = platform({
+      deployments: [activeDeployment(privateKey)], publicKey,
+      lookup: [dev(ENVIRONMENT_ID), dev(NEW_ENVIRONMENT_ID)],
+    });
+    let rejected = false;
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes('/sync?') && !rejected) {
+        rejected = true;
+        return json({ code: 'development_connection_read_only' }, 403);
+      }
+      return (base.fetchImpl as typeof fetch)(input, init);
+    }) as unknown as typeof fetch;
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError,
+    }));
+
+    await glirastes.ready();
+
+    await vi.waitFor(
+      () => expect(glirastes.currentSource().identity).toMatchObject({ environmentId: NEW_ENVIRONMENT_ID }),
+      { timeout: 1_000 },
+    );
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
   it('never waits longer than the first-sync timeout', async () => {
     const fetchImpl = vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch;
     const glirastes = track(createGlirastes({

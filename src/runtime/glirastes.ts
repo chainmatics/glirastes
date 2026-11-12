@@ -192,6 +192,12 @@ function isPlaceRequired(error: unknown): boolean {
     && error.code === 'environment_place_required';
 }
 
+function isReferenceChanged(error: unknown): boolean {
+  return error instanceof RuntimeControlPlaneRequestError
+    && error.status === 403
+    && error.code === 'development_connection_read_only';
+}
+
 function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
@@ -342,6 +348,16 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     await closing?.close().catch(onError);
   };
 
+  // The same rejected reference is logged once, however often the lookup returns it.
+  let loggedReadOnlyFor: string | undefined;
+  const reportConnectionLoss = (error: unknown, environmentId: string): void => {
+    if (isReferenceChanged(error)) {
+      if (loggedReadOnlyFor === environmentId) return;
+      loggedReadOnlyFor = environmentId;
+    }
+    onError(error);
+  };
+
   /** Returns true when the lookup must start over: the Platform withdrew the place, or no reference environment exists yet. */
   const runConnection = async (connection: ResolvedRuntimeConnection): Promise<boolean> => {
     if (!config) return false;
@@ -381,11 +397,11 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           validateLocalDeploymentBindings({ revisions, bindings: bound.bindings });
         },
         onError: (error) => {
-          if (isPlaceRequired(error)) {
+          if (isPlaceRequired(error) || isReferenceChanged(error)) {
             placeLost = true;
             stopSync?.();
           }
-          onError(error);
+          reportConnectionLoss(error, environmentId);
         },
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         ...(options.push !== undefined ? { push: options.push } : {}),
@@ -421,9 +437,9 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         await sync.client.syncOnce();
         break;
       } catch (error) {
-        if (isPlaceRequired(error)) {
+        if (isPlaceRequired(error) || isReferenceChanged(error)) {
           placeLost = true;
-          onError(error);
+          reportConnectionLoss(error, environmentId);
           break;
         }
         onError(error);
