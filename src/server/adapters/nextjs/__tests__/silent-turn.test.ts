@@ -9,7 +9,7 @@ const usage = {
   outputTokens: { total: 13, text: 0, reasoning: 13 },
 };
 
-function silentStep(kind: 'reasoning-only' | 'empty-text') {
+function silentStep(kind: 'reasoning-only' | 'empty-text'): ReadableStream {
   return convertArrayToReadableStream([
     { type: 'stream-start', warnings: [] },
     ...(kind === 'reasoning-only'
