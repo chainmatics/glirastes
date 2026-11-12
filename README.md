@@ -43,6 +43,20 @@ or business data.
 
 ## Quickstart (Next.js App Router)
 
+### With a coding agent (recommended)
+
+```bash
+npm install glirastes @ai-sdk/openai @ai-sdk/react react-markdown
+npx --no-install glirastes init
+```
+
+Run `init` inside Claude Code or Codex (Node >= 20.6). Your agent then derives
+the tools from your routes, adds the chat route and the chat UI, and asks once
+whether the app runs Standalone or with the Platform. Existing files are never
+replaced; `--dry-run --json` previews without writing anything.
+
+### By hand
+
 **1. Install** the SDK and the chat peers (Node >= 20.6):
 
 ```bash
@@ -60,7 +74,6 @@ npx --no-install glirastes init
 `predev` / `prebuild` scripts (`glirastes tools refresh`) and a short hint in
 `AGENTS.md` / `CLAUDE.md`, installs the [agent skills](#agent-skills) and hands
 the integration to your coding agent. Existing files are never replaced.
-`--dry-run --json` previews without writing anything.
 
 **3. Derive the tools** from your routes, pages, URL filters and client actions:
 
@@ -82,15 +95,7 @@ import { createAiChatHandler } from 'glirastes/server/nextjs';
 import * as generated from '@/generated/glirastes/tools.generated';
 import { resolvePrincipal } from '@/lib/glirastes-principal'; // your session lookup
 
-const glirastes = createGlirastes({
-  generated,
-  localLimits: {
-    maxModelSteps: 6, maxToolCalls: 8, totalTimeoutMs: 60_000, toolTimeoutMs: 15_000,
-    maxInputTokens: 40_000, maxOutputTokens: 4_000, maxEstimatedCostUsd: 0.5,
-    maxRepeatedFingerprint: 3, maxConsecutiveErrors: 3,
-    delegation: { maxDepth: 1, maxBreadth: 1, sharedBudget: true },
-  },
-});
+const glirastes = createGlirastes({ generated });
 const openrouter = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY });
 
 export const runtime = 'nodejs';
@@ -107,38 +112,12 @@ export async function POST(request: Request) {
 }
 ```
 
-The handler protects the route for you. Set `GLIRASTES_APPROVAL_SECRET` (at
-least 16 characters, the same on every instance) before production: it signs
-each approval the handler asks for to that tool call, its input, an expiry
-(15 minutes by default) and the user (the managed principal, as here, or your
-`approvalScope(request)`), so an approval in a forged or edited chat history
-runs nothing; production refuses to serve approvals without it. An approved
-call runs only when every check passed in that request; any other approved
-call without a result in the history is denied. With the default in-process store, each
-approval runs at most once per process within its lifetime, and each caller
-holds at most 200 live approvals. Without a managed runtime or
-`approvalScope`, the caller is told apart by a keyed hash of the request's
-`Authorization` or `Cookie` header (only requests without credentials share
-one quota); `approvalScope` also binds each approval to its user. With several instances, pass a
-shared `approvalStore` (e.g. Redis), or a replayed history can run once more
-on another instance. The handler also answers 415 to a body that is not
-`application/json`, 403 to a browser request from another origin (list yours
-in `allowedOrigins`), 413 above `maxBodyBytes` (1 MB), and 400 to a body that
-is not JSON (`invalid_json`), to a history that repeats a tool call id or an
-approval id (`duplicate_tool_call_id`, `duplicate_approval_id`), to a
-malformed tool part or approval (`tool_part_malformed`, `approval_malformed`)
-and to more than 32 approved calls in one request (`too_many_approvals`).
+Budgets default to safe values; pass `localLimits: { maxToolCalls: 4 }` to override single fields.
 
-Endpoint tools call the origin of the chat request's URL, the address your
-Next.js server listens on, so they reach the app's own route handlers. If your
-API runs in another process, even under the same public origin behind a
-proxy, pass `endpointCaller: (request) => createHttpEndpointCaller({ baseUrl,
-request })` with its origin; `trustForwardedHeaders: true` is the alternative
-only when every request comes through a proxy that sets `x-forwarded-host`
-(otherwise a client can aim the calls, with the user's cookie, at any host).
-
-`executeTool` and routes built from `glirastes/runtime/ai-sdk` alone run a tool
-without these approval checks; give them only input your server has authorized.
+Before production set `GLIRASTES_APPROVAL_SECRET` (at least 16 characters, the
+same on every instance): it signs each approval so a forged or edited chat
+history runs nothing. Request limits, multi-instance setups and the rest are in
+[docs/chat-route-security.md](docs/chat-route-security.md).
 
 **5. Mount the chat** and the navigation bridge (client components):
 
@@ -278,10 +257,15 @@ optional and defaults to `https://api.glirastes.io`; set it only
 for a self-hosted or local Platform.
 
 ```bash
-npx glirastes connect --base-url <platform-url>   # pair the app, writes GLIRASTES_API_KEY
-npx glirastes sync                                # upload the current local setup
-npx glirastes doctor                              # local checks, no network
+npx glirastes connect   # pair the app with the hosted Platform, writes GLIRASTES_API_KEY
+npx glirastes sync      # upload the current local setup
+npx glirastes doctor    # local checks, no network
 ```
+
+Pass `--base-url <platform-url>` to `connect` only for a self-hosted or local
+Platform. For a production server or CI where nobody runs `connect`, create a
+key in the Platform dashboard under **Settings → API keys → "Keys for servers
+and CI"** and set it as `GLIRASTES_API_KEY`.
 
 The **Glirastes Platform** is the optional control plane: reviewed tool
 configuration, signed immutable revisions, staged rollouts, approvals and
@@ -327,7 +311,7 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes tools enrich --managed [--first-run] [--base <branch>]` | Pro, CI only: run the managed tool agent |
 | `glirastes setup [--dry-run] [--managed]` | Validate and install the local setup artifacts |
 | `glirastes setup inspect` | Inspect project manifests before integration |
-| `glirastes connect --base-url <url>` | Pair the app with the Platform |
+| `glirastes connect [--base-url <url>]` | Pair the app with the Platform (`--base-url` only for self-hosted) |
 | `glirastes sync` | Upload the current local setup |
 | `glirastes doctor [--managed] [--verbose] [--json]` | Diagnose the local setup |
 | `glirastes install [--host a,b]` | Install the agent skills only |
@@ -355,6 +339,7 @@ FastAPI are integrated and automatically checked. Exact levels and evidence:
 
 - [Support matrix](docs/support-matrix.md)
 - [Tool policy](docs/tool-policy.md)
+- [Chat route security](docs/chat-route-security.md)
 - [Chat interactions (`@` and `/`)](docs/chat-interactions.md)
 - [Managed runtime sync](docs/managed-runtime-sync.md)
 - [Runtime persistence](docs/runtime-persistence.md)
