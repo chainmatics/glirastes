@@ -120,8 +120,10 @@ value, only name them.
 
 ## Connecting the Platform
 
-Platform mode only, with the developer's explicit consent: `glirastes connect
---base-url <confirmed-control-plane-url>`. Pairing adopts the app id of
+Platform mode only, with the developer's explicit consent: `glirastes connect`
+(the hosted Platform at `https://api.glirastes.io`). Only for a self-hosted or
+local Platform add `--base-url <confirmed-control-plane-url>` (or set
+`GLIRASTES_CONTROL_PLANE_URL`); the flag wins over the variable. Pairing adopts the app id of
 `.glirastes/tools.json` and refuses a different one. Afterwards
 `glirastes sync` uploads the current technical result; it never reassesses
 source and never activates anything. Existing Managed apps keep `--managed`

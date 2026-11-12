@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { DEFAULT_CONTROL_PLANE_URL } from '../../runtime/runtime-mode.js';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -124,15 +125,10 @@ function localRunnerKey(): string {
   return `local-${randomBytes(18).toString('base64url')}`;
 }
 
-function requiredBaseUrl(value: string | undefined): string {
-  if (!value) {
-    throw connectError(
-      'E-CONNECT-URL-REQUIRED',
-      '--base-url is required to connect to the Glirastes Platform.',
-      'pass-control-plane-url',
-    );
-  }
-  return value;
+function resolveBaseUrl(flag: string | undefined): string {
+  return flag?.trim()
+    || process.env.GLIRASTES_CONTROL_PLANE_URL?.trim()
+    || DEFAULT_CONTROL_PLANE_URL;
 }
 
 /**
@@ -170,7 +166,7 @@ export async function runConnect(
   dependencies: ConnectCommandDependencies = {},
 ): Promise<void> {
   const rootDir = resolve(options.rootDir);
-  const baseUrl = requiredBaseUrl(options.baseUrl);
+  const baseUrl = resolveBaseUrl(options.baseUrl);
   const createPlan = dependencies.createPlan ?? createSetupPlan;
   const createSelfPlan = dependencies.createSelfPlan ?? createSelfSetupPlan;
   const plan = await createPlan({ rootDir });
