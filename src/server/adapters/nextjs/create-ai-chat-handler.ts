@@ -58,7 +58,11 @@ import {
   buildToolContext,
   createInternalApiCallerFromRequest,
 } from './context-helpers.js';
-import { prepareModelMessages, wrapToolsForVercelAi } from './prepare-model-messages.js';
+import {
+  prepareModelMessages,
+  wrapToolsForVercelAi,
+  type HistoryOptions,
+} from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
 import { isSilentTurn, silentTurnFallbackText, withSilentTurnFallback } from './silent-turn-fallback.js';
 import { toolPresentationOf } from './tool-presentation.js';
@@ -94,6 +98,8 @@ import { defaultIntentRouterFor, previousTurnScope } from './default-intent-rout
 export interface StreamHandlerContext {
   /** Locale of the chat, for texts the handler writes itself. */
   locale?: string;
+  /** How earlier turns are sent to the model (see `AiChatHandlerConfig.history`). */
+  history?: HistoryOptions | false;
   /**
    * AI tools (output of toolsToAiTools, RBAC-filtered). Every tool that can
    * ask for approval carries the execution gate of this request: it executes
@@ -444,7 +450,7 @@ async function defaultStreamHandler(
   }
   const modelMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
-    { maxContextMessages: ctx.maxContextMessages },
+    { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
   );
 
   let wasTruncated = false;
@@ -784,6 +790,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     guardrails,
     intentRouter,
     intentRouting = true,
+    history,
     wrapHandler,
     onError: onErrorConfig,
     onToolError,
@@ -1493,6 +1500,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           temperature,
           maxContextMessages,
         locale,
+        history,
           modelTier: pipelineResult.model.modelId,
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
@@ -1657,6 +1665,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         temperature,
         maxContextMessages,
         locale,
+        history,
         modelTier: routing?.modelTier,
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,

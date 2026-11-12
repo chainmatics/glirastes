@@ -17,6 +17,7 @@ import type {
 import type { Lancer } from '../../lancer/index.js';
 import type { ApprovalStore } from './approval-binding.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
+import type { HistoryOptions } from './prepare-model-messages.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig } from '../../core/index.js';
 import type {
   Principal,
@@ -289,6 +290,14 @@ export interface AiChatHandlerConfig {
    */
   emitStepReports?: boolean;
   maxContextMessages?: number;
+  /**
+   * How earlier turns reach the model (default on): the current turn
+   * complete, the previous turn with compacted tool results (long arrays
+   * shortened to their first items plus a count, long strings cut), older
+   * turns as text only, at most `maxTurns` (6) within `maxTokens` (4000,
+   * estimated). `false` keeps the flat slice-and-prune of earlier versions.
+   */
+  history?: HistoryOptions | false;
   /**
    * Number of recent user/assistant text pairs to include as conversation
    * history for intent classification. Helps the classifier understand
