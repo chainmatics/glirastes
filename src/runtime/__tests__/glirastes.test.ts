@@ -223,6 +223,12 @@ describe('createGlirastes in standalone', () => {
     expect(http.mock).not.toHaveBeenCalled();
   });
 
+  it('runs without localLimits', async () => {
+    const glirastes = track(createGlirastes({ generated: generated(), env: {} }));
+    await glirastes.ready();
+    expect(glirastes.currentSource().mode).toBe('standalone');
+  });
+
   it('keeps one instance per app in the process', async () => {
     const first = track(createGlirastes({ generated: generated(), localLimits: limits, env: {} }));
     const second = createGlirastes({ generated: generated(), localLimits: limits, env: {} });
