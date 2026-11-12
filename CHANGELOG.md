@@ -7,15 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+Defaults of `createAiChatHandler` change; release as a minor version.
 
-- Default intent routing in `createAiChatHandler`: with `toolDiscovery` and no `intentRouter`, a turn starts with a small tool set instead of every tool. Modules come from the generated tool metadata (module, kind, method, usage hints, synonyms; fragments like `tasksReminder` join `tasks`, `ui.*` tools join the domain they name), the request is classified locally with the existing heuristics (German and English), and `ui_navigate` plus `find_tools` are always there. A weak request keeps a small default set, never all tools. Follow-ups keep the tools the previous turn called and, when the new message has no domain words, the previous request's modules. Tune with `intentRouting: { maxStartTools, alwaysAvailable }` or `examples` in `toolSemantics`; `intentRouting: false` restores the old start set. Routing only narrows: the start set is cut to what discovery already allows the principal.
-- `history` option: the current turn goes to the model complete, the previous turn with compacted tool results (arrays to the first 10 items plus a count, strings to 300 characters), older turns as text, at most 6 earlier turns within an estimated 4000 tokens. `history: false` keeps the earlier slice-and-prune.
-- `promptCaching` (default on): the system prompt and the newest message carry cache breakpoints for `@ai-sdk/anthropic` and `@openrouter/ai-sdk-provider`, and tools are sent active first in a stable order so tools found mid-turn append to the cached prefix.
+### Changed
+
+- **Start set with `toolDiscovery` and no `intentRouter`: about 10 tools instead of all.** A turn starts with the tools of the modules the request matches, `ui_navigate`, the tools the previous and the current turn called, and `find_tools`, which widens the set on demand. Modules come from the generated tool metadata (module, kind, method, usage hints, synonyms; fragments like `tasksReminder` join `tasks`, `ui.*` tools join the domain they name); the request is classified locally with the existing heuristics in German and English. A weak request gets a small default set, never all tools; a follow-up without domain words is routed by the previous request. Routing only narrows what discovery already allows the principal. Tune with `intentRouting: { maxStartTools, alwaysAvailable }` or `examples` in `toolSemantics`, replace with your own `intentRouter`. **Opt-out:** `intentRouting: false`.
+- **Turn-aware history on by default.** The current turn goes to the model complete; the previous turn is always kept, with compacted tool results (arrays to the first 10 items plus a count, strings to 300 characters) and oversized text cut to head and tail; older turns go as text, at most 6 earlier turns within an estimated 4000 tokens. Tune with `history: { maxTurns, toolTurns, maxTokens, maxItems, maxStringLength }`. **Opt-out:** `history: false`.
+- **Prompt caching hints on by default.** The system prompt is sent as a system message and, with the newest message, carries cache breakpoints for `@ai-sdk/anthropic` and `@openrouter/ai-sdk-provider` (merged into existing provider options); tools are sent active first in a stable order so tools found mid-turn append to the cached prefix. **Opt-out:** `promptCaching: false`.
+- **Silent turns show a fallback and report an error.** A turn whose model returned no visible output (no text, reasoning only, no tool call or executed approval) used to end as an empty bubble counted as `completed`. The chat now shows a short fallback text (German or English by `locale`) and the turn metric reports `error` / `model_error`. No opt-out; a dedicated error code would need a Platform change.
 
 ### Fixed
 
-- A turn whose model returned no visible output (no text, reasoning only, no tool call) ended as an empty bubble and counted as `completed`. The chat now shows a short fallback text (German or English by `locale`) and the turn metric reports `error` / `model_error`.
 - `uiAction` was not removed from tool results before they went back to the model: AI SDK 6 nests results under `output.value`, which the strip did not read.
 
 ## [0.5.1] - 2026-11-12
