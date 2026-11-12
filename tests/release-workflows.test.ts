@@ -70,7 +70,7 @@ describe('release workflows', () => {
       'bun run build',
       'bun install --frozen-lockfile --cwd examples/react-nest-separate/api',
       'bun run test',
-      `npm publish --access public --provenance --tag "$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"`,
+      `npm publish --access public --provenance --tag "$(node -p "['latest', 'next'][Number(require('./package.json').version.includes('-'))]")"`,
     ]);
   });
 });
