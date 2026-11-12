@@ -4,6 +4,7 @@ import {
   tokenize,
   jaccardSimilarity,
   classifyWithHeuristics,
+  rankModulesWithHeuristics,
   buildClassificationPrompt,
   parseJsonResponse,
   createIntentClassifier,
@@ -199,6 +200,20 @@ describe('classifyWithHeuristics', () => {
 // ---------------------------------------------------------------------------
 // buildClassificationPrompt
 // ---------------------------------------------------------------------------
+
+describe('rankModulesWithHeuristics', () => {
+  it('returns every module scored, best first, with the same winner as classifyWithHeuristics', () => {
+    const ranked = rankModulesWithHeuristics('schedule a meeting for Friday', [taskModule, calendarModule]);
+    expect(ranked.map((entry) => entry.moduleId)).toEqual(['calendar', 'tasks']);
+    expect(ranked[0]!.score).toBeGreaterThan(ranked[1]!.score);
+    expect(classifyWithHeuristics('schedule a meeting for Friday', [taskModule, calendarModule]).intent)
+      .toBe(ranked[0]!.moduleId);
+  });
+
+  it('returns an empty ranking for input without tokens', () => {
+    expect(rankModulesWithHeuristics('?!', [taskModule])).toEqual([]);
+  });
+});
 
 describe('buildClassificationPrompt', () => {
   it('includes all module IDs and descriptions', () => {

@@ -16,6 +16,8 @@ import type {
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import type { ApprovalStore } from './approval-binding.js';
+import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
+import type { HistoryOptions } from './prepare-model-messages.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig } from '../../core/index.js';
 import type {
   Principal,
@@ -190,6 +192,16 @@ export interface AiChatHandlerConfig {
   toolDiscovery?: boolean;
 
   /**
+   * Built-in start-set routing for `toolDiscovery` without `intentRouter`
+   * (default on): modules derived from the tool metadata, the request
+   * classified locally (German and English), the previous turn's tools kept
+   * for follow-ups. A turn starts with a small set plus `find_tools` and
+   * never with more than the principal may use. `false` starts every turn
+   * with all eligible tools; an object tunes the start set.
+   */
+  intentRouting?: boolean | DefaultIntentRoutingOptions;
+
+  /**
    * Search-only synonyms keyed by model-facing tool name (for example from
    * generated tool semantics). They improve `find_tools` ranking and never
    * make a tool eligible or reach the model.
@@ -278,6 +290,22 @@ export interface AiChatHandlerConfig {
    */
   emitStepReports?: boolean;
   maxContextMessages?: number;
+  /**
+   * How earlier turns reach the model (default on): the current turn
+   * complete, the previous turn with compacted tool results (long arrays
+   * shortened to their first items plus a count, long strings cut), older
+   * turns as text only, at most `maxTurns` (6) within `maxTokens` (4000,
+   * estimated). `false` keeps the flat slice-and-prune of earlier versions.
+   */
+  history?: HistoryOptions | false;
+  /**
+   * Prompt caching hints (default `true`): the system prompt and the newest
+   * message carry cache breakpoints for providers that need explicit ones
+   * (`@ai-sdk/anthropic`, `@openrouter/ai-sdk-provider`), and tools are sent
+   * active first in a stable order. Providers that cache a stable prefix
+   * automatically ignore the breakpoints. `false` sends `system` as before.
+   */
+  promptCaching?: boolean;
   /**
    * Number of recent user/assistant text pairs to include as conversation
    * history for intent classification. Helps the classifier understand

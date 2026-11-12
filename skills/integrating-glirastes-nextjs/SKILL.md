@@ -82,7 +82,15 @@ second, hand-maintained catalogue.
    chat's `@` and `/` list with a GET (`createChatInteractionsHandler`, see
    `building-glirastes-chat-ui`), give it `turn.managedRuntime` of the same
    principal, so the list and the turn decide alike. `toolDiscovery: true`
-   offers `find_tools`; it grants no tool. With metrics, an endpoint that
+   offers `find_tools`; it grants no tool. It also turns on the default
+   routing: each turn starts with the tools of the modules the request
+   matches (derived from the generated metadata, German and English),
+   `ui_navigate`, the tools the previous turn called, and `find_tools`, not
+   with every tool. Tune it in the app, not in a routing list: better tool
+   descriptions, usage hints and synonyms (`describing-glirastes-tools`),
+   `intentRouting: { maxStartTools: 12, alwaysAvailable: ['ui_navigate'] }`,
+   or `examples` per tool in `toolSemantics`. A custom `intentRouter`
+   replaces it; `intentRouting: false` starts every turn with all tools. With metrics, an endpoint that
    refuses a call its schema accepted (400 or 422) is reported as
    `tool_contract_rejected`, without content.
 4. Mount the navigation bridge once in the root layout, as a client component,

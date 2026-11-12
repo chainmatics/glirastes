@@ -58,8 +58,18 @@ import {
   buildToolContext,
   createInternalApiCallerFromRequest,
 } from './context-helpers.js';
-import { prepareModelMessages, wrapToolsForVercelAi } from './prepare-model-messages.js';
+import {
+  prepareModelMessages,
+  wrapToolsForVercelAi,
+  type HistoryOptions,
+} from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
+import {
+  isSilentTurn,
+  resumesToolApprovals,
+  silentTurnFallbackText,
+  withSilentTurnFallback,
+} from './silent-turn-fallback.js';
 import { toolPresentationOf } from './tool-presentation.js';
 import { PrincipalSchema } from '../../../contracts/index.js';
 import {
@@ -81,6 +91,7 @@ import {
   NON_DOMAIN_TOOL_NAMES,
   type HybridToolDiscovery,
 } from './tool-discovery.js';
+import { defaultIntentRouterFor, previousTurnScope } from './default-intent-routing.js';
 
 /**
  * Callback that the consumer provides to stream the AI response.
@@ -90,6 +101,12 @@ import {
  * calls streamText() themselves with full type safety.
  */
 export interface StreamHandlerContext {
+  /** Locale of the chat, for texts the handler writes itself. */
+  locale?: string;
+  /** How earlier turns are sent to the model (see `AiChatHandlerConfig.history`). */
+  history?: HistoryOptions | false;
+  /** Cache breakpoints and a stable tool order (see `AiChatHandlerConfig.promptCaching`). */
+  promptCaching?: boolean;
   /**
    * AI tools (output of toolsToAiTools, RBAC-filtered). Every tool that can
    * ask for approval carries the execution gate of this request: it executes
@@ -404,6 +421,54 @@ function createPipelineState(options: {
   };
 }
 
+// Namespaces of providers with explicit breakpoints; other providers ignore
+// them and cache a stable prefix on their own (OpenAI, Gemini, DeepSeek).
+const CACHE_BREAKPOINT = {
+  anthropic: { cacheControl: { type: 'ephemeral' } },
+  openrouter: { cacheControl: { type: 'ephemeral' } },
+} as const;
+
+function mergeCacheBreakpoint(
+  providerOptions: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...providerOptions };
+  for (const [provider, options] of Object.entries(CACHE_BREAKPOINT)) {
+    const existing = merged[provider];
+    merged[provider] = {
+      ...(existing && typeof existing === 'object' ? existing : {}),
+      ...options,
+    };
+  }
+  return merged;
+}
+
+/** System prompt (with the tools before it) and the newest message as cache breakpoints. */
+export function withCacheBreakpoints(systemPrompt: string, messages: unknown[]): unknown[] {
+  const marked = messages.map((message, index) => {
+    if (index !== messages.length - 1) return message;
+    const record = message as { providerOptions?: Record<string, unknown> };
+    return { ...record, providerOptions: mergeCacheBreakpoint(record.providerOptions) };
+  });
+  return systemPrompt
+    ? [{ role: 'system', content: systemPrompt, providerOptions: CACHE_BREAKPOINT }, ...marked]
+    : marked;
+}
+
+/**
+ * Providers serialize tools in object order. Active tools first, the rest
+ * behind them, so tools discovered mid-turn append instead of shifting the
+ * cached prefix.
+ */
+function orderToolsForCaching(
+  tools: Record<string, unknown>,
+  activeNames: ReadonlyArray<string>,
+): Record<string, unknown> {
+  const ordered: Record<string, unknown> = {};
+  for (const name of activeNames) if (name in tools) ordered[name] = tools[name];
+  for (const [name, tool] of Object.entries(tools)) if (!(name in ordered)) ordered[name] = tool;
+  return ordered;
+}
+
 /**
  * Built-in default stream handler.
  *
@@ -438,10 +503,19 @@ async function defaultStreamHandler(
   if (Object.keys(builtinTools).length > 0) {
     Object.assign(vercelTools, wrapToolsForVercelAi(builtinTools));
   }
+  const orderedTools = ctx.toolDiscovery
+    ? orderToolsForCaching(vercelTools, ctx.toolDiscovery.activeToolNames())
+    : vercelTools;
+  const promptCaching = ctx.promptCaching !== false;
   const modelMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
-    { maxContextMessages: ctx.maxContextMessages },
+    { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
   );
+  // Executed approvals are visible output for the stream and the metric alike.
+  const resumedApprovals = resumesToolApprovals(modelMessages);
+  const promptMessages = promptCaching
+    ? withCacheBreakpoints(ctx.systemPrompt, modelMessages)
+    : modelMessages;
 
   let wasTruncated = false;
   // At the runtime budget the turn blocks further tools and gets one bounded
@@ -511,9 +585,9 @@ async function defaultStreamHandler(
 
       const result = streamText({
         model: ctx.model as Parameters<typeof streamText>[0]['model'],
-        messages: modelMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
-        system: ctx.systemPrompt,
-        tools: vercelTools as Parameters<typeof streamText>[0]['tools'],
+        messages: promptMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
+        ...(promptCaching ? {} : { system: ctx.systemPrompt }),
+        tools: orderedTools as Parameters<typeof streamText>[0]['tools'],
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
@@ -646,11 +720,15 @@ async function defaultStreamHandler(
                 : event.finishReason === 'error'
                   ? 'error'
                   : 'completed';
+          // The user gets the fallback text; the Platform sees the failure.
+          const silent = status === 'completed'
+            && !resumedApprovals
+            && isSilentTurn(event.steps);
           ctx.turnMetrics?.finish({
-            status,
+            status: silent ? 'error' : status,
             errorCode: status === 'safety-stop'
               ? stoppedByBudget ? 'budget_exhausted' : 'step_limit'
-              : status === 'error' ? 'model_error' : null,
+              : status === 'error' || silent ? 'model_error' : null,
           });
 
           if (!finalStateWritten) {
@@ -669,7 +747,9 @@ async function defaultStreamHandler(
                     ? isSafetyStop
                       ? 'Paused at step safety cap. You can continue or stop.'
                       : 'Paused at configured step cap.'
-                    : undefined,
+                    : silent
+                      ? 'The model returned no answer.'
+                      : undefined,
               }),
             );
             finalStateWritten = true;
@@ -690,7 +770,12 @@ async function defaultStreamHandler(
         },
       });
 
-      const uiStream = result.toUIMessageStream({ onError: () => 'AI request failed' });
+      const uiStream = resumedApprovals
+        ? result.toUIMessageStream({ onError: () => 'AI request failed' })
+        : withSilentTurnFallback(
+          result.toUIMessageStream({ onError: () => 'AI request failed' }),
+          silentTurnFallbackText(ctx.locale),
+        );
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
@@ -772,6 +857,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     maxConversationHistoryPairs = 4,
     guardrails,
     intentRouter,
+    intentRouting = true,
+    history,
+    promptCaching,
     wrapHandler,
     onError: onErrorConfig,
     onToolError,
@@ -1480,6 +1568,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxOutputTokens,
           temperature,
           maxContextMessages,
+        locale,
+        history,
+        promptCaching,
           modelTier: pipelineResult.model.modelId,
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
@@ -1532,10 +1623,24 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       // Intent routing
       let routing: IntentRoutingResult | undefined;
+      let defaultStartToolNames: string[] | undefined;
       if (intentRouter) {
         const text = clarificationResume?.routingText
           ?? extractLastUserText(processedMessages);
         routing = await intentRouter(text, allToolNames);
+      } else if (enableToolDiscovery && intentRouting !== false) {
+        // Routing only picks the start set; discovery stays bounded by what
+        // this principal may use and can always widen it.
+        const manifest = managedTurn?.snapshot.manifestRevision;
+        defaultStartToolNames = defaultIntentRouterFor({
+          registry,
+          ...(manifest ? { manifest: { revisionId: manifest.revisionId, tools: manifest.tools } } : {}),
+          semantics: toolSemantics,
+          ...(typeof intentRouting === 'object' ? { options: intentRouting } : {}),
+        }).route({
+          text: clarificationResume?.routingText ?? extractLastUserText(processedMessages),
+          previous: previousTurnScope(processedMessages),
+        }).toolNames;
       }
 
       // Convert to AI tools
@@ -1554,7 +1659,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       const discoveryController = await buildDiscovery(
         registry,
-        routing?.toolNames?.length ? routing.toolNames : allToolNames,
+        routing?.toolNames?.length ? routing.toolNames : defaultStartToolNames ?? allToolNames,
         handlerBuiltinNames,
       );
       if (discoveryController) {
@@ -1629,6 +1734,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         maxOutputTokens,
         temperature,
         maxContextMessages,
+        locale,
+        history,
+        promptCaching,
         modelTier: routing?.modelTier,
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,

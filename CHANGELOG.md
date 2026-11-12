@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Defaults of `createAiChatHandler` change; release as a minor version.
+
+### Changed
+
+- **Start set with `toolDiscovery` and no `intentRouter`: about 10 tools instead of all.** A turn starts with the tools of the modules the request matches, `ui_navigate`, the tools the previous and the current turn called, and `find_tools`, which widens the set on demand. Modules come from the generated tool metadata (module, kind, method, usage hints, synonyms; fragments like `tasksReminder` join `tasks`, `ui.*` tools join the domain they name); the request is classified locally with the existing heuristics in German and English. A weak request gets a small default set, never all tools; a follow-up without domain words is routed by the previous request. Routing only narrows what discovery already allows the principal. Tune with `intentRouting: { maxStartTools, alwaysAvailable }` or `examples` in `toolSemantics`, replace with your own `intentRouter`. **Opt-out:** `intentRouting: false`.
+- **Turn-aware history on by default.** The current turn goes to the model complete; the previous turn is always kept, with compacted tool results (arrays to the first 10 items plus a count, strings to 300 characters) and oversized text cut to head and tail; older turns go as text, at most 6 earlier turns within an estimated 4000 tokens. Tune with `history: { maxTurns, toolTurns, maxTokens, maxItems, maxStringLength }`. **Opt-out:** `history: false`.
+- **Prompt caching hints on by default.** The system prompt is sent as a system message and, with the newest message, carries cache breakpoints for `@ai-sdk/anthropic` and `@openrouter/ai-sdk-provider` (merged into existing provider options); tools are sent active first in a stable order so tools found mid-turn append to the cached prefix. **Opt-out:** `promptCaching: false`.
+- **Silent turns show a fallback and report an error.** A turn whose model returned no visible output (no text, reasoning only, no tool call or executed approval) used to end as an empty bubble counted as `completed`. The chat now shows a short fallback text (German or English by `locale`) and the turn metric reports `error` / `model_error`. No opt-out; a dedicated error code would need a Platform change.
+
+### Fixed
+
+- `uiAction` was not removed from tool results before they went back to the model: AI SDK 6 nests results under `output.value`, which the strip did not read.
+
 ## [0.5.1] - 2026-11-12
 
 ### Changed

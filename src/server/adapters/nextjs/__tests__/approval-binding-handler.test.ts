@@ -768,3 +768,48 @@ describe('approval binding through the chat handler', () => {
     expect((await handler(post([user]))).status).toBe(200);
   });
 });
+
+describe('an approved call followed by a silent model step', () => {
+  it('counts the executed call as visible output in the stream and in the metric', async () => {
+    const events: Array<{ status: string; errorCode: string | null }> = [];
+    let call = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        call += 1;
+        return {
+          stream: convertArrayToReadableStream((call === 1
+            ? [
+              { type: 'stream-start', warnings: [] },
+              { type: 'tool-call', toolCallId: 'call-1', toolName: 'tasks_archive', input: JSON.stringify({ id: 't1' }) },
+              { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+            ]
+            : [
+              { type: 'stream-start', warnings: [] },
+              { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+            ]) as never),
+        };
+      },
+    });
+    const { registry } = tools();
+    const { handler, message } = await firstTurn({
+      tools: registry, model, systemPrompt: 'Assistant', approvalSecret: SECRET, locale: 'en-US',
+      metrics: {
+        identity: {
+          appId: '019fb900-0000-7000-8000-0000000000a1',
+          environmentId: '019fb900-0000-7000-8000-0000000000e1',
+          buildId: 'git:4f2c9e1',
+          instanceId: 'web-1',
+        },
+        record: (event) => { if (event.eventType !== 'tool_contract_rejected') events.push(event); },
+        flush: async () => undefined,
+        close: async () => undefined,
+      },
+    });
+    events.length = 0;
+
+    const second = await streamChunks(await handler(post([user, answered(message, true)])));
+    expect(second.some((chunk) => chunk.type === 'tool-output-available')).toBe(true);
+    expect(JSON.stringify(second)).not.toContain('did not produce an answer');
+    expect(events).toEqual([expect.objectContaining({ status: 'completed', errorCode: null })]);
+  });
+});
