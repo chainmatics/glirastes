@@ -439,7 +439,11 @@ describe('createGlirastes connected', () => {
   it('warns once in production without GLIRASTES_ENVIRONMENT', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const http = platform();
+      const http = platform({
+        lookup: [() => json({
+          schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: null, runnerKey: 'dev-abcdefghijklm',
+        })],
+      });
       const glirastes = track(createGlirastes({
         generated: generated(), localLimits: limits, push: false, pollIntervalMs: 60_000, onError: vi.fn(),
         env: { ...env, NODE_ENV: 'production' }, fetchImpl: http.fetchImpl,
@@ -493,6 +497,95 @@ describe('createGlirastes connected', () => {
 
     expect(glirastes.connection()).toMatchObject({ mode: 'development', environmentId: null });
     expect(http.calls.some(({ url }) => url.endsWith('/register'))).toBe(false);
+  });
+
+  it('follows the reference environment read-only in a development connection', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({
+      deployments: [activeDeployment(privateKey)], publicKey,
+      lookup: [() => json({
+        schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'dev-abcdefghijklm',
+      })],
+    });
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError,
+    }));
+
+    await glirastes.ready();
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(glirastes.accepted()?.policyRevision.tenantId).toBe(TENANT_ID);
+    expect(glirastes.currentSource().identity).toMatchObject({ environmentId: ENVIRONMENT_ID });
+    expect(http.calls.some(({ url }) => url.includes('/sync?runnerKey=dev-abcdefghijklm'))).toBe(true);
+    const forbidden = /\/(register|heartbeat|capabilities|leases)|\/metrics|\/runtime-setup/;
+    expect(http.calls.filter(({ url }) => forbidden.test(url))).toEqual([]);
+    expect(glirastes.metrics).toBeUndefined();
+  });
+
+  it('sends the runner key on the push stream of a development connection', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({
+      deployments: [activeDeployment(privateKey)], publicKey,
+      lookup: [() => json({
+        schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'dev-abcdefghijklm',
+      })],
+    });
+    const connect = vi.fn(() => new Promise<void>(() => {}));
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: { connect },
+      pollIntervalMs: 60_000, onError: vi.fn(),
+    }));
+
+    await glirastes.ready();
+
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled());
+    const [{ url }] = connect.mock.calls[0] as unknown as [{ url: string }];
+    expect(url).toBe(`${BASE_URL}/v1/runtime/apps/${APP_ID}/environments/${ENVIRONMENT_ID}/runners/stream?runnerKey=dev-abcdefghijklm`);
+  });
+
+  it('gives no production warning to a legacy environment key', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const http = platform();
+      const glirastes = track(createGlirastes({
+        generated: generated(), localLimits: limits, push: false, pollIntervalMs: 60_000, onError: vi.fn(),
+        env: { ...env, NODE_ENV: 'production' }, fetchImpl: http.fetchImpl,
+      }));
+      await glirastes.ready();
+
+      expect(glirastes.connection()?.mode).toBe('environment');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('logs a not-bound code again after a successful bind', async () => {
+    const http = platform();
+    let lookups = 0;
+    let syncs = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/v1/runtime/connection')) {
+        lookups += 1;
+        if (lookups === 2 || lookups === 4) return json({ code: 'environment_pending_approval' }, 409);
+      }
+      if (url.includes('/sync?') && ++syncs <= 2) return json({ code: 'environment_place_required' }, 409);
+      return (http.fetchImpl as typeof fetch)(input, init);
+    }) as unknown as typeof fetch;
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, push: false, pollIntervalMs: 20, onError,
+      env: { ...env, GLIRASTES_ENVIRONMENT: 'staging' }, fetchImpl,
+    }));
+
+    await glirastes.ready();
+
+    await vi.waitFor(() => expect(lookups).toBeGreaterThanOrEqual(5), { timeout: 2_000 });
+    const hints = onError.mock.calls.filter(([error]) => String((error as Error).message).includes('waiting for approval'));
+    expect(hints).toHaveLength(2);
   });
 
   it('drops to local tools and looks up again when the sync needs a place', async () => {

@@ -59,6 +59,37 @@ describe('RuntimeControlPlaneClient', () => {
     expect(manager.apply).toHaveBeenCalledOnce();
   });
 
+  it('sends the runner key on the stream only when read-only', async () => {
+    const urls: string[] = [];
+    const connect = vi.fn(async (input: { url: string }) => { urls.push(input.url); });
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      cursor: 'c', activeSnapshotComplete: true, deployments: [], revocations: [],
+    }), { status: 200 }));
+    for (const readOnly of [true, false]) {
+      const client = new RuntimeControlPlaneClient({
+        ...baseOptions, runnerKey: 'dev-abcdefghijklm', fetchImpl, readOnly,
+        manager: { apply: vi.fn().mockResolvedValue({}) } as never,
+        push: { connect: connect as never }, pollIntervalMs: 1_000,
+      });
+      const running = client.start();
+      await vi.waitFor(() => expect(urls.length).toBe(readOnly ? 1 : 2));
+      client.stop();
+      await running;
+    }
+    expect(urls[0]).toMatch(/\/runners\/stream\?runnerKey=dev-abcdefghijklm$/);
+    expect(urls[1]).toMatch(/\/runners\/stream$/);
+  });
+
+  it('refuses to register or heartbeat when read-only', async () => {
+    const fetchImpl = vi.fn();
+    const client = new RuntimeControlPlaneClient({
+      ...baseOptions, fetchImpl, readOnly: true, manager: { apply: vi.fn() } as never,
+    });
+    await expect(client.register({ capabilities: {} })).rejects.toThrow(/read-only/);
+    await expect(client.heartbeat({ health: 'healthy' })).rejects.toThrow(/read-only/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('continues polling when the optional push connector fails', async () => {
     vi.useFakeTimers();
     const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({

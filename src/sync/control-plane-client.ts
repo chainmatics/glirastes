@@ -56,6 +56,8 @@ export class RuntimeControlPlaneClient {
     environmentId: string;
     runnerKey: string;
     version: string;
+    /** A development connection only reads: no register, heartbeat, and the stream carries the runner key. */
+    readOnly?: boolean;
     /**
      * Discovery digest of the running code. Sent with every registration so
      * the Platform knows which capability report describes this runner.
@@ -133,6 +135,7 @@ export class RuntimeControlPlaneClient {
     if (relaxations !== undefined) capabilities.policyRelaxations = relaxations;
     this.assertTechnicalMetadata(capabilities);
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
+    this.assertWritable('register');
     return this.request('register', {
       method: 'POST',
       body: JSON.stringify({
@@ -151,6 +154,7 @@ export class RuntimeControlPlaneClient {
     technicalMetadata?: Record<string, unknown>;
   }) {
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
+    this.assertWritable('heartbeat');
     return this.request('heartbeat', {
       method: 'PATCH',
       body: JSON.stringify({
@@ -187,7 +191,9 @@ export class RuntimeControlPlaneClient {
     this.abortController = controller;
     if (this.options.push) {
       void this.options.push.connect({
-        url: `${this.runnerBaseUrl()}/stream`,
+        url: this.options.readOnly
+          ? `${this.runnerBaseUrl()}/stream?${new URLSearchParams({ runnerKey: this.options.runnerKey })}`
+          : `${this.runnerBaseUrl()}/stream`,
         headers: { authorization: `Bearer ${this.options.apiKey}` },
         signal: controller.signal,
         onEvent: async () => {
@@ -238,6 +244,12 @@ export class RuntimeControlPlaneClient {
       );
     }
     return response.json();
+  }
+
+  private assertWritable(operation: string): void {
+    if (this.options.readOnly) {
+      throw new Error(`A read-only runtime connection cannot ${operation}`);
+    }
   }
 
   private runnerBaseUrl(): string {

@@ -337,6 +337,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     managed = undefined;
     metrics = undefined;
     store.clear();
+    reportedNotBound.clear();
     await closing?.close().catch(onError);
   };
 
@@ -349,8 +350,8 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       return false;
     }
     const environmentId = connection.environmentId;
-    if (connection.mode === 'development' || environmentId === null) {
-      // Seam for read-only development sync: no register, heartbeat or metrics until it exists.
+    const readOnly = connection.mode === 'development';
+    if (environmentId === null) {
       resolved = connection;
       connectedBase = localSource({ targetAppId: connection.appId });
       return false;
@@ -365,6 +366,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         appId: connection.appId,
         environmentId,
         runnerKey: connection.runnerKey,
+        ...(readOnly ? { readOnly } : {}),
         version: options.version?.trim() || env.GLIRASTES_BUILD_ID?.trim() || `glirastes@${SDK_VERSION}`,
         stateStore: store,
         setupArtifact: options.generated.setupArtifact,
@@ -392,7 +394,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       targetAppId: connection.appId,
       environmentId,
     });
-    if (options.metrics !== false) {
+    if (options.metrics !== false && !readOnly) {
       metrics = createRuntimeMetricsSinkFromEnv(env, {
         ...options.metrics,
         connection: { appId: connection.appId, environmentId },
@@ -403,11 +405,13 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
 
     while (!abort.signal.aborted && !placeLost) {
       try {
-        await sync.client.register({
-          capabilities: { aiSdk: true },
-          technicalMetadata: { runtime: options.runtime ?? 'node' },
-        });
-        await sync.reportCapabilities().catch(onError);
+        if (!readOnly) {
+          await sync.client.register({
+            capabilities: { aiSdk: true },
+            technicalMetadata: { runtime: options.runtime ?? 'node' },
+          });
+          await sync.reportCapabilities().catch(onError);
+        }
         await sync.client.syncOnce();
         break;
       } catch (error) {
@@ -432,15 +436,20 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
 
   const connect = async (): Promise<void> => {
     if (!config) return;
-    if (env.NODE_ENV?.trim() === 'production' && !config.environment && !warnedNoEnvironment) {
-      warnedNoEnvironment = true;
-      console.warn(
-        "[glirastes] No GLIRASTES_ENVIRONMENT set; running as a development connection. Set it to the environment's key for deployments.",
-      );
-    }
     while (!abort.signal.aborted) {
       const connection = await lookupConnection();
       if (!connection || abort.signal.aborted) return;
+      reportedNotBound.clear();
+      if (
+        connection.mode === 'development'
+        && env.NODE_ENV?.trim() === 'production'
+        && !warnedNoEnvironment
+      ) {
+        warnedNoEnvironment = true;
+        console.warn(
+          "[glirastes] No GLIRASTES_ENVIRONMENT set; running as a development connection. Set it to the environment's key for deployments.",
+        );
+      }
       if (!(await runConnection(connection))) return;
       settleFirstAttempt();
       await delay(retryMs, abort.signal);

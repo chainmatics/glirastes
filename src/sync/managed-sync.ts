@@ -30,6 +30,8 @@ export function createManagedRuntimeSync(options: {
   environmentId: string;
   runnerKey: string;
   version: string;
+  /** Development connection: sync and stream only, no heartbeat, capability report or registration. */
+  readOnly?: boolean;
   stateStore?: RuntimeStateStore;
   stateFilePath?: string;
   fetchImpl?: typeof fetch;
@@ -74,6 +76,7 @@ export function createManagedRuntimeSync(options: {
     verifier,
     validateDeployment: options.validateDeployment,
     onPending: async (deployments) => {
+      if (options.readOnly) return;
       for (const deployment of deployments) {
         await client.heartbeat({
           health: options.validateDeployment ? 'healthy' : 'degraded',
@@ -87,6 +90,7 @@ export function createManagedRuntimeSync(options: {
       }
     },
     onActivated: async (deployments) => {
+      if (options.readOnly) return;
       for (const deployment of deployments) {
         await client.heartbeat({
           health: options.validateDeployment ? 'healthy' : 'degraded',
@@ -107,6 +111,7 @@ export function createManagedRuntimeSync(options: {
     environmentId: options.environmentId,
     runnerKey: options.runnerKey,
     version: options.version,
+    ...(options.readOnly ? { readOnly: true } : {}),
     ...(report ? { discoveryDigest: report.discoveryDigest, setupRunId: report.artifact.runId } : {}),
     policyRelaxations: report !== undefined,
     manager,
@@ -120,7 +125,7 @@ export function createManagedRuntimeSync(options: {
   let reported: Promise<CapabilityReportResult> | undefined;
   /** Uploads the capability report once per process; undefined without one. */
   const reportCapabilities = async (): Promise<CapabilityReportResult | undefined> => {
-    if (!report) return undefined;
+    if (!report || options.readOnly) return undefined;
     reported ??= uploadCapabilityReport({
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
