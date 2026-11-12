@@ -104,13 +104,15 @@ function stripUiActionsFromToolResults<T>(messages: T[]): T[] {
     if (m.role !== 'tool' || !Array.isArray(m.content)) return msg;
 
     const newContent = (m.content as Record<string, unknown>[]).map((part) => {
-      if (part.type !== 'tool-result' || !isPlainObject(part.result)) {
-        return part;
+      if (part.type !== 'tool-result') return part;
+      // AI SDK 5+ wraps the result as `output: { type: 'json', value }`.
+      const output = part.output as { type?: unknown; value?: unknown } | undefined;
+      if (output?.type === 'json' && isPlainObject(output.value) && 'uiAction' in output.value) {
+        const { uiAction: _stripped, ...rest } = output.value;
+        return { ...part, output: { ...output, value: rest } };
       }
-      const result = part.result as Record<string, unknown>;
-      if (!('uiAction' in result)) return part;
-
-      const { uiAction: _stripped, ...rest } = result;
+      if (!isPlainObject(part.result) || !('uiAction' in part.result)) return part;
+      const { uiAction: _stripped, ...rest } = part.result;
       return { ...part, result: rest };
     });
 
