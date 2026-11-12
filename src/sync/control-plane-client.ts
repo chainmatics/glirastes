@@ -16,6 +16,20 @@ export interface RuntimePushConnector {
   }): Promise<void>;
 }
 
+// Only short, machine-readable codes are surfaced; anything else is dropped.
+const ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+export async function errorCode(response: Response): Promise<string | undefined> {
+  try {
+    const body = await response.json() as { code?: unknown } | null;
+    return typeof body?.code === 'string' && ERROR_CODE_PATTERN.test(body.code)
+      ? body.code
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class RuntimeControlPlaneRequestError extends Error {
   readonly operation: string;
   readonly status: number;
@@ -220,6 +234,7 @@ export class RuntimeControlPlaneClient {
       throw new RuntimeControlPlaneRequestError(
         path.split('?', 1)[0]!,
         response.status,
+        await errorCode(response),
       );
     }
     return response.json();

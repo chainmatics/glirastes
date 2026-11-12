@@ -79,3 +79,17 @@ describe('resolveRuntimeConnectionConfig', () => {
     })).toEqual({ baseUrl: DEFAULT_CONTROL_PLANE_URL, apiKey: KEY });
   });
 });
+
+describe('GLIRASTES_ENVIRONMENT', () => {
+  it('is trimmed, and blank means absent', () => {
+    expect(resolveRuntimeConnectionConfig({ GLIRASTES_API_KEY: KEY, GLIRASTES_ENVIRONMENT: ' staging ' })?.environment)
+      .toBe('staging');
+    expect(resolveRuntimeConnectionConfig({ GLIRASTES_API_KEY: KEY, GLIRASTES_ENVIRONMENT: '  ' }))
+      .not.toHaveProperty('environment');
+  });
+
+  it.each(['Staging', '-x', 'a_b', 'a'.repeat(65)])('rejects %s', (value) => {
+    expect(() => resolveRuntimeConnectionConfig({ GLIRASTES_API_KEY: KEY, GLIRASTES_ENVIRONMENT: value }))
+      .toThrow(/GLIRASTES_ENVIRONMENT/);
+  });
+});
