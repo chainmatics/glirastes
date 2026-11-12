@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-12
+
+### Changed
+
+- README quickstart leads with the two-command coding-agent path; the chat route security details moved to `docs/chat-route-security.md`.
+- `glirastes connect` needs no `--base-url`: flag, then `GLIRASTES_CONTROL_PLANE_URL`, then `https://api.glirastes.io`. `glirastes sync` already reads the paired connection and needs none.
+- `createGlirastes({ localLimits })` is optional and each field falls back to `DEFAULT_LOCAL_LIMITS` (6 steps, 8 tool calls, 60 s, 40k/4k tokens, 0.5 USD); partial overrides merge onto it. The init skill and README drop the full limits block.
+- `setting-up-glirastes` asks once whether the app runs Standalone or with the Platform, records it, and lists the values both modes need (`GLIRASTES_APPROVAL_SECRET`).
+
+### Fixed
+
+- The runner registers with `GLIRASTES_BUILD_ID`, else `glirastes@<sdk version>`, instead of `0.0.0` when `createGlirastes` gets no `version`.
+- The default Platform URL is now `https://api.glirastes.io`; the previous `api.glirastes.chainmatics.io` host did not resolve, so connected apps without `GLIRASTES_CONTROL_PLANE_URL` never reached the Platform.
+- The approval card no longer hides what you approve: array values show the first two items plus "+N weitere" with an expandable one-item-per-line list, and long text expands to wrap fully (`aria-expanded`, German and English locale strings).
+
 ## [0.5.0] - 2026-11-11
 
 The Foundation release. Its surface differs from 0.4.0; read **Breaking** before
@@ -546,7 +561,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/chainmatics/glirastes/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/chainmatics/glirastes/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/chainmatics/glirastes/compare/v0.3.2...v0.4.0
 [0.2.1]: https://github.com/chainmatics/glirastes/compare/v0.2.0...v0.2.1

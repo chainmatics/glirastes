@@ -2,6 +2,7 @@
 // createLancer — factory for the Lancer platform client
 // ---------------------------------------------------------------------------
 
+import { DEFAULT_CONTROL_PLANE_URL } from '../../runtime/runtime-mode.js';
 import { Cache } from './cache.js';
 import { ServiceBlockedError } from './errors.js';
 import { TelemetryBuffer } from './telemetry-buffer.js';
@@ -24,7 +25,7 @@ import type {
   TelemetryEvent,
 } from './types.js';
 
-const DEFAULT_BASE_URL = 'https://api.glirastes.chainmatics.io';
+const DEFAULT_BASE_URL = DEFAULT_CONTROL_PLANE_URL;
 const DEFAULT_CACHE_TTL = 60_000;
 const DEFAULT_MAX_RETRIES = 3;
 

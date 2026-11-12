@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   openVerificationUrl,
   runConnect,
@@ -87,6 +87,34 @@ function connectedClient() {
 }
 
 describe('glirastes connect command', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    ['the hosted Platform without flag or env', undefined, undefined, 'https://api.glirastes.io'],
+    ['GLIRASTES_CONTROL_PLANE_URL over the default', undefined, 'https://self.example', 'https://self.example'],
+    ['the flag over the env', 'https://flag.example', 'https://self.example', 'https://flag.example'],
+  ])('pairs against %s', async (_label, flag, env, expected) => {
+    vi.stubEnv('GLIRASTES_CONTROL_PLANE_URL', env ?? '');
+    const rootDir = await fixture();
+    const clientFactory = vi.fn(() => ({
+      startPairing: vi.fn().mockRejectedValue(new Error('stop')),
+      pollForConnection: vi.fn(),
+    }));
+
+    await expect(runConnect({ rootDir, baseUrl: flag }, {
+      createPlan: vi.fn().mockResolvedValue(plan()),
+      preflight: vi.fn(async () => ({
+        projectRoot: rootDir,
+        environmentPath: join(rootDir, '.env.local'),
+        descriptorPath: join(rootDir, '.glirastes/platform-connection.json'),
+      })),
+      clientFactory,
+      log: vi.fn(),
+    })).rejects.toThrow('stop');
+
+    expect(clientFactory).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: expected }));
+  });
+
   it('opens Windows verification URLs with metacharacters without a shell', async () => {
     const url = 'https://platform.example/connect/pair?code=A&B=x|calc.exe';
     const launch = vi.fn().mockResolvedValue(undefined);

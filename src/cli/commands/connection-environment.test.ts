@@ -123,7 +123,7 @@ describe('connection environment materialization', () => {
     await materializeConnectionEnvironment({
       projectRoot: root,
       framework: 'nextjs',
-      connection: { ...connection, baseUrl: 'https://api.glirastes.chainmatics.io' },
+      connection: { ...connection, baseUrl: 'https://api.glirastes.io' },
       apiKey: credential,
       isGitIgnored: vi.fn().mockResolvedValue(true),
     });

@@ -1,6 +1,5 @@
 import {
   AppSetupArtifactSchema,
-  type ExecutionBudget,
   type Principal,
   type SecurityRevocation,
 } from '../contracts/index.js';
@@ -38,6 +37,8 @@ import {
 import type { RuntimeMetricsSink } from './metrics/turn-recorder.js';
 import { policyOverlayFromRevision } from './policy-overlay.js';
 import { resolveRuntimeConnectionConfig } from './runtime-mode.js';
+import { resolveLocalLimits, type LocalLimits } from './local-limits.js';
+import { SDK_VERSION } from './sdk-version.js';
 import type { ToolSearchSemanticsMap } from './tool-discovery.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
 
@@ -52,8 +53,8 @@ export interface GlirastesGeneratedModule extends GeneratedToolModule {
 export interface CreateGlirastesOptions {
   /** The generated module, e.g. `import * as generated from '@/generated/glirastes/tools.generated'`. */
   generated: GlirastesGeneratedModule;
-  /** Local turn limits; the runtime never exceeds them, whatever a Platform revision allows. */
-  localLimits: ExecutionBudget;
+  /** Local turn limits; the runtime never exceeds them, whatever a Platform revision allows. Unset fields use `DEFAULT_LOCAL_LIMITS`. */
+  localLimits?: LocalLimits;
   /**
    * Wraps the generated bindings before they are bound, e.g. to add write
    * feedback to the endpoint tools. Called once per process.
@@ -69,7 +70,7 @@ export interface CreateGlirastesOptions {
    * code whatever is reported here.
    */
   onError?: (error: unknown) => void;
-  /** The app version reported at runner registration. */
+  /** The app version reported at runner registration. Defaults to `GLIRASTES_BUILD_ID`, else `glirastes@<sdk version>`. */
   version?: string;
   /** A technical runtime label reported at registration, e.g. `nextjs`. */
   runtime?: string;
@@ -232,7 +233,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   }) => createLocalRuntimeSource({
     setupArtifact: bound.setupArtifact,
     bindings: bound.bindings,
-    localLimits: options.localLimits,
+    localLimits: resolveLocalLimits(options.localLimits),
     ...(identity ? { identity } : {}),
     ...(managed
       ? {
@@ -295,7 +296,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         appId: connection.appId,
         environmentId: connection.environmentId,
         runnerKey: connection.runnerKey,
-        version: options.version ?? '0.0.0',
+        version: options.version?.trim() || env.GLIRASTES_BUILD_ID?.trim() || `glirastes@${SDK_VERSION}`,
         stateStore: store,
         setupArtifact: options.generated.setupArtifact,
         // A deployment that names a tool this code lacks, or has changed, keeps running on the local tool.

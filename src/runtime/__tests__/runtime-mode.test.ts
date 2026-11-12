@@ -60,7 +60,7 @@ describe('resolveRuntimeConnectionConfig', () => {
       baseUrl: DEFAULT_CONTROL_PLANE_URL,
       apiKey: KEY,
     });
-    expect(DEFAULT_CONTROL_PLANE_URL).toBe('https://api.glirastes.chainmatics.io');
+    expect(DEFAULT_CONTROL_PLANE_URL).toBe('https://api.glirastes.io');
   });
 
   it('uses a self-hosted control plane URL when set', () => {

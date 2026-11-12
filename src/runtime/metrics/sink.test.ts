@@ -252,7 +252,7 @@ describe('createRuntimeMetricsSinkFromEnv', () => {
     sink?.record(event());
     await sink?.flush();
     expect(http.calls[0]!.url).toBe(
-      `https://api.glirastes.chainmatics.io/v1/runtime/apps/${APP_ID}/environments/${ENVIRONMENT_ID}/metrics/events`,
+      `https://api.glirastes.io/v1/runtime/apps/${APP_ID}/environments/${ENVIRONMENT_ID}/metrics/events`,
     );
   });
 

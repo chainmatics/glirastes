@@ -23,7 +23,7 @@ describe('glirastes help and version', () => {
     const stdout = captureStdout();
     await runCli(args);
     expect(stdout()).toMatch(/^Usage: glirastes init /);
-    expect(stdout()).toContain('glirastes connect --base-url <url>');
+    expect(stdout()).toContain('glirastes connect [--base-url <url>]');
     expect(process.exitCode).toBeUndefined();
   });
 

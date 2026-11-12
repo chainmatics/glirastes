@@ -22,6 +22,7 @@ import type {
 } from '../contract-bindings.js';
 import type { AiChatHandlerConfig } from '../../server/adapters/nextjs/types.js';
 import { createGlirastes, type Glirastes, type GlirastesChatTurn } from '../glirastes.js';
+import { SDK_VERSION } from '../sdk-version.js';
 import { createLocalSchemaDigest } from '../local-tool-bindings.js';
 
 const id = (suffix: string) => `019fa9a9-d5f7-7ec3-a3c7-8899de1d${suffix.padStart(4, '0')}`;
@@ -222,6 +223,12 @@ describe('createGlirastes in standalone', () => {
     expect(http.mock).not.toHaveBeenCalled();
   });
 
+  it('runs without localLimits', async () => {
+    const glirastes = track(createGlirastes({ generated: generated(), env: {} }));
+    await glirastes.ready();
+    expect(glirastes.currentSource().mode).toBe('standalone');
+  });
+
   it('keeps one instance per app in the process', async () => {
     const first = track(createGlirastes({ generated: generated(), localLimits: limits, env: {} }));
     const second = createGlirastes({ generated: generated(), localLimits: limits, env: {} });
@@ -300,6 +307,24 @@ describe('createGlirastes connected', () => {
     const request = new Request('https://app.example/api/chat');
     expect((await turn.managedRuntime.resolvePrincipal(request))?.tenantId).toBe(TENANT_ID);
     expect(turn.metrics).toBe(glirastes.metrics);
+  });
+
+  it.each([
+    ['an explicit version', { version: '2.3.4' }, { GLIRASTES_BUILD_ID: 'b1' }, '2.3.4'],
+    ['the build id', {}, { GLIRASTES_BUILD_ID: ' build-42 ' }, 'build-42'],
+    ['the SDK version', {}, {}, `glirastes@${SDK_VERSION}`],
+  ])('registers the runner with %s', async (_label, extra, extraEnv, expected) => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({ deployments: [activeDeployment(privateKey)], publicKey });
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env: { ...env, ...extraEnv },
+      fetchImpl: http.fetchImpl, push: false, pollIntervalMs: 60_000, ...extra,
+    }));
+
+    await glirastes.ready();
+
+    const register = http.calls.find(({ url }) => url.endsWith('/register'));
+    expect(JSON.parse(String(register?.init.body)).version).toBe(expected);
   });
 
   it('carries the platform environment before a deployment is accepted', async () => {

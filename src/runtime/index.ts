@@ -23,6 +23,7 @@ export {
   type BudgetReason,
   type ExecutionUsage,
 } from './budget.js';
+export { DEFAULT_LOCAL_LIMITS, resolveLocalLimits, type LocalLimits } from './local-limits.js';
 export { createExecutionFingerprint } from './fingerprint.js';
 export {
   DEFAULT_CONTROL_PLANE_URL,

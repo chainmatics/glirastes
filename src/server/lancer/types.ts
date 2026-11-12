@@ -56,7 +56,7 @@ export type OnServiceUnavailable = (
 /** Configuration for creating a Lancer client instance. */
 export interface LancerConfig {
   apiKey: string;
-  baseUrl?: string; // default: https://api.glirastes.chainmatics.io
+  baseUrl?: string; // default: https://api.glirastes.io
   cache?: { ttl: number }; // default: 60000 (60s)
   retry?: { maxRetries: number }; // default: 3
   /** Called whenever any service falls back (action='fallback'). */

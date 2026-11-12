@@ -243,7 +243,7 @@ describe('runSync', () => {
   it('needs only the key for the hosted platform', async () => {
     const rootDir = await fixture({
       writeEnvironment: false,
-      descriptorBaseUrl: 'https://api.glirastes.chainmatics.io',
+      descriptorBaseUrl: 'https://api.glirastes.io',
     });
     const deps = dependencies({
       env: { GLIRASTES_API_KEY: 'gl_processprocessprocessprocess1234' },
@@ -252,7 +252,7 @@ describe('runSync', () => {
     await runSync({ rootDir }, deps.value);
 
     expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({
-      baseUrl: 'https://api.glirastes.chainmatics.io',
+      baseUrl: 'https://api.glirastes.io',
       appId,
       setupApiKey: 'gl_processprocessprocessprocess1234',
     }));

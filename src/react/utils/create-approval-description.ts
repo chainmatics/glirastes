@@ -47,6 +47,11 @@ export interface ApprovalDescriptionConfig {
 // ============================================================================
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+interface DetailEntry {
+  line: string;
+  items?: string[];
+}
+
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?(Z|[+-]\d{2}:\d{2})?)?$/;
 
 function capitalize(str: string): string {
@@ -153,8 +158,8 @@ export function createApprovalDescriptionGenerator(
     return result;
   }
 
-  function collectDetails(obj: Record<string, unknown>): string[] {
-    const result: string[] = [];
+  function collectDetails(obj: Record<string, unknown>): DetailEntry[] {
+    const result: DetailEntry[] = [];
     for (const [key, value] of Object.entries(obj)) {
       if (value === undefined || value === null || value === '') continue;
       if (hiddenFields.has(key)) continue;
@@ -166,15 +171,14 @@ export function createApprovalDescriptionGenerator(
       }
 
       const label = fieldLabels[key] || key;
-      let displayValue: string;
       if (Array.isArray(value)) {
         const filtered = value.filter((v) => !UUID_REGEX.test(String(v)));
         if (filtered.length === 0) continue;
-        displayValue = filtered.map((v) => formatValue(key, v)).join(', ');
+        const items = filtered.map((v) => formatValue(key, v));
+        result.push({ line: `${label}: ${items.join(', ')}`, items });
       } else {
-        displayValue = formatValue(key, value);
+        result.push({ line: `${label}: ${formatValue(key, value)}` });
       }
-      result.push(`${label}: ${displayValue}`);
     }
     return result;
   }
@@ -186,15 +190,22 @@ export function createApprovalDescriptionGenerator(
     context?: ApprovalDescriptionContext,
   ): PendingApproval => {
     const details: string[] = [];
+    const detailItems: Array<string[] | undefined> = [];
     if (args && typeof args === 'object') {
       const stated = collectDetails(args as Record<string, unknown>);
       // What the call states comes first: a grouped card shows the first line.
-      details.push(...stated);
+      for (const entry of stated) {
+        details.push(entry.line);
+        detailItems.push(entry.items);
+      }
       if (context?.names?.size) {
         // A name the arguments already state is not repeated; a differing
         // one stays visible next to it.
         for (const [label, name] of collectNames(args as Record<string, unknown>, context.names)) {
-          if (!stated.some((line) => line.endsWith(`: ${name}`))) details.push(`${label}: ${name}`);
+          if (!stated.some((entry) => entry.line.endsWith(`: ${name}`))) {
+            details.push(`${label}: ${name}`);
+            detailItems.push(undefined);
+          }
         }
       }
     }
@@ -206,6 +217,7 @@ export function createApprovalDescriptionGenerator(
       messageId: '',
       description: toolLabels[toolName] || defaultDescription,
       details,
+      ...(detailItems.some(Boolean) ? { detailItems } : {}),
       ...(defaultConfirmText ? { confirmText: defaultConfirmText } : {}),
     };
   };

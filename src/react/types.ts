@@ -607,6 +607,9 @@ export interface ChatLocale {
   cancelButton: string;
   confirmButton: string;
   moreItemsLabel: string;
+  showAllItemsLabel: string;         // supports `{count}`
+  showMoreLabel: string;
+  showLessLabel: string;
   allCountLabel: string;
   pipelineTitle: string;
   pipelineRunningLabel: string;
@@ -894,6 +897,8 @@ export interface PendingApproval {
   description?: string;
   /** Detail lines (e.g. "Title: My Task", "Priority: High") */
   details?: string[];
+  /** Items of array-valued detail lines, by index into `details`. */
+  detailItems?: Array<string[] | undefined>;
   /** Confirm button text override */
   confirmText?: string;
 }

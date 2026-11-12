@@ -38,6 +38,22 @@ material questions that the code and earlier decisions cannot answer.
 
 ## Workflow
 
+0. Mode, asked once. Look for a line `Glirastes mode: standalone` or
+   `Glirastes mode: platform` in `AGENTS.md`/`CLAUDE.md`; if it exists, use it
+   and do not ask. Otherwise ask the developer:
+   - **Standalone**: open source only. No account, nothing is sent to the
+     Platform; tools, chat and approvals run entirely in the app, and your own
+     coding agent describes the tools.
+   - **With the Glirastes Platform** (Free or Pro): cost and usage overview,
+     versions with rollback, audit log, team approvals. With Pro the managed
+     CI tool agent describes new tools automatically. Source, prompts and
+     business data still stay in the app.
+
+   Write the answer as that line directly after the Glirastes hint block (never
+   inside it) and repeat it in the setup report. In autonomous mode without an
+   answer, run Standalone and list the open question in the final report.
+   Standalone: no Platform steps and no Platform values. Platform: connecting
+   still needs the developer's explicit consent.
 1. Inspect the project: `glirastes setup inspect --json`, then the code itself
    (frontend, backend, auth, schemas, pages, URL filters, client actions).
    Manifest hints are not proof. If the app uses `@chainmatics/agentic-*` or
@@ -90,14 +106,34 @@ ambiguity (availability, side effects, data class, confirmation, roles,
 planner behaviour), grouped by tool family. Record the answers as data in the
 files you may write, and the policy answers as commands for the developer.
 
+## Values for both modes
+
+The developer sets these as deployment secrets; never set, read or ask for a
+value, only name them.
+
+- Chat model access: `OPENROUTER_API_KEY` by default.
+- `GLIRASTES_APPROVAL_SECRET`: the chat handler signs tool approvals with it
+  (since 0.5.0). When the handler can ask for approvals and `NODE_ENV` is
+  `production`, chat fails with HTTP 500 `approval_secret_missing` without it.
+  Any long random value the developer generates (`openssl rand -base64 48`),
+  the same on every instance of one environment, unrelated to the Platform.
+
 ## Connecting the Platform
 
-Only with the developer's explicit consent: `glirastes connect --base-url
-<confirmed-control-plane-url>`. Pairing adopts the app id of
+Platform mode only, with the developer's explicit consent: `glirastes connect`
+(the hosted Platform at `https://api.glirastes.io`). Only for a self-hosted or
+local Platform add `--base-url <confirmed-control-plane-url>` (or set
+`GLIRASTES_CONTROL_PLANE_URL`); the flag wins over the variable. Pairing adopts the app id of
 `.glirastes/tools.json` and refuses a different one. Afterwards
 `glirastes sync` uploads the current technical result; it never reassesses
 source and never activates anything. Existing Managed apps keep `--managed`
 for setup and Doctor.
+
+For a production server or CI where nobody runs `glirastes connect`, the
+developer creates a key in the Platform dashboard under **Settings → API keys →
+"Keys for servers and CI"** (German UI: Einstellungen → API-Schlüssel →
+„Schlüssel für Server oder CI") and sets `GLIRASTES_API_KEY` as a deployment
+secret, plus `GLIRASTES_CONTROL_PLANE_URL` when it is not the hosted Platform.
 
 ## CI
 
@@ -108,10 +144,10 @@ it is the developer's decision. The job `glirastes-tools` runs
 `glirastes tools check --json` and `glirastes tools eval` with no secrets and
 no model on every pull request and push to `main`.
 
-- Free: you work through the resolve and describe lists locally, as in the
+- Free (Standalone, or Platform without Pro): you work through the resolve and describe lists locally, as in the
   workflow above, and commit the result. The workflow's second job,
   `glirastes-tools-enrich`, stays off; nothing else is needed.
-- Pro: the managed CI runner works the same lists in `glirastes-tools-enrich`,
+- Platform with Pro only: the managed CI runner works the same lists in `glirastes-tools-enrich`,
   automatically only for the tools a pull request or push changed, and
   commits them as `glirastes-bot` on the pull request branch. The backlog of
   an app that was never described runs once on request: start the workflow

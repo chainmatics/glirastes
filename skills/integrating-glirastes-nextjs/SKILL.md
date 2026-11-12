@@ -50,15 +50,8 @@ second, hand-maintained catalogue.
    import { resolvePrincipal } from '@/lib/glirastes-principal';
 
    // One instance per app and process, also when routes are bundled apart.
-   const glirastes = createGlirastes({
-     generated,
-     localLimits: {
-       maxModelSteps: 6, maxToolCalls: 8, totalTimeoutMs: 60_000, toolTimeoutMs: 15_000,
-       maxInputTokens: 40_000, maxOutputTokens: 4_000, maxEstimatedCostUsd: 0.5,
-       maxRepeatedFingerprint: 3, maxConsecutiveErrors: 3,
-       delegation: { maxDepth: 1, maxBreadth: 1, sharedBudget: true },
-     },
-   });
+   const glirastes = createGlirastes({ generated });
+   // Budgets default to safe values; override with `localLimits: { maxToolCalls: 4 }`.
    const openrouter = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY });
    const systemPrompt = 'Use the tools of this app. Ask one short question when the target is unclear.';
 
