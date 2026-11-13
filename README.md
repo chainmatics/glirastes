@@ -354,7 +354,9 @@ them without starting setup.
 
 Next.js 15 App Router, React (Vite, react-router) + NestJS 11 and Vue 3 +
 FastAPI are integrated and automatically checked. Exact levels and evidence:
-[docs/support-matrix.md](docs/support-matrix.md).
+[docs/support-matrix.md](docs/support-matrix.md). Other frontend/backend
+frameworks can use the conditional generic paths (web component, OpenAPI and
+Node runtime/sidecar) described there; this does not imply complete stack support.
 
 ## Docs
 

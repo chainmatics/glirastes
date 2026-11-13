@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Docs: distinguish complete framework integrations from conditional generic paths per frontend/backend layer; add OpenAPI without FastAPI, Node sidecar, partial-coverage and target-app verification guidance to the integration skills. Clarify that navigation bridges do not discover pages and FastAPI route counts do not prove export freshness.
+
 ## [0.7.0-connect.1] - 2026-11-13
 
 Prerelease on the `next` dist-tag.
