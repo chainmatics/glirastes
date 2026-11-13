@@ -56,7 +56,9 @@ material questions that the code and earlier decisions cannot answer.
    still needs the developer's explicit consent.
 1. Inspect the project: `glirastes setup inspect --json`, then the code itself
    (frontend, backend, auth, schemas, pages, URL filters, client actions).
-   Manifest hints are not proof. If the app uses `@chainmatics/agentic-*` or
+   Manifest hints are not proof. If either framework lacks a dedicated adapter,
+   follow the per-layer decision sequence in `integrating-glirastes-web`; record
+   direct integrations, conditional generic paths and gaps separately. If the app uses `@chainmatics/agentic-*` or
    `ai-tool.ts` files, follow `migrating-to-glirastes` first.
 2. Check what `glirastes init` wrote: `.glirastes/tools.json` (app id, target
    app key, sources), `.glirastes/prompt-bundle.json` (local prompt text, app

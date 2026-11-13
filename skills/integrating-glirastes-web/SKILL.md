@@ -1,6 +1,6 @@
 ---
 name: integrating-glirastes-web
-description: Use when integrating Glirastes into an app with a separate backend (NestJS, FastAPI or another API), a non-React frontend (Vue, plain web components) or a Node sidecar next to a non-Node backend.
+description: Use when integrating Glirastes into an app with a separate backend (NestJS, FastAPI or another API), a non-React frontend (Vue, plain web components) or a Node sidecar next to a non-Node backend, or a frontend/backend framework without a dedicated adapter.
 ---
 
 # Integrating Glirastes into Web Apps With a Separate Backend
@@ -41,6 +41,58 @@ Two reference apps in the SDK show the sources together:
 `examples/react-nest-separate` (a NestJS API on its own origin and a Vite
 React frontend) and `examples/vue-fastapi` (a FastAPI API, a small Node chat
 runtime next to it and a Vite Vue frontend).
+
+## Choose a path for each layer
+
+Read `docs/support-matrix.md` in the matching SDK checkout (not relative to
+a copied project-local skill). If unavailable, use the source table below
+and leave complete-stack verification unconfirmed. Record frontend,
+backend, chat runtime, endpoint discovery, navigation, filters and client
+actions separately as **directly integrated**, **generically connectable** or
+**gap**, with source/code evidence. A generic path is conditional on the app's
+contracts; it is not proof that its whole stack is officially supported.
+
+1. **UI:** React uses the React chat components. Otherwise use
+   `<glirastes-chat>` and verify custom-element mounting in the target framework.
+   The element still requires the React/AI SDK dependencies listed below.
+2. **Endpoints:** use `next-app` or `nest` when their source shapes match.
+   Otherwise use a committed OpenAPI 3.1 JSON export. With no supported source
+   or suitable export, endpoint discovery is a gap; do not invent a tool list.
+3. **Runtime:** adapt a Node backend to the handler's Web `Request`/`Response`,
+   or run a declared Node sidecar beside a non-Node backend. A Java/Python/PHP
+   API does not run the TypeScript SDK itself.
+4. **Frontend capabilities:** use a supported page/router source where available.
+   `registerNavigationBridge` executes navigation; it does not discover pages
+   from Angular, Svelte or another unknown router. Put client actions and
+   literal `defineQueryFilters` declarations in scanned JS/TS modules when the
+   framework's component format is unsupported. Verify declared filter paths
+   manually when no supported router source can cross-check them.
+5. **Partial coverage:** continue with independently usable supported parts,
+   but stop work on each unsupported capability and report it explicitly.
+   Do not present a chat shell as working API tools or a bridge as discovered
+   navigation. Never replace the generator with hand-written tool inventories.
+
+For example, Angular + Java with a suitable OpenAPI export can use the web
+component, a Node sidecar and generated API tools; Angular page discovery
+remains a gap. Svelte + Django without an export has an endpoint-discovery gap
+as well. Neither combination has a complete stack corpus in the support matrix.
+
+### OpenAPI without FastAPI
+
+Use this entry in the existing `sources` array of `.glirastes/tools.json`:
+
+```json
+{ "kind": "openapi", "document": "api/openapi.json" }
+```
+
+Omit `fastapi` for Express, Django, Java or any other non-FastAPI backend.
+Regenerate the export from the backend's authoritative API/schema before
+`tools refresh`, and make CI detect stale exports. The generic source reads
+only the document; the Python source-route count is specific to `fastapi`
+and does not prove that paths or schemas with unchanged counts are current.
+OpenAPI 3.0 and YAML are not accepted by this source. Check generator findings
+for unsupported operations/schemas and authentication evidence; a valid 3.1
+file alone does not prove that every endpoint becomes an enabled tool.
 
 ## Workflow
 
@@ -95,8 +147,9 @@ runtime next to it and a Vite Vue frontend).
    `glirastes tools refresh`. Configure
    `{ "kind": "openapi", "document": "api/openapi.json", "fastapi": "api/app" }`:
    with `fastapi`, Python 3.12 counts the routes of that directory from
-   syntax only (the app is never imported) and the refresh stops when the
-   export is older than the code. Declare authentication as a security
+   syntax only (the app is never imported). Refresh stops on a route-count
+   mismatch; equal counts do not prove current paths or schemas. Regenerate
+   the export and verify freshness in CI for every backend. Declare authentication as a security
    dependency (`APIKeyCookie`, `HTTPBearer`) so it appears in the export;
    an operation without `security` needs attention. A route with
    `include_in_schema=False` stays out of the chat and is reported. Declare
@@ -138,7 +191,8 @@ runtime next to it and a Vite Vue frontend).
 5. Configure `.glirastes/tools.json` with the supported sources, run
    `glirastes tools refresh` and the work lists of `setting-up-glirastes`.
    For the parts marked "not yet", write down which endpoints, pages or
-   actions are missing as tools and stop there. Do the same for an API the
+   actions are missing as tools and stop that capability; continue only
+   independently usable supported parts. Do the same for an API the
    chat handler cannot reach (step 2) and name the origin or credential it
    needs.
 6. Build the backend and the frontend with the refresh step of their build
@@ -163,3 +217,20 @@ glirastes tools check --integrity-only
 - `<glirastes-chat>` mounts and unmounts without leaving a microphone stream
   open, and keyboard use works.
 - `glirastes tools check` passes in CI without secrets.
+
+### Target-app acceptance and report
+
+For a generic integration, record the SDK version/commit and the per-layer
+coverage above, then verify in the real app:
+
+- One authenticated read reaches the intended API as the same user; anonymous
+  and unauthorized calls are refused by the handler/API as applicable.
+- If the app exposes writes, one reversible write waits for approval and
+  executes only after approval; rejection causes no mutation. Use a development fixture, not production data.
+- Chat streaming and one registered frontend action work in a real browser.
+  Verify navigation and filters only where configured; label missing ones.
+- Export regeneration, `tools refresh` and `tools check` detect a representative
+  endpoint change. For every backend, verify the app's own stale-export check.
+
+Report observed results and missing checks separately. A passing CLI check
+alone does not establish browser behavior or complete framework support.

@@ -8,7 +8,7 @@ lists, the skills tell the agent how to work through them.
 |---|---|
 | [`setting-up-glirastes`](./setting-up-glirastes/SKILL.md) | Starting or resuming an integration after `glirastes init` |
 | [`integrating-glirastes-nextjs`](./integrating-glirastes-nextjs/SKILL.md) | Wiring chat, tools, navigation, filters and metrics in a Next.js App Router app |
-| [`integrating-glirastes-web`](./integrating-glirastes-web/SKILL.md) | A separate backend, a non-React frontend or a Node sidecar |
+| [`integrating-glirastes-web`](./integrating-glirastes-web/SKILL.md) | A separate backend, a non-React frontend, a Node sidecar or a framework without a dedicated adapter |
 | [`maintaining-glirastes-tools`](./maintaining-glirastes-tools/SKILL.md) | Resolving `glirastes tools resolve --print` findings and policy proposals |
 | [`describing-glirastes-tools`](./describing-glirastes-tools/SKILL.md) | Writing descriptions, schemas, synonyms and examples from `glirastes tools describe --print` |
 | [`building-glirastes-chat-ui`](./building-glirastes-chat-ui/SKILL.md) | Chat UI, the derived `@` entities and `/` commands (served by `createChatInteractionsHandler`, with direct commands), providers, result components, approvals and STT |
@@ -36,6 +36,7 @@ npx --no-install glirastes install --host codex --with-setup-skills
 Hosts install into `.agents/skills` (Codex), `.claude/skills` (Claude), or
 `.gemini/skills` (Gemini). Owned, unchanged copies refresh; customized copies
 are preserved and never force-replaced. The supported stacks and their test
-status are listed in `integrating-glirastes-web`; manifest detection and skill
+status are listed in [the support matrix](../docs/support-matrix.md);
+`integrating-glirastes-web` explains generic paths and their per-layer gaps; manifest detection and skill
 installation alone do not prove an integration. Use this Foundation package,
 not an unrelated registry package sharing its version number.
