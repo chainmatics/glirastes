@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0-connect.1] - 2026-11-13
+
+Prerelease on the `next` dist-tag.
+
+### Fixed
+
+- The runtime push stream reconnects after a failure or a closed connection (backoff from 1 s up to 60 s), syncs once after a reconnect to catch missed changes, and treats 90 s without data as a stalled connection. Before, one failed connect left the runner on polling until restart.
+
 ## [0.7.0-connect.0] - 2026-11-12
 
 Prerelease on the `next` dist-tag for the staging rollout of Connect once.
@@ -588,7 +596,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.7.0-connect.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.7.0-connect.1...HEAD
+[0.7.0-connect.1]: https://github.com/chainmatics/glirastes/compare/v0.7.0-connect.0...v0.7.0-connect.1
 [0.7.0-connect.0]: https://github.com/chainmatics/glirastes/compare/v0.6.0...v0.7.0-connect.0
 [0.6.0]: https://github.com/chainmatics/glirastes/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/chainmatics/glirastes/compare/v0.5.0...v0.5.1
