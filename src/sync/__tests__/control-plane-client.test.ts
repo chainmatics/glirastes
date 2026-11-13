@@ -128,6 +128,49 @@ describe('RuntimeControlPlaneClient', () => {
     }
   });
 
+  it('reconnects the push stream with backoff and catches up after a reconnect', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      cursor: 'c', activeSnapshotComplete: true, deployments: [], revocations: [],
+    }), { status: 200 }));
+    const manager = { apply: vi.fn().mockResolvedValue({}) };
+    const onError = vi.fn();
+    const attempts: number[] = [];
+    const connect = vi.fn(async (input: { onOpen?: () => void | Promise<void> }) => {
+      attempts.push(Date.now());
+      if (attempts.length <= 2) throw new Error('Runtime push stream failed (524)');
+      await input.onOpen?.();
+      if (attempts.length === 3) return;
+      await new Promise(() => {});
+    });
+    const client = new RuntimeControlPlaneClient({
+      ...baseOptions, fetchImpl, manager: manager as never, onError,
+      push: { connect: connect as never }, pollIntervalMs: 600_000,
+    });
+
+    const running = client.start();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connect).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(connect).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(connect).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(connect).toHaveBeenCalledTimes(3);
+      expect(onError).toHaveBeenCalledTimes(2);
+
+      const syncsBefore = manager.apply.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(connect).toHaveBeenCalledTimes(4);
+      expect(manager.apply.mock.calls.length).toBe(syncsBefore + 1);
+    } finally {
+      client.stop();
+      await running;
+      vi.useRealTimers();
+    }
+  });
+
   it('reports the failed operation and status without exposing response content', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       message: 'sensitive upstream detail',
