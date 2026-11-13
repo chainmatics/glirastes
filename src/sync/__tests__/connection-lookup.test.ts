@@ -42,6 +42,7 @@ describe('lookupRuntimeConnection', () => {
       appId: APP_ID,
       environmentId: ENVIRONMENT_ID,
       runnerKey: 'get-it-done-production',
+      mode: 'environment',
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
     const [url, init] = fetchImpl.mock.calls[0]!;
@@ -94,5 +95,40 @@ describe('lookupRuntimeConnection', () => {
 
     expect(error.message).toMatch(/connection/);
     expect(error.message).not.toContain('not-a-uuid');
+  });
+
+  it('sends the environment, NODE_ENV and digest only when set', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({
+      schemaVersion: 1, mode: 'environment', appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'env-staging',
+    }));
+
+    await lookupRuntimeConnection({
+      baseUrl: 'https://control.example.test',
+      apiKey: API_KEY,
+      environment: 'staging',
+      nodeEnv: 'production',
+      fetchImpl,
+    });
+
+    const url = new URL(fetchImpl.mock.calls[0]![0] as string);
+    expect(url.pathname).toBe('/v1/runtime/connection');
+    expect(url.searchParams.get('environment')).toBe('staging');
+    expect(url.searchParams.get('nodeEnv')).toBe('production');
+    expect(url.searchParams.has('digest')).toBe(false);
+  });
+
+  it('maps an answer without mode to environment and reads a development answer', async () => {
+    const old = vi.fn().mockResolvedValue(json({
+      schemaVersion: 1, appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'local-x',
+    }));
+    const dev = vi.fn().mockResolvedValue(json({
+      schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: null, runnerKey: 'dev-abcdefghijklm',
+    }));
+    const common = { baseUrl: 'https://control.example.test', apiKey: API_KEY };
+
+    expect((await lookupRuntimeConnection({ ...common, fetchImpl: old })).mode).toBe('environment');
+    expect(await lookupRuntimeConnection({ ...common, fetchImpl: dev })).toMatchObject({
+      mode: 'development', environmentId: null,
+    });
   });
 });

@@ -276,6 +276,7 @@ export async function runConnect(
     localAppId: receipt.data.appId,
     localAppName: packageJson.data.name,
     artifactDigest: artifactOperation.digest,
+    capabilities: { appConnection: 1 },
   }, dependencies.signal);
 
   const log = dependencies.log ?? console.log;
@@ -328,13 +329,19 @@ export async function runConnect(
     );
   }
 
+  const { environmentId, ...appConnection } = token.connection;
+  const connection = {
+    ...appConnection,
+    ...(environmentId ? { environmentId } : {}),
+  };
+
   const materialize = dependencies.materialize
     ?? materializeConnectionEnvironment;
   await materialize({
     projectRoot: rootDir,
     framework,
     connection: {
-      ...token.connection,
+      ...connection,
       runnerKey: (dependencies.createRunnerKey ?? localRunnerKey)(),
     },
     apiKey: token.apiKey,
@@ -347,7 +354,7 @@ export async function runConnect(
       schemaVersion: 1,
       status: 'connected',
       appId: token.connection.appId,
-      environmentId: token.connection.environmentId,
+      environmentId: environmentId ?? null,
     }));
   } else {
     log('Connected to the Glirastes Platform. Restart the application.');

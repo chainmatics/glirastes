@@ -57,6 +57,73 @@ describe('RuntimeConnectClient', () => {
     ]));
   });
 
+  it('retries once without capabilities when an old Platform rejects them', async () => {
+    const started = {
+      schemaVersion: 1,
+      deviceCode,
+      userCode: 'ABCD-EFGH',
+      verificationUri: 'https://platform.example/connect/pair',
+      expiresInSeconds: 60,
+      pollIntervalMs: 1_000,
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response({ message: 'unknown field' }, 400))
+      .mockResolvedValueOnce(response(started));
+    const client = new RuntimeConnectClient({
+      baseUrl: 'https://control.example', fetchImpl,
+    });
+    const request = {
+      schemaVersion: 1 as const,
+      localAppId: appId,
+      localAppName: 'fixture-app',
+      artifactDigest,
+      capabilities: { appConnection: 1 as const },
+    };
+
+    await expect(client.startPairing(request)).resolves.toMatchObject({ userCode: 'ABCD-EFGH' });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1].body)).capabilities)
+      .toEqual({ appConnection: 1 });
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1].body)))
+      .not.toHaveProperty('capabilities');
+  });
+
+  it('does not loop when the retry is rejected too, nor retry without capabilities', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response({}, 400));
+    const client = new RuntimeConnectClient({
+      baseUrl: 'https://control.example', fetchImpl,
+    });
+    const base = {
+      schemaVersion: 1 as const, localAppId: appId, localAppName: 'fixture-app', artifactDigest,
+    };
+
+    await expect(client.startPairing({ ...base, capabilities: { appConnection: 1 } }))
+      .rejects.toMatchObject({ code: 'E-CONNECT-REQUEST' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    fetchImpl.mockClear();
+    await expect(client.startPairing(base)).rejects.toMatchObject({ code: 'E-CONNECT-REQUEST' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a connected result with a null environmentId', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(response({ status: 'connected', connection: {
+      schemaVersion: 1,
+      baseUrl: 'https://control.example',
+      appId,
+      environmentId: null,
+      runnerKey: 'server-runner',
+    }, apiKey: `gl_${'k'.repeat(40)}` }));
+    const client = new RuntimeConnectClient({
+      baseUrl: 'https://control.example', fetchImpl, sleep: async () => undefined,
+    });
+    const result = await client.pollForConnection({
+      deviceCode, pollIntervalMs: 1_000, expiresInSeconds: 60,
+    });
+    expect(result.status).toBe('connected');
+  });
+
   it('polls at each server-provided interval until connected', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(response({ status: 'pending', pollAfterMs: 2_000 }))

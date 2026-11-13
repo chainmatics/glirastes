@@ -13,7 +13,26 @@ export interface RuntimePushConnector {
     headers: Record<string, string>;
     signal: AbortSignal;
     onEvent: () => void | Promise<void>;
+    /** Called once the stream is open, before any event. */
+    onOpen?: () => void | Promise<void>;
   }): Promise<void>;
+}
+
+const PUSH_RECONNECT_BASE_MS = 1_000;
+const PUSH_RECONNECT_MAX_MS = 60_000;
+
+// Only short, machine-readable codes are surfaced; anything else is dropped.
+const ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+export async function errorCode(response: Response): Promise<string | undefined> {
+  try {
+    const body = await response.json() as { code?: unknown } | null;
+    return typeof body?.code === 'string' && ERROR_CODE_PATTERN.test(body.code)
+      ? body.code
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export class RuntimeControlPlaneRequestError extends Error {
@@ -42,6 +61,8 @@ export class RuntimeControlPlaneClient {
     environmentId: string;
     runnerKey: string;
     version: string;
+    /** A development connection only reads: no register, heartbeat, and the stream carries the runner key. */
+    readOnly?: boolean;
     /**
      * Discovery digest of the running code. Sent with every registration so
      * the Platform knows which capability report describes this runner.
@@ -119,6 +140,7 @@ export class RuntimeControlPlaneClient {
     if (relaxations !== undefined) capabilities.policyRelaxations = relaxations;
     this.assertTechnicalMetadata(capabilities);
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
+    this.assertWritable('register');
     return this.request('register', {
       method: 'POST',
       body: JSON.stringify({
@@ -137,6 +159,7 @@ export class RuntimeControlPlaneClient {
     technicalMetadata?: Record<string, unknown>;
   }) {
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
+    this.assertWritable('heartbeat');
     return this.request('heartbeat', {
       method: 'PATCH',
       body: JSON.stringify({
@@ -171,22 +194,7 @@ export class RuntimeControlPlaneClient {
     }
     const controller = new AbortController();
     this.abortController = controller;
-    if (this.options.push) {
-      void this.options.push.connect({
-        url: `${this.runnerBaseUrl()}/stream`,
-        headers: { authorization: `Bearer ${this.options.apiKey}` },
-        signal: controller.signal,
-        onEvent: async () => {
-          try {
-            await this.syncOnce();
-          } catch (error) {
-            this.options.onError?.(error);
-          }
-        },
-      }).catch((error) => {
-        if (!controller.signal.aborted) this.options.onError?.(error);
-      });
-    }
+    if (this.options.push) void this.keepPushConnected(this.options.push, controller.signal);
 
     const interval = Math.max(1, this.options.pollIntervalMs ?? 30_000);
     while (!controller.signal.aborted) {
@@ -198,6 +206,42 @@ export class RuntimeControlPlaneClient {
       await this.delay(interval, controller.signal);
     }
     if (this.abortController === controller) this.abortController = null;
+  }
+
+  private async keepPushConnected(push: RuntimePushConnector, signal: AbortSignal): Promise<void> {
+    const sync = async () => {
+      try {
+        await this.syncOnce();
+      } catch (error) {
+        this.options.onError?.(error);
+      }
+    };
+    let failures = 0;
+    let opened = false;
+    while (!signal.aborted) {
+      try {
+        await push.connect({
+          url: this.options.readOnly
+            ? `${this.runnerBaseUrl()}/stream?${new URLSearchParams({ runnerKey: this.options.runnerKey })}`
+            : `${this.runnerBaseUrl()}/stream`,
+          headers: { authorization: `Bearer ${this.options.apiKey}` },
+          signal,
+          onEvent: sync,
+          onOpen: async () => {
+            failures = 0;
+            // Events sent while disconnected are lost; one sync catches up.
+            if (opened) await sync();
+            opened = true;
+          },
+        });
+      } catch (error) {
+        if (signal.aborted) break;
+        failures += 1;
+        this.options.onError?.(error);
+      }
+      const backoff = PUSH_RECONNECT_BASE_MS * 2 ** Math.max(0, failures - 1);
+      await this.delay(Math.min(PUSH_RECONNECT_MAX_MS, backoff), signal);
+    }
   }
 
   stop(): void {
@@ -220,9 +264,16 @@ export class RuntimeControlPlaneClient {
       throw new RuntimeControlPlaneRequestError(
         path.split('?', 1)[0]!,
         response.status,
+        await errorCode(response),
       );
     }
     return response.json();
+  }
+
+  private assertWritable(operation: string): void {
+    if (this.options.readOnly) {
+      throw new Error(`A read-only runtime connection cannot ${operation}`);
+    }
   }
 
   private runnerBaseUrl(): string {

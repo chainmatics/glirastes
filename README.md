@@ -271,15 +271,22 @@ optional and defaults to `https://api.glirastes.io`; set it only
 for a self-hosted or local Platform.
 
 ```bash
-npx glirastes connect   # pair the app with the hosted Platform, writes GLIRASTES_API_KEY
+npx glirastes connect   # connect once: issues one app key, writes GLIRASTES_API_KEY
 npx glirastes sync      # upload the current local setup
 npx glirastes doctor    # local checks, no network
 ```
 
 Pass `--base-url <platform-url>` to `connect` only for a self-hosted or local
-Platform. For a production server or CI where nobody runs `connect`, create a
-key in the Platform dashboard under **Settings → API keys → "Keys for servers
-and CI"** and set it as `GLIRASTES_API_KEY`.
+Platform. In Citadel the approver chooses the key lifetime: 90 days (the
+default), 1 year or no expiry.
+
+Every deployment uses that one secret, `GLIRASTES_API_KEY`, and sets
+`GLIRASTES_ENVIRONMENT=<environment key>` (not a secret, `^[a-z0-9][a-z0-9-]{0,63}$`).
+The first start of an unknown name creates a pending request; an owner or admin
+clicks "create and connect" in Citadel if the plan has a free place, and the app
+serves local tools until then. Without `GLIRASTES_ENVIRONMENT` the app runs as a
+read-only development connection that follows the reference environment. Details:
+[docs/managed-runtime-sync.md](docs/managed-runtime-sync.md).
 
 The **Glirastes Platform** is the optional control plane: reviewed tool
 configuration, signed immutable revisions, staged rollouts, approvals and
@@ -325,7 +332,7 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes tools enrich --managed [--first-run] [--base <branch>]` | Pro, CI only: run the managed tool agent |
 | `glirastes setup [--dry-run] [--managed]` | Validate and install the local setup artifacts |
 | `glirastes setup inspect` | Inspect project manifests before integration |
-| `glirastes connect [--base-url <url>]` | Pair the app with the Platform (`--base-url` only for self-hosted) |
+| `glirastes connect [--base-url <url>]` | Connect the app once and issue one app key (`--base-url` only for self-hosted) |
 | `glirastes sync` | Upload the current local setup |
 | `glirastes doctor [--managed] [--verbose] [--json]` | Diagnose the local setup |
 | `glirastes install [--host a,b]` | Install the agent skills only |
@@ -347,7 +354,9 @@ them without starting setup.
 
 Next.js 15 App Router, React (Vite, react-router) + NestJS 11 and Vue 3 +
 FastAPI are integrated and automatically checked. Exact levels and evidence:
-[docs/support-matrix.md](docs/support-matrix.md).
+[docs/support-matrix.md](docs/support-matrix.md). Other frontend/backend
+frameworks can use the conditional generic paths (web component, OpenAPI and
+Node runtime/sidecar) described there; this does not imply complete stack support.
 
 ## Docs
 

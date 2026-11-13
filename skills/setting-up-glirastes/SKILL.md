@@ -56,7 +56,9 @@ material questions that the code and earlier decisions cannot answer.
    still needs the developer's explicit consent.
 1. Inspect the project: `glirastes setup inspect --json`, then the code itself
    (frontend, backend, auth, schemas, pages, URL filters, client actions).
-   Manifest hints are not proof. If the app uses `@chainmatics/agentic-*` or
+   Manifest hints are not proof. If either framework lacks a dedicated adapter,
+   follow the per-layer decision sequence in `integrating-glirastes-web`; record
+   direct integrations, conditional generic paths and gaps separately. If the app uses `@chainmatics/agentic-*` or
    `ai-tool.ts` files, follow `migrating-to-glirastes` first.
 2. Check what `glirastes init` wrote: `.glirastes/tools.json` (app id, target
    app key, sources), `.glirastes/prompt-bundle.json` (local prompt text, app
@@ -129,11 +131,26 @@ local Platform add `--base-url <confirmed-control-plane-url>` (or set
 source and never activates anything. Existing Managed apps keep `--managed`
 for setup and Doctor.
 
-For a production server or CI where nobody runs `glirastes connect`, the
-developer creates a key in the Platform dashboard under **Settings → API keys →
-"Keys for servers and CI"** (German UI: Einstellungen → API-Schlüssel →
-„Schlüssel für Server oder CI") and sets `GLIRASTES_API_KEY` as a deployment
-secret, plus `GLIRASTES_CONTROL_PLANE_URL` when it is not the hosted Platform.
+Connect once: one run issues one app connection key. In Citadel the approver
+chooses its lifetime (90 days by default, 1 year or no expiry); no environment
+is chosen. The key lands in `.env.local` as `GLIRASTES_API_KEY`.
+
+Every deployment (production, staging, CI) sets the same secret
+`GLIRASTES_API_KEY`, plus `GLIRASTES_ENVIRONMENT=<environment key>`, which is
+not a secret and must match `^[a-z0-9][a-z0-9-]{0,63}$`. Add
+`GLIRASTES_CONTROL_PLANE_URL` only when the Platform is self-hosted. Never
+connect once per environment. Tell the developer:
+
+- An unknown environment name creates a pending request on its first start. An
+  owner or admin clicks "create and connect" in Citadel if a plan place is
+  free. Until then the app serves local tools and re-checks on an interval; no
+  redeploy is needed.
+- Without `GLIRASTES_ENVIRONMENT` the app runs as a development connection:
+  read-only, following the reference environment, no registration, health or
+  metrics. With `NODE_ENV=production` it logs a warning.
+- Rotation happens in Citadel; the old key stays valid for 7 days.
+- Older environment-bound keys keep working. `glirastes connect` again moves
+  the app to the new model, which `glirastes doctor` suggests.
 
 ## CI
 

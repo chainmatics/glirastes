@@ -127,7 +127,6 @@ describe('createDoctorReport', () => {
       schemaVersion: 1,
       baseUrl: 'https://control.example',
       appId,
-      environmentId,
       runnerKey: 'fixture-runner',
     });
     await writeFile(join(rootDir, '.env.local'), [
@@ -157,6 +156,44 @@ describe('createDoctorReport', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('warns when the descriptor is environment-bound, not when it has no environmentId', async () => {
+    const appId = id('1');
+    const run = async (extra: Record<string, string>) => {
+      const rootDir = await fixture();
+      await writeJson(rootDir, '.glirastes/platform-connection.json', {
+        schemaVersion: 1,
+        baseUrl: 'https://control.example',
+        appId,
+        ...extra,
+        runnerKey: 'fixture-runner',
+      });
+      await writeFile(join(rootDir, '.env.local'), [
+        'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+        'GLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456',
+        '',
+      ].join('\n'));
+      return createDoctorReport({
+        rootDir,
+        env: {},
+        isGitIgnored: vi.fn().mockResolvedValue(true),
+      });
+    };
+
+    const appBound = await run({});
+    expect(appBound.status).toBe('pass');
+    expect(appBound.counts.warnings).toBe(0);
+
+    const envBound = await run({ environmentId: id('9') });
+    expect(envBound.status).toBe('pass');
+    expect(envBound.checks).toContainEqual(expect.objectContaining({
+      name: 'connection-environment-bound',
+      status: 'warn',
+      remediation: 'reconnect-for-app-key',
+    }));
+    expect(formatDoctorReport(envBound))
+      .toContain('run `glirastes connect` again to use one key for all environments');
+  });
+
   it('hints that the old app, environment and runner variables are no longer needed', async () => {
     const rootDir = await fixture();
     const appId = id('1');
@@ -165,7 +202,6 @@ describe('createDoctorReport', () => {
       schemaVersion: 1,
       baseUrl: 'https://control.example',
       appId,
-      environmentId,
       runnerKey: 'fixture-runner',
     });
     await writeFile(join(rootDir, '.env.local'), [

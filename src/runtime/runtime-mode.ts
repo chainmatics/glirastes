@@ -10,7 +10,11 @@ export const RUNTIME_API_KEY_PATTERN = /^gl_[A-Za-z0-9]{32,128}$/;
 export interface RuntimeConnectionConfig {
   baseUrl: string;
   apiKey: string;
+  /** `GLIRASTES_ENVIRONMENT`; absent means a development connection. */
+  environment?: string;
 }
+
+const ENVIRONMENT_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 function isHttpUrl(value: string): boolean {
   try {
@@ -42,7 +46,17 @@ export function resolveRuntimeConnectionConfig(
       + 'rerun `glirastes connect` or remove the variable.',
     );
   }
-  return { baseUrl: configuredUrl || DEFAULT_CONTROL_PLANE_URL, apiKey };
+  const environment = env.GLIRASTES_ENVIRONMENT?.trim();
+  if (environment && !ENVIRONMENT_KEY_PATTERN.test(environment)) {
+    throw new Error(
+      'GLIRASTES_ENVIRONMENT must be lowercase letters, digits and hyphens (up to 64), starting with a letter or digit.',
+    );
+  }
+  return {
+    baseUrl: configuredUrl || DEFAULT_CONTROL_PLANE_URL,
+    apiKey,
+    ...(environment ? { environment } : {}),
+  };
 }
 
 /**

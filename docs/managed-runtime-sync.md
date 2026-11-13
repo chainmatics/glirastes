@@ -8,10 +8,44 @@ Most apps never call `glirastes/sync` directly. `createGlirastes` from
 `glirastes/runtime` does all of the following for them (see the README,
 "Standalone and Connected"). This page describes the parts underneath.
 
+## Connect once, environments by name
+
+One developer runs `glirastes connect` once. It issues one app connection key
+and writes it to `.env.local` as `GLIRASTES_API_KEY`. In Citadel the approver
+chooses the key lifetime: 90 days (the default), 1 year or no expiry. No
+environment is chosen, and `.glirastes/platform-connection.json` holds no
+environment id.
+
+Every deployment uses the same secret, `GLIRASTES_API_KEY`, and names itself
+with `GLIRASTES_ENVIRONMENT=<environment key>`. The name is not a secret and
+must match `^[a-z0-9][a-z0-9-]{0,63}$`. `GLIRASTES_CONTROL_PLANE_URL` is only
+needed when the Platform is self-hosted.
+
+- **Unknown environment name.** The first start creates a pending request in
+  Citadel. An owner or admin clicks "create and connect" if a plan place is
+  free. Until then the runtime serves local tools and checks again on an
+  interval, so no redeploy is needed. An environment that exists but has no
+  place also serves local tools.
+- **Places.** The plan limits connected environments ("places"). Development
+  does not count toward the limit.
+- **No `GLIRASTES_ENVIRONMENT`.** The app runs as a development connection. It
+  follows the dashboard settings of the reference environment read-only: the
+  first environment in promotion order that holds a place. The most
+  restrictive of code and Platform wins. It never registers, sends health or
+  sends metrics. Without a reference environment it uses local artifacts only.
+  With `NODE_ENV=production` and no environment name it logs a warning.
+- **Rotation.** Rotate the key in Citadel. The old key stays valid for a 7-day
+  grace period. Owners and admins are emailed 14 days and 3 days before a key
+  expires.
+- **Legacy keys.** Environment-bound keys from older pairings keep working
+  without `GLIRASTES_ENVIRONMENT`. Running `glirastes connect` again moves the
+  app to the new model, and `glirastes doctor` suggests it. Against an old
+  Platform the CLI falls back to the old per-environment pairing.
+
 ## Connection
 
-A connected app sets one variable, `GLIRASTES_API_KEY`.
-`GLIRASTES_CONTROL_PLANE_URL` is optional (default
+A connected app sets `GLIRASTES_API_KEY` and, per deployment,
+`GLIRASTES_ENVIRONMENT`. `GLIRASTES_CONTROL_PLANE_URL` is optional (default
 `https://api.glirastes.io`). The runtime asks the Platform which
 app, environment and runner the key belongs to:
 
@@ -20,12 +54,18 @@ import { resolveRuntimeConnectionConfig } from 'glirastes/runtime';
 import { lookupRuntimeConnection } from 'glirastes/sync';
 
 const config = resolveRuntimeConnectionConfig(process.env); // undefined in Standalone
-const connection = config && await lookupRuntimeConnection(config);
-// { baseUrl, appId, environmentId, runnerKey }
+const connection = config && await lookupRuntimeConnection({
+  ...config,
+  environment: process.env.GLIRASTES_ENVIRONMENT,
+  nodeEnv: process.env.NODE_ENV,
+});
+// { baseUrl, appId, environmentId: string | null, runnerKey, mode }
+// mode is 'environment', or 'development' (environmentId is null) without a name
 ```
 
 `GET /v1/runtime/connection` with the `x-api-key` header answers
-`{ schemaVersion: 1, appId, environmentId, runnerKey }`, 401 for an invalid
+`{ schemaVersion: 1, appId, environmentId, runnerKey, mode }`, with
+`environmentId` null in development mode, 401 for an invalid
 key, and 409 `{ code: 'connection_key_unbound' }` for a key that no pairing
 issued. Errors carry the operation and the status only. The looked-up `appId`
 must match the setup artifact of the code; a different app is an error.

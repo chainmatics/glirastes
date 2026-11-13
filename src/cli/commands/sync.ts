@@ -387,7 +387,7 @@ export async function runSync(
     schemaVersion: 1 as const,
     status: run.status,
     appId: descriptor.appId,
-    environmentId: descriptor.environmentId,
+    ...(descriptor.environmentId ? { environmentId: descriptor.environmentId } : {}),
     counts: {
       tools: artifact.data.tools.length,
       warnings: artifact.data.warnings.length,
@@ -403,9 +403,9 @@ export async function runSync(
   if (options.json) {
     log(JSON.stringify(result));
   } else {
-    log(
-      `Synced ${result.counts.tools} tools for app ${result.appId} `
-      + `and environment ${result.environmentId}: ${result.status}.`,
-    );
+    const scope = result.environmentId
+      ? `for app ${result.appId} and environment ${result.environmentId}`
+      : `for app ${result.appId}`;
+    log(`Synced ${result.counts.tools} tools ${scope}: ${result.status}.`);
   }
 }

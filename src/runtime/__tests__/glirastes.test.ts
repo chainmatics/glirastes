@@ -76,9 +76,13 @@ function binding(): GeneratedToolBinding {
   } satisfies GeneratedEndpointToolBinding;
 }
 
-function generated(appId = APP_ID): GeneratedToolModule & { toolSearchSemantics: Record<string, { synonyms: string[] }> } {
+function generated(appId = APP_ID, toolPatch: Record<string, unknown> = {}): GeneratedToolModule & { toolSearchSemantics: Record<string, { synonyms: string[] }> } {
   return {
-    setupArtifact: setupArtifact(appId),
+    setupArtifact: (() => {
+      const artifact = setupArtifact(appId);
+      Object.assign(artifact.tools[0]!, toolPatch);
+      return artifact;
+    })(),
     createToolBindings: () => [binding()],
     toolSearchSemantics: { [TOOL_ID]: { synonyms: ['todos'] } },
   };
@@ -100,7 +104,10 @@ function revision(
   };
 }
 
-function activeDeployment(privateKey: KeyObject): RuntimeDeploymentBundle {
+function activeDeployment(
+  privateKey: KeyObject,
+  toolOverrides: Array<Record<string, unknown>> = [],
+): RuntimeDeploymentBundle {
   const common = {
     schemaVersion: 1 as const, revision: 1, tenantId: TENANT_ID, targetAppId: APP_ID,
     publishedAt: '2026-07-29T00:00:00.000Z',
@@ -121,7 +128,7 @@ function activeDeployment(privateKey: KeyObject): RuntimeDeploymentBundle {
     }),
     policyRevision: revision(privateKey, {
       ...common, revisionId: id('3908'), revisionType: 'policy', environmentId: ENVIRONMENT_ID,
-      payload: { budget: limits, toolPolicies: [] },
+      payload: { budget: limits, toolPolicies: [], ...(toolOverrides.length ? { toolOverrides } : {}) },
     }),
     updatedAt: '2026-07-29T00:01:00.000Z',
   };
@@ -142,7 +149,7 @@ function platform(options: {
   const fetchImpl = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = String(input);
     calls.push({ url, init });
-    if (url.endsWith('/v1/runtime/connection')) {
+    if (url.includes('/v1/runtime/connection')) {
       const next = lookups.length > 1 ? lookups.shift()! : lookups[0];
       return next?.() ?? json({ schemaVersion: 1, appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'runner-1' });
     }
@@ -288,10 +295,11 @@ describe('createGlirastes connected', () => {
 
     expect(onError).not.toHaveBeenCalled();
     const lookup = http.calls[0]!;
-    expect(lookup.url).toBe(`${BASE_URL}/v1/runtime/connection`);
+    expect(lookup.url).toBe(`${BASE_URL}/v1/runtime/connection?digest=${encodeURIComponent(digest('D'))}`);
     expect(lookup.init.headers).toMatchObject({ 'x-api-key': API_KEY });
     expect(glirastes.connection()).toEqual({
       baseUrl: BASE_URL, appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'runner-1',
+      mode: 'environment',
     });
     const register = http.calls.find(({ url }) => url.endsWith('/register'));
     expect(register?.url).toContain(`/v1/runtime/apps/${APP_ID}/environments/${ENVIRONMENT_ID}/runners`);
@@ -399,8 +407,313 @@ describe('createGlirastes connected', () => {
     expect(onError).toHaveBeenCalledOnce();
     expect(String((onError.mock.calls[0]?.[0] as Error).message)).toMatch(/different app/);
     expect(glirastes.connection()).toBeUndefined();
-    expect(http.calls.filter(({ url }) => url.endsWith('/v1/runtime/connection'))).toHaveLength(1);
+    expect(http.calls.filter(({ url }) => url.includes('/v1/runtime/connection'))).toHaveLength(1);
     expect(http.calls.some(({ url }) => url.endsWith('/register'))).toBe(false);
+  });
+
+  it('binds by GLIRASTES_ENVIRONMENT and sends NODE_ENV', async () => {
+    const http = platform();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, push: false, pollIntervalMs: 60_000, onError: vi.fn(),
+      env: { ...env, GLIRASTES_ENVIRONMENT: ' staging ', NODE_ENV: 'production' }, fetchImpl: http.fetchImpl,
+    }));
+
+    await glirastes.ready();
+
+    const query = new URL(http.calls[0]!.url).searchParams;
+    expect(query.get('environment')).toBe('staging');
+    expect(query.get('nodeEnv')).toBe('production');
+  });
+
+  it('treats a blank GLIRASTES_ENVIRONMENT as absent', async () => {
+    const http = platform();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, push: false, pollIntervalMs: 60_000, onError: vi.fn(),
+      env: { ...env, GLIRASTES_ENVIRONMENT: '   ' }, fetchImpl: http.fetchImpl,
+    }));
+
+    await glirastes.ready();
+
+    expect(new URL(http.calls[0]!.url).searchParams.has('environment')).toBe(false);
+  });
+
+  it('throws at startup on an invalid GLIRASTES_ENVIRONMENT', () => {
+    expect(() => createGlirastes({
+      generated: generated(), localLimits: limits, env: { ...env, GLIRASTES_ENVIRONMENT: 'Not Valid' },
+    })).toThrow(/GLIRASTES_ENVIRONMENT/);
+  });
+
+  it('warns once in production without GLIRASTES_ENVIRONMENT', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const http = platform({
+        lookup: [() => json({
+          schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: null, runnerKey: 'dev-abcdefghijklm',
+        })],
+      });
+      const glirastes = track(createGlirastes({
+        generated: generated(), localLimits: limits, push: false, pollIntervalMs: 60_000, onError: vi.fn(),
+        env: { ...env, NODE_ENV: 'production' }, fetchImpl: http.fetchImpl,
+      }));
+      await glirastes.ready();
+      await glirastes.ready();
+
+      expect(warn).toHaveBeenCalledOnce();
+      expect(String(warn.mock.calls[0]?.[0])).toContain('No GLIRASTES_ENVIRONMENT set; running as a development connection');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('stays on local tools while an environment awaits approval, names it once and retries', async () => {
+    const http = platform({
+      lookup: [
+        () => json({ code: 'environment_pending_approval' }, 409),
+        () => json({ code: 'environment_pending_approval' }, 409),
+        () => json({ schemaVersion: 1, appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'env-staging' }),
+      ],
+    });
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, push: false, pollIntervalMs: 20, firstSyncTimeoutMs: 5,
+      env: { ...env, GLIRASTES_ENVIRONMENT: 'staging' }, fetchImpl: http.fetchImpl, onError,
+    }));
+
+    await glirastes.ready();
+
+    expect(glirastes.connection()).toBeUndefined();
+    await vi.waitFor(() => expect(glirastes.connection()?.runnerKey).toBe('env-staging'), { timeout: 1_000 });
+    expect(onError).toHaveBeenCalledOnce();
+    expect(String((onError.mock.calls[0]?.[0] as Error).message)).toBe(
+      "Environment 'staging' is waiting for approval in Glirastes Citadel (App → Environments). Serving local tools until then.",
+    );
+  });
+
+  it('exposes a development connection without registering a runner', async () => {
+    const http = platform({
+      lookup: [() => json({
+        schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: null, runnerKey: 'dev-abcdefghijklm',
+      })],
+    });
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError: vi.fn(),
+    }));
+
+    await glirastes.ready();
+
+    expect(glirastes.connection()).toMatchObject({ mode: 'development', environmentId: null });
+    expect(http.calls.some(({ url }) => url.endsWith('/register'))).toBe(false);
+  });
+
+  it('follows the reference environment read-only in a development connection', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({
+      deployments: [activeDeployment(privateKey)], publicKey,
+      lookup: [() => json({
+        schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'dev-abcdefghijklm',
+      })],
+    });
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError,
+    }));
+
+    await glirastes.ready();
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(glirastes.accepted()?.policyRevision.tenantId).toBe(TENANT_ID);
+    expect(glirastes.currentSource().identity).toMatchObject({ environmentId: ENVIRONMENT_ID });
+    expect(http.calls.some(({ url }) => url.includes('/sync?runnerKey=dev-abcdefghijklm'))).toBe(true);
+    const forbidden = /\/(register|heartbeat|capabilities|leases)|\/metrics|\/runtime-setup/;
+    expect(http.calls.filter(({ url }) => forbidden.test(url))).toEqual([]);
+    expect(glirastes.metrics).toBeUndefined();
+  });
+
+  const developmentLookup = () => json({
+    schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'dev-abcdefghijklm',
+  });
+
+  async function developmentPolicy(
+    toolOverrides: Array<Record<string, unknown>>,
+    toolPatch: Record<string, unknown> = {},
+  ) {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({
+      deployments: [activeDeployment(privateKey, toolOverrides)], publicKey, lookup: [developmentLookup],
+    });
+    const glirastes = track(createGlirastes({
+      generated: generated(APP_ID, toolPatch), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError: vi.fn(),
+    }));
+    await glirastes.ready();
+    const snapshot = glirastes.currentSource().resolveTurnSnapshot({ turnId: 't-1', principal: principal(TENANT_ID) });
+    return snapshot.policyRevision.toolPolicies.find((policy) => policy.toolId === TOOL_ID);
+  }
+
+  it('disables a tool locally that the reference revision disables', async () => {
+    expect(await developmentPolicy([{ toolId: TOOL_ID, enabled: false }])).toMatchObject({ enabled: false });
+  });
+
+  it('puts a tool on confirmation that the reference revision restricts', async () => {
+    expect(await developmentPolicy([{ toolId: TOOL_ID, requiresApproval: true }]))
+      .toMatchObject({ enabled: true, requiresApproval: true });
+  });
+
+  it('keeps a stricter local code rule against a looser reference revision', async () => {
+    const policy = await developmentPolicy(
+      [{ toolId: TOOL_ID, requiresApproval: false, riskClass: 'safe-read' }],
+      { riskClass: 'delete', operationGroup: 'delete', requiresApproval: true },
+    );
+    expect(policy).toMatchObject({ requiresApproval: true, riskClass: 'delete' });
+  });
+
+  it('keeps polling in a development connection without a reference environment', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({
+      deployments: [activeDeployment(privateKey)], publicKey,
+      lookup: [
+        () => json({ schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: null, runnerKey: 'dev-abcdefghijklm' }),
+        developmentLookup,
+      ],
+    });
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 20, onError,
+    }));
+
+    await glirastes.ready();
+    expect(http.calls.some(({ url }) => url.includes('/sync?'))).toBe(false);
+
+    await vi.waitFor(() => expect(glirastes.accepted()).toBeDefined(), { timeout: 1_000 });
+    expect(glirastes.connection()).toMatchObject({ environmentId: ENVIRONMENT_ID });
+    expect(http.calls.some(({ url }) => url.includes('/sync?runnerKey=dev-abcdefghijklm'))).toBe(true);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('sends the runner key on the push stream of a development connection', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({
+      deployments: [activeDeployment(privateKey)], publicKey,
+      lookup: [() => json({
+        schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'dev-abcdefghijklm',
+      })],
+    });
+    const connect = vi.fn(() => new Promise<void>(() => {}));
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: { connect },
+      pollIntervalMs: 60_000, onError: vi.fn(),
+    }));
+
+    await glirastes.ready();
+
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled());
+    const [{ url }] = connect.mock.calls[0] as unknown as [{ url: string }];
+    expect(url).toBe(`${BASE_URL}/v1/runtime/apps/${APP_ID}/environments/${ENVIRONMENT_ID}/runners/stream?runnerKey=dev-abcdefghijklm`);
+  });
+
+  it('gives no production warning to a legacy environment key', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const http = platform();
+      const glirastes = track(createGlirastes({
+        generated: generated(), localLimits: limits, push: false, pollIntervalMs: 60_000, onError: vi.fn(),
+        env: { ...env, NODE_ENV: 'production' }, fetchImpl: http.fetchImpl,
+      }));
+      await glirastes.ready();
+
+      expect(glirastes.connection()?.mode).toBe('environment');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('logs a not-bound code again after a successful bind', async () => {
+    const http = platform();
+    let lookups = 0;
+    let syncs = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/v1/runtime/connection')) {
+        lookups += 1;
+        if (lookups === 2 || lookups === 4) return json({ code: 'environment_pending_approval' }, 409);
+      }
+      if (url.includes('/sync?') && ++syncs <= 2) return json({ code: 'environment_place_required' }, 409);
+      return (http.fetchImpl as typeof fetch)(input, init);
+    }) as unknown as typeof fetch;
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, push: false, pollIntervalMs: 20, onError,
+      env: { ...env, GLIRASTES_ENVIRONMENT: 'staging' }, fetchImpl,
+    }));
+
+    await glirastes.ready();
+
+    await vi.waitFor(() => expect(lookups).toBeGreaterThanOrEqual(5), { timeout: 2_000 });
+    const hints = onError.mock.calls.filter(([error]) => String((error as Error).message).includes('waiting for approval'));
+    expect(hints).toHaveLength(2);
+  });
+
+  it('drops to local tools and looks up again when the sync needs a place', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    let placeWithdrawn = false;
+    const base = platform({ deployments: [activeDeployment(privateKey)], publicKey });
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sync?') && !placeWithdrawn) {
+        placeWithdrawn = true;
+        return json({ code: 'environment_place_required' }, 409);
+      }
+      return (base.fetchImpl as typeof fetch)(input, init);
+    }) as unknown as typeof fetch;
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20,
+      onError,
+    }));
+
+    await glirastes.ready();
+
+    await vi.waitFor(
+      () => expect(base.calls.filter(({ url }) => url.includes('/v1/runtime/connection')).length).toBeGreaterThanOrEqual(2),
+      { timeout: 1_000 },
+    );
+    await vi.waitFor(() => expect(glirastes.accepted()).toBeDefined(), { timeout: 1_000 });
+  });
+
+  it('looks up again when a development connection is read-only rejected and binds to the new reference', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const NEW_ENVIRONMENT_ID = id('3902');
+    const dev = (environmentId: string) => () => json({
+      schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId, runnerKey: 'dev-abcdefghijklm',
+    });
+    const base = platform({
+      deployments: [activeDeployment(privateKey)], publicKey,
+      lookup: [dev(ENVIRONMENT_ID), dev(NEW_ENVIRONMENT_ID)],
+    });
+    let rejected = false;
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes('/sync?') && !rejected) {
+        rejected = true;
+        return json({ code: 'development_connection_read_only' }, 403);
+      }
+      return (base.fetchImpl as typeof fetch)(input, init);
+    }) as unknown as typeof fetch;
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError,
+    }));
+
+    await glirastes.ready();
+
+    await vi.waitFor(
+      () => expect(glirastes.currentSource().identity).toMatchObject({ environmentId: NEW_ENVIRONMENT_ID }),
+      { timeout: 1_000 },
+    );
+    expect(onError).toHaveBeenCalledTimes(1);
   });
 
   it('never waits longer than the first-sync timeout', async () => {

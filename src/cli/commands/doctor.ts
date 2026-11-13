@@ -240,6 +240,14 @@ export async function createDoctorReport(
     try {
       descriptor = await readPlatformConnectionDescriptor(rootDir);
       checks.push(check('connection-descriptor', 'pass', 'E-CONNECT-100'));
+      if (descriptor.environmentId) {
+        checks.push(check(
+          'connection-environment-bound',
+          'warn',
+          'E-CONNECT-105',
+          'reconnect-for-app-key',
+        ));
+      }
     } catch {
       checks.push(check(
         'connection-descriptor',

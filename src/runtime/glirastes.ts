@@ -8,7 +8,10 @@ import {
   lookupRuntimeConnection,
   type ResolvedRuntimeConnection,
 } from '../sync/connection-lookup.js';
-import type { RuntimePushConnector } from '../sync/control-plane-client.js';
+import {
+  RuntimeControlPlaneRequestError,
+  type RuntimePushConnector,
+} from '../sync/control-plane-client.js';
 import { validateLocalDeploymentBindings } from '../sync/local-deployment-validator.js';
 import { createManagedRuntimeSync } from '../sync/managed-sync.js';
 import {
@@ -62,7 +65,7 @@ export interface CreateGlirastesOptions {
   wrapBindings?: (
     bindings: ReadonlyArray<GeneratedToolBinding>,
   ) => ReadonlyArray<GeneratedToolBinding>;
-  /** Defaults to `process.env`. Only `GLIRASTES_API_KEY` (and an optional `GLIRASTES_CONTROL_PLANE_URL`) are read. */
+  /** Defaults to `process.env`. Reads `GLIRASTES_API_KEY`, `GLIRASTES_ENVIRONMENT` and an optional `GLIRASTES_CONTROL_PLANE_URL`. */
   env?: Record<string, string | undefined>;
   /**
    * Content-free connection and sync errors (operation and status only).
@@ -154,6 +157,11 @@ class AcceptedStateStore implements RuntimeStateStore {
     return this.stable;
   }
 
+  clear(): void {
+    this.state = null;
+    this.stable = undefined;
+  }
+
   revocations(): SecurityRevocation[] {
     return this.state?.revocations ?? [];
   }
@@ -162,6 +170,32 @@ class AcceptedStateStore implements RuntimeStateStore {
 function logError(error: unknown): void {
   // The SDK's request errors name the operation and the status only.
   console.error('[Glirastes]', error instanceof Error ? error.message : 'connection failed');
+}
+
+function notBoundHint(code: string, environment: string | undefined): string | undefined {
+  const name = environment ? `Environment '${environment}'` : 'This environment';
+  switch (code) {
+    case 'environment_pending_approval':
+      return `${name} is waiting for approval in Glirastes Citadel (App → Environments). Serving local tools until then.`;
+    case 'environment_waiting_for_place':
+      return `${name} is waiting for a place in Glirastes Citadel (App → Environments). Serving local tools until then.`;
+    case 'connection_environment_mismatch':
+      return `${name} does not match the environment this key is bound to. Fix GLIRASTES_ENVIRONMENT or check App → Environments in Glirastes Citadel. Serving local tools until then.`;
+    default:
+      return undefined;
+  }
+}
+
+function isPlaceRequired(error: unknown): boolean {
+  return error instanceof RuntimeControlPlaneRequestError
+    && error.status === 409
+    && error.code === 'environment_place_required';
+}
+
+function isReferenceChanged(error: unknown): boolean {
+  return error instanceof RuntimeControlPlaneRequestError
+    && error.status === 403
+    && error.code === 'development_connection_read_only';
 }
 
 function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -263,39 +297,98 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     settleFirstAttempt = resolve;
   });
 
-  const connect = async (): Promise<void> => {
-    if (!config) return;
-    let connection: ResolvedRuntimeConnection | undefined;
-    while (!abort.signal.aborted && !connection) {
+  const reportedNotBound = new Set<string>();
+  let warnedNoEnvironment = false;
+  let notedNoReference = false;
+
+  const lookupConnection = async (): Promise<ResolvedRuntimeConnection | undefined> => {
+    if (!config) return undefined;
+    const nodeEnv = env.NODE_ENV?.trim();
+    const digest = bound.setupArtifact.discoveryDigest;
+    while (!abort.signal.aborted) {
       try {
-        connection = await lookupRuntimeConnection({
+        return await lookupRuntimeConnection({
           baseUrl: config.baseUrl,
           apiKey: config.apiKey,
+          ...(config.environment ? { environment: config.environment } : {}),
+          ...(nodeEnv ? { nodeEnv } : {}),
+          ...(digest ? { digest } : {}),
           signal: abort.signal,
           ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         });
       } catch (error) {
-        if (abort.signal.aborted) return;
-        onError(error);
+        if (abort.signal.aborted) return undefined;
+        const code = error instanceof RuntimeControlPlaneRequestError ? error.code : undefined;
+        const hint = code ? notBoundHint(code, config.environment) : undefined;
+        if (code && hint) {
+          if (!reportedNotBound.has(code)) {
+            reportedNotBound.add(code);
+            onError(new Error(hint));
+          }
+        } else {
+          onError(error);
+        }
         settleFirstAttempt();
         await delay(retryMs, abort.signal);
       }
     }
-    if (!connection || abort.signal.aborted) return;
+    return undefined;
+  };
+
+  const dropManagedConnection = async (): Promise<void> => {
+    stopSync?.();
+    stopSync = undefined;
+    const closing = metrics;
+    resolved = undefined;
+    connectedBase = undefined;
+    managed = undefined;
+    metrics = undefined;
+    store.clear();
+    reportedNotBound.clear();
+    await closing?.close().catch(onError);
+  };
+
+  // The same rejected reference is logged once, however often the lookup returns it.
+  let loggedReadOnlyFor: string | undefined;
+  const reportConnectionLoss = (error: unknown, environmentId: string): void => {
+    if (isReferenceChanged(error)) {
+      if (loggedReadOnlyFor === environmentId) return;
+      loggedReadOnlyFor = environmentId;
+    }
+    onError(error);
+  };
+
+  /** Returns true when the lookup must start over: the Platform withdrew the place, or no reference environment exists yet. */
+  const runConnection = async (connection: ResolvedRuntimeConnection): Promise<boolean> => {
+    if (!config) return false;
     if (connection.appId !== appId) {
       // A key of another app: report once and stay on the local code.
       onError(new Error('The Glirastes runtime key belongs to a different app than this code'));
-      return;
+      return false;
     }
+    const environmentId = connection.environmentId;
+    const readOnly = connection.mode === 'development';
+    if (environmentId === null) {
+      resolved = connection;
+      connectedBase = localSource({ targetAppId: connection.appId });
+      if (!notedNoReference) {
+        notedNoReference = true;
+        console.info('[glirastes] No reference environment yet; running on local code and checking again.');
+      }
+      return true;
+    }
+    notedNoReference = false;
 
+    let placeLost = false;
     let sync: ReturnType<typeof createManagedRuntimeSync>;
     try {
       sync = createManagedRuntimeSync({
         baseUrl: config.baseUrl,
         apiKey: config.apiKey,
         appId: connection.appId,
-        environmentId: connection.environmentId,
+        environmentId,
         runnerKey: connection.runnerKey,
+        ...(readOnly ? { readOnly } : {}),
         version: options.version?.trim() || env.GLIRASTES_BUILD_ID?.trim() || `glirastes@${SDK_VERSION}`,
         stateStore: store,
         setupArtifact: options.generated.setupArtifact,
@@ -303,45 +396,86 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         validateDeployment: (_deployment, revisions) => {
           validateLocalDeploymentBindings({ revisions, bindings: bound.bindings });
         },
-        onError,
+        onError: (error) => {
+          if (isPlaceRequired(error) || isReferenceChanged(error)) {
+            placeLost = true;
+            stopSync?.();
+          }
+          reportConnectionLoss(error, environmentId);
+        },
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         ...(options.push !== undefined ? { push: options.push } : {}),
         pollIntervalMs: retryMs,
       });
     } catch (error) {
       onError(error);
-      return;
+      return false;
     }
     resolved = connection;
     connectedBase = localSource({
       targetAppId: connection.appId,
-      environmentId: connection.environmentId,
+      environmentId,
     });
-    if (options.metrics !== false) {
+    if (options.metrics !== false && !readOnly) {
       metrics = createRuntimeMetricsSinkFromEnv(env, {
         ...options.metrics,
-        connection,
+        connection: { appId: connection.appId, environmentId },
         ...(options.fetchImpl ? { fetch: options.fetchImpl } : {}),
       });
     }
     stopSync = () => sync.client.stop();
 
-    while (!abort.signal.aborted) {
+    while (!abort.signal.aborted && !placeLost) {
       try {
-        await sync.client.register({
-          capabilities: { aiSdk: true },
-          technicalMetadata: { runtime: options.runtime ?? 'node' },
-        });
-        await sync.reportCapabilities().catch(onError);
+        if (!readOnly) {
+          await sync.client.register({
+            capabilities: { aiSdk: true },
+            technicalMetadata: { runtime: options.runtime ?? 'node' },
+          });
+          await sync.reportCapabilities().catch(onError);
+        }
         await sync.client.syncOnce();
         break;
       } catch (error) {
+        if (isPlaceRequired(error) || isReferenceChanged(error)) {
+          placeLost = true;
+          reportConnectionLoss(error, environmentId);
+          break;
+        }
         onError(error);
         settleFirstAttempt();
         await delay(retryMs, abort.signal);
       }
     }
-    if (!abort.signal.aborted) void sync.client.start();
+    settleFirstAttempt();
+    if (!abort.signal.aborted && !placeLost) await sync.client.start();
+    if (placeLost && !abort.signal.aborted) {
+      await dropManagedConnection();
+      return true;
+    }
+    return false;
+  };
+
+  const connect = async (): Promise<void> => {
+    if (!config) return;
+    while (!abort.signal.aborted) {
+      const connection = await lookupConnection();
+      if (!connection || abort.signal.aborted) return;
+      reportedNotBound.clear();
+      if (
+        connection.mode === 'development'
+        && env.NODE_ENV?.trim() === 'production'
+        && !warnedNoEnvironment
+      ) {
+        warnedNoEnvironment = true;
+        console.warn(
+          "[glirastes] No GLIRASTES_ENVIRONMENT set; running as a development connection. Set it to the environment's key for deployments.",
+        );
+      }
+      if (!(await runConnection(connection))) return;
+      settleFirstAttempt();
+      await delay(retryMs, abort.signal);
+    }
   };
 
   const instance: Glirastes = {
@@ -376,7 +510,11 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         managed = {
           tenantId,
           source: localSource(
-            { tenantId, targetAppId: resolved.appId, environmentId: resolved.environmentId },
+            {
+              tenantId,
+              targetAppId: resolved.appId,
+              ...(resolved.environmentId ? { environmentId: resolved.environmentId } : {}),
+            },
             { accepted: () => store.accepted() },
           ),
         };

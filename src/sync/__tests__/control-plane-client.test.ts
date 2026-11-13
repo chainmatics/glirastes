@@ -59,6 +59,37 @@ describe('RuntimeControlPlaneClient', () => {
     expect(manager.apply).toHaveBeenCalledOnce();
   });
 
+  it('sends the runner key on the stream only when read-only', async () => {
+    const urls: string[] = [];
+    const connect = vi.fn(async (input: { url: string }) => { urls.push(input.url); });
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      cursor: 'c', activeSnapshotComplete: true, deployments: [], revocations: [],
+    }), { status: 200 }));
+    for (const readOnly of [true, false]) {
+      const client = new RuntimeControlPlaneClient({
+        ...baseOptions, runnerKey: 'dev-abcdefghijklm', fetchImpl, readOnly,
+        manager: { apply: vi.fn().mockResolvedValue({}) } as never,
+        push: { connect: connect as never }, pollIntervalMs: 1_000,
+      });
+      const running = client.start();
+      await vi.waitFor(() => expect(urls.length).toBe(readOnly ? 1 : 2));
+      client.stop();
+      await running;
+    }
+    expect(urls[0]).toMatch(/\/runners\/stream\?runnerKey=dev-abcdefghijklm$/);
+    expect(urls[1]).toMatch(/\/runners\/stream$/);
+  });
+
+  it('refuses to register or heartbeat when read-only', async () => {
+    const fetchImpl = vi.fn();
+    const client = new RuntimeControlPlaneClient({
+      ...baseOptions, fetchImpl, readOnly: true, manager: { apply: vi.fn() } as never,
+    });
+    await expect(client.register({ capabilities: {} })).rejects.toThrow(/read-only/);
+    await expect(client.heartbeat({ health: 'healthy' })).rejects.toThrow(/read-only/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('continues polling when the optional push connector fails', async () => {
     vi.useFakeTimers();
     const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
@@ -90,6 +121,49 @@ describe('RuntimeControlPlaneClient', () => {
       await running;
       await vi.advanceTimersByTimeAsync(20);
       expect(manager.apply).toHaveBeenCalledTimes(4);
+    } finally {
+      client.stop();
+      await running;
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconnects the push stream with backoff and catches up after a reconnect', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      cursor: 'c', activeSnapshotComplete: true, deployments: [], revocations: [],
+    }), { status: 200 }));
+    const manager = { apply: vi.fn().mockResolvedValue({}) };
+    const onError = vi.fn();
+    const attempts: number[] = [];
+    const connect = vi.fn(async (input: { onOpen?: () => void | Promise<void> }) => {
+      attempts.push(Date.now());
+      if (attempts.length <= 2) throw new Error('Runtime push stream failed (524)');
+      await input.onOpen?.();
+      if (attempts.length === 3) return;
+      await new Promise(() => {});
+    });
+    const client = new RuntimeControlPlaneClient({
+      ...baseOptions, fetchImpl, manager: manager as never, onError,
+      push: { connect: connect as never }, pollIntervalMs: 600_000,
+    });
+
+    const running = client.start();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connect).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(connect).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(connect).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(connect).toHaveBeenCalledTimes(3);
+      expect(onError).toHaveBeenCalledTimes(2);
+
+      const syncsBefore = manager.apply.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(connect).toHaveBeenCalledTimes(4);
+      expect(manager.apply.mock.calls.length).toBe(syncsBefore + 1);
     } finally {
       client.stop();
       await running;

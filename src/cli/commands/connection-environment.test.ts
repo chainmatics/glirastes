@@ -116,6 +116,26 @@ describe('connection environment materialization', () => {
     expect(result).toContain(`GLIRASTES_CONTROL_PLANE_URL=${connection.baseUrl}`);
   });
 
+  it('writes an app connection without environmentId and keeps GLIRASTES_ENVIRONMENT', async () => {
+    const { root, environmentPath, descriptorPath } = await fixture();
+    await writeFile(environmentPath, 'GLIRASTES_ENVIRONMENT=staging\nKEEP=1\n');
+    const { environmentId: _unused, ...appConnection } = connection;
+
+    await materializeConnectionEnvironment({
+      projectRoot: root,
+      framework: 'nextjs',
+      connection: appConnection,
+      apiKey: credential,
+      isGitIgnored: vi.fn().mockResolvedValue(true),
+    });
+
+    const env = await readFile(environmentPath, 'utf8');
+    expect(env).toContain('GLIRASTES_ENVIRONMENT=staging');
+    expect(env).toContain(`GLIRASTES_API_KEY=${credential}`);
+    expect(JSON.parse(await readFile(descriptorPath, 'utf8')))
+      .not.toHaveProperty('environmentId');
+  });
+
   it('writes only the key for the hosted platform and removes a stale URL', async () => {
     const { root, environmentPath } = await fixture();
     await writeFile(environmentPath, 'GLIRASTES_CONTROL_PLANE_URL=http://localhost:8101\nKEEP=1\n');
