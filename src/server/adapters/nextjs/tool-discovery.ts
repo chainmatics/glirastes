@@ -26,6 +26,8 @@ export interface HybridToolDiscovery {
     parameters: typeof FindToolsInputSchema;
     execute(input: unknown): Promise<{
       tools: ReadonlyArray<ToolDiscoveryResult>;
+      /** Set when the search added no new tool. */
+      note?: string;
     }>;
   };
   activeToolNames(): ReadonlyArray<string>;
@@ -61,13 +63,22 @@ export function createHybridToolDiscovery(options: {
     turnId: options.discovery.turnId,
     tool: {
       description:
-        'Find eligible tools for the current turn by capability or intent.',
+        'Load more tools for this turn. Call it only when none of the tools you already have fits the request; '
+        + 'call a fitting tool directly instead. Describe the missing capability in a few words '
+        + '(for example "delete a task attachment"). Found tools can be called in the next step.',
       parameters: FindToolsInputSchema,
       async execute(input: unknown) {
         const { query } = FindToolsInputSchema.parse(input);
         const tools = options.discovery.search(query);
+        const before = active.size;
         for (const match of tools) {
           if (eligible.has(match.name)) active.add(match.name);
+        }
+        if (tools.length === 0) {
+          return { tools, note: 'No tool fits this search. Use the tools you have, or ask the user.' };
+        }
+        if (active.size === before) {
+          return { tools, note: 'These tools were already available. Call one of them directly instead of searching again.' };
         }
         return { tools };
       },

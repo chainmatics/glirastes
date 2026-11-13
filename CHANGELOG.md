@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `find_tools` no longer invites needless searches. Its description says to call it only when none of the offered tools fits, and its result carries a `note` when the search added no new tool (all matches already available, or no match). In a real-model run over 60 requests, the model had called it 20 times for tools it already had.
+
 ## [0.7.0] - 2026-11-13
 
 Connect once, released after the staging rollout (prereleases `0.7.0-connect.0` and `0.7.0-connect.1` on `next`).
