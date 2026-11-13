@@ -43,6 +43,33 @@ describe('createHybridToolDiscovery', () => {
     });
   });
 
+  it('tells the model to search only for tools it does not have yet', () => {
+    const controller = createHybridToolDiscovery({
+      discovery: discovery(),
+      initialToolNames: [],
+    });
+    expect(controller.tool.description).toMatch(/only when none of the tools you already have fits/i);
+  });
+
+  it('says so when the search found only tools that were already available', async () => {
+    const controller = createHybridToolDiscovery({
+      discovery: discovery(),
+      initialToolNames: ['reports_summary'],
+    });
+    const result = await controller.tool.execute({ query: 'report' });
+    expect(result.tools.map((tool) => tool.name)).toEqual(['reports_summary']);
+    expect(result.note).toMatch(/already available/i);
+  });
+
+  it('says so when the search found no tool', async () => {
+    const controller = createHybridToolDiscovery({
+      discovery: discovery(),
+      initialToolNames: [],
+    });
+    const result = await controller.tool.execute({ query: 'nothing' });
+    expect(result).toEqual({ tools: [], note: expect.stringMatching(/no tool/i) });
+  });
+
   it('never accepts model-supplied names or invokes a domain binding', async () => {
     const domain = vi.fn();
     const controller = createHybridToolDiscovery({
