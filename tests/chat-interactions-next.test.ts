@@ -65,7 +65,7 @@ describe('chat interactions derived from the Next reference app', () => {
         { id: 'open.overview', label: { en: 'Open Overview', de: 'Overview öffnen' }, keywords: ['overview'], run: { kind: 'ui', tool: 'ui.navigate', args: { destination: '/overview' } } },
         { id: 'open.tasks', label: { en: 'Open Tasks', de: 'Tasks öffnen' }, keywords: ['tasks'], run: { kind: 'ui', tool: 'ui.navigate', args: { destination: '/tasks' } } },
         {
-          id: 'tasks.highlight', label: { en: 'Tasks highlight', de: 'Tasks highlight' },
+          id: 'tasks.highlight', label: { en: 'Highlight tasks', de: 'Tasks hervorheben' },
           args: [{ name: 'title', label: 'Title', required: true }],
           run: { kind: 'ui', tool: 'ui.tasks.highlight' },
         },
@@ -84,9 +84,24 @@ describe('chat interactions derived from the Next reference app', () => {
       type: 'note',
       label: { en: 'Note', de: 'Note' },
       search: { tool: 'notes.list', path: '/api/notes', queryParam: 'search', itemsPath: ['notes'], idField: 'id', labelField: 'title' },
-      actions: [{ id: 'note.notesPin.create', label: { en: 'Pin', de: 'Pin' }, entityArg: 'id', run: { kind: 'tool', tool: 'notesPin.create' } }],
+      actions: [{ id: 'note.notesPin.create', label: { en: 'Pin', de: 'Anheften' }, entityArg: 'id', run: { kind: 'tool', tool: 'notesPin.create' } }],
     }]);
     expect(interactions.commands.map((command) => command.id)).toEqual(['filter.tasks', 'open.overview', 'open.tasks', 'tasks.highlight']);
+  }, 120_000);
+
+  it('labels an action from a reviewed title and keeps check and integrity green', async () => {
+    const root = await copyApp(NATIVE_APP);
+    await addNotes(root);
+    await mkdir(join(root, '.glirastes'), { recursive: true });
+    await writeFile(join(root, '.glirastes/tool-semantics.json'), `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [{ stableKey: 'POST /api/notes/:id/pin', title: { de: 'Notiz anheften', en: 'Pin note' } }],
+    })}\n`);
+    await runToolsPipeline({ root, mode: 'write' });
+    const action = (await interactionsOf(root)).entities[0]?.actions?.find((entry) => entry.id === 'note.notesPin.create');
+    expect(action?.label).toEqual({ en: 'Pin note', de: 'Notiz anheften' });
+    expect((await runToolsPipeline({ root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root, mode: 'integrity' })).driftPaths).toEqual([]);
   }, 120_000);
 });
 

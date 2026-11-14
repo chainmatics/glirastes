@@ -3,7 +3,7 @@ import { AppSetupArtifactSchema } from '../../contracts/index.js';
 import { createJsonSchemaLike } from '../../runtime/json-schema.js';
 import { canonicalJson } from './canonical.js';
 import { deriveChatInteractions, humanizeIdentifier } from './chat-interactions.js';
-import type { JsonSchemaLike, ToolContract, ToolContractsEntry } from './types.js';
+import type { JsonSchemaLike, ToolContract, ToolContractsEntry, ToolTitle } from './types.js';
 
 const digest = (character: string) => `sha256:${character.repeat(43)}`;
 const id = (index: number) => `019fb700-0000-7000-8000-${String(index).padStart(12, '0')}`;
@@ -11,13 +11,16 @@ const STRING = { type: 'string' };
 
 interface Spec {
   name: string;
-  method?: 'GET' | 'POST' | 'PATCH';
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   path?: string;
   enabled?: boolean;
   input: JsonSchemaLike;
   output?: JsonSchemaLike;
   params?: ToolContract['params'];
   uiAction?: ToolContract['uiAction'];
+  title?: ToolTitle;
+  presentation?: { locale: string; singular: string; plural: string; approval: string };
+  riskClass?: string;
 }
 
 const object = (props: Record<string, unknown>, required: string[] = []) => ({
@@ -88,6 +91,33 @@ const SPECS: Spec[] = [
   },
 ];
 
+const TITLED: Spec[] = [
+  { ...SPECS[0]!, presentation: { locale: 'de-DE', singular: 'Aufgabe', plural: 'Aufgaben', approval: 'Aufgaben abrufen?' } },
+  {
+    name: 'tasks.permanentDelete', method: 'DELETE', path: '/api/tasks/:id/permanent', riskClass: 'delete',
+    title: { de: 'Aufgabe endgültig löschen', en: 'Permanently delete task' },
+    input: object({ id: STRING }, ['id']), params: { path: ['id'], query: [], body: [] },
+  },
+  {
+    name: 'tasks.addSubtask', method: 'POST', path: '/api/tasks/:id/subtasks',
+    input: object({ id: STRING, title: STRING }, ['id', 'title']), params: { path: ['id'], query: [], body: ['title'] },
+  },
+  {
+    name: 'tasksAttachable.list', method: 'GET', path: '/api/tasks/:id/attachable',
+    input: object({ id: STRING }, ['id']), params: { path: ['id'], query: [], body: [] },
+  },
+  {
+    name: 'tasks.delete', method: 'DELETE', path: '/api/tasks/:id', riskClass: 'delete',
+    input: object({ id: STRING }, ['id']), params: { path: ['id'], query: [], body: [] },
+  },
+  {
+    name: 'ui.taskCreateDialog.open', title: { de: 'Dialog Aufgabe anlegen', en: 'Open create-task dialog' },
+    input: object({}), uiAction: { kind: 'client-action', actionId: 'task-create-dialog.open' },
+  },
+  { name: 'ui.tasks.view.switch', input: object({}), uiAction: { kind: 'client-action', actionId: 'tasks.view.switch' } },
+  { ...SPECS[9]!, title: { de: 'Aufgaben filtern' } },
+];
+
 function catalog(specs: ReadonlyArray<Spec>) {
   const artifact = AppSetupArtifactSchema.parse({
     schemaVersion: 1, artifactId: id(9001), runId: id(9002), appId: id(9003), discoveryDigest: digest('D'),
@@ -98,7 +128,8 @@ function catalog(specs: ReadonlyArray<Spec>) {
       executionKind: spec.uiAction ? 'ui' : 'endpoint',
       ...(spec.uiAction ? { actionBindingRef: 'glirastes.navigate' } : { method: spec.method, path: spec.path }),
       allowedRoles: [], operationGroup: spec.uiAction ? 'ui' : spec.method === 'GET' ? 'read' : 'update',
-      riskClass: spec.uiAction || spec.method === 'GET' ? 'safe-read' : 'write', enabled: spec.enabled ?? true,
+      riskClass: spec.riskClass ?? (spec.uiAction || spec.method === 'GET' ? 'safe-read' : 'write'), enabled: spec.enabled ?? true,
+      ...(spec.presentation ? { presentation: spec.presentation } : {}),
       requiresApproval: !spec.uiAction && spec.method !== 'GET', inputSchemaDigest: digest('I'), outputSchemaDigest: digest('O'),
     })),
     planner: { plannerId: id(9004), modelBindingRef: 'default', promptBindingRef: 'prompt:fixture', budgetProfileRef: 'default', toolIds: [] },
@@ -108,6 +139,7 @@ function catalog(specs: ReadonlyArray<Spec>) {
   const contracts: ToolContractsEntry[] = specs.map((spec, index) => ({
     toolId: id(index + 1), stableKey: spec.uiAction ? `UI ${spec.name}` : `${spec.method} ${spec.path}`, definitionId: spec.name,
     defaults: { operationGroup: 'read', riskClass: 'safe-read', requiresApproval: false, rulesVersion: 1 },
+    ...(spec.title ? { title: spec.title } : {}),
     contract: {
       source: spec.uiAction ? 'ui-bridge' : 'native', loadBearing: true, input: spec.input,
       ...(spec.output ? { output: spec.output } : {}),
@@ -165,7 +197,7 @@ describe('deriveChatInteractions', () => {
         { id: 'open.overview', label: { en: 'Open Overview', de: 'Overview öffnen' }, keywords: ['overview'], run: { kind: 'ui', tool: 'ui.navigate', args: { destination: '/overview' } } },
         { id: 'open.tasks', label: { en: 'Open Tasks', de: 'Tasks öffnen' }, keywords: ['tasks'], run: { kind: 'ui', tool: 'ui.navigate', args: { destination: '/tasks' } } },
         {
-          id: 'tasks.highlight', label: { en: 'Tasks highlight', de: 'Tasks highlight' },
+          id: 'tasks.highlight', label: { en: 'Highlight tasks', de: 'Tasks hervorheben' },
           args: [{ name: 'title', label: 'Title', required: true }],
           run: { kind: 'ui', tool: 'ui.tasks.highlight' },
         },
@@ -173,9 +205,49 @@ describe('deriveChatInteractions', () => {
     });
   });
 
+  it('labels commands, actions and entities from titles and the presentation noun', () => {
+    const derived = deriveChatInteractions(catalog(TITLED));
+    expect(derived.entities[0]!.label).toEqual({ en: 'Task', de: 'Aufgabe' });
+    const actions = derived.entities[0]!.actions!;
+    expect(Object.fromEntries(actions.map((action) => [action.id, action.label]))).toEqual({
+      'task.tasks.addSubtask': { en: 'Add subtask', de: 'Subtask hinzufügen' },
+      'task.tasksAttachable.list': { en: 'Show attachable', de: 'Attachable anzeigen' },
+      'task.tasks.delete': { en: 'Delete', de: 'Löschen' },
+      // The entity's own menu drops its leading noun.
+      'task.tasks.permanentDelete': { en: 'Permanently delete task', de: 'Endgültig löschen' },
+    });
+    expect(actions.map((action) => action.id))
+      .toEqual(['task.tasks.addSubtask', 'task.tasksAttachable.list', 'task.tasks.delete', 'task.tasks.permanentDelete']);
+    expect(Object.fromEntries(derived.commands.map((command) => [command.id, command.label]))).toEqual({
+      'taskCreateDialog.open': { en: 'Open create-task dialog', de: 'Dialog Aufgabe anlegen' },
+      'tasks.view.switch': { en: 'Switch tasks view', de: 'Tasks view wechseln' },
+      'filter.tasks': { en: 'Filter Tasks', de: 'Aufgaben filtern' },
+    });
+  });
+
+  it('falls back per language and clamps a title the list cannot show', () => {
+    const long = 'x'.repeat(201);
+    const derived = deriveChatInteractions(catalog([
+      { ...TITLED[5]!, title: { en: 'Open the dialog' } },
+      { ...TITLED[6]!, title: { de: long, en: 'Bad\u0007' } },
+    ]));
+    expect(Object.fromEntries(derived.commands.map((command) => [command.id, command.label]))).toEqual({
+      'taskCreateDialog.open': { en: 'Open the dialog', de: 'Task create dialog öffnen' },
+      'tasks.view.switch': { en: 'Switch tasks view', de: `${'x'.repeat(199)}…` },
+    });
+  });
+
+  it('uses the presentation noun only in its own language', () => {
+    const english = deriveChatInteractions(catalog([{ ...SPECS[0]!, presentation: { locale: 'en-US', singular: 'To-do', plural: 'To-dos', approval: 'List?' } }]));
+    expect(english.entities[0]!.label).toEqual({ en: 'To-do', de: 'Task' });
+    expect(deriveChatInteractions(catalog([SPECS[0]!])).entities[0]!.label).toEqual({ en: 'Task', de: 'Task' });
+    const templated = { locale: 'en-US', singular: 'List tasks', plural: 'List tasks', approval: 'List tasks' };
+    expect(deriveChatInteractions(catalog([{ ...SPECS[0]!, presentation: templated }])).entities[0]!.label).toEqual({ en: 'Task', de: 'Task' });
+  });
+
   it('is a pure function of the catalog, whatever the input order', () => {
-    const forward = deriveChatInteractions(catalog(SPECS));
-    expect(deriveChatInteractions(catalog([...SPECS].reverse()))).toEqual(forward);
+    const forward = deriveChatInteractions(catalog([...SPECS, ...TITLED.slice(1, 7)]));
+    expect(deriveChatInteractions(catalog([...SPECS, ...TITLED.slice(1, 7)].reverse()))).toEqual(forward);
   });
 
   it('derives nothing from disabled tools or tools without a contract', () => {
@@ -265,7 +337,7 @@ describe('deriveChatInteractions', () => {
       input: object({ params: object({ teamId: STRING, memberId: STRING }), status: { type: 'string', enum: ['active', 'inactive'] } }),
       uiAction: { kind: 'filter', destination: '/teams/:teamId/members/:memberId', keys: [{ key: 'status' }] },
     };
-    const { artifact, contracts } = catalog([...SPECS, nested]);
+    const { artifact, contracts } = catalog([...SPECS, ...TITLED.slice(1, 7), nested]);
     const fromFile = JSON.parse(canonicalJson({ tools: contracts })).tools as ToolContractsEntry[];
     const observed = deriveChatInteractions({ artifact, contracts });
     expect(observed.commands.some((entry) => entry.id === 'filter.teamsMembersItem')).toBe(true);

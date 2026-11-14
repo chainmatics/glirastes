@@ -11,7 +11,10 @@ import {
 } from '../../contracts/chat-interactions.js';
 import type { AppSetupArtifact } from '../../contracts/index.js';
 import { compareCodeUnits } from './canonical.js';
-import type { JsonSchemaLike, ToolContract, ToolContractsEntry } from './types.js';
+import { actionLabel, commandLabel, humanizeIdentifier, singular, type Label } from './chat-labels.js';
+import type { JsonSchemaLike, ToolContract, ToolContractsEntry, ToolTitle } from './types.js';
+
+export { humanizeIdentifier } from './chat-labels.js';
 
 export interface DeriveChatInteractionsInput {
   artifact: AppSetupArtifact;
@@ -23,6 +26,9 @@ interface BoundTool {
   method?: string;
   path?: string;
   contract: ToolContract;
+  title?: ToolTitle;
+  riskClass: string;
+  noun?: { language: 'de' | 'en'; text: string };
 }
 
 /** Query parameters that make a read endpoint an entity search, best first. */
@@ -32,17 +38,6 @@ const LABEL_FIELDS = ['title', 'name', 'displayName', 'label', 'subject', 'email
 const DESCRIPTION_FIELDS = ['description', 'email', 'status', 'subtitle', 'summary'];
 const FIELD = /^[A-Za-z_][\w-]{0,63}$/;
 const CONTROL = /[\u0000-\u001F]/;
-const VERBS: Record<string, { en: string; de: string }> = {
-  get: { en: 'Show', de: 'Anzeigen' },
-  check: { en: 'Check', de: 'Prüfen' },
-  update: { en: 'Edit', de: 'Bearbeiten' },
-  delete: { en: 'Delete', de: 'Löschen' },
-  complete: { en: 'Complete', de: 'Erledigen' },
-  archive: { en: 'Archive', de: 'Archivieren' },
-  assign: { en: 'Assign', de: 'Zuweisen' },
-  close: { en: 'Close', de: 'Schließen' },
-  reopen: { en: 'Reopen', de: 'Wieder öffnen' },
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -52,28 +47,33 @@ function clamp(text: string, max: number = CHAT_INTERACTION_LIMITS.labelLength):
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
-/** `my-tasks`, `myTasks`, `my_tasks` → `My tasks`. */
-export function humanizeIdentifier(value: string): string {
-  const words = value
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .split(/[\s._/-]+/)
-    .filter(Boolean)
-    .map((word) => word.toLowerCase());
-  const text = words.join(' ');
-  return text ? text[0]!.toUpperCase() + text.slice(1) : '';
+/** A text the list can show, clamped; `undefined` falls back to the derived label instead of dropping the entry. */
+function safe(text: string | undefined): string | undefined {
+  const trimmed = text?.trim();
+  return trimmed && !CONTROL.test(trimmed) ? clamp(trimmed) : undefined;
 }
 
-const IRREGULAR: Record<string, string> = { people: 'person', children: 'child', men: 'man', women: 'woman' };
+function safeTitle(title: ToolTitle | undefined): ToolTitle | undefined {
+  const en = safe(title?.en);
+  const de = safe(title?.de);
+  return en || de ? { ...(en ? { en } : {}), ...(de ? { de } : {}) } : undefined;
+}
 
-/** `tasks` → `task`, `categories` → `category`, `people` → `person`. */
-function singular(segment: string): string {
-  const irregular = IRREGULAR[segment.toLowerCase()];
-  if (irregular) return irregular;
-  if (/ies$/i.test(segment)) return `${segment.slice(0, -3)}y`;
-  if (/(?:ss|us|is)$/i.test(segment)) return segment;
-  if (/(?:sses|xes|ches|shes)$/i.test(segment)) return segment.slice(0, -2);
-  if (/s$/i.test(segment)) return segment.slice(0, -1);
-  return segment;
+function clampLabel(label: Label): Label {
+  return { en: clamp(label.en), de: clamp(label.de) };
+}
+
+function nounOf(entity: ChatEntityData, language: 'de' | 'en'): string | undefined {
+  return typeof entity.label === 'string' ? entity.label : entity.label[language];
+}
+
+/** Inside the entity's own menu a leading noun repeats the entity ("Aufgabe endgültig löschen" → "Endgültig löschen"). */
+function withoutNoun(text: string, noun: string | undefined): string {
+  if (!noun) return text;
+  const prefix = `${noun} `;
+  if (text.length <= prefix.length || text.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase()) return text;
+  const rest = text.slice(prefix.length).trimStart();
+  return rest ? rest[0]!.toUpperCase() + rest.slice(1) : text;
 }
 
 function entityType(segment: string): string | undefined {
@@ -179,15 +179,6 @@ function navigationTitle(path: string): { en: string; de: string } {
   return { en: title, de: title };
 }
 
-/** The trailing path segment (`/:id/pin` → `pin`), else the verb of the definition id (`tasks.update` → `update`). */
-function verbLabel(definitionId: string, trailingSegment: string | undefined): ChatText {
-  const verb = trailingSegment ?? definitionId.split('.').at(-1)!;
-  const known = VERBS[verb];
-  if (known) return known;
-  const text = clamp(humanizeIdentifier(verb) || verb);
-  return { en: text, de: text };
-}
-
 /**
  * True when the entries pass the strict check on their own: an identifier
  * the protocol cannot carry drops its entry, never the whole refresh.
@@ -238,9 +229,10 @@ function searchEntity(tool: BoundTool): SearchCandidate | undefined {
   const descriptionField = DESCRIPTION_FIELDS.find((name) => name !== labelField && isText(name));
   const limitParam = LIMIT_PARAMS.find((name) => query.has(name));
   const label = clamp(humanizeIdentifier(type));
+  const noun = tool.noun;
   const entity: ChatEntityData = {
     type,
-    label: { en: label, de: label },
+    label: { en: noun?.language === 'en' ? noun.text : label, de: noun?.language === 'de' ? noun.text : label },
     search: {
       tool: tool.definitionId,
       path: tool.path,
@@ -267,8 +259,8 @@ function searchEntity(tool: BoundTool): SearchCandidate | undefined {
  * - commands from navigation (one per page without parameters), URL
  *   filters and client actions.
  *
- * Labels are English and German defaults from identifiers; overrides and
- * skills replace them. Bounded and sorted, so the module stays byte-stable;
+ * Labels come from the tool's reviewed title and the presentation noun where
+ * the app has them, else from identifiers; overrides replace them. Bounded and sorted, so the module stays byte-stable;
  * an entry the protocol cannot carry is dropped alone, so app code never
  * makes the generated module (and `tools refresh`) fail here.
  */
@@ -276,9 +268,21 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
   const contracts = new Map(input.contracts.map((entry) => [entry.toolId, entry] as const));
   const tools: BoundTool[] = input.artifact.tools
     .filter((tool) => tool.enabled)
-    .flatMap((tool) => {
-      const contract = contracts.get(tool.toolId)?.contract;
-      return contract ? [{ definitionId: tool.name, method: tool.method, path: tool.path, contract }] : [];
+    .flatMap((tool): BoundTool[] => {
+      const entry = contracts.get(tool.toolId);
+      if (!entry?.contract) return [];
+      const title = safeTitle(entry.title);
+      const presentation = tool.presentation;
+      // The templated fallback repeats the tool label in all three texts; only a reviewed one names the thing.
+      const reviewed = presentation && !(presentation.singular === presentation.plural && presentation.plural === presentation.approval);
+      const locale = reviewed ? presentation.locale.toLowerCase() : undefined;
+      const language = locale?.startsWith('de') ? 'de' : locale?.startsWith('en') ? 'en' : undefined;
+      const noun = language ? safe(presentation?.singular) : undefined;
+      return [{
+        definitionId: tool.name, method: tool.method, path: tool.path, contract: entry.contract, riskClass: tool.riskClass,
+        ...(title ? { title } : {}),
+        ...(language && noun ? { noun: { language, text: noun } } : {}),
+      }];
     })
     .sort((left, right) => compareCodeUnits(left.definitionId, right.definitionId));
 
@@ -296,10 +300,12 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
   };
 
   const actions = new Map<string, ChatEntityActionData[]>();
-  const addAction = (type: string, action: ChatEntityActionData) => {
+  const destructive = new Set<string>();
+  const addAction = (type: string, action: ChatEntityActionData, isDestructive = false) => {
     if (!carries([{ type, label: type, actions: [action] }], [])) return;
     const list = actions.get(type) ?? [];
     if (!list.some((entry) => entry.id === action.id)) list.push(action);
+    if (isDestructive) destructive.add(action.id);
     actions.set(type, list);
   };
   for (const { type, entity } of searches.values()) {
@@ -312,13 +318,16 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
       const entityArg = match[1]!;
       const args = argsFor(tool.contract.input, new Set([entityArg]), entityOf);
       if (!args) continue;
+      const label = clampLabel(actionLabel({
+        definitionId: tool.definitionId, method: tool.method, trailingSegment: match[2], title: tool.title,
+      }));
       addAction(type, {
         id: `${type}.${tool.definitionId}`,
-        label: verbLabel(tool.definitionId, match[2]),
+        label: { en: withoutNoun(label.en, nounOf(entity, 'en')), de: withoutNoun(label.de, nounOf(entity, 'de')) },
         entityArg,
         ...(args.length > 0 ? { args } : {}),
         run: { kind: 'tool', tool: tool.definitionId },
-      });
+      }, tool.riskClass === 'delete' || tool.method === 'DELETE');
     }
   }
 
@@ -371,17 +380,16 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
       const title = humanizeIdentifier(view);
       addCommand({
         id: `filter.${idSegment(view)}`,
-        label: { en: clamp(`Filter ${title}`), de: clamp(`${title} filtern`) },
+        label: { en: tool.title?.en ?? clamp(`Filter ${title}`), de: tool.title?.de ?? clamp(`${title} filtern`) },
         ...(args.length > 0 ? { args } : {}),
         run: { kind: 'ui', tool: tool.definitionId },
       });
       continue;
     }
     const id = tool.definitionId.replace(/^ui\./, '');
-    const label = clamp(humanizeIdentifier(id));
     addCommand({
       id,
-      label: { en: label, de: label },
+      label: clampLabel(commandLabel(id, tool.title)),
       ...(args.length > 0 ? { args } : {}),
       run: { kind: 'ui', tool: tool.definitionId },
     });
@@ -390,7 +398,8 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
   const entities = [...searches.values()]
     .map(({ type, entity }) => {
       const list = (actions.get(type) ?? [])
-        .sort((left, right) => compareCodeUnits(left.id, right.id))
+        .sort((left, right) => (Number(destructive.has(left.id)) - Number(destructive.has(right.id)))
+          || compareCodeUnits(left.id, right.id))
         .slice(0, CHAT_INTERACTION_LIMITS.actionsPerEntity);
       return list.length > 0 ? { ...entity, actions: list } : entity;
     })
