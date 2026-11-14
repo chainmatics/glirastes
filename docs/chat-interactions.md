@@ -37,7 +37,9 @@ object built from identifiers, in English and German ("Open task create
 dialog", "Task create dialog öffnen"). Synonyms, icons and what a title cannot
 say come from `.glirastes/chat-interactions.json` (written by people, the
 `describing-glirastes-tools` or `curating-glirastes-chat-interactions` skill,
-never by the generator):
+never by the generator). The titles reach the derivation through
+`.glirastes/tool-contracts.json`; run `glirastes tools refresh` after
+upgrading and commit the result.
 
 ```json
 {
@@ -150,7 +152,8 @@ function Composer() {
 A custom suggestion item spreads `optionProps` onto its clickable element.
 Never call `send(text)` without the editor's mentions and never pass an own
 `onSearch` next to `chatInteractions`: both bypass direct commands and entity
-actions. The `curating-glirastes-chat-interactions` skill walks a coding agent
+actions. The legacy `mentions` composer ignores these props. The
+`curating-glirastes-chat-interactions` skill walks a coding agent
 through the review, the overrides and this wiring.
 
 ## `<glirastes-chat>`
