@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.0-chat.2] - 2026-11-14
+## [0.8.0-chat.3] - 2026-11-14
 
 Prerelease on the `next` dist-tag.
 
@@ -643,8 +643,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.2...HEAD
-[0.8.0-chat.2]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.1...v0.8.0-chat.2
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.3...HEAD
+[0.8.0-chat.3]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.1...v0.8.0-chat.3
 [0.8.0-chat.1]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.0...v0.8.0-chat.1
 [0.8.0-chat.0]: https://github.com/chainmatics/glirastes/compare/v0.7.1...v0.8.0-chat.0
 [0.7.1]: https://github.com/chainmatics/glirastes/compare/v0.7.0...v0.7.1
