@@ -121,3 +121,18 @@ describe('chats kept in the browser', () => {
     expect(await theirs.load!('default')).toBeNull();
   });
 });
+
+describe('attachments in stored chats', () => {
+  it('stores file parts without their data', async () => {
+    const { data, storage } = memory();
+    const chats = store(storage);
+    const withImage: ChatMessage = {
+      id: 'u1', role: 'user',
+      parts: [{ type: 'text', text: 'Sieh mal' }, { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAAA', filename: 'a.png' }],
+    };
+    await chats.save!('default', [withImage]);
+    expect(data.get('app:u1:messages:default')).not.toContain('base64');
+    const [loaded] = (await chats.load!('default')) as ChatMessage[];
+    expect(loaded!.parts[1]).toEqual({ type: 'file', mediaType: 'image/png', url: '', filename: 'a.png' });
+  });
+});

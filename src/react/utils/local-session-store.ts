@@ -1,4 +1,5 @@
 import type { ChatMessage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
+import { omitAttachmentData } from './attachments.js';
 import { sanitizeStoredMessages } from './sanitize-stored-messages.js';
 
 type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -166,7 +167,8 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
         updatedAt: now(),
         messageCount: messages.length,
       };
-      write(messagesKey(conversationId), messages);
+      // Base64 attachments would fill the storage quota within a few images.
+      write(messagesKey(conversationId), omitAttachmentData(messages));
       persist([...list.filter((other) => other.id !== conversationId), entry]);
     },
     load(conversationId) {
