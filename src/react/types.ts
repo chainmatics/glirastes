@@ -256,6 +256,8 @@ export interface MentionResult {
   args?: Readonly<Record<string, unknown>>;
   /** Entity actions offered next to this result (see `CompletionItem.actions`). */
   actions?: ReadonlyArray<CompletionItemAction>;
+  /** Heading the list shows above this hit's group. */
+  group?: string;
 }
 
 export interface MentionData {
@@ -306,6 +308,8 @@ export interface CompletionItem {
    * to it in the list and reachable by keyboard (ArrowRight/ArrowLeft).
    */
   actions?: ReadonlyArray<CompletionItemAction>;
+  /** Heading the list shows above this hit's group. */
+  group?: string;
 }
 
 export interface CompletionItemAction {
@@ -662,6 +666,8 @@ export interface ChatLocale {
   // `@` and `/` suggestions
   completionListLabel: string;
   completionResultsLabel: string;     // supports `{count}`
+  /** Hint when a `@`/`/` search finds nothing. */
+  completionEmptyLabel?: string;
 
   // Arguments of `/` commands and entity actions
   commandArgumentsLabel: string;      // supports `{command}`
@@ -1009,7 +1015,7 @@ export interface ChatComposer extends ChatComposerControls {
   /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
   readonly inputRef: RefObject<RichMentionInputHandle | null>;
   readonly inputProps: Pick<RichMentionInputProps,
-    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel'>;
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel'>;
   readonly pendingCommand: PendingChatCommand | null;
   submitPendingCommand(values: Readonly<Record<string, string>>, valueLabels?: Readonly<Record<string, string>>): boolean;
   cancelPendingCommand(): void;
@@ -1055,6 +1061,8 @@ export interface RichMentionInputProps {
   className?: string;
   /** Class of the wrapper in mention mode (plain mode has none; there `className` styles the element). */
   wrapperClassName?: string;
+  /** Shown instead of the list when a search finds nothing; without it an empty result shows nothing. */
+  emptyLabel?: string;
   onChange?: (nextValue: string) => void;
   /** Receives the text and the structured mentions (chips and commands) still in it. */
   onSubmit?: (message: string, mentions: MentionData[]) => void;

@@ -101,6 +101,7 @@ export function useChatComposer(options: UseChatComposerOptions = {}): ChatCompo
     ),
     listLabel: locale.completionListLabel,
     resultsLabel: locale.completionResultsLabel,
+    emptyLabel: locale.completionEmptyLabel,
   }), [completionSearch, isLoading, locale, runEntityAction, submitText]);
 
   const argumentsForm = pendingCommand ? (

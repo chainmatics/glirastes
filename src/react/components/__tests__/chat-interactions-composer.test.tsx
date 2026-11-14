@@ -8,6 +8,7 @@ import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import { useChatContext, type ChatContextValue } from '../../provider/chat-context.js';
 import type { ChatTransport } from '../../types.js';
 import { MentionInput } from '../mention-input.js';
+import { RichMentionInput } from '../rich-mention-input.js';
 
 const task = defineChatEntity({
   type: 'task',
@@ -208,5 +209,63 @@ describe('composer keyboard and ARIA for chat interactions', () => {
     await act(async () => { await context!.mentionEntity('task', '7'); });
     const editor = screen.getByRole('textbox');
     await waitFor(() => expect(editor.querySelector('[data-mention-id="7"]')?.textContent).toContain('Release prüfen'));
+  });
+});
+
+const person = defineChatEntity({
+  type: 'person',
+  label: 'Person',
+  search: (query) => [{ id: 'rita', label: 'Rita Muster' }].filter((item) => item.label.toLowerCase().startsWith(query.toLowerCase())),
+});
+
+function MixedComposer({ chat }: { chat: ChatTransport }) {
+  const interactions = useMemo(() => ({ entities: [task, person], commands }), []);
+  return <AiChatProvider transport={chat} chatInteractions={interactions}><MentionInput /></AiChatProvider>;
+}
+
+describe('composer list headings and empty state', () => {
+  it('shows a heading per group only when there are several', async () => {
+    const { container } = render(<MixedComposer chat={transport()} />);
+    const editor = screen.getByRole('textbox');
+    typeInto(editor, '@r');
+    await screen.findByRole('listbox');
+    await waitFor(() => expect(container.querySelectorAll('[data-element="group-heading"]')).toHaveLength(2));
+    const headings = [...container.querySelectorAll('[data-element="group-heading"]')];
+    expect(headings.map((heading) => heading.textContent)).toEqual(['Task', 'Person']);
+    expect(headings[0]!.getAttribute('role')).toBe('presentation');
+    const order = [...container.querySelectorAll('[data-element="group-heading"], [role="option"]:not([data-component="mention-action"])')]
+      .map((element) => (element.getAttribute('data-element') === 'group-heading'
+        ? `# ${element.textContent}`
+        : ['Release prüfen', 'Report schreiben', 'Rita Muster'].find((label) => element.textContent?.startsWith(label))));
+    expect(order).toEqual(['# Task', 'Release prüfen', 'Report schreiben', '# Person', 'Rita Muster']);
+    fireEvent.keyDown(editor, { key: 'ArrowDown' });
+    fireEvent.keyDown(editor, { key: 'ArrowDown' });
+    expect(document.getElementById(editor.getAttribute('aria-activedescendant')!)?.textContent).toContain('Rita Muster');
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    typeInto(editor, '/open');
+    await screen.findByRole('listbox');
+    expect(container.querySelector('[data-element="group-heading"]')).toBeNull();
+  });
+
+  it('says so when nothing matches and how the list works', async () => {
+    const { container } = render(<MixedComposer chat={transport()} />);
+    const editor = screen.getByRole('textbox');
+    typeInto(editor, '/zzz');
+    await waitFor(() => expect(container.querySelector('[data-component="mention-dropdown"][data-state="empty"]')).not.toBeNull());
+    const empty = container.querySelector('[data-component="mention-dropdown"][data-state="empty"]')!;
+    expect(empty.textContent).toBe('No matches. @ for things, / for commands');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('No matches. @ for things, / for commands');
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(container.querySelector('[data-state="empty"]')).toBeNull();
+  });
+
+  it('renders nothing for an empty result without an empty label', async () => {
+    const onSearch = vi.fn(() => []);
+    const { container } = render(<RichMentionInput onSearch={onSearch} />);
+    typeInto(screen.getByRole('textbox'), '/zzz');
+    await waitFor(() => expect(onSearch).toHaveBeenCalled());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(container.querySelector('[data-component="mention-dropdown"]')).toBeNull();
   });
 });
