@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0-chat.0] - 2026-11-14
+
+Prerelease on the `next` dist-tag for the staging rollout of chat interaction curation.
+
 ### Added
 
 - `useChatComposer()` exposes the composer logic (suggestion search, direct `/` commands, the argument form, entity actions, references from `mentionEntity`) for a custom chat input; `MentionInput` takes `initialValue`, `initialMentions`, `components.DropdownItem`, `renderActions`, `renderSubmit`, `inputClassName` and `editorClassName`, and `components.MentionDropdownItem` sets the suggestion item for the whole chat.
@@ -612,7 +616,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.0...HEAD
+[0.8.0-chat.0]: https://github.com/chainmatics/glirastes/compare/v0.7.1...v0.8.0-chat.0
 [0.7.1]: https://github.com/chainmatics/glirastes/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/chainmatics/glirastes/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/chainmatics/glirastes/compare/v0.5.1...v0.6.0
