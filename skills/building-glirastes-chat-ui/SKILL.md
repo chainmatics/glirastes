@@ -43,16 +43,14 @@ chat route uses the app's own model access.
 5. Prove it in a real browser: keyboard, mobile layout, approvals, STT
    cleanup.
 
-The application may use an ephemeral session for basic interactive chat.
-Server-backed conversation visibility and retention must be explicit when
-durable sessions are enabled.
+The app may use an ephemeral session for basic chat; with durable sessions,
+make server-side visibility and retention explicit.
 
 ## Configuration
 
-`VercelAiChat` requires `endpoint` and creates its transport internally.
-It also accepts `AiChatProviderConfig` fields directly. Only when composing
-`AiChatProvider` yourself do you supply `transport` from the transport hook.
-Reach for configuration before forking a component.
+`VercelAiChat` requires `endpoint`, creates its transport internally and takes
+the `AiChatProviderConfig` fields; an own `AiChatProvider` needs `transport`
+from the transport hook. Reach for configuration before forking a component.
 
 | Field | What it decides |
 |---|---|
@@ -66,6 +64,7 @@ Reach for configuration before forking a component.
 | `mentions` | mention sources and search |
 | `suggestions` | contextual suggestion chips |
 | `voice` | speech-to-text |
+| `attachments` | image and PDF attachments (section below) |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
 | `onBeforeSend`, `onToolResult` | hooks around a turn |
 | `approvalDescription` | human-readable text for an approval request |
@@ -90,21 +89,19 @@ const t = useTranslations('chat');
 <VercelAiChat endpoint="/api/chat" theme={{ preset: 'minimal-white', colors: { primary: '#10b981' } }} />
 ```
 
-`getThemeVars`, `CHAT_THEME_PRESETS`, and `DEFAULT_THEME_PRESET` are exported for
-products that need to read the resolved variables. Prefer `theme` and
-`classNames` over overriding the shipped CSS: styles are variable-driven, and
-inline overrides are what break under a strict CSP.
+`getThemeVars`, `CHAT_THEME_PRESETS` and `DEFAULT_THEME_PRESET` expose the
+resolved variables. Prefer `theme` and `classNames` over overriding the CSS:
+styles are variable-driven, inline overrides break under a strict CSP.
 
 ## Slots
 
 `components` replaces one rendered piece while the rest of the chat keeps
 working: `MessageBubble`, `ChatInput`, `ToolResultBlock`, `Markdown`,
 `InputExtra`, `ApprovalCard`, `BulkApprovalCard`, `PipelineTimeline`,
-`SuggestionChip`, `MentionChip`.
+`SuggestionChip`, `MentionChip`, `AttachmentTray`, `AttachmentButton`.
 
-Replace the narrowest slot that solves the problem. Swapping `MessageBubble`
-to restyle one tool result costs the streaming, approval, and mention behavior
-that bubble already carries.
+Replace the narrowest slot: swapping `MessageBubble` to restyle one tool result
+costs the streaming, approval and mention behavior it carries.
 
 ## UI actions
 
@@ -230,22 +227,29 @@ microphone. The host needs `react`, `react-dom`, `@ai-sdk/react` and `ai`.
 ## Mentions and suggestions
 
 `mentions` supplies the sources; `MentionInput` and `RichMentionInput` render
-them, `MentionChip` and `MentionChipList` display the result. Structured mention
-ids must survive submission — assert that, because a mention degraded to plain
-text still looks right on screen and no longer resolves.
+them, `MentionChip` and `MentionChipList` show them. Assert that structured
+mention ids survive submission: a mention degraded to plain text looks right
+and no longer resolves. `suggestions` drives `SuggestionBar` and
+`SuggestionChip`; a failing source may not take the composer down.
 
-`suggestions` drives `SuggestionBar` and `SuggestionChip`. Suggestions are
-contextual, so they must handle their source failing: a search error may not
-take the composer down with it.
+## Attachments
+
+Off by default; enable both sides: `attachments` on `VercelAiChat` (`true` or
+`{ mediaTypes, maxFiles, maxFileBytes, prepare }`) and `attachments: {
+enabled: true }` on `createAiChatHandler`. The SDK never compresses: downscale
+in `prepare`. With `piiShield` the handler also needs `allowWithPiiShield:
+true` (files bypass the shield); decide that with the developer. A custom
+composer adds `AttachmentTray`, `<input {...composer.attachmentInputProps} />`
+and `AttachmentButton` (`onClick={composer.openFilePicker}`). Raise body limits
+in front of the route: Next.js middleware (10 MB), Express/NestJS JSON parser.
 
 ## Sessions
 
-`session.save`, `session.load`, and `session.clear` make conversations durable.
-`load` accepts full SDK `ChatMessage`s or flat `WireChatMessage`s and coerces the
-wire shape. `SessionSwitcher` renders list, create, switch, and rename.
+`session.save`, `.load` and `.clear` make conversations durable; `load` takes
+SDK `ChatMessage`s or flat `WireChatMessage`s. `SessionSwitcher` renders list,
+create, switch and rename.
 
-Corrupted stored sessions fail closed rather than rendering garbage, and clearing
-history requires an explicit confirmation. Both are tested behavior; keep them.
+Corrupted stored sessions fail closed; clearing history needs a confirmation.
 
 For several chats per user without a backend, pass
 `session={createLocalSessionStore({ storageKey: `myapp:${userId}` })}`
@@ -259,12 +263,10 @@ and `load` from its own server instead.
 
 ## Floating window
 
-`FloatingChatUI`, `ChatWindow`, and `AiTriggerButton` provide the portal-mounted
+`FloatingChatUI`, `ChatWindow` and `AiTriggerButton` provide the portal-mounted
 widget; `useDragResizePanel` and `useDraggablePosition` carry drag, resize,
-viewport constraint, and snapback. Panel dimensions persist and stay bounded.
-
-Mount the window through the shipped portal rather than nesting it in product
-layout: it is what keeps the panel clear of transformed or clipping ancestors.
+viewport constraint and snapback (bounded, persisted). Mount it through the
+shipped portal, which keeps it clear of transformed or clipping ancestors.
 
 ## Placing the assistant
 
@@ -292,12 +294,11 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
 }
 ```
 
-The workspace is a row that fills its parent: the page on the left, the
-docked assistant on the right. The parent needs a height (for example
-`html, body { height: 100dvh }` or a full-height app frame); otherwise the
-docked assistant is only as tall as the page content. It folds to a rail, takes the whole row on
-narrow screens, and publishes its width as `--assistant-right-inset` for
-fixed elements of the page. Detaching or docking is remembered, so a closed
+The workspace is a row that fills its parent (page left, assistant right); the
+parent needs a height (`html, body { height: 100dvh }` or a full-height frame),
+or the assistant is only as tall as the page. It folds to a rail, takes the
+whole row on narrow screens, and publishes its width as
+`--assistant-right-inset` for fixed elements. Detaching or docking is remembered, so a closed
 window reopens as a window. `defaultMode="floating"` opens detached first.
 
 - Toggle anywhere: `AssistantToggle` works at any depth inside the workspace;
@@ -324,13 +325,12 @@ window reopens as a window. `defaultMode="floating"` opens detached first.
 ## Approvals
 
 Self-confirmation stays in the initiating chat. Organizational approval creates
-a durable Platform request and remains fail-closed while unavailable. Never
-derive approver authority from the browser payload. Test denial, expiry,
-replay, cross-app, and cross-tenant cases.
+a durable Platform request and stays fail-closed while unavailable. Test
+denial, expiry, replay, cross-app and cross-tenant cases.
 
-`ApprovalCard` handles one request and `BulkApprovalCard` groups same-tool
-requests while keeping each approval independent — bulk rendering must not become
-bulk authorization. An approval failure is retryable without losing the request.
+`ApprovalCard` handles one request; `BulkApprovalCard` groups same-tool requests
+but keeps each approval independent (no bulk authorization). A failed approval
+is retryable without losing the request.
 
 ## Speech-to-text gate
 
