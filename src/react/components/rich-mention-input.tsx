@@ -117,9 +117,13 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       listLabel = 'Suggestions',
       resultsLabel = '{count} suggestions',
       emptyLabel,
+      onFiles,
+      onBackspaceEmpty,
+      allowEmptySubmit = false,
     },
     ref,
   ) {
+    const [dragOver, setDragOver] = useState(false);
     const hasMentionSupport = typeof onSearch === 'function';
     const isControlled = value !== undefined;
     const [internalValue, setInternalValue] = useState(defaultValue);
@@ -543,9 +547,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         ? getFullValue()
         : normalizeInputValue((editableRef.current?.innerText ?? '').trim());
 
-      if (!text) return;
+      if (!text && !allowEmptySubmit) return;
 
-      onSubmit?.(text, collectMentions(text));
+      if (onSubmit?.(text, text ? collectMentions(text) : []) === false) return;
       setValue('');
       if (hasMentionSupport) {
         setMentions([]);
@@ -553,7 +557,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       if (editableRef.current) {
         editableRef.current.innerHTML = '';
       }
-    }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions]);
+    }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions, allowEmptySubmit]);
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
@@ -616,6 +620,17 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           return;
         }
 
+        if (event.key === 'Backspace' && onBackspaceEmpty) {
+          const empty = hasMentionSupport
+            ? getFullValue() === ''
+            : (editableRef.current?.textContent ?? '') === '';
+          if (empty) {
+            event.preventDefault();
+            onBackspaceEmpty();
+            return;
+          }
+        }
+
         // Backspace: delete chip at cursor boundary (mention mode)
         if (hasMentionSupport && event.key === 'Backspace') {
           const selection = editorSelection(editableRef.current);
@@ -651,13 +666,18 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         submit,
         onChange,
         getFullValue,
+        onBackspaceEmpty,
       ],
     );
 
-    /** Strip formatting on paste — insert plain text only. */
+    /** Strip formatting on paste — insert plain text only; files go to `onFiles`. */
     const handlePaste = useCallback(
       (e: React.ClipboardEvent<HTMLDivElement>) => {
+        const files = onFiles ? Array.from(e.clipboardData.files ?? []) : [];
+        // Plain mode keeps the browser's own text paste unless files must stay out of the editor.
+        if (!hasMentionSupport && files.length === 0) return;
         e.preventDefault();
+        if (files.length > 0) onFiles!(files);
         const plainText = e.clipboardData.getData('text/plain');
         if (!plainText) return;
 
@@ -673,10 +693,29 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         selection.removeAllRanges();
         selection.addRange(range);
 
-        onChange?.(getFullValue());
+        onChange?.(hasMentionSupport ? getFullValue() : normalizeInputValue(editableRef.current?.innerText ?? ''));
       },
-      [onChange, getFullValue],
+      [onChange, getFullValue, onFiles, hasMentionSupport],
     );
+
+    const fileDrag = (event: React.DragEvent) =>
+      Boolean(onFiles) && Array.from(event.dataTransfer?.types ?? []).includes('Files');
+    const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+      if (!fileDrag(event) || disabled) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+      setDragOver(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [onFiles, disabled]);
+    const handleDragLeave = useCallback(() => setDragOver(false), []);
+    const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+      setDragOver(false);
+      if (!fileDrag(event) || disabled) return;
+      event.preventDefault();
+      const files = Array.from(event.dataTransfer.files ?? []);
+      if (files.length > 0) onFiles!(files);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [onFiles, disabled]);
 
     // -----------------------------------------------------------------------
     // Side effects (mention mode)
@@ -864,10 +903,15 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           data-component="rich-mention-input"
           data-placeholder={dataPlaceholder}
           data-state={disabled ? 'disabled' : 'idle'}
+          data-drag-over={dragOver ? 'true' : undefined}
           aria-disabled={disabled}
           aria-label={placeholder ?? 'Message input'}
           onInput={handleInput}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
           suppressContentEditableWarning
         />
       );
@@ -925,6 +969,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       <div
         className={wrapperClassName}
         data-component="rich-mention-input"
+        data-drag-over={dragOver ? 'true' : undefined}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         data-state={
           disabled
             ? 'disabled'

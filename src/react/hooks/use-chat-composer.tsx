@@ -2,11 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandArgumentsForm as DefaultCommandArgumentsForm } from '../components/command-arguments-form.js';
 import { useChatContext } from '../provider/chat-context.js';
 import type {
+  ChatAttachment,
   ChatComposer,
+  ChatLocale,
   MentionData,
   RichMentionInputHandle,
   UseChatComposerOptions,
 } from '../types.js';
+import { formatBytes, readAttachments, toFilePart, type AttachmentProblem } from '../utils/attachments.js';
+
+function describeProblem(problem: AttachmentProblem, locale: ChatLocale): string {
+  const fill = (text: string, values: Record<string, string | number>) =>
+    text.replace(/\{(\w+)\}/g, (match, key: string) => (key in values ? String(values[key]) : match));
+  switch (problem.code) {
+    case 'type': return fill(locale.attachmentTypeNotAllowed, { name: problem.name });
+    case 'too-many': return fill(locale.attachmentTooMany, { count: problem.count });
+    case 'too-large': return fill(locale.attachmentTooLarge, { name: problem.name, size: formatBytes(problem.maxBytes) });
+    case 'read-failed': return fill(locale.attachmentReadFailed, { name: problem.name });
+    case 'command': return locale.attachmentCommandRefused;
+    case 'unsupported': return locale.attachmentUnsupported;
+  }
+}
 
 /**
  * The composer logic of the chat (suggestion search, direct `/` commands,
@@ -27,9 +43,16 @@ export function useChatComposer(options: UseChatComposerOptions = {}): ChatCompo
     pendingCommand,
     submitPendingCommand,
     cancelPendingCommand,
+    attachments: attachmentOptions,
+    interactions,
   } = useChatContext();
   const { onSubmit, initialValue } = options;
   const [value, setValue] = useState('');
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentProblem, setAttachmentProblem] = useState<AttachmentProblem | null>(null);
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<RichMentionInputHandle | null>(null);
   const initialApplied = useRef(false);
   const ArgumentsForm = components.CommandArgumentsForm ?? DefaultCommandArgumentsForm;
@@ -53,17 +76,56 @@ export function useChatComposer(options: UseChatComposerOptions = {}): ChatCompo
     setValue(handle.getValue());
   }, [initialValue]);
 
+  const addFiles = useCallback(async (files: FileList | ReadonlyArray<File>) => {
+    if (!attachmentOptions) return;
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    const read = await readAttachments(list, attachmentsRef.current.length, attachmentOptions);
+    if (read.attachments.length > 0) {
+      attachmentsRef.current = [...attachmentsRef.current, ...read.attachments];
+      setAttachments(attachmentsRef.current);
+    }
+    setAttachmentProblem(read.error);
+  }, [attachmentOptions]);
+
+  const removeAttachment = useCallback((id: string) => {
+    attachmentsRef.current = attachmentsRef.current.filter((attachment) => attachment.id !== id);
+    setAttachments(attachmentsRef.current);
+    setAttachmentProblem(null);
+  }, []);
+
+  const removeLastAttachment = useCallback(() => {
+    const last = attachmentsRef.current.at(-1);
+    if (last) removeAttachment(last.id);
+  }, [removeAttachment]);
+
+  const openFilePicker = useCallback(() => { fileInputRef.current?.click(); }, []);
+
   const submitText = useCallback((text: string, mentions: MentionData[]) => {
     const trimmed = text.trim();
-    if (!trimmed || isLoading) return false;
+    const pending = attachmentsRef.current;
+    if ((!trimmed && pending.length === 0) || isLoading) return false;
+    const files = pending.map(toFilePart);
+    if (files.length > 0) {
+      const plan = interactions?.planMessage(trimmed, mentions);
+      if (plan?.status === 'send' || plan?.status === 'needs-args') {
+        setAttachmentProblem({ code: 'command' });
+        return false;
+      }
+    }
     if (onSubmit) {
-      onSubmit(trimmed, mentions);
-    } else if (!send(trimmed, { mentions })) {
+      onSubmit(trimmed, mentions, ...(files.length > 0 ? [files] : []));
+    } else if (!send(trimmed, files.length > 0 ? { mentions, files } : { mentions })) {
       return false;
     }
     setValue('');
+    if (pending.length > 0) {
+      attachmentsRef.current = [];
+      setAttachments([]);
+    }
+    setAttachmentProblem(null);
     return true;
-  }, [isLoading, onSubmit, send]);
+  }, [isLoading, onSubmit, send, interactions]);
 
   const submit = useCallback(() => {
     const handle = inputRef.current;
@@ -91,7 +153,7 @@ export function useChatComposer(options: UseChatComposerOptions = {}): ChatCompo
 
   const inputProps = useMemo<ChatComposer['inputProps']>(() => ({
     onChange: setValue,
-    onSubmit: (text, mentions) => { submitText(text, mentions); },
+    onSubmit: (text, mentions) => submitText(text, mentions),
     onSearch: completionSearch,
     placeholder: locale.placeholder,
     disabled: isLoading,
@@ -102,7 +164,31 @@ export function useChatComposer(options: UseChatComposerOptions = {}): ChatCompo
     listLabel: locale.completionListLabel,
     resultsLabel: locale.completionResultsLabel,
     emptyLabel: locale.completionEmptyLabel,
-  }), [completionSearch, isLoading, locale, runEntityAction, submitText]);
+    ...(attachmentOptions
+      ? {
+          onFiles: (files: File[]) => { void addFiles(files); },
+          onBackspaceEmpty: removeLastAttachment,
+          allowEmptySubmit: attachments.length > 0,
+        }
+      : {}),
+  }), [completionSearch, isLoading, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
+
+  const attachmentInputProps = useMemo<ChatComposer['attachmentInputProps']>(() => ({
+    ref: fileInputRef,
+    type: 'file',
+    multiple: true,
+    accept: (attachmentOptions?.mediaTypes ?? []).join(','),
+    hidden: true,
+    tabIndex: -1,
+    'aria-hidden': true,
+    onChange: (event) => {
+      const input = event.currentTarget;
+      const files = input.files ? Array.from(input.files) : [];
+      // Lets the same file be picked again after it was removed.
+      input.value = '';
+      void addFiles(files);
+    },
+  }), [attachmentOptions, addFiles]);
 
   const argumentsForm = pendingCommand ? (
     <ArgumentsForm
@@ -122,7 +208,14 @@ export function useChatComposer(options: UseChatComposerOptions = {}): ChatCompo
   return {
     value,
     isLoading,
-    canSend: value.trim().length > 0 && !isLoading,
+    canSend: (value.trim().length > 0 || attachments.length > 0) && !isLoading,
+    attachments,
+    attachmentError: attachmentProblem ? describeProblem(attachmentProblem, locale) : null,
+    attachmentsEnabled: attachmentOptions !== null,
+    addFiles,
+    removeAttachment,
+    openFilePicker,
+    attachmentInputProps,
     submit,
     stop,
     setText,
