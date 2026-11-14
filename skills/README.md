@@ -1,6 +1,6 @@
 # Glirastes Agent Skills
 
-The package ships seven skills for the app's existing coding agent. Glirastes
+The package ships eight skills for the app's existing coding agent. Glirastes
 never calls a model: the CLI derives tools from the code and prints work
 lists, the skills tell the agent how to work through them.
 
@@ -12,6 +12,7 @@ lists, the skills tell the agent how to work through them.
 | [`maintaining-glirastes-tools`](./maintaining-glirastes-tools/SKILL.md) | Resolving `glirastes tools resolve --print` findings and policy proposals |
 | [`describing-glirastes-tools`](./describing-glirastes-tools/SKILL.md) | Writing descriptions, schemas, synonyms and examples from `glirastes tools describe --print` |
 | [`building-glirastes-chat-ui`](./building-glirastes-chat-ui/SKILL.md) | Chat UI, the derived `@` entities and `/` commands (served by `createChatInteractionsHandler`, with direct commands), providers, result components, approvals and STT |
+| [`curating-glirastes-chat-interactions`](./curating-glirastes-chat-interactions/SKILL.md) | Reviewing the derived `@` entities and `/` commands after a refresh: hide, rename or add entries, wire a custom composer, remove hand-built lists |
 | [`migrating-to-glirastes`](./migrating-to-glirastes/SKILL.md) | Moving off `@chainmatics/agentic-*` and `ai-tool.ts` |
 
 Install project-local copies with:

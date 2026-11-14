@@ -19,8 +19,10 @@ import type {
   PipelineMessageTranslator,
   StepSummaryFormatter,
   SessionSummary,
+  FilePart,
 } from '../types.js';
 import type { CompletionSearch } from '../completions/completion-search.js';
+import type { ResolvedAttachmentOptions } from '../utils/attachments.js';
 import type { ChatInteractionRegistry, PendingChatCommand } from '../interactions/registry.js';
 import type { ToolResultRendererRegistry } from '../tool-renderers/registry.js';
 
@@ -53,6 +55,8 @@ export interface ChatContextValue {
   toolResults: ToolResultDisplayConfig;
   /** Custom result components; absent when none are configured. */
   toolRendererRegistry?: ToolResultRendererRegistry;
+  /** Resolved attachment limits; null while attachments are off. */
+  attachments: ResolvedAttachmentOptions | null;
   voice: VoiceInputConfig;
   mentionConfig?: MentionConfig;
   pipelineMessageTranslator?: PipelineMessageTranslator;
@@ -64,10 +68,11 @@ export interface ChatContextValue {
   error: Error | null;
   /**
    * `mentions` replaces the provider's active mentions for this message.
-   * Returns false when the message is not taken (an approval is still open or
-   * the session is not ready); the composer should then keep the typed text.
+   * Returns false when the message is not taken (an approval is still open,
+   * the session is not ready, or `files` come with a direct command or while
+   * attachments are off); the composer should then keep text and files.
    */
-  send: (message: string, options?: { mentions?: MentionData[] }) => boolean;
+  send: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => boolean;
   stop: () => void;
   clear: () => void;
   loadMore: () => void;

@@ -71,6 +71,7 @@ export type {
   WithAiToolOptions,
   AiToolRouteHandler,
   AiChatHandlerConfig,
+  ChatAttachmentsConfig,
   LoadTools,
   GuardrailResult,
   GuardrailHook,

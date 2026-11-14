@@ -77,7 +77,7 @@ describe('part resolution', () => {
     expect(resolvePartSkills(['framework'], { stack: 'nextjs' }))
       .toEqual(['integrating-glirastes-nextjs']);
     expect(resolvePartSkills(['chat-ui'], { stack: 'nextjs' }))
-      .toEqual(['building-glirastes-chat-ui']);
+      .toEqual(['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions']);
     expect(resolvePartSkills(['tools'], { stack: 'nextjs' }))
       .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools']);
     expect(resolvePartSkills(['setup'], { stack: 'nextjs' }))

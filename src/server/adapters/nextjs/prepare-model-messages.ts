@@ -19,6 +19,7 @@ import {
   createAiSdkTools,
   type AiSdkToolHooks,
 } from '../../../runtime/ai-sdk/engine.js';
+import { attachmentPlaceholderText } from '../../../contracts/attachments.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,8 @@ const HISTORY_DEFAULTS = {
 const MAX_COMPACT_DEPTH = 6;
 const CHARS_PER_TOKEN = 4;
 const MIN_TEXT_SHARE = 1_000;
+/** Flat history estimate per file part; its encoded bytes say little about the model's cost. */
+const FILE_PART_TOKENS = 1_000;
 
 /**
  * Convert UI messages into sanitized model messages ready for `streamText()`.
@@ -119,8 +122,29 @@ interface ModelMessageLike {
   content: unknown;
 }
 
+function isFilePart(value: unknown): value is { type: 'file'; filename?: unknown } {
+  return typeof value === 'object' && value !== null
+    && (value as { type?: unknown }).type === 'file' && 'data' in value;
+}
+
 function estimateTokens(messages: ReadonlyArray<unknown>): number {
-  return Math.ceil(JSON.stringify(messages).length / CHARS_PER_TOKEN);
+  let files = 0;
+  const json = JSON.stringify(messages, (_key, value: unknown) => {
+    if (!isFilePart(value)) return value;
+    files += 1;
+    return undefined;
+  });
+  return Math.ceil(json.length / CHARS_PER_TOKEN) + files * FILE_PART_TOKENS;
+}
+
+function withoutFiles(message: ModelMessageLike): ModelMessageLike {
+  if (!Array.isArray(message.content) || !message.content.some(isFilePart)) return message;
+  return {
+    ...message,
+    content: (message.content as unknown[]).map((part) => (isFilePart(part)
+      ? { type: 'text', text: attachmentPlaceholderText(typeof part.filename === 'string' ? part.filename : undefined) }
+      : part)),
+  };
 }
 
 /** Splits model messages into turns, each starting at a user message. */
@@ -136,6 +160,7 @@ function splitTurns(messages: ModelMessageLike[]): ModelMessageLike[][] {
 function textOnly(turn: ModelMessageLike[]): ModelMessageLike[] {
   return turn
     .filter((message) => message.role !== 'tool')
+    .map(withoutFiles)
     .map((message) => (message.role === 'assistant' && Array.isArray(message.content)
       ? {
           ...message,

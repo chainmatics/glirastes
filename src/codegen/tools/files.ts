@@ -108,6 +108,11 @@ export const McpToolNamesFileSchema = z.object({
   }
 });
 
+const ToolTitleSchema = z.object({
+  de: z.string().min(1).max(200).optional(),
+  en: z.string().min(1).max(200).optional(),
+}).strict();
+
 export const ToolContractsFileSchema = z.object({
   schemaVersion: z.literal(1),
   appId: z.uuid(),
@@ -118,6 +123,7 @@ export const ToolContractsFileSchema = z.object({
     contract: ToolContractSchema.nullable(),
     defaults: ToolPolicyDefaultsSchema,
     search: ToolSearchFactsSchema.optional(),
+    title: ToolTitleSchema.optional(),
     mcp: z.array(McpToolNameSchema).min(1).max(10).optional(),
   }).strict()).max(5_000),
 }).strict();

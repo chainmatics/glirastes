@@ -16,7 +16,7 @@ import {
   stripClarificationMarkers,
 } from '../../contracts/clarification.js';
 import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
-import type { ChatLocale, MessageBubbleProps, PipelineState, TextPart } from '../types.js';
+import type { ChatLocale, FilePart, MessageBubbleProps, PipelineState, TextPart } from '../types.js';
 
 // Lazy-load react-markdown — keeps it out of the synchronous import graph so
 // server-only consumers don't pay for it, and gracefully degrades to raw text
@@ -77,6 +77,70 @@ function pipelineNotice(state: PipelineState | null, locale: ChatLocale): string
 
 function isTextPart(part: unknown): part is TextPart {
   return isRecord(part) && part.type === 'text' && typeof part.text === 'string';
+}
+
+function isFilePart(part: unknown): part is FilePart {
+  return isRecord(part) && part.type === 'file' && typeof part.url === 'string' && typeof part.mediaType === 'string';
+}
+
+function isSafeHref(url: string): boolean {
+  return /^(data:|https?:|blob:)/i.test(url);
+}
+
+// Browsers refuse top-level navigation to data: URLs, so open a blob copy instead.
+function openDataUrl(url: string): boolean {
+  const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(url);
+  if (!match || typeof URL.createObjectURL !== 'function') return false;
+  const [, mediaType, base64, payload] = match;
+  let bytes: Uint8Array;
+  try {
+    bytes = base64
+      ? Uint8Array.from(atob(payload!), (char) => char.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(payload!));
+  } catch {
+    return false;
+  }
+  const blobUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mediaType || 'application/octet-stream' }));
+  window.open(blobUrl, '_blank', 'noopener,noreferrer');
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  return true;
+}
+
+function MessageAttachment({ part, locale }: { part: FilePart; locale: ChatLocale }) {
+  const name = part.filename ?? part.mediaType;
+  if (!part.url) {
+    return (
+      <span data-element="message-attachment" data-kind="file" data-state="unavailable">
+        <span data-element="file-name">{name}</span>
+        <span data-element="attachment-note">{locale.attachmentUnavailableLabel}</span>
+      </span>
+    );
+  }
+  const isImage = part.mediaType.startsWith('image/');
+  if (!isImage || !isSafeHref(part.url)) {
+    return (
+      <span data-element="message-attachment" data-kind="file">
+        <span data-element="file-name">{name}</span>
+      </span>
+    );
+  }
+  const label = locale.openAttachmentLabel.replace('{name}', name);
+  return (
+    <a
+      href={part.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={label}
+      title={label}
+      data-element="message-attachment"
+      data-kind="image"
+      onClick={(event) => {
+        if (part.url.startsWith('data:') && openDataUrl(part.url)) event.preventDefault();
+      }}
+    >
+      <img src={part.url} alt={name} data-element="thumbnail" />
+    </a>
+  );
 }
 
 /**
@@ -158,6 +222,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         : text
     ));
   const hasTextContent = cleanTextParts.some((text) => text.trim().length > 0);
+  const fileParts = message.parts.filter(isFilePart);
 
   // Build fallback summary from tool outputs
   let fallbackSummary = '';
@@ -200,6 +265,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
     && !fallbackSummary
     && activitySteps.length === 0
     && !hasPlan
+    && fileParts.length === 0
   ) {
     const hasVisibleToolOutput = message.parts.some(p => {
       if (readClarificationPart(p)) return true;
@@ -226,6 +292,12 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
     >
       {hasPlan && <PlanChecklist items={planItems!} active={turnActive} />}
       <ActivityLog steps={activitySteps} active={turnActive} notice={notice} />
+
+      {fileParts.length > 0 && (
+        <div data-element="message-attachments">
+          {fileParts.map((part, i) => <MessageAttachment key={`file-${i}`} part={part} locale={locale} />)}
+        </div>
+      )}
 
       {/* Render text parts */}
       {cleanTextParts.map((text, i) => {

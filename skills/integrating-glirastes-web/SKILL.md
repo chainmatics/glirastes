@@ -101,6 +101,10 @@ file alone does not prove that every endpoint becomes an enabled tool.
    handler is framework-neutral: `createAiChatHandler` (from
    `glirastes/server/nextjs`, despite the name) takes a Web `Request` and
    returns a `Response`; adapt your framework's request object to it.
+   With chat attachments (`attachments: { enabled: true }`, see
+   `building-glirastes-chat-ui`), raise the JSON body limit of the chat route
+   in front of the handler (NestJS/Express default 100 kB:
+   `json({ limit: '50mb' })` or `app.useBodyParser('json', { limit: '50mb' })`).
 2. Endpoint tools call the API with the user's own credentials. By default
    `createAiChatHandler` sends each call to the origin of the Web
    `Request` URL it was given and forwards only the chat request's session

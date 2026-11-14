@@ -346,7 +346,10 @@ export function useLangGraphChatTransport(
   }, []);
 
   const sendMessage = useCallback(
-    async ({ text }: { text: string }) => {
+    async ({ text, files }: { text: string; files?: ReadonlyArray<unknown> }) => {
+      if (files && files.length > 0) {
+        throw new Error('The LangGraph transport does not support attachments; use the Vercel transport or leave attachments off.');
+      }
       const controller = new AbortController();
       abortRef.current = controller;
       setError(null);

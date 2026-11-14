@@ -77,6 +77,8 @@ export interface ChatEntityActionData {
   readonly entityArg: string;
   readonly args?: ReadonlyArray<ChatInteractionArg>;
   readonly run: ChatToolRun;
+  /** Deletes or otherwise destroys the entity; such actions stay last in the menu. */
+  readonly destructive?: boolean;
 }
 
 export interface ChatEntityData {
@@ -319,7 +321,7 @@ function search(value: unknown, path: string, issues: Issues): ChatEntitySearchD
   };
 }
 
-const ACTION_FIELDS = ['label', 'entityArg', 'args', 'run'] as const;
+const ACTION_FIELDS = ['label', 'entityArg', 'args', 'run', 'destructive'] as const;
 
 function actionFields(value: Record<string, unknown>, path: string, issues: Issues): Partial<ChatEntityActionData> {
   const result: Record<string, unknown> = {};
@@ -331,6 +333,11 @@ function actionFields(value: Record<string, unknown>, path: string, issues: Issu
   }
   if (value.args !== undefined) result.args = args(value.args, `${path}.args`, issues);
   if (value.run !== undefined) result.run = toolRun(value.run, `${path}.run`, issues);
+  if (value.destructive !== undefined) {
+    result.destructive = typeof value.destructive === 'boolean'
+      ? value.destructive
+      : fail(issues, `${path}.destructive`, 'a boolean');
+  }
   return result as Partial<ChatEntityActionData>;
 }
 
@@ -499,7 +506,11 @@ export function mergeChatInteractions(
       if (hasFields(patch, ['label', 'entityArg', 'run'])) merged.push({ id, ...withoutHidden(patch) });
       else stale.push(`${path}.actions.${id}`);
     }
-    return merged;
+    return (merged as ChatEntityActionData[])
+      .map((entry, index) => ({ entry, index }))
+      .sort((left, right) => (Number(left.entry.destructive === true) - Number(right.entry.destructive === true))
+        || left.index - right.index)
+      .map(({ entry }) => entry);
   };
   const entities: unknown[] = base.entities
     .filter((entry) => entityPatches[entry.type]?.hidden !== true)

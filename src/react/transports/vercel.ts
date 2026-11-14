@@ -17,7 +17,9 @@ import type {
   ChatTransportConfig,
   ChatTransportDataHandler,
   ChatMessage,
+  FilePart,
 } from '../types.js';
+import { limitRequestAttachments } from '../utils/attachments.js';
 
 /**
  * Body of each chat request: the client actions the open page handles, so
@@ -90,6 +92,16 @@ export function useVercelAiChatTransport(
             }
           : undefined,
         body: () => chatRequestBody(bodyExtrasRef.current),
+        // Same body as the default, with file data only in the latest user turns.
+        prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => ({
+          body: {
+            ...body,
+            id,
+            messages: limitRequestAttachments(messages as unknown as ChatMessage[]),
+            trigger,
+            messageId,
+          },
+        }),
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- headersRef/bodyExtrasRef are stable
     [endpoint, !!userHeaders],
@@ -115,17 +127,25 @@ export function useVercelAiChatTransport(
     },
   });
 
+  const send = useCallback(
+    ({ text, files }: { text: string; files?: FilePart[] }) => {
+      if (!files || files.length === 0) return sendMessage({ text });
+      return text === '' ? sendMessage({ parts: files }) : sendMessage({ text, files });
+    },
+    [sendMessage],
+  );
+
   return useMemo<ChatTransport>(
     () => ({
       messages: rawMessages as unknown as ChatMessage[],
       status,
       error: error ?? null,
-      sendMessage,
+      sendMessage: send,
       stop,
       setMessages: setMessages as unknown as ChatTransport['setMessages'],
       addToolApprovalResponse,
       subscribeToData,
     }),
-    [rawMessages, status, error, sendMessage, stop, setMessages, addToolApprovalResponse, subscribeToData],
+    [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData],
   );
 }

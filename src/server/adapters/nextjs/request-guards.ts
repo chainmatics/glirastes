@@ -1,7 +1,18 @@
+import {
+  DEFAULT_ATTACHMENT_MAX_FILE_BYTES,
+  DEFAULT_ATTACHMENT_MAX_FILES,
+  DEFAULT_ATTACHMENT_MEDIA_TYPES,
+  SNIFFABLE_MEDIA_TYPES,
+  parseDataUrl,
+  sniffMediaType,
+} from '../../../contracts/attachments.js';
 import { publicOrigins } from './context-helpers.js';
+import type { ChatAttachmentsConfig } from './types.js';
 
 /** Default cap on the request body of the chat handler: 1 MB. */
 export const DEFAULT_MAX_BODY_BYTES = 1_000_000;
+/** Default body cap once `attachments.enabled` is set: 50 MB. */
+export const DEFAULT_ATTACHMENT_MAX_BODY_BYTES = 50_000_000;
 
 export interface RequestGuardOptions {
   /** Origins besides the request's own that may post from a browser. */
@@ -118,4 +129,57 @@ export async function readJsonBody(
     // A client error, not a server failure: no 500 and no onError.
     return { ok: false, response: json(400, 'invalid_json', 'The request body is not valid JSON.') };
   }
+}
+
+/**
+ * Checks every file part of the history: 400 while attachments are disabled,
+ * for a remote URL without `allowRemoteUrls`, more than `maxFiles` in one
+ * message, or bytes that do not match the declared type; 415 for a type
+ * outside `mediaTypes`; 413 for a decoded file over `maxFileBytes`.
+ */
+export function validateAttachments(
+  messages: ReadonlyArray<unknown>,
+  config: ChatAttachmentsConfig | undefined,
+): Response | undefined {
+  const enabled = config?.enabled === true;
+  const maxFiles = config?.maxFiles ?? DEFAULT_ATTACHMENT_MAX_FILES;
+  const maxFileBytes = config?.maxFileBytes ?? DEFAULT_ATTACHMENT_MAX_FILE_BYTES;
+  const mediaTypes = new Set((config?.mediaTypes ?? DEFAULT_ATTACHMENT_MEDIA_TYPES).map((type) => type.toLowerCase()));
+  const invalid = (message: string) => json(400, 'invalid_attachment', message);
+
+  for (const message of messages) {
+    const parts = (message as { parts?: unknown } | null)?.parts;
+    if (!Array.isArray(parts)) continue;
+    let files = 0;
+    for (const part of parts) {
+      if ((part as { type?: unknown } | null)?.type !== 'file') continue;
+      if (!enabled) return json(400, 'attachments_disabled', 'This chat does not accept attachments.');
+      files += 1;
+      if (files > maxFiles) return json(400, 'too_many_attachments', `At most ${maxFiles} attachments per message.`);
+      const { url, mediaType } = part as { url?: unknown; mediaType?: unknown };
+      if (typeof url !== 'string' || url === '' || typeof mediaType !== 'string') {
+        return invalid('An attachment has no data or no media type.');
+      }
+      const declared = mediaType.toLowerCase();
+      if (!mediaTypes.has(declared)) {
+        return json(415, 'unsupported_attachment_type', 'This attachment type is not accepted.');
+      }
+      if (!url.startsWith('data:')) {
+        if (!config?.allowRemoteUrls) return json(400, 'remote_attachment_refused', 'Attachments must be sent as data URLs.');
+        if (!/^https?:\/\//i.test(url)) return invalid('A remote attachment must be an http(s) URL.');
+        continue;
+      }
+      const parsed = parseDataUrl(url);
+      if (!parsed || (parsed.mediaType !== '' && parsed.mediaType !== declared)) {
+        return invalid('An attachment is not a base64 data URL of its declared type.');
+      }
+      if (parsed.decodedBytes > maxFileBytes) {
+        return json(413, 'attachment_too_large', 'An attachment is too large.');
+      }
+      if (SNIFFABLE_MEDIA_TYPES.includes(declared) && sniffMediaType(parsed.head) !== declared) {
+        return invalid('An attachment\'s content does not match its declared type.');
+      }
+    }
+  }
+  return undefined;
 }

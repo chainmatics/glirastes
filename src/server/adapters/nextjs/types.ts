@@ -531,11 +531,20 @@ export interface AiChatHandlerConfig {
   crossOriginProtection?: boolean;
 
   /**
-   * Largest request body in bytes. Default 1,000,000. A larger body is
-   * answered with 413 before it is parsed; the limit counts the bytes read,
-   * not only the declared `Content-Length`.
+   * Largest request body in bytes. Default 1,000,000, or 50,000,000 when
+   * `attachments.enabled` is set. A larger body is answered with 413 before
+   * it is parsed; the limit counts the bytes read, not only the declared
+   * `Content-Length`.
    */
   maxBodyBytes?: number;
+
+  /**
+   * File and image attachments in user messages; off by default, and a file
+   * part is then refused with 400. Attachments bypass the PII shield, so
+   * with `piiShield` set the handler refuses to start unless
+   * `allowWithPiiShield` is true.
+   */
+  attachments?: ChatAttachmentsConfig;
 
   /**
    * Lancer client for runtime prompt and model overrides (Pro feature).
@@ -606,4 +615,22 @@ export interface ExecuteToolResult {
   data?: unknown;
   error?: string;
   uiAction?: Record<string, unknown>;
+}
+
+/** Attachment options of `createAiChatHandler`. */
+export interface ChatAttachmentsConfig {
+  enabled: boolean;
+  /** Files per message. Default 10. */
+  maxFiles?: number;
+  /** Decoded bytes per file. Default 20,000,000. */
+  maxFileBytes?: number;
+  /**
+   * Accepted media types. Default PNG, JPEG, WebP, GIF and PDF; for these
+   * the leading bytes must match the declared type.
+   */
+  mediaTypes?: ReadonlyArray<string>;
+  /** Also accept http(s) URLs instead of data URLs. The model provider fetches them. Default false. */
+  allowRemoteUrls?: boolean;
+  /** Required next to `piiShield`: images and PDFs reach the model unredacted. */
+  allowWithPiiShield?: boolean;
 }

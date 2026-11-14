@@ -13,6 +13,7 @@ import type {
   AiChatProviderConfig,
   ChatMessage,
   ChatTransport,
+  FilePart,
   PendingApproval,
   MentionResult,
   MentionData,
@@ -23,6 +24,7 @@ import type {
 } from '../types.js';
 import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
+import { resolveAttachmentOptions } from '../utils/attachments.js';
 import { collectEntityNames } from '../utils/entity-names.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
 import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
@@ -109,6 +111,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   retryRecordingAriaLabel: 'Retry recording',
   completionListLabel: 'Suggestions',
   completionResultsLabel: '{count} suggestions',
+  completionEmptyLabel: 'No matches. @ for things, / for commands',
   commandArgumentsLabel: 'Details for {command}',
   commandArgumentsSubmit: 'Run',
   commandArgumentsInvalid: 'These values are too long.',
@@ -118,6 +121,18 @@ export const DEFAULT_LOCALE: ChatLocale = {
   removeMentionLabel: 'Remove {label}',
   openEntityLabel: 'Open {label}',
   chatAboutLabel: 'Chat about this',
+  attachButtonLabel: 'Attach files',
+  attachmentsLabel: 'Attachments',
+  removeAttachmentLabel: 'Remove {name}',
+  openAttachmentLabel: 'Open {name}',
+  attachmentAddedLabel: '{name} attached',
+  attachmentUnavailableLabel: 'No longer available',
+  attachmentTooLarge: '{name} is larger than {size}.',
+  attachmentTypeNotAllowed: '{name} is not a supported file type.',
+  attachmentTooMany: 'At most {count} files per message.',
+  attachmentReadFailed: '{name} could not be read.',
+  attachmentCommandRefused: 'Commands cannot carry attachments. Remove them or write a message.',
+  attachmentUnsupported: 'This chat cannot send attachments.',
 };
 
 // ============================================================================
@@ -190,7 +205,8 @@ function sanitizeMessages<T extends { role: string; parts: unknown[] }>(msgs: T[
       return true;
     });
 
-    return { ...message, parts: sanitizedParts };
+    // Same object when unchanged, so callers compare by identity, not by serializing file data.
+    return sanitizedParts.length === message.parts.length ? message : { ...message, parts: sanitizedParts };
   }).filter((message) => {
     if (message.role === 'assistant') {
       const hasContent = message.parts.some((part) =>
@@ -386,6 +402,7 @@ export function AiChatProvider({
   onOpenRequest,
   toolRenderers,
   toolResults: userToolResults,
+  attachments: userAttachments,
   voice: userVoice,
   session,
   classNames: userClassNames,
@@ -438,6 +455,7 @@ export function AiChatProvider({
       : undefined),
     [toolRenderers],
   );
+  const attachmentOptions = useMemo(() => resolveAttachmentOptions(userAttachments), [userAttachments]);
   const voiceConfig = useMemo(
     () => ({
       enabled: false,
@@ -941,7 +959,7 @@ export function AiChatProvider({
 
   // Actions
   // The shared tail of every send: transport hygiene, then the transport.
-  const deliver = useCallback(async (processedMessage: string) => {
+  const deliver = useCallback(async (processedMessage: string, files?: FilePart[]) => {
     // An open approval is decided on its card. A typed "yes" must not count as
     // approval, and rejecting it on send dropped requests the user wanted.
     if (pendingApprovalsMap.size > 0) {
@@ -958,12 +976,15 @@ export function AiChatProvider({
     // Sanitize messages before sending to prevent AI_MissingToolResultsError
     const currentMessages = rawMessages;
     const sanitized = sanitizeMessages(currentMessages as unknown as Array<{ role: string; parts: unknown[] }>);
-    if (sanitized.length !== currentMessages.length || JSON.stringify(sanitized) !== JSON.stringify(currentMessages)) {
+    if (
+      sanitized.length !== currentMessages.length
+      || sanitized.some((message, index) => message !== (currentMessages[index] as unknown))
+    ) {
       setMessages(sanitized as unknown as typeof rawMessages);
       setPendingApprovalsMap(new Map());
     }
 
-    await sendMessage({ text: processedMessage });
+    await sendMessage(files && files.length > 0 ? { text: processedMessage, files } : { text: processedMessage });
     setActiveMentions([]);
     setMentionQuery('');
     setMentionTrigger(null);
@@ -978,9 +999,10 @@ export function AiChatProvider({
 
   const dispatchSend = useCallback(async (
     message: string,
-    sendOptions?: { mentions?: MentionData[] },
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
   ) => {
     const mentionsForSend = sendOptions?.mentions ?? activeMentions;
+    const files = sendOptions?.files;
 
     // A `/` command alone runs without the model; missing arguments open its form.
     const plan = interactionRegistry?.planMessage(message, mentionsForSend);
@@ -1025,7 +1047,7 @@ export function AiChatProvider({
       });
     }
 
-    await deliver(processedMessage);
+    await deliver(processedMessage, files);
   }, [
     rawMessages,
     deliver,
@@ -1039,16 +1061,22 @@ export function AiChatProvider({
   // keep the typed text when it is not.
   const send = useCallback((
     message: string,
-    sendOptions?: { mentions?: MentionData[] },
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
   ): boolean => {
     if (sessionNotReady || sessionMutationRef.current) return false;
     if (pendingApprovalsMap.size > 0) {
       setApprovalReminder(true);
       return false;
     }
+    if (sendOptions?.files?.length) {
+      if (!attachmentOptions) return false;
+      // A direct command runs without the model, which would silently drop the files.
+      const plan = interactionRegistry?.planMessage(message, sendOptions.mentions ?? activeMentions);
+      if (plan?.status === 'send' || plan?.status === 'needs-args') return false;
+    }
     void dispatchSend(message, sendOptions);
     return true;
-  }, [sessionNotReady, pendingApprovalsMap, dispatchSend]);
+  }, [sessionNotReady, pendingApprovalsMap, dispatchSend, attachmentOptions, interactionRegistry, activeMentions]);
 
   const submitPendingCommand = useCallback((
     values: Readonly<Record<string, string>>,
@@ -1451,6 +1479,7 @@ export function AiChatProvider({
       toolLabels,
       toolResults: toolResultConfig,
       toolRendererRegistry,
+      attachments: attachmentOptions,
       voice: voiceConfig,
       mentionConfig: mentions,
       pipelineMessageTranslator,
@@ -1522,6 +1551,7 @@ export function AiChatProvider({
       toolLabels,
       toolResultConfig,
       toolRendererRegistry,
+      attachmentOptions,
       voiceConfig,
       mentions,
       pipelineMessageTranslator,

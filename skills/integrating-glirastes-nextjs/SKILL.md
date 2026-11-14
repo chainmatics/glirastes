@@ -93,6 +93,13 @@ second, hand-maintained catalogue.
    replaces it; `intentRouting: false` starts every turn with all tools. With metrics, an endpoint that
    refuses a call its schema accepted (400 or 422) is reported as
    `tool_contract_rejected`, without content.
+   Image and PDF attachments stay off until the developer asks for them:
+   then `attachments: { enabled: true }` here (body limit 50 MB; with
+   `piiShield` also `allowWithPiiShield: true`, since files bypass the
+   shield) and `attachments` on the chat (`building-glirastes-chat-ui`). A
+   middleware or `proxy` on `/api/chat` buffers only 10 MB: raise
+   `experimental.middlewareClientMaxBodySize` (Next.js 16:
+   `experimental.proxyClientMaxBodySize`) or keep the route out of its matcher.
 4. Mount the navigation bridge once in the root layout, as a client component,
    so `ui.navigate` and the `ui.filter.*` tools can run:
 
