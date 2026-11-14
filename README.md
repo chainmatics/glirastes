@@ -244,7 +244,8 @@ two jobs:
 - `useAiClientAction(id, handler, contract)` lets the chat drive UI state;
   `refresh` turns each registration into a tool.
 - Generic `@` mentions and `/` commands derived from your tools
-  ([docs/chat-interactions.md](docs/chat-interactions.md)).
+  ([docs/chat-interactions.md](docs/chat-interactions.md)); `useChatComposer`
+  keeps them in a custom input.
 - A per-message work log of tool calls and an optional plan checklist.
 - `unstyled` to bring your own CSS; `deChatLocale` for German texts.
 - Push-to-talk speech input through one STT controller (`voice` config,
@@ -342,11 +343,12 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 
 ## Agent skills
 
-The package ships seven skills in [`skills/`](skills/README.md) for your
+The package ships eight skills in [`skills/`](skills/README.md) for your
 existing coding agent (Codex, Claude Code, Gemini): `setting-up-glirastes`,
 `integrating-glirastes-nextjs`, `integrating-glirastes-web`,
 `maintaining-glirastes-tools`, `describing-glirastes-tools`,
-`building-glirastes-chat-ui` and `migrating-to-glirastes`. `glirastes init`
+`building-glirastes-chat-ui`, `curating-glirastes-chat-interactions` and
+`migrating-to-glirastes`. `glirastes init`
 installs them; `glirastes install --host codex --with-setup-skills` installs
 them without starting setup.
 

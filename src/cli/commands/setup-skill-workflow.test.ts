@@ -132,6 +132,14 @@ describe('bundled local-first setup workflow', () => {
     }
   });
 
+  it('lists eight skills with the curating skill in both READMEs', async () => {
+    for (const path of [join(findPackageSkillsDir(), 'README.md'), join(findPackageSkillsDir(), '../README.md')]) {
+      const readme = await readFile(path, 'utf8');
+      expect(readme, path).toContain('eight skills');
+      expect(readme, path).toContain('curating-glirastes-chat-interactions');
+    }
+  });
+
   it('teaches chat entities and commands in the chat UI and the describing skill', async () => {
     const chatUi = await readFile(join(findPackageSkillsDir(), 'building-glirastes-chat-ui/SKILL.md'), 'utf8');
     for (const text of ['docs/chat-interactions.md', 'createChatInteractionsHandler', 'useChatInteractionsData', 'directCommands: false']) {
@@ -141,13 +149,17 @@ describe('bundled local-first setup workflow', () => {
     for (const text of ['open.<path>', 'filter.<view>', 'ArrowRight', 'Escape', 'not shipped in the package']) {
       expect(chatUi).toContain(text);
     }
-    // Only a hand-composed RichMentionInput takes DropdownItem; VercelAiChat and MentionInput do not forward it.
-    expect(chatUi).toMatch(/hand-composed\s+`RichMentionInput`/);
-    expect(chatUi).not.toMatch(/custom `components\.DropdownItem`/);
+    // The suggestion item and the composer logic reach custom inputs; review and overrides live in the curating skill.
+    for (const text of ['curating-glirastes-chat-interactions', 'useChatComposer', 'components.MentionDropdownItem', 'renderActions', 'optionProps']) {
+      expect(chatUi).toContain(text);
+    }
+    expect(chatUi).not.toContain('Labels are English words built from identifiers');
     expect(chatUi).toMatch(/`managedRuntime` once as a `const`/);
     const describing = await readFile(join(findPackageSkillsDir(), 'describing-glirastes-tools/SKILL.md'), 'utf8');
     expect(describing).toContain('.glirastes/chat-interactions.json');
     expect(describing).toContain('`hidden` is no permission');
+    expect(describing).toContain('curating-glirastes-chat-interactions');
+    expect(describing.replace(/\s+/g, ' ')).toContain('title becomes the default label');
     // A refresh can stop deriving an id: the chat route ignores the patch with a warning, so it is removed, not kept.
     const flat = describing.replace(/\s+/g, ' ');
     for (const text of ['is stale', 'Remove stale patches', 'after every refresh', 'logs one console warning']) {
