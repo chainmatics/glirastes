@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0-chat.1] - 2026-11-14
+
+Prerelease on the `next` dist-tag.
+
+### Fixed
+
+- Destructive entity actions stay last after the override merge: derived ones carry `destructive: true`, and an action added in `.glirastes/chat-interactions.json` no longer lands behind "Löschen". Run `glirastes tools refresh` to regenerate the chat interactions module.
+
 ## [0.8.0-chat.0] - 2026-11-14
 
 Prerelease on the `next` dist-tag for the staging rollout of chat interaction curation.
@@ -616,7 +624,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.1...HEAD
+[0.8.0-chat.1]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.0...v0.8.0-chat.1
 [0.8.0-chat.0]: https://github.com/chainmatics/glirastes/compare/v0.7.1...v0.8.0-chat.0
 [0.7.1]: https://github.com/chainmatics/glirastes/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/chainmatics/glirastes/compare/v0.6.0...v0.7.0
