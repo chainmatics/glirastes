@@ -1,4 +1,5 @@
 import type { MentionChipProps, MentionChipListProps } from '../types.js';
+import { inferMentionPrefix } from '../utils/mention-markup.js';
 
 /**
  * Inline mention chip for displaying referenced entities.
@@ -20,7 +21,7 @@ export function MentionChip({
   inline = false,
 }: MentionChipProps) {
   const size = inline ? 'inline' : compact ? 'compact' : 'default';
-  const prefix = mention.prefix ?? (mention.type === 'command' ? '/' : '@');
+  const prefix = mention.prefix ?? inferMentionPrefix(mention.type);
   const name = (
     <span data-element="display-name">
       <span data-element="prefix">{prefix}</span>

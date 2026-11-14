@@ -63,12 +63,12 @@ function normalizeInputValue(text: string): string {
   return text.replace(/\u00A0/g, ' ');
 }
 
-/** `command` pills and `entity` pills are styled apart (`data-mention-kind`). */
 /** Any whitespace ends a word; Chrome types a trailing space as U+00A0 in contentEditable. */
 function isSpace(char: string | undefined): boolean {
   return char !== undefined && /\s/.test(char);
 }
 
+/** `command` pills and `entity` pills are styled apart (`data-mention-kind`). */
 function mentionKind(type: string): 'command' | 'entity' {
   return type === 'command' ? 'command' : 'entity';
 }
