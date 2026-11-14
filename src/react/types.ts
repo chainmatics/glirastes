@@ -572,6 +572,8 @@ export interface ChatComponents {
   ClarificationCard?: ComponentType<ClarificationCardProps>;
   /** Form for the missing arguments of a `/` command or entity action. */
   CommandArgumentsForm?: ComponentType<CommandArgumentsFormProps>;
+  /** Item of the `@`/`/` suggestion list; it must spread `optionProps`. */
+  MentionDropdownItem?: ComponentType<MentionDropdownItemProps>;
 }
 
 export interface CommandArgumentsFormProps {
@@ -964,6 +966,20 @@ export interface ChatInputProps {
 export interface MentionInputProps {
   className?: string;
   onSubmit?: (message: string) => void;
+  /** Text put into the editor once on mount, after `initialMentions`. */
+  initialValue?: string;
+  /** References the editor starts with; key the input to start over (`key={taskId}`). */
+  initialMentions?: MentionData[];
+  /** Class of the box around editor, placeholder and list. */
+  inputClassName?: string;
+  /** Class of the editable element. */
+  editorClassName?: string;
+  /** Suggestion item; wins over `components.MentionDropdownItem` of the provider. */
+  components?: RichMentionInputComponents;
+  /** Extra controls between the editor and the send button, e.g. the app's own microphone. */
+  renderActions?: (composer: ChatComposerControls) => ReactNode;
+  /** Replaces the default send and stop buttons; a `type="submit"` button sends. */
+  renderSubmit?: (composer: ChatComposerControls) => ReactNode;
 }
 
 export interface UseChatComposerOptions {
@@ -1037,6 +1053,8 @@ export interface RichMentionInputProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /** Class of the wrapper in mention mode (plain mode has none; there `className` styles the element). */
+  wrapperClassName?: string;
   onChange?: (nextValue: string) => void;
   /** Receives the text and the structured mentions (chips and commands) still in it. */
   onSubmit?: (message: string, mentions: MentionData[]) => void;

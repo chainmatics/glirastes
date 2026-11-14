@@ -24,11 +24,25 @@ export function MentionInput(props: MentionInputProps) {
     : <LegacyMentionInput {...props} />;
 }
 
-function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
+function ProviderMentionInput({
+  className,
+  onSubmit,
+  initialValue,
+  initialMentions,
+  inputClassName,
+  editorClassName,
+  components: inputComponents,
+  renderActions,
+  renderSubmit,
+}: MentionInputProps) {
   const { classNames, locale, components, voice } = useChatContext();
-  const composer = useChatComposer({ onSubmit: onSubmit ? (message) => onSubmit(message) : undefined });
+  const composer = useChatComposer({
+    onSubmit: onSubmit ? (message) => onSubmit(message) : undefined,
+    initialValue,
+  });
   const { isLoading } = composer;
   const InputExtra = components.InputExtra;
+  const DropdownItem = inputComponents?.DropdownItem ?? components.MentionDropdownItem;
 
   return (
     <div data-component="mention-input" data-mode="providers">
@@ -40,7 +54,14 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
         }}
         className={className ?? classNames.input}
       >
-        <RichMentionInput ref={composer.inputRef} {...composer.inputProps} />
+        <RichMentionInput
+          ref={composer.inputRef}
+          {...composer.inputProps}
+          initialMentions={initialMentions}
+          wrapperClassName={inputClassName}
+          className={editorClassName}
+          {...(DropdownItem ? { components: { DropdownItem } } : {})}
+        />
         {voice.enabled && (
           <VoiceInputAddon
             disabled={isLoading}
@@ -56,8 +77,9 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
             routeKey={voice.routeKey}
           />
         )}
+        {renderActions?.(composer)}
         {InputExtra && <InputExtra />}
-        {isLoading ? (
+        {renderSubmit ? renderSubmit(composer) : isLoading ? (
           <button type="button" onClick={composer.stop} data-action="stop">
             {locale.stopButton}
           </button>

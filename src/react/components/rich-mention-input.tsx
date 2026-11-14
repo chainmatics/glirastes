@@ -106,6 +106,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       placeholder,
       disabled = false,
       className,
+      wrapperClassName,
       onChange,
       onSubmit,
       onSearch,
@@ -875,6 +876,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
     return (
       <div
+        className={wrapperClassName}
         data-component="rich-mention-input"
         data-state={
           disabled
