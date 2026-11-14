@@ -64,6 +64,11 @@ function normalizeInputValue(text: string): string {
 }
 
 /** `command` pills and `entity` pills are styled apart (`data-mention-kind`). */
+/** Any whitespace ends a word; Chrome types a trailing space as U+00A0 in contentEditable. */
+function isSpace(char: string | undefined): boolean {
+  return char !== undefined && /\s/.test(char);
+}
+
 function mentionKind(type: string): 'command' | 'entity' {
   return type === 'command' ? 'command' : 'entity';
 }
@@ -411,9 +416,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
       for (let i = before.length - 1; i >= 0; i--) {
         const char = before[i];
-        if (char === ' ' || char === '\n') break;
+        if (isSpace(char)) break;
         if (triggers.includes(char)) {
-          if (i === 0 || before[i - 1] === ' ' || before[i - 1] === '\n') {
+          if (i === 0 || isSpace(before[i - 1])) {
             return { trigger: char, query: before.slice(i + 1), triggerPos: i };
           }
         }
@@ -443,9 +448,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         let triggerPos = -1;
         for (let i = cursorPos - 1; i >= 0; i--) {
           const char = text[i];
-          if (char === ' ' || char === '\n') break;
+          if (isSpace(char)) break;
           if (triggers.includes(char)) {
-            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n') {
+            if (i === 0 || isSpace(text[i - 1])) {
               triggerPos = i;
               break;
             }
@@ -569,8 +574,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           const cursorPos = range.startOffset;
           for (let i = cursorPos - 1; i >= 0; i--) {
             const char = text[i];
-            if (char === ' ' || char === '\n') break;
-            if (triggers.includes(char) && (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n')) {
+            if (isSpace(char)) break;
+            if (triggers.includes(char) && (i === 0 || isSpace(text[i - 1]))) {
               textNode.textContent = text.slice(0, i) + text.slice(cursorPos);
               // Replacing the data pulls the live range to offset 0: put the caret back where the `@query` was.
               range.setStart(textNode, i);

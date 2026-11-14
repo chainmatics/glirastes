@@ -105,6 +105,19 @@ describe('pills in RichMentionInput', () => {
     expect(entity.querySelector('[data-action="remove-mention"]')?.getAttribute('aria-label')).toBe('Remove Release prüfen');
   });
 
+  it('opens the list for a trigger after a pill, where the browser typed a non-breaking space', async () => {
+    const { ref, editor } = renderEditor();
+    act(() => { ref.current!.insertMention({ id: '7', type: 'task', label: 'Release prüfen', displayName: 'Release prüfen', prefix: '@' }); });
+    const after = editor.querySelector(PILL)!.nextSibling as Text;
+    after.textContent = '\u00a0/op';
+    caretAt(after, after.length);
+    fireEvent.input(editor);
+    await screen.findByRole('listbox');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(editor.querySelector('[data-mention-kind="command"]')?.getAttribute('data-mention-id')).toBe('open.overview');
+    expect(editor.textContent).not.toContain('/op');
+  });
+
   it('keeps a picked command as text with commandPills={false}', async () => {
     const { editor } = renderEditor({ commandPills: false });
     typeInto(editor, '/op');

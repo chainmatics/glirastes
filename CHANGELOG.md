@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `entityLinks` on the provider turns entity references in assistant answers into chips: app matchers (e.g. task keys with `resolve`), and names the conversation already referenced (`@` mentions, hits of an entity's search tool). A chip opens through `entityLinks.open` or the entity's derived `ui.navigate` page on the navigation bridge, without a chat message. `@` pills in sent messages open the same way. `EntityText`, `EntityLinkChip` and `useChatEntityLinks()` (`linkify`, `markdownComponents`) cover custom renderers.
 - `RichMentionInputHandle.insertMention`, `MentionChipProps.onOpen`/`openLabel`, locale keys `removeMentionLabel`, `openEntityLabel`, `chatAboutLabel` (German included).
 
+### Fixed
+
+- A task mention without an explicit prefix shows `@`, not `/`; `/` now means a command only (`inferMentionPrefix`, `MentionChip`).
+- A chat named after its first question shows its mentions as `@Name` and `/Command` instead of `{{mention:…}}` markup.
+- `@` and `/` open their list after a pill or any other place where the browser typed a non-breaking space.
+
 ## [0.7.1] - 2026-11-13
 
 ### Fixed
