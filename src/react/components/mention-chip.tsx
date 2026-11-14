@@ -13,25 +13,46 @@ import type { MentionChipProps, MentionChipListProps } from '../types.js';
 export function MentionChip({
   mention,
   onRemove,
+  onOpen,
+  openLabel,
   className,
   compact = false,
   inline = false,
 }: MentionChipProps) {
   const size = inline ? 'inline' : compact ? 'compact' : 'default';
   const prefix = mention.prefix ?? (mention.type === 'task' || mention.type === 'command' ? '/' : '@');
+  const name = (
+    <span data-element="display-name">
+      <span data-element="prefix">{prefix}</span>
+      {mention.displayName}
+    </span>
+  );
 
   return (
     <span
       className={className}
       data-component="mention-chip"
       data-mention-type={mention.type}
+      data-mention-kind={mention.type === 'command' ? 'command' : 'entity'}
       data-size={size}
+      data-interactive={onOpen ? 'true' : undefined}
     >
       <span data-element="icon" />
-      <span data-element="display-name">
-        <span data-element="prefix">{prefix}</span>
-        {mention.displayName}
-      </span>
+      {onOpen ? (
+        <button
+          type="button"
+          data-action="open"
+          aria-label={openLabel}
+          title={openLabel}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onOpen();
+          }}
+        >
+          {name}
+        </button>
+      ) : name}
       {onRemove && (
         <button
           type="button"

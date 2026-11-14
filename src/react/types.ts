@@ -3,6 +3,7 @@ import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
 import type { ChatInteractionsConfig, PendingChatCommand } from './interactions/registry.js';
+import type { ChatEntityLinksConfig } from './entity-links/entity-links.js';
 
 export type {
   ClarificationOption,
@@ -668,6 +669,11 @@ export interface ChatLocale {
   commandArgumentsIncomplete: string; // supports `{fields}`: required values still missing, or a person typed but not picked
   commandArgumentsAnyOption: string;
   commandArgumentsNoMatches: string;
+
+  // Pills and entity chips
+  removeMentionLabel: string;         // supports `{label}`
+  openEntityLabel: string;            // supports `{label}`
+  chatAboutLabel: string;             // a "Chat about this" menu entry (`useChatComposer`)
 }
 
 // ============================================================================
@@ -728,6 +734,17 @@ export interface AiChatProviderConfig {
    * normal authorization and confirmation.
    */
   chatInteractions?: ChatInteractionsConfig;
+  /**
+   * Turns entity references in assistant messages into clickable chips:
+   * app matchers (e.g. task keys), names the conversation already referenced,
+   * and how a chip opens its entity. Memoize the object.
+   */
+  entityLinks?: ChatEntityLinksConfig;
+  /**
+   * Shows the chat when `useChatComposer().open()` or `chatAbout()` asks for
+   * it. Without it the surrounding `AssistantLayoutProvider` opens.
+   */
+  onOpenRequest?: () => void;
   toolResults?: ToolResultDisplayConfig;
   voice?: VoiceInputConfig;
   session?: SessionConfig;
@@ -824,6 +841,14 @@ export interface ChatThemeColors {
   border?: string;
   /** Danger color for delete actions and error banners. */
   danger?: string;
+  /** `/` command pill background (`--cm-pill-command-bg`). Default: the primary tint. */
+  pillCommand?: string;
+  /** `/` command pill text (`--cm-pill-command-text`). Default: the primary color. */
+  pillCommandText?: string;
+  /** `@` entity pill background (`--cm-pill-entity-bg`). Default: a teal tint. */
+  pillEntity?: string;
+  /** `@` entity pill text (`--cm-pill-entity-text`). Default: teal mixed with the text color. */
+  pillEntityText?: string;
 }
 
 export interface ChatThemeOverride {
@@ -973,7 +998,14 @@ export interface RichMentionInputHandle {
   /** Restore text, optionally retaining the ordered identities of its mention tokens. */
   setValue: (value: string, mentions?: MentionData[]) => void;
   getMentions: () => MentionData[];
+  /** Puts a reference at the start of the editor (kept for existing callers; prefer `insertMention`). */
   addMention: (mention: MentionData) => void;
+  /**
+   * Puts a pill at the caret, or at the end when the caret is outside the
+   * editor, and leaves the caret behind it. A `type: 'command'` mention
+   * becomes a command pill, any other type an entity pill.
+   */
+  insertMention: (mention: MentionData) => void;
 }
 
 /** ARIA wiring of one option in the `@`/`/` list; spread it onto the clickable element. */
@@ -1019,6 +1051,13 @@ export interface RichMentionInputProps {
   listLabel?: string;
   /** Announced result count; `{count}` is replaced. Default `{count} suggestions`. */
   resultsLabel?: string;
+  /**
+   * A picked `/` command becomes a pill like an `@` entity (default). `false`
+   * keeps the earlier behaviour: the command is inserted as `/slug ` text.
+   */
+  commandPills?: boolean;
+  /** Accessible name of a pill's remove control; `{label}` is replaced. Default `Remove {label}`. */
+  removeMentionLabel?: string;
 }
 
 export interface ChatWindowHeaderRenderProps {
@@ -1156,6 +1195,10 @@ export interface MarkdownProps {
 export interface MentionChipProps {
   mention: Mention;
   onRemove?: () => void;
+  /** Makes the pill a button that opens the entity (see `entityLinks`). */
+  onOpen?: () => void;
+  /** Accessible name of the open button; defaults to the display name. */
+  openLabel?: string;
   className?: string;
   compact?: boolean;
   inline?: boolean;

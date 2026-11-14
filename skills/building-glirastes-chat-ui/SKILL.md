@@ -188,6 +188,12 @@ with the override format.
   required field, entity fields are ARIA 1.2 comboboxes, and Escape closes an
   open list before it cancels the form.
 
+## Pills, "Chat about this" and chips in answers
+
+`chatInteractions` makes the default `ChatInput` show `/` and `@` pills (`theme.colors.pill*`, `--cm-pill-*`, `glirastes/react/pills.css` when unstyled); keep it.
+`useChatComposer().chatAbout({ type, id, label })` opens the chat with the pills in it (own composers: `useChatComposerTarget`).
+`entityLinks={{ matchers, open }}` makes references in answers clickable chips; see `docs/chat-interactions.md`.
+
 ## Commands, mentions and clarification
 
 `completionProviders` turns the composer into provider search. Each provider

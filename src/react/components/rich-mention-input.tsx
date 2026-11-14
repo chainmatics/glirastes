@@ -63,6 +63,62 @@ function normalizeInputValue(text: string): string {
   return text.replace(/\u00A0/g, ' ');
 }
 
+/** `command` pills and `entity` pills are styled apart (`data-mention-kind`). */
+function mentionKind(type: string): 'command' | 'entity' {
+  return type === 'command' ? 'command' : 'entity';
+}
+
+function isChip(node: Node | null | undefined): node is HTMLElement {
+  return !!node && node.nodeType === Node.ELEMENT_NODE && !!(node as HTMLElement).dataset?.mentionId;
+}
+
+function isBlankText(node: Node): boolean {
+  return node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').replace(/\u200B/g, '') === '';
+}
+
+/** The pill directly before or after a collapsed caret, skipping empty text nodes. */
+function adjacentChip(range: Range, editor: HTMLElement, side: 'before' | 'after'): HTMLElement | null {
+  const { startContainer: node, startOffset: offset } = range;
+  let sibling: Node | null = null;
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = (node.textContent ?? '');
+    const atEdge = side === 'before'
+      ? text.slice(0, offset).replace(/\u200B/g, '') === ''
+      : text.slice(offset).replace(/\u200B/g, '') === '';
+    if (!atEdge) return null;
+    sibling = side === 'before' ? node.previousSibling : node.nextSibling;
+  } else if (node === editor) {
+    sibling = side === 'before' ? editor.childNodes[offset - 1] ?? null : editor.childNodes[offset] ?? null;
+  } else {
+    return null;
+  }
+  while (sibling && isBlankText(sibling)) {
+    sibling = side === 'before' ? sibling.previousSibling : sibling.nextSibling;
+  }
+  return isChip(sibling) && editor.contains(sibling) ? sibling : null;
+}
+
+function charBefore(range: Range, editor: HTMLElement): string {
+  const probe = document.createRange();
+  probe.selectNodeContents(editor);
+  probe.setEnd(range.startContainer, range.startOffset);
+  const fragment = probe.cloneContents();
+  const last = fragment.lastChild;
+  if (!last) return '';
+  if (last.nodeType === Node.ELEMENT_NODE) return isChip(last) ? 'x' : (last.textContent ?? '').slice(-1);
+  return (last.textContent ?? '').slice(-1);
+}
+
+function charAfter(range: Range, editor: HTMLElement): string {
+  const probe = document.createRange();
+  probe.selectNodeContents(editor);
+  probe.setStart(range.endContainer, range.endOffset);
+  const first = probe.cloneContents().firstChild;
+  if (!first) return '';
+  if (first.nodeType === Node.ELEMENT_NODE) return isChip(first) ? 'x' : (first.textContent ?? '').slice(0, 1);
+  return (first.textContent ?? '').slice(0, 1);
+}
+
 // ---------------------------------------------------------------------------
 // Default dropdown item (data-attribute driven, no hardcoded styles)
 // ---------------------------------------------------------------------------
@@ -115,6 +171,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onEntityAction,
       listLabel = 'Suggestions',
       resultsLabel = '{count} suggestions',
+      commandPills = true,
+      removeMentionLabel = 'Remove {label}',
     },
     ref,
   ) {
@@ -261,6 +319,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       chip.dataset.mentionSlug = slug;
       chip.dataset.mentionLabel = displayName;
       chip.dataset.mentionPrefix = prefix;
+      chip.dataset.mentionKind = mentionKind(mention.type);
       chip.dataset.size = 'inline';
       // A command's definition id and arguments stay on its chip, so the
       // entry read back from the editor (getMentions, drafts) still has them.
@@ -281,6 +340,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       const removeBtn = document.createElement('span');
       removeBtn.dataset.action = 'remove-mention';
       removeBtn.dataset.mentionId = mention.id;
+      removeBtn.setAttribute('role', 'button');
+      removeBtn.setAttribute('aria-label', removeMentionLabel.replace('{label}', displayName));
       removeBtn.textContent = '\u00D7';
       removeBtn.style.cursor = 'pointer';
 
@@ -289,7 +350,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       chip.appendChild(removeBtn);
 
       return chip;
-    }, []);
+    }, [removeMentionLabel]);
 
     // -----------------------------------------------------------------------
     // Dropdown helpers
@@ -400,8 +461,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
         const mentionData = mentionDataFromResult(result, { prefix, slug });
 
-        // For command type: insert as text, no chip
-        if (result.type === 'command') {
+        // Without command pills a command stays text, so arguments can be typed right behind it.
+        if (result.type === 'command' && !commandPills) {
           const beforeText = text.slice(0, triggerPos);
           const afterText = text.slice(cursorPos);
           const token = `${prefix}${slug} `;
@@ -452,8 +513,50 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           onChange?.(getFullValue());
         });
       },
-      [triggers, createChipElement, closeDropdown, onChange, getFullValue],
+      [triggers, commandPills, createChipElement, closeDropdown, onChange, getFullValue],
     );
+
+    /**
+     * Puts a pill at the caret (or at the end when the caret is elsewhere),
+     * with a space on both sides, and leaves the caret behind it.
+     */
+    const insertPill = useCallback((mention: MentionData) => {
+      const editor = editableRef.current;
+      if (!editor) return;
+      const selection = editorSelection(editor);
+      let range: Range | null = null;
+      if (selection && selection.rangeCount > 0 && editor.contains(selection.getRangeAt(0).startContainer)) {
+        range = selection.getRangeAt(0).cloneRange();
+      }
+      if (!range) {
+        range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+      }
+      const container = range.startContainer;
+      const inChip = (container instanceof Element ? container : container.parentElement)?.closest('[data-component="mention-chip"]');
+      if (inChip && editor.contains(inChip)) {
+        range.setStartAfter(inChip);
+        range.collapse(true);
+      }
+      range.deleteContents();
+      const before = charBefore(range, editor);
+      const after = charAfter(range, editor);
+      const chip = createChipElement(mention);
+      const trailing = document.createTextNode(after && /\s/.test(after) ? '' : ' ');
+      const fragment = document.createDocumentFragment();
+      if (before && !/\s/.test(before)) fragment.append(document.createTextNode(' '));
+      fragment.append(chip, trailing);
+      range.insertNode(fragment);
+      const caret = document.createRange();
+      caret.setStart(trailing, trailing.length);
+      caret.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(caret);
+      setMentions((prev) => [...prev, mention]);
+      closeDropdown();
+      onChange?.(getFullValue());
+    }, [createChipElement, closeDropdown, onChange, getFullValue]);
 
     /** Removes the `@query` being typed and runs one of the result's entity actions instead. */
     const runAction = useCallback(
@@ -604,23 +707,27 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           return;
         }
 
-        // Backspace: delete chip at cursor boundary (mention mode)
-        if (hasMentionSupport && event.key === 'Backspace') {
-          const selection = editorSelection(editableRef.current);
-          if (selection && selection.rangeCount > 0) {
+        // Backspace and Delete remove a whole pill next to the caret (mention mode).
+        if (hasMentionSupport && (event.key === 'Backspace' || event.key === 'Delete')) {
+          const editor = editableRef.current;
+          const selection = editorSelection(editor);
+          if (editor && selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
-            if (range.collapsed && range.startOffset === 0) {
-              let prevNode: Node | null = range.startContainer;
-              if (prevNode.nodeType === Node.TEXT_NODE) {
-                prevNode = prevNode.previousSibling;
-              }
-              if (prevNode && (prevNode as HTMLElement).dataset?.mentionId) {
-                event.preventDefault();
-                const mentionId = (prevNode as HTMLElement).dataset.mentionId!;
-                setMentions((prev) => prev.filter((m) => m.id !== mentionId));
-                prevNode.parentNode?.removeChild(prevNode);
-                onChange?.(getFullValue());
-              }
+            const chip = range.collapsed
+              ? adjacentChip(range, editor, event.key === 'Backspace' ? 'before' : 'after')
+              : null;
+            if (chip) {
+              event.preventDefault();
+              const mentionId = chip.dataset.mentionId!;
+              const caret = document.createRange();
+              if (event.key === 'Backspace') caret.setStartBefore(chip);
+              else caret.setStartAfter(chip);
+              caret.collapse(true);
+              chip.remove();
+              selection.removeAllRanges();
+              selection.addRange(caret);
+              setMentions((prev) => prev.filter((m) => m.id !== mentionId));
+              onChange?.(getFullValue());
             }
           }
         }
@@ -766,7 +873,19 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     useImperativeHandle(
       ref,
       () => ({
-        focus: () => editableRef.current?.focus(),
+        focus: () => {
+          const editor = editableRef.current;
+          if (!editor) return;
+          editor.focus();
+          const selection = editorSelection(editor);
+          if (selection && (selection.rangeCount === 0 || !editor.contains(selection.getRangeAt(0).startContainer))) {
+            const end = document.createRange();
+            end.selectNodeContents(editor);
+            end.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(end);
+          }
+        },
         clear: () => {
           if (editableRef.current) {
             editableRef.current.innerHTML = '';
@@ -821,6 +940,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           setValue(nextValue);
         },
         getMentions: () => (hasMentionSupport ? collectMentions(getFullValue()) : []),
+        insertMention: (mention: MentionData) => {
+          if (!hasMentionSupport) return;
+          insertPill(mention);
+        },
         addMention: (mention: MentionData) => {
           if (!hasMentionSupport || !editableRef.current) return;
           const chip = createChipElement(mention);
@@ -830,7 +953,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           setMentions((prev) => [...prev, mention]);
         },
       }),
-      [hasMentionSupport, setValue, getFullValue, collectMentions, createChipElement, closeDropdown],
+      [hasMentionSupport, setValue, getFullValue, collectMentions, createChipElement, closeDropdown, insertPill],
     );
 
     // -----------------------------------------------------------------------
@@ -861,7 +984,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     }
 
     // Mention mode — wrapper with editor + dropdown
-    const isEmpty = !isFocused && getTextContent() === '' && mentions.length === 0;
+    const isEmpty = !isFocused && getTextContent() === ''
+      && mentions.length === 0 && !editableRef.current?.querySelector('[data-mention-id]');
     const optionId = (index: number, action = -1) => (
       action >= 0 ? `${listboxId}-option-${index}-action-${action}` : `${listboxId}-option-${index}`
     );

@@ -282,6 +282,32 @@ export {
   type ChatSendPlan,
   type PendingChatCommand,
 } from './interactions/registry.js';
+// Programmatic composer ("Chat about this") and entity chips in answers
+export {
+  useChatComposer,
+  useChatComposerTarget,
+  entityMention,
+  commandMention,
+  type ChatAboutOptions,
+  type ChatComposer,
+  type ChatComposerEntity,
+  type ChatComposerOperation,
+} from './composer/chat-composer.js';
+export {
+  collectKnownEntities,
+  entityNavigationHref,
+  splitEntityText,
+  type ChatEntityLinksConfig,
+  type ChatEntityMatcher,
+  type ChatEntityReference,
+  type ChatEntityTextSegment,
+} from './entity-links/entity-links.js';
+export {
+  EntityLinkChip,
+  EntityText,
+  useChatEntityLinks,
+  type ChatEntityLinks,
+} from './entity-links/entity-links-react.js';
 export {
   useChatInteractionsData,
   type UseChatInteractionsDataOptions,
