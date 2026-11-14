@@ -14,7 +14,12 @@ import {
   resolveClarificationResume,
 } from './clarification-resume.js';
 import { scopePipelineTools } from './scope-pipeline-tools.js';
-import { checkRequestHeaders, readJsonBody } from './request-guards.js';
+import {
+  DEFAULT_ATTACHMENT_MAX_BODY_BYTES,
+  checkRequestHeaders,
+  readJsonBody,
+  validateAttachments,
+} from './request-guards.js';
 import {
   ApprovalHistoryError,
   ApprovalSecretMissingError,
@@ -880,9 +885,18 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     approvalScope: approvalScopeOf,
     allowedOrigins,
     crossOriginProtection,
-    maxBodyBytes,
+    maxBodyBytes: configuredMaxBodyBytes,
+    attachments,
   } = config;
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
+  if (attachments?.enabled && piiShield && attachments.allowWithPiiShield !== true) {
+    throw new Error(
+      'createAiChatHandler: attachments bypass the PII shield; set '
+      + 'attachments.allowWithPiiShield: true to accept them next to piiShield',
+    );
+  }
+  const maxBodyBytes = configuredMaxBodyBytes
+    ?? (attachments?.enabled ? DEFAULT_ATTACHMENT_MAX_BODY_BYTES : undefined);
   // Without a callback a failed turn would only say "AI request failed" to
   // the user and nothing to the developer. Name only: provider errors can
   // carry request and response content.
@@ -1090,6 +1104,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           { status: 400, headers: { 'Content-Type': 'application/json' } },
         );
       }
+      const attachmentRefusal = validateAttachments(requestMessages, attachments);
+      if (attachmentRefusal) return attachmentRefusal;
       // A history the AI SDK could read in two ways (a tool call id in two
       // parts, a non-boolean approval answer) is refused before anything else.
       try {
