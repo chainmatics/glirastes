@@ -112,6 +112,94 @@ offers the generated UI tools as `/` commands; drop an earlier
 show a command twice (results are only merged when type and id match), and
 the entry of the older provider still goes through the model.
 
+## Pills in the composer
+
+With `chatInteractions` (or `completionProviders`) the default `ChatInput`
+is the pill composer: a picked `/` command and a picked `@` entity both
+become pills inside the text, `data-mention-kind="command"` or `"entity"`,
+styled apart. Backspace right behind a pill and Delete right before it
+remove the whole pill. `RichMentionInput commandPills={false}` keeps the
+earlier behaviour of a command inserted as `/slug ` text.
+
+Pill colors are CSS variables, light and dark come from the theme:
+
+| Variable | Theme color | Unset |
+| --- | --- | --- |
+| `--cm-pill-command-bg`, `--cm-pill-command-text` | `pillCommand`, `pillCommandText` | the primary tint and color |
+| `--cm-pill-entity-bg`, `--cm-pill-entity-text` | `pillEntity`, `pillEntityText` | a teal tint, mixed with the text color |
+
+A chat rendered `unstyled`, or a composer of its own built on
+`RichMentionInput`, gets the same pills from `import 'glirastes/react/pills.css'`
+(zero specificity, every app rule wins) and sets the variables itself:
+
+```css
+:root { --cm-pill-command-bg: #ede9fe; --cm-pill-command-text: #5b21b6; --cm-pill-entity-bg: #ccfbf1; --cm-pill-entity-text: #115e59; }
+.dark { --cm-pill-command-bg: #4c1d95; --cm-pill-command-text: #ede9fe; --cm-pill-entity-bg: #134e4a; --cm-pill-entity-text: #ccfbf1; }
+```
+
+## Starting a chat about something
+
+`useChatComposer()` works anywhere below `AiChatProvider` (`VercelAiChat`),
+for a right-click "Chat about this" entry or an AI button in a detail view:
+
+```tsx
+import { useChatComposer } from 'glirastes/react';
+
+function TaskMenu({ task }) {
+  const composer = useChatComposer();
+  return (
+    <>
+      <MenuItem onSelect={() => composer.chatAbout({ type: 'task', id: task.id, label: task.title })}>
+        {composer.chatAboutLabel /* "Chat about this", German "Mit KI besprechen" */}
+      </MenuItem>
+      <MenuItem onSelect={() => composer.chatAbout({ type: 'task', id: task.id, label: task.title }, { command: 'tasks.summarize' })}>
+        Summarize
+      </MenuItem>
+    </>
+  );
+}
+```
+
+| Method | Effect |
+| --- | --- |
+| `open()` | Calls the provider's `onOpenRequest`, else opens the surrounding `AssistantLayoutProvider` |
+| `chatAbout(entity, { command?, args?, text?, append? })` | `open()`, then replaces the draft (or adds to it with `append`) with the command pill, the entity pill and the text, and focuses the editor |
+| `insertMention({ type, id, label? })` | An `@` pill at the caret; without `label` the entity's `resolve` looks it up (false when neither gives one) |
+| `insertCommand(id, args?)` | A `/` pill for a known command (false otherwise); `args` fill its arguments, so sent alone it runs without the form |
+| `setDraft(text, mentions?)`, `insertText(text)`, `clear()`, `focus()` | The draft itself |
+| `hasCommand(id)`, `hasEntity(type)`, `chatAboutLabel` | For building menus |
+
+Components that also render without a chat (tests, other pages) use
+`useOptionalChatComposer()`, which is `null` there. Requests wait until a composer is mounted, so a closed chat that mounts its
+panel on open still receives them. A composer of its own built on
+`RichMentionInput` takes them with `useChatComposerTarget(inputRef, { onChange })`.
+`chatAbout` with a command whose entity argument the pill fills runs the
+command directly when sent alone, like a command picked from the list.
+
+## Entity chips in answers
+
+`entityLinks` on the provider turns references in assistant text into chips:
+
+```tsx
+const entityLinks = useMemo(() => ({
+  // App-specific references, e.g. task keys. `resolve` may return undefined (not visible): the text stays.
+  matchers: [{ type: 'task', pattern: /[A-Z][A-Z0-9]{1,5}-\d+/, resolve: (key) => lookupTask(key) }],
+  // Optional: open a reference yourself; return false to fall through to the default.
+  open: (ref) => (ref.type === 'task' ? openTaskDetails(ref.id) : false),
+}), []);
+<VercelAiChat endpoint="/api/chat" chatInteractions={chatInteractions} entityLinks={entityLinks} />
+```
+
+Besides the matchers, names the conversation already referenced become chips
+(`known`, default on, names of at least `minLabelLength` = 4 characters):
+`@` mentions and the hits of an entity's search tool (`GET /api/tasks?search=`).
+A chip opens through `open`, else through the entity's derived "Open" action
+(a page like `/tasks/:taskId`) on the navigation bridge, without a chat
+message; without either it is shown but not clickable. `@` pills in sent
+messages open the same way, also without `entityLinks`. A custom `Markdown`
+component keeps the chips with `useChatEntityLinks().markdownComponents`
+(for `react-markdown`) or `linkify(children)`; `EntityText` renders one string.
+
 ## `<glirastes-chat>`
 
 ```html
@@ -165,5 +253,8 @@ then goes to the model.
   polite live region announces the number of suggestions.
 - ArrowUp/ArrowDown move between results, ArrowRight/ArrowLeft between an
   entity and its actions, Enter or Tab picks, Escape closes.
+- Backspace behind a pill and Delete before it remove the whole pill; each
+  pill's remove control is named by `locale.removeMentionLabel`.
+- A chip in an answer is a button named by `locale.openEntityLabel`.
 - The argument form starts at the first empty required field; entity fields
   are ARIA 1.2 comboboxes; Escape closes an open list first, then cancels.

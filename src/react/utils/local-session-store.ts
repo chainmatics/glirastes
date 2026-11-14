@@ -1,5 +1,6 @@
 import type { ChatMessage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
 import { sanitizeStoredMessages } from './sanitize-stored-messages.js';
+import { parseMentionSegments } from './mention-markup.js';
 
 type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -53,7 +54,13 @@ function textOf(message: ChatMessage | WireChatMessage): string {
 /** The first question of a chat, cut at a word, as its name. */
 function titleFrom(messages: ReadonlyArray<ChatMessage | WireChatMessage>): string | null {
   const first = messages.find((message) => message.role === 'user');
-  const text = first ? textOf(first).replace(/\s+/g, ' ').trim() : '';
+  const raw = first ? textOf(first) : '';
+  // Mentions read as `@Name` and `/Command`, not as their markup.
+  const text = parseMentionSegments(raw)
+    .map((segment) => (segment.kind === 'text' ? segment.text : `${segment.mention.prefix ?? ''}${segment.mention.displayName}`))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (text === '') return null;
   if (text.length <= TITLE_LENGTH) return text;
   const head = text.slice(0, TITLE_LENGTH + 1);

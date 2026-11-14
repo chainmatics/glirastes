@@ -129,7 +129,7 @@ export function toolReferenceFromDataset(dataset: {
 }
 
 export function inferMentionPrefix(type: string): string {
-  return type === 'task' || type === 'command' ? '/' : '@';
+  return type === 'command' ? '/' : '@';
 }
 
 export function normalizeMentionSlug(value: string): string {

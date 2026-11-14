@@ -112,12 +112,16 @@ function typeInto(editor: HTMLElement, text: string) {
   fireEvent.input(editor);
 }
 
-/** Picks the first entry of the open list by keyboard and waits for the command token. */
+/** Picks the first entry of the open list by keyboard and waits for its command pill. */
 async function pickFirstCommand(editor: HTMLElement, query: string, label: string, token: string) {
   typeInto(editor, query);
   await waitFor(() => expect(screen.getByText(label)).toBeTruthy());
   fireEvent.keyDown(editor, { key: 'Enter' });
-  await waitFor(() => expect(editor.textContent).toBe(`${token} `));
+  await waitFor(() => expect(commandPill(editor, token.slice(1))).toBeTruthy());
+}
+
+function commandPill(editor: HTMLElement, slug: string): HTMLElement | null {
+  return editor.querySelector(`[data-mention-kind="command"][data-mention-slug="${slug}"]`);
 }
 
 function sentText(chat: ChatTransport): string {
@@ -144,7 +148,7 @@ describe('composer with completion providers', () => {
     typeInto(editor, '/er');
     await waitFor(() => expect(screen.getByText('Erledigte filtern')).toBeTruthy());
     fireEvent.keyDown(editor, { key: 'Enter' });
-    await waitFor(() => expect(editor.textContent).toBe('/erledigte-filtern '));
+    await waitFor(() => expect(commandPill(editor, 'erledigte-filtern')).toBeTruthy());
     fireEvent.keyDown(editor, { key: 'Enter' });
 
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith({
