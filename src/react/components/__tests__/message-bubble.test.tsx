@@ -264,3 +264,64 @@ describe('MessageBubble tool-result visibility', () => {
       .toBe('Sicherheitsstopp');
   });
 });
+
+describe('MessageBubble attachments', () => {
+  afterEach(cleanup);
+
+  it('renders sent files: image link, file chip and an unavailable chip', () => {
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: 'user-1',
+          role: 'user',
+          parts: [
+            { type: 'text', text: 'Schau mal' },
+            { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AA==', filename: 'shot.png' },
+            { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,AA==', filename: 'report.pdf' },
+            { type: 'file', mediaType: 'image/png', url: '', filename: 'old.png' },
+          ],
+        }}
+      />,
+    );
+
+    const link = screen.getByRole('link', { name: 'shot.png öffnen' });
+    expect(link.getAttribute('href')).toBe('data:image/png;base64,AA==');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(link.querySelector('img')?.getAttribute('alt')).toBe('shot.png');
+    expect(screen.getByText('report.pdf')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'report.pdf öffnen' })).toBeNull();
+    const omitted = container.querySelector('[data-element="message-attachment"][data-state="unavailable"]');
+    expect(omitted?.textContent).toContain('old.png');
+    expect(omitted?.textContent).toContain('Nicht mehr verfügbar');
+  });
+
+  it('renders an attachment-only message', () => {
+    render(
+      <MessageBubble
+        message={{ id: 'user-2', role: 'user', parts: [{ type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,AA==', filename: 'a.pdf' }] }}
+      />,
+    );
+    expect(screen.getByText('a.pdf')).toBeTruthy();
+  });
+
+  it('opens a data image through a blob URL, since browsers block top-level data: navigation', () => {
+    const createObjectURL = vi.fn(() => 'blob:shot');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }));
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    render(
+      <MessageBubble
+        message={{ id: 'user-3', role: 'user', parts: [{ type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AA==', filename: 'shot.png' }] }}
+      />,
+    );
+    const link = screen.getByRole('link', { name: 'shot.png öffnen' });
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(open).toHaveBeenCalledWith('blob:shot', '_blank', 'noopener,noreferrer');
+    open.mockRestore();
+    vi.unstubAllGlobals();
+  });
+});
