@@ -26,6 +26,15 @@ approval id (`duplicate_tool_call_id`, `duplicate_approval_id`), to a
 malformed tool part or approval (`tool_part_malformed`, `approval_malformed`)
 and to more than 32 approved calls in one request (`too_many_approvals`).
 
+## Attachments
+
+File parts are refused (400 `attachments_disabled`) unless
+`attachments.enabled` is set; then `maxBodyBytes` defaults to 50 MB, only
+`data:` URLs are accepted, and each file's type, size and first bytes are
+checked. The PII shield does not see file contents, so `piiShield` together
+with attachments needs `allowWithPiiShield: true`. See
+[chat attachments](chat-attachments.md).
+
 ## Where endpoint tools call
 
 Endpoint tools call the origin of the chat request's URL, the address your

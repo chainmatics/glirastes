@@ -155,7 +155,8 @@ Never call `send(text)` without the editor's mentions and never pass an own
 `onSearch` next to `chatInteractions`: both bypass direct commands and entity
 actions. The legacy `mentions` composer ignores these props. The
 `curating-glirastes-chat-interactions` skill walks a coding agent
-through the review, the overrides and this wiring.
+through the review, the overrides and this wiring. For file attachments in a
+custom composer see [chat attachments](chat-attachments.md#custom-composers).
 
 ## `<glirastes-chat>`
 

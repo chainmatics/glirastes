@@ -247,6 +247,8 @@ two jobs:
   ([docs/chat-interactions.md](docs/chat-interactions.md)); `useChatComposer`
   keeps them in a custom input.
 - A per-message work log of tool calls and an optional plan checklist.
+- Opt-in image and PDF attachments (paperclip, paste, drop;
+  [docs/chat-attachments.md](docs/chat-attachments.md)).
 - `unstyled` to bring your own CSS; `deChatLocale` for German texts.
 - Push-to-talk speech input through one STT controller (`voice` config,
   `glirastes/stt` adapters, `createRecordingTranscriptionHandler` for a
@@ -366,6 +368,7 @@ Node runtime/sidecar) described there; this does not imply complete stack suppor
 - [Tool policy](docs/tool-policy.md)
 - [Chat route security](docs/chat-route-security.md)
 - [Chat interactions (`@` and `/`)](docs/chat-interactions.md)
+- [Chat attachments](docs/chat-attachments.md)
 - [Managed runtime sync](docs/managed-runtime-sync.md)
 - [Runtime persistence](docs/runtime-persistence.md)
 - [0.5.0 acceptance](docs/acceptance/0.5.0-acceptance.md)

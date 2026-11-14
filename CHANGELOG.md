@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Chat attachments (images and PDFs), off by default. `createAiChatHandler({ attachments: { enabled: true } })` accepts file parts (`maxFiles` 10, `maxFileBytes` 20 MB decoded, png/jpeg/webp/gif/pdf, `data:` URLs only unless `allowRemoteUrls`), checks type, size and magic bytes of every file in the history (400, 413 `attachment_too_large`, 415) and raises the default `maxBodyBytes` from 1 MB to 50 MB. With `piiShield` it also needs `allowWithPiiShield: true`: file parts pass through byte-identical and never reach the PII detector.
+- `attachments` on `AiChatProvider` / `VercelAiChat` (`true` or `{ mediaTypes, maxFiles, maxFileBytes, prepare }`): paperclip button, paste and drop into the input, a tray with thumbnails and remove buttons, and sent files in the message (an image opens in a new tab). The SDK does not compress images; do it in `prepare`.
+- `AttachmentTray`, `AttachmentButton` (also as `components` slots) and the types `FilePart`, `ChatAttachment`, `ChatAttachmentOptions`, `ChatAttachmentInputProps`, `AttachmentTrayProps`, `AttachmentButtonProps`, `ChatAttachmentsConfig`. `useChatComposer()` adds `attachments`, `attachmentError`, `attachmentsEnabled`, `addFiles`, `removeAttachment`, `openFilePicker` and `attachmentInputProps`; a custom `onSubmit` gets the files as third argument. `RichMentionInput` takes `onFiles`, `onBackspaceEmpty` and `allowEmptySubmit`, and keeps its text when `onSubmit` returns `false`. New locale keys with English and German texts.
+
+### Changed
+
+- A request keeps file data only in the two most recent user messages, older files become `[attachment: name]` text; `createLocalSessionStore` stores no file data. History trimming on the server counts a file part as about 1,000 tokens.
+- The LangGraph transport throws when a message carries files.
+
+### Notes
+
+- A Next.js middleware (`proxy`) on the chat route buffers at most 10 MB of the body (`experimental.middlewareClientMaxBodySize`, Next.js 16 `experimental.proxyClientMaxBodySize`); a NestJS or Express app in front of the handler needs a larger JSON limit (`json({ limit: '50mb' })`). See `docs/chat-attachments.md`.
+
 ## [0.8.0-chat.1] - 2026-11-14
 
 Prerelease on the `next` dist-tag.
