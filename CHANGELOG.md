@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-14
+
+### Added
+
+- `createAiChatHandler({ hideIds })`, on by default: technical ids stay out of the assistant's answers. The system prompt forbids them, and the built-in stream handler replaces an id the model writes anyway with the label its tool result gave it (a `*Identifier` or `key` field, else `title`, `name`, `displayName`, `label`, or a sibling such as `teamName` for `teamId`) or removes it, together with wrappers like `(ID: …)`. Ids are UUIDs and every value under an `id`/`*Id` key in this turn's tool inputs and outputs or the history. `hideIds: false` keeps the old behaviour. `createHideIdsTransform()`, `redactIds()`, `collectIdLabels()` and `HIDE_IDS_PROMPT` are exported for a custom `streamHandler`.
+
 ## [0.9.0] - 2026-11-14
 
 Brings the chat interaction curation and chat attachments (prereleases `0.8.0-chat.0` to `0.8.0-chat.3` on the `next` dist-tag) together with the 0.8.0 pills, composer API and entity chips.

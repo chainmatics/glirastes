@@ -50,7 +50,7 @@ function request(text: string) {
 describe('prompt caching', () => {
   it('marks the system prompt and the newest message as cache breakpoints', async () => {
     const { model, calls } = capturingModel();
-    await (await createAiChatHandler({ tools: registry, model, systemPrompt: 'Static app prompt.' })(request('Hallo'))).text();
+    await (await createAiChatHandler({ tools: registry, model, systemPrompt: 'Static app prompt.', hideIds: false })(request('Hallo'))).text();
 
     const prompt = calls[0]!.prompt;
     expect(prompt[0]).toMatchObject({
