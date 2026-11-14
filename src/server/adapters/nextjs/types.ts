@@ -307,6 +307,15 @@ export interface AiChatHandlerConfig {
    */
   promptCaching?: boolean;
   /**
+   * Keeps technical ids out of answers (default `true`): the system prompt
+   * forbids them, and the built-in stream handler replaces an id the model
+   * writes anyway with the label its tool result gave it (a `*Identifier` or
+   * `key` field, else `title`, `name`, `displayName`, `label`) or removes it.
+   * A custom `streamHandler` gets `hideIds` in its context and can pass
+   * `createHideIdsTransform()` to `streamText` as `experimental_transform`.
+   */
+  hideIds?: boolean;
+  /**
    * Number of recent user/assistant text pairs to include as conversation
    * history for intent classification. Helps the classifier understand
    * follow-up messages. Defaults to 4.

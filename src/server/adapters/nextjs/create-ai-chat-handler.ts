@@ -41,6 +41,7 @@ import {
   runDirectCommand,
   stripChatCommandMessages,
 } from './direct-command.js';
+import { collectIdLabels, createHideIdsTransform, HIDE_IDS_PROMPT, type IdLabels } from './hide-ids.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
 import type { Tool, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
@@ -112,6 +113,8 @@ export interface StreamHandlerContext {
   history?: HistoryOptions | false;
   /** Cache breakpoints and a stable tool order (see `AiChatHandlerConfig.promptCaching`). */
   promptCaching?: boolean;
+  /** Keep technical ids out of answers (see `AiChatHandlerConfig.hideIds`). */
+  hideIds?: boolean;
   /**
    * AI tools (output of toolsToAiTools, RBAC-filtered). Every tool that can
    * ask for approval carries the execution gate of this request: it executes
@@ -512,6 +515,12 @@ async function defaultStreamHandler(
     ? orderToolsForCaching(vercelTools, ctx.toolDiscovery.activeToolNames())
     : vercelTools;
   const promptCaching = ctx.promptCaching !== false;
+  const hideIds = ctx.hideIds !== false;
+  const systemPrompt = hideIds && ctx.systemPrompt
+    ? `${ctx.systemPrompt}\n\n${HIDE_IDS_PROMPT}`
+    : ctx.systemPrompt;
+  const idLabels: IdLabels = new Map();
+  if (hideIds) collectIdLabels(ctx.messages, idLabels);
   const modelMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
     { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
@@ -519,7 +528,7 @@ async function defaultStreamHandler(
   // Executed approvals are visible output for the stream and the metric alike.
   const resumedApprovals = resumesToolApprovals(modelMessages);
   const promptMessages = promptCaching
-    ? withCacheBreakpoints(ctx.systemPrompt, modelMessages)
+    ? withCacheBreakpoints(systemPrompt, modelMessages)
     : modelMessages;
 
   let wasTruncated = false;
@@ -591,7 +600,8 @@ async function defaultStreamHandler(
       const result = streamText({
         model: ctx.model as Parameters<typeof streamText>[0]['model'],
         messages: promptMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
-        ...(promptCaching ? {} : { system: ctx.systemPrompt }),
+        ...(promptCaching ? {} : { system: systemPrompt }),
+        ...(hideIds ? { experimental_transform: createHideIdsTransform(idLabels) } : {}),
         tools: orderedTools as Parameters<typeof streamText>[0]['tools'],
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
@@ -865,6 +875,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     intentRouting = true,
     history,
     promptCaching,
+    hideIds = true,
     wrapHandler,
     onError: onErrorConfig,
     onToolError,
@@ -1587,6 +1598,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         locale,
         history,
         promptCaching,
+        hideIds,
           modelTier: pipelineResult.model.modelId,
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
@@ -1753,6 +1765,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         locale,
         history,
         promptCaching,
+        hideIds,
         modelTier: routing?.modelTier,
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,

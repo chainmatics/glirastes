@@ -11,6 +11,13 @@ export {
   createInternalApiCallerFromRequest,
   type OriginOptions,
 } from './context-helpers.js';
+export {
+  createHideIdsTransform,
+  redactIds,
+  collectIdLabels,
+  HIDE_IDS_PROMPT,
+  type IdLabels,
+} from './hide-ids.js';
 export { sanitizeModelMessages } from './sanitize-model-messages.js';
 export {
   prepareModelMessages,
