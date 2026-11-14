@@ -20,7 +20,7 @@ export function MentionChip({
   inline = false,
 }: MentionChipProps) {
   const size = inline ? 'inline' : compact ? 'compact' : 'default';
-  const prefix = mention.prefix ?? (mention.type === 'task' || mention.type === 'command' ? '/' : '@');
+  const prefix = mention.prefix ?? (mention.type === 'command' ? '/' : '@');
   const name = (
     <span data-element="display-name">
       <span data-element="prefix">{prefix}</span>
