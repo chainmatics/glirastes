@@ -9,18 +9,22 @@ import {
 } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
+import { MentionInput } from './mention-input.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
 import type { ChatInputProps } from '../types.js';
 
 /**
- * Plain chat input field with submit handling.
- *
- * Submits on Enter (without Shift). Renders the InputExtra component
- * from provider config if available (e.g., voice input button).
- *
- * Toggles between send and stop button based on loading state.
+ * The chat's input. With `@`/`/` search (`chatInteractions` or
+ * `completionProviders`) it is the pill composer (`MentionInput`); otherwise
+ * a plain text field that submits on Enter (without Shift) and renders the
+ * provider's `InputExtra` (e.g. a voice button).
  */
-export function ChatInput({ className, onSubmit }: ChatInputProps) {
+export function ChatInput(props: ChatInputProps) {
+  const { completionSearch } = useChatContext();
+  return completionSearch ? <MentionInput {...props} /> : <PlainChatInput {...props} />;
+}
+
+function PlainChatInput({ className, onSubmit }: ChatInputProps) {
   const visible = useContext(ChatWindowVisibilityContext);
   const { send, stop, isLoading, classNames, locale, components, voice } = useChatContext();
   const [value, setValue] = useState('');

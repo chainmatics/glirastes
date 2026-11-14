@@ -95,7 +95,7 @@ describe('composer keyboard and ARIA for chat interactions', () => {
   it('runs a picked command without the model when it is sent alone', async () => {
     const { chat, editor } = await open('/open');
     fireEvent.keyDown(editor, { key: 'Enter' });
-    await waitFor(() => expect(editor.textContent).toBe('/open-overview '));
+    await waitFor(() => expect(editor.querySelector('[data-mention-kind="command"][data-mention-slug="open-overview"]')).toBeTruthy());
     fireEvent.keyDown(editor, { key: 'Enter' });
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
     expect(parseChatCommandMessage(chat.sendMessage.mock.calls[0]![0].text as string)?.invocation)

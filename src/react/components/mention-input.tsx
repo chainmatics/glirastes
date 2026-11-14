@@ -4,6 +4,7 @@ import { MentionChipList } from './mention-chip.js';
 import { RichMentionInput } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
 import { useChatContext } from '../provider/chat-context.js';
+import { useChatComposerTarget } from '../composer/chat-composer.js';
 import { inferMentionPrefix, normalizeMentionSlug } from '../utils/mention-markup.js';
 import type {
   MentionData,
@@ -46,6 +47,9 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
   const inputRef = useRef<RichMentionInputHandle | null>(null);
   const InputExtra = components.InputExtra;
   const ArgumentsForm = components.CommandArgumentsForm ?? DefaultCommandArgumentsForm;
+
+  // Pills and drafts from `useChatComposer` (e.g. a "Chat about this" menu entry).
+  useChatComposerTarget(inputRef, { onChange: setValue });
 
   // References added from outside the composer (`mentionEntity`).
   useEffect(() => {
@@ -105,6 +109,7 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
           )}
           listLabel={locale.completionListLabel}
           resultsLabel={locale.completionResultsLabel}
+          removeMentionLabel={locale.removeMentionLabel}
         />
         {voice.enabled && (
           <VoiceInputAddon

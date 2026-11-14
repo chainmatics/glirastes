@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
+import { EntityText, useChatEntityLinks } from '../entity-links/entity-links-react.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, readClarificationPart } from '../utils/clarification.js';
 import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
@@ -103,6 +104,8 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const ToolResultComponent = components.ToolResultBlock ?? DefaultToolResult;
   const MentionChipComponent = components.MentionChip ?? DefaultMentionChip;
   const ClarificationComponent = components.ClarificationCard ?? DefaultClarificationCard;
+  const links = useChatEntityLinks();
+  const linkText = links.enabled && message.role === 'assistant';
   const isLatestMessage = messages?.[messages.length - 1]?.id === message.id;
 
   const renderToolResult = (key: string, toolName: string, result: unknown) => {
@@ -246,7 +249,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
                 if (!segment.text) return null;
                 return (
                   <span key={`segment-text-${index}`} data-component="message-rich-text-part">
-                    {segment.text}
+                    {linkText ? <EntityText text={segment.text} /> : segment.text}
                   </span>
                 );
               }
@@ -256,6 +259,12 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
                   key={`segment-mention-${index}`}
                   mention={segment.mention}
                   inline
+                  {...(segment.mention.type !== 'command' && links.canOpen(segment.mention.type)
+                    ? {
+                      onOpen: () => links.open({ type: segment.mention.type, id: segment.mention.id, label: segment.mention.displayName }),
+                      openLabel: links.openLabel({ type: segment.mention.type, id: segment.mention.id, label: segment.mention.displayName }),
+                    }
+                    : {})}
                 />
               );
             })}
@@ -310,10 +319,11 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 }
 
 function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
+  const links = useChatEntityLinks();
   return (
     <div className={className} data-component="markdown">
       <Suspense fallback={<>{content}</>}>
-        <ReactMarkdown>{content}</ReactMarkdown>
+        <ReactMarkdown components={links.enabled ? links.markdownComponents : undefined}>{content}</ReactMarkdown>
       </Suspense>
     </div>
   );

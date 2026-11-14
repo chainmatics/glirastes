@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { MentionData, MentionResult } from '../../types.js';
 import {
   describeToolReference,
+  inferMentionPrefix,
   mentionDataFromResult,
+  parseMentionSegments,
   serializeMentionsForSend,
   stripContextBlocks,
   toolReferenceFromDataset,
@@ -21,6 +23,25 @@ function command(extra: Record<string, unknown> = {}): MentionData {
     ...extra,
   };
 }
+
+describe('mention prefixes', () => {
+  it('reserves / for commands and gives a task @', () => {
+    expect(inferMentionPrefix('command')).toBe('/');
+    expect(inferMentionPrefix('task')).toBe('@');
+    expect(inferMentionPrefix('person')).toBe('@');
+  });
+
+  it('reads a task in sent markup back as an @ mention', () => {
+    const [segment] = parseMentionSegments('{{mention:task:a65e:Release prüfen}}');
+    expect(segment).toMatchObject({ kind: 'mention', mention: { type: 'task', prefix: '@' } });
+  });
+
+  it('turns an @ token of a task without explicit prefix into markup', () => {
+    const task: MentionData = { id: 'a65e', type: 'task', label: 'Release prüfen', slug: 'release-prufen' };
+    expect(serializeMentionsForSend('Bitte @release-prufen ansehen', [task]))
+      .toContain('{{mention:task:a65e:Release prüfen}}');
+  });
+});
 
 describe('describeToolReference', () => {
   it('names the definition and its fixed arguments', () => {

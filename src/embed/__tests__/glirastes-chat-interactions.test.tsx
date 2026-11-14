@@ -98,7 +98,7 @@ describe('<glirastes-chat> chat interactions', () => {
     const option = editor().getRootNode() as ShadowRoot;
     expect(option.querySelector('[role="option"]')?.textContent).toBe('Übersicht öffnen');
     fireEvent.keyDown(editor(), { key: 'Enter' });
-    await waitFor(() => expect(editor().textContent).toBe('/ubersicht-offnen '));
+    await waitFor(() => expect(editor().querySelector('[data-component="mention-chip"][data-mention-kind="command"]')?.getAttribute('data-mention-slug')).toBe('ubersicht-offnen'));
     fireEvent.keyDown(editor(), { key: 'Enter' });
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
     expect(parseChatCommandMessage(chat.sendMessage.mock.calls[0]![0].text as string)).toEqual({

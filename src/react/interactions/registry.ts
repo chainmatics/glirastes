@@ -5,6 +5,7 @@ import {
 import {
   chatText,
   isChatArgumentPath,
+  type ChatEntitySearchData,
   type ChatInteractionArg,
   type ChatInteractionsData,
   type ChatLocaleCode,
@@ -69,6 +70,8 @@ export interface ChatInteractionRegistry {
   readonly providers: ReadonlyArray<ChatCompletionProvider>;
   command(id: string): ChatCommandDefinition | undefined;
   entity(type: string): ChatEntityDefinition | undefined;
+  /** The derived search of each entity type: which tool lists it and where id and label sit in its result. */
+  readonly entitySearches: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }>;
   /** Searches one entity type, e.g. for an argument field; failures yield no hits. */
   searchEntity(type: string, query: string, signal: AbortSignal): Promise<ChatEntityItem[]>;
   /**
@@ -110,6 +113,16 @@ function setPath(target: Record<string, unknown>, path: string, value: unknown):
     current = current[segment] as Record<string, unknown>;
   }
   current[segments.at(-1)!] = value;
+}
+
+function valueAt(source: Record<string, unknown>, path: string): unknown {
+  if (path in source) return source[path];
+  let current: unknown = source;
+  for (const segment of path.split('.')) {
+    if (typeof current !== 'object' || current === null || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
 }
 
 function tokenOf(mention: MentionData): string | undefined {
@@ -245,6 +258,9 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
   return {
     locale,
     providers: [commandProvider, entityProvider],
+    entitySearches: (config.data?.entities ?? []).flatMap((entity) => (
+      entity.search ? [{ type: entity.type, search: entity.search }] : []
+    )),
     command: (id) => commands.get(id),
     entity: (type) => entities.get(type),
     completeCommand: complete,
@@ -290,6 +306,17 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
         values[arg.name] = String(match.id);
         valueLabels[arg.name] = typeof match.label === 'string' ? match.label : String(match.id);
       }
+      // Values the pill carries (`insertCommand(id, args)`) fill the remaining arguments.
+      let preset = 0;
+      if (typeof mention.args === 'object' && mention.args !== null && !Array.isArray(mention.args)) {
+        for (const arg of command.args ?? []) {
+          if (values[arg.name]) continue;
+          const value = valueAt(mention.args as Record<string, unknown>, arg.name);
+          if (typeof value !== 'string' || !value.trim()) continue;
+          values[arg.name] = value.trim();
+          preset += 1;
+        }
+      }
       for (const entry of used) {
         const entryToken = tokenOf(entry);
         if (entryToken) remaining = withoutToken(remaining, entryToken).text;
@@ -304,7 +331,7 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
         args: command.args ?? [],
         values,
         valueLabels,
-      }, used.size);
+      }, used.size + preset);
     },
 
     planAction(target, actionId) {

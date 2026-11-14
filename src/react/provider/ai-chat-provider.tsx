@@ -36,6 +36,8 @@ import {
   type PendingChatCommand,
 } from '../interactions/registry.js';
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
+import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
+import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
 import { dispatchToolResultUiActions } from '../../browser/client-actions.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import {
@@ -113,6 +115,9 @@ export const DEFAULT_LOCALE: ChatLocale = {
   commandArgumentsIncomplete: 'Please complete: {fields}',
   commandArgumentsAnyOption: 'Any',
   commandArgumentsNoMatches: 'No matches',
+  removeMentionLabel: 'Remove {label}',
+  openEntityLabel: 'Open {label}',
+  chatAboutLabel: 'Chat about this',
 };
 
 // ============================================================================
@@ -377,6 +382,8 @@ export function AiChatProvider({
   completionContext,
   onCompletionProviderError,
   chatInteractions,
+  entityLinks,
+  onOpenRequest,
   toolRenderers,
   toolResults: userToolResults,
   voice: userVoice,
@@ -1579,7 +1586,11 @@ export function AiChatProvider({
 
   return (
     <ChatContext.Provider value={contextValue}>
-      {children}
+      <ChatComposerQueueProvider onOpenRequest={onOpenRequest}>
+        <ChatEntityLinksProvider config={entityLinks} uiActionBus={uiActionBus}>
+          {children}
+        </ChatEntityLinksProvider>
+      </ChatComposerQueueProvider>
     </ChatContext.Provider>
   );
 }

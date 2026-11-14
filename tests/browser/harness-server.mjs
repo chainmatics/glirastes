@@ -32,7 +32,8 @@ export async function startChatHarness() {
   }
   await writeFile(join(outdir, 'index.html'), [
     '<!doctype html>',
-    '<html lang="de"><head><meta charset="utf-8">',
+    // The tests assert the English texts; the provider follows the page language.
+    '<html lang="en"><head><meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<link rel="stylesheet" href="/chat-harness.css">',
     '<style>body{margin:0;font:16px/1.5 system-ui,sans-serif}</style>',

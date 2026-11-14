@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-14
+
+### Added
+
+- Pills in the chat composer: a picked `/` command is now a pill like an `@` entity (`data-mention-kind="command"` / `"entity"`), and the two are colored apart. Backspace behind a pill and Delete before it remove the whole pill; each pill has a remove control named by `locale.removeMentionLabel`. Colors come from `theme.colors.pillCommand`, `pillCommandText`, `pillEntity`, `pillEntityText` (`--cm-pill-*`). An `unstyled` chat or a composer of the app's own imports `glirastes/react/pills.css`. `RichMentionInput commandPills={false}` keeps commands as text.
+- The default `ChatInput` is the pill composer when the chat has `@`/`/` search (`chatInteractions` or `completionProviders`).
+- `useChatComposer()`: `open`, `chatAbout(entity, { command, args, text, append })`, `insertMention`, `insertCommand`, `setDraft`, `insertText`, `clear`, `focus`, plus `chatAboutLabel` for a "Chat about this" menu entry; `useOptionalChatComposer()` is `null` outside the provider. Requests wait for a mounted composer; `useChatComposerTarget` connects a composer of the app's own. `AiChatProvider` takes `onOpenRequest` to show the chat, else it opens the surrounding `AssistantLayoutProvider`. A command pill's `args` fill the command's arguments, so it runs directly when sent alone.
+- `entityLinks` on the provider turns entity references in assistant answers into chips: app matchers (e.g. task keys with `resolve`), and names the conversation already referenced (`@` mentions, hits of an entity's search tool). A chip opens through `entityLinks.open` or the entity's derived `ui.navigate` page on the navigation bridge, without a chat message. `@` pills in sent messages open the same way. `EntityText`, `EntityLinkChip` and `useChatEntityLinks()` (`linkify`, `markdownComponents`) cover custom renderers.
+- `RichMentionInputHandle.insertMention`, `MentionChipProps.onOpen`/`openLabel`, locale keys `removeMentionLabel`, `openEntityLabel`, `chatAboutLabel` (German included).
+
+### Fixed
+
+- A task mention without an explicit prefix shows `@`, not `/`; `/` now means a command only (`inferMentionPrefix`, `MentionChip`).
+- A chat named after its first question shows its mentions as `@Name` and `/Command` instead of `{{mention:…}}` markup.
+- `@` and `/` open their list after a pill or any other place where the browser typed a non-breaking space.
+
 ## [0.7.1] - 2026-11-13
 
 ### Fixed
@@ -599,7 +615,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/chainmatics/glirastes/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/chainmatics/glirastes/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/chainmatics/glirastes/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/chainmatics/glirastes/compare/v0.5.1...v0.6.0

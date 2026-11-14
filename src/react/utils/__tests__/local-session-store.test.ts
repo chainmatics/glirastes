@@ -56,6 +56,12 @@ describe('chats kept in the browser', () => {
     expect((await sessions.list!())[0]!.title).toBe('Offene Aufträge');
   });
 
+  it('names a chat with readable mentions instead of their markup', async () => {
+    const sessions = store();
+    await sessions.save!('default', [user('{{mention:command:tasks.summarize:Zusammenfassen}} {{mention:task:a65e:Release prüfen}} bitte')]);
+    expect((await sessions.list!())[0]!.title).toBe('/Zusammenfassen @Release prüfen bitte');
+  });
+
   it('lists the chat used last first', async () => {
     const clock = { now: 1_000 };
     const sessions = store(memory().storage, clock);

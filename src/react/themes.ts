@@ -13,8 +13,11 @@ import type {
 // `professional-lightblue`) and override individual keys.
 // ---------------------------------------------------------------------------
 
+type PillColorKey = 'pillCommand' | 'pillCommandText' | 'pillEntity' | 'pillEntityText';
+
 interface ResolvedTheme {
-  colors: Required<ChatThemeColors>;
+  /** Pill colors are derived in CSS from `primary` and `text` unless a theme sets them. */
+  colors: Required<Omit<ChatThemeColors, PillColorKey>> & Pick<ChatThemeColors, PillColorKey>;
   radius: string;
   radiusSmall: string;
   fontFamily: string;
@@ -307,6 +310,10 @@ export function getThemeVars(theme?: ChatTheme): Record<string, string> {
     '--cm-radius': r.radius,
     '--cm-radius-sm': r.radiusSmall,
     '--cm-font': r.fontFamily,
+    ...(r.colors.pillCommand ? { '--cm-pill-command-bg': r.colors.pillCommand } : {}),
+    ...(r.colors.pillCommandText ? { '--cm-pill-command-text': r.colors.pillCommandText } : {}),
+    ...(r.colors.pillEntity ? { '--cm-pill-entity-bg': r.colors.pillEntity } : {}),
+    ...(r.colors.pillEntityText ? { '--cm-pill-entity-text': r.colors.pillEntityText } : {}),
   };
 }
 

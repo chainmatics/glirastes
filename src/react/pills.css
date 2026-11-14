@@ -1,0 +1,74 @@
+/* glirastes — pill styles for `/` commands and `@` entities on their own.
+   For apps that render the chat `unstyled` (or with their own composer) and
+   still want the SDK's pills: `import 'glirastes/react/pills.css'`.
+   Zero specificity (:where), so any app rule wins. Theme with CSS variables,
+   e.g. in light and dark mode:
+     :root  { --cm-pill-command-bg: #ede9fe; --cm-pill-command-text: #5b21b6;
+              --cm-pill-entity-bg: #ccfbf1;  --cm-pill-entity-text: #115e59; }
+     .dark  { --cm-pill-command-bg: #4c1d95; --cm-pill-command-text: #ede9fe;
+              --cm-pill-entity-bg: #134e4a;  --cm-pill-entity-text: #ccfbf1; }
+   Unset, they derive from currentColor and adapt to light and dark text. */
+
+:where([data-component="mention-chip"]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  max-width: 100%;
+  margin: 0 0.0625rem;
+  padding: 0 0.375rem;
+  border-radius: 0.375rem;
+  background: var(--cm-pill-entity-bg, color-mix(in srgb, #14b8a6 15%, transparent));
+  color: var(--cm-pill-entity-text, color-mix(in srgb, #0d9488 62%, var(--cm-text, currentColor)));
+  font-size: 0.92em;
+  font-weight: 500;
+  line-height: 1.5;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+:where([data-component="mention-chip"][data-mention-kind="command"]) {
+  background: var(--cm-pill-command-bg, var(--cm-primary-tint, color-mix(in srgb, #6366f1 14%, transparent)));
+  color: var(--cm-pill-command-text, var(--cm-primary, color-mix(in srgb, #6366f1 70%, currentColor)));
+}
+:where([data-component="mention-chip"] [data-element="display-name"]) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:where([data-component="mention-chip"] [data-element="prefix"]) {
+  opacity: 0.65;
+  margin-right: 0.0625rem;
+}
+:where([data-component="mention-chip"] [data-action="remove-mention"]),
+:where([data-component="mention-chip"] [data-action="remove"]) {
+  margin-left: 0.125rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  opacity: 0.55;
+  cursor: pointer;
+}
+:where([data-component="mention-chip"] [data-action="remove-mention"]:hover),
+:where([data-component="mention-chip"] [data-action="remove"]:hover) {
+  opacity: 1;
+}
+:where([data-component="mention-chip"] [data-action="open"]) {
+  display: inline-flex;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+:where([data-component="mention-chip"][data-interactive="true"]:hover) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+:where([data-component="mention-chip"] [data-action="open"]:focus-visible) {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+  border-radius: 0.25rem;
+}
