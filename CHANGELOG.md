@@ -649,7 +649,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/chainmatics/glirastes/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/chainmatics/glirastes/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/chainmatics/glirastes/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/chainmatics/glirastes/compare/v0.7.0...v0.7.1
