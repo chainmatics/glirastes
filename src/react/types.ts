@@ -1,4 +1,4 @@
-import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent } from 'react';
+import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
@@ -964,6 +964,41 @@ export interface ChatInputProps {
 export interface MentionInputProps {
   className?: string;
   onSubmit?: (message: string) => void;
+}
+
+export interface UseChatComposerOptions {
+  /** Called instead of `send`; the composer clears afterwards. */
+  onSubmit?: (message: string, mentions: MentionData[]) => void;
+  /** Text put into the editor once on mount, after the input's `initialMentions`. */
+  initialValue?: string;
+}
+
+export interface ChatComposerControls {
+  /** Current text including `@`/`/` tokens. */
+  readonly value: string;
+  readonly isLoading: boolean;
+  /** Non-blank text and not loading. */
+  readonly canSend: boolean;
+  /** Sends the editor text with its structured mentions; false when nothing was taken (the text stays). */
+  submit(): boolean;
+  stop(): void;
+  /** Replaces the text; references whose token is not in it are dropped. */
+  setText(text: string): void;
+  /** Appends with one space, e.g. a voice transcript; references stay. */
+  appendText(text: string): void;
+  focus(): void;
+}
+
+export interface ChatComposer extends ChatComposerControls {
+  /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
+  readonly inputRef: RefObject<RichMentionInputHandle | null>;
+  readonly inputProps: Pick<RichMentionInputProps,
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel'>;
+  readonly pendingCommand: PendingChatCommand | null;
+  submitPendingCommand(values: Readonly<Record<string, string>>, valueLabels?: Readonly<Record<string, string>>): boolean;
+  cancelPendingCommand(): void;
+  /** The argument form (`components.CommandArgumentsForm` or the default), `null` when nothing is pending. */
+  readonly argumentsForm: ReactNode;
 }
 
 export interface RichMentionInputHandle {
