@@ -43,6 +43,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     themeVars,
     themeEffect,
     unstyled,
+    attachments,
   } = useChatContext();
 
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
@@ -51,7 +52,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
   // when the app supplies its own component.
   const PipelineTimelineComponent = components.PipelineTimeline;
   const InputComponent = components.ChatInput
-    ?? (hasMentions || hasCompletions ? MentionInput : ChatInput);
+    ?? (hasMentions || hasCompletions || attachments ? MentionInput : ChatInput);
 
   // Group approvals by tool name for bulk operations
   const { singleApprovals, bulkGroups } = useMemo(() => {

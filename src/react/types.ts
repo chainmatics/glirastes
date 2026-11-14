@@ -1,4 +1,4 @@
-import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent } from 'react';
+import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
@@ -66,8 +66,8 @@ export interface ChatTransport {
   status: 'ready' | 'submitted' | 'streaming' | 'error';
   /** Current error, if any */
   error: Error | null;
-  /** Send a user message */
-  sendMessage(opts: { text: string }): Promise<void>;
+  /** Send a user message; `files` only with a transport that supports attachments. */
+  sendMessage(opts: { text: string; files?: FilePart[] }): Promise<void>;
   /** Stop the current generation */
   stop(): void;
   /** Replace the message list (for session restore, sanitization) */
@@ -169,12 +169,68 @@ export interface ChatMessage {
 
 export type MessagePart =
   | TextPart
+  | FilePart
   | ToolInvocationPart
   | ToolResultPart;
 
 export interface TextPart {
   type: 'text';
   text: string;
+}
+
+/** An attached file. An empty `url` marks an attachment whose data was dropped (stored sessions). */
+export interface FilePart {
+  type: 'file';
+  mediaType: string;
+  /** A `data:` URL. */
+  url: string;
+  filename?: string;
+}
+
+// ============================================================================
+// Attachments
+// ============================================================================
+
+/** A file in the composer, read and checked, waiting to be sent. */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mediaType: string;
+  /** Bytes after `prepare`. */
+  size: number;
+  /** `data:` URL sent to the server. */
+  url: string;
+  /** Thumbnail source for images. */
+  previewUrl?: string;
+}
+
+/**
+ * Attachment limits of the composer. The SDK neither compresses nor scales
+ * images; use `prepare` to do that before the size check.
+ */
+export interface ChatAttachmentOptions {
+  /** Default true when the options object is given. */
+  enabled?: boolean;
+  /** Default PNG, JPEG, WebP, GIF and PDF. */
+  mediaTypes?: ReadonlyArray<string>;
+  /** Files per message. Default 10. */
+  maxFiles?: number;
+  /** Bytes per file after `prepare`. Default 20,000,000. */
+  maxFileBytes?: number;
+  /** Runs on each accepted file before the size check, e.g. to compress an image. */
+  prepare?: (file: File) => Promise<File | Blob> | File | Blob;
+}
+
+/** Hidden `<input type="file">` wiring of the composer: `<input {...attachmentInputProps} />`. */
+export interface ChatAttachmentInputProps {
+  ref: RefObject<HTMLInputElement | null>;
+  type: 'file';
+  multiple: true;
+  accept: string;
+  hidden: true;
+  tabIndex: -1;
+  'aria-hidden': true;
+  onChange: (event: { currentTarget: HTMLInputElement }) => void;
 }
 
 export interface ToolInvocationPart {
@@ -257,6 +313,8 @@ export interface MentionResult {
   args?: Readonly<Record<string, unknown>>;
   /** Entity actions offered next to this result (see `CompletionItem.actions`). */
   actions?: ReadonlyArray<CompletionItemAction>;
+  /** Heading the list shows above this hit's group. */
+  group?: string;
 }
 
 export interface MentionData {
@@ -307,6 +365,8 @@ export interface CompletionItem {
    * to it in the list and reachable by keyboard (ArrowRight/ArrowLeft).
    */
   actions?: ReadonlyArray<CompletionItemAction>;
+  /** Heading the list shows above this hit's group. */
+  group?: string;
 }
 
 export interface CompletionItemAction {
@@ -571,8 +631,14 @@ export interface ChatComponents {
   SuggestionChip?: ComponentType<SuggestionChipProps>;
   MentionChip?: ComponentType<MentionChipProps>;
   ClarificationCard?: ComponentType<ClarificationCardProps>;
+  /** Pending attachments above the editor. */
+  AttachmentTray?: ComponentType<AttachmentTrayProps>;
+  /** Paperclip button that opens the file picker. */
+  AttachmentButton?: ComponentType<AttachmentButtonProps>;
   /** Form for the missing arguments of a `/` command or entity action. */
   CommandArgumentsForm?: ComponentType<CommandArgumentsFormProps>;
+  /** Item of the `@`/`/` suggestion list; it must spread `optionProps`. */
+  MentionDropdownItem?: ComponentType<MentionDropdownItemProps>;
 }
 
 export interface CommandArgumentsFormProps {
@@ -661,6 +727,8 @@ export interface ChatLocale {
   // `@` and `/` suggestions
   completionListLabel: string;
   completionResultsLabel: string;     // supports `{count}`
+  /** Hint when a `@`/`/` search finds nothing. */
+  completionEmptyLabel?: string;
 
   // Arguments of `/` commands and entity actions
   commandArgumentsLabel: string;      // supports `{command}`
@@ -674,6 +742,19 @@ export interface ChatLocale {
   removeMentionLabel: string;         // supports `{label}`
   openEntityLabel: string;            // supports `{label}`
   chatAboutLabel: string;             // a "Chat about this" menu entry (`useChatComposer`)
+  // Attachments
+  attachButtonLabel: string;
+  attachmentsLabel: string;
+  removeAttachmentLabel: string;      // supports `{name}`
+  openAttachmentLabel: string;        // supports `{name}`
+  attachmentAddedLabel: string;       // supports `{name}`
+  attachmentUnavailableLabel: string;
+  attachmentTooLarge: string;         // supports `{name}` and `{size}`
+  attachmentTypeNotAllowed: string;   // supports `{name}`
+  attachmentTooMany: string;          // supports `{count}`
+  attachmentReadFailed: string;       // supports `{name}`
+  attachmentCommandRefused: string;
+  attachmentUnsupported: string;
 }
 
 // ============================================================================
@@ -746,6 +827,11 @@ export interface AiChatProviderConfig {
    */
   onOpenRequest?: () => void;
   toolResults?: ToolResultDisplayConfig;
+  /**
+   * File and image attachments in the composer (paste, drop, picker); off by
+   * default. The server handler needs `attachments.enabled` too.
+   */
+  attachments?: boolean | ChatAttachmentOptions;
   voice?: VoiceInputConfig;
   session?: SessionConfig;
   classNames?: ChatClassNames;
@@ -989,6 +1075,68 @@ export interface ChatInputProps {
 export interface MentionInputProps {
   className?: string;
   onSubmit?: (message: string) => void;
+  /** Text put into the editor once on mount, after `initialMentions`. */
+  initialValue?: string;
+  /** References the editor starts with; key the input to start over (`key={taskId}`). */
+  initialMentions?: MentionData[];
+  /** Class of the box around editor, placeholder and list. */
+  inputClassName?: string;
+  /** Class of the editable element. */
+  editorClassName?: string;
+  /** Suggestion item; wins over `components.MentionDropdownItem` of the provider. */
+  components?: RichMentionInputComponents;
+  /** Extra controls between the editor and the send button, e.g. the app's own microphone. */
+  renderActions?: (composer: ChatComposerInputControls) => ReactNode;
+  /** Replaces the default send and stop buttons; a `type="submit"` button sends. */
+  renderSubmit?: (composer: ChatComposerInputControls) => ReactNode;
+}
+
+export interface UseChatComposerInputOptions {
+  /** Called instead of `send`; the composer clears afterwards. `files` only when something is attached. */
+  onSubmit?: (message: string, mentions: MentionData[], files?: FilePart[]) => void;
+  /** Text put into the editor once on mount, after the input's `initialMentions`. */
+  initialValue?: string;
+}
+
+export interface ChatComposerInputControls {
+  /** Current text including `@`/`/` tokens. */
+  readonly value: string;
+  readonly isLoading: boolean;
+  /** Non-blank text or an attachment, and not loading. */
+  readonly canSend: boolean;
+  /** Files waiting to be sent with the next message. */
+  readonly attachments: ReadonlyArray<ChatAttachment>;
+  /** Last refusal of a file or of a send with files, localized; null when none. */
+  readonly attachmentError: string | null;
+  /** Whether the provider enables attachments. */
+  readonly attachmentsEnabled: boolean;
+  /** Reads, checks and adds files (paste, drop, picker). */
+  addFiles(files: FileList | ReadonlyArray<File>): Promise<void>;
+  removeAttachment(id: string): void;
+  /** Opens the file picker of `attachmentInputProps`. */
+  openFilePicker(): void;
+  /** Sends the editor text with its structured mentions; false when nothing was taken (the text stays). */
+  submit(): boolean;
+  stop(): void;
+  /** Replaces the text; references whose token is not in it are dropped. */
+  setText(text: string): void;
+  /** Appends with one space, e.g. a voice transcript; references stay. */
+  appendText(text: string): void;
+  focus(): void;
+}
+
+export interface ChatComposerInput extends ChatComposerInputControls {
+  /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
+  readonly inputRef: RefObject<RichMentionInputHandle | null>;
+  readonly inputProps: Pick<RichMentionInputProps,
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit'>;
+  /** Spread onto a hidden `<input>` rendered next to the editor; `openFilePicker` clicks it. */
+  readonly attachmentInputProps: ChatAttachmentInputProps;
+  readonly pendingCommand: PendingChatCommand | null;
+  submitPendingCommand(values: Readonly<Record<string, string>>, valueLabels?: Readonly<Record<string, string>>): boolean;
+  cancelPendingCommand(): void;
+  /** The argument form (`components.CommandArgumentsForm` or the default), `null` when nothing is pending. */
+  readonly argumentsForm: ReactNode;
 }
 
 export interface RichMentionInputHandle {
@@ -1034,9 +1182,13 @@ export interface RichMentionInputProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /** Class of the wrapper in mention mode (plain mode has none; there `className` styles the element). */
+  wrapperClassName?: string;
+  /** Shown instead of the list when a search finds nothing; without it an empty result shows nothing. */
+  emptyLabel?: string;
   onChange?: (nextValue: string) => void;
-  /** Receives the text and the structured mentions (chips and commands) still in it. */
-  onSubmit?: (message: string, mentions: MentionData[]) => void;
+  /** Receives the text and the structured mentions (chips and commands) still in it. Return `false` to keep the text. */
+  onSubmit?: (message: string, mentions: MentionData[]) => void | boolean;
   /** Search callback for mention autocomplete (BYOS). Return matching results for the given query and trigger character. */
   onSearch?: (query: string, trigger: string) => Promise<MentionResult[]> | MentionResult[];
   /** Mention data to render as inline chips on mount (e.g. pre-filled context from a detail view). */
@@ -1058,6 +1210,12 @@ export interface RichMentionInputProps {
   commandPills?: boolean;
   /** Accessible name of a pill's remove control; `{label}` is replaced. Default `Remove {label}`. */
   removeMentionLabel?: string;
+  /** Pasted or dropped files. Without it the editor ignores files and drops. */
+  onFiles?: (files: File[]) => void;
+  /** Backspace in an empty editor, e.g. to remove the last attachment. */
+  onBackspaceEmpty?: () => void;
+  /** Enter submits an empty editor, e.g. while attachments wait. */
+  allowEmptySubmit?: boolean;
 }
 
 export interface ChatWindowHeaderRenderProps {
@@ -1189,6 +1347,20 @@ export interface ToolResultBlockProps {
 
 export interface MarkdownProps {
   content: string;
+  className?: string;
+}
+
+export interface AttachmentTrayProps {
+  attachments: ReadonlyArray<ChatAttachment>;
+  onRemove: (id: string) => void;
+  /** Announced in a polite live region. */
+  error?: string | null;
+  className?: string;
+}
+
+export interface AttachmentButtonProps {
+  onClick: () => void;
+  disabled?: boolean;
   className?: string;
 }
 

@@ -11,6 +11,7 @@ export type {
   ChatMessage,
   MessagePart,
   TextPart,
+  FilePart,
   ToolInvocationPart,
   ToolResultPart,
   // Truncation
@@ -32,6 +33,12 @@ export type {
   CommandArgumentsFormProps,
   CompletionSearchRequest,
   UiToolCommandSource,
+  // Attachments
+  ChatAttachment,
+  ChatAttachmentOptions,
+  ChatAttachmentInputProps,
+  AttachmentTrayProps,
+  AttachmentButtonProps,
   // Session
   SessionConfig,
   SessionSummary,
@@ -81,6 +88,9 @@ export type {
   MessageBubbleProps,
   ChatInputProps,
   MentionInputProps,
+  UseChatComposerInputOptions,
+  ChatComposerInput,
+  ChatComposerInputControls,
   RichMentionInputHandle,
   RichMentionInputProps,
   RichMentionInputComponents,
@@ -126,6 +136,7 @@ export type { ChatContextValue } from './provider/chat-context.js';
 export { useAiChat } from './hooks/use-ai-chat.js';
 export { useApprovals } from './hooks/use-approvals.js';
 export { useMentions } from './hooks/use-mentions.js';
+export { useChatComposerInput } from './hooks/use-chat-composer-input.js';
 export { useSuggestions } from './hooks/use-suggestions.js';
 export { useDeepgramTranscription } from './hooks/use-deepgram-transcription.js';
 export { useStt, type UseSttOptions, type UseSttReturn } from './stt/use-stt.js';
@@ -241,6 +252,7 @@ export { RecordingBar } from './components/recording-bar.js';
 export { AiTriggerButton } from './components/ai-trigger-button.js';
 export { SessionSwitcher, type SessionSwitcherProps } from './components/session-switcher.js';
 export { ClarificationCard } from './components/clarification-card.js';
+export { AttachmentTray, AttachmentButton } from './components/attachments.js';
 
 // Tool result renderers
 export {

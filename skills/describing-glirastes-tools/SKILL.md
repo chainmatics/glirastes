@@ -111,9 +111,11 @@ which is not shipped in the package). The ids you patch follow the code:
 - Only string arguments are derived; a disabled, `needs_attention` or
   excluded tool derives nothing.
 
-Their default labels are English words built from identifiers. Give them
-stage-2 texts in `.glirastes/chat-interactions.json`, in the same languages as
-the synonyms:
+A tool's title becomes the default label of its command or entity action,
+and the presentation noun names its entity; without them the label is verb
+plus object from identifiers. Fix a poor label in the title first. What a
+title cannot say goes as stage-2 texts into
+`.glirastes/chat-interactions.json`, in the same languages as the synonyms:
 
 - Patch only ids and types the generated `chatInteractions` lists:
   `commands["<id>"]` with `label`, `description`, `keywords` (up to 20, the
@@ -126,8 +128,8 @@ the synonyms:
   developer wrote it as a complete new entry: the chat route ignores it and
   logs one console warning naming it. Remove stale patches; after every
   refresh, compare the file with the ids the new `chatInteractions` lists.
-- Leave `hidden`, `run`, `args`, `search` and new entries to the developer:
-  they decide what the chat offers. `hidden` is no permission either; the
+- Leave `hidden`, `run`, `args`, `search` and new entries to the developer
+  and `curating-glirastes-chat-interactions`: they decide what the chat offers. `hidden` is no permission either; the
   tool policy and the endpoints decide what a user may run.
 - `glirastes tools refresh` does not read this file; the chat route reads it
   when it creates its `createChatInteractionsHandler` and fails to load on an

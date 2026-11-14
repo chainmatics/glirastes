@@ -236,3 +236,49 @@ describe('compactToolOutput', () => {
     expect(compactToolOutput({ text: 'x'.repeat(1000) })).toEqual({ text: `${'x'.repeat(300)}… [700 more characters]` });
   });
 });
+
+describe('prepareModelMessages with attachments', () => {
+  const image = (size: number) => `data:image/png;base64,${'A'.repeat(size)}`;
+  const withFile = (id: string, text: string, url: string, filename = 'shot.png'): UIMessage =>
+    ({ id, role: 'user', parts: [{ type: 'text', text }, { type: 'file', mediaType: 'image/png', url, filename }] }) as UIMessage;
+  const answer = (id: string, text: string) => assistant(id, [{ type: 'text', text }]);
+  const fileParts = (messages: unknown[]) => (messages as Array<{ content: unknown }>)
+    .flatMap((message) => (Array.isArray(message.content) ? message.content as Part[] : []))
+    .filter((part) => part.type === 'file');
+
+  it('charges a file part a flat estimate, so a large image does not push earlier turns out', async () => {
+    const messages = await prepareModelMessages([
+      user('u1', 'Erste Frage'),
+      answer('a1', 'Erste Antwort'),
+      withFile('u2', 'Was zeigt das Bild?', image(400_000)),
+      answer('a2', 'Ein Diagramm.'),
+      user('u3', 'Und die Achsen?'),
+    ]);
+    expect(JSON.stringify(messages)).toContain('Erste Frage');
+    expect(fileParts(messages)).toHaveLength(1);
+  });
+
+  it('keeps file parts in the current turn and replaces them with a placeholder in text-only turns', async () => {
+    const messages = await prepareModelMessages([
+      withFile('u1', 'Alt', image(100), 'old.png'),
+      answer('a1', 'Gesehen.'),
+      user('u2', 'Weiter'),
+      answer('a2', 'Ok.'),
+      withFile('u3', 'Neu', image(100), 'new.png'),
+    ]);
+    const files = fileParts(messages);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({ filename: 'new.png' });
+    expect(JSON.stringify(messages)).toContain('[attachment: old.png]');
+  });
+
+  it('replaces the files of a previous turn that has to go as text', async () => {
+    const messages = await prepareModelMessages([
+      withFile('u1', 'Bild', image(100), 'prev.png'),
+      answer('a1', 'x'.repeat(20_000)),
+      user('u2', 'Und?'),
+    ], { history: { maxTokens: 1_000 } });
+    expect(fileParts(messages)).toHaveLength(0);
+    expect(JSON.stringify(messages)).toContain('[attachment: prev.png]');
+  });
+});

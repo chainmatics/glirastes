@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-14
+
+Brings the chat interaction curation and chat attachments (prereleases `0.8.0-chat.0` to `0.8.0-chat.3` on the `next` dist-tag) together with the 0.8.0 pills, composer API and entity chips.
+
+### Added
+
+- `useChatComposerInput()` exposes the composer logic (suggestion search, direct `/` commands, the argument form, entity actions, references from `mentionEntity`, pills, attachments) for a custom chat input: `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />`. A composer built on it also receives what `useChatComposer()` sends (`chatAbout`, `insertMention`, `insertCommand`, drafts) without `useChatComposerTarget`. Types `UseChatComposerInputOptions`, `ChatComposerInput`, `ChatComposerInputControls`. In the `0.8.0-chat.*` prereleases this hook was called `useChatComposer(options)`; that name stays the 0.8.0 programmatic composer API.
+- `MentionInput` takes `initialValue`, `initialMentions`, `components.DropdownItem`, `renderActions`, `renderSubmit`, `inputClassName` and `editorClassName`; `components.MentionDropdownItem` sets the suggestion item for the whole chat.
+- Suggestions are grouped under headings when a list mixes types, `/` search matches umlauts typed as `ae`/`oe`/`ue`/`ss`, and an empty result shows a hint (optional `locale.completionEmptyLabel`, with English and German defaults).
+- Skill `curating-glirastes-chat-interactions`: review and curate the derived `@` entities and `/` commands, wire them, move a custom composer onto the SDK logic.
+- A search endpoint (`GET /api/users/search?name=`) derives an `@` entity; item endpoints of its collection become its actions.
+- Chat attachments (images and PDFs), off by default. `createAiChatHandler({ attachments: { enabled: true } })` accepts file parts (`maxFiles` 10, `maxFileBytes` 20 MB decoded, png/jpeg/webp/gif/pdf, `data:` URLs only unless `allowRemoteUrls`), checks type, size and magic bytes of every file in the history (400, 413 `attachment_too_large`, 415) and raises the default `maxBodyBytes` from 1 MB to 50 MB. With `piiShield` it also needs `allowWithPiiShield: true`: file parts pass through byte-identical and never reach the PII detector.
+- `attachments` on `AiChatProvider` / `VercelAiChat` (`true` or `{ mediaTypes, maxFiles, maxFileBytes, prepare }`): paperclip button, paste and drop into the input, a tray with thumbnails and remove buttons, and sent files in the message (an image opens in a new tab). Pills and attachments go out together in one message. The SDK does not compress images; do it in `prepare`.
+- `AttachmentTray`, `AttachmentButton` (also as `components` slots) and the types `FilePart`, `ChatAttachment`, `ChatAttachmentOptions`, `ChatAttachmentInputProps`, `AttachmentTrayProps`, `AttachmentButtonProps`, `ChatAttachmentsConfig`. `useChatComposerInput()` carries `attachments`, `attachmentError`, `attachmentsEnabled`, `addFiles`, `removeAttachment`, `openFilePicker` and `attachmentInputProps`; a custom `onSubmit` gets the files as third argument. `RichMentionInput` takes `onFiles`, `onBackspaceEmpty` and `allowEmptySubmit`, and keeps its text when `onSubmit` returns `false`. New locale keys with English and German texts.
+
+### Changed
+
+- Derived chat labels: commands and entity actions take the tool's reviewed `title` from `.glirastes/tool-semantics.json`, entities the presentation noun; without them the fallback is verb plus object in English and object plus verb in German ("Dashboard aktualisieren"). Inside an entity's menu a leading entity noun is dropped ("Endgültig löschen" instead of "Aufgabe endgültig löschen"). Action labels no longer consist of the last path segment. Overrides in `.glirastes/chat-interactions.json` still win.
+- Destructive entity actions stay last, also after the override merge: derived ones carry `destructive: true`, and an action added in `.glirastes/chat-interactions.json` no longer lands behind "Löschen".
+- Client actions of the chat itself (`ai-chat.*`, `chat.*`, `assistant.*`, `command-palette.*`, `command-menu.*`, `cmdk.*`) are no longer offered as `/` commands; a complete entry in `.glirastes/chat-interactions.json` adds one back.
+- `.glirastes/tool-contracts.json` carries an optional `title` per tool. Run `glirastes tools refresh` after upgrading and commit the result (it also regenerates the chat interactions module with `destructive: true` on generated actions); `glirastes tools check` reports drift until then.
+- A request keeps file data only in the two most recent user messages, older files become `[attachment: name]` text; `createLocalSessionStore` stores no file data. History trimming on the server counts a file part as about 1,000 tokens.
+- The LangGraph transport throws when a message carries files.
+
+### Notes
+
+- A Next.js middleware (`proxy`) on the chat route buffers at most 10 MB of the body (`experimental.middlewareClientMaxBodySize`, Next.js 16 `experimental.proxyClientMaxBodySize`); a NestJS or Express app in front of the handler needs a larger JSON limit (`json({ limit: '50mb' })`). See `docs/chat-attachments.md`.
+
 ## [0.8.0] - 2026-11-14
 
 ### Added
@@ -615,7 +643,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/chainmatics/glirastes/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/chainmatics/glirastes/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/chainmatics/glirastes/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/chainmatics/glirastes/compare/v0.6.0...v0.7.0

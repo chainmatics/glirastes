@@ -51,6 +51,25 @@ function isItem(value: unknown): value is CompletionItem {
     && isActions(item.actions);
 }
 
+function groupOf(value: unknown): { group?: string } {
+  if (typeof value !== 'string') return {};
+  const group = value.trim();
+  return group && group.length <= 100 ? { group } : {};
+}
+
+/** Hits of one group stay together, groups in first-seen order. */
+function grouped(results: MentionResult[]): MentionResult[] {
+  if (!results.some((result) => result.group !== undefined)) return results;
+  const groups = new Map<string, MentionResult[]>();
+  for (const result of results) {
+    const key = result.group ?? '';
+    const list = groups.get(key) ?? [];
+    list.push(result);
+    groups.set(key, list);
+  }
+  return [...groups.values()].flat();
+}
+
 function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
@@ -109,7 +128,7 @@ export function createCompletionSearch(
 
     const seen = new Set<string>();
     const results: MentionResult[] = [];
-    for (const { provider, items } of settled) {
+    collect: for (const { provider, items } of settled) {
       for (const item of items) {
         if (!isItem(item)) continue;
         const identity = `${item.type}:${item.id}`;
@@ -125,10 +144,11 @@ export function createCompletionSearch(
           ...(item.definitionId ? { definitionId: item.definitionId } : {}),
           ...(item.args ? { args: item.args } : {}),
           ...(item.actions?.length ? { actions: item.actions.map(({ id, label }) => ({ id, label: label.trim() })) } : {}),
+          ...groupOf(item.group),
         });
-        if (results.length >= maxResults) return results;
+        if (results.length >= maxResults) break collect;
       }
     }
-    return results;
+    return grouped(results);
   };
 }

@@ -43,16 +43,14 @@ chat route uses the app's own model access.
 5. Prove it in a real browser: keyboard, mobile layout, approvals, STT
    cleanup.
 
-The application may use an ephemeral session for basic interactive chat.
-Server-backed conversation visibility and retention must be explicit when
-durable sessions are enabled.
+The app may use an ephemeral session for basic chat; with durable sessions,
+make server-side visibility and retention explicit.
 
 ## Configuration
 
-`VercelAiChat` requires `endpoint` and creates its transport internally.
-It also accepts `AiChatProviderConfig` fields directly. Only when composing
-`AiChatProvider` yourself do you supply `transport` from the transport hook.
-Reach for configuration before forking a component.
+`VercelAiChat` requires `endpoint`, creates its transport internally and takes
+the `AiChatProviderConfig` fields; an own `AiChatProvider` needs `transport`
+from the transport hook. Reach for configuration before forking a component.
 
 | Field | What it decides |
 |---|---|
@@ -66,6 +64,7 @@ Reach for configuration before forking a component.
 | `mentions` | mention sources and search |
 | `suggestions` | contextual suggestion chips |
 | `voice` | speech-to-text |
+| `attachments` | image and PDF attachments (section below) |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
 | `onBeforeSend`, `onToolResult` | hooks around a turn |
 | `approvalDescription` | human-readable text for an approval request |
@@ -90,21 +89,19 @@ const t = useTranslations('chat');
 <VercelAiChat endpoint="/api/chat" theme={{ preset: 'minimal-white', colors: { primary: '#10b981' } }} />
 ```
 
-`getThemeVars`, `CHAT_THEME_PRESETS`, and `DEFAULT_THEME_PRESET` are exported for
-products that need to read the resolved variables. Prefer `theme` and
-`classNames` over overriding the shipped CSS: styles are variable-driven, and
-inline overrides are what break under a strict CSP.
+`getThemeVars`, `CHAT_THEME_PRESETS` and `DEFAULT_THEME_PRESET` expose the
+resolved variables. Prefer `theme` and `classNames` over overriding the CSS:
+styles are variable-driven, inline overrides break under a strict CSP.
 
 ## Slots
 
 `components` replaces one rendered piece while the rest of the chat keeps
 working: `MessageBubble`, `ChatInput`, `ToolResultBlock`, `Markdown`,
 `InputExtra`, `ApprovalCard`, `BulkApprovalCard`, `PipelineTimeline`,
-`SuggestionChip`, `MentionChip`.
+`SuggestionChip`, `MentionChip`, `AttachmentTray`, `AttachmentButton`.
 
-Replace the narrowest slot that solves the problem. Swapping `MessageBubble`
-to restyle one tool result costs the streaming, approval, and mention behavior
-that bubble already carries.
+Replace the narrowest slot: swapping `MessageBubble` to restyle one tool result
+costs the streaming, approval and mention behavior it carries.
 
 ## UI actions
 
@@ -145,9 +142,12 @@ the command or action).
 | A read endpoint with `search`, `q`, `query` or `term` that lists objects with an `id` and a `title`, `name`, `displayName`, `label`, `subject` or `email` (`GET /api/tasks?search=`) | `@` entity `task` |
 | An endpoint with one path parameter below that collection, or a page with one parameter of that entity | Context action of the entity ("Complete", id `task.tasks.complete`; "Open") |
 
-Labels are English words built from identifiers. `docs/chat-interactions.md`
-in the Glirastes repository (not shipped in the package) has the same table
-with the override format.
+A search below `/search` (`GET /api/users/search?name=`) is an entity too.
+Labels come from each tool's reviewed `title`, entities from the presentation
+noun; without them, verb plus object from identifiers. Chat-internal client
+actions are left out, destructive ones come last. Review the list with
+`curating-glirastes-chat-interactions`; `docs/chat-interactions.md` (Glirastes
+repository, not shipped in the package) has the table and override format.
 
 - Serve them with a GET next to the chat POST:
   `export const GET = createChatInteractionsHandler({ interactions: generated.chatInteractions, overrides, managedRuntime })`
@@ -177,21 +177,24 @@ with the override format.
 - Better labels, synonyms (`keywords`) and icons go into
   `.glirastes/chat-interactions.json` (`describing-glirastes-tools`).
   `hidden` there only shapes the list; the server still authorizes.
-- `VercelAiChat` has no slot for the suggestion item. Only a hand-composed
-  `RichMentionInput` takes `components={{ DropdownItem }}`; that item must
-  spread its `optionProps`, or the listbox loses its active option for screen
-  readers.
+- Own suggestion item: `components.MentionDropdownItem` on the chat, or
+  `components={{ DropdownItem }}` on `MentionInput`; it must spread its
+  `optionProps`, or the listbox loses its active option for screen readers.
+  `renderActions`, `renderSubmit`, other `MentionInput` props and
+  `useChatComposerInput` (custom composers): the curating skill.
+  Never an own `onSearch` next to `chatInteractions`.
 - Keyboard model of the `/` and `@` list: the editor is a `textbox` that
   controls the suggestion `listbox`; ArrowUp and ArrowDown move between
   results, ArrowRight and ArrowLeft between an entity and its actions, Enter
-  or Tab picks, Escape closes. The argument form starts at the first empty
+  or Tab picks, Escape closes. Headings group a mixed list, and a search
+  without hits says so. The argument form starts at the first empty
   required field, entity fields are ARIA 1.2 comboboxes, and Escape closes an
   open list before it cancels the form.
 
 ## Pills, "Chat about this" and chips in answers
 
 `chatInteractions` makes the default `ChatInput` show `/` and `@` pills (`theme.colors.pill*`, `--cm-pill-*`, `glirastes/react/pills.css` when unstyled); keep it.
-`useChatComposer().chatAbout({ type, id, label })` opens the chat with the pills in it (own composers: `useChatComposerTarget`).
+`useChatComposer().chatAbout({ type, id, label })` opens the chat with the pills in it (composers on `useChatComposerInput` get them; other own composers: `useChatComposerTarget`).
 `entityLinks={{ matchers, open }}` makes references in answers clickable chips; see `docs/chat-interactions.md`.
 
 ## Commands, mentions and clarification
@@ -230,22 +233,29 @@ microphone. The host needs `react`, `react-dom`, `@ai-sdk/react` and `ai`.
 ## Mentions and suggestions
 
 `mentions` supplies the sources; `MentionInput` and `RichMentionInput` render
-them, `MentionChip` and `MentionChipList` display the result. Structured mention
-ids must survive submission — assert that, because a mention degraded to plain
-text still looks right on screen and no longer resolves.
+them, `MentionChip` and `MentionChipList` show them. Assert that structured
+mention ids survive submission: a mention degraded to plain text looks right
+and no longer resolves. `suggestions` drives `SuggestionBar` and
+`SuggestionChip`; a failing source may not take the composer down.
 
-`suggestions` drives `SuggestionBar` and `SuggestionChip`. Suggestions are
-contextual, so they must handle their source failing: a search error may not
-take the composer down with it.
+## Attachments
+
+Off by default; enable both sides: `attachments` on `VercelAiChat` (`true` or
+`{ mediaTypes, maxFiles, maxFileBytes, prepare }`) and `attachments: {
+enabled: true }` on `createAiChatHandler`. The SDK never compresses: downscale
+in `prepare`. With `piiShield` the handler also needs `allowWithPiiShield:
+true` (files bypass the shield); decide that with the developer. A custom
+composer adds `AttachmentTray`, `<input {...composer.attachmentInputProps} />`
+and `AttachmentButton` (`onClick={composer.openFilePicker}`). Raise body limits
+in front of the route: Next.js middleware (10 MB), Express/NestJS JSON parser.
 
 ## Sessions
 
-`session.save`, `session.load`, and `session.clear` make conversations durable.
-`load` accepts full SDK `ChatMessage`s or flat `WireChatMessage`s and coerces the
-wire shape. `SessionSwitcher` renders list, create, switch, and rename.
+`session.save`, `.load` and `.clear` make conversations durable; `load` takes
+SDK `ChatMessage`s or flat `WireChatMessage`s. `SessionSwitcher` renders list,
+create, switch and rename.
 
-Corrupted stored sessions fail closed rather than rendering garbage, and clearing
-history requires an explicit confirmation. Both are tested behavior; keep them.
+Corrupted stored sessions fail closed; clearing history needs a confirmation.
 
 For several chats per user without a backend, pass
 `session={createLocalSessionStore({ storageKey: `myapp:${userId}` })}`
@@ -259,78 +269,29 @@ and `load` from its own server instead.
 
 ## Floating window
 
-`FloatingChatUI`, `ChatWindow`, and `AiTriggerButton` provide the portal-mounted
+`FloatingChatUI`, `ChatWindow` and `AiTriggerButton` provide the portal-mounted
 widget; `useDragResizePanel` and `useDraggablePosition` carry drag, resize,
-viewport constraint, and snapback. Panel dimensions persist and stay bounded.
-
-Mount the window through the shipped portal rather than nesting it in product
-layout: it is what keeps the panel clear of transformed or clipping ancestors.
+viewport constraint and snapback (bounded, persisted). Mount it through the
+shipped portal, which keeps it clear of transformed or clipping ancestors.
 
 ## Placing the assistant
 
 The default for an app with its own layout: an "Ask AI" button where the app
-wants it (usually the top bar), and the chat docked on the right of the page
-or detached as a window the user moves and resizes. `AssistantWorkspace` is
-that whole integration in one component; `VercelAiChat` with children supplies
-the chat and drops its own floating widget:
-
-```tsx
-'use client';
-import { VercelAiChat } from 'glirastes/react/vercel';
-import { AiChatPanel, AssistantToggle, AssistantWorkspace } from 'glirastes/react';
-import 'glirastes/react/styles.css';
-
-export function AppFrame({ children }: { children: React.ReactNode }) {
-  return (
-    <VercelAiChat endpoint="/api/chat">
-      <AssistantWorkspace chat={<AiChatPanel />} storageKey={`assistant:${userId}`}>
-        <header>… <AssistantToggle /></header>
-        {children}
-      </AssistantWorkspace>
-    </VercelAiChat>
-  );
-}
-```
-
-The workspace is a row that fills its parent: the page on the left, the
-docked assistant on the right. The parent needs a height (for example
-`html, body { height: 100dvh }` or a full-height app frame); otherwise the
-docked assistant is only as tall as the page content. It folds to a rail, takes the whole row on
-narrow screens, and publishes its width as `--assistant-right-inset` for
-fixed elements of the page. Detaching or docking is remembered, so a closed
-window reopens as a window. `defaultMode="floating"` opens detached first.
-
-- Toggle anywhere: `AssistantToggle` works at any depth inside the workspace;
-  `useAssistantLayout()` gives `openChat`, `closeChat`, `setMode` and the
-  state for the app's own controls.
-- Shortcuts on every OS: mod+I toggles, alt+shift+D docks or detaches,
-  alt+shift+C collapses, alt+shift+N starts a new chat (when the chat keeps several, or `onNewChat`),
-  alt+shift+I focuses the input. Pass `shortcuts={{ newChat: 'alt+shift+k',
-  toggleCollapse: false }}` when the app already uses one; `formatShortcut`
-  shows a combination as ⌘I or Ctrl+I. `assistantShortcutList({ shortcuts,
-  language })` gives the active ones with labels (German ships) for the
-  app's shortcut overview.
-- Look: `icons`, `labels` (`DE_ASSISTANT_SHELL_LABELS` ships German),
-  `classNames`, `renderButton` for the app's own button component, the
-  `headerStart` / `headerTitle` / `headerActions` slots, `window` for the
-  size limits of the detached window, and `showBubble={false}` to drop the
-  round opener. With the provider's `unstyled` only the handle geometry stays.
-- Own layout: `AssistantLayoutProvider` + `AssistantShell` are the parts the
-  workspace is made of. The shell is then the last child of the row that
-  holds the page, marked `data-assistant-main`. An existing provider higher
-  up is reused by the workspace.
-- Scope `storageKey` per user when several people share a browser.
+wants it (usually the top bar), and the chat docked on the right or detached
+as a window. `AssistantWorkspace` inside `VercelAiChat` is that whole
+integration; `AssistantToggle` and `useAssistantLayout()` control it from any
+depth, and the parent needs a height. Example, shortcuts, look options and the
+own-layout parts: [references/placing-the-assistant.md](references/placing-the-assistant.md).
 
 ## Approvals
 
 Self-confirmation stays in the initiating chat. Organizational approval creates
-a durable Platform request and remains fail-closed while unavailable. Never
-derive approver authority from the browser payload. Test denial, expiry,
-replay, cross-app, and cross-tenant cases.
+a durable Platform request and stays fail-closed while unavailable. Test
+denial, expiry, replay, cross-app and cross-tenant cases.
 
-`ApprovalCard` handles one request and `BulkApprovalCard` groups same-tool
-requests while keeping each approval independent — bulk rendering must not become
-bulk authorization. An approval failure is retryable without losing the request.
+`ApprovalCard` handles one request; `BulkApprovalCard` groups same-tool requests
+but keeps each approval independent (no bulk authorization). A failed approval
+is retryable without losing the request.
 
 ## Speech-to-text gate
 

@@ -167,6 +167,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       placeholder,
       disabled = false,
       className,
+      wrapperClassName,
       onChange,
       onSubmit,
       onSearch,
@@ -178,9 +179,14 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       resultsLabel = '{count} suggestions',
       commandPills = true,
       removeMentionLabel = 'Remove {label}',
+      emptyLabel,
+      onFiles,
+      onBackspaceEmpty,
+      allowEmptySubmit = false,
     },
     ref,
   ) {
+    const [dragOver, setDragOver] = useState(false);
     const hasMentionSupport = typeof onSearch === 'function';
     const isControlled = value !== undefined;
     const [internalValue, setInternalValue] = useState(defaultValue);
@@ -191,6 +197,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const [mentions, setMentions] = useState<MentionData[]>([]);
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [searchResults, setSearchResults] = useState<MentionResult[]>([]);
+    const [noMatches, setNoMatches] = useState(false);
     const [selectedIndex, setSelectedIndex] = useState(0);
     // -1: the result itself; 0..n: one of its entity actions.
     const [selectedAction, setSelectedAction] = useState(-1);
@@ -365,6 +372,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       searchVersionRef.current++;
       setDropdownOpen(false);
       setSearchResults([]);
+      setNoMatches(false);
       setSelectedIndex(0);
       setSelectedAction(-1);
     }, []);
@@ -381,10 +389,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           setSelectedIndex(0);
           setSelectedAction(-1);
           setDropdownOpen(results.length > 0);
+          setNoMatches(results.length === 0);
         } catch {
           if (searchVersionRef.current !== version) return;
           setSearchResults([]);
           setDropdownOpen(false);
+          setNoMatches(false);
         } finally {
           if (searchVersionRef.current === version) {
             setIsSearching(false);
@@ -645,9 +655,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         ? getFullValue()
         : normalizeInputValue((editableRef.current?.innerText ?? '').trim());
 
-      if (!text) return;
+      if (!text && !allowEmptySubmit) return;
 
-      onSubmit?.(text, collectMentions(text));
+      if (onSubmit?.(text, text ? collectMentions(text) : []) === false) return;
       setValue('');
       if (hasMentionSupport) {
         setMentions([]);
@@ -655,7 +665,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       if (editableRef.current) {
         editableRef.current.innerHTML = '';
       }
-    }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions]);
+    }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions, allowEmptySubmit]);
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
@@ -705,11 +715,28 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           }
         }
 
+        if (event.key === 'Escape' && noMatches) {
+          event.preventDefault();
+          closeDropdown();
+          return;
+        }
+
         // Submit on Enter (both modes)
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
           submit();
           return;
+        }
+
+        if (event.key === 'Backspace' && onBackspaceEmpty) {
+          const empty = hasMentionSupport
+            ? getFullValue() === ''
+            : (editableRef.current?.textContent ?? '') === '';
+          if (empty) {
+            event.preventDefault();
+            onBackspaceEmpty();
+            return;
+          }
         }
 
         // Backspace and Delete remove a whole pill next to the caret (mention mode).
@@ -747,16 +774,22 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         runAction,
         insertMention,
         closeDropdown,
+        noMatches,
         submit,
         onChange,
         getFullValue,
+        onBackspaceEmpty,
       ],
     );
 
-    /** Strip formatting on paste — insert plain text only. */
+    /** Strip formatting on paste — insert plain text only; files go to `onFiles`. */
     const handlePaste = useCallback(
       (e: React.ClipboardEvent<HTMLDivElement>) => {
+        const files = onFiles ? Array.from(e.clipboardData.files ?? []) : [];
+        // Plain mode keeps the browser's own text paste unless files must stay out of the editor.
+        if (!hasMentionSupport && files.length === 0) return;
         e.preventDefault();
+        if (files.length > 0) onFiles!(files);
         const plainText = e.clipboardData.getData('text/plain');
         if (!plainText) return;
 
@@ -772,10 +805,29 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         selection.removeAllRanges();
         selection.addRange(range);
 
-        onChange?.(getFullValue());
+        onChange?.(hasMentionSupport ? getFullValue() : normalizeInputValue(editableRef.current?.innerText ?? ''));
       },
-      [onChange, getFullValue],
+      [onChange, getFullValue, onFiles, hasMentionSupport],
     );
+
+    const fileDrag = (event: React.DragEvent) =>
+      Boolean(onFiles) && Array.from(event.dataTransfer?.types ?? []).includes('Files');
+    const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+      if (!fileDrag(event) || disabled) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+      setDragOver(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [onFiles, disabled]);
+    const handleDragLeave = useCallback(() => setDragOver(false), []);
+    const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+      setDragOver(false);
+      if (!fileDrag(event) || disabled) return;
+      event.preventDefault();
+      const files = Array.from(event.dataTransfer.files ?? []);
+      if (files.length > 0) onFiles!(files);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [onFiles, disabled]);
 
     // -----------------------------------------------------------------------
     // Side effects (mention mode)
@@ -979,10 +1031,15 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           data-component="rich-mention-input"
           data-placeholder={dataPlaceholder}
           data-state={disabled ? 'disabled' : 'idle'}
+          data-drag-over={dragOver ? 'true' : undefined}
           aria-disabled={disabled}
           aria-label={placeholder ?? 'Message input'}
           onInput={handleInput}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
           suppressContentEditableWarning
         />
       );
@@ -995,6 +1052,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       action >= 0 ? `${listboxId}-option-${index}-action-${action}` : `${listboxId}-option-${index}`
     );
     const listOpen = dropdownOpen && searchResults.length > 0;
+    const showEmpty = !listOpen && noMatches && Boolean(emptyLabel);
+    const showHeadings = new Set(searchResults.map((result) => result.group ?? '')).size > 1;
     const optionProps = (index: number, action = -1): MentionDropdownOptionProps => ({
       id: optionId(index, action),
       role: 'option',
@@ -1002,9 +1061,47 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       tabIndex: -1,
     });
 
+    const renderRow = (result: MentionResult, index: number, key: string) => {
+      const item = (
+        <DropdownItem
+          key={key}
+          result={result}
+          isSelected={index === selectedIndex && selectedAction === -1}
+          onClick={() => insertMention(result)}
+          optionProps={optionProps(index)}
+        />
+      );
+      if (!onEntityAction || !result.actions?.length) return item;
+      return (
+        <div key={key} role="group" aria-label={result.label} data-element="result-row">
+          {item}
+          <span data-element="entity-actions">
+            {result.actions.map((action, actionIndex) => (
+              <button
+                key={action.id}
+                type="button"
+                {...optionProps(index, actionIndex)}
+                aria-label={`${action.label}: ${result.label}`}
+                data-component="mention-action"
+                data-selected={index === selectedIndex && actionIndex === selectedAction ? 'true' : 'false'}
+                onClick={() => runAction(result, action.id)}
+              >
+                {action.label}
+              </button>
+            ))}
+          </span>
+        </div>
+      );
+    };
+
     return (
       <div
+        className={wrapperClassName}
         data-component="rich-mention-input"
+        data-drag-over={dragOver ? 'true' : undefined}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         data-state={
           disabled
             ? 'disabled'
@@ -1041,8 +1138,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         )}
 
         <div data-element="completion-status" role="status" aria-live="polite" style={VISUALLY_HIDDEN}>
-          {listOpen ? resultsLabel.replace('{count}', String(searchResults.length)) : ''}
+          {listOpen ? resultsLabel.replace('{count}', String(searchResults.length)) : showEmpty ? emptyLabel : ''}
         </div>
+
+        {showEmpty && (
+          <div data-component="mention-dropdown" data-state="empty">{emptyLabel}</div>
+        )}
 
         {listOpen && (
           <div
@@ -1057,40 +1158,16 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           >
             {searchResults.map((result, index) => {
               const key = result.key ?? `${result.type}:${result.id}`;
-              const item = (
-                <DropdownItem
-                  key={key}
-                  result={result}
-                  isSelected={index === selectedIndex && selectedAction === -1}
-                  onClick={() => insertMention(result)}
-                  optionProps={optionProps(index)}
-                />
-              );
-              if (!onEntityAction || !result.actions?.length) return item;
-              return (
-                <div key={key} role="group" aria-label={result.label} data-element="result-row">
-                  {item}
-                  <span data-element="entity-actions">
-                    {result.actions.map((action, actionIndex) => (
-                      <button
-                        key={action.id}
-                        type="button"
-                        {...optionProps(index, actionIndex)}
-                        aria-label={`${action.label}: ${result.label}`}
-                        data-component="mention-action"
-                        data-selected={index === selectedIndex && actionIndex === selectedAction ? 'true' : 'false'}
-                        onClick={() => runAction(result, action.id)}
-                      >
-                        {action.label}
-                      </button>
-                    ))}
-                  </span>
-                </div>
-              );
+              const heading = showHeadings && result.group && result.group !== searchResults[index - 1]?.group
+                ? <div key={`heading:${result.group}`} role="presentation" data-element="group-heading">{result.group}</div>
+                : null;
+              const row = renderRow(result, index, key);
+              return heading ? [heading, row] : row;
             })}
           </div>
         )}
       </div>
     );
+
   },
 );

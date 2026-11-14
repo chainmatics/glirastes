@@ -4,7 +4,7 @@ import { createJsonSchemaLike } from '../../runtime/json-schema.js';
 import { AGENT_MODEL_PATTERN, agenticContentProblem, lockDigest } from './agentic.js';
 import { compareCodeUnits } from './canonical.js';
 import { toolFinding } from './findings.js';
-import type { JsonSchemaLike, ToolFinding } from './types.js';
+import type { JsonSchemaLike, ToolFinding, ToolTitle } from './types.js';
 
 /** Languages of synonyms, titles and example sentences (spec 4.7 "DE/EN"). */
 export const SEMANTICS_LANGUAGES = ['de', 'en'] as const;
@@ -239,4 +239,14 @@ export function semanticsSearch(entry: ToolSemanticsEntry | undefined): { synony
       .slice(0, SEMANTICS_LIMITS.synonyms),
     examples: collect(SEMANTICS_LANGUAGES.flatMap((language) => entry?.examples?.[language] ?? [])),
   };
+}
+
+/** The reviewed title per language; a language whose text the chat list cannot show is left out. */
+export function semanticsTitle(entry: ToolSemanticsEntry | undefined): ToolTitle | undefined {
+  const title: ToolTitle = {};
+  for (const language of SEMANTICS_LANGUAGES) {
+    const text = entry?.title?.[language]?.trim();
+    if (text && text.length <= SEMANTICS_LIMITS.title && !/[\u0000-\u001F]/.test(text)) title[language] = text;
+  }
+  return Object.keys(title).length > 0 ? title : undefined;
 }

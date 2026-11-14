@@ -116,6 +116,11 @@ export interface McpToolName {
   name: string;
 }
 
+export interface ToolTitle {
+  de?: string;
+  en?: string;
+}
+
 export interface ToolContractsEntry {
   toolId: string;
   stableKey: string;
@@ -123,6 +128,7 @@ export interface ToolContractsEntry {
   contract: ToolContract | null;
   defaults: ToolPolicyDefaults;
   search?: ToolSearchFacts;
+  title?: ToolTitle;
   mcp?: McpToolName[];
 }
 

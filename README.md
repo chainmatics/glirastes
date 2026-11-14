@@ -244,8 +244,11 @@ two jobs:
 - `useAiClientAction(id, handler, contract)` lets the chat drive UI state;
   `refresh` turns each registration into a tool.
 - Generic `@` mentions and `/` commands derived from your tools
-  ([docs/chat-interactions.md](docs/chat-interactions.md)).
+  ([docs/chat-interactions.md](docs/chat-interactions.md)); `useChatComposerInput`
+  keeps them in a custom input.
 - A per-message work log of tool calls and an optional plan checklist.
+- Opt-in image and PDF attachments (paperclip, paste, drop;
+  [docs/chat-attachments.md](docs/chat-attachments.md)).
 - `unstyled` to bring your own CSS; `deChatLocale` for German texts.
 - Push-to-talk speech input through one STT controller (`voice` config,
   `glirastes/stt` adapters, `createRecordingTranscriptionHandler` for a
@@ -342,11 +345,12 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 
 ## Agent skills
 
-The package ships seven skills in [`skills/`](skills/README.md) for your
+The package ships eight skills in [`skills/`](skills/README.md) for your
 existing coding agent (Codex, Claude Code, Gemini): `setting-up-glirastes`,
 `integrating-glirastes-nextjs`, `integrating-glirastes-web`,
 `maintaining-glirastes-tools`, `describing-glirastes-tools`,
-`building-glirastes-chat-ui` and `migrating-to-glirastes`. `glirastes init`
+`building-glirastes-chat-ui`, `curating-glirastes-chat-interactions` and
+`migrating-to-glirastes`. `glirastes init`
 installs them; `glirastes install --host codex --with-setup-skills` installs
 them without starting setup.
 
@@ -364,6 +368,7 @@ Node runtime/sidecar) described there; this does not imply complete stack suppor
 - [Tool policy](docs/tool-policy.md)
 - [Chat route security](docs/chat-route-security.md)
 - [Chat interactions (`@` and `/`)](docs/chat-interactions.md)
+- [Chat attachments](docs/chat-attachments.md)
 - [Managed runtime sync](docs/managed-runtime-sync.md)
 - [Runtime persistence](docs/runtime-persistence.md)
 - [0.5.0 acceptance](docs/acceptance/0.5.0-acceptance.md)
