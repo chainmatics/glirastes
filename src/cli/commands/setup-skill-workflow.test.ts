@@ -112,6 +112,26 @@ describe('bundled local-first setup workflow', () => {
     expect(source).not.toContain('| `primary`, `primarySoft` |');
   });
 
+  it('teaches curating chat interactions end to end', async () => {
+    const source = await readFile(join(findPackageSkillsDir(), 'curating-glirastes-chat-interactions/SKILL.md'), 'utf8');
+    const flat = source.replace(/\s+/g, ' ');
+    for (const text of [
+      'glirastes tools refresh', 'chatInteractions', '.glirastes/chat-interactions.json', 'defineChatEntity', 'defineChatCommand',
+      'createChatInteractionsHandler', '`managedRuntime` once as a `const`', 'useChatComposer', 'renderActions', 'stripSegments',
+      'onSearch', '`hidden` is no permission', 'without a model call', 'ArrowRight', 'role',
+    ]) {
+      expect(flat, text).toContain(text);
+    }
+    // Blocks sit inside a numbered step, so their indentation is removed before parsing.
+    const examples = [...source.matchAll(/^( *)```json\n([\s\S]*?)^\1```/gm)]
+      .map((match) => match[2]!.split('\n').map((line) => line.slice(match[1]!.length)).join('\n'))
+      .filter((block) => block.startsWith('{\n  "schemaVersion": 1'));
+    expect(examples.length).toBeGreaterThan(0);
+    for (const example of examples) {
+      expect(() => parseChatInteractionOverrides(JSON.parse(example))).not.toThrow();
+    }
+  });
+
   it('teaches chat entities and commands in the chat UI and the describing skill', async () => {
     const chatUi = await readFile(join(findPackageSkillsDir(), 'building-glirastes-chat-ui/SKILL.md'), 'utf8');
     for (const text of ['docs/chat-interactions.md', 'createChatInteractionsHandler', 'useChatInteractionsData', 'directCommands: false']) {

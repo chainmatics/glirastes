@@ -19,6 +19,7 @@ const foundationSkills = [
   'maintaining-glirastes-tools',
   'describing-glirastes-tools',
   'building-glirastes-chat-ui',
+  'curating-glirastes-chat-interactions',
 ] as const;
 const setupSkill = 'setting-up-glirastes';
 
@@ -236,6 +237,27 @@ describe('foundation agent skills', () => {
     // A skill that names an export nobody ships sends the reader looking for
     // something that was renamed or never existed.
     expect(missing).toEqual([]);
+  });
+
+  it('names only React and server surfaces that exist in the curating skill', async () => {
+    const skill = await skillSource('curating-glirastes-chat-interactions');
+    const named = [...new Set(
+      [...skill.matchAll(/`([A-Za-z][A-Za-z0-9]*)`/g)]
+        .map((match) => match[1]!)
+        .filter((name) => /^(use[A-Z]|[A-Z])/.test(name)),
+    )];
+    expect(named.length).toBeGreaterThan(2);
+    async function readTree(dir: string): Promise<string> {
+      const entries = await readdir(dir, { withFileTypes: true });
+      const parts = await Promise.all(entries.map(async (entry) => {
+        const absolute = join(dir, entry.name);
+        if (entry.isDirectory()) return readTree(absolute);
+        return /\.tsx?$/.test(entry.name) ? readFile(absolute, 'utf8') : '';
+      }));
+      return parts.join('\n');
+    }
+    const surface = `${await readTree(join(packageRoot, 'src/react'))}\n${await readTree(join(packageRoot, 'src/server'))}`;
+    expect(named.filter((name) => !new RegExp(`\\b${name}\\b`).test(surface))).toEqual([]);
   });
 
   it('records what it installed so a refresh can tell it from authored work', async () => {
