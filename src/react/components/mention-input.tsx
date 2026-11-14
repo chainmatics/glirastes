@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useMemo } from 'react';
 import { MentionChipList } from './mention-chip.js';
 import { RichMentionInput } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
+import { AttachmentButton as DefaultAttachmentButton, AttachmentTray as DefaultAttachmentTray } from './attachments.js';
 import { useChatComposer } from '../hooks/use-chat-composer.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { inferMentionPrefix, normalizeMentionSlug } from '../utils/mention-markup.js';
@@ -18,8 +19,9 @@ import type {
  * Without them the legacy `mentions` flow is unchanged.
  */
 export function MentionInput(props: MentionInputProps) {
-  const { completionSearch } = useChatContext();
-  return completionSearch
+  const { completionSearch, hasMentions, attachments } = useChatContext();
+  // The legacy `mentions` flow has no attachment support; attachments alone use the composer.
+  return completionSearch || (attachments && !hasMentions)
     ? <ProviderMentionInput {...props} />
     : <LegacyMentionInput {...props} />;
 }
@@ -43,10 +45,15 @@ function ProviderMentionInput({
   const { isLoading } = composer;
   const InputExtra = components.InputExtra;
   const DropdownItem = inputComponents?.DropdownItem ?? components.MentionDropdownItem;
+  const Tray = components.AttachmentTray ?? DefaultAttachmentTray;
+  const AttachButton = components.AttachmentButton ?? DefaultAttachmentButton;
 
   return (
     <div data-component="mention-input" data-mode="providers">
       {composer.argumentsForm}
+      {composer.attachmentsEnabled && (
+        <Tray attachments={composer.attachments} onRemove={composer.removeAttachment} error={composer.attachmentError} />
+      )}
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -54,6 +61,12 @@ function ProviderMentionInput({
         }}
         className={className ?? classNames.input}
       >
+        {composer.attachmentsEnabled && (
+          <>
+            <input {...composer.attachmentInputProps} />
+            <AttachButton onClick={composer.openFilePicker} disabled={isLoading} />
+          </>
+        )}
         <RichMentionInput
           ref={composer.inputRef}
           {...composer.inputProps}
@@ -84,7 +97,7 @@ function ProviderMentionInput({
             {locale.stopButton}
           </button>
         ) : (
-          <button type="submit" disabled={!composer.value.trim()} data-action="send">
+          <button type="submit" disabled={!composer.canSend} data-action="send">
             {locale.sendButton}
           </button>
         )}

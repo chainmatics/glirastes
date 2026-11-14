@@ -11,6 +11,7 @@ export type {
   ChatMessage,
   MessagePart,
   TextPart,
+  FilePart,
   ToolInvocationPart,
   ToolResultPart,
   // Truncation
@@ -32,6 +33,12 @@ export type {
   CommandArgumentsFormProps,
   CompletionSearchRequest,
   UiToolCommandSource,
+  // Attachments
+  ChatAttachment,
+  ChatAttachmentOptions,
+  ChatAttachmentInputProps,
+  AttachmentTrayProps,
+  AttachmentButtonProps,
   // Session
   SessionConfig,
   SessionSummary,
@@ -245,6 +252,7 @@ export { RecordingBar } from './components/recording-bar.js';
 export { AiTriggerButton } from './components/ai-trigger-button.js';
 export { SessionSwitcher, type SessionSwitcherProps } from './components/session-switcher.js';
 export { ClarificationCard } from './components/clarification-card.js';
+export { AttachmentTray, AttachmentButton } from './components/attachments.js';
 
 // Tool result renderers
 export {
