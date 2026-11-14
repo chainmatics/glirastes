@@ -9,6 +9,7 @@ import { defineChatCommand, defineChatEntity } from '../../interactions/definiti
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import type { ChatTransport, MentionResult, RichMentionInputHandle } from '../../types.js';
 import { ChatInput } from '../chat-input.js';
+import { MentionChip } from '../mention-chip.js';
 import { RichMentionInput } from '../rich-mention-input.js';
 
 const task = defineChatEntity({
@@ -103,6 +104,16 @@ describe('pills in RichMentionInput', () => {
     expect(entity.dataset.mentionKind).toBe('entity');
     expect(entity.dataset.mentionPrefix).toBe('@');
     expect(entity.querySelector('[data-action="remove-mention"]')?.getAttribute('aria-label')).toBe('Remove Release prüfen');
+  });
+
+  it('shows a task pill without explicit prefix with @, a command with /', () => {
+    const { ref, editor } = renderEditor();
+    act(() => { ref.current!.insertMention({ id: '7', type: 'task', label: 'Release prüfen', displayName: 'Release prüfen' }); });
+    expect(editor.querySelector('[data-mention-kind="entity"] [data-element="prefix"]')?.textContent).toBe('@');
+    render(<MentionChip mention={{ id: '7', type: 'task', displayName: 'Release prüfen' }} />);
+    render(<MentionChip mention={{ id: 'open.overview', type: 'command', displayName: 'Open Overview' }} />);
+    const prefixes = [...document.querySelectorAll('body > div > [data-component="mention-chip"] [data-element="prefix"]')].map((el) => el.textContent);
+    expect(prefixes).toEqual(['@', '/']);
   });
 
   it('opens the list for a trigger after a pill, where the browser typed a non-breaking space', async () => {
