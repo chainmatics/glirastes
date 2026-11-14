@@ -55,7 +55,7 @@ function post(messages: unknown[]) {
 
 function modelFileParts(model: MockLanguageModelV3): Array<Record<string, unknown>> {
   const prompt = model.doStreamCalls[0]?.prompt ?? [];
-  return prompt.flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+  return prompt.flatMap((message) => (Array.isArray(message.content) ? (message.content as ReadonlyArray<unknown>) : []))
     .filter((part) => (part as { type?: string }).type === 'file') as Array<Record<string, unknown>>;
 }
 
@@ -231,8 +231,8 @@ describe('attachments stay out of the text paths', () => {
     };
     const { handler } = setup({
       attachments: enabled,
-      onAudit: (event) => { audit.push(event); },
-      telemetry: { emit: (event) => { telemetry.push(event); }, flush: async () => undefined } as never,
+      onAudit: (event: unknown) => { audit.push(event); },
+      telemetry: { emit: (event: unknown) => { telemetry.push(event); }, flush: async () => undefined } as never,
       metrics: sink,
     });
     const response = await handler(post([userMessage([{ type: 'text', text: 'see' }, filePart(pngDataUrl()), filePart(PDF_DATA_URL, 'application/pdf', 'a.pdf')])]));
