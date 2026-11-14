@@ -508,10 +508,11 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
       tools: [{
         stableKey: 'GET /api/tasks',
         description: 'Lists the caller\'s tasks, optionally by status. Use tasks.create to add one.',
+        title: { de: 'Aufgaben auflisten', en: 'List tasks' },
         synonyms: { en: ['to-dos', 'my work'] },
         examples: { en: EXAMPLES },
         exampleCalls: [{ sentence: 'List the finished tasks', input: { status: ['done'] } }],
-        origin: { description: 'agent', synonyms: 'agent', examples: 'agent', exampleCalls: 'agent' },
+        origin: { description: 'agent', title: 'agent', synonyms: 'agent', examples: 'agent', exampleCalls: 'agent' },
         agent: { model: 'claude-code', interfaceDigest },
       }],
     })}\n`);
@@ -519,6 +520,7 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
     const entry = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts)))
       .tools.find((tool) => tool.stableKey === 'GET /api/tasks');
     expect(entry?.search).toEqual({ synonyms: ['my work', 'to-dos'], examples: [...EXAMPLES].sort() });
+    expect(entry?.title).toEqual({ de: 'Aufgaben auflisten', en: 'List tasks' });
     const module = await fixture.read(DEFAULT_GENERATED_MODULE);
     expect(module).toContain('export const toolSearchSemantics = {\n  "tasks_list": {\n    "synonyms": [\n      "my work",');
     const view = result.tools?.find((tool) => tool.stableKey === 'GET /api/tasks');
@@ -534,6 +536,15 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
       semantics: { protectedFields: [], hasSynonyms: true, missingExamples: [], stale: false, rejected: false },
     });
     expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'integrity' })).driftPaths).toEqual([]);
+  }, 120_000);
+
+  it('leaves the title out when the app has no semantics file', async () => {
+    const fixture = await app();
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const tools = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts))).tools;
+    expect(tools.length).toBeGreaterThan(0);
+    expect(tools.filter((tool) => Object.hasOwn(tool, 'title'))).toEqual([]);
   }, 120_000);
 
   it('ignores a rejected agent entry and keeps a stale one in use until it is renewed', async () => {

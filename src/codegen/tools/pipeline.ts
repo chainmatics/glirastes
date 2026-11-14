@@ -61,6 +61,7 @@ import {
   requiredLanguages,
   semanticsFacts,
   semanticsSearch,
+  semanticsTitle,
   validateSemanticsEntry,
   type SemanticsCheck,
   type SemanticsFacts,
@@ -595,6 +596,7 @@ async function generate(
       },
     });
     const search = semanticsSearch(semantics.entry);
+    const title = semanticsTitle(semantics.entry);
     const mcp = execution.executionKind === 'endpoint' ? inputs.mcpNames?.get(execution.stableKey) : undefined;
     contractEntries.push({
       toolId: execution.toolId,
@@ -611,6 +613,7 @@ async function generate(
           },
         }
         : {}),
+      ...(title ? { title } : {}),
     });
     const requiresApproval = confirmationFloor(resolved.effective.riskClass, resolved.effective.requiresApproval);
     toolViews.push({
