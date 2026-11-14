@@ -31,6 +31,9 @@ interface BoundTool {
   noun?: { language: 'de' | 'en'; text: string };
 }
 
+/** Client actions of the chat itself; offering them inside the chat is noise. An override adds one back. */
+export const CHAT_INTERNAL_ACTION = /^(?:ai-?chat|chat|assistant|command-?palette|command-?menu|cmdk)(?:[.\-_]|$)/i;
+
 /** Query parameters that make a read endpoint an entity search, best first. */
 const SEARCH_PARAMS = ['search', 'q', 'query', 'term'];
 const LIMIT_PARAMS = ['limit', 'pageSize'];
@@ -373,6 +376,7 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
       }
       continue;
     }
+    if (action.kind === 'client-action' && CHAT_INTERNAL_ACTION.test(action.actionId)) continue;
     const args = argsFor(tool.contract.input, new Set(), entityOf);
     if (!args) continue;
     if (action.kind === 'filter') {

@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { mergeChatInteractions, parseChatInteractionOverrides } from '../../contracts/chat-interactions.js';
 import { AppSetupArtifactSchema } from '../../contracts/index.js';
 import { createJsonSchemaLike } from '../../runtime/json-schema.js';
 import { canonicalJson } from './canonical.js';
-import { deriveChatInteractions, humanizeIdentifier } from './chat-interactions.js';
+import { CHAT_INTERNAL_ACTION, deriveChatInteractions, humanizeIdentifier } from './chat-interactions.js';
 import type { JsonSchemaLike, ToolContract, ToolContractsEntry, ToolTitle } from './types.js';
 
 const digest = (character: string) => `sha256:${character.repeat(43)}`;
@@ -243,6 +244,32 @@ describe('deriveChatInteractions', () => {
     expect(deriveChatInteractions(catalog([SPECS[0]!])).entities[0]!.label).toEqual({ en: 'Task', de: 'Task' });
     const templated = { locale: 'en-US', singular: 'List tasks', plural: 'List tasks', approval: 'List tasks' };
     expect(deriveChatInteractions(catalog([{ ...SPECS[0]!, presentation: templated }])).entities[0]!.label).toEqual({ en: 'Task', de: 'Task' });
+  });
+
+  it('does not offer the chat window or the command palette inside the chat', () => {
+    const client = (name: string, actionId: string): Spec => ({ name, input: object({}), uiAction: { kind: 'client-action', actionId } });
+    const derived = deriveChatInteractions(catalog([
+      client('ui.aiChat.open', 'ai-chat.open'),
+      client('ui.commandPalette.open', 'command-palette.open'),
+      client('ui.chat.clear', 'chat.clear'),
+      client('ui.chatbotSettings.open', 'chatbot-settings.open'),
+    ]));
+    expect(derived.commands.map((command) => command.id)).toEqual(['chatbotSettings.open']);
+    expect(CHAT_INTERNAL_ACTION.test('cmdk')).toBe(true);
+  });
+
+  it('lets an override add a chat-internal action back', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const derived = deriveChatInteractions(catalog([
+      { name: 'ui.aiChat.open', input: object({}), uiAction: { kind: 'client-action', actionId: 'ai-chat.open' } },
+    ]));
+    const merged = mergeChatInteractions(derived, parseChatInteractionOverrides({
+      schemaVersion: 1,
+      commands: { 'aiChat.open': { label: 'KI-Chat öffnen', run: { kind: 'ui', tool: 'ui.aiChat.open' } } },
+    }));
+    expect(merged.commands.map((command) => command.id)).toEqual(['aiChat.open']);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('is a pure function of the catalog, whatever the input order', () => {
