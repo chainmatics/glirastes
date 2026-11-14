@@ -169,7 +169,8 @@ function TaskMenu({ task }) {
 | `setDraft(text, mentions?)`, `insertText(text)`, `clear()`, `focus()` | The draft itself |
 | `hasCommand(id)`, `hasEntity(type)`, `chatAboutLabel` | For building menus |
 
-Requests wait until a composer is mounted, so a closed chat that mounts its
+Components that also render without a chat (tests, other pages) use
+`useOptionalChatComposer()`, which is `null` there. Requests wait until a composer is mounted, so a closed chat that mounts its
 panel on open still receives them. A composer of its own built on
 `RichMentionInput` takes them with `useChatComposerTarget(inputRef, { onChange })`.
 `chatAbout` with a command whose entity argument the pill fills runs the

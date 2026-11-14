@@ -4,7 +4,7 @@ import { createRef, useMemo, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseChatCommandMessage } from '../../../contracts/chat-command.js';
 import { AssistantLayoutProvider, useAssistantLayout } from '../../assistant/assistant-layout.js';
-import { useChatComposer, type ChatComposer } from '../../composer/chat-composer.js';
+import { useChatComposer, useOptionalChatComposer, type ChatComposer } from '../../composer/chat-composer.js';
 import { defineChatCommand, defineChatEntity } from '../../interactions/definitions.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import type { ChatTransport, MentionResult, RichMentionInputHandle } from '../../types.js';
@@ -279,6 +279,22 @@ describe('useChatComposer', () => {
     }
     render(<German />);
     expect(screen.getByRole('button', { name: 'Mit KI besprechen' })).toBeTruthy();
+  });
+
+  it('is null outside the provider with useOptionalChatComposer, and useChatComposer throws there', () => {
+    let optional: ChatComposer | null | undefined;
+    function Probe() {
+      optional = useOptionalChatComposer();
+      return null;
+    }
+    render(<Probe />);
+    expect(optional).toBeNull();
+    function Strict() {
+      useChatComposer();
+      return null;
+    }
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => render(<Strict />)).toThrow('useChatComposer must be used within an <AiChatProvider>');
   });
 });
 

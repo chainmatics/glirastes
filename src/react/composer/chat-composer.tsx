@@ -13,7 +13,7 @@ import { chatText, type ChatLocaleCode } from '../../contracts/chat-interactions
 import { useOptionalAssistantLayout } from '../assistant/assistant-layout.js';
 import { toChatEntityItem, type ChatCommandDefinition } from '../interactions/definitions.js';
 import type { ChatInteractionRegistry } from '../interactions/registry.js';
-import { useChatContext } from '../provider/chat-context.js';
+import { ChatContext } from '../provider/chat-context.js';
 import type { MentionData, RichMentionInputHandle } from '../types.js';
 import { normalizeMentionSlug } from '../utils/mention-markup.js';
 
@@ -173,14 +173,26 @@ async function labelOf(entity: ChatComposerEntity, registry: ChatInteractionRegi
  * ```
  */
 export function useChatComposer(): ChatComposer {
-  const { push, requestOpen } = useComposerQueue();
-  const { interactions, locale } = useChatContext();
+  const composer = useOptionalChatComposer();
+  if (!composer) throw new Error('useChatComposer must be used within an <AiChatProvider>');
+  return composer;
+}
+
+/** `useChatComposer` for components that also render without a chat: null outside `AiChatProvider`. */
+export function useOptionalChatComposer(): ChatComposer | null {
+  const queue = useContext(ChatComposerQueueContext);
+  const chat = useContext(ChatContext);
+  const push = queue?.push;
+  const requestOpen = queue?.requestOpen;
+  const interactions = chat?.interactions;
+  const chatAboutLabel = chat?.locale.chatAboutLabel ?? '';
   const registryRef = useRef(interactions);
   registryRef.current = interactions;
   const languageRef = useRef<ChatLocaleCode>(interactions?.locale ?? 'en');
   languageRef.current = interactions?.locale ?? 'en';
 
-  return useMemo<ChatComposer>(() => {
+  return useMemo<ChatComposer | null>(() => {
+    if (!push || !requestOpen) return null;
     const command = (commandId: string, args?: Readonly<Record<string, unknown>>) => {
       const definition = registryRef.current?.command(commandId);
       return definition ? commandMention(definition, languageRef.current, args) : undefined;
@@ -224,9 +236,9 @@ export function useChatComposer(): ChatComposer {
       },
       hasCommand: (commandId) => registryRef.current?.command(commandId) !== undefined,
       hasEntity: (type) => registryRef.current?.entity(type) !== undefined,
-      chatAboutLabel: locale.chatAboutLabel,
+      chatAboutLabel,
     };
-  }, [push, requestOpen, locale.chatAboutLabel]);
+  }, [push, requestOpen, chatAboutLabel]);
 }
 
 /**

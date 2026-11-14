@@ -285,6 +285,7 @@ export {
 // Programmatic composer ("Chat about this") and entity chips in answers
 export {
   useChatComposer,
+  useOptionalChatComposer,
   useChatComposerTarget,
   entityMention,
   commandMention,
