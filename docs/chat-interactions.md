@@ -16,6 +16,7 @@ the Glirastes Platform.
 | A URL filter (`ui.filter.<view>`) | `/` command `filter.<view>`; its string keys are arguments, enums become choices |
 | A client action (`ui.<actionId>`) | `/` command `<actionId>`; its string payload fields are arguments |
 | A read endpoint with `search`, `q`, `query` or `term` whose output lists objects with `id` and `title`/`name`/`displayName`/`label`/`subject`/`email` (`GET /api/tasks?search=`) | `@` entity `task`, searched with the user's session |
+| A search endpoint below `/search` with a `name` parameter (`GET /api/users/search?name=`) | `@` entity `user` |
 | An endpoint with one path parameter below that collection (`PATCH /api/tasks/:id`, `POST /api/tasks/:id/complete`) | Context action of the entity ("Edit", "Complete") |
 | A page with one parameter of that entity (`/tasks/:taskId`) | Context action "Open" |
 
@@ -24,10 +25,22 @@ is left out of the form, and a command or action with a required key of
 another type is not offered at all.
 
 Only enabled tools count: a disabled, `needs_attention` or excluded tool
-derives nothing. Labels are English and German defaults built from
-identifiers; better labels, synonyms and icons come from
-`.glirastes/chat-interactions.json` (written by people or the
-`describing-glirastes-tools` skill, never by the generator):
+derives nothing. Client actions of the chat itself (`ai-chat.*`, `chat.*`,
+`assistant.*`, `command-palette.*`, `command-menu.*`, `cmdk.*`) are left out,
+and destructive actions (marked `destructive: true`) come last in an entity's
+menu, also after actions the overrides add.
+
+Labels come from each tool's reviewed `title` in
+`.glirastes/tool-semantics.json`, entity labels from its presentation noun
+(inside an entity's menu a leading noun is dropped: "Endgültig löschen"
+instead of "Aufgabe endgültig löschen"). Without them the label is verb plus
+object built from identifiers, in English and German ("Open task create
+dialog", "Task create dialog öffnen"). Synonyms, icons and what a title cannot
+say come from `.glirastes/chat-interactions.json` (written by people, the
+`describing-glirastes-tools` or `curating-glirastes-chat-interactions` skill,
+never by the generator). The titles reach the derivation through
+`.glirastes/tool-contracts.json`; run `glirastes tools refresh` after
+upgrading and commit the result.
 
 ```json
 {
@@ -112,6 +125,38 @@ offers the generated UI tools as `/` commands; drop an earlier
 show a command twice (results are only merged when type and id match), and
 the entry of the older provider still goes through the model.
 
+## Custom composers
+
+An app that replaces the input (`components.ChatInput`) first tries the SDK
+`MentionInput` with its props: `initialMentions`, `initialValue`,
+`components={{ DropdownItem }}` (or `components.MentionDropdownItem` on the
+chat), `renderActions` and `renderSubmit` (both get the composer controls),
+`inputClassName` and `editorClassName`. A layout those props cannot express
+builds the input on `useChatComposer`, which keeps the suggestion search,
+direct commands, the argument form, entity actions and `mentionEntity`:
+
+```tsx
+import { RichMentionInput, useChatComposer } from 'glirastes/react';
+
+function Composer() {
+  const composer = useChatComposer();
+  return (
+    <form onSubmit={(event) => { event.preventDefault(); composer.submit(); }}>
+      {composer.argumentsForm}
+      <RichMentionInput ref={composer.inputRef} {...composer.inputProps} />
+      <button type="submit" disabled={!composer.canSend}>Senden</button>
+    </form>
+  );
+}
+```
+
+A custom suggestion item spreads `optionProps` onto its clickable element.
+Never call `send(text)` without the editor's mentions and never pass an own
+`onSearch` next to `chatInteractions`: both bypass direct commands and entity
+actions. The legacy `mentions` composer ignores these props. The
+`curating-glirastes-chat-interactions` skill walks a coding agent
+through the review, the overrides and this wiring.
+
 ## `<glirastes-chat>`
 
 ```html
@@ -165,5 +210,8 @@ then goes to the model.
   polite live region announces the number of suggestions.
 - ArrowUp/ArrowDown move between results, ArrowRight/ArrowLeft between an
   entity and its actions, Enter or Tab picks, Escape closes.
+- A list that mixes commands and entity types shows a heading per group; a
+  search without hits shows the optional locale text `completionEmptyLabel`, which
+  Escape clears.
 - The argument form starts at the first empty required field; entity fields
   are ARIA 1.2 comboboxes; Escape closes an open list first, then cancels.

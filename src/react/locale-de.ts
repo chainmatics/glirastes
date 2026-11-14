@@ -59,6 +59,7 @@ export const deChatLocale: ChatLocale = {
   retryRecordingAriaLabel: 'Aufnahme wiederholen',
   completionListLabel: 'Vorschläge',
   completionResultsLabel: '{count} Vorschläge',
+  completionEmptyLabel: 'Keine Treffer. @ für Dinge, / für Befehle',
   commandArgumentsLabel: 'Angaben für {command}',
   commandArgumentsSubmit: 'Ausführen',
   commandArgumentsInvalid: 'Diese Werte sind zu lang.',

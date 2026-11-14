@@ -5,6 +5,7 @@ import {
   SemanticsEntrySchema,
   semanticsFacts,
   semanticsSearch,
+  semanticsTitle,
   validateSemanticsEntry,
   type ToolSemanticsEntry,
 } from './semantics.js';
@@ -131,5 +132,15 @@ describe('tool-semantics.json entries', () => {
         'Leg eine Aufgabe Angebot schreiben an', 'Neue Aufgabe: Bericht prüfen', 'New task: review the report',
       ],
     });
+  });
+
+  it('carries a checked title per language and drops a language it cannot show', () => {
+    const titled = (title: unknown) => ({ stableKey: 'POST /api/tasks', title }) as ToolSemanticsEntry;
+    expect(semanticsTitle(titled({ de: ' Aufgabe anlegen ', en: 'Create task' }))).toEqual({ de: 'Aufgabe anlegen', en: 'Create task' });
+    expect(semanticsTitle(titled({ de: 'Aufgabe\u0007', en: 'Create task' }))).toEqual({ en: 'Create task' });
+    expect(semanticsTitle(titled({ de: 'x'.repeat(201) }))).toBeUndefined();
+    expect(semanticsTitle({ stableKey: 'POST /api/tasks' } as ToolSemanticsEntry)).toBeUndefined();
+    expect(semanticsTitle(undefined)).toBeUndefined();
+    expect(semanticsTitle(titled({}))).toBeUndefined();
   });
 });

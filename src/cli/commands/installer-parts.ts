@@ -38,7 +38,7 @@ const PART_SKILLS: Record<
   Exclude<InstallerPart, 'framework'>,
   ReadonlyArray<string>
 > = {
-  'chat-ui': ['building-glirastes-chat-ui'],
+  'chat-ui': ['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions'],
   tools: ['maintaining-glirastes-tools', 'describing-glirastes-tools'],
   setup: ['setting-up-glirastes', 'migrating-to-glirastes'],
 };

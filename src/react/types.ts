@@ -1,4 +1,4 @@
-import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent } from 'react';
+import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
@@ -256,6 +256,8 @@ export interface MentionResult {
   args?: Readonly<Record<string, unknown>>;
   /** Entity actions offered next to this result (see `CompletionItem.actions`). */
   actions?: ReadonlyArray<CompletionItemAction>;
+  /** Heading the list shows above this hit's group. */
+  group?: string;
 }
 
 export interface MentionData {
@@ -306,6 +308,8 @@ export interface CompletionItem {
    * to it in the list and reachable by keyboard (ArrowRight/ArrowLeft).
    */
   actions?: ReadonlyArray<CompletionItemAction>;
+  /** Heading the list shows above this hit's group. */
+  group?: string;
 }
 
 export interface CompletionItemAction {
@@ -572,6 +576,8 @@ export interface ChatComponents {
   ClarificationCard?: ComponentType<ClarificationCardProps>;
   /** Form for the missing arguments of a `/` command or entity action. */
   CommandArgumentsForm?: ComponentType<CommandArgumentsFormProps>;
+  /** Item of the `@`/`/` suggestion list; it must spread `optionProps`. */
+  MentionDropdownItem?: ComponentType<MentionDropdownItemProps>;
 }
 
 export interface CommandArgumentsFormProps {
@@ -660,6 +666,8 @@ export interface ChatLocale {
   // `@` and `/` suggestions
   completionListLabel: string;
   completionResultsLabel: string;     // supports `{count}`
+  /** Hint when a `@`/`/` search finds nothing. */
+  completionEmptyLabel?: string;
 
   // Arguments of `/` commands and entity actions
   commandArgumentsLabel: string;      // supports `{command}`
@@ -964,6 +972,55 @@ export interface ChatInputProps {
 export interface MentionInputProps {
   className?: string;
   onSubmit?: (message: string) => void;
+  /** Text put into the editor once on mount, after `initialMentions`. */
+  initialValue?: string;
+  /** References the editor starts with; key the input to start over (`key={taskId}`). */
+  initialMentions?: MentionData[];
+  /** Class of the box around editor, placeholder and list. */
+  inputClassName?: string;
+  /** Class of the editable element. */
+  editorClassName?: string;
+  /** Suggestion item; wins over `components.MentionDropdownItem` of the provider. */
+  components?: RichMentionInputComponents;
+  /** Extra controls between the editor and the send button, e.g. the app's own microphone. */
+  renderActions?: (composer: ChatComposerControls) => ReactNode;
+  /** Replaces the default send and stop buttons; a `type="submit"` button sends. */
+  renderSubmit?: (composer: ChatComposerControls) => ReactNode;
+}
+
+export interface UseChatComposerOptions {
+  /** Called instead of `send`; the composer clears afterwards. */
+  onSubmit?: (message: string, mentions: MentionData[]) => void;
+  /** Text put into the editor once on mount, after the input's `initialMentions`. */
+  initialValue?: string;
+}
+
+export interface ChatComposerControls {
+  /** Current text including `@`/`/` tokens. */
+  readonly value: string;
+  readonly isLoading: boolean;
+  /** Non-blank text and not loading. */
+  readonly canSend: boolean;
+  /** Sends the editor text with its structured mentions; false when nothing was taken (the text stays). */
+  submit(): boolean;
+  stop(): void;
+  /** Replaces the text; references whose token is not in it are dropped. */
+  setText(text: string): void;
+  /** Appends with one space, e.g. a voice transcript; references stay. */
+  appendText(text: string): void;
+  focus(): void;
+}
+
+export interface ChatComposer extends ChatComposerControls {
+  /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
+  readonly inputRef: RefObject<RichMentionInputHandle | null>;
+  readonly inputProps: Pick<RichMentionInputProps,
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel'>;
+  readonly pendingCommand: PendingChatCommand | null;
+  submitPendingCommand(values: Readonly<Record<string, string>>, valueLabels?: Readonly<Record<string, string>>): boolean;
+  cancelPendingCommand(): void;
+  /** The argument form (`components.CommandArgumentsForm` or the default), `null` when nothing is pending. */
+  readonly argumentsForm: ReactNode;
 }
 
 export interface RichMentionInputHandle {
@@ -1002,6 +1059,10 @@ export interface RichMentionInputProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /** Class of the wrapper in mention mode (plain mode has none; there `className` styles the element). */
+  wrapperClassName?: string;
+  /** Shown instead of the list when a search finds nothing; without it an empty result shows nothing. */
+  emptyLabel?: string;
   onChange?: (nextValue: string) => void;
   /** Receives the text and the structured mentions (chips and commands) still in it. */
   onSubmit?: (message: string, mentions: MentionData[]) => void;

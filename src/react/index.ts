@@ -81,6 +81,9 @@ export type {
   MessageBubbleProps,
   ChatInputProps,
   MentionInputProps,
+  UseChatComposerOptions,
+  ChatComposer,
+  ChatComposerControls,
   RichMentionInputHandle,
   RichMentionInputProps,
   RichMentionInputComponents,
@@ -126,6 +129,7 @@ export type { ChatContextValue } from './provider/chat-context.js';
 export { useAiChat } from './hooks/use-ai-chat.js';
 export { useApprovals } from './hooks/use-approvals.js';
 export { useMentions } from './hooks/use-mentions.js';
+export { useChatComposer } from './hooks/use-chat-composer.js';
 export { useSuggestions } from './hooks/use-suggestions.js';
 export { useDeepgramTranscription } from './hooks/use-deepgram-transcription.js';
 export { useStt, type UseSttOptions, type UseSttReturn } from './stt/use-stt.js';

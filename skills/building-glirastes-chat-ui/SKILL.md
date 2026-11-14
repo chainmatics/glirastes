@@ -145,9 +145,12 @@ the command or action).
 | A read endpoint with `search`, `q`, `query` or `term` that lists objects with an `id` and a `title`, `name`, `displayName`, `label`, `subject` or `email` (`GET /api/tasks?search=`) | `@` entity `task` |
 | An endpoint with one path parameter below that collection, or a page with one parameter of that entity | Context action of the entity ("Complete", id `task.tasks.complete`; "Open") |
 
-Labels are English words built from identifiers. `docs/chat-interactions.md`
-in the Glirastes repository (not shipped in the package) has the same table
-with the override format.
+A search below `/search` (`GET /api/users/search?name=`) is an entity too.
+Labels come from each tool's reviewed `title`, entities from the presentation
+noun; without them, verb plus object from identifiers. Chat-internal client
+actions are left out, destructive ones come last. Review the list with
+`curating-glirastes-chat-interactions`; `docs/chat-interactions.md` (Glirastes
+repository, not shipped in the package) has the table and override format.
 
 - Serve them with a GET next to the chat POST:
   `export const GET = createChatInteractionsHandler({ interactions: generated.chatInteractions, overrides, managedRuntime })`
@@ -177,14 +180,17 @@ with the override format.
 - Better labels, synonyms (`keywords`) and icons go into
   `.glirastes/chat-interactions.json` (`describing-glirastes-tools`).
   `hidden` there only shapes the list; the server still authorizes.
-- `VercelAiChat` has no slot for the suggestion item. Only a hand-composed
-  `RichMentionInput` takes `components={{ DropdownItem }}`; that item must
-  spread its `optionProps`, or the listbox loses its active option for screen
-  readers.
+- Own suggestion item: `components.MentionDropdownItem` on the chat, or
+  `components={{ DropdownItem }}` on `MentionInput`; it must spread its
+  `optionProps`, or the listbox loses its active option for screen readers.
+  `renderActions`, `renderSubmit`, other `MentionInput` props and
+  `useChatComposer`: the curating skill.
+  Never an own `onSearch` next to `chatInteractions`.
 - Keyboard model of the `/` and `@` list: the editor is a `textbox` that
   controls the suggestion `listbox`; ArrowUp and ArrowDown move between
   results, ArrowRight and ArrowLeft between an entity and its actions, Enter
-  or Tab picks, Escape closes. The argument form starts at the first empty
+  or Tab picks, Escape closes. Headings group a mixed list, and a search
+  without hits says so. The argument form starts at the first empty
   required field, entity fields are ARIA 1.2 comboboxes, and Escape closes an
   open list before it cancels the form.
 

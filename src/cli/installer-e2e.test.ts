@@ -100,6 +100,7 @@ describe('a fresh app reaches a synced setup run', () => {
     expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}).sort())
       .toEqual([
         'building-glirastes-chat-ui',
+        'curating-glirastes-chat-interactions',
         'describing-glirastes-tools',
         'integrating-glirastes-nextjs',
         'maintaining-glirastes-tools',
@@ -185,7 +186,7 @@ describe('parts install independently', () => {
     expect(Object.keys(hostRecord(manifest, 'codex')?.skills ?? {}))
       .toEqual(['describing-glirastes-tools', 'maintaining-glirastes-tools']);
     expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}))
-      .toEqual(['building-glirastes-chat-ui']);
+      .toEqual(['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions']);
   });
 
   it('accepts several hosts from one --host flag', async () => {

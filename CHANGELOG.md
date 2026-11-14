@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0-chat.1] - 2026-11-14
+
+Prerelease on the `next` dist-tag.
+
+### Fixed
+
+- Destructive entity actions stay last after the override merge: derived ones carry `destructive: true`, and an action added in `.glirastes/chat-interactions.json` no longer lands behind "Löschen". Run `glirastes tools refresh` to regenerate the chat interactions module.
+
+## [0.8.0-chat.0] - 2026-11-14
+
+Prerelease on the `next` dist-tag for the staging rollout of chat interaction curation.
+
+### Added
+
+- `useChatComposer()` exposes the composer logic (suggestion search, direct `/` commands, the argument form, entity actions, references from `mentionEntity`) for a custom chat input; `MentionInput` takes `initialValue`, `initialMentions`, `components.DropdownItem`, `renderActions`, `renderSubmit`, `inputClassName` and `editorClassName`, and `components.MentionDropdownItem` sets the suggestion item for the whole chat.
+- Suggestions are grouped under headings when a list mixes types, `/` search matches umlauts typed as `ae`/`oe`/`ue`/`ss`, and an empty result shows a hint (optional `locale.completionEmptyLabel`, with English and German defaults).
+- Skill `curating-glirastes-chat-interactions`: review and curate the derived `@` entities and `/` commands, wire them, move a custom composer onto the SDK logic.
+- A search endpoint (`GET /api/users/search?name=`) derives an `@` entity; item endpoints of its collection become its actions.
+
+### Changed
+
+- Derived chat labels: commands and entity actions take the tool's reviewed `title` from `.glirastes/tool-semantics.json`, entities the presentation noun; without them the fallback is verb plus object in English and object plus verb in German ("Dashboard aktualisieren"). Inside an entity's menu a leading entity noun is dropped ("Endgültig löschen" instead of "Aufgabe endgültig löschen"). Action labels no longer consist of the last path segment. Overrides in `.glirastes/chat-interactions.json` still win. Destructive actions are listed last.
+- Client actions of the chat itself (`ai-chat.*`, `chat.*`, `assistant.*`, `command-palette.*`, `command-menu.*`, `cmdk.*`) are no longer offered as `/` commands; a complete entry in `.glirastes/chat-interactions.json` adds one back.
+- `.glirastes/tool-contracts.json` carries an optional `title` per tool. Run `glirastes tools refresh` after upgrading and commit the result; `glirastes tools check` reports drift until then.
+
 ## [0.7.1] - 2026-11-13
 
 ### Fixed
@@ -599,7 +624,9 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.1...HEAD
+[0.8.0-chat.1]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.0...v0.8.0-chat.1
+[0.8.0-chat.0]: https://github.com/chainmatics/glirastes/compare/v0.7.1...v0.8.0-chat.0
 [0.7.1]: https://github.com/chainmatics/glirastes/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/chainmatics/glirastes/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/chainmatics/glirastes/compare/v0.5.1...v0.6.0

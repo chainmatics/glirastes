@@ -79,6 +79,7 @@ describe('createChatInteractionRegistry', () => {
     expect((await search('', '/')).map((item) => item.label)).toEqual(['Aufgaben filtern', 'Start', 'Tagesrückblick', 'Zuweisen']);
     expect(await search('zuw', '/')).toEqual([{
       id: 'tasks.assign', key: 'chat-commands:command:tasks.assign', type: 'command', label: 'Zuweisen', definitionId: 'tasks.assign',
+      group: 'Befehle',
     }]);
     expect((await search('tages', '/'))[0]).not.toHaveProperty('definitionId');
     expect((await search('filtern', '/'))[0]).toMatchObject({ id: 'filter.tasks', definitionId: 'ui.filter.tasks' });
@@ -94,11 +95,36 @@ describe('createChatInteractionRegistry', () => {
     expect(fetch.mock.calls[0]![1]).toMatchObject({ credentials: 'same-origin' });
     expect(results).toEqual([{
       id: '7', key: 'chat-entities:task:7', type: 'task', label: 'Release prüfen', description: 'open',
-      actions: [{ id: 'task.tasks.complete', label: 'Complete' }, { id: 'task.open', label: 'Open' }],
+      actions: [{ id: 'task.tasks.complete', label: 'Complete' }, { id: 'task.open', label: 'Open' }], group: 'Task',
     }]);
     expect((await search('ali', '@')).filter((item) => item.type === 'person')).toEqual([{
       id: 'alice', key: 'chat-entities:person:alice', type: 'person', label: 'Alice Example', description: 'alice@example.com',
+      group: 'Person',
     }]);
+  });
+
+  it('finds commands with umlauts typed either way', async () => {
+    const label = (id: string, text: string) => defineChatCommand({ id, label: text, run: { kind: 'tool', tool: id } });
+    const registry = createChatInteractionRegistry({
+      locale: 'de',
+      commands: [label('one', 'Löschen'), label('two', 'Schließen'), label('three', 'Übersicht öffnen')],
+    });
+    const search = createCompletionSearch(registry.providers);
+    const labels = async (query: string) => (await search(query, '/')).map((item) => item.label);
+    expect(await labels('loe')).toEqual(['Löschen']);
+    expect(await labels('los')).toEqual(['Löschen']);
+    expect(await labels('ueber')).toEqual(['Übersicht öffnen']);
+    expect(await labels('uber')).toEqual(['Übersicht öffnen']);
+    expect(await labels('schliessen')).toEqual(['Schließen']);
+    expect(await labels('oeffnen')).toEqual(['Übersicht öffnen']);
+  });
+
+  it('names the group of every hit', async () => {
+    const german = createCompletionSearch(createChatInteractionRegistry({ data, entities: [person], fetch: tasksFetch(), locale: 'de' }).providers);
+    expect((await german('auf', '/'))[0]).toMatchObject({ group: 'Befehle' });
+    expect((await german('rel', '@')).find((item) => item.type === 'task')).toMatchObject({ group: 'Aufgabe' });
+    const english = createCompletionSearch(createChatInteractionRegistry({ data, locale: 'en' }).providers);
+    expect((await english('filter', '/'))[0]).toMatchObject({ group: 'Commands' });
   });
 
   it('drops results whose actions the composer could not offer safely', async () => {
@@ -139,13 +165,13 @@ describe('createChatInteractionRegistry', () => {
     const crowded = createCompletionSearch(createChatInteractionRegistry({ entities: [entity('aaa', 8), entity('bbb', 8)] }).providers);
     const both = await crowded('', '@');
     expect(new Set(both.map((item) => item.type))).toEqual(new Set(['aaa', 'bbb']));
-    expect(both.map((item) => item.id)).toEqual(['aaa0', 'bbb0', 'aaa1', 'bbb1', 'aaa2', 'bbb2', 'aaa3', 'bbb3']);
+    expect(both.map((item) => item.id)).toEqual(['aaa0', 'aaa1', 'aaa2', 'aaa3', 'bbb0', 'bbb1', 'bbb2', 'bbb3']);
 
     // A type with few hits is not starved by two with many, and a short list gives its slots to the others.
     const mixed = createCompletionSearch(createChatInteractionRegistry({
       entities: [entity('aaa', 8), entity('bbb', 1), entity('ccc', 8)],
     }).providers);
-    expect((await mixed('', '@')).map((item) => item.id)).toEqual(['aaa0', 'bbb0', 'ccc0', 'aaa1', 'ccc1', 'aaa2', 'ccc2', 'aaa3']);
+    expect((await mixed('', '@')).map((item) => item.id)).toEqual(['aaa0', 'aaa1', 'aaa2', 'aaa3', 'bbb0', 'ccc0', 'ccc1', 'ccc2']);
   });
 
   it('sends a picked command alone as a direct command, and mixed text to the model', () => {

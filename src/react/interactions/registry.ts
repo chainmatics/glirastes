@@ -90,15 +90,28 @@ function fold(value: string): string {
   return value.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().trim();
 }
 
-function rank(label: string, command: ChatCommandDefinition, needle: string): number | undefined {
-  if (!needle) return 0;
-  const folded = fold(label);
+/** German spelling without umlauts: `Übersicht` → `uebersicht`, `Schließen` → `schliessen`. */
+function transliterate(value: string): string {
+  return fold(value.toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss'));
+}
+
+function rankWith(normalize: (value: string) => string, label: string, command: ChatCommandDefinition, needle: string): number | undefined {
+  const folded = normalize(label);
   if (folded.startsWith(needle)) return 0;
   if (folded.split(/[^\p{L}\p{N}]+/u).some((word) => word.startsWith(needle))) return 1;
-  if (folded.includes(needle) || fold(normalizeMentionSlug(label)).includes(needle)) return 2;
-  if (fold(command.id).includes(needle)) return 3;
-  if ((command.keywords ?? []).some((keyword) => fold(keyword).includes(needle))) return 4;
+  if (folded.includes(needle) || normalize(normalizeMentionSlug(label)).includes(needle)) return 2;
+  if (normalize(command.id).includes(needle)) return 3;
+  if ((command.keywords ?? []).some((keyword) => normalize(keyword).includes(needle))) return 4;
   return undefined;
+}
+
+function rank(label: string, command: ChatCommandDefinition, query: string): number | undefined {
+  const needle = fold(query);
+  if (!needle) return 0;
+  // `ueber` and `uber` both find `Übersicht`, `schliessen` finds `Schließen`.
+  const ranks = [rankWith(fold, label, command, needle), rankWith(transliterate, label, command, transliterate(query))]
+    .filter((value): value is number => value !== undefined);
+  return ranks.length > 0 ? Math.min(...ranks) : undefined;
 }
 
 function setPath(target: Record<string, unknown>, path: string, value: unknown): void {
@@ -141,11 +154,11 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
     id: 'chat-commands',
     trigger: '/',
     search({ query, limit }) {
-      const needle = fold(query);
+      const group = locale === 'de' ? 'Befehle' : 'Commands';
       return [...commands.values()]
         .map((command) => {
           const label = chatText(command.label, locale);
-          return { command, label, rank: rank(label, command, needle) };
+          return { command, label, rank: rank(label, command, query) };
         })
         .filter((entry): entry is { command: ChatCommandDefinition; label: string; rank: number } => entry.rank !== undefined)
         .sort((left, right) => left.rank - right.rank || left.label.localeCompare(right.label))
@@ -158,6 +171,7 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
             type: 'command',
             label,
             ...(description ? { description } : {}),
+            group,
             // A command mixed with free text goes to the model with its tool reference.
             ...(run.kind !== 'prompt' ? { definitionId: run.tool, ...(run.args ? { args: run.args } : {}) } : {}),
           };
@@ -182,6 +196,7 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
             ...(entity.actions?.length
               ? { actions: entity.actions.map((action) => ({ id: action.id, label: chatText(action.label, locale) })) }
               : {}),
+            group: chatText(entity.label, locale),
           };
         });
       }));

@@ -1,12 +1,11 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { CommandArgumentsForm as DefaultCommandArgumentsForm } from './command-arguments-form.js';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { MentionChipList } from './mention-chip.js';
 import { RichMentionInput } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
+import { useChatComposer } from '../hooks/use-chat-composer.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { inferMentionPrefix, normalizeMentionSlug } from '../utils/mention-markup.js';
 import type {
-  MentionData,
   MentionInputProps,
   RichMentionInputHandle,
 } from '../types.js';
@@ -25,86 +24,43 @@ export function MentionInput(props: MentionInputProps) {
     : <LegacyMentionInput {...props} />;
 }
 
-function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
-  const {
-    send,
-    stop,
-    isLoading,
-    classNames,
-    locale,
-    components,
-    completionSearch,
-    voice,
-    runEntityAction,
-    composerMentions,
-    consumeComposerMentions,
-    pendingCommand,
-    submitPendingCommand,
-    cancelPendingCommand,
-  } = useChatContext();
-  const [value, setValue] = useState('');
-  const inputRef = useRef<RichMentionInputHandle | null>(null);
+function ProviderMentionInput({
+  className,
+  onSubmit,
+  initialValue,
+  initialMentions,
+  inputClassName,
+  editorClassName,
+  components: inputComponents,
+  renderActions,
+  renderSubmit,
+}: MentionInputProps) {
+  const { classNames, locale, components, voice } = useChatContext();
+  const composer = useChatComposer({
+    onSubmit: onSubmit ? (message) => onSubmit(message) : undefined,
+    initialValue,
+  });
+  const { isLoading } = composer;
   const InputExtra = components.InputExtra;
-  const ArgumentsForm = components.CommandArgumentsForm ?? DefaultCommandArgumentsForm;
-
-  // References added from outside the composer (`mentionEntity`).
-  useEffect(() => {
-    const handle = inputRef.current;
-    if (!handle || composerMentions.length === 0) return;
-    for (const mention of composerMentions) handle.addMention(mention);
-    consumeComposerMentions();
-    setValue(handle.getValue());
-  }, [composerMentions, consumeComposerMentions]);
-
-  const submit = useCallback((text: string, mentions: MentionData[]) => {
-    const trimmed = text.trim();
-    if (!trimmed || isLoading) return false;
-    if (onSubmit) {
-      onSubmit(trimmed);
-    } else if (!send(trimmed, { mentions })) {
-      return false;
-    }
-    setValue('');
-    return true;
-  }, [isLoading, onSubmit, send]);
+  const DropdownItem = inputComponents?.DropdownItem ?? components.MentionDropdownItem;
 
   return (
     <div data-component="mention-input" data-mode="providers">
-      {pendingCommand && (
-        <ArgumentsForm
-          key={`${pendingCommand.commandId}:${JSON.stringify(pendingCommand.values)}:${pendingCommand.error ?? ''}`}
-          pending={pendingCommand}
-          onSubmit={(values, valueLabels) => {
-            // Back to the editor only once the form is gone; while it keeps asking, focus stays in it.
-            if (submitPendingCommand(values, valueLabels)) inputRef.current?.focus();
-          }}
-          onCancel={() => {
-            cancelPendingCommand();
-            inputRef.current?.focus();
-          }}
-        />
-      )}
+      {composer.argumentsForm}
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          const handle = inputRef.current;
-          if (handle && submit(handle.getValue(), handle.getMentions())) handle.clear();
+          composer.submit();
         }}
         className={className ?? classNames.input}
       >
         <RichMentionInput
-          ref={inputRef}
-          onChange={setValue}
-          onSubmit={(text, mentions) => { submit(text, mentions); }}
-          onSearch={completionSearch}
-          placeholder={locale.placeholder}
-          disabled={isLoading}
-          onEntityAction={(result, actionId) => runEntityAction(
-            { type: result.type, id: result.id, label: result.label },
-            actionId,
-          )}
-          listLabel={locale.completionListLabel}
-          resultsLabel={locale.completionResultsLabel}
+          ref={composer.inputRef}
+          {...composer.inputProps}
+          initialMentions={initialMentions}
+          wrapperClassName={inputClassName}
+          className={editorClassName}
+          {...(DropdownItem ? { components: { DropdownItem } } : {})}
         />
         {voice.enabled && (
           <VoiceInputAddon
@@ -112,12 +68,7 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
             language={voice.language ?? 'de'}
             baseUrl={voice.baseUrl}
             getToken={voice.getToken}
-            onTranscript={(text) => {
-              const handle = inputRef.current;
-              if (!handle) return;
-              const current = handle.getValue();
-              handle.setValue(current ? `${current} ${text}` : text, handle.getMentions());
-            }}
+            onTranscript={composer.appendText}
             onError={voice.onError}
             showRecordingBar={voice.recordingBar?.enabled ?? true}
             recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
@@ -126,13 +77,14 @@ function ProviderMentionInput({ className, onSubmit }: MentionInputProps) {
             routeKey={voice.routeKey}
           />
         )}
+        {renderActions?.(composer)}
         {InputExtra && <InputExtra />}
-        {isLoading ? (
-          <button type="button" onClick={stop} data-action="stop">
+        {renderSubmit ? renderSubmit(composer) : isLoading ? (
+          <button type="button" onClick={composer.stop} data-action="stop">
             {locale.stopButton}
           </button>
         ) : (
-          <button type="submit" disabled={!value.trim()} data-action="send">
+          <button type="submit" disabled={!composer.value.trim()} data-action="send">
             {locale.sendButton}
           </button>
         )}

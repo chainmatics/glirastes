@@ -106,6 +106,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       placeholder,
       disabled = false,
       className,
+      wrapperClassName,
       onChange,
       onSubmit,
       onSearch,
@@ -115,6 +116,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onEntityAction,
       listLabel = 'Suggestions',
       resultsLabel = '{count} suggestions',
+      emptyLabel,
     },
     ref,
   ) {
@@ -128,6 +130,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const [mentions, setMentions] = useState<MentionData[]>([]);
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [searchResults, setSearchResults] = useState<MentionResult[]>([]);
+    const [noMatches, setNoMatches] = useState(false);
     const [selectedIndex, setSelectedIndex] = useState(0);
     // -1: the result itself; 0..n: one of its entity actions.
     const [selectedAction, setSelectedAction] = useState(-1);
@@ -299,6 +302,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       searchVersionRef.current++;
       setDropdownOpen(false);
       setSearchResults([]);
+      setNoMatches(false);
       setSelectedIndex(0);
       setSelectedAction(-1);
     }, []);
@@ -315,10 +319,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           setSelectedIndex(0);
           setSelectedAction(-1);
           setDropdownOpen(results.length > 0);
+          setNoMatches(results.length === 0);
         } catch {
           if (searchVersionRef.current !== version) return;
           setSearchResults([]);
           setDropdownOpen(false);
+          setNoMatches(false);
         } finally {
           if (searchVersionRef.current === version) {
             setIsSearching(false);
@@ -597,6 +603,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           }
         }
 
+        if (event.key === 'Escape' && noMatches) {
+          event.preventDefault();
+          closeDropdown();
+          return;
+        }
+
         // Submit on Enter (both modes)
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
@@ -635,6 +647,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         runAction,
         insertMention,
         closeDropdown,
+        noMatches,
         submit,
         onChange,
         getFullValue,
@@ -866,6 +879,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       action >= 0 ? `${listboxId}-option-${index}-action-${action}` : `${listboxId}-option-${index}`
     );
     const listOpen = dropdownOpen && searchResults.length > 0;
+    const showEmpty = !listOpen && noMatches && Boolean(emptyLabel);
+    const showHeadings = new Set(searchResults.map((result) => result.group ?? '')).size > 1;
     const optionProps = (index: number, action = -1): MentionDropdownOptionProps => ({
       id: optionId(index, action),
       role: 'option',
@@ -873,8 +888,42 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       tabIndex: -1,
     });
 
+    const renderRow = (result: MentionResult, index: number, key: string) => {
+      const item = (
+        <DropdownItem
+          key={key}
+          result={result}
+          isSelected={index === selectedIndex && selectedAction === -1}
+          onClick={() => insertMention(result)}
+          optionProps={optionProps(index)}
+        />
+      );
+      if (!onEntityAction || !result.actions?.length) return item;
+      return (
+        <div key={key} role="group" aria-label={result.label} data-element="result-row">
+          {item}
+          <span data-element="entity-actions">
+            {result.actions.map((action, actionIndex) => (
+              <button
+                key={action.id}
+                type="button"
+                {...optionProps(index, actionIndex)}
+                aria-label={`${action.label}: ${result.label}`}
+                data-component="mention-action"
+                data-selected={index === selectedIndex && actionIndex === selectedAction ? 'true' : 'false'}
+                onClick={() => runAction(result, action.id)}
+              >
+                {action.label}
+              </button>
+            ))}
+          </span>
+        </div>
+      );
+    };
+
     return (
       <div
+        className={wrapperClassName}
         data-component="rich-mention-input"
         data-state={
           disabled
@@ -912,8 +961,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         )}
 
         <div data-element="completion-status" role="status" aria-live="polite" style={VISUALLY_HIDDEN}>
-          {listOpen ? resultsLabel.replace('{count}', String(searchResults.length)) : ''}
+          {listOpen ? resultsLabel.replace('{count}', String(searchResults.length)) : showEmpty ? emptyLabel : ''}
         </div>
+
+        {showEmpty && (
+          <div data-component="mention-dropdown" data-state="empty">{emptyLabel}</div>
+        )}
 
         {listOpen && (
           <div
@@ -928,40 +981,16 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           >
             {searchResults.map((result, index) => {
               const key = result.key ?? `${result.type}:${result.id}`;
-              const item = (
-                <DropdownItem
-                  key={key}
-                  result={result}
-                  isSelected={index === selectedIndex && selectedAction === -1}
-                  onClick={() => insertMention(result)}
-                  optionProps={optionProps(index)}
-                />
-              );
-              if (!onEntityAction || !result.actions?.length) return item;
-              return (
-                <div key={key} role="group" aria-label={result.label} data-element="result-row">
-                  {item}
-                  <span data-element="entity-actions">
-                    {result.actions.map((action, actionIndex) => (
-                      <button
-                        key={action.id}
-                        type="button"
-                        {...optionProps(index, actionIndex)}
-                        aria-label={`${action.label}: ${result.label}`}
-                        data-component="mention-action"
-                        data-selected={index === selectedIndex && actionIndex === selectedAction ? 'true' : 'false'}
-                        onClick={() => runAction(result, action.id)}
-                      >
-                        {action.label}
-                      </button>
-                    ))}
-                  </span>
-                </div>
-              );
+              const heading = showHeadings && result.group && result.group !== searchResults[index - 1]?.group
+                ? <div key={`heading:${result.group}`} role="presentation" data-element="group-heading">{result.group}</div>
+                : null;
+              const row = renderRow(result, index, key);
+              return heading ? [heading, row] : row;
             })}
           </div>
         )}
       </div>
     );
+
   },
 );

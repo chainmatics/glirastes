@@ -126,6 +126,32 @@ describe('chat interaction overrides', () => {
     expect(merged.entities[0]!.actions!.map((entry) => entry.id)).toEqual(['task.tasks.assign']);
   });
 
+  it('keeps destructive actions last when the app adds an action', () => {
+    const base: ChatInteractionsData = {
+      ...data,
+      entities: [{
+        ...data.entities[0]!,
+        actions: [
+          ...data.entities[0]!.actions!,
+          { id: 'task.tasks.delete', label: { en: 'Delete' }, entityArg: 'id', destructive: true, run: { kind: 'tool', tool: 'tasks.delete' } },
+        ],
+      }],
+    };
+    const merged = mergeChatInteractions(base, parseChatInteractionOverrides({
+      schemaVersion: 1,
+      entities: { task: { actions: { 'task.open': { label: 'Open', entityArg: 'taskId', run: { kind: 'ui', tool: 'ui.task.open' } } } } },
+    }));
+    expect(merged.entities[0]!.actions!.map((entry) => entry.id))
+      .toEqual(['task.tasks.complete', 'task.tasks.assign', 'task.open', 'task.tasks.delete']);
+  });
+
+  it('refuses a destructive flag that is not a boolean', () => {
+    expect(issuesOf(() => parseChatInteractionOverrides({
+      schemaVersion: 1,
+      entities: { task: { actions: { 'task.tasks.complete': { destructive: 'yes' } } } },
+    }))).toEqual([expect.stringContaining('destructive')]);
+  });
+
   it('removes the last action of an entity when every action is hidden', () => {
     const merged = mergeChatInteractions(data, parseChatInteractionOverrides({
       schemaVersion: 1,

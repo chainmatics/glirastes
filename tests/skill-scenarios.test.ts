@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import ts from 'typescript';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAppFixture, removeAppFixtures, SDK_ROOT, type AppFixture } from '../src/codegen/tools/__tests__/app-fixture.js';
-import { TOOLS_PATHS } from '../src/codegen/tools/config.js';
+import { DEFAULT_GENERATED_MODULE, TOOLS_PATHS } from '../src/codegen/tools/config.js';
 import { ToolContractsFileSchema } from '../src/codegen/tools/files.js';
 import type { DescribeWorklist, ResolveWorklist } from '../src/codegen/tools/worklist.js';
 import { readSkill, skillCommands } from '../src/cli/commands/__tests__/skill-lint.js';
@@ -375,6 +375,23 @@ describe('skill scenarios', () => {
       const status = await s.run('glirastes tools status');
       expect(status.out).toContain('+ ui.navigate');
       expect(status.out).toContain('+ ui.tasks.highlight');
+    });
+  }, 240_000);
+
+  it('curating-glirastes-chat-interactions derives, confirms and checks', async () => {
+    const fixture = await nextApp({
+      'src/components/bridge.tsx': BRIDGE,
+      'src/app/tasks/page.tsx': TASKS_PAGE,
+    }, { sources: ['next-app', 'next-pages', 'url-filters', 'react-actions'] });
+    await scenario('curating-glirastes-chat-interactions', fixture, async (s) => {
+      expect((await s.run('glirastes tools refresh')).code).toBe(0);
+      const module = await fixture.read(DEFAULT_GENERATED_MODULE);
+      expect(module).toContain('export const chatInteractions');
+      expect(module).toContain('"id": "open.tasks"');
+      expect((await s.run('glirastes tools status')).out).toContain('+ ui.navigate');
+      expect((await s.run('glirastes tools policy confirm <tool>', { tool: 'tasks.list' })).code).toBe(0);
+      expect((await s.run('glirastes tools refresh')).code).toBe(0);
+      expect((await s.run('glirastes tools check')).out).toContain('Tool outputs match the code.');
     });
   }, 240_000);
 

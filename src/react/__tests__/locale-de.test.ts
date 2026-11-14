@@ -11,7 +11,7 @@ describe('deChatLocale', () => {
   });
 
   it('keeps the placeholders of the default texts', () => {
-    const placeholders = (text: string) => (text.match(/\{\w+\}/g) ?? []).sort();
+    const placeholders = (text: string | undefined) => (text?.match(/\{\w+\}/g) ?? []).sort();
     for (const [key, text] of Object.entries(DEFAULT_LOCALE)) {
       expect(placeholders(deChatLocale[key as keyof typeof deChatLocale]), key).toEqual(placeholders(text));
     }

@@ -112,6 +112,34 @@ describe('bundled local-first setup workflow', () => {
     expect(source).not.toContain('| `primary`, `primarySoft` |');
   });
 
+  it('teaches curating chat interactions end to end', async () => {
+    const source = await readFile(join(findPackageSkillsDir(), 'curating-glirastes-chat-interactions/SKILL.md'), 'utf8');
+    const flat = source.replace(/\s+/g, ' ');
+    for (const text of [
+      'glirastes tools refresh', 'chatInteractions', '.glirastes/chat-interactions.json', 'defineChatEntity', 'defineChatCommand',
+      'createChatInteractionsHandler', '`managedRuntime` once as a `const`', 'useChatComposer', 'renderActions', 'stripSegments',
+      'onSearch', '`hidden` is no permission', 'without a model call', 'ArrowRight', 'role',
+    ]) {
+      expect(flat, text).toContain(text);
+    }
+    // Blocks sit inside a numbered step, so their indentation is removed before parsing.
+    const examples = [...source.matchAll(/^( *)```json\n([\s\S]*?)^\1```/gm)]
+      .map((match) => match[2]!.split('\n').map((line) => line.slice(match[1]!.length)).join('\n'))
+      .filter((block) => block.startsWith('{\n  "schemaVersion": 1'));
+    expect(examples.length).toBeGreaterThan(0);
+    for (const example of examples) {
+      expect(() => parseChatInteractionOverrides(JSON.parse(example))).not.toThrow();
+    }
+  });
+
+  it('lists eight skills with the curating skill in both READMEs', async () => {
+    for (const path of [join(findPackageSkillsDir(), 'README.md'), join(findPackageSkillsDir(), '../README.md')]) {
+      const readme = await readFile(path, 'utf8');
+      expect(readme, path).toContain('eight skills');
+      expect(readme, path).toContain('curating-glirastes-chat-interactions');
+    }
+  });
+
   it('teaches chat entities and commands in the chat UI and the describing skill', async () => {
     const chatUi = await readFile(join(findPackageSkillsDir(), 'building-glirastes-chat-ui/SKILL.md'), 'utf8');
     for (const text of ['docs/chat-interactions.md', 'createChatInteractionsHandler', 'useChatInteractionsData', 'directCommands: false']) {
@@ -121,13 +149,17 @@ describe('bundled local-first setup workflow', () => {
     for (const text of ['open.<path>', 'filter.<view>', 'ArrowRight', 'Escape', 'not shipped in the package']) {
       expect(chatUi).toContain(text);
     }
-    // Only a hand-composed RichMentionInput takes DropdownItem; VercelAiChat and MentionInput do not forward it.
-    expect(chatUi).toMatch(/hand-composed\s+`RichMentionInput`/);
-    expect(chatUi).not.toMatch(/custom `components\.DropdownItem`/);
+    // The suggestion item and the composer logic reach custom inputs; review and overrides live in the curating skill.
+    for (const text of ['curating-glirastes-chat-interactions', 'useChatComposer', 'components.MentionDropdownItem', 'renderActions', 'optionProps']) {
+      expect(chatUi).toContain(text);
+    }
+    expect(chatUi).not.toContain('Labels are English words built from identifiers');
     expect(chatUi).toMatch(/`managedRuntime` once as a `const`/);
     const describing = await readFile(join(findPackageSkillsDir(), 'describing-glirastes-tools/SKILL.md'), 'utf8');
     expect(describing).toContain('.glirastes/chat-interactions.json');
     expect(describing).toContain('`hidden` is no permission');
+    expect(describing).toContain('curating-glirastes-chat-interactions');
+    expect(describing.replace(/\s+/g, ' ')).toContain('title becomes the default label');
     // A refresh can stop deriving an id: the chat route ignores the patch with a warning, so it is removed, not kept.
     const flat = describing.replace(/\s+/g, ' ');
     for (const text of ['is stale', 'Remove stale patches', 'after every refresh', 'logs one console warning']) {
