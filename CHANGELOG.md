@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0-chat.2] - 2026-11-14
+
+Prerelease on the `next` dist-tag.
+
 ### Added
 
 - Chat attachments (images and PDFs), off by default. `createAiChatHandler({ attachments: { enabled: true } })` accepts file parts (`maxFiles` 10, `maxFileBytes` 20 MB decoded, png/jpeg/webp/gif/pdf, `data:` URLs only unless `allowRemoteUrls`), checks type, size and magic bytes of every file in the history (400, 413 `attachment_too_large`, 415) and raises the default `maxBodyBytes` from 1 MB to 50 MB. With `piiShield` it also needs `allowWithPiiShield: true`: file parts pass through byte-identical and never reach the PII detector.
@@ -639,7 +643,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.1...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.2...HEAD
+[0.8.0-chat.2]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.1...v0.8.0-chat.2
 [0.8.0-chat.1]: https://github.com/chainmatics/glirastes/compare/v0.8.0-chat.0...v0.8.0-chat.1
 [0.8.0-chat.0]: https://github.com/chainmatics/glirastes/compare/v0.7.1...v0.8.0-chat.0
 [0.7.1]: https://github.com/chainmatics/glirastes/compare/v0.7.0...v0.7.1
