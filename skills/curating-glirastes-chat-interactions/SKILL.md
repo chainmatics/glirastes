@@ -63,7 +63,8 @@ identifiers ("Open task create dialog", German "Task create dialog öffnen").
      cards. Use an override only for what a title cannot say: a short
      context-menu label ("Erledigen" inside the task menu), `keywords`,
      `icon`.
-   - *Destructive actions.* They are listed last. Each must answer with the
+   - *Destructive actions.* They are listed last, also after actions you
+     add; mark an added one `destructive: true` to keep it there. Each must answer with the
      approval card: check `requiresApproval` in `glirastes tools status` and
      run `glirastes tools policy confirm <tool>` where it is off. Hide
      irreversible ones the chat should not offer at all.

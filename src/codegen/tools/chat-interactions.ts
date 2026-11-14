@@ -313,7 +313,7 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
   const addAction = (type: string, action: ChatEntityActionData, isDestructive = false) => {
     if (!carries([{ type, label: type, actions: [action] }], [])) return;
     const list = actions.get(type) ?? [];
-    if (!list.some((entry) => entry.id === action.id)) list.push(action);
+    if (!list.some((entry) => entry.id === action.id)) list.push(isDestructive ? { ...action, destructive: true } : action);
     if (isDestructive) destructive.add(action.id);
     actions.set(type, list);
   };

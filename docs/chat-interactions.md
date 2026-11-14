@@ -27,7 +27,8 @@ another type is not offered at all.
 Only enabled tools count: a disabled, `needs_attention` or excluded tool
 derives nothing. Client actions of the chat itself (`ai-chat.*`, `chat.*`,
 `assistant.*`, `command-palette.*`, `command-menu.*`, `cmdk.*`) are left out,
-and destructive actions come last in an entity's menu.
+and destructive actions (marked `destructive: true`) come last in an entity's
+menu, also after actions the overrides add.
 
 Labels come from each tool's reviewed `title` in
 `.glirastes/tool-semantics.json`, entity labels from its presentation noun

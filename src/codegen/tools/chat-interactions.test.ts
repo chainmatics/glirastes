@@ -239,6 +239,8 @@ describe('deriveChatInteractions', () => {
     });
     expect(actions.map((action) => action.id))
       .toEqual(['task.tasks.addSubtask', 'task.tasksAttachable.list', 'task.tasks.delete', 'task.tasks.permanentDelete']);
+    expect(actions.filter((action) => action.destructive).map((action) => action.id))
+      .toEqual(['task.tasks.delete', 'task.tasks.permanentDelete']);
     expect(Object.fromEntries(derived.commands.map((command) => [command.id, command.label]))).toEqual({
       'taskCreateDialog.open': { en: 'Open create-task dialog', de: 'Dialog Aufgabe anlegen' },
       'tasks.view.switch': { en: 'Switch tasks view', de: 'Tasks view wechseln' },
