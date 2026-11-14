@@ -198,16 +198,21 @@ function carries(entities: ReadonlyArray<ChatEntityData>, commands: ReadonlyArra
 interface SearchCandidate {
   type: string;
   entity: ChatEntityData;
+  /** Path whose item endpoints become actions (`/api/users` for `/api/users/search`). */
+  collection: string;
 }
 
 /** A read endpoint with a search parameter whose output is a list of objects with an id and a label. */
 function searchEntity(tool: BoundTool): SearchCandidate | undefined {
   if ((tool.method !== 'GET' && tool.method !== 'HEAD') || !tool.path || tool.path.includes(':')) return undefined;
   const query = new Set(tool.contract.params.query);
-  const queryParam = SEARCH_PARAMS.find((name) => query.has(name));
-  if (!queryParam) return undefined;
   const segments = staticSegments(tool.path);
-  const type = entityType(segments.at(-1) ?? '');
+  const isSearchPath = segments.at(-1) === 'search';
+  if (isSearchPath && segments.length < 2) return undefined;
+  const queryParam = (isSearchPath ? [...SEARCH_PARAMS, 'name'] : SEARCH_PARAMS).find((name) => query.has(name));
+  if (!queryParam) return undefined;
+  const listName = segments.at(isSearchPath ? -2 : -1) ?? '';
+  const type = entityType(listName);
   if (!type) return undefined;
   const output = tool.contract.output;
   let itemsPath: string[] | undefined;
@@ -218,7 +223,7 @@ function searchEntity(tool: BoundTool): SearchCandidate | undefined {
   } else {
     const lists = Object.entries(properties(output))
       .filter(([name, schema]) => FIELD.test(name) && isRecord(schema) && schema.type === 'array' && isRecord(schema.items));
-    const preferred = lists.find(([name]) => name === segments.at(-1)) ?? (lists.length === 1 ? lists[0] : undefined);
+    const preferred = lists.find(([name]) => name === listName) ?? (lists.length === 1 ? lists[0] : undefined);
     if (preferred) {
       itemsPath = [preferred[0]];
       items = (preferred[1] as Record<string, unknown>).items as JsonSchemaLike;
@@ -247,7 +252,8 @@ function searchEntity(tool: BoundTool): SearchCandidate | undefined {
       ...(limitParam ? { limitParam } : {}),
     },
   };
-  return carries([entity], []) ? { type, entity } : undefined;
+  const collection = isSearchPath ? tool.path.replace(/\/search\/?$/, '') : tool.path;
+  return carries([entity], []) ? { type, entity, collection } : undefined;
 }
 
 /**
@@ -311,8 +317,7 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
     if (isDestructive) destructive.add(action.id);
     actions.set(type, list);
   };
-  for (const { type, entity } of searches.values()) {
-    const collection = entity.search!.path;
+  for (const { type, entity, collection } of searches.values()) {
     for (const tool of tools) {
       if (!tool.path || tool.contract.uiAction) continue;
       const match = new RegExp(`^${collection.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/:([A-Za-z_][A-Za-z0-9_]*)(?:/([A-Za-z0-9_-]+))?$`)

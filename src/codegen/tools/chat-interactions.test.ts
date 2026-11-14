@@ -119,6 +119,26 @@ const TITLED: Spec[] = [
   { ...SPECS[9]!, title: { de: 'Aufgaben filtern' } },
 ];
 
+const USERS: Spec[] = [
+  {
+    name: 'users.search', method: 'GET', path: '/api/users/search',
+    input: object({ email: STRING, name: STRING, teamId: STRING }), params: { path: [], query: ['email', 'name', 'teamId'], body: [] },
+    output: object({
+      users: { type: 'array', items: object({ id: STRING, displayName: STRING, email: STRING, role: STRING }) },
+      count: { type: 'number' },
+    }),
+  },
+  {
+    name: 'users.updateRole', method: 'PATCH', path: '/api/users/:id/role',
+    input: object({ id: STRING, role: { type: 'string', enum: ['admin', 'member'] } }, ['id', 'role']),
+    params: { path: ['id'], query: [], body: ['role'] },
+  },
+  {
+    name: 'users.delete', method: 'DELETE', path: '/api/users/:id', riskClass: 'delete',
+    input: object({ id: STRING }, ['id']), params: { path: ['id'], query: [], body: [] },
+  },
+];
+
 function catalog(specs: ReadonlyArray<Spec>) {
   const artifact = AppSetupArtifactSchema.parse({
     schemaVersion: 1, artifactId: id(9001), runId: id(9002), appId: id(9003), discoveryDigest: digest('D'),
@@ -270,6 +290,45 @@ describe('deriveChatInteractions', () => {
     expect(merged.commands.map((command) => command.id)).toEqual(['aiChat.open']);
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it('derives an entity from a search endpoint and hangs item actions on its collection', () => {
+    const derived = deriveChatInteractions(catalog(USERS));
+    expect(derived.entities).toHaveLength(1);
+    expect(derived.entities[0]!.type).toBe('user');
+    expect(derived.entities[0]!.search).toEqual({
+      tool: 'users.search', path: '/api/users/search', queryParam: 'name', itemsPath: ['users'],
+      idField: 'id', labelField: 'displayName', descriptionField: 'email',
+    });
+    expect(derived.entities[0]!.actions!.map((action) => action.id)).toEqual(['user.users.updateRole', 'user.users.delete']);
+  });
+
+  it('accepts name as a search parameter only on a search endpoint', () => {
+    const derived = deriveChatInteractions(catalog([{
+      name: 'reports.list', method: 'GET', path: '/api/reports',
+      input: object({ name: STRING }), params: { path: [], query: ['name'], body: [] },
+      output: object({ reports: { type: 'array', items: object({ id: STRING, title: STRING }) } }),
+    }]));
+    expect(derived.entities).toEqual([]);
+  });
+
+  it('prefers the collection search over a search endpoint of the same type', () => {
+    const collection: Spec = {
+      name: 'users.list', method: 'GET', path: '/api/users',
+      input: object({ q: STRING }), params: { path: [], query: ['q'], body: [] },
+      output: { type: 'array', items: object({ id: STRING, displayName: STRING }) },
+    };
+    const derived = deriveChatInteractions(catalog([USERS[0]!, collection]));
+    expect(derived.entities.map((entity) => entity.search!.path)).toEqual(['/api/users']);
+  });
+
+  it('derives nothing from a bare /search path', () => {
+    const derived = deriveChatInteractions(catalog([{
+      name: 'search.list', method: 'GET', path: '/search',
+      input: object({ q: STRING }), params: { path: [], query: ['q'], body: [] },
+      output: { type: 'array', items: object({ id: STRING, title: STRING }) },
+    }]));
+    expect(derived.entities).toEqual([]);
   });
 
   it('is a pure function of the catalog, whatever the input order', () => {
