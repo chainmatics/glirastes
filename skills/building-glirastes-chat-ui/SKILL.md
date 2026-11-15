@@ -32,7 +32,7 @@ chat route uses the app's own model access.
    app wants it, the chat docked on the right or detached as a window. The
    bare floating bubble is only for apps without a layout of their own.
 2. Register client actions with `useAiClientAction` where their state lives,
-   with a payload contract, and mount the navigation bridge
+   with a payload contract (and `{ route }` when that is one page), and mount the navigation bridge
    (`useGlirastesNavigationBridge`) once. Run `glirastes tools refresh` and
    check with `glirastes tools status` that the UI tools are active.
 3. Serve the derived `@` entities and `/` commands next to the chat route and
@@ -124,7 +124,12 @@ Generated navigation (`ui.navigate`) and filter (`ui.filter.<view>`) tools run
 through `useGlirastesNavigationBridge({ push })`; without the bridge they stay
 disabled. A client action becomes the tool `ui.<actionId>`; pass its payload
 contract as the third argument of `useAiClientAction` so the payload is typed
-and checked before the handler runs.
+and checked before the handler runs. An action that lives on one page takes
+that page's path as fourth argument, `{ route: '/templates' }`, in the page
+component: from another page the chat navigates there first and runs the
+action once it is registered. A handler returns `false` when it could not do
+its work, so the chat does not report it as done. Never register a global
+handler that only fires a window event for a listener on one page.
 
 ## `@` entities and `/` commands
 

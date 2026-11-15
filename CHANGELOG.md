@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-15
+
+### Added
+
+- Page-bound client actions: `useAiClientAction(actionId, handler, contract, { route: '/templates' })` and `registerAiClientAction(actionId, handler, contract, { route })` say which page registers the action. `glirastes tools refresh` reads the literal route into the tool's UI action (`{ kind: 'client-action', actionId, route }`); tools without a route keep their contract byte for byte.
+- When the open page has no handler for a client action with a route, the generated tool no longer refuses: it returns the action with its `route`, and the browser (`dispatchToolResultUiActions`, used by the React chat) opens the route through the navigation bridge, waits up to 5 s (`routeTimeoutMs`) for the page to register the action and then runs it. If it never registers, the dispatch fails with a clear error instead of reporting success.
+- `UiActionBus.waitForHandler(actionId, timeoutMs)`. A bus of an older SDK copy without it is polled through `registeredActionIds()`.
+- A client action handler may return `false` to report that it did not carry out the action; the dispatch then fails with `UI action <id> was not executed`. Types `ClientActionHandler`, `DispatchToolResultOptions` and `AiClientActionOptions`.
+- Findings `ui-action-route-invalid` and `ui-action-route-conflict` (needs attention: a route that is not a literal static app path, or registrations of one action with different routes) and the warning `ui-action-indirect` (a handler that only dispatches a window event and has no route, so it works only where a listener is mounted).
+
 ## [0.10.1] - 2026-11-15
 
 ### Fixed
@@ -655,7 +665,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/chainmatics/glirastes/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/chainmatics/glirastes/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/chainmatics/glirastes/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/chainmatics/glirastes/compare/v0.8.0...v0.9.0

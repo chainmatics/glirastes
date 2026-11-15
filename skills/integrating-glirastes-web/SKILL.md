@@ -177,6 +177,15 @@ file alone does not prove that every endpoint becomes an enabled tool.
      z.object({ taskId: z.string() }).strict());
    ```
 
+   Register a client action in the module of the page or component that owns
+   its effect. When that lives on one page, pass the page path as
+   `{ route: '/reports' }` in the fourth argument (options): from another
+   page the chat opens the route through the navigation bridge, waits for the
+   page to register the action, then runs it. Do not relay a window event
+   from a global registration to a listener on one page
+   (`ui-action-indirect`). A handler returns `false` when it could not do its
+   work; the dispatch then fails instead of being reported as done.
+
    Literal ids and literal filter definitions only: the generator reads them
    from code, in `.ts` modules and in the `<script lang="ts">` or
    `<script setup lang="ts">` blocks of `.vue` files (a `src` attribute is

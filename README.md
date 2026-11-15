@@ -241,8 +241,9 @@ two jobs:
 
 - Docked sidebar or floating window (`AssistantWorkspace`, `AssistantToggle`),
   themes, slots, tool result renderers and approval cards.
-- `useAiClientAction(id, handler, contract)` lets the chat drive UI state;
-  `refresh` turns each registration into a tool.
+- `useAiClientAction(id, handler, contract, { route })` lets the chat drive UI
+  state; `refresh` turns each registration into a tool. With `route` the chat
+  opens that page first when the user is elsewhere.
 - Generic `@` mentions and `/` commands derived from your tools
   ([docs/chat-interactions.md](docs/chat-interactions.md)); `useChatComposerInput`
   keeps them in a custom input.

@@ -50,7 +50,10 @@ reference until parity is proven.
    `ui.navigate` destinations through the navigation bridge; URL parameters
    become `ui.filter.<view>` through closed nuqs parsers or
    `defineQueryFilters`. Dialogs and other client actions use
-   `useAiClientAction` with a payload contract.
+   `useAiClientAction` with a payload contract, registered in the component
+   that owns the dialog or state; one that lives on one page passes
+   `{ route: '<page path>' }` as fourth argument instead of a global
+   window-event relay.
 5. Identity: run `glirastes tools refresh --adopt <inventory>` with the old
    Foundation inventory (if the app had one), so unchanged stable keys keep
    their tool ids. Renamed routes get new ids and the old ones tombstones;
