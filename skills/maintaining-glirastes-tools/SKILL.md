@@ -34,8 +34,12 @@ keeps its fallback.
 ## Workflow
 
 1. After a change to routes, pages, URL filters or client actions run
-   `glirastes tools refresh`. Read the summary: added, changed, risk raised,
-   removed, needs attention, excluded, each with its next step.
+   `glirastes tools refresh`, and also after upgrading `glirastes`: a new
+   version can add fields to the generated outputs (0.9.0 added `title` to
+   `.glirastes/tool-contracts.json`), and `glirastes tools check` reports
+   drift until the refreshed outputs are committed. Read the summary: added,
+   changed, risk raised, removed, needs attention, excluded, each with its
+   next step.
 2. Run `glirastes tools resolve --print` and work through `items`:
    - `owner: "agent"`, `target.kind: "file"`: write the `expected` entry at
      `target.key` of `target.file`. Replace every `<…>` placeholder: `model`

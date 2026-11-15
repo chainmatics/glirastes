@@ -56,8 +56,8 @@ identifiers ("Open task create dialog", German "Task create dialog öffnen").
      (delete or edit dialogs), duplicates of navigation (an app-specific
      navigate action next to `open.*`), filters of detail pages, read actions
      nobody asks for by name, and keep about five actions per entity.
-     Client actions of the chat itself (`ai-chat.*`, `chat.*`,
-     `command-palette.*`, `cmdk.*`) are already left out.
+     Client actions of the chat itself (`ai-chat.*`, `chat.*`, `assistant.*`,
+     `command-palette.*`, `command-menu.*`, `cmdk.*`) are already left out.
    - *Poor labels.* First fix the tool's `title` in
      `.glirastes/tool-semantics.json`; it feeds the chat label and the tool
      cards. Use an override only for what a title cannot say: a short

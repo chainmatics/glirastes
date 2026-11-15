@@ -90,7 +90,21 @@ second, hand-maintained catalogue.
    descriptions, usage hints and synonyms (`describing-glirastes-tools`),
    `intentRouting: { maxStartTools: 12, alwaysAvailable: ['ui_navigate'] }`,
    or `examples` per tool in `toolSemantics`. A custom `intentRouter`
-   replaces it; `intentRouting: false` starts every turn with all tools. With metrics, an endpoint that
+   replaces it; `intentRouting: false` starts every turn with all tools.
+   Further defaults, each with an opt-out: `history` sends earlier turns
+   compacted (`{ maxTurns, toolTurns, maxTokens, maxItems, maxStringLength }`,
+   `false` for the flat slice), `promptCaching` adds cache breakpoints for
+   `@ai-sdk/anthropic` and `@openrouter/ai-sdk-provider`, and `hideIds`
+   keeps technical ids out of answers: the prompt forbids them and the stream
+   replaces an id the model writes anyway with the label its tool result gave
+   it, or drops it. Keep `hideIds` on; a test or a chat that must show raw
+   ids sets `hideIds: false`. A custom `streamHandler` gets `hideIds` in its
+   context and must apply it itself: append `HIDE_IDS_PROMPT`, fill an
+   `IdLabels` map with `collectIdLabels(messages, labels)` and pass
+   `createHideIdsTransform(labels)` to `streamText` as
+   `experimental_transform` (all from `glirastes/server/nextjs`). A turn
+   without visible output shows a short fallback text and is reported as
+   `model_error`. With metrics, an endpoint that
    refuses a call its schema accepted (400 or 422) is reported as
    `tool_contract_rejected`, without content.
    Image and PDF attachments stay off until the developer asks for them:
@@ -145,8 +159,8 @@ second, hand-maintained catalogue.
    top bar. The chat then docks on the right or detaches as a window.
 8. Run `glirastes tools refresh`, the work lists of `setting-up-glirastes`,
    `glirastes tools check` and `glirastes doctor`, then the real chat test.
-   Connecting is optional: `glirastes connect --base-url <url>`, then
-   `glirastes sync` uploads the technical result.
+   Connecting is optional and only in Platform mode (`setting-up-glirastes`):
+   `glirastes connect`, then `glirastes sync` uploads the technical result.
 
 ## Commands
 
