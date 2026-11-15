@@ -7,8 +7,11 @@ high availability or automatic continuation of a disconnected stream.
 
 The image runs Node 22 as UID/GID 1000 (`node`). Base images are digest-pinned and
 Bun installs the committed lockfile. Build and runtime use the same SDK version.
-The image includes the OpenAI-compatible provider and artifact-build dependencies;
-customers do not need to write Node server code or maintain a Node package.
+The image includes production dependencies, the exact locked OpenAI-compatible
+provider and TypeScript (a production dependency used by artifact generation).
+Framework/test peers such as Next.js, React and Vitest are omitted. The provider
+imports are checked during the image build against the production dependency
+closure. Customers need no Node server code or customer-maintained Node package.
 
 ## Build and inspect locally
 

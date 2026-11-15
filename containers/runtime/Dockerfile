@@ -5,14 +5,27 @@ FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /opt/glirastes
 COPY package.json bun.lock ./
-# Install from the committed lock. The image deliberately includes the optional
-# OpenAI-compatible provider and build dependencies: the same image builds the
-# customer's data-only artifacts without a customer-maintained Node project.
+# Compile the SDK using the complete committed development lock.
 RUN bun install --frozen-lockfile
 COPY tsconfig.json tsconfig.cjs.json ./
 COPY src ./src
 COPY scripts ./scripts
 RUN bun run build
+
+# Install a clean production closure. --production alone still installs the
+# optional framework/test peers, so omit peers explicitly. TypeScript is a real
+# SDK dependency: the same image must still build customer JSON artifacts.
+FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS runtime-deps
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+WORKDIR /opt/glirastes
+COPY package.json bun.lock ./
+RUN bun install --production --omit peer --frozen-lockfile --ignore-scripts
+# The configured host needs this optional SDK peer. Copy its exact locked
+# package, not an independently resolved version; its current provider/provider-
+# utils dependencies are already in ai's production closure. Import-check that
+# assumption on every build so future provider dependency changes fail visibly.
+COPY --from=build /opt/glirastes/node_modules/@ai-sdk/openai ./node_modules/@ai-sdk/openai
+RUN node --input-type=module -e "await import('@ai-sdk/openai'); await import('pg'); await import('typescript');"
 
 FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS runtime
 LABEL org.opencontainers.image.title="Glirastes Runtime" \
@@ -22,7 +35,7 @@ LABEL org.opencontainers.image.title="Glirastes Runtime" \
 ENV NODE_ENV=production
 WORKDIR /opt/glirastes
 COPY --from=build /opt/glirastes/package.json ./package.json
-COPY --from=build /opt/glirastes/node_modules ./node_modules
+COPY --from=runtime-deps /opt/glirastes/node_modules ./node_modules
 COPY --from=build /opt/glirastes/dist ./dist
 COPY skills ./skills
 COPY LICENSE NOTICE ./
