@@ -101,7 +101,7 @@ function candidates(name: string): string[] {
 
 function mentioned(text: string, name: string): boolean {
   return candidates(name).some((word) => (
-    new RegExp(`(?<![A-Za-z0-9_$])${word.replace(/[$]/g, '\\$')}(?![A-Za-z0-9_$])`).test(text)
+    new RegExp(`(?<![A-Za-z0-9_$])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_$])`).test(text)
   ));
 }
 
