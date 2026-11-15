@@ -96,7 +96,7 @@ export function ChatEntityLinksProvider({
 
   const value = useMemo<ChatEntityLinks>(() => {
     const matchers = config?.matchers ?? [];
-    const keyOf = (segment: { matcher: number; text: string }) => `${segment.matcher}\u0000${segment.text}`;
+    const keyOf = (segment: { matcher: number; text: string; match?: string }) => `${segment.matcher}\u0000${segment.match ?? segment.text}`;
     const links: ChatEntityLinks = {
       enabled: !!config,
       split: (text) => (config
@@ -108,13 +108,14 @@ export function ChatEntityLinksProvider({
       cachedMatch: (segment) => settled.current.get(keyOf(segment)),
       resolveMatch(segment) {
         const key = keyOf(segment);
+        const hit = segment.match ?? segment.text;
         let pending = cache.current.get(key);
         if (!pending) {
           const matcher = matchers[segment.matcher];
           pending = Promise.resolve()
-            .then(() => (matcher?.resolve ? matcher.resolve(segment.text) : { id: segment.text, label: segment.text }))
+            .then(() => (matcher?.resolve ? matcher.resolve(hit) : { id: hit, label: hit }))
             .then((found) => (found && typeof found.id === 'string' && found.id
-              ? { type: segment.type, id: found.id, label: typeof found.label === 'string' && found.label ? found.label : segment.text }
+              ? { type: segment.type, id: found.id, label: typeof found.label === 'string' && found.label ? found.label : hit }
               : undefined))
             .catch(() => {
               cache.current.delete(key);

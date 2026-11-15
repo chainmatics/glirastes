@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-15
+
+### Fixed
+
+- Entity chips: a matcher hit followed by a known name of the conversation ("MAR-5 Flyer drucken", also with `:` or a dash between) is one chip instead of two. The matcher's `resolve` still gets only the hit; the match segment carries it as `match`.
+
 ## [0.10.0] - 2026-11-14
 
 ### Added
@@ -649,7 +655,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/chainmatics/glirastes/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/chainmatics/glirastes/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/chainmatics/glirastes/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/chainmatics/glirastes/compare/v0.7.1...v0.8.0
