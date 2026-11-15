@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-15
+
+### Added
+
+- Installed skills keep themselves current: `glirastes tools refresh` (write mode, so also the app's `predev`/`prebuild`) brings every install recorded in `.glirastes/installed-skills.json` up to the running SDK without prompting. Unedited copies are replaced, new skills of the installed parts are added, skills the SDK no longer ships are removed when unedited, and the manifest gets the new `sdkVersion` and hashes. Symlinked installs are relinked, the install's target and mode are kept. Edited copies are never overwritten; the refresh prints one line naming them and the command that replaces them. Without a manifest nothing happens. Summary line: `Skills updated to 0.12.0: 2 refreshed, 1 edited copy kept (claude: …).`
+- Opt-out: `glirastes tools refresh --no-skills` or `GLIRASTES_SKILLS_AUTO_UPDATE=0` (also `false`, `off`, `no`).
+- `glirastes tools check` fails while unedited installed skills or the manifest are behind the SDK (refresh would rewrite them, like stale tool outputs) and only warns about edited copies and machine-local symlinks. `--no-skills`, the opt-out variable and `--integrity-only` skip the skills.
+- `glirastes doctor` shows "Installed agent skills" for apps with a skills manifest and warns when they are behind.
+- `tests/skill-coverage.test.ts`: every named export of the public entry points and every `AiChatHandlerConfig` option appears in a shipped skill or in `tests/skill-coverage-allowlist.json` with a reason.
+- Skills: `integrating-glirastes-nextjs/references/handler-options.md` lists every `createAiChatHandler` option; `building-glirastes-chat-ui/references/hooks-and-building-blocks.md` covers the headless hooks, `useVercelAiChatTransport`, tool renderers, the REST session bridge and the theme helpers; `integrating-glirastes-web` names the embed element's `config` property and the navigation bridge's safety check.
+
 ## [0.11.1] - 2026-11-15
 
 ### Changed
@@ -676,7 +687,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/chainmatics/glirastes/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/chainmatics/glirastes/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/chainmatics/glirastes/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/chainmatics/glirastes/compare/v0.10.0...v0.10.1
