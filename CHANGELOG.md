@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-15
+
 ### Changed
 
 - Skills catch up with 0.6.0 to 0.11.0: `integrating-glirastes-nextjs` and `integrating-glirastes-web` cover the `history`, `promptCaching` and `hideIds` defaults (and how a custom `streamHandler` applies `createHideIdsTransform`), and `glirastes connect` without `--base-url`. `building-glirastes-chat-ui` gets `references/composer-chips-attachments.md` (the `useChatComposer` API, `useOptionalChatComposer`, `onOpenRequest`, `entityLinks` options with trailing-name chips and `useChatEntityLinks` for a custom `Markdown` slot, attachment limits and error codes, `dispatchToolResultUiActions` for a chat without the SDK provider), since `docs/` is not in the package.
@@ -674,7 +676,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/chainmatics/glirastes/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/chainmatics/glirastes/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/chainmatics/glirastes/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/chainmatics/glirastes/compare/v0.9.0...v0.10.0
