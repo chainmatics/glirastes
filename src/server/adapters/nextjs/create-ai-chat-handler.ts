@@ -554,6 +554,9 @@ async function defaultStreamHandler(
 
   let providerErrorReported = false;
   const stream = createUIMessageStream({
+    // Approval responses continue the last assistant message instead of appending
+    // another snapshot with the same tool call IDs.
+    originalMessages: ctx.messages as UIMessage[],
     // A turn can also fail outside the provider call, e.g. on a model object
     // from an unsupported AI SDK version. The client gets the generic text,
     // the app's error callback the cause.

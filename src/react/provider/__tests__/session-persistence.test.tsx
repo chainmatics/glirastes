@@ -6,6 +6,7 @@ import type { ChatMessage, ChatTransport, SessionConfig } from '../../types.js';
 import { AiChatProvider } from '../ai-chat-provider.js';
 import { useChatContext } from '../chat-context.js';
 import { SessionSwitcher } from '../../components/session-switcher.js';
+import { createLocalSessionStore } from '../../utils/local-session-store.js';
 import { ChatInput } from '../../components/chat-input.js';
 
 const history = (id: string): ChatMessage[] => [{
@@ -43,6 +44,24 @@ function Harness({ session, status = 'ready', onSend = async () => {}, composer 
 
 describe('session persistence ownership', () => {
   afterEach(cleanup);
+
+  it('restores the last selection with the actual browser store after a provider remount', async () => {
+    const data = new Map<string, string>();
+    const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } };
+    const makeStore = () => createLocalSessionStore({ storageKey: 'test:selection', storage, createId: () => 'new-chat' });
+    const store = makeStore();
+    await store.save!('default', history('old'));
+    const first = render(<Harness session={store} />);
+    await screen.findByText('old', { selector: '[data-testid="history"]' });
+    fireEvent.click(screen.getByText('New'));
+    await waitFor(() => expect(screen.getByTestId('session').textContent).toBe('new-chat'));
+    await waitFor(() => expect(screen.getByTestId('history').textContent).toBe(''));
+    first.unmount();
+    await store.save!('new-chat', history('new-message'));
+    render(<Harness session={makeStore()} />);
+    await waitFor(() => expect(screen.getByTestId('history').textContent).toBe('new-message'));
+    expect(screen.getByTestId('session').textContent).toBe('new-chat');
+  });
 
   it('never writes the old history into the destination while its load is pending', async () => {
     const pending = deferred<ChatMessage[]>();

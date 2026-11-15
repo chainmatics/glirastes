@@ -46,6 +46,19 @@ describe('chats kept in the browser', () => {
     expect(await reloaded.load!('unknown')).toBeNull();
   });
 
+  it('restores the selected chat, including an empty one, and falls back after deletion', async () => {
+    const { storage } = memory();
+    const sessions = store(storage);
+    const created = await sessions.create!();
+    sessions.onActiveIdChange!(created.id);
+    expect(store(storage).defaultActiveId).toBe(created.id);
+    sessions.onActiveIdChange!('default');
+    expect(store(storage).defaultActiveId).toBe('default');
+    sessions.onActiveIdChange!(created.id);
+    await sessions.remove!(created.id);
+    expect(store(storage).defaultActiveId).toBe('default');
+  });
+
   it('names a chat after its first question while it still has the default name', async () => {
     const sessions = store();
     await sessions.save!('default', [user('Welche Aufträge sind heute offen und wem gehören sie eigentlich genau?'), assistant('Zwei.')]);

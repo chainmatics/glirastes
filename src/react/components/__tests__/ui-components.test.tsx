@@ -234,7 +234,7 @@ describe('Glirastes UI parity components', () => {
 
     await waitFor(() => {
       expect(componentSpies.createSession)
-        .toHaveBeenCalledWith({ title: 'Neuer Chat' });
+        .toHaveBeenCalledWith();
     });
   });
 

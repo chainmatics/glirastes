@@ -132,7 +132,7 @@ describe('uiActionToolToTool', () => {
     });
     const highlight = uiActionToolToTool({
       id: 'ui.tasks.highlight', toolName: 'ui_tasks_highlight', description: 'Highlight a task.',
-      inputSchema: anyObject, needsApproval: false, action: { kind: 'client-action', actionId: 'tasks.highlight' },
+      inputSchema: anyObject, needsApproval: false, action: { kind: 'client-action', actionId: 'tasks.highlight', route: '/tasks' },
     });
     const schema = createUiActionSchema();
     for (const result of [
