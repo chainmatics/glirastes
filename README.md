@@ -18,7 +18,7 @@
 <p align="center">
   <a href="https://glirastes.io"><b>Website</b></a> ·
   <a href="#quickstart-nextjs-app-router"><b>Quickstart</b></a> ·
-  <a href="docs/"><b>Docs</b></a> ·
+  <a href="https://glirastes.io/docs"><b>Documentation</b></a> ·
   <a href="skills/"><b>Skills</b></a> ·
   <a href="CHANGELOG.md"><b>Changelog</b></a>
 </p>
@@ -428,6 +428,11 @@ frameworks can use the conditional generic paths (web component, OpenAPI and
 configured runtime service) described there; this does not imply complete stack support.
 
 ## Docs
+
+The [developer documentation at glirastes.io/docs](https://glirastes.io/docs)
+provides a guided start, searchable integration topics and copyable examples.
+Preview guides are marked explicitly; check their release status against your
+installed SDK version. The versioned source guides remain available below.
 
 - [Support matrix](docs/support-matrix.md)
 - [Runtime container architecture and operations](docs/runtime-container.md)
