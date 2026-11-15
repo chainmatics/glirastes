@@ -94,6 +94,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   const maxSessions = Math.max(1, options.maxSessions ?? 30);
   const now = options.now ?? (() => Date.now());
   const createId = options.createId ?? randomId;
+  const activeKey = `${options.storageKey}:active`;
   const indexKey = `${options.storageKey}:sessions`;
   const messagesKey = (id: string) => `${options.storageKey}:messages:${id}`;
   type Entry = SessionSummary & { createdAt: number; updatedAt: number; named?: boolean };
@@ -144,6 +145,13 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   const summary = ({ named: _named, ...entry }: Entry): SessionSummary => entry;
 
   return {
+    get defaultActiveId() {
+      const active = read(activeKey);
+      const list = entries();
+      return typeof active === 'string' && list.some((entry) => entry.id === active)
+        ? active : list[0]!.id;
+    },
+    onActiveIdChange(id) { write(activeKey, id); },
     async list() {
       return persist(entries()).map(summary);
     },

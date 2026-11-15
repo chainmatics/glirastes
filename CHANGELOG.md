@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-15
+
+### Fixed
+
+- Approval continuations retain the original assistant message ID, so completed tool calls are not duplicated and later turns still pass history validation. Browser-stored histories from older versions recover matching adjacent continuation snapshots without changing server approval validation or repairing conflicting calls.
+- Local chat stores remember the selected session across reloads, including empty chats. New chats keep automatic first-message titles instead of treating the placeholder as a custom title.
+- Generated client actions retain their optional app route through UI-action validation, allowing dialogs on other pages to open through the browser bridge.
+
 ## [0.13.0] - 2026-11-15
 
 ### Added
@@ -703,7 +711,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/chainmatics/glirastes/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/chainmatics/glirastes/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/chainmatics/glirastes/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/chainmatics/glirastes/compare/v0.11.0...v0.11.1

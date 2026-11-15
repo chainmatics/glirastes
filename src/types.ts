@@ -213,6 +213,7 @@ export function createUiActionSchema(
       type: z.literal('glirastes.action'),
       actionId: z.string().min(1).max(200),
       payload: z.record(z.string(), z.unknown()),
+      route: z.string().max(2_048).regex(/^\/(?![\/\\])[^\\\x00-\x20]*$/).optional(),
     })
     .strict();
 

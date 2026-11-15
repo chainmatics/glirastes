@@ -114,8 +114,8 @@ export function SessionSwitcher({
   const onNew = useCallback(async () => {
     if (blocked) return;
     setOpen(false);
-    await createSession({ title: locale.newChatLabel });
-  }, [createSession, locale.newChatLabel, blocked]);
+    await createSession();
+  }, [createSession, blocked]);
 
   const onPick = useCallback(
     async (id: string) => {

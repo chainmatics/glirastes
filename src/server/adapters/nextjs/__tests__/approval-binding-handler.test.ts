@@ -110,6 +110,30 @@ describe('approval binding through the chat handler', () => {
     expect(archive.mock.calls[0]![0]).toEqual({ id: 't1' });
   });
 
+  it('continues the same assistant message after approval and accepts the next turn after reload', async () => {
+    const { config, archive } = setup();
+    const fullChunks = async (response: Response) => (await response.text()).split('\n')
+      .filter((line) => line.startsWith('data: ') && line !== 'data: [DONE]')
+      .map((line) => JSON.parse(line.slice(6)) as Record<string, unknown>);
+    const handler = createAiChatHandler(config);
+    const message = await clientMessage(await fullChunks(await handler(post([user]))));
+    const approved = answered(message, true);
+    const chunks = await fullChunks(await handler(post([user, approved])));
+    expect(chunks.find((chunk) => chunk.type === 'start')?.messageId).toBe(message.id);
+    let completed: UIMessage | undefined;
+    for await (const next of readUIMessageStream({
+      message: approved,
+      stream: convertArrayToReadableStream(chunks as never),
+    })) completed = next;
+    const restored = JSON.parse(JSON.stringify(completed)) as UIMessage;
+    expect(restored.id).toBe(message.id);
+    expect(restored.parts.filter((part) => 'toolCallId' in part && part.toolCallId === 'call-1')).toHaveLength(1);
+    const response = await handler(post([user, restored, { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'Thanks' }] }]));
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(archive).toHaveBeenCalledTimes(1);
+  });
+
   it('does not run a call the user refused', async () => {
     const { config, archive } = setup();
     const { handler, message } = await firstTurn(config);

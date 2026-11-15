@@ -2,6 +2,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+/** Older streams appended a second assistant snapshot after an approval.
+ * Only discard the earlier copy when the adjacent continuation has the same
+ * input and a completed result. Conflicting calls remain for server validation.
+ * This is storage recovery, never authorization or a server-side bypass.
+ */
+function recoverContinuationSnapshots(messages: unknown[]): unknown[] {
+  return messages.map((message, index) => {
+    if (!isRecord(message) || message.role !== 'assistant' || !Array.isArray(message.parts)) return message;
+    const following: Record<string, unknown>[] = [];
+    for (let next = index + 1; next < messages.length; next++) {
+      const candidate = messages[next];
+      if (!isRecord(candidate) || candidate.role !== 'assistant') break;
+      if (Array.isArray(candidate.parts)) following.push(...candidate.parts.filter(isRecord));
+    }
+    return { ...message, parts: message.parts.filter((part) => {
+      if (!isRecord(part) || typeof part.type !== 'string' || !part.type.startsWith('tool-')
+        || typeof part.toolCallId !== 'string') return true;
+      return !following.some((next) => {
+        if (next.type !== part.type || next.toolCallId !== part.toolCallId
+          || JSON.stringify(next.input) !== JSON.stringify(part.input)) return false;
+        if (part.state === 'output-available') return next.state === 'output-available'
+          && JSON.stringify(next.output) === JSON.stringify(part.output);
+        if (part.state !== 'approval-responded' || next.state !== 'output-available') return false;
+        return isRecord(part.approval) && isRecord(next.approval)
+          && part.approval.id === next.approval.id && part.approval.approved === next.approval.approved;
+      });
+    }) };
+  });
+}
+
 /**
  * Sanitize raw stored messages to remove incomplete tool calls that would
  * cause `AI_MissingToolResultsError` when sent to the API.
@@ -25,7 +55,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * ```
  */
 export function sanitizeStoredMessages(messages: unknown[]): unknown[] {
-  return messages
+  return recoverContinuationSnapshots(messages)
     .map((message) => {
       if (!isRecord(message)) return message;
 
