@@ -63,6 +63,9 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'ui-action-id-reserved': 'Ids starting with glirastes. belong to the SDK; choose another action id.',
   'ui-control-unbound': 'Add the proposed useAiClientAction (expected.registration) in expected.file, inside the component that owns the state and stays mounted, with imports from glirastes/react and zod; keep the action id. If the chat must not set it, the developer runs glirastes tools policy exclude-control <file>#<setter> --reason <text>.',
   'ui-control-contract-mismatch': 'Restrict the payload contract of the client action to the values the setter takes, e.g. z.enum of the same const list.',
+  'ui-action-route-invalid': 'Pass route as a string literal of a static app path, e.g. { route: \'/templates\' } (one leading slash, no query, hash or :param), or remove it when the action works on every page, then run glirastes tools refresh.',
+  'ui-action-route-conflict': 'Register the action with the same route everywhere, or only in the page component that owns the effect, then run glirastes tools refresh.',
+  'ui-action-indirect': 'Register the action in the component that owns the effect (the dialog or state it changes) instead of relaying a window event; if that component lives on one page, pass its path as route, e.g. useAiClientAction(id, handler, contract, { route: \'/templates\' }).',
   'ui-action-write-unproven': 'If the handler changes data through a helper, a Server Action or a mutation hook, raise the tool: glirastes tools policy raise <tool> write. Otherwise nothing to do.',
 };
 

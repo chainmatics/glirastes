@@ -1,5 +1,6 @@
 import ts from 'typescript';
 import { canonicalJson, compareCodeUnits } from '../canonical.js';
+import { isClientActionRoute } from '../files.js';
 import { toolFinding } from '../findings.js';
 import { typeToJsonSchema } from '../output-inference.js';
 import { createAppProgram, type AppProgram } from '../program.js';
@@ -38,8 +39,15 @@ interface Registration {
   style: 'payload' | 'action';
   handler: ts.Expression | undefined;
   contract: ts.Expression | undefined;
+  /** The options argument that may carry `route`; only the payload-style registrations take one. */
+  options: ts.Expression | undefined;
   call: ts.CallExpression;
 }
+
+type RouteRead =
+  | { kind: 'none' }
+  | { kind: 'static'; route: string }
+  | { kind: 'invalid'; reason: string };
 
 function unwrap(expression: ts.Expression): ts.Expression {
   let current = expression;
@@ -53,6 +61,65 @@ function literalId(expression: ts.Expression | undefined): string | undefined {
   if (!expression) return undefined;
   const value = unwrap(expression);
   return ts.isStringLiteralLike(value) ? value.text : undefined;
+}
+
+function stringOfType(type: ts.Type): string | undefined {
+  return type.isStringLiteral() ? type.value : undefined;
+}
+
+/** `route` of the options argument: a string literal or a constant with a literal type. */
+function routeOf(app: AppProgram, raw: ts.Expression | undefined): RouteRead {
+  if (!raw) return { kind: 'none' };
+  const options = unwrap(raw);
+  let value: string | undefined;
+  if (ts.isObjectLiteralExpression(options)) {
+    const property = options.properties.find((entry): entry is ts.PropertyAssignment | ts.ShorthandPropertyAssignment => (
+      (ts.isPropertyAssignment(entry) || ts.isShorthandPropertyAssignment(entry))
+      && (ts.isIdentifier(entry.name) || ts.isStringLiteral(entry.name)) && entry.name.text === 'route'));
+    if (!property) {
+      return options.properties.some(ts.isSpreadAssignment)
+        ? { kind: 'invalid', reason: 'the options spread another object, so route cannot be read' }
+        : { kind: 'none' };
+    }
+    const expression = ts.isPropertyAssignment(property) ? property.initializer : property.name;
+    value = literalId(expression) ?? stringOfType(app.checker.getTypeAtLocation(expression));
+    if (value === undefined) return { kind: 'invalid', reason: 'route is not a string literal' };
+  } else {
+    const route = app.checker.getPropertyOfType(app.checker.getTypeAtLocation(options), 'route');
+    if (!route) return { kind: 'none' };
+    value = stringOfType(app.checker.getNonNullableType(app.checker.getTypeOfSymbolAtLocation(route, options)));
+    if (value === undefined) return { kind: 'invalid', reason: 'route is not a string literal' };
+  }
+  return isClientActionRoute(value)
+    ? { kind: 'static', route: value }
+    : { kind: 'invalid', reason: `${JSON.stringify(value)} is not a static app path (one leading slash, no query, hash or :param)` };
+}
+
+const DISPATCH_RECEIVERS: ReadonlySet<string> = new Set(['window', 'document', 'globalThis', 'self']);
+
+function isEventRelay(node: ts.Expression): boolean {
+  let expression = unwrap(node);
+  if (ts.isVoidExpression(expression)) expression = unwrap(expression.expression);
+  if (!ts.isCallExpression(expression)) return false;
+  const callee = expression.expression;
+  const dispatches = ts.isIdentifier(callee)
+    ? callee.text === 'dispatchEvent'
+    : ts.isPropertyAccessExpression(callee) && callee.name.text === 'dispatchEvent'
+      && ts.isIdentifier(callee.expression) && DISPATCH_RECEIVERS.has(callee.expression.text);
+  const event = expression.arguments[0] ? unwrap(expression.arguments[0]) : undefined;
+  return dispatches && event !== undefined && ts.isNewExpression(event)
+    && ts.isIdentifier(event.expression) && ['CustomEvent', 'Event'].includes(event.expression.text);
+}
+
+/** A handler whose whole body is `window.dispatchEvent(new CustomEvent(…))`: its effect is a listener elsewhere. */
+function onlyRelaysEvents(handler: ts.SignatureDeclaration | undefined): boolean {
+  const body = handler && 'body' in handler ? (handler as ts.FunctionLikeDeclaration).body : undefined;
+  if (!body) return false;
+  if (!ts.isBlock(body)) return isEventRelay(body);
+  return body.statements.length > 0 && body.statements.every((statement) => (
+    ts.isExpressionStatement(statement) ? isEventRelay(statement.expression)
+      : ts.isReturnStatement(statement) && statement.expression !== undefined && isEventRelay(statement.expression)
+  ));
 }
 
 function importsBus(source: ts.SourceFile): boolean {
@@ -220,14 +287,16 @@ function registrationsOf(
   const found: Array<Omit<Registration, 'actionId'> & { id: ts.Expression | undefined }> = [];
   for (const { name, call } of importedCalls(source, REGISTRATION_SPECS)) {
     found.push(name === 'useAiClientActionById'
-      ? { file, style: 'action', id: call.arguments[1], handler: call.arguments[2], contract: undefined, call }
-      : { file, style: 'payload', id: call.arguments[0], handler: call.arguments[1], contract: call.arguments[2], call });
+      ? { file, style: 'action', id: call.arguments[1], handler: call.arguments[2], contract: undefined, options: undefined, call }
+      : {
+        file, style: 'payload', id: call.arguments[0], handler: call.arguments[1], contract: call.arguments[2], options: call.arguments[3], call,
+      });
   }
   if (importsBus(source)) {
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
         && node.expression.name.text === 'subscribeById') {
-        found.push({ file, style: 'action', id: node.arguments[0], handler: node.arguments[1], contract: undefined, call: node });
+        found.push({ file, style: 'action', id: node.arguments[0], handler: node.arguments[1], contract: undefined, options: undefined, call: node });
       }
       ts.forEachChild(node, visit);
     };
@@ -324,6 +393,24 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
             ?? (handler && ts.isFunctionDeclaration(handler) ? docOf(handler.getSourceFile(), handler) : undefined);
         })
         .find((doc) => doc !== undefined);
+      const routes = registrations.map((registration) => routeOf(app, registration.options));
+      const routeKeys = [...new Set(routes.map((route) => route.kind === 'static' ? route.route : route.kind === 'none' ? '' : undefined)
+        .filter((key): key is string => key !== undefined))];
+      const invalid = routes.find((route): route is Extract<RouteRead, { kind: 'invalid' }> => route.kind === 'invalid');
+      let route: string | undefined;
+      if (invalid) {
+        toolFindings.push(toolFinding('ui-action-route-invalid', 'needs_attention', stableKey,
+          `${actionId} is registered with a route the generator cannot use: ${invalid.reason}.`));
+      } else if (routeKeys.length > 1) {
+        toolFindings.push(toolFinding('ui-action-route-conflict', 'needs_attention', stableKey,
+          `${actionId} is registered with different routes: ${routeKeys.map((key) => key === '' ? 'none' : key).sort(compareCodeUnits).join(', ')}.`));
+      } else if (routeKeys[0]) {
+        route = routeKeys[0];
+      }
+      if (handlers.some((handler, index) => routes[index]!.kind === 'none' && onlyRelaysEvents(handler))) {
+        toolFindings.push(toolFinding('ui-action-indirect', 'warning', stableKey,
+          `${actionId} only dispatches a window event, so it works only where a listener for that event is mounted.`));
+      }
       const evidence = handlers.map((handler) => writeEvidence(app, handler));
       const uiMutation = evidence.some((entry) => entry.writes);
       const unproven = evidence.find((entry) => entry.unproven)?.unproven;
@@ -336,7 +423,7 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
         definitionId: ids.get(stableKey)!,
         actionBindingRef: actionId,
         ...(input ? { input } : {}),
-        uiAction: { kind: 'client-action', actionId },
+        uiAction: { kind: 'client-action', actionId, ...(route ? { route } : {}) },
         params: {
           path: [],
           query: [],
