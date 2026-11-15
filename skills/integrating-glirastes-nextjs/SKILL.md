@@ -121,7 +121,21 @@ second, hand-maintained catalogue.
    closed (`parseAsStringLiteral([...])`, `parseAsInteger`, `parseAsArrayOf`);
    `parseAsString` stays open and is reported as `filter-domain-open`.
 6. Client actions: `useAiClientAction('tasks.highlight', handler, contract)`
-   where the state lives, with a Zod payload contract as third argument. A
+   where the state lives, with a Zod payload contract as third argument. An
+   action whose component lives on one page gets that page's path as fourth
+   argument, in the page component itself:
+
+   ```tsx
+   // src/app/templates/page.tsx
+   useAiClientAction('template-create-dialog.open', () => setCreateOpen(true),
+     z.object({}), { route: '/templates' });
+   ```
+
+   From any other page the chat then opens `/templates` through the
+   navigation bridge and runs the action once the page registered it. Never
+   register an action in the app shell that only fires a window event for a
+   listener on one page (`ui-action-indirect`). A handler returns `false`
+   when it could not do its work, so the chat does not report it as done. A
    handler that writes through a helper, a Server Action or a mutation hook is
    flagged (`ui-action-write-unproven`); the developer raises it with
    `glirastes tools policy raise <tool> write`.

@@ -181,6 +181,89 @@ describe('react-actions source', () => {
     expect(unproven('ui.tasks.read')).toBeUndefined();
   }, 120_000);
 
+  it('reads a literal route of a page-bound client action into its UI action', async () => {
+    const app = await createAppFixture({
+      'tsconfig.json': TSCONFIG,
+      'src/app/templates/page.tsx': "'use client';\nimport { z } from 'zod';\nimport { useAiClientAction } from 'glirastes/react';\n"
+        + "const TEMPLATES = '/templates' as const;\n"
+        + 'export default function Page() {\n'
+        + "  useAiClientAction('template-create-dialog.open', () => {}, z.object({}), { route: '/templates' });\n"
+        + "  useAiClientAction('templates.refresh', () => {}, z.object({}), { route: TEMPLATES });\n"
+        + "  useAiClientAction('templates.select', (payload: { id: string }) => {});\n"
+        + '  return null;\n}\n',
+      'src/lib/actions.ts': "import { registerAiClientAction } from 'glirastes/browser';\n"
+        + "registerAiClientAction('reports.open', (payload: { id: string }) => {}, undefined, { route: '/reports' });\n",
+    });
+    const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+    expect(tools.get('ui.templateCreateDialog.open')).toMatchObject({
+      contract: { uiAction: { kind: 'client-action', actionId: 'template-create-dialog.open', route: '/templates' } },
+      findings: [],
+    });
+    expect(tools.get('ui.templates.refresh')?.contract?.uiAction).toEqual({ kind: 'client-action', actionId: 'templates.refresh', route: '/templates' });
+    expect(tools.get('ui.reports.open')?.contract?.uiAction).toEqual({ kind: 'client-action', actionId: 'reports.open', route: '/reports' });
+    // Without a route the UI action keeps its earlier shape, so its interface digest does not change.
+    expect(tools.get('ui.templates.select')?.contract?.uiAction).toEqual({ kind: 'client-action', actionId: 'templates.select' });
+  }, 120_000);
+
+  it('needs attention for an unreadable or invalid route and for routes that disagree', async () => {
+    const app = await createAppFixture({
+      'tsconfig.json': TSCONFIG,
+      'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+        + 'declare const path: string;\n'
+        + 'export function A() {\n'
+        + "  useAiClientAction('a.dynamic', (payload: { id: string }) => {}, undefined, { route: path });\n"
+        + "  useAiClientAction('a.param', (payload: { id: string }) => {}, undefined, { route: '/tasks/:id' });\n"
+        + "  useAiClientAction('a.query', (payload: { id: string }) => {}, undefined, { route: '/tasks?x=1' });\n"
+        + "  useAiClientAction('a.external', (payload: { id: string }) => {}, undefined, { route: 'https://example.com' });\n"
+        + "  useAiClientAction('a.split', (payload: { id: string }) => {}, undefined, { route: '/one' });\n"
+        + "  useAiClientAction('a.mixed', (payload: { id: string }) => {}, undefined, { route: '/one' });\n"
+        + '  return null;\n}\n',
+      'src/b.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+        + 'export function B() {\n'
+        + "  useAiClientAction('a.split', (payload: { id: string }) => {}, undefined, { route: '/two' });\n"
+        + "  useAiClientAction('a.mixed', (payload: { id: string }) => {});\n"
+        + '  return null;\n}\n',
+    });
+    const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+    const codes = (name: string) => tools.get(name)?.findings.map((finding) => [finding.code, finding.severity]);
+    for (const name of ['ui.a.dynamic', 'ui.a.param', 'ui.a.query', 'ui.a.external']) {
+      expect(codes(name)).toEqual([['ui-action-route-invalid', 'needs_attention']]);
+      expect(tools.get(name)?.contract?.uiAction).not.toHaveProperty('route');
+    }
+    expect(tools.get('ui.a.dynamic')?.findings[0]?.message).toContain('route is not a string literal');
+    expect(codes('ui.a.split')).toEqual([['ui-action-route-conflict', 'needs_attention']]);
+    expect(tools.get('ui.a.split')?.findings[0]?.message).toBe('a.split is registered with different routes: /one, /two.');
+    expect(codes('ui.a.mixed')).toEqual([['ui-action-route-conflict', 'needs_attention']]);
+    expect(tools.get('ui.a.split')?.contract?.uiAction).not.toHaveProperty('route');
+  }, 120_000);
+
+  it('warns about a handler that only relays a window event and has no route', async () => {
+    const app = await createAppFixture({
+      'tsconfig.json': TSCONFIG,
+      'src/shell.tsx': "import { z } from 'zod';\nimport { useAiClientAction } from 'glirastes/react';\n"
+        + 'export function Shell() {\n'
+        + "  useAiClientAction('template-create-dialog.open', () => {\n"
+        + "    window.dispatchEvent(new CustomEvent('open-template-create'));\n  }, z.object({}));\n"
+        + "  useAiClientAction('a.arrow', () => dispatchEvent(new Event('x')), z.object({}));\n"
+        + "  useAiClientAction('a.routed', () => { window.dispatchEvent(new CustomEvent('x')); }, z.object({}), { route: '/a' });\n"
+        + "  useAiClientAction('a.mixed', () => { window.dispatchEvent(new CustomEvent('x')); console.log('x'); }, z.object({}));\n"
+        + "  useAiClientAction('a.empty', () => {}, z.object({}));\n"
+        + '  return null;\n}\n',
+    });
+    const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+    const indirect = (name: string) => tools.get(name)?.findings.find((finding) => finding.code === 'ui-action-indirect');
+    expect(indirect('ui.templateCreateDialog.open')).toMatchObject({
+      severity: 'warning',
+      subjectRef: 'UI action template-create-dialog.open',
+      message: 'template-create-dialog.open only dispatches a window event, so it works only where a listener for that event is mounted.',
+    });
+    expect(indirect('ui.templateCreateDialog.open')?.nextAction).toContain('route');
+    expect(indirect('ui.a.arrow')).toBeDefined();
+    expect(indirect('ui.a.routed')).toBeUndefined();
+    expect(indirect('ui.a.mixed')).toBeUndefined();
+    expect(indirect('ui.a.empty')).toBeUndefined();
+  }, 120_000);
+
   it('produces nothing without registrations', async () => {
     const app = await createAppFixture({ 'src/a.ts': 'export const x = 1;\n' });
     expect(await createReactActionSource().observe(context(app.root)))

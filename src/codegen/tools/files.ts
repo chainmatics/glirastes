@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isSafeAppHref } from '../../browser/navigation.js';
 import { ToolRiskClassSchema } from '../../contracts/index.js';
 import { TOOL_POLICY_RULES_VERSION } from '../../contracts/tool-policy.js';
 import { ExecutionGenerationStateSchema } from '../inventory-generation.js';
@@ -30,6 +31,13 @@ const RuntimeSchemaSourceSchema = z.discriminatedUnion('kind', [
  */
 export const MAX_FILTER_KEYS = 50;
 
+/** A static app path a page-bound client action lives on: no query, hash or route parameter. */
+export function isClientActionRoute(route: string): boolean {
+  return isSafeAppHref(route)
+    && !/[?#]/.test(route)
+    && !route.split('/').some((segment) => segment.startsWith(':') || segment.startsWith('['));
+}
+
 const GeneratedUiActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('navigate') }).strict(),
   z.object({
@@ -40,7 +48,11 @@ const GeneratedUiActionSchema = z.discriminatedUnion('kind', [
       array: z.enum(['comma', 'repeat']).optional(),
     }).strict()).max(MAX_FILTER_KEYS),
   }).strict(),
-  z.object({ kind: z.literal('client-action'), actionId: z.string().min(1).max(200) }).strict(),
+  z.object({
+    kind: z.literal('client-action'),
+    actionId: z.string().min(1).max(200),
+    route: z.string().max(2_048).refine(isClientActionRoute).optional(),
+  }).strict(),
 ]);
 
 export const ToolContractSchema = z.object({

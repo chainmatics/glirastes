@@ -48,7 +48,8 @@ keeps its fallback.
      `target.files` as the finding says (export the schema, add the payload
      contract as third argument of `useAiClientAction`, mount the navigation
      bridge, rename a colliding parameter, add the client action a UI
-     control proposes).
+     control proposes, move a client action into the page that owns its
+     effect with `{ route }` as fourth argument).
    - `owner: "developer"`: show `target.command` and why; stop there.
      With `target.kind: "review"` a person wrote or reviewed the entry at
      `target.key` of `target.file` (human or locked): leave it exactly as it
@@ -79,6 +80,9 @@ keeps its fallback.
 | `input-schema-not-object` | an object at the root of the input schema (optional fields, or one field holding the variants), changed together with every caller of the route; for an internal route, tell the developer instead |
 | `navigation-bridge-missing` | mount `useGlirastesNavigationBridge` (React) or `registerNavigationBridge` (`glirastes/browser`) where it is always mounted |
 | `ui-action-payload-untyped`, `ui-action-contract-conflict` | one payload contract per client action |
+| `ui-action-route-invalid` | the fourth argument of the registration: `{ route: '/templates' }` as a string literal of a static app path (one leading slash, no query, hash or `:param`), or no route when the action works on every page |
+| `ui-action-route-conflict` | one route per client action: register it only in the page component that owns the effect, or with the same route everywhere |
+| `ui-action-indirect` | the handler only relays a window event, so it works only where a listener is mounted. Move the registration into the component that owns the effect (the dialog or state it opens) and pass `{ route: '<page path>' }` when that component lives on one page; delete the global relay. Return `false` from a handler that could not do its work |
 | `ui-control-unbound` | a setting the chat cannot set yet (a context setter or the next-themes `setTheme` with a closed set of values). Add `expected.registration` in `expected.file`, inside the component that owns the state and is always mounted (the provider, or for `setTheme` a component rendered inside the `ThemeProvider`), never on the settings page. Keep `expected.actionId`; import `useAiClientAction` from `glirastes/react` and `z` from `zod`, and use the app's own const list (e.g. `z.enum(UI_SIZES)`) where it has one. If the chat must not set it, tell the developer: `glirastes tools policy exclude-control <subject> --reason <text>` |
 | `ui-control-contract-mismatch` | narrow the client action's contract to the values the setter takes |
 | `ui-action-write-unproven` | developer: `glirastes tools policy raise <tool> write` when the helper writes |

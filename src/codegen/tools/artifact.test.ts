@@ -261,8 +261,16 @@ describe('UI tool contracts', () => {
     ['a filter without keys', { kind: 'filter', destination: '/tasks' }],
     ['an unknown array format', { kind: 'filter', destination: '/tasks', keys: [{ key: 'tags', array: 'pipe' }] }],
     ['a client action without id', { kind: 'client-action' }],
+    ['a client action route that leaves the app', { kind: 'client-action', actionId: 'a.b', route: '//evil.example' }],
+    ['a client action route with a parameter', { kind: 'client-action', actionId: 'a.b', route: '/tasks/:id' }],
+    ['a client action route with a query', { kind: 'client-action', actionId: 'a.b', route: '/tasks?x=1' }],
   ])('rejects %s', (_label, uiAction) => {
     expect(ToolContractsFileSchema.safeParse(file({ ...uiContract, uiAction })).success).toBe(false);
+  });
+
+  it('keeps the route of a page-bound client action', () => {
+    const uiAction = { kind: 'client-action', actionId: 'template-create-dialog.open', route: '/templates' };
+    expect(ToolContractsFileSchema.parse(file({ ...uiContract, uiAction })).tools[0]?.contract?.uiAction).toEqual(uiAction);
   });
 
   it('grades UI schemas read from code as JSON Schema', () => {

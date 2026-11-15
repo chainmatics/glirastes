@@ -1,5 +1,9 @@
 import { useEffect, useCallback, useRef } from 'react';
-import { registerAiClientAction, type PayloadContract } from '../browser/client-actions.js';
+import {
+  registerAiClientAction,
+  type ClientActionHandler,
+  type PayloadContract,
+} from '../browser/client-actions.js';
 import {
   registerNavigationBridge,
   type NavigationBridgeOptions,
@@ -21,6 +25,15 @@ export {
   type UiAction,
   type UiActionHandler,
 } from '../browser/ui-action-bus.js';
+
+export interface AiClientActionOptions {
+  /**
+   * Static app path of the page that registers the action, e.g. `/templates`.
+   * Read by `glirastes tools refresh`: when the user is on another page, the
+   * chat opens this route first and runs the action once it is registered.
+   */
+  route?: string;
+}
 
 export interface AiClientActionEventDetail {
   actionId: string;
@@ -101,23 +114,30 @@ export function dispatchAiClientActions(
 
 /**
  * Hook to register a handler for a specific AI client action ID.
- * The literal id and the optional contract (third argument, e.g. a Zod
- * object) are what `glirastes tools refresh` turns into the tool
- * `ui.<actionId>`; the contract types and validates the payload. Generated
- * actions arrive on the default UiActionBus; `dispatchAiClientAction`
- * window events keep working for existing callers.
+ * The literal id, the optional contract (third argument, e.g. a Zod
+ * object) and a literal `route` (fourth argument) are what
+ * `glirastes tools refresh` turns into the tool `ui.<actionId>`; the
+ * contract types and validates the payload. Register the action in the
+ * component that owns the effect; if that component lives on one page, pass
+ * its `route` so the chat can open the page first. Return `false` from the
+ * handler when the action could not be carried out. Generated actions arrive
+ * on the default UiActionBus; `dispatchAiClientAction` window events keep
+ * working for existing callers.
  *
  * @example
  * ```tsx
- * useAiClientAction('task-details.open', (payload) => {
- *   openTaskDetails(payload.taskId);
- * }, z.object({ taskId: z.string() }));
+ * // in the /templates page component
+ * useAiClientAction('template-create-dialog.open', () => {
+ *   setCreateOpen(true);
+ * }, z.object({}), { route: '/templates' });
  * ```
  */
 export function useAiClientAction<T = Record<string, unknown>>(
   actionId: string,
-  handler: (payload: T) => void | Promise<void>,
+  handler: ClientActionHandler<T>,
   contract?: PayloadContract<T>,
+  // Only read statically by `glirastes tools refresh`.
+  _options?: AiClientActionOptions,
 ): void {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;

@@ -63,6 +63,9 @@
   font: inherit;
   cursor: pointer;
 }
+:where([data-component="mention-chip"][data-interactive="true"]) {
+  cursor: pointer;
+}
 :where([data-component="mention-chip"][data-interactive="true"]:hover) {
   text-decoration: underline;
   text-underline-offset: 2px;

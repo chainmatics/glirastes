@@ -14,7 +14,12 @@ export type GeneratedUiAction =
     destination: string;
     keys: ReadonlyArray<{ key: string; array?: 'comma' | 'repeat' }>;
   }
-  | { kind: 'client-action'; actionId: string };
+  | {
+    kind: 'client-action';
+    actionId: string;
+    /** Static path of the page that registers the action; the browser opens it when the handler is missing. */
+    route?: string;
+  };
 
 export interface GeneratedUiToolDefinition {
   id: string;
@@ -53,18 +58,28 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
       const action = definition.action;
       if (action.kind === 'client-action') {
         const available = context?.runtime?.clientActions;
+        const route = action.route;
+        const uiAction = {
+          type: 'glirastes.action',
+          actionId: action.actionId,
+          payload: { ...input },
+          ...(route ? { route } : {}),
+        };
         if (available && !available.includes(action.actionId)) {
+          if (route) {
+            return {
+              success: true,
+              message: `The app opens ${route} and runs the action there.`,
+              uiAction,
+            };
+          }
           return {
             success: false,
             error: 'This action is not available on the page the user has open. Do not claim it happened; navigate to a page that offers it, or use another tool.',
             retryable: false,
           };
         }
-        return {
-          success: true,
-          message: 'Action executed.',
-          uiAction: { type: 'glirastes.action', actionId: action.actionId, payload: { ...input } },
-        };
+        return { success: true, message: 'Action executed.', uiAction };
       }
       const params = stringParams(input.params);
       try {
