@@ -13,7 +13,30 @@ Framework/test peers such as Next.js, React and Vitest are omitted. The provider
 imports are checked during the image build against the production dependency
 closure. Customers need no Node server code or customer-maintained Node package.
 
-## Build and inspect locally
+## Use the public release
+
+The Linux amd64 image is public; pulling it needs no GitHub account or registry
+credentials. Release 0.14.0 was published from SDK commit `a638689`:
+
+```sh
+export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime:0.14.0
+docker pull "$GLIRASTES_RUNTIME_IMAGE"
+docker run --rm "$GLIRASTES_RUNTIME_IMAGE" --help
+```
+
+For production, pin the verified release digest instead of a mutable tag:
+
+```sh
+export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime@sha256:edf35f3d093d58c03361c0242350dd6d9fb70554e4deffa113002aaba8cac00c
+```
+
+Use SDK 0.14.0 to build artifacts for this image and for the browser package.
+The [PHP walkthrough](../../examples/php-runtime/README.md) includes
+[Docker Compose](../../examples/php-runtime/compose.yaml) and a sample JSON config.
+Its fixture login/reset endpoints are test-only; production uses your existing
+backend authentication. See the [release evidence](../../docs/acceptance/2026-11-15-runtime-container-v1.md).
+
+## Build and inspect locally (optional)
 
 From the SDK repository root:
 
@@ -21,6 +44,8 @@ From the SDK repository root:
 docker build -f containers/runtime/Dockerfile -t glirastes-runtime:v1-test .
 docker run --rm glirastes-runtime:v1-test --help
 docker image inspect glirastes-runtime:v1-test --format '{{.Config.User}}'
+# Use the local image for the artifact commands below instead of the release:
+export GLIRASTES_RUNTIME_IMAGE=glirastes-runtime:v1-test
 ```
 
 Local builds do not publish. Release tags run the PHP/browser acceptance gate
@@ -42,7 +67,7 @@ For an already configured project, mount it writable for the generator:
 mkdir -p artifacts
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$PWD,dst=/project" \
-  glirastes-runtime:v1-test \
+  "$GLIRASTES_RUNTIME_IMAGE" \
   build --project /project --out /project/artifacts/release-1
 ```
 
@@ -56,16 +81,16 @@ current:
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$PWD,dst=/project" \
-  glirastes-runtime:v1-test \
+  "$GLIRASTES_RUNTIME_IMAGE" \
   build --project /project --out /project/artifacts/ci-build --frozen
 ```
 
 To verify the artifact independently:
 
 ```sh
-docker run --rm --read-only \
+docker run --rm --read-only --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$PWD/artifacts/release-1,dst=/artifact,readonly" \
-  glirastes-runtime:v1-test validate --artifact /artifact
+  "$GLIRASTES_RUNTIME_IMAGE" validate --artifact /artifact
 ```
 
 An exact SDK version match, hashes, schema/binding integrity and application

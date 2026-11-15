@@ -1,7 +1,9 @@
-# Runtime container V1 local acceptance — 2026-11-15
+# Runtime container V1 acceptance and release — 2026-11-15
 
 Implementation worktree: `feat/runtime-container-v1`, based on SDK main `7816b37`.
 The test uses the same SDK execution/approval pipeline as embedded integrations.
+The first sections record local implementation acceptance; the release and
+production section below records the later publication and live SDK verification.
 
 ## Observed results
 
@@ -45,13 +47,14 @@ CI installs Chromium and uses the same image/browser test without requiring a
 Chrome channel. The reference test cleans its isolated containers and scratch
 files. The separately provisioned approval-test database was removed afterwards.
 
-## Boundaries
+## Local acceptance boundaries
 
 The provider is a deterministic OpenAI-compatible HTTP/SSE stub, not a paid model
-account. No live customer deployment, model-provider account smoke test, or live
-platform pairing/policy change was performed. Platform gates are covered by
-service wiring and existing SDK/platform-contract tests. This record does not
-claim HA, a Rust/Java reference-stack acceptance, or image/npm publication.
+account. This local test phase did not perform a live customer deployment,
+model-provider account smoke test or live platform pairing/policy change.
+Platform gates are covered by service wiring and existing SDK/platform-contract
+tests. The local results alone do not establish image/npm publication.
+Neither this phase nor the later release claims HA or a Rust/Java reference-stack acceptance.
 The general suite's skipped reference cases are not counted as passed.
 
 ## Frontend host acceptance
@@ -66,3 +69,39 @@ unmount/remount cleanup and a delayed-identity/unmount race.
 API/model replies in these frontend-only cases are scripted. The PHP test above
 is the separate end-to-end runtime/backend boundary. Reproduce with the locked
 fixture installs and command in `examples/frontend-frameworks/README.md`.
+
+## Published release and production SDK verification
+
+Later on 2026-11-15, [SDK PR #57](https://github.com/chainmatics/glirastes/pull/57)
+merged as `a63868946c27555b6c00b120db063228607fdb1f`. The
+[v0.14.0 release](https://github.com/chainmatics/glirastes/releases/tag/v0.14.0)
+and [release workflow](https://github.com/chainmatics/glirastes/actions/runs/43740370091)
+provide the publication evidence:
+
+- Final SDK suite: **3,840 tests passed**, 16 conditional skips; typechecks,
+  build and release gates passed.
+- The release gate passed the real PHP/PostgreSQL/container/browser test
+  (**2 tests, no skips**) and Angular/SvelteKit/Nuxt browser host tests
+  (**4 tests, no skips**) on Linux before publishing the tested image.
+- `glirastes@0.14.0` became publicly installable from npm. The downloaded package
+  included the runtime CLI and packaged setup, runtime and non-React references.
+- The Linux amd64 image `ghcr.io/chainmatics/glirastes-runtime:0.14.0` was
+  verified with an anonymous pull and runs as `node`. Its immutable digest is
+  `sha256:edf35f3d093d58c03361c0242350dd6d9fb70554e4deffa113002aaba8cac00c`.
+
+Get It Done separately upgraded its **embedded SDK** through
+[staging PR #81](https://github.com/chainmatics/get-it-done/pull/81) and
+[production PR #83](https://github.com/chainmatics/get-it-done/pull/83).
+The final production composition passed **2,144 tests** (29 existing optional
+PostgreSQL skips) and its production build. The
+[production deployment](https://github.com/chainmatics/get-it-done/actions/runs/43745808379)
+completed successfully for commit `d7373bf62d02d171fc7f1db69520d818af0ee134`.
+Citadel showed a connected Production runner reporting `glirastes@0.14.0`
+with a recent heartbeat. Authenticated browser checks passed a read-only chat
+tool call, a navigation action and conversation restoration after reload;
+the health endpoint returned `ok`. No business-data writes were exercised.
+
+This live smoke test proves the embedded integration in that application.
+It is not a live deployment of the new container to a Rust/PHP/Java customer,
+a production write/approval test, or a complete-stack acceptance of the three
+frontend examples. Those boundaries retain their separate tests above.

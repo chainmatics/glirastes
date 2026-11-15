@@ -60,7 +60,7 @@ Svelte, Express, Django or Java stack support is claimed by these paths.
 | `url-filters` | filter tools from `defineQueryFilters` declarations | Next, React+NestJS, Vue+FastAPI |
 | `react-actions` | client action tools from `useAiClientAction` and `registerAiClientAction` | none (browser tests only) |
 
-## Not in 0.5.0
+## Deferred package exports
 
 The exports `glirastes/server/nestjs`, `glirastes/openapi` and `glirastes/react/langgraph`
 are deferred and not shipped. `glirastes/server/testing` is ESM only, because Vitest
@@ -68,11 +68,17 @@ cannot be required from CommonJS.
 
 ## Configured runtime service V1
 
-The runtime container (`docs/runtime-container.md`) packages the same SDK for
+The [runtime container](runtime-container.md) packages the same SDK for
 non-Node APIs. `tests/runtime-container-e2e.mjs` is the PHP acceptance harness
 (real PHP/PostgreSQL, scripted model, optional built image and browser). It does
 not establish full Rust/Java framework support or replace the complete-stack
 criteria above. One active runtime per application/environment; no HA claim.
+
+Version 0.14.0 is published on npm and as the public Linux amd64 image
+`ghcr.io/chainmatics/glirastes-runtime:0.14.0`. The
+[acceptance record](acceptance/2026-11-15-runtime-container-v1.md) links the release
+gates and the separate embedded Get It Done production smoke test. Publication
+and a successful embedded pilot do not certify a customer's container deployment.
 
 ## Browser frontend references
 
