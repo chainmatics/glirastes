@@ -1,5 +1,9 @@
 # Glirastes Agent Skills
 
+For the guided integration path and searchable SDK reference, visit the
+[developer documentation](https://glirastes.io/docs). Check each guide's release
+status before using preview APIs with an installed SDK version.
+
 The package ships eight skills for the app's existing coding agent. Glirastes
 does not need a separate coding-agent service: the CLI generator derives
 tools and prints work lists, and these skills guide the app's agent. Chat

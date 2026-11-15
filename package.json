@@ -280,6 +280,7 @@
     "browser",
     "codegen",
     "skills",
+    "docs/README.md",
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
