@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-15
+
+### Added
+
+- Environment chains for the managed tool job: `enrich.environments` in `.glirastes/tools.json` (lowest first, any names and length, e.g. `["pre-dev", "dev", "staging", "master"]`), overridden by `GLIRASTES_ENVIRONMENT_BRANCHES` or `glirastes tools enrich --environments`. Without it the job detects the usual environment names that exist on origin. A promotion (a head branch that is an environment branch, or a head commit another environment branch already holds, such as a release branch cut from one) ends at once with `promotion from <branch>, nothing to enrich` and changes nothing.
+- `glirastes tools enrich --head <branch>`; `--base` and `--head` also come from `GLIRASTES_BASE_BRANCH` / `GLIRASTES_HEAD_BRANCH` (then `GITHUB_BASE_REF`).
+- `glirastes init --ci github` checks out the full history for the enrich job, passes base, head and `vars.GLIRASTES_ENVIRONMENT_BRANCHES` on every trigger, and skips pushes whose commit carries the bot marker. Regenerate the workflow with `glirastes init --ci github --force` to pick it up.
+
+### Fixed
+
+- The managed job works only tools whose semantics are missing, stale or rejected (a first run also takes the schema backlog), no longer every tool whose contract differs from the base branch. A pull request from staging into master re-described tools that were already current.
+- The model's files are proposals: entries of tools outside the scope, fields written by a person, supplied by the code or locked by a review, and agent fields written for the current interface keep their stored value byte for byte; only a missing language may be added to a current agent field. The job sets `origin`, `agent.model` and `agent.interfaceDigest` itself, so an invented origin (`origin.module: "tasks"`) or unknown field never reaches the file. Curated synonyms and examples were replaced before.
+- Before it commits, the job regenerates the outputs with the refresh pipeline, takes back entries the generator rejects, and verifies with the `tools check` pipeline; it refuses a commit that removes or adds tools or changes the `tool-contracts.json` entry of a tool outside the scope (`contracts_out_of_scope`, `check_failed`, `rejected_entries`), and restores the agent files. Bot commits failed `tools check` with `tool-outputs-drift` and `resolution-rejected` before.
+- Sandbox writes are atomic (written beside, then renamed): a refresh running alongside a task no longer reads half a `tool-semantics.json`, ignores all semantics and renders outputs without any synonyms or titles.
+- One commit per job, after all tasks: no checkpoint commits that each started the workflow again. A run started by the bot's own commit ends before any refresh; a branch that already fails `tools check` ends before a job is reserved (`check_failing`).
+
 ## [0.12.0] - 2026-11-15
 
 ### Added
@@ -687,7 +703,8 @@ No code changes — patch-level docs release.
   these libraries on install. `react-markdown` is loaded via `React.lazy`
   with a plain-text fallback when the peer dep is not installed.
 
-[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/chainmatics/glirastes/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/chainmatics/glirastes/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/chainmatics/glirastes/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/chainmatics/glirastes/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/chainmatics/glirastes/compare/v0.10.1...v0.11.0
