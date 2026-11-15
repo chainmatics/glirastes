@@ -470,6 +470,10 @@ backend-verified user credentials, persistent approvals and one active service
 per app/environment. Image publication and customer deployment are separate
 release steps; V1 does not provide HA or native backend SDKs.
 
+## Developer documentation
+
+The developer documentation lives at [glirastes.io/docs](https://glirastes.io/docs), with a guided start, integration topics and release-status labels. The [repository guides](docs/openrouter-standalone.md) remain available as a source mirror.
+
 ## Complete standalone integration
 
 Follow the [OpenRouter + Next.js standalone path](docs/openrouter-standalone.md) for identity, generated tools, approvals, chat, sessions, attachments and voice assets.
