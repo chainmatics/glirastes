@@ -24,7 +24,7 @@ jobs:
       packages: write
   publish:
     needs: runtime-container
-    if: ${{ !cancelled() && (needs.runtime-container.result == 'success' || needs.runtime-container.result == 'skipped') }}
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.runtime-container.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
