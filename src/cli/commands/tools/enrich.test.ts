@@ -722,7 +722,7 @@ describe('glirastes tools enrich --managed', () => {
   it('refuses a BYOK key OpenRouter rejects before the Platform reserves a job', async () => {
     const fixture = await createAppFixture();
     const api = platform({ byokKeyStatus: 401 });
-    const result = run(fixture, { GLIRASTES_TOOLS_OPENROUTER_KEY: 'sk-or-v1-revoked' }, { platform: api });
+    const result = run(fixture, { GLIRASTES_TOOLS_OPENROUTER_KEY: 'sk-or-v1-revoked' }, { platform: api, args: ['--head', 'feature/byok'] });
 
     expect(await result.code).toBe(1);
     expect(JSON.parse(result.out.at(-1)!)).toEqual({ schemaVersion: 1, status: 'failed', code: 'byok_key_invalid' });
