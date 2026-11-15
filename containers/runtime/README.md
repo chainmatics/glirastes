@@ -96,7 +96,7 @@ Production deployment requirements:
 
 - Read-only root filesystem, a small writable `/tmp` tmpfs, dropped capabilities
   and `no-new-privileges`; the runtime process never needs Docker socket access.
-- Configuration, artifact and secret files readable by UID 1000; no credentials in
+- Configuration, artifact and secret files and their parent directories must be readable/traversable by UID 1000. The CLI creates a private artifact directory; when building with a different host UID, assign the deployed artifact to the runtime UID (for example `chown -R 1000:1000 <artifact>`), or grant equivalent group access. No credentials in
   image layers or build arguments. Restrict host and secret-file permissions.
 - PostgreSQL for persisted approval consumption and the one-active-runtime lock.
   All processes for the same application/environment must use the same store.

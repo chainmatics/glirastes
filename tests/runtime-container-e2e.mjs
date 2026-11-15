@@ -91,8 +91,8 @@ test('PHP backend and official runtime preserve identity, authorization, streami
   await chmod(dir, 0o755);
   let runtime; let runtimeOrigin; let ingress; let model; let browser;
   t.after(async () => {
-    await browser?.close();
-    await runtime?.stop();
+    // A failed/exited container must not prevent server/container cleanup.
+    await Promise.allSettled([browser?.close(), runtime?.stop()]);
     await close(ingress); await close(model);
     for (const name of Object.values(names)) await docker('rm', '-f', name).catch(() => {});
     await docker('network', 'rm', network).catch(() => {});
@@ -106,6 +106,9 @@ test('PHP backend and official runtime preserve identity, authorization, streami
   await mkdir(join(dir, 'secrets'));
   for (const [file, value] of [['model', 'fixture-key'], ['approval', 'fixture-approval-secret-at-least-32-characters']]) await writeFile(join(dir, 'secrets', file), value);
   await run(process.execPath, [join(ROOT, 'dist/runtime-service/bin.js'), 'build', '--project', join(dir, 'project'), '--out', join(dir, 'artifact')]);
+  // Artifact staging uses a private mkdtemp directory. Deployment must grant
+  // the runtime UID access; this fixture has no real credentials or private data.
+  await chmod(join(dir, 'artifact'), 0o755);
   const payload = JSON.parse(await readFile(join(dir, 'artifact/runtime.json'), 'utf8'));
   const toolNames = Object.fromEntries(payload.setupArtifact.tools.map((tool) => [
     tool.executionKind === 'ui' ? 'highlight' : tool.method === 'GET' ? 'read' : 'write', tool.modelName ?? tool.name.replaceAll('.', '_'),
@@ -157,16 +160,24 @@ test('PHP backend and official runtime preserve identity, authorization, streami
   await writeFile(join(dir, 'runtime-config.json'), json(config));
   async function start() {
     if (runtimeImage) {
-      await docker('run', '--rm', '-d', '--name', names.runtime, '--network', network, '--add-host', 'host.docker.internal:host-gateway', '-p', '127.0.0.1::8787', '-v', `${dir}:/fixture:ro`, runtimeImage, 'serve', '--config', '/fixture/runtime-config.json');
+      await docker('run', '-d', '--name', names.runtime, '--network', network, '--add-host', 'host.docker.internal:host-gateway', '-p', '127.0.0.1::8787', '-v', `${dir}:/fixture:ro`, runtimeImage, 'serve', '--config', '/fixture/runtime-config.json');
       runtimeOrigin = `http://127.0.0.1:${(await docker('port', names.runtime, '8787')).split(':').at(-1)}`;
-      runtime = { stop: async () => { await docker('stop', '-t', '5', names.runtime); } };
+      runtime = { stop: async () => {
+        try { await docker('stop', '-t', '5', names.runtime); }
+        finally { await docker('rm', '-f', names.runtime); }
+      } };
     } else {
       const { parseRuntimeConfig } = await import('../dist/runtime-service/config.js');
       const { startRuntimeService } = await import('../dist/runtime-service/service.js');
       runtime = await startRuntimeService(parseRuntimeConfig(config));
       runtimeOrigin = `http://127.0.0.1:${runtimePort}`;
     }
-    await eventually(async () => (await fetch(`${runtimeOrigin}/readyz`)).ok, 'Runtime did not become ready');
+    try {
+      await eventually(async () => (await fetch(`${runtimeOrigin}/readyz`)).ok, 'Runtime did not become ready');
+    } catch (error) {
+      const logs = runtimeImage ? await docker('logs', names.runtime).catch(() => 'Container logs unavailable') : '';
+      throw new Error(`${error.message}\n${logs}`, { cause: error });
+    }
   }
   await start();
   const state = () => fetch(`${apiOrigin}/fixture/state`).then((response) => response.json());
