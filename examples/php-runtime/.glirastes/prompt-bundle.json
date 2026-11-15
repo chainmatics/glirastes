@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "appId": "019fb007-0000-7000-8000-000000000005",
+  "artifactRef": "local://php-runtime-fixture/prompts",
+  "sections": {
+    "planner": "Use only available tools. Ask when the target is unclear.",
+    "appBehavior": "Work only with the signed-in user's tasks. Backend authorization is authoritative.",
+    "responseStyle": "Be concise.",
+    "capabilityFragments": {}
+  }
+}

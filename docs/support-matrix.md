@@ -38,7 +38,7 @@ browser test, CI corpus or pilot acceptance.
 | --- | --- | --- | --- |
 | Chat UI | React components | `glirastes/embed` registers `<glirastes-chat>` in a browser frontend | Verify the framework's custom-element integration; React and AI SDK dependencies are still required internally |
 | API tools | Next.js route handlers; NestJS controllers with supported schemas | Any backend exporting a committed OpenAPI 3.1 JSON document, using the `openapi` source | No generic source-code scanner; export freshness is the app's responsibility (FastAPI additionally checks route counts); unsupported operations remain gaps |
-| Chat runtime | Next.js handler integration | Adapt a Node server to Web `Request`/`Response`; use a Node sidecar for a non-Node backend | The SDK runtime remains TypeScript/Node; user authentication, streaming and fixed API origin must be wired and verified |
+| Chat runtime | Next.js handler integration | Adapt a Node server with `glirastes/server/http`, or run the configured runtime service beside a non-Node application | One service per app/environment in V1; a per-instance sidecar is a separate deployment choice, not required |
 | Client actions | Registrations in supported JS/TS files and Vue script blocks; a literal `{ route }` makes an action page-bound (the chat opens the route first) | Put `registerAiClientAction` registrations in ordinary JS/TS modules imported by the app | Arbitrary framework templates and `.svelte` files are not scanned; `route` must be a static path |
 | Navigation | `next-pages`, supported `react-router` route objects, `vue-router` records | `registerNavigationBridge` connects execution to the app's router | The bridge does not discover pages; an unknown router has no automatic navigation inventory |
 | Filters | Supported page/router sources and URL-filter declarations | Literal `defineQueryFilters` declarations in scanned modules plus a navigation bridge | Verify paths against the app; without a supported router source there is no route-inventory cross-check |
@@ -65,3 +65,24 @@ Svelte, Express, Django or Java stack support is claimed by these paths.
 The exports `glirastes/server/nestjs`, `glirastes/openapi` and `glirastes/react/langgraph`
 are deferred and not shipped. `glirastes/server/testing` is ESM only, because Vitest
 cannot be required from CommonJS.
+
+## Configured runtime service V1
+
+The runtime container (`docs/runtime-container.md`) packages the same SDK for
+non-Node APIs. `tests/runtime-container-e2e.mjs` is the PHP acceptance harness
+(real PHP/PostgreSQL, scripted model, optional built image and browser). It does
+not establish full Rust/Java framework support or replace the complete-stack
+criteria above. One active runtime per application/environment; no HA claim.
+
+## Browser frontend references
+
+`examples/frontend-frameworks` contains actual Angular 21, SvelteKit 2/Svelte 5
+and Nuxt 4 applications. `tests/frontend-frameworks-browser.test.mjs` builds each
+application and checks mounting, identity-scoped session restoration, streamed
+frontend actions, real router navigation and teardown/remount in a browser.
+The runtime-container workflow runs this gate before publishing an image.
+
+These are tested **frontend host contracts**, with scripted identity/chat
+responses. They do not promote those frameworks to complete-stack support,
+add source scanners or discover routes automatically. The PHP runtime test
+separately exercises the actual backend, identity and approval pipeline.

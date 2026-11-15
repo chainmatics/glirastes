@@ -739,7 +739,7 @@ describe('glirastes tools enrich --managed', () => {
     expect(JSON.parse(out[0]!)).toEqual({ schemaVersion: 1, status: 'failed', code: 'ci_key_invalid' });
   });
 
-  it('keeps @ai-sdk/openai out of every module but the lazy loader of tools enrich', async () => {
+  it('confines the model provider to the opt-in runtime host and lazy enrich loader', async () => {
     const sources: string[] = [];
     const walk = async (dir: string): Promise<void> => {
       for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -763,7 +763,9 @@ describe('glirastes tools enrich --managed', () => {
       }
     }
 
-    expect(importing).toEqual([]);
+    // The separately loaded container host owns its configured model provider.
+    // Library and normal CLI entry points must remain provider-independent.
+    expect(importing).toEqual(['src/runtime-service/service.ts']);
     const enrich = await readFile(join(SDK_ROOT, 'src/cli/commands/tools/enrich.ts'), 'utf8');
     expect(enrich).toContain("const specifier = '@ai-sdk/openai';");
   });

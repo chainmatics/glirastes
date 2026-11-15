@@ -1,0 +1,198 @@
+# Configured runtime service (0.14, V1)
+
+Use this path when a non-Node backend needs Glirastes without customer Node
+server code. A suitable existing Node/Next.js server can instead embed
+`createAiChatHandler` from `glirastes/server/http`; `/server/nextjs` remains
+compatible. The container is one independent service per application and
+environment. It is not a sidecar per backend replica and does not offer HA.
+
+## Customer inputs and build
+
+Keep the existing backend and its authorization. Export its authoritative API
+as committed **OpenAPI 3.1 JSON** and add the normal SDK inputs. Generate a unique
+UUID for the app once and use the same value in both files below; preserve an
+existing appId. Example `.glirastes/tools.json` (replace this example appId):
+
+```json
+{
+  "schemaVersion": 1,
+  "appId": "3e0e58e8-1480-4c59-b173-63b45927d031",
+  "targetAppKey": "customer-app",
+  "locale": "en-US",
+  "sources": [{ "kind": "openapi", "document": "api/openapi.json" }]
+}
+```
+
+Example `.glirastes/prompt-bundle.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "appId": "3e0e58e8-1480-4c59-b173-63b45927d031",
+  "artifactRef": "local://customer-app/prompts",
+  "sections": {
+    "planner": "Use available tools and ask when the target is unclear.",
+    "appBehavior": "Help the signed-in user with this application.",
+    "responseStyle": "Be concise and describe the observed result.",
+    "capabilityFragments": {}
+  }
+}
+```
+
+An OpenAPI-only project needs no package.json. Browser actions/navigation use
+supported scanner sources in addition to OpenAPI; a router bridge alone does
+not discover pages. Do not add hand-written tools or edit generated artifacts.
+Use the normal `tools resolve`, `tools describe` and policy workflow when the
+generator reports gaps.
+
+With the matching SDK CLI installed:
+
+```sh
+glirastes-runtime build --project /workspace/app --out /artifacts/release-1
+glirastes-runtime validate --artifact /artifacts/release-1
+# After committing generated outputs, CI verifies unchanged generation:
+glirastes-runtime build --project /workspace/app --out /artifacts/ci-1 --frozen
+```
+
+The same commands run as arguments to the official runtime image. For example,
+with `GLIRASTES_RUNTIME_IMAGE` set to the approved image digest and a writable
+project bind mount:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" \
+  --mount "type=bind,src=$PWD,dst=/workspace/app" \
+  "$GLIRASTES_RUNTIME_IMAGE" \
+  build --project /workspace/app --out /workspace/app/artifacts/release-1
+```
+
+The build writes `manifest.json`, `runtime.json` and `coverage.json` in a **new**
+output directory. Runtime loads JSON only, checks exact SDK version, hash, app
+identity and schema bindings. A hash detects corruption, not an untrusted
+publisher. Review artifacts and deploy them read-only. Build-time changes do
+not automatically update a running container. CI must also regenerate the
+backend OpenAPI export and detect stale exports; frozen generation alone cannot
+prove that a stale document matches the backend.
+
+The supported subset is intentionally narrower than all OpenAPI 3.1: simple
+path parameters, supported query parameters on GET/HEAD/DELETE, and JSON-object
+bodies on POST/PUT/PATCH. Unsupported active operations fail the build, including
+write-method query parameters, multipart, custom header/cookie arguments,
+external/recursive references and unsupported schema/serialization features.
+Declare authentication with `securitySchemes`, not model-supplied credentials.
+Explicit `x-glirastes-ignore` and normal policy exclusions remain in coverage.
+OpenAPI `servers` does not select the API target.
+
+## Identity contract
+
+Configure a fixed endpoint on the backend origin, e.g. `/api/me`. It validates
+the forwarded session cookie or bearer token and returns exactly:
+
+```json
+{"userId":"42","tenantId":"business-a","roles":["editor"]}
+```
+
+Invalid sessions return 401/403. Return no credentials or extra business data.
+The runtime rechecks identity at tool boundaries. `tenantId` above is the
+**business tenant**, separate from the SDK/platform tenant; the runtime maps
+them and scopes the subject to business tenant plus user.
+
+Every tool request forwards only selected user credentials and adds verified
+`x-glirastes-business-tenant` and `x-glirastes-user-id` headers. **Backend
+middleware must compare both with its current authenticated session and reject
+mismatches.** They grant no access: retain existing record/tenant/role checks.
+A confirmation never overrides backend authorization. No privileged service
+account, browser-provided role mapping or OAuth token broker is introduced.
+
+## Strict JSON configuration
+
+Example `/etc/glirastes/runtime.json`; replace origins, model and paths with
+reviewed deployment values. Unknown fields fail; JSON performs no environment
+or shell interpolation. Secrets come from mounted files, never from the browser
+or generated artifact.
+
+```json
+{
+  "schemaVersion": 1,
+  "server": { "publicOrigin": "https://app.example.com", "port": 8787 },
+  "application": {
+    "artifact": "/app/artifact",
+    "apiOrigin": "http://backend:8080",
+    "allowedPathPrefixes": ["/api"],
+    "timeoutMs": 15000,
+    "maxResponseBytes": 2097152
+  },
+  "identity": {
+    "endpoint": "/api/me",
+    "credential": { "type": "cookie", "names": ["session"] }
+  },
+  "model": { "name": "REPLACE_WITH_MODEL_ID", "apiKeyFile": "/run/secrets/model_key" },
+  "approvals": {
+    "secretFile": "/run/secrets/approval_key",
+    "connectionStringFile": "/run/secrets/state_dsn"
+  },
+  "platform": { "enabled": false }
+}
+```
+
+For bearer authentication use `"credential": {"type":"bearer"}`. For existing
+backend CSRF middleware set `identity.csrfHeader` to `x-csrf-token` or
+`x-xsrf-token` and send that header from the chat UI. Do not disable CSRF checks.
+The default chat route is `/glirastes/chat`; the application ingress must route
+it under the configured public origin and send the session cookie on that path.
+
+The default model base URL is OpenRouter's OpenAI-compatible chat API; an
+operator-controlled `model.baseUrl` is optional. A different backend URL or
+model URL is an operator decision, never an input from a browser or tool call.
+
+To connect an already authorized and paired app, replace `platform` with:
+
+```json
+{
+  "enabled": true,
+  "environment": "production",
+  "apiKeyFile": "/run/secrets/glirastes_key",
+  "requireAcceptedDeployment": true
+}
+```
+
+Use `controlPlaneOrigin` only for a confirmed alternative platform origin.
+The runtime will not become ready before an accepted deployment. A failed key
+never silently enables standalone. An already accepted revision can survive a
+transient platform outage; a cold restart waits for a fresh accepted revision.
+Remote revocation is not instantaneous while the connection is unavailable.
+
+## Deployment and verification
+
+Run `glirastes-runtime serve --config /etc/glirastes/runtime.json`. The image
+runs as nonroot UID 1000. Mount config/artifacts read-only and secret files with
+appropriate readability. Use a read-only root filesystem, writable `/tmp` tmpfs,
+dropped capabilities and restricted egress to the fixed backend, model provider,
+PostgreSQL and optional platform. Runtime logs omit credentials and payloads.
+
+PostgreSQL persists approval consumption and enforces one active runtime per
+app/environment. All instances for that scope must use the same store. Use a
+32+ character approval secret; keep it stable through pending approvals. The
+store creates its own tables/indexes, so provide a restricted schema/search_path
+and suitable initialization permissions. It is not a conversation database.
+
+`/healthz` is liveness; `/readyz` checks dependencies and managed readiness.
+The image healthcheck expects `/etc/glirastes/runtime.json`; override it for a
+different config path. Disable ingress response buffering and automatic POST
+retries. SIGTERM drains then aborts remaining work; allow a longer orchestrator
+stop grace period. Stop the old instance before starting its replacement.
+
+Keep browser conversations isolated by app, environment, business tenant and
+user; remount on identity changes. Create the web component detached, set
+`config.session` before appending it, and remove the old element on logout
+or identity switch. Load browser-only SDK modules in the client lifecycle.
+The optional `building-glirastes-chat-ui` skill contains a fuller helper.
+Cancellation reaches model/API calls but does not undo completed mutations.
+Approval replay prevention is not a distributed exactly-once write guarantee;
+use backend idempotency when the business operation needs it.
+
+Before claiming acceptance, verify anonymous rejection, same-user reads,
+backend denial, write approval/rejection, replay after restart, user/tenant
+switching, stream cancellation, one frontend action and export drift. The SDK
+repository's `examples/php-runtime` and `examples/frontend-frameworks` are
+optional examples, not files required by this packaged reference. Record local
+build, image publication, deployment and real-provider acceptance separately.

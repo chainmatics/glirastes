@@ -53,8 +53,8 @@ const STACK_MARKERS: ReadonlyArray<[DetectedStack, string]> = [
 
 /**
  * Recognise the project's stack from its manifest. Absence of a manifest, or of
- * any known marker, is not an error — it only means the framework part cannot be
- * proposed.
+ * any known marker, is not an error. Keep detection null: generic integration
+ * guidance is a fallback, not evidence of a supported framework.
  */
 export async function detectStack(
   rootDir: string,
@@ -87,10 +87,10 @@ export async function detectStack(
  * `setup` is deliberately absent: it carries a host choice and, in autonomous
  * mode, the only egress this tool has. It stays an explicit decision.
  */
-export function proposeParts(stack: DetectedStack | null): InstallerPart[] {
-  const proposed: InstallerPart[] = ['tools', 'chat-ui'];
-  if (stack) proposed.unshift('framework');
-  return proposed;
+export function proposeParts(_stack: DetectedStack | null): InstallerPart[] {
+  // Non-Node and unknown apps still need the generic HTTP/container guidance.
+  // An explicit parts selection below continues to honor declining framework.
+  return ['framework', 'tools', 'chat-ui'];
 }
 
 export function resolvePartSkills(
@@ -105,7 +105,7 @@ export function resolvePartSkills(
       );
     }
     const skills = part === 'framework'
-      ? (context.stack ? FRAMEWORK_SKILLS[context.stack] : [])
+      ? FRAMEWORK_SKILLS[context.stack ?? 'web']
       : PART_SKILLS[part];
     for (const skill of skills) {
       if (!resolved.includes(skill)) resolved.push(skill);

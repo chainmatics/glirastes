@@ -201,6 +201,8 @@ export function createAiSdkTools(
       inputSchema,
       needsApproval: needsApproval as Parameters<typeof tool>[0]['needsApproval'],
       execute: async (rawInput: unknown, executionOptions: unknown) => {
+        const incomingSignal = (executionOptions as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
+        incomingSignal?.throwIfAborted();
         if (gate) {
           gate.authorize({
             toolName,
@@ -213,13 +215,19 @@ export function createAiSdkTools(
         let input = rawInput;
         try {
           input = await parseInput(rawInput);
-          const sourceOptions = gate
-            ? { ...(executionOptions as object | undefined), [AI_SDK_APPROVAL_GATE_PASSED]: gate }
+          incomingSignal?.throwIfAborted();
+          const timeoutController = options.toolTimeoutMs === undefined ? undefined : new AbortController();
+          const abortSignal = timeoutController
+            ? (incomingSignal ? AbortSignal.any([incomingSignal, timeoutController.signal]) : timeoutController.signal)
+            : incomingSignal;
+          const sourceOptions = gate || abortSignal
+            ? { ...(executionOptions as object | undefined), ...(abortSignal ? { abortSignal } : {}),
+                ...(gate ? { [AI_SDK_APPROVAL_GATE_PASSED]: gate } : {}) }
             : executionOptions;
           const execution = Promise.resolve(source.execute(input, sourceOptions));
           const result = options.toolTimeoutMs === undefined
             ? await execution
-            : await withTimeout(execution, options.toolTimeoutMs, toolName);
+            : await withTimeout(execution, options.toolTimeoutMs, toolName, (error) => timeoutController!.abort(error));
           await options.afterToolCall?.({
             toolName,
             input,
@@ -258,6 +266,7 @@ async function withTimeout<T>(
   execution: Promise<T>,
   timeoutMs: number,
   toolName: string,
+  onTimeout?: (error: Error) => void,
 ): Promise<T> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new RangeError('toolTimeoutMs must be a positive finite number');
@@ -269,7 +278,9 @@ async function withTimeout<T>(
       execution,
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => {
-          reject(new Error(`Tool "${toolName}" timed out after ${timeoutMs}ms`));
+          const error = new Error(`Tool "${toolName}" timed out after ${timeoutMs}ms`);
+          onTimeout?.(error);
+          reject(error);
         }, timeoutMs);
       }),
     ]);

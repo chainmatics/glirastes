@@ -32,7 +32,7 @@ describe('createHttpEndpointCaller', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = fetchImpl.mock.calls[0]!;
     expect(url).toBe('http://127.0.0.1:4000/api/tasks?status=open');
-    expect(init).toEqual({
+    expect(init).toMatchObject({
       method: 'GET',
       headers: { authorization: 'Bearer user-token', cookie: 'session=abc' },
     });
@@ -51,7 +51,7 @@ describe('createHttpEndpointCaller', () => {
     });
     const [url, init] = fetchImpl.mock.calls[0]!;
     expect(url).toBe('https://api.example/tasks');
-    expect(init).toEqual({
+    expect(init).toMatchObject({
       method: 'POST',
       headers: { cookie: 'session=abc', 'content-type': 'application/json' },
       body: '{"title":""}',
@@ -68,7 +68,7 @@ describe('createHttpEndpointCaller', () => {
     });
 
     await caller({ method: 'GET', path: '/api/tasks' });
-    expect(fetchImpl.mock.calls[0]![1]).toEqual({ method: 'GET', headers: { 'x-request-source': 'chat' } });
+    expect(fetchImpl.mock.calls[0]![1]).toMatchObject({ method: 'GET', headers: { 'x-request-source': 'chat' } });
   });
 
   it('forwards the configured header names only', async () => {
@@ -81,7 +81,7 @@ describe('createHttpEndpointCaller', () => {
     });
 
     await caller({ method: 'DELETE', path: '/api/tasks/1' });
-    expect(fetchImpl.mock.calls[0]![1]).toEqual({ method: 'DELETE', headers: { 'x-tenant': 'acme' } });
+    expect(fetchImpl.mock.calls[0]![1]).toMatchObject({ method: 'DELETE', headers: { 'x-tenant': 'acme' } });
   });
 
   it.each([

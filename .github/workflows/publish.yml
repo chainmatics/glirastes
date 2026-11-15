@@ -14,7 +14,17 @@ permissions:
   contents: read
 
 jobs:
+  runtime-container:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/runtime-container.yml
+    with:
+      publish: true
+    permissions:
+      contents: read
+      packages: write
   publish:
+    needs: runtime-container
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.runtime-container.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

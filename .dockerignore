@@ -1,0 +1,22 @@
+# Only the SDK build inputs enter the container context. In particular, never
+# send local secrets, worktrees, recordings, generated artifacts or git history.
+**
+!package.json
+!bun.lock
+!tsconfig.json
+!tsconfig.cjs.json
+!src/
+!src/**
+!scripts/
+!scripts/**
+!skills/
+!skills/**
+!LICENSE
+!NOTICE
+!containers/
+!containers/runtime/
+!containers/runtime/Dockerfile
+**/.env*
+**/*.pem
+**/*.key
+**/node_modules

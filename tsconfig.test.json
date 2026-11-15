@@ -13,6 +13,7 @@
       "glirastes/sync": ["./src/sync/index.ts"],
       "glirastes/server": ["./src/server/index.ts"],
       "glirastes/server/nextjs": ["./src/server/adapters/nextjs/index.ts"],
+      "glirastes/server/http": ["./src/server/adapters/nextjs/index.ts"],
       "glirastes/adapter/nextjs": ["./src/server/adapters/nextjs/index.ts"],
       "glirastes/server/testing": ["./src/server/testing/index.ts"],
       "glirastes/react": ["./src/react/index.ts"],

@@ -1,0 +1,21 @@
+{
+  "name": "glirastes-nuxt-reference",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev --host 127.0.0.1",
+    "start": "node .output/server/index.mjs"
+  },
+  "dependencies": {
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "@ai-sdk/react": "3.0.163",
+    "ai": "6.0.161",
+    "zod": "4.4.3",
+    "nuxt": "4.4.2"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,93 @@
+name: Runtime container V1
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the tested versioned image (release tag only)
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: runtime-container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-container:
+    name: Container and PHP integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Build SDK for the test harness
+        run: bun run build
+      - name: Build runtime image
+        run: |
+          RUNTIME_RELEASE_VERSION=$(node -p "require('./package.json').version")
+          docker build --file containers/runtime/Dockerfile --tag glirastes-runtime:ci \
+            --label "org.opencontainers.image.version=$RUNTIME_RELEASE_VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
+      - name: Install pinned browser test driver
+        run: |
+          npm install --prefix "$RUNNER_TEMP/glirastes-browser" --no-save --package-lock=false playwright@1.62.1
+          node "$RUNNER_TEMP/glirastes-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Install locked frontend reference apps
+        run: |
+          for framework in angular sveltekit nuxt; do
+            (cd "examples/frontend-frameworks/$framework" && bun install --frozen-lockfile)
+          done
+      - name: Angular, SvelteKit and Nuxt browser acceptance
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/glirastes-browser/node_modules/playwright/index.mjs
+          PLAYWRIGHT_CHANNEL: chromium
+        run: node --test tests/frontend-frameworks-browser.test.mjs
+      - name: PHP and PostgreSQL end-to-end acceptance
+        env:
+          GLIRASTES_RUNTIME_TEST_IMAGE: glirastes-runtime:ci
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/glirastes-browser/node_modules/playwright/index.mjs
+        run: node tests/runtime-container-e2e.mjs
+      - name: Verify release tag
+        if: inputs.publish
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          test "$GITHUB_REF" = "refs/tags/v$VERSION"
+          echo "IMAGE=ghcr.io/chainmatics/glirastes-runtime:$VERSION" >> "$GITHUB_ENV"
+      - name: Authenticate to GHCR
+        if: inputs.publish
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the exact tested image
+        if: inputs.publish
+        run: |
+          docker tag glirastes-runtime:ci "$IMAGE"
+          docker push "$IMAGE"
+          echo "Published $IMAGE" >> "$GITHUB_STEP_SUMMARY"

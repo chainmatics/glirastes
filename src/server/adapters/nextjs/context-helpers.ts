@@ -113,6 +113,7 @@ export function buildToolContext(
   options?: { locale?: string } & OriginOptions,
 ): ToolContext {
   return {
+    abortSignal: req.signal,
     currentDate: new Date(),
     locale: options?.locale ?? 'en-US',
     runtime: buildRuntimeContext(req, { trustForwardedHeaders: options?.trustForwardedHeaders }),
@@ -132,6 +133,7 @@ export function createInternalApiCallerFromRequest(
   return createNextInternalApiCaller({
     origin: extractOrigin(req, { trustForwardedHeaders }),
     cookieHeader: req.headers.get('cookie') ?? undefined,
+    signal: req.signal,
     ...callerOverrides,
   });
 }

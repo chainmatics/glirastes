@@ -1,0 +1,11 @@
+.prepared/
+.secrets/
+runtime.json
+.glirastes/build/
+.glirastes/installed-skills.json
+.glirastes/tool-contracts.json
+.glirastes/tool-inventory.json
+.glirastes/tool-report.json
+.glirastes/tool-policy.json
+.glirastes/tool-receipt.json
+.glirastes/setup-artifact.json
