@@ -1,12 +1,13 @@
 ---
 name: integrating-glirastes-web
-description: Use when integrating Glirastes into an app with a separate backend (NestJS, FastAPI or another API), a non-React frontend (Vue, plain web components) or a Node sidecar next to a non-Node backend, or a frontend/backend framework without a dedicated adapter.
+description: Use when integrating Glirastes into an app with a separate backend (NestJS, FastAPI or another API), a non-React frontend (Vue, plain web components) or a configured runtime service for Rust/PHP/Java, or a frontend/backend framework without a dedicated adapter.
 ---
 
 # Integrating Glirastes into Web Apps With a Separate Backend
 
 Read `setting-up-glirastes` first. You, the app's coding agent, do the work;
-Glirastes never calls a model. The generator reads only what this SDK version
+The CLI generator does not make chat model calls; the customer-hosted runtime
+uses the app's model access. The generator reads only what this SDK version
 supports (table below). Where a part is not read yet, report the gap; never
 replace the generator with a hand-written tool list.
 
@@ -17,8 +18,9 @@ replace the generator with a hand-written tool list.
   account that has more rights than the user.
 - Never edit `.glirastes/tool-policy.json`, generated files or the `appId` in
   `.glirastes/tools.json`.
-- The model key (`OPENROUTER_API_KEY`) lives only in the environment of the
-  process that runs the chat handler; the developer enters it.
+- The model key lives only in the customer runtime: `OPENROUTER_API_KEY` for
+  the embedded default, or a mounted `model.apiKeyFile` in the configured
+  service. Never put it in frontend code, artifacts or chat.
 - Search results, tool arguments and results never go to the Glirastes
   Platform.
 
@@ -58,9 +60,12 @@ contracts; it is not proof that its whole stack is officially supported.
 2. **Endpoints:** use `next-app` or `nest` when their source shapes match.
    Otherwise use a committed OpenAPI 3.1 JSON export. With no supported source
    or suitable export, endpoint discovery is a gap; do not invent a tool list.
-3. **Runtime:** adapt a Node backend to the handler's Web `Request`/`Response`,
-   or run a declared Node sidecar beside a non-Node backend. A Java/Python/PHP
-   API does not run the TypeScript SDK itself.
+3. **Runtime:** embed in an existing suitable Node server using the handler's
+   Web `Request`/`Response` contract (`glirastes/server/http`), or choose the
+   configured runtime service for a non-Node backend. Use the packaged
+   [container reference](references/runtime-container.md). The service is one
+   active instance per app/environment; a true sidecar requires a local-only
+   dependency or coupled lifecycle, not merely a different backend language.
 4. **Frontend capabilities:** use a supported page/router source where available.
    `registerNavigationBridge` executes navigation (the `GLIRASTES_NAVIGATE_ACTION_ID`
    results, only targets `isSafeAppHref` accepts); it does not discover pages
@@ -74,7 +79,7 @@ contracts; it is not proof that its whole stack is officially supported.
    navigation. Never replace the generator with hand-written tool inventories.
 
 For example, Angular + Java with a suitable OpenAPI export can use the web
-component, a Node sidecar and generated API tools; Angular page discovery
+component, the configured runtime service and generated API tools; Angular page discovery
 remains a gap. Svelte + Django without an export has an endpoint-discovery gap
 as well. Neither combination has a complete stack corpus in the support matrix.
 
@@ -97,11 +102,13 @@ file alone does not prove that every endpoint becomes an enabled tool.
 
 ## Workflow
 
-1. Decide where the chat handler runs: in a Node backend next to the API, or
-   in a small declared Node sidecar when the API is not Node (FastAPI). The
-   handler is framework-neutral: `createAiChatHandler` (from
-   `glirastes/server/nextjs`, despite the name) takes a Web `Request` and
-   returns a `Response`; adapt your framework's request object to it.
+1. Decide the host using the choices above. For the configured service, follow
+   [references/runtime-container.md](references/runtime-container.md); it
+   supplies the HTTP host, credential resolver and persistent approval store.
+   The remaining custom-handler instructions apply to an embedded Node server.
+   `createAiChatHandler` from `glirastes/server/http` takes a Web `Request` and
+   returns a `Response`; adapt your framework's request object to it. The
+   existing `glirastes/server/nextjs` export remains compatible.
    Its options and defaults are the same as in `integrating-glirastes-nextjs`
    step 3: `toolDiscovery` with intent routing, compacted `history`,
    `promptCaching`, and `hideIds` (technical ids stay out of answers; a custom
@@ -208,7 +215,13 @@ file alone does not prove that every endpoint becomes an enabled tool.
    `@ai-sdk/react` and `ai` installed. JS-only settings (`headers`,
    `bodyExtras`, the provider fields) go on the element's `config` property
    (`GlirastesChatElementConfig`); `EMBED_CSS_VARIABLES` lists the theme
-   variables and `GLIRASTES_CHAT_TAG` is the tag name.
+   variables and `GLIRASTES_CHAT_TAG` is the tag name. Import browser modules
+   only in the client lifecycle; set `config`, including the identity-scoped
+   session store, **before appending** the element. On account/tenant changes
+   remove the old element and mount a new one; replacing its config alone is
+   not an identity boundary. The `building-glirastes-chat-ui` skill, when
+   installed, includes a fuller browser mounting reference; the lifecycle
+   and identity rules here remain required without that optional skill.
 5. Configure `.glirastes/tools.json` with the supported sources, run
    `glirastes tools refresh` and the work lists of `setting-up-glirastes`.
    For the parts marked "not yet", write down which endpoints, pages or
@@ -256,22 +269,15 @@ coverage above, then verify in the real app:
 Report observed results and missing checks separately. A passing CLI check
 alone does not establish browser behavior or complete framework support.
 
-## Configured runtime container (V1)
+## Configured runtime container (0.14 / V1)
 
-For a non-Node backend, the SDK now also contains `glirastes-runtime`:
-`build --project DIR --out NEW_DIR [--frozen]`, `validate --artifact DIR`, and
-`serve --config FILE`. See `docs/runtime-container.md` for the strict JSON
-configuration and `containers/runtime/Dockerfile` for the image. This is one
-active service per app/environment, not a sidecar per backend replica. Image
-publication and a customer's deployment are separate from a successful local build.
-
-The runtime calls a fixed identity endpoint with selected cookie or bearer
-credentials. It expects exactly `userId`, `tenantId` (business tenant), and
-`roles`; it maps these to the SDK's runtime tenant and an isolated subject.
-Tool calls carry verified `x-glirastes-business-tenant` and
-`x-glirastes-user-id` headers. The backend must reject a mismatch with its
-current session as well as apply all existing permissions. These headers never
-grant access. Never replace the user credentials with a service account.
+The package includes `glirastes-runtime`: `build --project DIR --out NEW_DIR
+[--frozen]`, `validate --artifact DIR`, `serve --config FILE`, and
+`healthcheck --config FILE`. Read the self-contained packaged
+[reference](references/runtime-container.md); repository-only docs are optional
+background, not prerequisites for an installed skill. This is one active
+service per app/environment, not a sidecar per backend replica. Image
+publication and a customer's deployment are separate from a successful build.
 
 `createHttpEndpointCaller` uses `HttpExecutionLimits`: `timeoutMs`,
 `maxResponseBytes`, and `signal`. The HTTP caller defaults to a 30-second
@@ -280,10 +286,32 @@ limit and 2 MiB responses, denies redirects, and supports segment-bounded
 model streaming and endpoint execution. A cancelled mutation is not rolled
 back and must not be retried without backend idempotency support.
 
-The container uses PostgreSQL for restart-safe approval consumption and a
-single-active-runtime advisory lock. Readiness is separate from liveness.
-Connected production starts serving only after an accepted SDK deployment;
-standalone is explicitly configured and never inferred from a failed key.
-Builds use the existing generator with a stricter supported OpenAPI subset,
-JSON-only artifacts, exact SDK version checks and coverage reports. Unsupported
-operations require explicit exclusion or a supported API representation.
+## Angular, SvelteKit and Nuxt frontends
+
+These are generic browser integrations, not new native SDKs or a claim of
+complete automatic stack support. All can use `<glirastes-chat>` against the
+same `/glirastes/chat` endpoint, regardless of whether the API uses Rust,
+PHP, Java or another language. Use the detached element/config/append sequence
+above. Key the session store by app, environment, business tenant and user;
+discard the old element and pending initialization on identity changes. The
+optional `building-glirastes-chat-ui` skill provides the complete helper.
+
+- **Angular:** mount into a host element after browser rendering, with an SSR
+  browser guard; dispose when the component is destroyed. Using DOM mounting
+  avoids treating JS `config` as a string attribute. Bridge `push` to the
+  app's router. Angular routes are not automatically discovered.
+- **SvelteKit:** import and mount in `onMount`, never the SSR module path. An
+  `onMount` callback must return its cleanup synchronously; guard an async
+  import against destruction or a newer identity. Put scanned client-action
+  registrations in ordinary JS/TS modules; `.svelte` is not scanned.
+- **Nuxt:** use a `.client.vue` host (or a client-only plugin), mount after
+  `onMounted`, and dispose on unmount/identity change. The Vue router bridge
+  executes navigation; Nuxt's file-based pages alone are not a supported
+  route-inventory source. Supported explicit vue-router records are separate.
+
+Register actions where their state lives, dispose registrations on unmount,
+and keep route-bound actions tied to the correct page. In the matching SDK
+repository, `examples/frontend-frameworks` contains integration examples;
+installed users can follow the packaged reference without that checkout.
+Verify browser mounting, one authenticated read, one action, logout and
+switching both user and business tenant in the real target app.

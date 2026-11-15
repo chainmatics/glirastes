@@ -56,9 +56,9 @@ describe('stack detection', () => {
 });
 
 describe('proposed parts', () => {
-  it('proposes the framework part only when a stack was detected', () => {
+  it('proposes integration guidance even without a detected framework', () => {
     expect(proposeParts('nextjs')).toContain('framework');
-    expect(proposeParts(null)).not.toContain('framework');
+    expect(proposeParts(null)).toContain('framework');
   });
 
   it('always proposes tool maintenance', () => {
@@ -88,9 +88,9 @@ describe('part resolution', () => {
     expect(resolvePartSkills([], { stack: 'nextjs' })).toEqual([]);
   });
 
-  it('resolves the framework part to nothing when no stack was detected', () => {
+  it('resolves an undetected stack to generic integration guidance without claiming detection', () => {
     expect(resolvePartSkills(['framework', 'tools'], { stack: null }))
-      .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools']);
+      .toEqual(['integrating-glirastes-web', 'maintaining-glirastes-tools', 'describing-glirastes-tools']);
   });
 
   it('never repeats a skill selected through two parts', () => {

@@ -48,11 +48,25 @@ jobs:
       - name: Build SDK for the test harness
         run: bun run build
       - name: Build runtime image
-        run: docker build --file containers/runtime/Dockerfile --tag glirastes-runtime:ci .
+        run: |
+          RUNTIME_RELEASE_VERSION=$(node -p "require('./package.json').version")
+          docker build --file containers/runtime/Dockerfile --tag glirastes-runtime:ci \
+            --label "org.opencontainers.image.version=$RUNTIME_RELEASE_VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
       - name: Install pinned browser test driver
         run: |
           npm install --prefix "$RUNNER_TEMP/glirastes-browser" --no-save --package-lock=false playwright@1.62.1
           node "$RUNNER_TEMP/glirastes-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Install locked frontend reference apps
+        run: |
+          for framework in angular sveltekit nuxt; do
+            (cd "examples/frontend-frameworks/$framework" && bun install --frozen-lockfile)
+          done
+      - name: Angular, SvelteKit and Nuxt browser acceptance
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/glirastes-browser/node_modules/playwright/index.mjs
+          PLAYWRIGHT_CHANNEL: chromium
+        run: node --test tests/frontend-frameworks-browser.test.mjs
       - name: PHP and PostgreSQL end-to-end acceptance
         env:
           GLIRASTES_RUNTIME_TEST_IMAGE: glirastes-runtime:ci

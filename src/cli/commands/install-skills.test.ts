@@ -1,4 +1,4 @@
-import { access, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,6 +95,29 @@ describe('foundation agent skills', () => {
     }
     expect(source).toContain('only hides entries');
     expect(source).toContain('no automatic send on finalization');
+  });
+
+  it('installs portable generic integration guidance for a non-Node project with no package.json', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-non-node-install-'));
+    try {
+      await writeFile(join(rootDir, 'Cargo.toml'), '[package]\nname = "customer-api"\nversion = "1.0.0"\n');
+      await installSkills({ rootDir, host: 'codex', quiet: true, includeSetupSkills: true });
+      const target = join(rootDir, '.agents/skills');
+      expect(await readdir(target)).toContain('integrating-glirastes-web');
+      expect(await readdir(target)).not.toContain('integrating-glirastes-nextjs');
+      expect(await readFile(join(target, 'integrating-glirastes-web/references/runtime-container.md'), 'utf8')).toContain('glirastes-runtime build');
+      expect(await readFile(join(target, 'setting-up-glirastes/references/runtime-hosts.md'), 'utf8')).toContain('no Node server code');
+      await expect(access(join(rootDir, 'package.json'))).rejects.toThrow();
+    } finally { await rm(rootDir, { recursive: true, force: true }); }
+  });
+
+  it('does not add generic framework skills when the non-Node developer selected only chat UI', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'glirastes-ui-only-install-'));
+    try {
+      await installSkills({ rootDir, host: 'codex', quiet: true, parts: ['chat-ui'] });
+      expect(await readdir(join(rootDir, '.agents/skills'))).not.toContain('integrating-glirastes-web');
+      expect(await readFile(join(rootDir, '.agents/skills/building-glirastes-chat-ui/references/non-react-hosts.md'), 'utf8')).toContain('config.session');
+    } finally { await rm(rootDir, { recursive: true, force: true }); }
   });
 
   it('installs only foundation-supported skills for the all profile', async () => {

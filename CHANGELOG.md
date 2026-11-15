@@ -11,13 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Configured Node runtime container V1 for non-Node HTTP backends: JSON configuration, generator-built data-only artifacts, backend-verified identities, persistent PostgreSQL approvals and a single-active-instance guard. Includes a PHP reference, browser/container acceptance and build-only CI.
+- Configured Node runtime container V1 for non-Node HTTP backends: JSON configuration, generator-built data-only artifacts, backend-verified identities, persistent PostgreSQL approvals and a single-active-instance guard. Includes a PHP reference, browser/container acceptance and versioned GHCR publication gated before npm release.
 - `glirastes-runtime` build/validate/serve/healthcheck commands and the framework-neutral `glirastes/server/http` alias.
+- Runnable Angular, SvelteKit and Nuxt frontend references with production-build browser acceptance, plus packaged setup/UI/integration skill guidance for the runtime and non-React hosts.
 
 ### Fixed
 
 - Request and tool-timeout cancellation reaches model streams and backend HTTP calls. HTTP endpoint callers reject redirects by default, limit responses and support explicit API path boundaries.
 - Output-schema diagnostics omit backend values and schema issue paths from logs.
+- Skill installation supplies generic integration guidance for unknown/non-Node stacks without claiming framework detection.
 
 ## [0.13.1] - 2026-11-15
 

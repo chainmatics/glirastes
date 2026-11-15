@@ -133,7 +133,7 @@ test('PHP backend and official runtime preserve identity, authorization, streami
     }
     const target = request.url?.startsWith('/glirastes/') ? runtimeOrigin : apiOrigin;
     if (!target) { response.writeHead(503).end(); return; }
-    const upstream = httpRequest(new URL(request.url, target), { method: request.method, headers: request.headers }, (reply) => {
+    const upstream = httpRequest(target, { path: request.url, method: request.method, headers: request.headers }, (reply) => {
       response.writeHead(reply.statusCode, reply.headers); reply.pipe(response);
     });
     upstream.on('error', () => { if (!response.headersSent) response.writeHead(502); response.end(); });

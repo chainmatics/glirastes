@@ -53,3 +53,16 @@ platform pairing/policy change was performed. Platform gates are covered by
 service wiring and existing SDK/platform-contract tests. This record does not
 claim HA, a Rust/Java reference-stack acceptance, or image/npm publication.
 The general suite's skipped reference cases are not counted as passed.
+
+## Frontend host acceptance
+
+The Angular 21.2.26, SvelteKit 2.70.4/Svelte 5.57.3 and Nuxt 4.4.2
+production builds passed their real Chrome acceptance: **4 tests passed, no
+skips** (one parent and three framework cases). The test covers client-only
+loading under SSR, verified identity before session-store initialization,
+restoration after reload, streamed frontend actions, real router navigation,
+unmount/remount cleanup and a delayed-identity/unmount race.
+
+API/model replies in these frontend-only cases are scripted. The PHP test above
+is the separate end-to-end runtime/backend boundary. Reproduce with the locked
+fixture installs and command in `examples/frontend-frameworks/README.md`.

@@ -1,13 +1,14 @@
 ---
 name: setting-up-glirastes
-description: Use when starting or resuming a Glirastes integration in an app, after glirastes init, or when an app's tools, chat or model access are not set up yet.
+description: Use when starting or resuming a Glirastes integration, choosing embedded Node hosting or a configured runtime container for Rust/PHP/Java, after glirastes init, or when tools, chat or model access are not set up yet.
 ---
 
 # Setting Up Glirastes
 
 You are the existing coding agent of this app. You carry out the whole
-integration in the app checkout; Glirastes never calls a model. The CLI reads
-the code, writes the tool files and prints work lists; you supply judgement
+integration in the app checkout. The CLI generator reads
+the code, writes the tool files and prints work lists; the customer-hosted
+chat runtime uses the app's own model access; you supply judgement
 where the code is not enough. A fresh app runs Standalone: it needs no
 Platform account, no Glirastes key and no extra provider for you. Do not stop
 after installing skills or hand routine work back to the developer. Ask only
@@ -39,6 +40,32 @@ material questions that the code and earlier decisions cannot answer.
   opts out with `GLIRASTES_SKILLS_AUTO_UPDATE=0` or `--no-skills`.
 - No unsigned fallback, silent Managed downgrade or approval bypass. No push,
   merge, package publication or deployment without explicit authority.
+
+## Choose the runtime host first
+
+Preserve a working deployment and use the smallest host that meets the app's
+contracts. Backend language and frontend framework are separate decisions:
+
+- **Existing Node/Next.js server:** embed the SDK when that server already
+  authenticates the user, reaches the backend and supports streaming. Use
+  `integrating-glirastes-nextjs` or the generic `glirastes/server/http` handler.
+- **Rust, PHP, Java or another non-Node backend:** prefer the configured
+  `glirastes-runtime` service from 0.14. It runs one active instance per app
+  and environment, reaches the existing API and needs no customer Node server
+  code. Read the packaged
+  [runtime-host reference](references/runtime-hosts.md)
+  for inputs, JSON config, identity and deployment. Do not add package.json or
+  Next.js merely to host chat; OpenAPI-only artifact builds need neither.
+- **True sidecar per backend instance:** choose only for an evidenced local-only
+  interface or coupled lifecycle requirement. A separate service is not
+  automatically a sidecar, and V1 does not support multiple active runtimes
+  per app/environment or HA.
+
+For the container path, use the reference's artifact build/validate/deploy flow
+instead of the embedded-server wiring, package.json principal declaration and
+predev hooks below. Keep the source generator, policy review and target-app
+acceptance gates. A packaged CLI, built image, published image and deployed
+customer runtime are separate results; report which was actually verified.
 
 ## Workflow
 
@@ -117,7 +144,9 @@ files you may write, and the policy answers as commands for the developer.
 The developer sets these as deployment secrets; never set, read or ask for a
 value, only name them.
 
-- Chat model access: `OPENROUTER_API_KEY` by default.
+- Embedded chat model access: `OPENROUTER_API_KEY` by default. The configured
+  container instead reads `model.apiKeyFile` and other secrets from mounted
+  files; its strict JSON does not interpolate environment variables.
 - `GLIRASTES_APPROVAL_SECRET`: the chat handler signs tool approvals with it
   (since 0.5.0). When the handler can ask for approvals and `NODE_ENV` is
   `production`, chat fails with HTTP 500 `approval_secret_missing` without it.

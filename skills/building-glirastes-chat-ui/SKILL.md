@@ -1,11 +1,11 @@
 ---
 name: building-glirastes-chat-ui
-description: Use when integrating or customizing the Glirastes React chat, tool cards, approvals, sessions, mentions and slash commands (derived `@` entities and `/` commands, direct commands), suggestions, UI actions, themes, floating window behavior, or speech-to-text.
+description: Use when integrating or customizing the Glirastes React chat or browser-only web component in Angular/SvelteKit/Nuxt/Vue, tool cards, approvals, sessions, mentions and slash commands (derived `@` entities and `/` commands, direct commands), suggestions, UI actions, themes, floating window behavior, or speech-to-text.
 ---
 
 # Building the Glirastes Chat UI
 
-Use `VercelAiChat` from `glirastes/react/vercel` plus
+For React, use `VercelAiChat` from `glirastes/react/vercel` plus
 `glirastes/react/styles.css`. Preserve existing product UX through supported
 themes, slots, session adapters, tool renderers, and `useAiClientAction`
 handlers rather than copying the chat implementation. You, the app's coding
@@ -26,7 +26,8 @@ chat route uses the app's own model access.
 
 ## Workflow
 
-1. Mount one `VercelAiChat endpoint="/api/chat"` (the app's real chat route)
+1. Choose React or the browser-only custom element (see Non-React hosts).
+   For React, mount one `VercelAiChat endpoint="/api/chat"` (the app's real chat route)
    and import `glirastes/react/styles.css`; theme it before forking anything.
    Place the assistant as in "Placing the assistant" below: a toggle where the
    app wants it, the chat docked on the right or detached as a window. The
@@ -242,6 +243,26 @@ variables, `glirastes-chat:ready`, `:status`, `:tool-result` and `:error`
 events bubble out, and removing the element unmounts it and frees the
 microphone. The host needs `react`, `react-dom`, `@ai-sdk/react` and `ai`.
 
+Import `glirastes/embed`, `glirastes/browser` and the session helper only in
+browser lifecycle code; an SSR guard around rendering does not protect a
+server-side static import. Create the element detached, set attributes and
+its JS `config` (session, headers, callbacks), then append it. Initial session
+loading must see the verified user's store on the first mount.
+
+Use an identity key containing app, environment, business tenant and user.
+On logout or any change of that key, remove the old element and create a
+new store and element; changing `config` on the existing provider is not a
+safe identity reset. Cancel/ignore stale async initialization, dispose browser
+action/navigation registrations and clear retained local conversations as the
+app's privacy policy requires. Verify the new user cannot see or resume the
+old user's messages or pending approvals.
+
+Follow [references/non-react-hosts.md](references/non-react-hosts.md) for a
+complete mounting pattern and Angular/SvelteKit/Nuxt lifecycle guidance. The
+configured runtime defaults to `/glirastes/chat`; do not assume it exposes
+chat-interactions, speech or attachment routes unless that host implements
+those capabilities.
+
 ## Mentions and suggestions
 
 `mentions` supplies the sources; `MentionInput` and `RichMentionInput` render
@@ -273,11 +294,12 @@ create, switch and rename.
 Corrupted stored sessions fail closed; clearing history needs a confirmation.
 
 For several chats per user without a backend, pass
-`session={createLocalSessionStore({ storageKey: `myapp:${userId}` })}`
-(from `glirastes/react`; create it once per user, in `useMemo`): the chats
+`session={createLocalSessionStore({ storageKey: JSON.stringify([appId, environment, businessTenantId, userId]) })}`
+(from `glirastes/react`; memoize by that complete identity key): the chats
 stay in the browser's `localStorage`, are named after their first question,
 and the assistant header lists them in place of its title, with new, rename
-and delete. Include the signed-in user in `storageKey`. This keeps chat
+and delete. Include app, environment, business tenant and verified user in
+`storageKey`; remount the React chat with that key when identity changes. This keeps chat
 content on the device, so decide it with the developer; an app that needs
 chats on every device supplies `list`, `create`, `remove`, `rename`, `save`
 and `load` from its own server instead.
