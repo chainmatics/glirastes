@@ -10,7 +10,30 @@ The official image is `ghcr.io/chainmatics/glirastes-runtime:0.14.0` for
 Linux amd64. Use a pinned version (or digest) with matching artifact SDK version;
 ARM users can build the supplied Dockerfile locally.
 
+Start with the [public image and artifact commands](../containers/runtime/README.md),
+the [PHP walkthrough](../examples/php-runtime/README.md), its
+[JSON configuration](../examples/php-runtime/runtime.example.json) and
+[Docker Compose](../examples/php-runtime/compose.yaml). The image is public and
+does not require registry login. The [release record](acceptance/2026-11-15-runtime-container-v1.md)
+separates container tests, publication and the embedded SDK's production rollout.
+
 ## Responsibilities and deployment
+
+```mermaid
+flowchart LR
+  Browser["Browser: chat, local sessions, UI actions"] -->|"same-origin HTTPS + user credential"| Ingress["Customer ingress"]
+  Ingress --> Runtime["Customer Glirastes runtime"]
+  Runtime -->|"verified identity + user credential"| Backend["Rust / PHP / Java API: final authorization"]
+  Runtime -->|"chat inference"| Model["Customer-selected model provider"]
+  Runtime --> State["PostgreSQL: approval consumption + singleton lock"]
+  Runtime -->|"content-free metadata"| Platform["Optional Glirastes Platform"]
+  Platform -->|"accepted signed configuration"| Runtime
+```
+
+When an existing Node server embeds the SDK, that server takes the runtime box's
+role. No additional service is required. The Platform is a control plane, not a
+proxy between chat and backend. It cannot supply the customer's session, replace
+backend permissions or host browser actions.
 
 Run **one active service per application/environment**, independently of backend
 replica count. PostgreSQL session locking rejects a second active service using
@@ -104,7 +127,8 @@ are read from mounted files; no shell/environment interpolation in the JSON.
 Use a 32+ character random approval secret, a backend-scoped database account,
 and separate model and platform secrets. Do not pass secrets to the frontend.
 
-`platform: {"enabled": false}` is network-silent standalone. Connected mode needs
+`platform: {"enabled": false}` disables Platform traffic; backend, model-provider
+and PostgreSQL connections still operate. Connected mode needs
 `enabled: true`, an environment slug and `apiKeyFile`; it requires an accepted
 platform deployment before readiness. No automatic fallback on failed pairing or
 startup sync. An already accepted SDK revision remains usable during a transient

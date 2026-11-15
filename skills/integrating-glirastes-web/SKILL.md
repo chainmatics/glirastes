@@ -1,6 +1,6 @@
 ---
 name: integrating-glirastes-web
-description: Use when integrating Glirastes into an app with a separate backend (NestJS, FastAPI or another API), a non-React frontend (Vue, plain web components) or a configured runtime service for Rust/PHP/Java, or a frontend/backend framework without a dedicated adapter.
+description: Use when integrating Glirastes into an app with a separate backend (NestJS, FastAPI or another API), a non-React frontend (Angular, SvelteKit, Nuxt, Vue, plain web components) or a configured runtime service for Rust/PHP/Java, or a frontend/backend framework without a dedicated adapter.
 ---
 
 # Integrating Glirastes into Web Apps With a Separate Backend

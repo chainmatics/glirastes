@@ -29,9 +29,43 @@
 
 Glirastes is a TypeScript SDK for an embedded chat that operates your app: it
 calls your endpoints, navigates, sets filters and triggers UI actions. The tools
-come from your code, everything runs inside your app, and the optional Glirastes
+come from your code or OpenAPI export, execution stays in your environment, and the optional Glirastes
 Platform manages reviewed configuration and rollouts without ever seeing prompts
 or business data.
+
+## Choose your integration
+
+Choose the backend host and browser UI independently:
+
+| Your application | Recommended path |
+| --- | --- |
+| Existing suitable Node/Next.js server | Embed the SDK and its HTTP handler; use the Next.js quickstart below or `glirastes/server/http` |
+| Rust, PHP, Java or another HTTP backend without a suitable Node host | Deploy the official configured runtime container beside the app; supply OpenAPI 3.1 JSON, an authenticated identity endpoint and JSON configuration |
+| React frontend | Use `VercelAiChat` and the React navigation/action hooks |
+| Angular, SvelteKit, Nuxt, Vue or plain JavaScript frontend | Mount `<glirastes-chat>` client-side and connect the app's router/actions through `glirastes/browser` |
+
+### Runtime container for Rust, PHP and Java
+
+The public image needs no registry login and no customer-written Node server:
+
+```sh
+docker pull ghcr.io/chainmatics/glirastes-runtime:0.14.0
+docker run --rm ghcr.io/chainmatics/glirastes-runtime:0.14.0 --help
+```
+
+Run **one active service per app/environment**, independently of backend replica
+count. A separate service is not automatically a sidecar per backend instance.
+V1 uses PostgreSQL for approval consumption and an overlap guard; it does not
+provide HA. Keep the user's cookie/bearer token and all backend permissions.
+
+Start with the [runtime guide](docs/runtime-container.md),
+[image and artifact commands](containers/runtime/README.md), and the
+[PHP example with Docker Compose](examples/php-runtime/README.md).
+Pin the image digest and use its exact SDK version for artifacts and browser code.
+Angular, SvelteKit and Nuxt have [tested browser examples](examples/frontend-frameworks/README.md).
+Those tests cover frontend integration; Rust/Java remain generic HTTP/OpenAPI
+paths, and unknown routers have no automatic page discovery. See the
+[support matrix](docs/support-matrix.md) for the evidence at each layer.
 
 ## See it in action
 
@@ -147,7 +181,7 @@ commands, is the bundled skill
 ## How it works
 
 - **Execution is local.** The model call, the tool loop and every tool call
-  run in your app's server. A normal chat turn makes no request to the
+  run in your app's Node server or the customer-hosted runtime service. A normal chat turn makes no request to the
   Platform.
 - **Your app keeps the sensitive parts.** Prompts, model calls and provider
   keys, secrets, business data, tool arguments and results, and final
@@ -196,8 +230,9 @@ external or financial always ask. Change that locally with
 `roles`, `exclude`, ...); it writes `.glirastes/tool-policy.json`. See
 [docs/tool-policy.md](docs/tool-policy.md).
 
-**Describing tools.** Glirastes itself never calls a model. Descriptions,
-synonyms and example calls are written by a coding agent from work lists:
+**Describing tools.** The source generator never calls a model. Descriptions,
+synonyms and example calls are written by a coding agent from work lists;
+the chat runtime uses your configured model provider:
 
 - **Free:** your own coding agent works through `glirastes tools resolve --print`
   and `glirastes tools describe --print` with the shipped skills
@@ -279,7 +314,7 @@ See the skill [`building-glirastes-chat-ui`](skills/building-glirastes-chat-ui/S
 | | Standalone | Connected |
 |---|---|---|
 | Trigger | no `GLIRASTES_API_KEY` | `GLIRASTES_API_KEY` is set |
-| Network | none | Platform lookup, registration, sync and metrics, all off the turn path |
+| Platform network | none | Platform lookup, registration, sync and metrics, all off the turn path |
 | Config | local code and `.glirastes/` | reviewed, signed, immutable revisions with rollouts and revocations |
 
 `createGlirastes` from `glirastes/runtime` handles both. Connected, it falls
@@ -306,6 +341,13 @@ serves local tools until then. Without `GLIRASTES_ENVIRONMENT` the app runs as a
 read-only development connection that follows the reference environment. Details:
 [docs/managed-runtime-sync.md](docs/managed-runtime-sync.md).
 
+These environment-variable defaults describe embedded `createGlirastes` use.
+The configured container explicitly selects `platform.enabled` in its JSON
+configuration. Connected container startup waits for an accepted deployment;
+it never silently switches to standalone. An accepted revision can remain usable
+during a transient outage. Standalone still calls your backend and model provider;
+it means no Platform connection, not no network access.
+
 The **Glirastes Platform** is the optional control plane: reviewed tool
 configuration, signed immutable revisions, staged rollouts, approvals and
 content-free health. **Free** covers the local SDK, the local skill workflow
@@ -320,6 +362,7 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes` | Shared types, tool definition helpers and diagnostics |
 | `glirastes/runtime` | `createGlirastes`, local authorization, pinned turns, budgets, durable stores |
 | `glirastes/server` | Server pipeline, including `createLocalAiPipeline` |
+| `glirastes/server/http` | Framework-neutral Web Request/Response handlers for an existing Node host; same exports as `/server/nextjs` |
 | `glirastes/server/nextjs` | Next.js handlers: `createAiChatHandler`, `createChatInteractionsHandler`, `createRecordingTranscriptionHandler` (alias `glirastes/adapter/nextjs`) |
 | `glirastes/server/testing` | Test helpers for tool setups without model calls (ESM only) |
 | `glirastes/react` | Chat UI, provider, hooks, client actions, navigation bridge, STT |
@@ -354,6 +397,10 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes sync` | Upload the current local setup |
 | `glirastes doctor [--managed] [--verbose] [--json]` | Diagnose the local setup |
 | `glirastes install [--host a,b]` | Install the agent skills only |
+| `glirastes-runtime build --project <dir> --out <new-dir> [--frozen]` | Generate an immutable JSON runtime artifact; frozen mode checks committed generation |
+| `glirastes-runtime validate --artifact <dir>` | Check exact SDK version, hashes and bindings |
+| `glirastes-runtime serve --config <absolute-json-path>` | Serve the configured customer runtime |
+| `glirastes-runtime healthcheck --config <absolute-json-path>` | Probe readiness using the service configuration |
 
 `glirastes --help` lists every command and flag; `glirastes tools` and
 `glirastes tools policy` print their own usage.
@@ -378,11 +425,16 @@ Next.js 15 App Router, React (Vite, react-router) + NestJS 11 and Vue 3 +
 FastAPI are integrated and automatically checked. Exact levels and evidence:
 [docs/support-matrix.md](docs/support-matrix.md). Other frontend/backend
 frameworks can use the conditional generic paths (web component, OpenAPI and
-Node runtime/sidecar) described there; this does not imply complete stack support.
+configured runtime service) described there; this does not imply complete stack support.
 
 ## Docs
 
 - [Support matrix](docs/support-matrix.md)
+- [Runtime container architecture and operations](docs/runtime-container.md)
+- [Public image and artifact build commands](containers/runtime/README.md)
+- [PHP backend and Docker Compose example](examples/php-runtime/README.md)
+- [Angular, SvelteKit and Nuxt browser examples](examples/frontend-frameworks/README.md)
+- [Runtime V1 acceptance and release evidence](docs/acceptance/2026-11-15-runtime-container-v1.md)
 - [Tool policy](docs/tool-policy.md)
 - [Chat route security](docs/chat-route-security.md)
 - [Chat interactions (`@` and `/`)](docs/chat-interactions.md)

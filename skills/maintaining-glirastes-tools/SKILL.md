@@ -1,6 +1,6 @@
 ---
 name: maintaining-glirastes-tools
-description: Use when glirastes tools refresh reports findings, a tool needs attention or is disabled, a route, page, filter or client action changed, or the tool policy must be reviewed.
+description: Use when glirastes tools refresh reports findings, a tool needs attention or is disabled, a route, OpenAPI export, page, filter or client action changed, a configured runtime artifact needs rebuilding, or the tool policy must be reviewed.
 ---
 
 # Maintaining Glirastes Tools
@@ -8,10 +8,14 @@ description: Use when glirastes tools refresh reports findings, a tool needs att
 The app's code is the tool catalogue. The source-derived generator
 (`glirastes tools refresh`) turns route handlers, pages, URL filters and client
 actions into tools; where the code does not say enough, it prints a work list
-for you, the app's coding agent. Glirastes never calls a model: you resolve the
+for you, the app's coding agent. The CLI generator never calls a model: you resolve the
 findings, the next refresh checks every entry with the same rules, whoever
 wrote it, and an invalid entry is ignored (`resolution-rejected`) while the tool
 keeps its fallback.
+
+The chat runtime does call the app's model provider. For a configured runtime
+container, use the artifact workflow below instead of assuming the customer
+maintains a Node server or imports a generated TypeScript module.
 
 ## Boundaries
 
@@ -76,6 +80,38 @@ keeps its fallback.
    or sync is needed. A Connected app may run `glirastes sync`; it uploads the
    technical result and never activates anything. Managed apps keep their
    verified revision source.
+
+## OpenAPI and configured runtime updates
+
+1. Regenerate OpenAPI 3.1 JSON from the backend's authoritative schema before
+   refreshing tools. CI must detect stale exports separately; frozen generation
+   cannot detect backend changes hidden by an old document. Preserve the appId.
+2. Use the same generator, resolution, description and developer-owned policy
+   workflows above. Unsupported active operations fail the runtime artifact
+   build. Report the affected operation and supported alternatives; only an
+   explicitly authorized exclusion may remove it, and it remains in coverage.
+3. Build a new artifact directory with the exact deployed SDK/image version:
+   `glirastes-runtime build --project /workspace/app --out /artifacts/release-2`.
+   Review and commit the generated inputs/outputs. Then CI builds a separate
+   directory with `--frozen` and validates it with
+   `glirastes-runtime validate --artifact /artifacts/ci-2`.
+   These commands also run through the official image, without a customer
+   package.json. Never patch runtime.json, manifest.json or coverage.json by hand.
+4. Mount the reviewed artifact read-only and deploy it with the matching image
+   and browser package. A refresh or Platform sync does not replace a running
+   container's artifact. V1 permits one active service per app/environment:
+   stop the old instance before starting the replacement; keep its approval
+   database and secret. Rebuilding tools must not erase consumed approvals.
+5. Connected mode additionally requires an accepted compatible Platform
+   deployment. Verify `/readyz`, current runner/version when connected, an
+   authorized read and an unauthorized denial. Exercise changed tools and
+   frontend behavior in the target app; no successful build alone proves them.
+
+The official public image starts at
+`ghcr.io/chainmatics/glirastes-runtime:0.14.0` (Linux amd64). Pin an approved
+release digest. The packaged `integrating-glirastes-web` runtime reference covers
+identity/configuration when installed; otherwise use the matching SDK's
+[runtime guide](https://github.com/chainmatics/glirastes/blob/v0.14.0/docs/runtime-container.md).
 
 ## Findings and what resolves them
 

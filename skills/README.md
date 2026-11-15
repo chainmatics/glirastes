@@ -55,6 +55,18 @@ not an unrelated registry package sharing its version number.
 
 ## Runtime and frontend choices in 0.14
 
+The released runtime image is public:
+`ghcr.io/chainmatics/glirastes-runtime:0.14.0` (Linux amd64). No registry account
+is required; pin its approved digest and match artifact/browser SDK versions.
+Use these entry points when handing work to a coding agent:
+
+| Task | Skill |
+| --- | --- |
+| Decide embedded Node versus configured service | `setting-up-glirastes` and its `references/runtime-hosts.md` |
+| Integrate Rust/PHP/Java identity, OpenAPI and deployment | `integrating-glirastes-web` and its `references/runtime-container.md` |
+| Mount Angular/SvelteKit/Nuxt/Vue UI with scoped sessions and cleanup | `building-glirastes-chat-ui` and its `references/non-react-hosts.md` |
+| Update an API export and redeploy an immutable runtime artifact | `maintaining-glirastes-tools`, section OpenAPI and configured runtime updates |
+
 Embed in a suitable existing Node/Next.js server, or deploy the configured
 runtime service for Rust/PHP/Java without customer Node server code. V1 is one
 active runtime per app/environment; a true sidecar needs its own lifecycle or
