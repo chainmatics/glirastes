@@ -61,7 +61,7 @@ describe('glirastes init --ci github', () => {
   it('adds the main branch with pull request rights only on request', () => {
     const enrich = job(githubToolsWorkflow({ packageManager: 'bun', enrichOnMain: true }), 'glirastes-tools-enrich');
 
-    expect(enrich).toContain("|| (github.event_name == 'push' && github.ref == 'refs/heads/main')");
+    expect(enrich).toContain("|| (github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[glirastes-tools]'))");
     expect(enrich).toContain('      contents: write\n      pull-requests: write\n');
     expect(enrich).toContain('          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}\n');
   });
@@ -71,25 +71,31 @@ describe('glirastes init --ci github', () => {
     const enrich = job(workflow, 'glirastes-tools-enrich');
 
     expect(workflow).toContain("  push:\n    branches: [main, staging, 'release/next']\n");
-    expect(enrich).toContain("|| (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/release/next'))");
+    expect(enrich).toContain("|| (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/release/next') && !contains(github.event.head_commit.message, '[glirastes-tools]'))");
     expect(enrich).toContain('      contents: write\n      pull-requests: write\n');
     // The branch name reaches the shell through the environment, never through the script text.
-    expect(enrich).toContain('      - run: bunx glirastes tools enrich --managed --json --base "$GLIRASTES_BASE_BRANCH"\n');
+    expect(enrich).toContain('      - run: bunx glirastes tools enrich --managed --json --base "$GLIRASTES_BASE_BRANCH" --head "$GLIRASTES_HEAD_BRANCH"\n');
     expect(enrich).toContain('          GLIRASTES_BASE_BRANCH: ${{ github.base_ref || github.ref_name }}\n');
     expect(githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['main'] }))
       .toBe(githubToolsWorkflow({ packageManager: 'bun', enrichOnMain: true }));
   });
 
-  it('compares a push with the commit before it and works the backlog only on a manual start', () => {
+  it('passes base, head and environments, fetches the history and works the backlog only on a manual start', () => {
     const workflow = githubToolsWorkflow({ packageManager: 'bun', enrichOn: ['staging'] });
     const enrich = job(workflow, 'glirastes-tools-enrich');
 
     expect(workflow).toContain("  push:\n    branches: [main, staging]\n  workflow_dispatch:\n");
     expect(enrich).toContain("|| github.event_name == 'workflow_dispatch'");
-    expect(enrich).toContain('          GLIRASTES_BEFORE_SHA: ${{ github.event.before }}\n');
+    expect(enrich).not.toContain('GLIRASTES_BEFORE_SHA');
+    expect(enrich).toContain('          fetch-depth: 0\n');
+    expect(enrich).toContain('          GLIRASTES_HEAD_BRANCH: ${{ github.head_ref || github.ref_name }}\n');
+    expect(enrich).toContain('          GLIRASTES_ENVIRONMENT_BRANCHES: ${{ vars.GLIRASTES_ENVIRONMENT_BRANCHES }}\n');
     expect(enrich).toContain("          GLIRASTES_FIRST_RUN: ${{ github.event_name == 'workflow_dispatch' }}\n");
     // A repository that runs the job on pull requests only has no manual start: the bot could not open a pull request.
-    expect(githubToolsWorkflow({ packageManager: 'bun' })).not.toMatch(/workflow_dispatch|GLIRASTES_FIRST_RUN|GLIRASTES_BEFORE_SHA/);
+    const pullRequestsOnly = githubToolsWorkflow({ packageManager: 'bun' });
+    expect(pullRequestsOnly).not.toMatch(/workflow_dispatch|GLIRASTES_FIRST_RUN/);
+    // Pull requests into any branch name their base, so the job knows a promotion from new code.
+    expect(pullRequestsOnly).toContain('          GLIRASTES_BASE_BRANCH: ${{ github.base_ref || github.ref_name }}\n');
   });
 
   it("pushes as a GitHub App when one is configured, so the bot's commits get their checks without approval", () => {

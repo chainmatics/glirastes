@@ -102,6 +102,8 @@ export const ToolsConfigSchema = z.object({
     managed: z.boolean().optional(),
     model: z.string().trim().min(1).max(200).optional(),
     writeContracts: z.boolean().optional(),
+    /** The environment chain, lowest first (e.g. `["dev", "staging", "main"]`); a promotion between them is never enriched. */
+    environments: z.array(z.string().regex(/^(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/)).max(20).optional(),
   }).strict().default({}),
   ci: z.object({
     strict: z.boolean().optional(),

@@ -169,8 +169,12 @@ no model on every pull request and push to `main`.
   workflow above, and commit the result. The workflow's second job,
   `glirastes-tools-enrich`, stays off; nothing else is needed.
 - Platform with Pro only: the managed CI runner works the same lists in `glirastes-tools-enrich`,
-  automatically only for the tools a pull request or push changed, and
-  commits them as `glirastes-bot` on the pull request branch. The backlog of
+  automatically only for tools whose semantics are missing or stale, and
+  commits them as `glirastes-bot` on the pull request branch, once, and only
+  what passes `glirastes tools check`. A promotion between environment
+  branches changes nothing; the chain is `enrich.environments` in
+  `.glirastes/tools.json` (ask the developer for it, lowest first) or the
+  variable `GLIRASTES_ENVIRONMENT_BRANCHES`. The backlog of
   an app that was never described runs once on request: start the workflow
   by hand (it then passes the first-run budget), or work the lists locally
   as in Free. (With

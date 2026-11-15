@@ -204,8 +204,11 @@ synonyms and example calls are written by a coding agent from work lists:
   `maintaining-glirastes-tools` and `describing-glirastes-tools`, and you
   commit the result.
 - **Pro:** the managed CI tool agent (`glirastes tools enrich --managed`)
-  runs the same skills in your CI, only on the tools a pull request or push
-  changed, and commits the result as `glirastes-bot`. Model requests go
+  runs the same skills in your CI, only on tools whose semantics are
+  missing or stale, and commits the result as `glirastes-bot` in one commit
+  that passes `glirastes tools check`. It never rewrites current entries,
+  human or locked fields, and does nothing on a promotion between
+  environment branches. Model requests go
   through OpenRouter with the routing the Platform grants for the job (no
   data collection, zero data retention), or your own key in
   `GLIRASTES_TOOLS_OPENROUTER_KEY`. Requires the optional peer
@@ -229,6 +232,14 @@ two jobs:
   after pushes to those branches; there it opens a pull request instead of
   committing, and the workflow gets a manual start that works the whole
   backlog once.
+- New code is described where it enters the environment chain; a promotion
+  (a pull request whose head is an environment branch, or whose head commit
+  another environment branch already holds, e.g. a release branch) is a fast
+  no-op. Set the chain, lowest first, in `.glirastes/tools.json`:
+  `"enrich": { "environments": ["dev", "staging", "main"] }`, or with the
+  repository variable `GLIRASTES_ENVIRONMENT_BRANCHES=dev,staging,main`.
+  Without it the job uses the usual names (`dev`, `staging`, `main`,
+  `master`, `prod`, …) that exist on origin.
 - `--ci-environment <name>` reads the three values from that GitHub
   environment instead of the repository.
 - Set the variable `GLIRASTES_BOT_APP_ID` and the secret
@@ -336,7 +347,7 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes tools eval` | Check that example sentences find their tool |
 | `glirastes tools verify <tool>...\|--all` | Confirm agent-written contracts after review |
 | `glirastes tools policy <...>` | Change the local tool policy |
-| `glirastes tools enrich --managed [--first-run] [--base <branch>]` | Pro, CI only: run the managed tool agent |
+| `glirastes tools enrich --managed [--first-run] [--base <branch>] [--head <branch>] [--environments <a,b,c>]` | Pro, CI only: run the managed tool agent |
 | `glirastes setup [--dry-run] [--managed]` | Validate and install the local setup artifacts |
 | `glirastes setup inspect` | Inspect project manifests before integration |
 | `glirastes connect [--base-url <url>]` | Connect the app once and issue one app key (`--base-url` only for self-hosted) |

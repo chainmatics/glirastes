@@ -24,6 +24,7 @@ export const MAX_OUTPUT_TOKENS = 16_000;
 /** The only words the runner adds to the skills: nobody answers a question in CI. */
 export const HEADLESS_INSTRUCTIONS = 'No developer is present. Work every item of these work lists now, without asking, '
   + 'then stop. Add entries with upsert_semantics and upsert_resolutions; they keep every other entry of the file. '
+  + 'Write only the fields each item\'s expected entry shows; protectedFields stay as they are, and anything else you write is discarded. '
   + 'Leave items owned by the developer open.';
 /** Margin before the job key expires, so the ledger still reaches the Platform. */
 const DEADLINE_MARGIN_MS = 3 * 60_000;

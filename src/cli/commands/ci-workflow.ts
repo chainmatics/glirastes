@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { BOT_MARKER } from '../../agent/git.js';
 
 /**
  * `glirastes init --ci github` (spec 4.6, 4.8): the GitHub Actions workflow
@@ -117,16 +118,20 @@ export function githubToolsWorkflow(options: {
   const refs = branches.map((branch) => `github.ref == 'refs/heads/${branch}'`).join(' || ');
   const trigger = onPush
     ? "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)\n"
-      + `        || (github.event_name == 'push' && ${branches.length > 1 ? `(${refs})` : refs})\n`
-      // A manual start works the backlog; every automatic run works only what changed.
+      // The bot's own push starts no second job.
+      + `        || (github.event_name == 'push' && ${branches.length > 1 ? `(${refs})` : refs}`
+      + ` && !contains(github.event.head_commit.message, '${BOT_MARKER}'))\n`
+      // A manual start works the backlog; every automatic run works only missing or stale semantics.
       + "        || github.event_name == 'workflow_dispatch'"
     : "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository";
   const pushBranches = [...new Set(['main', ...branches])].map(yamlBranch).join(', ');
   return [
     '# Written by `glirastes init --ci github`.',
     '# glirastes-tools checks the committed tool outputs without secrets or models.',
-    '# glirastes-tools-enrich (Glirastes Pro) describes the tools a pull request or push',
-    '# changed in a managed job (a manual start works the whole backlog) and',
+    '# glirastes-tools-enrich (Glirastes Pro) describes tools whose semantics are missing',
+    '# or stale in a managed job (a manual start works the whole backlog), skips a',
+    '# promotion between environment branches (enrich.environments in .glirastes/tools.json',
+    '# or the variable GLIRASTES_ENVIRONMENT_BRANCHES) and',
     ...(environment === undefined
       ? [
         '# commits them as glirastes-bot; it runs once the repository variable',
@@ -185,21 +190,24 @@ export function githubToolsWorkflow(options: {
       '      - uses: actions/checkout@v4',
       '        with:',
       '          ref: ${{ github.head_ref || github.ref_name }}',
+      // The whole history: a promotion is recognised by a commit an environment branch already holds.
+      '          fetch-depth: 0',
       '          token: ${{ steps.bot.outputs.token || github.token }}',
       ...setup.steps,
       `      - run: ${setup.install}`,
       `      - run: ${setup.run} tools refresh --mode write --keep-going`,
-      `      - run: ${setup.run} tools enrich --managed --json${onPush ? ' --base "$GLIRASTES_BASE_BRANCH"' : ''}`,
+      `      - run: ${setup.run} tools enrich --managed --json --base "$GLIRASTES_BASE_BRANCH" --head "$GLIRASTES_HEAD_BRANCH"`,
     ]),
     '        env:',
     '          GLIRASTES_CI_KEY: ${{ secrets.GLIRASTES_CI_KEY }}',
     '          GLIRASTES_CONTROL_PLANE_URL: ${{ vars.GLIRASTES_CONTROL_PLANE_URL }}',
     '          GLIRASTES_TOOLS_OPENROUTER_KEY: ${{ secrets.GLIRASTES_TOOLS_OPENROUTER_KEY }}',
+    // A pull request names its target, a push its own branch: there the bot opens a pull request.
+    '          GLIRASTES_BASE_BRANCH: ${{ github.base_ref || github.ref_name }}',
+    '          GLIRASTES_HEAD_BRANCH: ${{ github.head_ref || github.ref_name }}',
+    '          GLIRASTES_ENVIRONMENT_BRANCHES: ${{ vars.GLIRASTES_ENVIRONMENT_BRANCHES }}',
     ...(onPush ? [
-      // A pull request names its target, a push its own branch: there the bot opens a pull request.
-      '          GLIRASTES_BASE_BRANCH: ${{ github.base_ref || github.ref_name }}',
       '          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}',
-      '          GLIRASTES_BEFORE_SHA: ${{ github.event.before }}',
       "          GLIRASTES_FIRST_RUN: ${{ github.event_name == 'workflow_dispatch' }}",
     ] : []),
     '',

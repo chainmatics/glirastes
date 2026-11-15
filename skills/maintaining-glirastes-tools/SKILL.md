@@ -139,6 +139,30 @@ glirastes tools policy reset <tool>
 glirastes doctor
 ```
 
+## Environment chain and the managed job
+
+An app deploys from an ordered chain of environment branches, any names and
+any length (`pre-dev → dev → staging → master`, `qa → uat → prod`, or just
+`main`). Tools are described where new code enters the chain:
+
+- A pull request from a branch that is no environment (feature, hotfix,
+  release with new commits) into any environment branch, or a push to one:
+  the managed job (`glirastes tools enrich --managed`) works only tools whose
+  semantics are missing, stale or rejected. Current entries, human and locked
+  fields stay exactly as they are; a first run (manual start) also takes the
+  schema backlog.
+- A promotion changes nothing: a head branch that is an environment branch,
+  or a head commit another environment branch already holds (a release
+  branch cut from one, a fast-forward merged up). The job logs
+  `promotion from <branch>, nothing to enrich` and ends.
+- The chain is `enrich.environments` in `.glirastes/tools.json` (lowest
+  first), overridden by the variable `GLIRASTES_ENVIRONMENT_BRANCHES` or
+  `--environments`. Without either, the job takes the usual names
+  (`dev`, `develop`, `staging`, `main`, `master`, `prod`, …) that exist on
+  origin. Setting the chain is the developer's decision.
+- The job commits at most once and only what passes `glirastes tools check`;
+  a run its own commit starts does nothing.
+
 ## Verification
 
 - `glirastes tools resolve --print` shows no agent item; developer items are
