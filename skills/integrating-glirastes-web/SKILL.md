@@ -62,7 +62,8 @@ contracts; it is not proof that its whole stack is officially supported.
    or run a declared Node sidecar beside a non-Node backend. A Java/Python/PHP
    API does not run the TypeScript SDK itself.
 4. **Frontend capabilities:** use a supported page/router source where available.
-   `registerNavigationBridge` executes navigation; it does not discover pages
+   `registerNavigationBridge` executes navigation (the `GLIRASTES_NAVIGATE_ACTION_ID`
+   results, only targets `isSafeAppHref` accepts); it does not discover pages
    from Angular, Svelte or another unknown router. Put client actions and
    literal `defineQueryFilters` declarations in scanned JS/TS modules when the
    framework's component format is unsupported. Verify declared filter paths
@@ -204,7 +205,10 @@ file alone does not prove that every endpoint becomes an enabled tool.
    themes through `--glirastes-chat-*` CSS variables, emits
    `glirastes-chat:ready`, `:status`, `:tool-result` and `:error`, and frees
    the microphone when removed. The page needs `react`, `react-dom`,
-   `@ai-sdk/react` and `ai` installed.
+   `@ai-sdk/react` and `ai` installed. JS-only settings (`headers`,
+   `bodyExtras`, the provider fields) go on the element's `config` property
+   (`GlirastesChatElementConfig`); `EMBED_CSS_VARIABLES` lists the theme
+   variables and `GLIRASTES_CHAT_TAG` is the tag name.
 5. Configure `.glirastes/tools.json` with the supported sources, run
    `glirastes tools refresh` and the work lists of `setting-up-glirastes`.
    For the parts marked "not yet", write down which endpoints, pages or

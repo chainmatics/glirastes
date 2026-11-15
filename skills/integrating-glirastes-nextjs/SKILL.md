@@ -107,6 +107,8 @@ second, hand-maintained catalogue.
    `model_error`. With metrics, an endpoint that
    refuses a call its schema accepted (400 or 422) is reported as
    `tool_contract_rejected`, without content.
+   Every other `AiChatHandlerConfig` option (approvals, origins, limits,
+   callbacks), one line each: [references/handler-options.md](references/handler-options.md).
    Image and PDF attachments stay off until the developer asks for them:
    then `attachments: { enabled: true }` here (body limit 50 MB; with
    `piiShield` also `allowWithPiiShield: true`, since files bypass the

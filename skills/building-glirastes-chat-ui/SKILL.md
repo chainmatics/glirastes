@@ -50,7 +50,9 @@ make server-side visibility and retention explicit.
 
 `VercelAiChat` requires `endpoint`, creates its transport internally and takes
 the `AiChatProviderConfig` fields; an own `AiChatProvider` needs `transport`
-from the transport hook. Reach for configuration before forking a component.
+from `useVercelAiChatTransport`. Reach for configuration before forking a
+component; headless hooks and building blocks for an own chat:
+[references/hooks-and-building-blocks.md](references/hooks-and-building-blocks.md).
 
 | Field | What it decides |
 |---|---|
@@ -324,7 +326,9 @@ Use the SDK STT controller as the only recording state machine:
 (default `mod+shift+space`) next to tap-to-toggle. Pass `voice.routeKey` (for
 example the pathname) so navigation stops recording and keeps the speech as
 draft; back/forward, session switches and unmount release the microphone as
-well. `voice.adapter` plugs in another provider; keep its identity stable.
+well. `voice.adapter` plugs in another provider (an `SttProviderAdapter`;
+`DeepgramSttAdapter` and `RecordedSttAdapter` ship in `glirastes/stt`); keep
+its identity stable.
 
 A finished recording (`RecordedSttAdapter`, `audio/wav` to
 `/api/ai/speech-recognize`) needs one route; the app's transcription service

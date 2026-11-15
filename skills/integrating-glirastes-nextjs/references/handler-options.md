@@ -1,0 +1,106 @@
+# createAiChatHandler options
+
+Every top-level key of `AiChatHandlerConfig` (`glirastes/server/nextjs`), one
+line each. Only `systemPrompt` is required; set the rest when the product needs
+it. The type's JSDoc carries the full detail.
+
+## Contents
+
+- Tools and routing
+- Model and turn limits
+- History and answers
+- Built-in tools
+- Approvals
+- Request safety
+- Callbacks and observability
+- Legacy and Pro
+
+## Tools and routing
+
+| Key | What it does |
+| --- | --- |
+| `tools` | static `ToolRegistry`; wins over `loadTools` |
+| `loadTools` | `LoadTools` callback that builds the registry per request |
+| `managedRuntime` | `ManagedLocalRuntimeConfig`: verified principal, pinned turn snapshot, local guard per tool call |
+| `toolDiscovery` | local `find_tools` recovery |
+| `intentRouting` | start-set routing for `toolDiscovery` (default on); `DefaultIntentRoutingOptions` tunes it |
+| `toolSemantics` | search-only synonyms per model-facing tool name |
+| `directCommands` | `/` commands and entity actions run without a model call (default `true`) |
+| `endpointCaller` | `(request) => InternalApiCaller` for an API on another origin or with `Authorization` auth; default `createInternalApiCallerFromRequest` |
+| `trustForwardedHeaders` | take the origin from `x-forwarded-*`; only behind a proxy that sets them |
+
+## Model and turn limits
+
+| Key | What it does |
+| --- | --- |
+| `model` | model instance or resolver |
+| `systemPrompt` | string or function of routing, date and pinned `TurnSnapshot` |
+| `locale` | answer locale |
+| `temperature`, `maxOutputTokens` | passed to the model call |
+| `maxSteps` | hard step cap; without it `safetyMaxSteps` (default 24) is the soft cap |
+| `safetyMaxSteps` | guard against runaway loops when no `maxSteps` is set |
+| `maxBodyBytes` | request body limit (1 MB, 50 MB with attachments) |
+| `attachments` | `ChatAttachmentsConfig`; off by default |
+
+## History and answers
+
+| Key | What it does |
+| --- | --- |
+| `history` | compacted earlier turns (default on); `HistoryOptions` or `false` |
+| `maxContextMessages` | most model messages kept (default 12); the current turn is never split |
+| `maxConversationHistoryPairs` | user/assistant pairs the intent classifier sees (default 4) |
+| `promptCaching` | cache breakpoints and stable tool order (default `true`) |
+| `hideIds` | keep technical ids out of answers (default `true`) |
+| `uiActionSchema` | schema that validates the `uiAction` of tool results |
+
+## Built-in tools
+
+| Key | What it does |
+| --- | --- |
+| `clarification` | `ClarificationConfig` enables `ask_clarification` |
+| `planning` | `PlanningConfig` enables `update_plan`; the chat shows it as a checklist |
+| `guardrails` | `GuardrailHook`, the app's own input check before routing; a refusal answers 400 |
+| `piiShield` | anonymize user messages before the model, re-hydrate tool arguments |
+
+## Approvals
+
+| Key | What it does |
+| --- | --- |
+| `approvalSecret` | HMAC secret that binds an approval to its tool call; falls back to `GLIRASTES_APPROVAL_SECRET`, required in production |
+| `approvalMaxAgeMs` | approval lifetime (default 15 minutes, at most 24 hours) |
+| `approvalStore` | single-use `ApprovalStore`; several instances need a shared one (e.g. Redis `SET NX PXAT`) |
+| `approvalScope` | `(request) => userId` binds approvals to a user without a managed runtime |
+
+## Request safety
+
+| Key | What it does |
+| --- | --- |
+| `crossOriginProtection` | refuses cross-site browser posts (default on); `false` only without cookie auth |
+| `allowedOrigins` | other origins whose pages may post to the handler |
+| `wrapHandler` | wrap each request, e.g. in a tenant context |
+
+## Callbacks and observability
+
+| Key | What it does |
+| --- | --- |
+| `onError` | request failed |
+| `onToolError` | a tool threw |
+| `onFinish` | steps, finish reason, token usage, truncation and `StepLimitSource` |
+| `emitStepReports` | `data-step-report` stream parts (default on) |
+| `onStepReport` | one `PipelineStepReport` per step |
+| `onPipelineResult` | intent, module, model and tools chosen by `pipeline` |
+| `onAudit` | `AuditEmitter` for all audit events; forward to logs or a SIEM |
+| `metrics` | content-free turn metrics, e.g. from `createGlirastes(...).chatTurn()` |
+| `modelPricing` | price table for providers that report no cost |
+
+## Legacy and Pro
+
+| Key | What it does |
+| --- | --- |
+| `pipeline` | Pro `AiPipeline` from `glirastes/server`; replaces guardrails and intent router routing |
+| `followups` | follow-up suggestions; needs `pipeline` |
+| `intentRouter` | deprecated; use `pipeline` |
+| `telemetry` | legacy remote sink; refused together with `managedRuntime` (use `metrics`) |
+| `lancer` | legacy prompt and model overrides; not on the Foundation path |
+| `modelDefaults` | model ids per tier reported with `lancer` |
+| `modelInstanceFactory` | turns a model id into a model instance for `lancer` overrides |
