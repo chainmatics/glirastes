@@ -47,8 +47,12 @@ export interface ChatEntityLinksConfig {
 
 export type ChatEntityTextSegment =
   | { readonly kind: 'text'; readonly text: string }
-  /** A matcher hit; `resolve` decides later whether it becomes a chip. */
-  | { readonly kind: 'match'; readonly type: string; readonly text: string; readonly matcher: number }
+  /**
+   * A matcher hit; `resolve` decides later whether it becomes a chip. A known
+   * name right after the hit ("MAR-5 Flyer drucken") joins it: `text` is the
+   * whole phrase, `match` the hit that `resolve` gets.
+   */
+  | { readonly kind: 'match'; readonly type: string; readonly text: string; readonly matcher: number; readonly match?: string }
   | { readonly kind: 'entity'; readonly text: string; readonly reference: ChatEntityReference };
 
 const WORD = '[\\p{L}\\p{N}_]';
@@ -86,6 +90,9 @@ export function splitEntityText(
     matcher: index,
   }));
   if (labels.length > 0) patterns.push({ regex: boundaryPattern(labels.join('|'), '') });
+  const trailingLabel = labels.length > 0
+    ? new RegExp(`[ \\t]*(?:[:\u2013\u2014-][ \\t]*)?(?:${labels.join('|')})(?!${WORD})`, 'uy')
+    : undefined;
   if (patterns.length === 0 || !text) return [{ kind: 'text', text }];
 
   const segments: ChatEntityTextSegment[] = [];
@@ -103,7 +110,18 @@ export function splitEntityText(
     if (!best) break;
     if (best.index > cursor) segments.push({ kind: 'text', text: text.slice(cursor, best.index) });
     if (best.matcher !== undefined) {
-      segments.push({ kind: 'match', type: options.matchers![best.matcher]!.type, text: best.value, matcher: best.matcher });
+      const type = options.matchers![best.matcher]!.type;
+      let joined: string | undefined;
+      if (trailingLabel) {
+        trailingLabel.lastIndex = best.index + best.length;
+        joined = trailingLabel.exec(text)?.[0];
+      }
+      if (joined) {
+        segments.push({ kind: 'match', type, text: best.value + joined, matcher: best.matcher, match: best.value });
+        best.length += joined.length;
+      } else {
+        segments.push({ kind: 'match', type, text: best.value, matcher: best.matcher });
+      }
     } else {
       segments.push({ kind: 'entity', text: best.value, reference: byLabel.get(best.value)! });
     }

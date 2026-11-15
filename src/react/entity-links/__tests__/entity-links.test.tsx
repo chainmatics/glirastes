@@ -43,6 +43,18 @@ describe('splitEntityText', () => {
     ]);
   });
 
+  it('joins a key and the known name right after it into one hit', () => {
+    const known = [{ type: 'task', id: 'task-1', label: 'Check laightup und AI Act' }];
+    const matchers = [{ type: 'task', pattern: TASK_KEY }];
+    expect(splitEntityText('MAR-1 Check laightup und AI Act – offen', { matchers, known })).toEqual([
+      { kind: 'match', type: 'task', text: 'MAR-1 Check laightup und AI Act', matcher: 0, match: 'MAR-1' },
+      { kind: 'text', text: ' – offen' },
+    ]);
+    expect(splitEntityText('MAR-1: Check laightup und AI Act', { matchers, known })[0])
+      .toMatchObject({ text: 'MAR-1: Check laightup und AI Act', match: 'MAR-1' });
+    expect(splitEntityText('MAR-1 und Check laightup und AI Act', { matchers, known })).toHaveLength(3);
+  });
+
   it('returns the text unchanged without matchers or known names', () => {
     expect(splitEntityText('Nichts zu sehen', {})).toEqual([{ kind: 'text', text: 'Nichts zu sehen' }]);
   });
@@ -119,6 +131,22 @@ describe('entity chips in answers', () => {
     expect(screen.queryByRole('button', { name: /MAR-404/ })).toBeNull();
     fireEvent.click(chip);
     expect(open).toHaveBeenCalledWith({ type: 'task', id: 'task-2', label: 'Release prüfen' });
+  });
+
+  it('renders a key with the known name after it as one chip and resolves the key alone', async () => {
+    const resolve = vi.fn(() => ({ id: 'task-2', label: 'Release prüfen' }));
+    const links: ChatEntityLinksConfig = { matchers: [{ type: 'task', pattern: TASK_KEY, resolve }], open: vi.fn() };
+    const messages: ChatMessage[] = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Was ist mit {{mention:task:task-2:Release prüfen}}?' }] },
+      answer('MAR-2 Release prüfen ist offen.'),
+    ];
+    render(<Chat messages={messages} entityLinks={links} bus={new UiActionBus()} />);
+    await waitFor(() => {
+      const chips = screen.getAllByRole('button', { name: 'Open Release prüfen' }).map((chip) => chip.textContent);
+      expect(chips.filter((text) => text?.includes('MAR-2'))).toEqual(['MAR-2 Release prüfen']);
+      expect(chips).toHaveLength(2);
+    });
+    expect(resolve).toHaveBeenCalledWith('MAR-2');
   });
 
   it('links names the conversation already referenced and navigates through the bus by default', async () => {
