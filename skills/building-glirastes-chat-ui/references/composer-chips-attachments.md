@@ -134,4 +134,16 @@ for each successful result: otherwise generated navigation, filter and client
 actions never run, and a page-bound action (`{ route }`) never opens its page.
 It navigates through the navigation bridge, waits up to `routeTimeoutMs`
 (default 5000) for the page to register the handler, and rejects when it does
-not or when a handler returns `false`.
+not or when a handler returns `false`. Server `success: true` means only that
+an action request was created; check `executionStatus: 'unconfirmed'`. Local
+feedback distinguishes rejection, missing handlers, exceptions and timeouts.
+Never retry timed-out work automatically: an already-running handler may still
+have an effect. Custom clients should pass an abort `signal` on session changes
+and deduplicate tool-call IDs, including restored history. See
+[Browser outcomes](../../../docs/browser-action-outcomes.md).
+
+Custom clients can import `UiActionDispatchError` and the `UiActionFailureStatus`
+type from `glirastes/browser`. Catch the typed error around
+`await dispatchToolResultUiActions(result, bus, { signal })`, then display a
+localized label for `error.status`. Do not turn exceptions or timeouts into
+success and do not resend the tool call automatically.

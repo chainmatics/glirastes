@@ -1,0 +1,35 @@
+
+ RUN  v4.1.4 /Users/philipprollmann/Dev/chainmatics/glirastes/.worktrees/fieldwork-dx
+
+ ❯ src/react/utils/__tests__/approval-names.test.ts (11 tests | 1 failed) 7ms
+   × never substitutes a globally known short ID into an unrelated entity field 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/react/utils/__tests__/approval-names.test.ts > never substitutes a globally known short ID into an unrelated entity field
+AssertionError: expected [ 'Technician: Repair lighting' ] to deeply equal [ 'technicianId: 1' ]
+
+- Expected
++ Received
+
+  [
+-   "technicianId: 1",
++   "Technician: Repair lighting",
+  ]
+
+ ❯ src/react/utils/__tests__/approval-names.test.ts:118:24
+    116|     'assign', 'binding', { technicianId: '1' }, { names },
+    117|   );
+    118|   expect(card.details).toEqual(['technicianId: 1']);
+       |                        ^
+    119|   expect(card.details?.join(' ')).not.toContain('Repair lighting');
+    120| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 passed (11)
+   Start at  21:54:41
+   Duration  141ms (transform 21ms, setup 0ms, import 29ms, tests 7ms, environment 0ms)
+

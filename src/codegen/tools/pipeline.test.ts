@@ -774,6 +774,15 @@ describe('runToolsPipeline (app identity)', () => {
 });
 
 describe('runToolsPipeline (input schema root)', () => {
+  it('reports missing Zod 3 conversion without accusing an object schema of having the wrong shape', async () => {
+    const fixture = await app();
+    await fixture.write('src/lib/schemas.ts', SCHEMAS.replace("from 'zod'", "from 'zod-v3'"));
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const tool = result.tools?.find((item) => item.stableKey === 'POST /api/tasks');
+    expect(tool?.enabled).toBe(false);
+    expect(tool?.findings.map((finding) => finding.code)).toContain('schema-json-unavailable');
+    expect(tool?.findings.map((finding) => finding.code)).not.toContain('input-schema-not-object');
+  }, 120_000);
   it('disables a tool whose input schema is no object at its root and lists it for the coding agent', async () => {
     const fixture = await app();
     await fixture.write('src/lib/notes.ts', "import { z } from 'zod';\n"

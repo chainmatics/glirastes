@@ -513,12 +513,13 @@ async function generate(
         'The source reported no input contract for this tool.'));
     }
     // Function calling needs an object at the root of the input schema; a union there fails every turn.
-    const rootNotObject = tool.contract !== undefined && tool.contract.input.type !== 'object';
+    const conversionUnavailable = tool.findings.some((finding) => finding.code === 'schema-json-unavailable');
+    const rootNotObject = !conversionUnavailable && tool.contract !== undefined && tool.contract.input.type !== 'object';
     if (rootNotObject) {
       findings.push(toolFinding('input-schema-not-object', 'needs_attention', execution.stableKey,
         'The input schema is not an object at its root (for example a union), so models cannot call this tool.'));
     }
-    const needsAttention = reportedAttention || !tool.contract || rootNotObject;
+    const needsAttention = reportedAttention || conversionUnavailable || !tool.contract || rootNotObject;
     const defaults = deriveToolPolicyDefaults({
       executionKind: execution.executionKind,
       ...(execution.executionKind === 'endpoint' ? { method: execution.method, path: execution.path } : {}),

@@ -1,3 +1,4 @@
+import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
 import type { ChatMessage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
 import { omitAttachmentData } from './attachments.js';
 import { sanitizeStoredMessages } from './sanitize-stored-messages.js';
@@ -57,7 +58,7 @@ function titleFrom(messages: ReadonlyArray<ChatMessage | WireChatMessage>): stri
   const first = messages.find((message) => message.role === 'user');
   const raw = first ? textOf(first) : '';
   // Mentions read as `@Name` and `/Command`, not as their markup.
-  const text = parseMentionSegments(raw)
+  const text = parseMentionSegments(stripChatCommandMarkers(raw))
     .map((segment) => (segment.kind === 'text' ? segment.text : `${segment.mention.prefix ?? ''}${segment.mention.displayName}`))
     .join('')
     .replace(/\s+/g, ' ')
@@ -90,7 +91,7 @@ function isSummary(value: unknown): value is SessionSummary & { createdAt: numbe
  */
 export function createLocalSessionStore(options: LocalSessionStoreOptions): SessionConfig {
   const storage = options.storage === undefined ? browserStorage() : options.storage;
-  const newTitle = options.newTitle ?? 'New chat';
+  let newTitle = options.newTitle ?? 'New chat';
   const maxSessions = Math.max(1, options.maxSessions ?? 30);
   const now = options.now ?? (() => Date.now());
   const createId = options.createId ?? randomId;
@@ -145,6 +146,11 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   const summary = ({ named: _named, ...entry }: Entry): SessionSummary => entry;
 
   return {
+    setDefaultTitle(title) {
+      if (options.newTitle !== undefined || !title.trim() || title === newTitle) return;
+      newTitle = title;
+      persist(entries().map((entry) => !entry.named && entry.messageCount === 0 ? { ...entry, title } : entry));
+    },
     get defaultActiveId() {
       const active = read(activeKey);
       const list = entries();

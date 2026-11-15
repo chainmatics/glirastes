@@ -45,12 +45,14 @@ describe('uiActionToolToTool', () => {
     const on = (clientActions: string[]) => ({ currentDate: new Date(), locale: 'de-DE', runtime: { clientActions } });
     await expect(tool.execute({}, on(['task-details.open']))).resolves.toEqual({
       success: true,
-      message: 'The app opens /templates and runs the action there.',
+      requested: true, executionStatus: 'unconfirmed',
+      message: 'Aktion angefordert. Die Ausführung im Browser ist unbestätigt; keinen Erfolg behaupten.',
       uiAction: { type: 'glirastes.action', actionId: 'template-create-dialog.open', payload: {}, route: '/templates' },
     });
     await expect(tool.execute({}, on(['template-create-dialog.open']))).resolves.toEqual({
       success: true,
-      message: 'Action executed.',
+      requested: true, executionStatus: 'unconfirmed',
+      message: 'Aktion angefordert. Die Ausführung im Browser ist unbestätigt; keinen Erfolg behaupten.',
       uiAction: { type: 'glirastes.action', actionId: 'template-create-dialog.open', payload: {}, route: '/templates' },
     });
   });
@@ -67,7 +69,8 @@ describe('uiActionToolToTool', () => {
     expect(tool.needsApproval).toBe(false);
     await expect(tool.execute({ destination: '/tasks/:id', params: { id: '7' } }, context)).resolves.toEqual({
       success: true,
-      message: 'Action executed.',
+      requested: true, executionStatus: 'unconfirmed',
+      message: 'Action requested. Browser execution is unconfirmed; do not claim it was completed.',
       uiAction: {
         type: 'glirastes.navigate',
         actionId: 'glirastes.navigate',
@@ -120,7 +123,8 @@ describe('uiActionToolToTool', () => {
     expect(tool.needsApproval).toBe(true);
     await expect(tool.execute({ taskId: '2' }, context)).resolves.toEqual({
       success: true,
-      message: 'Action executed.',
+      requested: true, executionStatus: 'unconfirmed',
+      message: 'Action requested. Browser execution is unconfirmed; do not claim it was completed.',
       uiAction: { type: 'glirastes.action', actionId: 'tasks.highlight', payload: { taskId: '2' } },
     });
   });

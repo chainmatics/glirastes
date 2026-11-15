@@ -23,7 +23,7 @@ describe('built-in voice in a retained window', () => {
       <VoiceInputAddon disabled={false} language="en" onTranscript={received} onError={error} />
     </ChatWindow>;
     const { rerender } = render(view(true));
-    fireEvent.click(screen.getByRole('button', { name: 'mic' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
     await waitFor(() => expect(document.querySelector('[data-component="voice-input-addon"]')?.getAttribute('data-state')).toBe('recording'));
     rerender(view(false));
     await waitFor(() => expect(error).toHaveBeenCalledWith('fixture-finalize-failed'));
@@ -50,11 +50,11 @@ describe('built-in voice in a retained window', () => {
       <VoiceInputAddon disabled={false} language="en" onTranscript={received} />
     </ChatWindow>;
     const { rerender } = render(view(true));
-    fireEvent.click(screen.getByRole('button', { name: 'mic' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
     await waitFor(() => expect(document.querySelector('[data-component="voice-input-addon"]')?.getAttribute('data-state')).toBe('recording'));
     // Stop and hiding can race; only one final draft insertion is allowed.
-    fireEvent.click(screen.getByRole('button', { name: 'stop' }));
-    fireEvent.click(screen.getByRole('button', { name: 'stop' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Stop recording' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Stop recording' })[0]);
     rerender(view(action !== 'close', action === 'collapse'));
     await act(async () => { release(); });
     await waitFor(() => expect(stopTrack).toHaveBeenCalled());
@@ -76,7 +76,7 @@ describe('built-in voice in a retained window', () => {
       <VoiceInputAddon disabled={false} language="en" onTranscript={received} />
     </ChatWindow>;
     const { rerender } = render(view(false));
-    fireEvent.click(screen.getByRole('button', { name: 'mic' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
     await waitFor(() => expect(document.querySelector('[data-component="voice-input-addon"]')?.getAttribute('data-state')).toBe('recording'));
     rerender(view(true));
     await waitFor(() => expect(stopTrack).toHaveBeenCalled());

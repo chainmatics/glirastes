@@ -1,0 +1,9 @@
+
+ RUN  v4.1.4 /Users/philipprollmann/Dev/chainmatics/glirastes/.worktrees/fieldwork-dx
+
+
+ Test Files  12 passed (12)
+      Tests  90 passed (90)
+   Start at  21:43:31
+   Duration  2.24s (transform 906ms, setup 0ms, import 1.74s, tests 2.79s, environment 2.76s)
+

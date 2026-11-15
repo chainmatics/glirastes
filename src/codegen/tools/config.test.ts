@@ -149,4 +149,13 @@ describe('tools config', () => {
     expect(() => loadToolsConfig(wrongVersion))
       .toThrowError(expect.objectContaining({ code: 'E-TOOLS-002' }));
   });
+  it('names the invalid field and expected format without exposing submitted values', async () => {
+    const root = await appWith({ ...minimal, appId: 'private-value', emit: { module: 'bad.txt' } });
+    expect(() => loadToolsConfig(root)).toThrow(/appId.*UUID/);
+    expect(() => loadToolsConfig(root)).toThrow(/emit.module.*\.ts/);
+    try { loadToolsConfig(root); } catch (error) {
+      expect(String(error)).not.toContain('private-value');
+    }
+  });
+
 });

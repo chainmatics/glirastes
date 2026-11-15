@@ -48,6 +48,8 @@ export function createDeepgramSegmentParser(): (
 
 export interface DeepgramSttAdapterOptions {
   baseUrl?: string;
+  /** Public PCM worklet URL, including any application base path. */
+  workletUrl?: string;
   getToken?: () => string | null | undefined;
   connectTimeoutMs?: number;
   finalizeGraceMs?: number;
@@ -72,27 +74,44 @@ function resolveWebSocketUrl(
 export async function createPcmPipeline(
   stream: MediaStream,
   onAudio: (audio: ArrayBuffer) => void,
+  workletUrl = '/audio-worklet-processor.js',
 ): Promise<() => Promise<void>> {
   const AudioContextCtor = globalThis.AudioContext
     ?? (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextCtor) throw new Error('Browser does not support AudioContext');
 
   const context = new AudioContextCtor({ sampleRate: 16_000 });
-  await context.audioWorklet.addModule('/audio-worklet-processor.js');
-  const source = context.createMediaStreamSource(stream);
-  const processor = new AudioWorkletNode(context, 'audio-processor');
-  processor.port.onmessage = (event: MessageEvent<Int16Array>) => {
-    onAudio(event.data.buffer as ArrayBuffer);
-  };
-  source.connect(processor);
-  processor.connect(context.destination);
-
-  return async () => {
-    processor.port.onmessage = null;
-    processor.disconnect();
-    source.disconnect();
+  let source: MediaStreamAudioSourceNode | undefined;
+  let processor: AudioWorkletNode | undefined;
+  let closed = false;
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    if (processor) {
+      processor.port.onmessage = null;
+      processor.disconnect();
+    }
+    source?.disconnect();
     await context.close();
   };
+  try {
+    try {
+      await context.audioWorklet.addModule(workletUrl);
+    } catch (cause) {
+      throw new Error(`Speech audio asset could not be loaded: ${workletUrl}. Copy glirastes/stt/audio-worklet-processor.js to your public assets and configure workletUrl (including your base path). Check JavaScript MIME type, CSP and HTTPS.`, { cause });
+    }
+    source = context.createMediaStreamSource(stream);
+    processor = new AudioWorkletNode(context, 'audio-processor');
+    processor.port.onmessage = (event: MessageEvent<Int16Array>) => {
+      onAudio(event.data.buffer as ArrayBuffer);
+    };
+    source.connect(processor);
+    processor.connect(context.destination);
+    return close;
+  } catch (error) {
+    await close().catch(() => {});
+    throw error;
+  }
 }
 
 export class DeepgramSttAdapter implements SttProviderAdapter {
@@ -200,7 +219,12 @@ export class DeepgramSttAdapter implements SttProviderAdapter {
     try {
       closeAudio = await createPcmPipeline(input.stream, (audio) => {
         if (socket.readyState === WebSocket.OPEN) socket.send(audio);
-      });
+      }, this.options.workletUrl);
+      if (disposed || input.signal.aborted) {
+        await closeAudio();
+        closeAudio = null;
+        throw new Error('Speech provider connection cancelled');
+      }
     } catch (error) {
       await close();
       throw error;

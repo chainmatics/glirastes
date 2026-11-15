@@ -18,8 +18,12 @@ const DEFAULT_DESCRIPTION = [
   'Show the user a short task list when a request needs several distinct',
   'actions (for example: find tasks, then create a team, then invite members).',
   'Never call it for a simple request that one or two tool calls answer.',
-  'Call it once before you start, then again with updated statuses whenever an',
-  'item starts or finishes. Keep exactly one item in_progress while you work.',
+  'Call it once before you start. Combine status updates for completed work;',
+  'do not spend a separate model step announcing every item transition.',
+  'Update only after actual results, and reserve a final response to summarize outcomes and open work.',
+  'On continuation inspect previous tool results and resume only unfinished work.',
+  'Never repeat a successful mutation merely to reconstruct the plan; unclear outcomes require reconciliation first.',
+  'Keep at most one item in_progress while you work.',
 ].join(' ');
 
 export const PlanInputSchema = z.object({

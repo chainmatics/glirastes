@@ -8,6 +8,12 @@ export interface ApprovalDescriptionConfig {
   /** Map field names to human-readable labels. Example: `{ dueDate: 'Due date' }` */
   fieldLabels?: Record<string, string>;
 
+  /** Authorized record names explicitly associated with a dotted argument path.
+   * Short IDs require this scoped map; the global history map is UUID-only.
+   * Example: { technicianId: new Map([['1', 'Mara']]), 'job.id': jobsById }
+   */
+  entityNames?: Record<string, ReadonlyMap<string, string>>;
+
   /**
    * Map of field+value to translated display value.
    * Outer key = field name, inner key = raw value.
@@ -111,6 +117,7 @@ export function createApprovalDescriptionGenerator(
 ): ApprovalDescriptionFn {
   const {
     fieldLabels = {},
+    entityNames = {},
     valueTranslations = {},
     hiddenFields: rawHiddenFields,
     nameLabels = {},
@@ -137,36 +144,55 @@ export function createApprovalDescriptionGenerator(
     return capitalize(strValue);
   }
 
+  function entityName(path: string, id: string, names?: ReadonlyMap<string, string>): string | undefined {
+    const scoped = Object.hasOwn(entityNames, path) ? entityNames[path] : undefined;
+    // The caller supplies an explicit entity/argument association. Never infer
+    // one from short identifier prefixes or a field's human-readable label.
+    if (scoped) return scoped.get(id);
+    return UUID_REGEX.test(id) ? names?.get(id.toLowerCase()) : undefined;
+  }
+
   /** The known names behind the id fields, as `[label, names]` pairs. */
   function collectNames(
     obj: Record<string, unknown>,
     names: ReadonlyMap<string, string>,
+    parentPath = '',
   ): Array<[string, string]> {
     const result: Array<[string, string]> = [];
     for (const [key, value] of Object.entries(obj)) {
+      const path = parentPath ? `${parentPath}.${key}` : key;
+      if (hiddenFields.has(key) && !nameLabels[key]) continue;
       if (value && typeof value === 'object' && !Array.isArray(value)) {
-        result.push(...collectNames(value as Record<string, unknown>, names));
+        result.push(...collectNames(value as Record<string, unknown>, names, path));
         continue;
       }
       const label = nameLabels[key];
       if (!label) continue;
       const known = (Array.isArray(value) ? value : [value])
-        .map((id) => (typeof id === 'string' ? names.get(id.toLowerCase()) : undefined))
+        .map((id) => (typeof id === 'string' ? entityName(path, id, names) : undefined))
         .filter((name): name is string => !!name);
       if (known.length > 0) result.push([label, known.join(', ')]);
     }
     return result;
   }
 
-  function collectDetails(obj: Record<string, unknown>): DetailEntry[] {
+  function collectDetails(obj: Record<string, unknown>, names?: ReadonlyMap<string, string>, parentPath = ''): DetailEntry[] {
     const result: DetailEntry[] = [];
     for (const [key, value] of Object.entries(obj)) {
+      const path = parentPath ? `${parentPath}.${key}` : key;
       if (value === undefined || value === null || value === '') continue;
       if (hiddenFields.has(key)) continue;
+      const known = typeof value === 'string' && /(^id$|Id$|_id$)/.test(key)
+        ? entityName(path, value, names) : undefined;
+      if (known && !nameLabels[key]) {
+        result.push({ line: `${fieldLabels[key] || key}: ${known}` });
+        continue;
+      }
+      if (nameLabels[key] && known) continue;
       if (UUID_REGEX.test(String(value))) continue;
 
       if (value && typeof value === 'object' && !Array.isArray(value)) {
-        result.push(...collectDetails(value as Record<string, unknown>));
+        result.push(...collectDetails(value as Record<string, unknown>, names, path));
         continue;
       }
 
@@ -192,16 +218,16 @@ export function createApprovalDescriptionGenerator(
     const details: string[] = [];
     const detailItems: Array<string[] | undefined> = [];
     if (args && typeof args === 'object') {
-      const stated = collectDetails(args as Record<string, unknown>);
+      const stated = collectDetails(args as Record<string, unknown>, context?.names);
       // What the call states comes first: a grouped card shows the first line.
       for (const entry of stated) {
         details.push(entry.line);
         detailItems.push(entry.items);
       }
-      if (context?.names?.size) {
+      if (context?.names?.size || Object.keys(entityNames).length) {
         // A name the arguments already state is not repeated; a differing
         // one stays visible next to it.
-        for (const [label, name] of collectNames(args as Record<string, unknown>, context.names)) {
+        for (const [label, name] of collectNames(args as Record<string, unknown>, context?.names ?? new Map())) {
           if (!stated.some((entry) => entry.line.endsWith(`: ${name}`))) {
             details.push(`${label}: ${name}`);
             detailItems.push(undefined);

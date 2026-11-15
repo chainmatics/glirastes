@@ -1,0 +1,47 @@
+
+ RUN  v4.1.4 /Users/philipprollmann/Dev/chainmatics/glirastes/.worktrees/fieldwork-dx
+
+ ❯ src/codegen/tools/config.test.ts (29 tests | 1 failed | 28 skipped) 9ms
+     × names the invalid field and expected format without exposing submitted values 8ms
+ ❯ src/codegen/tools/pipeline.test.ts (36 tests | 1 failed | 35 skipped) 1211ms
+     × reports missing Zod 3 conversion without accusing an object schema of having the wrong shape 1210ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/codegen/tools/config.test.ts > tools config > names the invalid field and expected format without exposing submitted values
+AssertionError: expected [Function] to throw error matching /appId.*UUID/ but got 'The Glirastes tools configuration is …'
+
+- Expected:
+/appId.*UUID/
+
++ Received:
+"The Glirastes tools configuration is invalid."
+
+ ❯ src/codegen/tools/config.test.ts:154:41
+    152|   it('names the invalid field and expected format without exposing sub…
+    153|     const root = await appWith({ ...minimal, appId: 'private-value', e…
+    154|     expect(() => loadToolsConfig(root)).toThrow(/appId.*UUID/);
+       |                                         ^
+    155|     expect(() => loadToolsConfig(root)).toThrow(/emit.module.*\.ts/);
+    156|     try { loadToolsConfig(root); } catch (error) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/codegen/tools/pipeline.test.ts > runToolsPipeline (input schema root) > reports missing Zod 3 conversion without accusing an object schema of having the wrong shape
+AssertionError: expected [ 'input-schema-not-object', …(2) ] to not include 'input-schema-not-object'
+ ❯ src/codegen/tools/pipeline.test.ts:784:63
+    782|     expect(tool?.enabled).toBe(false);
+    783|     expect(tool?.findings.map((finding) => finding.code)).toContain('s…
+    784|     expect(tool?.findings.map((finding) => finding.code)).not.toContai…
+       |                                                               ^
+    785|   }, 120_000);
+    786|   it('disables a tool whose input schema is no object at its root and …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 63 skipped (65)
+   Start at  21:40:18
+   Duration  1.93s (transform 372ms, setup 0ms, import 682ms, tests 1.22s, environment 0ms)
+

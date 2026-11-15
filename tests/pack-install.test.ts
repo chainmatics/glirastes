@@ -34,7 +34,9 @@ let workDir: string;
 let consumer: string;
 
 const specifier = (subpath: string) => (subpath === '.' ? 'glirastes' : `glirastes/${subpath.slice(2)}`);
-const codeSubpaths = () => Object.keys(manifest.exports).filter((subpath) => !subpath.endsWith('.css'));
+// Public assets execute in their browser host, not as Node application modules.
+const workletSubpath = './stt/audio-worklet-processor.js';
+const codeSubpaths = () => Object.keys(manifest.exports).filter((subpath) => !subpath.endsWith('.css') && subpath !== workletSubpath);
 const requireSubpaths = () => codeSubpaths().filter((subpath) => {
   const target = manifest.exports[subpath];
   return typeof target === 'object' && target.require !== undefined;
@@ -108,6 +110,33 @@ describe('package pack install', () => {
 
   it('ships the stylesheet subpath', () => {
     expect(existsSync(join(consumer, 'node_modules/glirastes', String(manifest.exports['./react/styles.css'])))).toBe(true);
+  });
+
+  it('resolves and runs the installed speech asset in an AudioWorklet host', async () => {
+    const probe = `
+      import assert from 'node:assert/strict';
+      import { createRequire } from 'node:module';
+      import { readFile } from 'node:fs/promises';
+      import { pathToFileURL } from 'node:url';
+      const require = createRequire(process.cwd() + '/');
+      const asset = require.resolve('glirastes/stt/audio-worklet-processor.js');
+      assert.match(await readFile(asset, 'utf8'), /registerProcessor/);
+      let registered;
+      let pcm;
+      globalThis.AudioWorkletProcessor = class {
+        port = { postMessage: (samples) => { pcm = samples; } };
+      };
+      globalThis.registerProcessor = (name, implementation) => {
+        assert.equal(name, 'audio-processor');
+        registered = implementation;
+      };
+      await import(pathToFileURL(asset).href);
+      const processor = new registered();
+      assert.equal(processor.process([[new Float32Array([0, 0.5, -1, 1])]], [], {}), true);
+      assert.ok(pcm instanceof Int16Array);
+      assert.deepEqual(Array.from(pcm), [0, 16383, -32768, 32767]);
+    `;
+    await expect(run(process.execPath, ['--input-type=module', '-e', probe], { cwd: consumer })).resolves.toMatchObject({ stdout: '' });
   });
 
   it('runs the installed CLI', async () => {

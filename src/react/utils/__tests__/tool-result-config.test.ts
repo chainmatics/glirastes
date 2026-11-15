@@ -17,3 +17,10 @@ describe('how tool results show by default', () => {
     expect(resolveToolResultConfig({ mode: 'hidden' }, true)).toEqual({ mode: 'hidden', allowlist: [] });
   });
 });
+
+
+it('shows only registered outputs by default without enabling raw discovery and read blocks', () => {
+  expect(resolveToolResultConfig(undefined, true, ['jobs_schedule', 'jobs.schedule']))
+    .toEqual({ mode: 'allowlist', allowlist: ['jobs_schedule', 'jobs.schedule'] });
+  expect(resolveToolResultConfig({ mode: 'default' }, true, ['jobs_schedule']).mode).toBe('default');
+});

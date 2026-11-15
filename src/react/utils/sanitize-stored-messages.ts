@@ -71,6 +71,18 @@ export function sanitizeStoredMessages(messages: unknown[]): unknown[] {
         }
 
         return true;
+      }).map((part) => {
+        // Before request-only semantics, generated UI results asserted execution
+        // although the server could only create a request. Migrate presentation
+        // metadata; never alter tool input, approval binding or action payload.
+        if (!isRecord(part)) return part;
+        const key = part.type === 'tool-result' ? 'result' : 'output';
+        const result = part[key];
+        if (!isRecord(result) || result.success !== true || result.executionStatus !== undefined) return part;
+        const actions = Array.isArray(result.uiAction) ? result.uiAction : [result.uiAction];
+        if (!actions.some((action) => isRecord(action) && typeof action.type === 'string'
+          && action.type.startsWith('glirastes.'))) return part;
+        return { ...part, [key]: { ...result, requested: true, executionStatus: 'unconfirmed' } };
       });
 
       // If all parts were removed, mark for filtering

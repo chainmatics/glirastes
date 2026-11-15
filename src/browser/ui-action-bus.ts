@@ -80,6 +80,10 @@ export class UiActionBus {
     return Array.from(this.handlersById.keys());
   }
 
+  hasHandler(action: UiAction): boolean {
+    return Boolean(this.handlersByType.get(action.type)?.size || (action.actionId && this.handlersById.get(action.actionId)?.size));
+  }
+
   async dispatch(action: UiAction): Promise<void> {
     const typeHandlers = this.handlersByType.get(action.type);
     const idHandlers = action.actionId

@@ -129,6 +129,7 @@ export function VoiceInputAddon({
   );
   const {
     phase,
+    error,
     isRecording,
     isConnecting,
     displayTranscript,
@@ -325,6 +326,14 @@ export function VoiceInputAddon({
         ? 'recording'
         : 'idle';
 
+  const buttonLabel = isRecording
+    ? chat?.locale.stopRecordingAriaLabel ?? 'Stop recording'
+    : chat?.locale.micAriaLabel ?? 'Start recording';
+  const retryLabel = chat?.locale.retryRecordingAriaLabel ?? 'Retry recording';
+  const errorLabel = error?.startsWith('Speech audio asset could not be loaded:')
+    ? chat?.locale.recordingAssetErrorLabel ?? 'The audio capture file could not be loaded. Ask the app administrator to check the speech asset setup.'
+    : chat?.locale.recordingErrorLabel ?? 'Recording failed. Check microphone permission and your connection, then try again.';
+
   return (
     <>
       <button
@@ -335,23 +344,31 @@ export function VoiceInputAddon({
         onTouchCancel={handleTouchCancel}
         onClick={handleClick}
         disabled={disabled}
+        aria-label={buttonLabel}
+        title={buttonLabel}
         aria-busy={isConnecting}
         data-component="voice-input-addon"
         data-state={state}
       >
-        {isRecording ? 'stop' : 'mic'}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" focusable="false">
+          {isRecording ? <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" /> : <><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></>}
+        </svg>
       </button>
 
       {phase === 'failed' && (
+        <span data-component="voice-error">
+        <span role="alert">{errorLabel}</span>
         <button
           type="button"
           onClick={() => { void retry().catch(() => {}); }}
           disabled={disabled}
-          aria-label={chat?.locale.retryRecordingAriaLabel ?? 'Retry recording'}
+          aria-label={retryLabel}
           data-action="retry-recording"
         >
-          retry
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" focusable="false"><path d="M3 11a9 9 0 1 1 2 7M3 3v8h8" /></svg>
+          {retryLabel}
         </button>
+        </span>
       )}
 
       {showRecordingBar && active && (

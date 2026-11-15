@@ -133,7 +133,7 @@ and checked before the handler runs. An action that lives on one page takes
 that page's path as fourth argument, `{ route: '/templates' }`, in the page
 component: from another page the chat navigates there first and runs the
 action once it is registered. A handler returns `false` when it could not do
-its work, so the chat does not report it as done. Never register a global
+its work, so local execution feedback reports rejection. Server results confirm only the request (`executionStatus: unconfirmed`), never browser execution. Never register a global
 handler that only fires a window event for a listener on one page. A chat UI
 that does not use the SDK provider must pass each tool result to
 `dispatchToolResultUiActions` (`glirastes/browser`), or no UI tool runs.
@@ -336,7 +336,8 @@ Use the SDK STT controller as the only recording state machine:
 
 - exactly one microphone stream supplies capture and visualization;
 - push-to-talk exposes an unambiguous recording state;
-- show a visible interim transcript while recording;
+- show visible interim transcripts when the adapter supports streaming;
+  `RecordedSttAdapter` produces only final text after Stop;
 - merge interim and final segments without loss or duplication;
 - stop finalizes into the draft; cancel restores the previous draft;
 - let the user edit before sending;
@@ -352,23 +353,14 @@ well. `voice.adapter` plugs in another provider (an `SttProviderAdapter`;
 `DeepgramSttAdapter` and `RecordedSttAdapter` ship in `glirastes/stt`); keep
 its identity stable.
 
-A finished recording (`RecordedSttAdapter`, `audio/wav` to
-`/api/ai/speech-recognize`) needs one route; the app's transcription service
-(any `POST /v1/audio/transcriptions` server) stays on the server:
+Install the public browser asset and configure `workletUrl` for the app base
+path before enabling speech: follow [Speech input with OpenRouter](https://github.com/chainmatics/glirastes/blob/main/docs/speech-input.md).
+Use its repeatable predev/prebuild copy script; do not import private dist paths.
 
-```ts
-// src/app/api/ai/speech-recognize/route.ts
-import { createRecordingTranscriptionHandler } from 'glirastes/server/nextjs';
-import { resolvePrincipal } from '@/lib/glirastes-principal';
-
-export const runtime = 'nodejs';
-export const POST = createRecordingTranscriptionHandler({
-  authorize: async (request) => Boolean(await resolvePrincipal(request)),
-  url: process.env.STT_RECORDING_URL,
-  apiKey: process.env.STT_RECORDING_API_KEY,
-  model: process.env.STT_RECORDING_MODEL,
-});
-```
+A finished recording needs an authenticated app route using
+`createRecordingTranscriptionHandler`. Keep its provider URL, model and key on
+the server. The linked guide includes the full OpenRouter route, public-origin
+check, browser configuration and asset deployment scripts.
 
 `useStt` is the hook, `VoiceInputButton` and `RecordingBar` the surface. Speech
 traffic goes directly between the target app's local provider adapter and its

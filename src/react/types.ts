@@ -462,6 +462,8 @@ export interface WireChatMessage {
  * component renders.
  */
 export interface SessionConfig {
+  /** Optional localization hook for unnamed empty conversations. Explicit store titles take precedence. */
+  setDefaultTitle?: (title: string) => void;
   /** Persist messages for a session. Called after each message change. */
   save?: (conversationId: string, messages: ChatMessage[]) => void | Promise<void>;
   /**
@@ -682,6 +684,9 @@ export interface ChatLocale {
   pipelineRunningLabel: string;
   pipelineCompletedLabel: string;
   pipelineSafetyStopLabel: string;
+  /** Visible stop explanation, with {count} and {max} placeholders. */
+  pipelineBudgetStopLabel?: string;
+  uiActionStatusLabels?: Record<'succeeded' | 'rejected' | 'missing-handler' | 'exception' | 'timeout' | 'cancelled', string>;
   pipelineAbortedLabel: string;
   pipelineErrorLabel: string;
   pipelineStepLabel: string;
@@ -723,6 +728,8 @@ export interface ChatLocale {
 
   // Speech-to-text
   retryRecordingAriaLabel: string;
+  recordingErrorLabel?: string;
+  recordingAssetErrorLabel?: string;
 
   // `@` and `/` suggestions
   completionListLabel: string;

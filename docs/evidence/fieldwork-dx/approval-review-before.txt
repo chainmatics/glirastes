@@ -1,0 +1,56 @@
+
+ RUN  v4.1.4 /Users/philipprollmann/Dev/chainmatics/glirastes/.worktrees/fieldwork-dx
+
+ ❯ src/react/utils/__tests__/approval-names.test.ts (10 tests | 2 failed) 15ms
+   × fails closed when a short ID has conflicting record names, even if its original name appears again 7ms
+   × honors explicit hiddenFields before automatic name substitution, including nested inputs 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/react/utils/__tests__/approval-names.test.ts > fails closed when a short ID has conflicting record names, even if its original name appears again
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/react/utils/__tests__/approval-names.test.ts:98:26
+     96|     toolMessage({ id: '2', title: 'Unambiguous' }),
+     97|   ]);
+     98|   expect(names.has('1')).toBe(false);
+       |                          ^
+     99|   expect(names.get('2')).toBe('Unambiguous');
+    100|   const card = createApprovalDescriptionGenerator()('assign', 'binding…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/react/utils/__tests__/approval-names.test.ts > honors explicit hiddenFields before automatic name substitution, including nested inputs
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "technicianId: Confidential person",
++   "id: Hidden record",
++ ]
+
+ ❯ src/react/utils/__tests__/approval-names.test.ts:109:24
+    107|   const args = { technicianId: 'Tech-1', nested: { id: TASK }, interna…
+    108|   const card = describe('assign', 'binding', args, { names });
+    109|   expect(card.details).toEqual([]);
+       |                        ^
+    110|   expect(card.args).toBe(args);
+    111| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 8 passed (10)
+   Start at  21:52:47
+   Duration  309ms (transform 65ms, setup 0ms, import 79ms, tests 15ms, environment 0ms)
+

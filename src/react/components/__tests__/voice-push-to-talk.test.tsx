@@ -28,7 +28,7 @@ function fakeAdapter(options: { failFirst?: boolean } = {}): SttProviderAdapter 
   };
 }
 
-const mic = () => screen.getByRole('button', { name: /^(mic|stop)$/ });
+const mic = () => screen.getAllByRole('button', { name: /^(Start|Stop) recording$/ })[0];
 const state = () => document.querySelector('[data-component="voice-input-addon"]')?.getAttribute('data-state');
 
 /**

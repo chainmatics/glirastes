@@ -22,7 +22,7 @@ describe('collectEntityNames', () => {
     expect(names.get(OTHER)).toBe('Vertrieb');
   });
 
-  it('prefers the latest result and ignores unfinished calls, inputs and non-UUID ids', () => {
+  it('prefers the latest result and ignores unfinished calls, inputs and accepts short ids', () => {
     const names = collectEntityNames([
       toolMessage({ id: TASK, title: 'Alt' }),
       toolMessage({ id: TASK, title: 'Neu' }),
@@ -33,7 +33,8 @@ describe('collectEntityNames', () => {
     ]);
 
     expect(names.get(TASK)).toBe('Neu');
-    expect(names.size).toBe(1);
+    expect(names.get('42')).toBe('Keine UUID');
+    expect(names.size).toBe(2);
   });
 });
 
@@ -73,6 +74,59 @@ describe('approval card names', () => {
     expect(describeApproval('tasks_delete', 'a1', { id: TASK }).details).toEqual([]);
     expect(describeApproval('tasks_delete', 'a1', { id: TASK }, { names: new Map() }).details).toEqual([]);
     const plain = createApprovalDescriptionGenerator({});
-    expect(plain('tasks_delete', 'a1', { id: TASK }, { names }).details).toEqual([]);
+    expect(plain('tasks_delete', 'a1', { id: TASK }, { names }).details).toEqual(['id: Angebot Meier']);
   });
+});
+
+
+it('resolves case-sensitive short IDs only from finished results without altering approval args', () => {
+  const names = collectEntityNames([toolMessage({ id: 'job-107', title: 'Außenbeleuchtung' }), toolMessage({ id: 'Tech-1', name: 'Mara' })]);
+  const args = { job: { id: 'job-107' }, technicianId: 'Tech-1' };
+  const card = createApprovalDescriptionGenerator({ fieldLabels: { id: 'Auftrag', technicianId: 'Techniker' }, entityNames: { 'job.id': new Map([['job-107', 'Außenbeleuchtung']]), technicianId: new Map([['Tech-1', 'Mara']]) } })('assign', 'signed', args, { names });
+  expect(card.details).toEqual(['Auftrag: Außenbeleuchtung', 'Techniker: Mara']);
+  expect(card.args).toBe(args);
+  expect(names.has('tech-1')).toBe(false);
+});
+
+it('fails closed when a short ID has conflicting record names, even if its original name appears again', () => {
+  const names = collectEntityNames([
+    toolMessage({ jobs: [{ id: '1', title: 'Repair lighting' }] }),
+    { role: 'assistant', parts: [{ type: 'tool-technicians_list', state: 'output-available', output: { technicians: [{ id: '1', name: 'Mara' }] } }] },
+    toolMessage({ id: '1', title: 'Repair lighting' }),
+    toolMessage({ id: '2', title: 'Unambiguous' }),
+  ]);
+  expect(names.has('1')).toBe(false);
+  expect(names.get('2')).toBe('Unambiguous');
+  const card = createApprovalDescriptionGenerator()('assign', 'binding', { technicianId: '1' }, { names });
+  expect(card.details).toEqual(['technicianId: 1']);
+});
+
+it('honors explicit hiddenFields before automatic name substitution, including nested inputs', () => {
+  const names = new Map([['Tech-1', 'Confidential person'], [TASK, 'Hidden record']]);
+  const describe = createApprovalDescriptionGenerator({ hiddenFields: ['technicianId', 'id', 'internal'] });
+  const args = { technicianId: 'Tech-1', nested: { id: TASK }, internal: { technicianId: 'Tech-1' } };
+  const card = describe('assign', 'binding', args, { names });
+  expect(card.details).toEqual([]);
+  expect(card.args).toBe(args);
+});
+
+it('never substitutes a globally known short ID into an unrelated entity field', () => {
+  const names = collectEntityNames([toolMessage({ jobs: [{ id: '1', title: 'Repair lighting' }] })]);
+  const card = createApprovalDescriptionGenerator({ nameLabels: { technicianId: 'Technician' } })(
+    'assign', 'binding', { technicianId: '1' }, { names },
+  );
+  expect(card.details).toEqual(['technicianId: 1']);
+  expect(card.details?.join(' ')).not.toContain('Repair lighting');
+});
+
+
+it('scopes short ID names by full argument path and preserves raw args', () => {
+  const args = { job: { id: '1' }, technician: { id: '1' } };
+  const describe = createApprovalDescriptionGenerator({ entityNames: {
+    'job.id': new Map([['1', 'Repair lighting']]),
+    'technician.id': new Map([['1', 'Mara']]),
+  } });
+  const card = describe('assign', 'binding', args);
+  expect(card.details).toEqual(['id: Repair lighting', 'id: Mara']);
+  expect(card.args).toBe(args);
 });

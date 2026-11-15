@@ -23,6 +23,7 @@ export interface AssistantShellButtonProps {
   /** The icon, plus the visible label for `toggle`. */
   children: ReactNode;
   className?: string;
+  style?: CSSProperties;
 }
 
 export interface AssistantShellIcons {
@@ -183,13 +184,13 @@ const withShortcut = (label: string, combo: string | false) => combo ? `${label}
 const cx = (...names: Array<string | false | undefined>) => names.filter(Boolean).join(' ') || undefined;
 
 function defaultButton(unstyled: boolean | undefined) {
-  return function DefaultButton({ action, label, title, pressed, onClick, children, className }: AssistantShellButtonProps) {
+  return function DefaultButton({ action, label, title, pressed, onClick, children, className, style }: AssistantShellButtonProps) {
     // Bubble and toggle live outside the shell, so they carry their own component name and styling switch.
     const standalone = action === 'bubble' || action === 'toggle';
     return (
       <button type="button" data-component={standalone ? `assistant-${action}` : undefined}
         data-action={standalone ? undefined : action} data-unstyled={(standalone && unstyled) || undefined}
-        className={className} aria-label={label} title={title} aria-pressed={pressed} onClick={onClick}>{children}</button>
+        className={className} style={style} aria-label={label} title={title} aria-pressed={pressed} onClick={onClick}>{children}</button>
     );
   };
 }
@@ -204,10 +205,11 @@ export function AssistantToggle({ icon, label, className, showLabel = true, rend
   renderButton?: (props: AssistantShellButtonProps) => ReactNode;
 }) {
   const layout = useAssistantLayout();
-  const unstyled = useContext(ChatContext)?.unstyled;
+  const chat = useContext(ChatContext);
+  const unstyled = chat?.unstyled;
   const text = label ?? assistantShellLabelsFor(usePageLanguage()).toggle;
   return (renderButton ?? defaultButton(unstyled))({
-    action: 'toggle', label: text, title: text, pressed: layout.open, onClick: layout.toggleChat, className,
+    style: chat?.themeVars, action: 'toggle', label: text, title: text, pressed: layout.open, onClick: layout.toggleChat, className,
     children: <>{icon ?? DEFAULT_ASSISTANT_SHELL_ICONS.assistant}{showLabel && <span data-element="label">{text}</span>}</>,
   });
 }
@@ -384,7 +386,7 @@ export function AssistantShell({
     : windowStyle ?? { position: 'fixed', width: floatingWidth, height: floatingHeight, right: `min(${right}px, max(0px, calc((100vw - 500px) / 2)))`, bottom };
 
   return <>
-    {!sidebar && showBubble && button({ action: 'bubble', label: labels.title, title: withShortcut(labels.title, shortcuts.toggle), pressed: ui.open, onClick: ui.toggleChat, children: icons.assistant })}
+    {!sidebar && showBubble && button({ style: chat?.themeVars, action: 'bubble', label: labels.title, title: withShortcut(labels.title, shortcuts.toggle), pressed: ui.open, onClick: ui.toggleChat, children: icons.assistant })}
     <aside ref={shell} aria-label={labels.title} data-component="assistant-shell" data-assistant-shell data-mode={ui.mode}
       data-collapsed={(sidebar && ui.collapsed) || undefined} data-unstyled={chat?.unstyled || undefined}
       className={cx(classNames.root, sidebar ? classNames.sidebar : classNames.floating)}

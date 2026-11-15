@@ -69,10 +69,10 @@ export function ActivityLog({ steps, active, notice, className }: ActivityLogPro
     summaryText = locale.activityWaitingLabel;
   } else {
     summaryIcon = failed > 0 ? 'error' : 'check';
-    summaryText = steps.length === 1
+    summaryText = failed === steps.length ? locale.activityFailedLabel.replace('{count}', String(failed)) : steps.length === 1
       ? locale.activityDoneOneLabel
       : locale.activityDoneLabel.replace('{count}', String(steps.length));
-    if (failed > 0) {
+    if (failed > 0 && failed < steps.length) {
       summaryText += `, ${locale.activityFailedLabel.replace('{count}', String(failed))}`;
     }
   }

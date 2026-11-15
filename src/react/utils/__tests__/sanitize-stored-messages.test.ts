@@ -30,3 +30,19 @@ describe('recovery of legacy approval continuations', () => {
     expect(sanitizeStoredMessages(messages)).toEqual(messages);
   });
 });
+
+it('migrates legacy generated browser results to unconfirmed without changing signed arguments or source', () => {
+  const original = { ...done, output: { success: true, message: 'Action executed.', uiAction: { type: 'glirastes.action', actionId: 'highlight', payload: { id: 'wrong' } } } };
+  const messages = [assistant('a', [original])];
+  const fixed = sanitizeStoredMessages(messages) as typeof messages;
+  expect(fixed[0]!.parts[0]).toMatchObject({ input: original.input, approval: original.approval, output: { requested: true, executionStatus: 'unconfirmed', success: true } });
+  expect(original.output).not.toHaveProperty('executionStatus');
+  expect(sanitizeStoredMessages(fixed)).toEqual(fixed);
+});
+
+it('migrates the older tool-result/result shape too', () => {
+ const result = { success: true, message: 'Action executed.', uiAction: { type: 'glirastes.navigate' } };
+ const messages = [assistant('a', [{ type: 'tool-result', result }])];
+ expect(sanitizeStoredMessages(messages)).toMatchObject([{ parts: [{ result: { executionStatus: 'unconfirmed' } }] }]);
+ expect(result).not.toHaveProperty('executionStatus');
+});

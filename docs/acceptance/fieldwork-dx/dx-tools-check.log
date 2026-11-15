@@ -1,0 +1,10 @@
+Glirastes tools (frozen): 0 added, 0 changed, 0 removed
+
+Excluded (4)
+  . GET /api/chat  chat-handler (default)
+  . PAGE /login  auth-page (default)
+  . POST /api/ai/speech-recognize  stt-handler (default)
+  . POST /api/chat  chat-handler (default)
+  Next: Excluded routes are never tools; remove a matching exclude entry from .glirastes/tool-policy.json to include a policy exclusion.
+
+Tool outputs match the code.

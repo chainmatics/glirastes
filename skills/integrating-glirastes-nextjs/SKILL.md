@@ -151,7 +151,7 @@ second, hand-maintained catalogue.
    navigation bridge and runs the action once the page registered it. Never
    register an action in the app shell that only fires a window event for a
    listener on one page (`ui-action-indirect`). A handler returns `false`
-   when it could not do its work, so the chat does not report it as done. A
+   when it could not do its work, so local execution feedback reports rejection. Server results confirm only the request (`executionStatus: unconfirmed`), never browser execution. A
    handler that writes through a helper, a Server Action or a mutation hook is
    flagged (`ui-action-write-unproven`); the developer raises it with
    `glirastes tools policy raise <tool> write`.
@@ -195,3 +195,5 @@ no locally authorized tool. If the generator cannot type an endpoint, the tool
 stays disabled with a finding: resolve it with `maintaining-glirastes-tools`
 instead of inventing a permissive schema. A passing Doctor does not prove a
 live action.
+
+For a complete provider-specific standalone path (identity, generated tools, chat, sessions, attachments and speech assets), follow [OpenRouter standalone](https://github.com/chainmatics/glirastes/blob/main/docs/openrouter-standalone.md). Validate the locked Next/TypeScript combination in a fresh packed consumer; do not install unversioned TypeScript into Next 15.

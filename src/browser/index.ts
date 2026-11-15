@@ -14,6 +14,8 @@ export {
 } from './navigation.js';
 export {
   dispatchToolResultUiActions,
+  UiActionDispatchError,
+  type UiActionFailureStatus,
   registerAiClientAction,
   type ClientActionHandler,
   type ClientActionOptions,

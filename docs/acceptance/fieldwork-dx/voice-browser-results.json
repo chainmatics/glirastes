@@ -1,0 +1,73 @@
+[
+  {
+    "name": "missing-asset-localized-error",
+    "streams": 1,
+    "tracks": [
+      "ended"
+    ],
+    "contexts": [
+      "closed"
+    ]
+  },
+  {
+    "name": "retry-real-openrouter-draft-no-send",
+    "draft": "Die dringenden Aufträge. Zeige mir die dringenden Aufträge.",
+    "chatCalls": 0,
+    "streams": 2,
+    "tracks": [
+      "ended",
+      "ended"
+    ],
+    "contexts": [
+      "closed",
+      "closed",
+      "closed",
+      "closed"
+    ]
+  },
+  {
+    "name": "cancel-keeps-draft",
+    "streams": 3,
+    "tracks": [
+      "ended",
+      "ended",
+      "ended"
+    ],
+    "contexts": [
+      "closed",
+      "closed",
+      "closed",
+      "closed",
+      "closed",
+      "closed",
+      "closed"
+    ]
+  },
+  {
+    "name": "navigation-stop-draft",
+    "streams": 4,
+    "tracks": [
+      "ended",
+      "ended",
+      "ended",
+      "ended"
+    ],
+    "contexts": [
+      "closed",
+      "closed",
+      "closed",
+      "closed",
+      "closed",
+      "closed",
+      "closed",
+      "closed",
+      "closed",
+      "closed"
+    ]
+  },
+  {
+    "name": "reload-unmount",
+    "navigation": "completed",
+    "priorLiveTracks": 1
+  }
+]

@@ -518,9 +518,10 @@ async function defaultStreamHandler(
     : vercelTools;
   const promptCaching = ctx.promptCaching !== false;
   const hideIds = ctx.hideIds !== false;
-  const systemPrompt = hideIds && ctx.systemPrompt
+  const baseSystemPrompt = hideIds && ctx.systemPrompt
     ? `${ctx.systemPrompt}\n\n${HIDE_IDS_PROMPT}`
     : ctx.systemPrompt;
+  const systemPrompt = `${baseSystemPrompt ?? ''}\n\nBrowser actions with executionStatus=unconfirmed are requests only, never proof of execution. Say only that the action was requested. Do not claim a card was highlighted, a page opened, or any browser effect completed. Client feedback is local to the browser and is not server-authoritative. Use only IDs returned by authorized tools; never invent IDs.`;
   const idLabels: IdLabels = new Map();
   if (hideIds) collectIdLabels(ctx.messages, idLabels);
   const modelMessages = await prepareModelMessages(

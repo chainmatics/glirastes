@@ -55,7 +55,7 @@ describe('prompt caching', () => {
     const prompt = calls[0]!.prompt;
     expect(prompt[0]).toMatchObject({
       role: 'system',
-      content: 'Static app prompt.',
+      content: expect.stringContaining('Static app prompt.'),
       providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
     });
     expect(prompt.at(-1)).toMatchObject({

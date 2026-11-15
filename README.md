@@ -469,3 +469,7 @@ existing HTTP API without customer Node server code. See
 backend-verified user credentials, persistent approvals and one active service
 per app/environment. Image publication and customer deployment are separate
 release steps; V1 does not provide HA or native backend SDKs.
+
+## Complete standalone integration
+
+Follow the [OpenRouter + Next.js standalone path](docs/openrouter-standalone.md) for identity, generated tools, approvals, chat, sessions, attachments and voice assets.

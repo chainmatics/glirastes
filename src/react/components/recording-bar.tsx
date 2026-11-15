@@ -73,6 +73,9 @@ function RecordingBarInner({
   variant,
   className,
 }: RecordingBarProps) {
+  const chat = useContext(ChatContext);
+  const cancelLabel = chat?.locale.cancelRecordingAriaLabel ?? 'Cancel recording';
+  const stopLabel = chat?.locale.stopRecordingAriaLabel ?? 'Stop recording';
   const handleCancel = useCallback(() => onCancel(), [onCancel]);
   const handleStop = useCallback(() => onStop(), [onStop]);
 
@@ -88,7 +91,7 @@ function RecordingBarInner({
         ...(variant === 'inline' ? { width: '100%', height: '36px' } : {}),
       }}
     >
-      <CancelButton onClick={handleCancel} ariaLabel="Aufnahme abbrechen" title="Aufnahme abbrechen" />
+      <CancelButton onClick={handleCancel} ariaLabel={cancelLabel} title={cancelLabel} />
 
       <div data-part="wave-container" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
         {isConnecting ? <LoadingDots /> : <StreamWaveform stream={stream} />}
@@ -96,7 +99,7 @@ function RecordingBarInner({
 
       <InterimTranscript text={transcript} />
 
-      <StopButton onClick={handleStop} ariaLabel="Aufnahme stoppen" title="Aufnahme stoppen" />
+      <StopButton onClick={handleStop} ariaLabel={stopLabel} title={stopLabel} />
     </div>
   );
 }

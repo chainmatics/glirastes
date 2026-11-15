@@ -213,7 +213,7 @@ function composeInput(
       source: only.source,
       json: only.json ?? OPAQUE_JSON_SCHEMA,
       digest: only.digest,
-      findings: only.json ? [] : [toolFinding('schema-json-unavailable', 'warning', subject, `${only.label} has no JSON Schema description.`)],
+      findings: only.json ? [] : [toolFinding('schema-json-unavailable', 'needs_attention', subject, `${only.label} loaded as a schema but JSON Schema conversion failed or is unavailable. Use Zod 4, or install zod-to-json-schema alongside Zod 3 in the app, then run glirastes tools refresh.`)],
     };
   }
   const findings: ToolFinding[] = [];

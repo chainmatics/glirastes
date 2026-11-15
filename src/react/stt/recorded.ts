@@ -9,6 +9,8 @@ const SAMPLE_RATE = 16_000;
 export interface RecordedSttAdapterOptions {
   /** Endpoint that takes the WAV and answers `{ text }`. Default: `/api/ai/speech-recognize`. */
   url?: string;
+  /** Public PCM worklet URL, including any application base path. */
+  workletUrl?: string;
   /** Extra request headers, read when the recording is sent. */
   getHeaders?: () => Record<string, string> | undefined;
   /** Longest recording kept, in seconds; later audio is dropped. Default: 120. */
@@ -70,7 +72,7 @@ export class RecordedSttAdapter implements SttProviderAdapter {
     let sent: Promise<void> | null = null;
     const request = new AbortController();
 
-    let stopCapture: (() => Promise<void>) | null = await (this.options.capture ?? createPcmPipeline)(
+    let stopCapture: (() => Promise<void>) | null = await (this.options.capture ?? ((stream, onAudio) => createPcmPipeline(stream, onAudio, this.options.workletUrl)))(
       input.stream,
       (audio) => {
         if (discarded || kept >= maxSamples) return;
@@ -91,6 +93,8 @@ export class RecordedSttAdapter implements SttProviderAdapter {
       await endCapture();
     };
     input.signal.addEventListener('abort', () => { void discard(); }, { once: true });
+    // Cancellation can race with loading the browser worklet.
+    if (input.signal.aborted) await discard();
 
     const send = async () => {
       await endCapture();

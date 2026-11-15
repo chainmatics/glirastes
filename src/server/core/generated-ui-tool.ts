@@ -5,6 +5,18 @@ import {
 } from '../../browser/navigation.js';
 import { defineTool, type SchemaLike, type Tool } from '../../types.js';
 
+/** A server can request browser work, but cannot attest that it ran. */
+export function uiActionRequestResult(locale?: string) {
+  return {
+    success: true,
+    requested: true,
+    executionStatus: 'unconfirmed' as const,
+    message: locale?.startsWith('de')
+      ? 'Aktion angefordert. Die Ausführung im Browser ist unbestätigt; keinen Erfolg behaupten.'
+      : 'Action requested. Browser execution is unconfirmed; do not claim it was completed.',
+  };
+}
+
 /** What a generated UI tool asks the browser to do. */
 export type GeneratedUiAction =
   | { kind: 'navigate' }
@@ -68,8 +80,7 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
         if (available && !available.includes(action.actionId)) {
           if (route) {
             return {
-              success: true,
-              message: `The app opens ${route} and runs the action there.`,
+              ...uiActionRequestResult(context?.locale),
               uiAction,
             };
           }
@@ -79,7 +90,7 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
             retryable: false,
           };
         }
-        return { success: true, message: 'Action executed.', uiAction };
+        return { ...uiActionRequestResult(context?.locale), uiAction };
       }
       const params = stringParams(input.params);
       try {
@@ -87,8 +98,7 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
           const destination = typeof input.destination === 'string' ? input.destination : '';
           const href = buildNavigationHref({ destination, ...(params ? { params } : {}) });
           return {
-            success: true,
-            message: 'Action executed.',
+            ...uiActionRequestResult(context?.locale),
             uiAction: {
               type: 'glirastes.navigate',
               actionId: GLIRASTES_NAVIGATE_ACTION_ID,
@@ -109,8 +119,7 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
           arrayFormats,
         });
         return {
-          success: true,
-          message: 'Action executed.',
+          ...uiActionRequestResult(context?.locale),
           uiAction: {
             type: 'glirastes.navigate',
             actionId: GLIRASTES_NAVIGATE_ACTION_ID,

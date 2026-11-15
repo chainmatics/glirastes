@@ -16,6 +16,7 @@ export function collectEntityNames(
   messages: ReadonlyArray<unknown>,
 ): Map<string, string> {
   const names = new Map<string, string>();
+  const ambiguous = new Set<string>();
   let budget = MAX_NODES;
 
   const walk = (value: unknown, depth: number): void => {
@@ -25,12 +26,20 @@ export function collectEntityNames(
       for (const item of value) walk(item, depth + 1);
       return;
     }
-    if (!isRecord(value)) return;
-    if (typeof value.id === 'string' && UUID_REGEX.test(value.id)) {
+    if (!isRecord(value) || value.success === false) return;
+    if (typeof value.id === 'string' && value.id.trim().length > 0) {
       for (const key of NAME_KEYS) {
         const name = value[key];
         if (typeof name === 'string' && name.trim()) {
-          names.set(value.id.toLowerCase(), name);
+          const uuid = UUID_REGEX.test(value.id);
+          const id = uuid ? value.id.toLowerCase() : value.id;
+          // Short identifiers are commonly reused by unrelated entity types.
+          // Without a typed entity namespace, conflicting names are unsafe.
+          if (!uuid && names.has(id) && names.get(id) !== name) {
+            ambiguous.add(id);
+            names.delete(id);
+          }
+          if (!ambiguous.has(id)) names.set(id, name);
           break;
         }
       }
@@ -41,7 +50,7 @@ export function collectEntityNames(
   };
 
   for (const message of messages) {
-    if (!isRecord(message) || !Array.isArray(message.parts)) continue;
+    if (!isRecord(message) || message.role !== 'assistant' || !Array.isArray(message.parts)) continue;
     for (const part of message.parts) {
       if (
         isRecord(part)

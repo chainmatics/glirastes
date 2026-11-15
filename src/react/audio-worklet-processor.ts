@@ -2,9 +2,9 @@
  * AudioWorklet processor for real-time audio streaming
  * Converts Float32 audio samples to Int16 format for Deepgram
  *
- * Note: This file is intentionally not unit tested as AudioWorkletProcessor
- * runs in a separate audio rendering thread and is difficult to test in isolation.
- * Integration testing happens in the useDeepgramTranscription hook.
+ * Runs in a separate audio rendering thread. The pack-install test verifies
+ * registration and PCM conversion in an AudioWorklet host; consumer browser
+ * acceptance checks capture and cleanup through the shared STT controller.
  */
 
 // Type declarations for AudioWorklet API (not in standard TypeScript libs)

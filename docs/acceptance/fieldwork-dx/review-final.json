@@ -1,0 +1,1 @@
+{"score":90,"summary":"Mergefähig: Im vorgelegten Diff sind keine konkret belegbaren blockierenden Mängel erkennbar. Request-only-Semantik, Abbruchbehandlung, feldgebundene Namensauflösung und Ressourcenfreigabe sind nachvollziehbar umgesetzt und durch gezielte Regressionstests abgedeckt. Bewertung anhand des Diffs; Tests wurden nicht eigenständig ausgeführt.","findings":[]}
