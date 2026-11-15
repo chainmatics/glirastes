@@ -6,7 +6,7 @@ description: Use when starting or resuming a Glirastes integration, choosing emb
 # Setting Up Glirastes
 
 You are the existing coding agent of this app. You carry out the whole
-integration in the app checkout. The CLI generator reads
+integration in the app checkout. The CLI generator never calls a model: it reads
 the code, writes the tool files and prints work lists; the customer-hosted
 chat runtime uses the app's own model access; you supply judgement
 where the code is not enough. A fresh app runs Standalone: it needs no

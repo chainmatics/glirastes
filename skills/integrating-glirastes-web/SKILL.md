@@ -5,8 +5,8 @@ description: Use when integrating Glirastes into an app with a separate backend 
 
 # Integrating Glirastes into Web Apps With a Separate Backend
 
-Read `setting-up-glirastes` first. You, the app's coding agent, do the work;
-The CLI generator does not make chat model calls; the customer-hosted runtime
+Read `setting-up-glirastes` first. You, the app's coding agent, do the work.
+The CLI generator never calls a model; the customer-hosted runtime
 uses the app's model access. The generator reads only what this SDK version
 supports (table below). Where a part is not read yet, report the gap; never
 replace the generator with a hand-written tool list.
