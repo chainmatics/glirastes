@@ -33,6 +33,28 @@ describe('uiActionToolToTool', () => {
     await expect(tool.execute({ taskId: 't1' }, on())).resolves.toMatchObject({ success: true });
   });
 
+  it('hands a page-bound client action to the browser with its route when the open page lacks it', async () => {
+    const tool = uiActionToolToTool({
+      id: 'ui.templateCreateDialog.open',
+      toolName: 'ui_templateCreateDialog_open',
+      description: 'Open the dialog that creates a template.',
+      inputSchema: anyObject,
+      needsApproval: false,
+      action: { kind: 'client-action', actionId: 'template-create-dialog.open', route: '/templates' },
+    });
+    const on = (clientActions: string[]) => ({ currentDate: new Date(), locale: 'de-DE', runtime: { clientActions } });
+    await expect(tool.execute({}, on(['task-details.open']))).resolves.toEqual({
+      success: true,
+      message: 'The app opens /templates and runs the action there.',
+      uiAction: { type: 'glirastes.action', actionId: 'template-create-dialog.open', payload: {}, route: '/templates' },
+    });
+    await expect(tool.execute({}, on(['template-create-dialog.open']))).resolves.toEqual({
+      success: true,
+      message: 'Action executed.',
+      uiAction: { type: 'glirastes.action', actionId: 'template-create-dialog.open', payload: {}, route: '/templates' },
+    });
+  });
+
   it('turns a navigation call into the href the app bridge pushes', async () => {
     const tool = uiActionToolToTool({
       id: 'ui.navigate',

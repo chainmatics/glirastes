@@ -32,13 +32,43 @@ function addHandler(
 export class UiActionBus {
   private handlersByType = new Map<string, Set<UiActionHandler>>();
   private handlersById = new Map<string, Set<UiActionHandler>>();
+  private handlerWaiters = new Map<string, Set<() => void>>();
 
   subscribeByType(type: string, handler: UiActionHandler): () => void {
     return addHandler(this.handlersByType, type, handler);
   }
 
   subscribeById(actionId: string, handler: UiActionHandler): () => void {
-    return addHandler(this.handlersById, actionId, handler);
+    const unsubscribe = addHandler(this.handlersById, actionId, handler);
+    const waiters = this.handlerWaiters.get(actionId);
+    if (waiters) {
+      this.handlerWaiters.delete(actionId);
+      for (const resolve of waiters) resolve();
+    }
+    return unsubscribe;
+  }
+
+  /**
+   * Resolves `true` as soon as a handler for `actionId` is subscribed, or
+   * `false` after `timeoutMs`. Used to run a page-bound client action once
+   * the chat navigated to its page and the page registered it.
+   */
+  waitForHandler(actionId: string, timeoutMs: number): Promise<boolean> {
+    if (this.handlersById.has(actionId)) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const waiters = this.handlerWaiters.get(actionId) ?? new Set<() => void>();
+      const done = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        waiters.delete(done);
+        if (waiters.size === 0 && this.handlerWaiters.get(actionId) === waiters) this.handlerWaiters.delete(actionId);
+        resolve(false);
+      }, timeoutMs);
+      waiters.add(done);
+      this.handlerWaiters.set(actionId, waiters);
+    });
   }
 
   /**

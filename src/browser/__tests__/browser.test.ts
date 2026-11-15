@@ -82,6 +82,15 @@ describe('registerAiClientAction', () => {
     await getDefaultUiActionBus().dispatch({ type: 'glirastes.action', actionId: 'dialogs.open', payload: { id: 'x' } });
     expect(handler).toHaveBeenCalledWith({ id: 'x' });
   });
+
+  it('fails the dispatch when the handler returns false', async () => {
+    const bus = new UiActionBus();
+    cleanups.push(registerAiClientAction('dialogs.open', () => false, undefined, { bus }));
+    cleanups.push(registerAiClientAction('dialogs.close', async () => true, undefined, { bus }));
+    await expect(bus.dispatch({ type: 'glirastes.action', actionId: 'dialogs.open' }))
+      .rejects.toThrow('UI action dialogs.open was not executed');
+    await expect(bus.dispatch({ type: 'glirastes.action', actionId: 'dialogs.close' })).resolves.toBeUndefined();
+  });
 });
 
 describe('navigation bridge', () => {
@@ -148,6 +157,82 @@ describe('dispatchToolResultUiActions', () => {
     expect(await dispatchToolResultUiActions({ success: false, uiAction: { type: 'glirastes.navigate' } }, bus)).toBe(0);
     expect(await dispatchToolResultUiActions('not a result', bus)).toBe(0);
     expect(seen).toHaveBeenCalledTimes(1);
+  });
+
+  const routed = {
+    success: true,
+    uiAction: { type: 'glirastes.action', actionId: 'template-create-dialog.open', payload: {}, route: '/templates' },
+  };
+
+  it('opens the route of a page-bound client action, waits for its handler and then runs it', async () => {
+    const bus = new UiActionBus();
+    const order: string[] = [];
+    const handler = vi.fn(() => { order.push('action'); });
+    cleanups.push(registerNavigationBridge({
+      bus,
+      push: (href) => {
+        order.push(`push ${href}`);
+        // The page mounts after the router push resolved.
+        setTimeout(() => cleanups.push(registerAiClientAction('template-create-dialog.open', handler, undefined, { bus })), 10);
+      },
+    }));
+    expect(await dispatchToolResultUiActions(routed, bus)).toBe(1);
+    expect(order).toEqual(['push /templates', 'action']);
+    expect(handler).toHaveBeenCalledWith({});
+  });
+
+  it('runs a page-bound client action in place when its page is already open', async () => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    const handler = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    cleanups.push(registerAiClientAction('template-create-dialog.open', handler, undefined, { bus }));
+    await dispatchToolResultUiActions(routed, bus);
+    expect(push).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails when the page-bound client action never registers on its route', async () => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    await expect(dispatchToolResultUiActions(routed, bus, { routeTimeoutMs: 30 }))
+      .rejects.toThrow('UI action template-create-dialog.open was not registered on /templates within 30 ms');
+    expect(push).toHaveBeenCalledWith('/templates');
+    await expect(dispatchToolResultUiActions({
+      success: true,
+      uiAction: { ...routed.uiAction, route: '//evil.example' },
+    }, bus)).rejects.toThrow('unsafe route');
+  });
+
+  it('waits by polling on a bus of an older SDK copy without waitForHandler', async () => {
+    const real = new UiActionBus();
+    const foreign = {
+      dispatch: real.dispatch.bind(real),
+      subscribeById: real.subscribeById.bind(real),
+      subscribeByType: real.subscribeByType.bind(real),
+      registeredActionIds: real.registeredActionIds.bind(real),
+    } as unknown as UiActionBus;
+    const handler = vi.fn();
+    cleanups.push(registerNavigationBridge({
+      bus: foreign,
+      push: () => {
+        setTimeout(() => cleanups.push(registerAiClientAction('template-create-dialog.open', handler, undefined, { bus: foreign })), 10);
+      },
+    }));
+    await dispatchToolResultUiActions(routed, foreign);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('UiActionBus.waitForHandler', () => {
+  it('resolves true once a handler subscribes and false after the timeout', async () => {
+    const bus = new UiActionBus();
+    const waiting = bus.waitForHandler('a', 1_000);
+    cleanups.push(bus.subscribeById('a', () => {}));
+    await expect(waiting).resolves.toBe(true);
+    await expect(bus.waitForHandler('a', 10)).resolves.toBe(true);
+    await expect(bus.waitForHandler('b', 10)).resolves.toBe(false);
   });
 });
 

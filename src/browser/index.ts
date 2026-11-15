@@ -15,7 +15,9 @@ export {
 export {
   dispatchToolResultUiActions,
   registerAiClientAction,
+  type ClientActionHandler,
   type ClientActionOptions,
+  type DispatchToolResultOptions,
   type PayloadContract,
 } from './client-actions.js';
 export {
