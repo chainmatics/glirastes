@@ -101,6 +101,10 @@ file alone does not prove that every endpoint becomes an enabled tool.
    handler is framework-neutral: `createAiChatHandler` (from
    `glirastes/server/nextjs`, despite the name) takes a Web `Request` and
    returns a `Response`; adapt your framework's request object to it.
+   Its options and defaults are the same as in `integrating-glirastes-nextjs`
+   step 3: `toolDiscovery` with intent routing, compacted `history`,
+   `promptCaching`, and `hideIds` (technical ids stay out of answers; a custom
+   `streamHandler` must apply `createHideIdsTransform` itself).
    With chat attachments (`attachments: { enabled: true }`, see
    `building-glirastes-chat-ui`), raise the JSON body limit of the chat route
    in front of the handler (NestJS/Express default 100 kB:

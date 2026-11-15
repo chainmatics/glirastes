@@ -65,6 +65,8 @@ from the transport hook. Reach for configuration before forking a component.
 | `suggestions` | contextual suggestion chips |
 | `voice` | speech-to-text |
 | `attachments` | image and PDF attachments (section below) |
+| `chatInteractions` | derived `@` entities and `/` commands (section below) |
+| `entityLinks` | entity references in answers as chips |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
 | `onBeforeSend`, `onToolResult` | hooks around a turn |
 | `approvalDescription` | human-readable text for an approval request |
@@ -129,7 +131,9 @@ that page's path as fourth argument, `{ route: '/templates' }`, in the page
 component: from another page the chat navigates there first and runs the
 action once it is registered. A handler returns `false` when it could not do
 its work, so the chat does not report it as done. Never register a global
-handler that only fires a window event for a listener on one page.
+handler that only fires a window event for a listener on one page. A chat UI
+that does not use the SDK provider must pass each tool result to
+`dispatchToolResultUiActions` (`glirastes/browser`), or no UI tool runs.
 
 ## `@` entities and `/` commands
 
@@ -199,8 +203,9 @@ repository, not shipped in the package) has the table and override format.
 ## Pills, "Chat about this" and chips in answers
 
 `chatInteractions` makes the default `ChatInput` show `/` and `@` pills (`theme.colors.pill*`, `--cm-pill-*`, `glirastes/react/pills.css` when unstyled); keep it.
-`useChatComposer().chatAbout({ type, id, label })` opens the chat with the pills in it (composers on `useChatComposerInput` get them; other own composers: `useChatComposerTarget`).
-`entityLinks={{ matchers, open }}` makes references in answers clickable chips; see `docs/chat-interactions.md`.
+`useChatComposer().chatAbout({ type, id, label })` opens the chat with the pills in it (composers on `useChatComposerInput` get them; other own composers: `useChatComposerTarget`); `useOptionalChatComposer()` is `null` outside the provider, and `onOpenRequest` on the provider shows a chat the app opens itself.
+`entityLinks={{ matchers, open }}` makes references in answers clickable chips; a replaced `Markdown` slot keeps them only through `useChatEntityLinks()`.
+Methods, chip options and gotchas: [references/composer-chips-attachments.md](references/composer-chips-attachments.md).
 
 ## Commands, mentions and clarification
 
@@ -253,6 +258,9 @@ true` (files bypass the shield); decide that with the developer. A custom
 composer adds `AttachmentTray`, `<input {...composer.attachmentInputProps} />`
 and `AttachmentButton` (`onClick={composer.openFilePicker}`). Raise body limits
 in front of the route: Next.js middleware (10 MB), Express/NestJS JSON parser.
+Only the two most recent user messages keep file data, and the LangGraph
+transport refuses files. Limits, error codes and the composer API:
+[references/composer-chips-attachments.md](references/composer-chips-attachments.md).
 
 ## Sessions
 
