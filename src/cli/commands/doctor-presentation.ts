@@ -15,6 +15,7 @@ const LABELS = new Map([
   ['connection-obsolete-variables', 'Unneeded connection settings'],
   ['connection-environment-bound', 'Connection scope'],
   ['runtime-mode', 'Runtime connection settings'],
+  ['agent-skills', 'Installed agent skills'],
 ]);
 
 const NEXT_ACTIONS = new Map([
@@ -48,6 +49,10 @@ const NEXT_ACTIONS = new Map([
     'GLIRASTES_APP_ID, GLIRASTES_ENVIRONMENT_ID and GLIRASTES_RUNNER_KEY are no longer needed. Remove them from the environment; a connected app needs only GLIRASTES_API_KEY.'],
   ['reconnect-for-app-key',
     'This is an environment-bound connection; run `glirastes connect` again to use one key for all environments.'],
+  ['refresh-agent-skills',
+    'Run glirastes tools refresh to bring the installed agent skills up to this SDK, then commit them with .glirastes/installed-skills.json.'],
+  ['review-edited-agent-skills',
+    'Some installed agent skills were edited and differ from this SDK. Run glirastes tools check for the names, then merge the update or replace them with glirastes install --force.'],
   ['align-explicit-runtime-mode',
     'Ask your coding agent to align the local runtime settings with the intended connection. Do not silently switch a connected app to standalone.'],
 ]);

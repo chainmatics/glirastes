@@ -6,9 +6,16 @@ import { isFoundationDiagnosticError } from '../../../diagnostics/index.js';
 import { parseToolArgs, ToolsUsageError } from './args.js';
 import { agentWorkNotes, formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
 import { watchToolsRefresh } from './watch.js';
+import {
+  applySkillsUpdate,
+  formatSkillsUpdate,
+  planSkillsUpdate,
+  skillsAutoUpdateDisabled,
+  type SkillsUpdatePlan,
+} from '../skills-auto-update.js';
 
 export const REFRESH_ARGS = {
-  flags: ['--keep-going', '--json', '--watch'],
+  flags: ['--keep-going', '--json', '--watch', '--no-skills'],
   values: ['--root', '--mode', '--adopt'],
 } as const;
 
@@ -51,6 +58,23 @@ async function watchRefresh(root: string, io: ToolsIo): Promise<number> {
   return 0;
 }
 
+/**
+ * Brings installed agent skills up to this SDK (write mode only). A skills
+ * problem never fails the refresh that predev and prebuild depend on.
+ */
+async function updateInstalledSkills(root: string, io: ToolsIo, json: boolean): Promise<SkillsUpdatePlan | null> {
+  try {
+    const plan = await planSkillsUpdate({ rootDir: root });
+    if (!plan) return null;
+    await applySkillsUpdate(root, plan);
+    if (!json) for (const line of formatSkillsUpdate(plan)) io.log(line);
+    return plan;
+  } catch (error) {
+    io.error(`Installed skills were not updated: ${(error instanceof Error ? error.message : String(error)).split('\n')[0]}`);
+    return null;
+  }
+}
+
 export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo): Promise<number> {
   const args = parseToolArgs(argv, REFRESH_ARGS);
   const modeFlag = args.values.get('--mode');
@@ -59,11 +83,15 @@ export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo):
   }
   const mode = resolveToolsMode({ ...(modeFlag !== undefined ? { flag: modeFlag } : {}), env: io.env });
   const root = resolve(io.cwd, args.values.get('--root') ?? '.');
+  const json = args.flags.has('--json');
+  const skills = mode === 'write' && !args.flags.has('--no-skills') && !skillsAutoUpdateDisabled(io.env);
   if (args.flags.has('--watch')) {
     if (mode !== 'write') throw new ToolsUsageError('--watch refreshes in write mode only; CI and Docker builds check once.');
-    if (args.flags.has('--json') || args.values.has('--adopt')) throw new ToolsUsageError('--watch cannot be combined with --json or --adopt.');
+    if (json || args.values.has('--adopt')) throw new ToolsUsageError('--watch cannot be combined with --json or --adopt.');
+    if (skills) await updateInstalledSkills(root, io, false);
     return watchRefresh(root, io);
   }
+  const skillsPlan = skills ? await updateInstalledSkills(root, io, json) : null;
   const keepGoing = args.flags.has('--keep-going') && mode === 'write';
   const adoptInventoryPath = args.values.get('--adopt');
   const result = await io.runPipeline({
@@ -72,11 +100,22 @@ export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo):
     ...(keepGoing ? { keepGoing } : {}),
     ...(adoptInventoryPath ? { adoptInventoryPath } : {}),
   });
-  if (args.flags.has('--json')) {
-    io.log(formatToolsJson(result));
+  if (json) {
+    io.log(skillsPlan ? withSkillsJson(formatToolsJson(result), skillsPlan) : formatToolsJson(result));
     return 0;
   }
   const notes = agentWorkNotes(result);
   io.log(notes.length > 0 ? `${formatToolsHuman(result)}\n\n${notes.join('\n')}` : formatToolsHuman(result));
   return 0;
+}
+
+function withSkillsJson(raw: string, plan: SkillsUpdatePlan): string {
+  return JSON.stringify({
+    ...(JSON.parse(raw) as Record<string, unknown>),
+    skills: {
+      sdkVersion: plan.sdkVersion,
+      changes: plan.changes.map(({ host, name, kind }) => ({ host, name, kind })),
+      kept: plan.kept,
+    },
+  });
 }

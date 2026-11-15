@@ -53,13 +53,13 @@ export interface InstallSkillsOptions {
   quiet?: boolean;
 }
 
-interface SkillDescriptor {
+export interface SkillDescriptor {
   name: string;
   /** Source absolute path (where the skill lives in this package) */
   source: string;
 }
 
-const HOST_SKILL_TARGETS = {
+export const HOST_SKILL_TARGETS = {
   codex: {
     project: '.agents/skills',
     global: join(homedir(), '.agents', 'skills'),
@@ -75,7 +75,7 @@ const HOST_SKILL_TARGETS = {
 } as const;
 
 /** Project-relative paths of every file written for one installed skill. */
-async function listSkillFiles(
+export async function listSkillFiles(
   rootDir: string,
   skillDir: string,
 ): Promise<string[]> {
@@ -126,7 +126,7 @@ export function findPackageSkillsDir(): string {
   );
 }
 
-async function listAvailableSkills(skillsDir: string): Promise<SkillDescriptor[]> {
+export async function listAvailableSkills(skillsDir: string): Promise<SkillDescriptor[]> {
   const entries = await readdir(skillsDir, { withFileTypes: true });
   const skills: SkillDescriptor[] = [];
   for (const entry of entries) {
@@ -144,7 +144,7 @@ async function listAvailableSkills(skillsDir: string): Promise<SkillDescriptor[]
   return skills.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function pathExists(p: string): Promise<boolean> {
+export async function pathExists(p: string): Promise<boolean> {
   try {
     await lstat(p);
     return true;
@@ -153,7 +153,7 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
-async function copyDirRecursive(src: string, dest: string): Promise<void> {
+export async function copyDirRecursive(src: string, dest: string): Promise<void> {
   await mkdir(dest, { recursive: true });
   const entries = await readdir(src, { withFileTypes: true });
   for (const entry of entries) {
@@ -167,7 +167,7 @@ async function copyDirRecursive(src: string, dest: string): Promise<void> {
   }
 }
 
-async function removeAtomic(target: string): Promise<void> {
+export async function removeAtomic(target: string): Promise<void> {
   const info = await lstat(target);
   if (info.isSymbolicLink() || info.isFile()) {
     await unlink(target);

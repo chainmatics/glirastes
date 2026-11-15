@@ -47,10 +47,11 @@ export interface ToolsCommandDependencies {
 }
 
 export const TOOLS_USAGE = [
-  'Usage: glirastes tools refresh [--root <dir>] [--mode write|frozen|integrity] [--keep-going] [--adopt <inventory>] [--watch] [--json]',
+  'Usage: glirastes tools refresh [--root <dir>] [--mode write|frozen|integrity] [--keep-going] [--adopt <inventory>] [--watch] [--no-skills] [--json]',
   '         derive tools from the code (writes locally, checks in CI, verifies in Docker; --watch keeps refreshing)',
-  '       glirastes tools check [--root <dir>] [--strict] [--integrity-only] [--json]',
-  '         verify the committed tool outputs without writing, models or network',
+  '         and bring unedited installed agent skills up to this SDK (--no-skills or GLIRASTES_SKILLS_AUTO_UPDATE=0 opts out)',
+  '       glirastes tools check [--root <dir>] [--strict] [--integrity-only] [--no-skills] [--json]',
+  '         verify the committed tool outputs and installed skills without writing, models or network',
   '       glirastes tools status [--root <dir>] [--json]',
   '         show what your chat can do',
   '       glirastes tools resolve --print [--root <dir>] [--json]',
