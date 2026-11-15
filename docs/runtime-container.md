@@ -150,8 +150,9 @@ are denied, paths are prefix-restricted and caller-selected destinations rejecte
 Logs contain event type, trace ID, HTTP status and duration. Raw exception messages,
 credentials and chat/tool payloads are omitted. Provider output-schema diagnostics
 must likewise remain content-free. Pin image digests and deploy the matching SDK
-browser package/artifact version together. There is no automatic image publishing
-or live customer deployment in the build workflow.
+browser package/artifact version together. Normal builds do not publish. An authorized release tag publishes the tested
+versioned image to `ghcr.io/chainmatics/glirastes-runtime:<version>` and the npm
+package. Customer deployment remains separate.
 
 ## Acceptance
 

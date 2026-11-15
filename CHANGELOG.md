@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-15
+
 ### Added
 
 - Configured Node runtime container V1 for non-Node HTTP backends: JSON configuration, generator-built data-only artifacts, backend-verified identities, persistent PostgreSQL approvals and a single-active-instance guard. Includes a PHP reference, browser/container acceptance and build-only CI.
@@ -739,3 +741,5 @@ No code changes — patch-level docs release.
 [0.4.0]: https://github.com/chainmatics/glirastes/compare/v0.3.2...v0.4.0
 [0.2.1]: https://github.com/chainmatics/glirastes/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/chainmatics/glirastes/releases/tag/v0.2.0
+
+[0.14.0]: https://github.com/chainmatics/glirastes/compare/v0.13.1...v0.14.0

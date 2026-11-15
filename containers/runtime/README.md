@@ -20,10 +20,10 @@ docker run --rm glirastes-runtime:v1-test --help
 docker image inspect glirastes-runtime:v1-test --format '{{.Config.User}}'
 ```
 
-No registry image is published by these commands. The CI workflow
-`.github/workflows/runtime-container.yml` builds and runs acceptance tests without
-registry credentials or a push step. Promote only a reviewed, tested image under
-an immutable version/digest through an explicitly authorized release.
+Local builds do not publish. Release tags run the PHP/browser acceptance gate
+and publish the exact tested image to `ghcr.io/chainmatics/glirastes-runtime:<version>`
+before the npm release completes. Normal PR and main CI builds do not publish.
+Pin the released image by digest in production.
 
 ## Build customer artifacts
 

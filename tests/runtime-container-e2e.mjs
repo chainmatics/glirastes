@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -86,6 +86,9 @@ test('PHP backend and official runtime preserve identity, authorization, streami
   const names = { php: `${network}-php`, pg: `${network}-pg`, runtime: `${network}-runtime` };
   const runtimeImage = process.env.GLIRASTES_RUNTIME_TEST_IMAGE;
   const dir = await mkdtemp(join(ROOT, 'examples/.runtime-e2e-'));
+  // Fixtures only: allow the image's non-root UID to traverse the bind mount
+  // when the Linux CI runner has a different UID (macOS hides this difference).
+  await chmod(dir, 0o755);
   let runtime; let runtimeOrigin; let ingress; let model; let browser;
   t.after(async () => {
     await browser?.close();
