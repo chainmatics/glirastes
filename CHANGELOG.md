@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A client action handler may return `false` to report that it did not carry out the action; the dispatch then fails with `UI action <id> was not executed`. Types `ClientActionHandler`, `DispatchToolResultOptions` and `AiClientActionOptions`.
 - Findings `ui-action-route-invalid` and `ui-action-route-conflict` (needs attention: a route that is not a literal static app path, or registrations of one action with different routes) and the warning `ui-action-indirect` (a handler that only dispatches a window event and has no route, so it works only where a listener is mounted).
 
+### Fixed
+
+- Clickable entity chips show the pointer cursor on the whole chip, also when the app's CSS reset (e.g. Tailwind preflight) resets button cursors.
+
 ## [0.10.1] - 2026-11-15
 
 ### Fixed

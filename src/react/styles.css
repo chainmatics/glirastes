@@ -454,6 +454,9 @@
   font: inherit;
   cursor: pointer;
 }
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-chip"][data-interactive="true"] {
+  cursor: pointer;
+}
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-chip"][data-interactive="true"]:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
