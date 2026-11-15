@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agenticContentProblem } from '../codegen/tools/agentic.js';
 
@@ -122,6 +122,7 @@ export function deniedPath(path: string): boolean {
 
 export class Workspace {
   private read = 0;
+  private sequence = 0;
   private readonly created = new Set<string>();
   private readonly changed = new Set<string>();
 
@@ -217,7 +218,11 @@ export class Workspace {
       throw new WorkspaceRefusal('write_exists');
     }
     await this.assertNoSymlinkParents(relative);
-    await writeFile(join(this.options.root, relative), content.endsWith('\n') ? content : `${content}\n`, 'utf8');
+    // Written beside and renamed: a refresh running at the same time never reads half a file.
+    const target = join(this.options.root, relative);
+    const temporary = `${target}.glirastes-${process.pid}-${(this.sequence += 1)}.tmp`;
+    await writeFile(temporary, content.endsWith('\n') ? content : `${content}\n`, 'utf8');
+    await rename(temporary, target);
     if (create && existing === 'missing') this.created.add(relative);
     this.changed.add(relative);
     return { path: relative, bytes };

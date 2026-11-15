@@ -22,6 +22,11 @@ fallback. Tools stay active without stage 2, only less well described.
 - Fill only open fields and replace only your own earlier output. Fields in
   `protectedFields` (written by a human, supplied by the code or locked by a
   review) stay exactly as they are.
+- An agent entry written for the current `interfaceDigest` is finished: do not
+  rewrite it, only add a missing language. Renew agent fields only when the
+  tool shows `semantics-stale` or `enrichment-stale`. The managed CI job
+  enforces this: it keeps only the fields `targets.semantics.expected` shows
+  and discards everything else it is sent.
 - Every input key needs evidence in the code, and every key the handler reads
   stays in the schema. Effects may only raise the risk, never lower it.
 - Examples are neutral sentences a user could type; no customer names,

@@ -44,9 +44,14 @@ export interface HeadCommit {
 
 export type LoopGuardReason = 'last_commit_by_bot' | 'no_gaps';
 
+/** A commit the managed job made itself; a run it triggered does nothing. */
+export function isBotCommit(head: HeadCommit): boolean {
+  return head.author === BOT_NAME || head.message.includes(BOT_MARKER);
+}
+
 /** No run when the last commit is a bot commit or nothing is open (spec 4.6). */
 export function loopGuard(head: HeadCommit, openItems: number): LoopGuardReason | undefined {
-  if (head.author === BOT_NAME || head.message.includes(BOT_MARKER)) return 'last_commit_by_bot';
+  if (isBotCommit(head)) return 'last_commit_by_bot';
   if (openItems === 0) return 'no_gaps';
   return undefined;
 }
@@ -111,6 +116,27 @@ export class GitRepository {
     if (fetched.code !== 0) return undefined;
     const shown = await this.exec('git', ['show', `FETCH_HEAD:${path}`], { cwd: this.root });
     return shown.code === 0 ? shown.stdout : null;
+  }
+
+  /** Branch names on origin; `undefined` when origin cannot be listed. */
+  async remoteBranches(): Promise<string[] | undefined> {
+    const result = await this.exec('git', ['ls-remote', '--heads', 'origin'], { cwd: this.root });
+    if (result.code !== 0) return undefined;
+    return result.stdout.split('\n')
+      .map((line) => /\trefs\/heads\/(.+)$/.exec(line)?.[1])
+      .filter((name): name is string => name !== undefined);
+  }
+
+  /**
+   * Whether `sha` is already part of `branch` on origin. `undefined` when the
+   * branch cannot be fetched or the history is too shallow to tell.
+   */
+  async containedIn(sha: string, branch: string): Promise<boolean | undefined> {
+    const ref = `refs/remotes/origin/${branch}`;
+    const fetched = await this.exec('git', ['fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${branch}:${ref}`], { cwd: this.root });
+    if (fetched.code !== 0) return undefined;
+    const result = await this.exec('git', ['merge-base', '--is-ancestor', sha, ref], { cwd: this.root });
+    return result.code === 0 ? true : result.code === 1 ? false : undefined;
   }
 
   async switchToNewBranch(name: string): Promise<void> {

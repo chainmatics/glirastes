@@ -1,11 +1,23 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { LanguageModel } from 'ai';
+import {
+  contractViolations,
+  mergeResolutions,
+  mergeSemantics,
+  openSemanticsFields,
+  rejectedKeys,
+  withoutTools,
+  writePolicy,
+  type WritePolicy,
+} from '../../../agent/enrich-guard.js';
+import { environmentBranches, promotionSource } from '../../../agent/environments.js';
 import {
   BOT_MARKER,
   execFileRunner,
   GitCommandError,
   GitRepository,
+  isBotCommit,
   loopGuard,
   pathViolations,
   type Exec,
@@ -26,16 +38,24 @@ import { ENRICH_TIMEOUT_MINUTES } from '../ci-workflow.js';
 import { loadToolsConfig, TOOLS_PATHS } from '../../../codegen/tools/config.js';
 import { ToolContractsFileSchema } from '../../../codegen/tools/files.js';
 import { evaluateRouting } from '../../../codegen/tools/routing-eval.js';
-import { requiredLanguages } from '../../../codegen/tools/semantics.js';
-import type { ToolsPipelineResult } from '../../../codegen/tools/pipeline.js';
-import { buildDescribeWorklist, buildResolveWorklist } from '../../../codegen/tools/worklist.js';
+import { requiredLanguages, SEMANTICS_FIELDS, type SemanticsField } from '../../../codegen/tools/semantics.js';
+import { ToolsPipelineFailure, type ToolsPipelineResult } from '../../../codegen/tools/pipeline.js';
+import {
+  buildDescribeWorklist,
+  buildResolveWorklist,
+  type DescribeWorkItem,
+  type ResolveWorkItem,
+} from '../../../codegen/tools/worklist.js';
 import { AppSetupArtifactSchema } from '../../../contracts/index.js';
 import { findPackageSkillsDir } from '../install-skills.js';
 import { parseToolArgs, ToolsUsageError } from './args.js';
 import type { ToolsIo } from './format.js';
 import { readToolOutput } from './status.js';
 
-export const ENRICH_ARGS = { flags: ['--managed', '--first-run', '--json'], values: ['--root', '--base'] } as const;
+export const ENRICH_ARGS = {
+  flags: ['--managed', '--first-run', '--json'],
+  values: ['--root', '--base', '--head', '--environments'],
+} as const;
 
 /** The skills the local coding agent uses; the managed job runs exactly these (spec 4.6). */
 export const MANAGED_JOB_SKILLS = ['maintaining-glirastes-tools', 'describing-glirastes-tools'] as const;
@@ -49,11 +69,8 @@ export const MAX_TASK_TOOLS = 8;
 const MAX_ITEM_ATTEMPTS = 2;
 /** A work list this long is an app's backlog: the Platform grants the first-run budget. */
 const FIRST_RUN_ITEMS = 20;
-/** Finished tasks between two commits of a long run. */
-const CHECKPOINT_TASKS = 5;
 /** Left of the CI job's timeout for the last refresh, the commit, the push and the ledger. */
 const CI_TAIL_MINUTES = 10;
-const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
 /**
  * When the model work ends: before the CI job is cancelled (which would lose
@@ -69,8 +86,6 @@ export interface EnrichDependencies {
   /** Loads `@ai-sdk/openai` on demand; only `tools enrich --managed` ever does. */
   loadOpenAI?: () => Promise<CreateOpenAI>;
   now?: () => Date;
-  /** Finished tasks between two commits; tests lower it. */
-  checkpointEvery?: number;
 }
 
 interface EnrichSummary {
@@ -130,59 +145,6 @@ async function readText(path: string): Promise<string | null> {
   return readFile(path, 'utf8').catch(() => null);
 }
 
-function parsed(text: string | null): JsonRecord | null {
-  if (text === null) return null;
-  try {
-    const value = JSON.parse(text) as unknown;
-    return isRecord(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Names the model that actually ran in every agent entry the job wrote or
- * changed. A model only knows the label the skill shows as an example, so it
- * would sign its work as someone else; entries the job left alone keep theirs.
- * Returns whether a file changed.
- */
-export async function stampAgentModel(root: string, before: ReadonlyMap<string, string | null>, model: string): Promise<boolean> {
-  let stamped = false;
-  const semanticsPath = join(root, TOOLS_PATHS.semantics);
-  const semantics = parsed(await readText(semanticsPath));
-  if (semantics && Array.isArray(semantics.tools)) {
-    const earlier = parsed(before.get(TOOLS_PATHS.semantics) ?? null);
-    const previous = new Map((Array.isArray(earlier?.tools) ? earlier.tools : [])
-      .filter(isRecord)
-      .map((entry) => [entry.stableKey, JSON.stringify(entry)] as const));
-    let changed = false;
-    for (const entry of semantics.tools) {
-      if (!isRecord(entry) || !isRecord(entry.agent) || entry.agent.model === model) continue;
-      if (previous.get(entry.stableKey) === JSON.stringify(entry)) continue;
-      entry.agent.model = model;
-      changed = true;
-    }
-    if (changed) await writeFile(semanticsPath, `${JSON.stringify(semantics, null, 2)}\n`);
-    stamped ||= changed;
-  }
-  const resolutionsPath = join(root, TOOLS_PATHS.resolutions);
-  const resolutions = parsed(await readText(resolutionsPath));
-  if (resolutions && isRecord(resolutions.tools)) {
-    const earlier = parsed(before.get(TOOLS_PATHS.resolutions) ?? null);
-    const previous = isRecord(earlier?.tools) ? earlier.tools : {};
-    let changed = false;
-    for (const [key, entry] of Object.entries(resolutions.tools)) {
-      if (!isRecord(entry) || entry.origin !== 'agent' || typeof entry.model !== 'string' || entry.model === model) continue;
-      if (JSON.stringify(previous[key]) === JSON.stringify(entry)) continue;
-      entry.model = model;
-      changed = true;
-    }
-    if (changed) await writeFile(resolutionsPath, `${JSON.stringify(resolutions, null, 2)}\n`);
-    stamped ||= changed;
-  }
-  return stamped;
-}
-
 /** The message of an unexpected error for the CI log, without anything that looks like a key. */
 function causeOf(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -210,33 +172,93 @@ async function openRouterRejects(apiKey: string, fetchImpl: typeof fetch): Promi
   }
 }
 
-/**
- * The stable keys an automatic run works: tools that `ref` (the base branch
- * of a pull request, the commit before a push) does not have or has with
- * another interface. `undefined` when the ref cannot be read.
- */
-export async function changedSince(repository: GitRepository, ref: string, result: ToolsPipelineResult): Promise<Set<string> | undefined> {
-  const text = await repository.fileAt(ref, TOOLS_PATHS.contracts);
-  if (text === undefined) return undefined;
-  const digests = new Map<string, unknown>();
-  try {
-    const file = JSON.parse(text ?? '{}') as { tools?: Array<{ stableKey?: unknown; contract?: { interfaceDigest?: unknown } }> };
-    // The file stores a digest only with a contract. A tool that had none and has none is backlog, not a change.
-    for (const tool of Array.isArray(file.tools) ? file.tools : []) digests.set(String(tool.stableKey), tool.contract?.interfaceDigest ?? null);
-  } catch {
-    // An unreadable file describes no tool: everything counts as changed.
-  }
-  return new Set((result.tools ?? [])
-    .filter((tool) => !digests.has(tool.stableKey) || digests.get(tool.stableKey) !== (tool.contract ? tool.interfaceDigest : null))
-    .map((tool) => tool.stableKey));
-}
-
 async function currentBranch(exec: Exec, root: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   const fromCi = env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME;
   if (fromCi) return fromCi;
   const result = await exec('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root });
   const branch = result.stdout.trim();
   return result.code === 0 && branch !== 'HEAD' ? branch : undefined;
+}
+
+
+/** Gaps that mean a tool's semantics are missing or written for another interface: every run works them. */
+const STALE_GAPS: ReadonlySet<string> = new Set([
+  'description-templated', 'synonyms-missing', 'examples-missing', 'semantics-stale', 'enrichment-stale',
+]);
+/** Gaps a typed schema in tool-resolutions.json closes; besides stale tools only a first run works them. */
+const SCHEMA_GAPS: ReadonlySet<string> = new Set(['contract-derived', 'output-contract-opaque', 'filter-domain-open', 'enrichment-stale']);
+
+export interface EnrichScope {
+  /** Tools whose semantics the job works. */
+  semantics: Set<string>;
+  /** Tools whose tool-resolutions.json entry the job may write. */
+  resolutions: Set<string>;
+  conventions: boolean;
+}
+
+/**
+ * The tools that need work, whatever the branch is compared with: semantics
+ * that are missing, stale or rejected, and stage-1 items for the agent's data
+ * files. A first run also takes schema gaps of otherwise current tools. A
+ * tool whose only gap is routing (or nothing) is never in scope: its current
+ * entries stay as they are.
+ */
+export function enrichScope(
+  resolveItems: ReadonlyArray<Pick<ResolveWorkItem, 'stableKey' | 'toolId' | 'owner' | 'code' | 'target'>>,
+  describeItems: ReadonlyArray<Pick<DescribeWorkItem, 'stableKey' | 'gaps'>>,
+  firstRun: boolean,
+): EnrichScope {
+  const scope: EnrichScope = { semantics: new Set(), resolutions: new Set(), conventions: false };
+  for (const item of describeItems) {
+    const stale = item.gaps.some((gap) => STALE_GAPS.has(gap));
+    const schema = item.gaps.some((gap) => SCHEMA_GAPS.has(gap));
+    if (stale || (firstRun && schema)) scope.semantics.add(item.stableKey);
+    if (schema && (stale || firstRun)) scope.resolutions.add(item.stableKey);
+  }
+  for (const item of resolveItems) {
+    if (item.owner !== 'agent' || item.toolId === null || item.target.kind !== 'file') continue;
+    if (item.target.file === TOOLS_PATHS.semantics) scope.semantics.add(item.stableKey);
+    else if (item.target.file === TOOLS_PATHS.resolutions) {
+      scope.resolutions.add(item.stableKey);
+      if (item.code === 'auth-evidence-missing') scope.conventions = true;
+    }
+  }
+  return scope;
+}
+
+/** A describe item as the model sees it: only the fields and the schema the job may still write. */
+export function restrictItem(item: DescribeWorkItem, policy: WritePolicy): DescribeWorkItem {
+  const allowed = policy.tools.get(item.stableKey);
+  const open = new Set<string>(openSemanticsFields(allowed));
+  const expected = Object.fromEntries(Object.entries(item.targets.semantics.expected)
+    .filter(([key]) => !(SEMANTICS_FIELDS as ReadonlyArray<string>).includes(key) || open.has(key))
+    .map(([key, value]) => {
+      const languages = allowed?.languages.get(key as SemanticsField);
+      if (!languages || allowed?.fields.has(key as SemanticsField) || !isRecord(value)) return [key, value];
+      return [key, Object.fromEntries(Object.entries(value).filter(([language]) => (languages as string[]).includes(language)))];
+    }));
+  if (isRecord(expected.origin)) {
+    expected.origin = Object.fromEntries(Object.entries(expected.origin).filter(([field]) => allowed?.fields.has(field as SemanticsField)));
+  }
+  const { schema, ...targets } = item.targets;
+  return {
+    ...item,
+    protectedFields: SEMANTICS_FIELDS.filter((field) => !allowed?.fields.has(field)),
+    targets: {
+      ...targets,
+      semantics: { ...item.targets.semantics, expected },
+      ...(schema && allowed?.resolution ? { schema } : {}),
+    },
+  };
+}
+
+async function writeOrRemove(path: string, text: string | null): Promise<void> {
+  if (text === null) await rm(path, { force: true });
+  else await writeFile(path, text);
+}
+
+function findingKey(finding: { code: string; subjectRef: string; message: string }): string {
+  return `${finding.code}|${finding.subjectRef}|${finding.message}`;
 }
 
 export async function runToolsEnrich(
@@ -252,7 +274,7 @@ export async function runToolsEnrich(
   }
   const json = args.flags.has('--json');
   const root = resolve(io.cwd, args.values.get('--root') ?? '.');
-  const base = args.values.get('--base') ?? 'main';
+  const base = args.values.get('--base') || io.env.GLIRASTES_BASE_BRANCH?.trim() || io.env.GITHUB_BASE_REF?.trim() || 'main';
   const now = deps.now ?? (() => new Date());
   const exec = deps.exec ?? execFileRunner;
   const started = now().getTime();
@@ -264,37 +286,59 @@ export async function runToolsEnrich(
   if (!ciKey || !baseUrl) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'managed_config_missing' });
   // A secret pasted from the wrong clipboard is named, before any work starts.
   if (!isCiKey(ciKey)) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'ci_key_invalid' });
+  const config = loadToolsConfig(root);
+  const repository = new GitRepository(root, exec);
+  const head = await repository.head();
+  // A run the bot's own commit started does nothing, before any refresh or request.
+  if (isBotCommit(head)) return report(io, json, { schemaVersion: 1, status: 'skipped', code: 'last_commit_by_bot' });
+  const branch = args.values.get('--head') || io.env.GLIRASTES_HEAD_BRANCH?.trim() || await currentBranch(exec, root, io.env);
+  if (!branch || !BRANCH.test(branch) || !BRANCH.test(base)) {
+    return report(io, json, { schemaVersion: 1, status: 'failed', code: 'branch_unknown' });
+  }
+  // The generated workflow sets GLIRASTES_FIRST_RUN on its manual start.
+  const firstRun = args.flags.has('--first-run') || io.env.GLIRASTES_FIRST_RUN === 'true';
+
+  // A promotion carries what a lower environment accepted; it never changes it.
+  if (!firstRun) {
+    const chain = await environmentBranches({
+      flag: args.values.get('--environments'),
+      env: io.env.GLIRASTES_ENVIRONMENT_BRANCHES,
+      config: config.enrich.environments,
+      remoteBranches: () => repository.remoteBranches(),
+    });
+    const from = await promotionSource({
+      head: branch,
+      base,
+      environments: chain.branches,
+      containedIn: (environment) => repository.containedIn(head.sha, environment),
+    });
+    if (from !== undefined) {
+      io.error(`glirastes tools enrich: promotion from ${from}, nothing to enrich`);
+      return report(io, json, { schemaVersion: 1, status: 'skipped', code: 'promotion' });
+    }
+  }
+
   // A BYOK key OpenRouter rejects fails here, before the Platform reserves a job.
   const byokKey = io.env.GLIRASTES_TOOLS_OPENROUTER_KEY?.trim();
   if (byokKey && await openRouterRejects(byokKey, deps.fetchImpl ?? fetch)) {
     return report(io, json, { schemaVersion: 1, status: 'failed', code: 'byok_key_invalid' });
   }
-  const config = loadToolsConfig(root);
-  const repository = new GitRepository(root, exec);
-  const head = await repository.head();
-  const branch = await currentBranch(exec, root, io.env);
-  if (!branch || !BRANCH.test(branch) || !BRANCH.test(base)) {
-    return report(io, json, { schemaVersion: 1, status: 'failed', code: 'branch_unknown' });
-  }
 
-  // An automatic run works what changed: a pull request against its base, a push against the commit before it.
-  // Everything else is the backlog, which only --first-run works.
-  let scope: Set<string> | null = null;
+  const initial = await io.runPipeline({ root, mode: 'frozen', keepGoing: true });
+  const describeOptions = {
+    root,
+    locale: config.locale,
+    languages: requiredLanguages(config.locale),
+    writeContracts: config.enrich.writeContracts === true,
+  };
+  const scope = enrichScope(buildResolveWorklist(initial).items, buildDescribeWorklist(initial, describeOptions).items, firstRun);
+  const keys = new Set([...scope.semantics, ...scope.resolutions]);
   const listsOf = (result: ToolsPipelineResult) => {
     const allResolve = buildResolveWorklist(result);
-    const allDescribe = buildDescribeWorklist(result, {
-      root,
-      locale: config.locale,
-      languages: requiredLanguages(config.locale),
-      writeContracts: config.enrich.writeContracts === true,
-    });
-    const keys = scope;
-    const resolveList = keys === null ? allResolve : {
-      ...allResolve,
-      items: allResolve.items.filter((item) => item.toolId !== null && keys.has(item.stableKey)),
-    };
-    const describeItems = keys === null ? allDescribe.items : allDescribe.items.filter((item) => keys.has(item.stableKey));
-    const describeList = keys === null ? allDescribe : {
+    const allDescribe = buildDescribeWorklist(result, describeOptions);
+    const resolveList = { ...allResolve, items: allResolve.items.filter((item) => item.toolId !== null && keys.has(item.stableKey)) };
+    const describeItems = allDescribe.items.filter((item) => keys.has(item.stableKey));
+    const describeList = {
       ...allDescribe,
       items: describeItems,
       modules: allDescribe.modules
@@ -304,21 +348,14 @@ export async function runToolsEnrich(
     return { result, resolveList, describeList, items: jobItems(resolveList.items, describeList.items) };
   };
   const worklists = async () => listsOf(await io.runPipeline({ root, mode: 'frozen', keepGoing: true }));
-  const initial = await io.runPipeline({ root, mode: 'frozen', keepGoing: true });
-  // The generated workflow sets GLIRASTES_FIRST_RUN on its manual start.
-  const firstRun = args.flags.has('--first-run') || io.env.GLIRASTES_FIRST_RUN === 'true';
-  if (!firstRun) {
-    const beforeSha = io.env.GLIRASTES_BEFORE_SHA?.trim() ?? '';
-    const ref = branch !== base ? base : COMMIT_SHA.test(beforeSha) && !/^0+$/.test(beforeSha) ? beforeSha : undefined;
-    if (ref === undefined) return report(io, json, { schemaVersion: 1, status: 'skipped', code: 'backlog_needs_first_run' });
-    const changed = await changedSince(repository, ref, initial);
-    if (changed === undefined) return report(io, json, { schemaVersion: 1, status: 'failed', code: 'base_unreadable' });
-    scope = changed;
-  }
   const before = listsOf(initial);
-  io.error(`glirastes tools enrich: scope=${scope === null ? 'all' : 'changed'} items=${before.items.length}`);
+  io.error(`glirastes tools enrich: scope=${firstRun ? 'backlog' : 'stale'} items=${before.items.length}`);
   const skip = loopGuard(head, before.items.length);
   if (skip) return report(io, json, { schemaVersion: 1, status: 'skipped', code: skip });
+  // A branch `tools check` already fails would fail after the job too: no model is paid for a commit that cannot pass.
+  if (initial.findings.some((finding) => finding.severity === 'error' && finding.code !== 'tool-outputs-drift')) {
+    return report(io, json, { schemaVersion: 1, status: 'failed', code: 'check_failing' });
+  }
 
   // Only generator outputs may differ from the commit before the job starts.
   const generated = new Set(Object.keys(before.result.outputs));
@@ -333,6 +370,20 @@ export async function runToolsEnrich(
   if (typeof artifact.discoveryDigest !== 'string' || !DISCOVERY_DIGEST.test(artifact.discoveryDigest)) {
     return report(io, json, { schemaVersion: 1, status: 'failed', code: 'setup_artifact_missing' });
   }
+
+  const semanticsPath = join(root, TOOLS_PATHS.semantics);
+  const resolutionsPath = join(root, TOOLS_PATHS.resolutions);
+  const stored = { semantics: await readText(semanticsPath), resolutions: await readText(resolutionsPath) };
+  const initialRejections = new Set(initial.findings.map(findingKey));
+  let policy = writePolicy({
+    tools: initial.tools ?? [],
+    scope: scope.semantics,
+    resolutionScope: scope.resolutions,
+    semantics: stored.semantics,
+    resolutions: stored.resolutions,
+    rejected: rejectedKeys(initial.findings, stored.semantics),
+    conventions: scope.conventions,
+  });
 
   const jobs = new PlatformToolJobs({ baseUrl, appId: config.appId, ciKey, ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}) });
   let grant;
@@ -402,6 +453,11 @@ export async function runToolsEnrich(
       throw error;
     }
   };
+  /** Puts the agent's data files back as the job found them, so a failed job leaves nothing behind. */
+  const restore = async () => {
+    await writeOrRemove(semanticsPath, stored.semantics);
+    await writeOrRemove(resolutionsPath, stored.resolutions);
+  };
 
   // Any unexpected throw after the grant still reports a ledger, so the job is released.
   const execute = async () => {
@@ -450,8 +506,7 @@ export async function runToolsEnrich(
       queue = turn.catch(() => undefined);
       return turn;
     };
-    const refresh = (): Promise<RefreshSummary> => inTurn(refreshNow);
-    const refreshNow = async (): Promise<RefreshSummary> => {
+    const refresh = (): Promise<RefreshSummary> => inTurn(async () => {
       const result = await io.runPipeline({ root, mode: 'write', keepGoing: true });
       latest = result;
       for (const path of Object.keys(result.outputs)) allowed.files.add(path);
@@ -459,44 +514,13 @@ export async function runToolsEnrich(
         findings: result.findings.slice(0, 200).map(({ code, subjectRef, message }) => ({ code, subjectRef, message })),
         changed: result.changes.added.length + result.changes.changed.length + result.changes.removed.length,
       };
-    };
+    });
     const evaluate = async () => {
       const setup = await readToolOutput(root, TOOLS_PATHS.setupArtifact, AppSetupArtifactSchema, 'tools.enrich');
       const contracts = await readToolOutput(root, TOOLS_PATHS.contracts, ToolContractsFileSchema, 'tools.enrich');
       const evaluation = evaluateRouting({ artifact: setup, contracts: contracts.tools });
       return { failed: evaluation.summary.failed, failures: evaluation.tools.filter((tool) => tool.failures.length > 0).slice(0, 50) };
     };
-
-    // Commits go to the branch of a pull request, and on the base branch to a bot branch that ends in a pull request.
-    const message = `chore(glirastes): describe tools ${BOT_MARKER}\n\nGlirastes-Job: ${grant.jobId}`;
-    const committedPaths = new Set<string>();
-    let lastSha: string | undefined;
-    let botBranch: string | undefined;
-    const commitChanged = async (paths: ReadonlyArray<string>): Promise<void> => {
-      if (branch === base && !botBranch) {
-        botBranch = `glirastes/tools-${head.sha.slice(0, 12)}`;
-        await repository.switchToNewBranch(botBranch);
-      }
-      lastSha = await repository.commit(paths, message);
-      await repository.push(botBranch ?? branch);
-      for (const path of paths) committedPaths.add(path);
-    };
-    const written = new Map(await Promise.all([TOOLS_PATHS.semantics, TOOLS_PATHS.resolutions]
-      .map(async (path) => [path, await readText(join(root, path))] as const)));
-    /** A commit of what is finished so far; a problem here is left to the final commit to report. */
-    const checkpoint = (): Promise<void> => inTurn(async () => {
-      try {
-        if (await stampAgentModel(root, written, modelId)) await refreshNow();
-        for (const path of workspace.written) allowed.files.add(path);
-        const paths = await repository.changedPaths();
-        if (paths.length === 0 || pathViolations(paths, allowed).length > 0) return;
-        await commitChanged(paths);
-        io.error(`glirastes tools enrich: checkpoint ${lastSha!.slice(0, 7)}`);
-      } catch (error) {
-        if (!(error instanceof GitCommandError)) throw error;
-      }
-    });
-    let finishedTasks = 0;
 
     // The runner asks for one task at a time; each is cut from the state the last refresh left.
     const attempts = new Map<string, { count: number; gaps: ReadonlyArray<string> }>();
@@ -540,7 +564,11 @@ export async function runToolsEnrich(
         return {
           id: `describe:${first.module}`,
           worklists: {
-            describe: { ...lists.describeList, modules: [{ module: first.module, tools: chunk.map((item) => item.tool) }], items: chunk },
+            describe: {
+              ...lists.describeList,
+              modules: [{ module: first.module, tools: chunk.map((item) => item.tool) }],
+              items: chunk.map((item) => restrictItem(item, policy)),
+            },
           },
           open: chunk.length,
           keys: chunk.map((item) => item.stableKey),
@@ -552,10 +580,8 @@ export async function runToolsEnrich(
       modelId,
       skills: await readSkills(),
       plan,
-      onTask: async (task) => {
+      onTask: (task) => {
         io.error(`glirastes tools enrich: task ${task.id} items=${task.open} steps=${task.steps} finish=${task.finishReason}${task.repaired ? ' repaired' : ''}`);
-        finishedTasks += 1;
-        if (finishedTasks % (deps.checkpointEvery ?? CHECKPOINT_TASKS) === 0) await checkpoint();
       },
       workspace,
       tools: { refresh, evaluate },
@@ -563,27 +589,76 @@ export async function runToolsEnrich(
       deadline: jobDeadline(started, grant.expiresAt),
       now,
     });
+    await queue;
     const ranModel = MODEL_ID.test(run.servedModel) ? run.servedModel : modelId;
-    // A failed run stopped mid-task: the outputs follow what earlier tasks wrote.
-    if (await stampAgentModel(root, written, ranModel) || !run.refresh || run.outcome === 'failed') await refresh();
 
     for (const path of workspace.written) allowed.files.add(path);
+    if (pathViolations(await repository.changedPaths(), allowed).length > 0) {
+      return finish('failed', { reasonCode: 'path_violation', run, model: modelId });
+    }
+
+    // The model's files are proposals: only what the policy allows is kept, entries the
+    // generator rejects are taken back, and the result must pass glirastes tools check.
+    const proposed = { semantics: await readText(semanticsPath), resolutions: await readText(resolutionsPath) };
+    const takenBack = new Set<string>();
+    let refreshed: ToolsPipelineResult | undefined;
+    for (let round = 0; round < 3; round += 1) {
+      const semantics = mergeSemantics(stored.semantics, proposed.semantics, policy, ranModel);
+      const resolutions = mergeResolutions(stored.resolutions, proposed.resolutions, policy, ranModel);
+      await writeOrRemove(semanticsPath, semantics.text);
+      await writeOrRemove(resolutionsPath, resolutions.text);
+      refreshed = await io.runPipeline({ root, mode: 'write', keepGoing: true });
+      const written = new Set([...semantics.changed, ...resolutions.changed]);
+      const rejected = [...rejectedKeys(refreshed.findings.filter((finding) => !initialRejections.has(findingKey(finding))), semantics.text)]
+        .filter((key) => written.has(key));
+      if (rejected.length === 0) break;
+      for (const key of rejected) takenBack.add(key);
+      io.error(`glirastes tools enrich: ${rejected.length} rejected entr${rejected.length === 1 ? 'y' : 'ies'} taken back`);
+      policy = withoutTools(policy, new Set(rejected));
+      refreshed = undefined;
+    }
+    for (const path of Object.keys(refreshed?.outputs ?? {})) allowed.files.add(path);
+    const verified = await (async (): Promise<string | undefined> => {
+      if (!refreshed) return 'rejected_entries';
+      let check: ToolsPipelineResult;
+      try {
+        check = await io.runPipeline({ root, mode: 'frozen' });
+      } catch (error) {
+        if (error instanceof ToolsPipelineFailure) {
+          const codes = [...new Set(error.result.findings.filter((finding) => finding.severity === 'error').map((finding) => finding.code))];
+          io.error(`glirastes tools enrich: tools check would fail (${codes.join(', ')})`);
+          return 'check_failed';
+        }
+        throw error;
+      }
+      const newRejections = check.findings.filter((finding) => (finding.code === 'resolution-rejected' || finding.code === 'tool-semantics-invalid')
+        && !initialRejections.has(findingKey(finding)));
+      if (newRejections.length > 0) return 'rejected_entries';
+      const violations = contractViolations(before.result.outputs[TOOLS_PATHS.contracts], check.outputs[TOOLS_PATHS.contracts], keys);
+      if (violations.length > 0) {
+        io.error(`glirastes tools enrich: tool-contracts.json would change outside the scope: ${violations.slice(0, 10).join('; ')}`);
+        return 'contracts_out_of_scope';
+      }
+      return undefined;
+    })();
+    if (verified) {
+      await restore();
+      await io.runPipeline({ root, mode: 'write', keepGoing: true });
+      return finish('failed', { reasonCode: verified, run, model: modelId });
+    }
+
     const changed = await repository.changedPaths();
     if (pathViolations(changed, allowed).length > 0) {
       return finish('failed', { reasonCode: 'path_violation', run, model: modelId });
     }
-
     const after = await worklists();
     const open = new Map(after.items.map((item) => [item.stableKey, new Set(item.gaps)]));
-    const rejected = new Set((run.refresh?.findings ?? [])
-      .filter((finding) => finding.code === 'resolution-rejected')
-      .map((finding) => finding.subjectRef));
-    const resolutionCodes = new Set(before.resolveList.items.map((item) => item.code));
     const states: ToolJobLedger['items'] = items.map((item) => {
+      if (takenBack.has(item.stableKey)) return { stableKey: item.stableKey, state: 'failed', reasonCode: 'resolution-rejected' };
       const remaining = open.get(item.stableKey) ?? new Set<string>();
-      if (rejected.has(item.stableKey)) return { stableKey: item.stableKey, state: 'failed', reasonCode: 'resolution-rejected' };
       const closed = item.gaps.filter((gap) => !remaining.has(gap));
       if (closed.length === 0) return { stableKey: item.stableKey, state: 'unchanged' };
+      const resolutionCodes = new Set(before.resolveList.items.map((entry) => entry.code));
       const state = closed.some((gap) => resolutionCodes.has(gap)) ? 'resolved' : 'described';
       // Some gaps closed, others still open (e.g. a schema the job did not write).
       return closed.length < item.gaps.length
@@ -602,13 +677,21 @@ export async function runToolsEnrich(
       run.outcome === 'completed' || run.outcome === 'failed' ? committed : run.outcome
     );
     if (untouched > 0) io.error(`glirastes tools enrich: ${untouched} of ${states.length} items are still open`);
-    // Nothing closed and nothing checkpointed: refreshed outputs alone are no reason to commit or open a pull request.
-    if (lastSha === undefined && (changed.length === 0 || closed === 0)) {
+    // Nothing closed: refreshed outputs alone are no reason to commit or open a pull request.
+    if (changed.length === 0 || closed === 0) {
       return finish(closed === 0 ? 'failed' : outcomeOf('no_change'), { ...reason, run, model: modelId, states });
     }
+    // One commit per job, made once the outputs pass the check: a push starts the checks once.
+    const message = `chore(glirastes): describe tools ${BOT_MARKER}\n\nGlirastes-Job: ${grant.jobId}`;
     try {
-      if (changed.length > 0) await commitChanged(changed);
-      const done = { ...reason, run, model: modelId, committed: [...committedPaths], commitSha: lastSha!, states };
+      let botBranch: string | undefined;
+      if (branch === base) {
+        botBranch = `glirastes/tools-${head.sha.slice(0, 12)}`;
+        await repository.switchToNewBranch(botBranch);
+      }
+      const commitSha = await repository.commit(changed, message);
+      await repository.push(botBranch ?? branch);
+      const done = { ...reason, run, model: modelId, committed: changed, commitSha, states };
       if (botBranch) {
         const pullRequest = await repository.openPullRequest({
           base,

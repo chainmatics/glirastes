@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { BOT_MARKER, BOT_NAME, execFileRunner, type Exec } from '../../../agent/git.js';
 import type { ToolJobLedger, ToolJobRequest } from '../../../agent/platform-jobs.js';
 import { createAppFixture, FIXTURE_APP_ID, removeAppFixtures, SDK_ROOT, type AppFixture } from '../../../codegen/tools/__tests__/app-fixture.js';
-import { changedSince, jobDeadline } from './enrich.js';
+import { enrichScope, jobDeadline } from './enrich.js';
 import { runToolsCommand, TOOLS_SUBCOMMANDS } from './index.js';
 
 const ROUTE = "declare function getSession(): Promise<unknown>;\n"
@@ -79,6 +79,29 @@ async function committedApp(branch: string): Promise<AppFixture> {
   await git(fixture, 'add', '.');
   await git(fixture, 'commit', '--quiet', '-m', 'feat: tasks api');
   return fixture;
+}
+
+/** `glirastes tools check --json`, exactly as the CI job after a bot commit runs it. */
+async function check(fixture: AppFixture): Promise<number> {
+  return runToolsCommand(['check', '--json', '--no-skills'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined });
+}
+
+/** Commits agent entries for the tasks tools, current for their interface; returns the stored file. */
+async function describeCurrent(fixture: AppFixture): Promise<{ tools: Array<Record<string, unknown>> }> {
+  const contracts = JSON.parse(await fixture.read('.glirastes/tool-contracts.json')) as {
+    tools: Array<{ stableKey: string; contract: { interfaceDigest: string } | null }>;
+  };
+  const digest = new Map(contracts.tools.map((tool) => [tool.stableKey, tool.contract?.interfaceDigest]));
+  const semantics = JSON.parse(SEMANTICS) as { tools: Array<Record<string, unknown> & { stableKey: string }> };
+  for (const entry of semantics.tools) {
+    entry.origin = { description: 'agent', synonyms: 'agent', examples: 'agent' };
+    entry.agent = { model: 'claude-code', interfaceDigest: digest.get(entry.stableKey) };
+  }
+  await fixture.write('.glirastes/tool-semantics.json', `${JSON.stringify(semantics, null, 2)}\n`);
+  expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
+  await git(fixture, 'add', '.');
+  await git(fixture, 'commit', '--quiet', '-m', 'docs: describe tasks');
+  return semantics;
 }
 
 interface Platform {
@@ -208,7 +231,6 @@ function run(fixture: AppFixture, env: Record<string, string>, options: {
   out?: string[];
   exec?: Exec;
   args?: string[];
-  checkpointEvery?: number;
 }) {
   const loadOpenAI = vi.fn(async () => (() => ({ chat: () => options.model ?? writingModel() })) as never);
   const out = options.out ?? [];
@@ -226,7 +248,6 @@ function run(fixture: AppFixture, env: Record<string, string>, options: {
       exec: options.exec ?? execWith(options.pullRequests ?? []),
       fetchImpl: options.platform.fetchImpl,
       loadOpenAI,
-      ...(options.checkpointEvery ? { checkpointEvery: options.checkpointEvery } : {}),
       now: () => new Date('2026-10-22T12:00:00.000Z'),
     },
   });
@@ -281,6 +302,8 @@ describe('glirastes tools enrich --managed', () => {
       'src/generated/glirastes/tools.generated.ts',
     ]);
     expect(JSON.stringify([api.requests, api.ledgers, first.out])).not.toMatch(/sk-or-v1|gl_c{32}/);
+    // The CI check on the bot commit passes.
+    expect(await check(fixture)).toBe(0);
 
     // The bot commit is the last commit now: the next run stops before any request.
     const second = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api });
@@ -403,7 +426,7 @@ describe('glirastes tools enrich --managed', () => {
     expect(Object.keys(TOOLS_SUBCOMMANDS)).toContain('enrich');
   });
 
-  it('works only the tools a pull request changed and leaves the backlog to the base branch', async () => {
+  it('works every tool whose semantics are missing, however far the branch is from its base', async () => {
     const fixture = await committedApp('main');
     await git(fixture, 'push', '--quiet', 'origin', 'main');
     await git(fixture, 'switch', '--quiet', '-c', 'feature/teams');
@@ -413,20 +436,111 @@ describe('glirastes tools enrich --managed', () => {
     // The workflow refreshes before the job; the outputs are not committed yet.
     expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
     const api = platform();
-    const { model, tasks } = upsertingModel();
+    const { model } = upsertingModel();
 
     const result = run(fixture, { GITHUB_HEAD_REF: 'feature/teams' }, { platform: api, model });
 
     expect(await result.code).toBe(0);
-    expect(api.requests[0]!.items.map((item) => item.stableKey)).toEqual(['GET /api/teams']);
+    // The base has no semantics either: missing is missing, whatever the diff to the base is.
+    expect(api.requests[0]!.items.map((item) => item.stableKey)).toEqual(['GET /api/tasks', 'GET /api/teams', 'POST /api/tasks']);
     expect(api.requests[0]!.firstRun).toBe(false);
-    expect(tasks).toEqual([['GET /api/teams']]);
-    expect(api.ledgers[0]!.items.map((item) => [item.stableKey, item.state])).toEqual([['GET /api/teams', 'described']]);
-    const committed = JSON.parse(await git(fixture, 'show', 'HEAD:.glirastes/tool-semantics.json')) as { tools: Array<{ stableKey: string }> };
-    expect(committed.tools.map((entry) => entry.stableKey)).toEqual(['GET /api/teams']);
-    expect(result.out).toContain('glirastes tools enrich: scope=changed items=1');
+    expect(result.out).toContain('glirastes tools enrich: scope=stale items=3');
+    expect(await check(fixture)).toBe(0);
   }, 240_000);
 
+  it('does nothing, quickly, on a base whose tools are all described', async () => {
+    const fixture = await committedApp('feature/tasks');
+    await describeCurrent(fixture);
+    await git(fixture, 'push', '--quiet', 'origin', 'feature/tasks:master');
+    await fixture.write('README.md', 'hotfix\n');
+    await git(fixture, 'add', 'README.md');
+    await git(fixture, 'commit', '--quiet', '-m', 'fix: readme');
+    const api = platform();
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, args: ['--base', 'master'] });
+
+    expect(await result.code).toBe(0);
+    expect(JSON.parse(result.out.at(-1)!)).toEqual({ schemaVersion: 1, status: 'skipped', code: 'no_gaps' });
+    expect([api.requests.length, result.loadOpenAI.mock.calls.length]).toEqual([0, 0]);
+  }, 240_000);
+
+  it('keeps current entries byte for byte and takes only the allowed part of what the model writes', async () => {
+    const fixture = await committedApp('feature/tasks');
+    const stored = await describeCurrent(fixture);
+    await fixture.write('src/app/api/teams/route.ts', TEAMS_ROUTE);
+    await git(fixture, 'add', '.');
+    await git(fixture, 'commit', '--quiet', '-m', 'feat: teams api');
+    expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
+    const contractsBefore = JSON.parse(await fixture.read('.glirastes/tool-contracts.json')) as { tools: Array<{ stableKey: string }> };
+    // A careless model: rewrites the whole file, drops one curated entry, replaces the
+    // synonyms of another, and invents an origin and a field for the new tool.
+    const careless = () => JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { ...stored.tools[0], synonyms: { en: ['worse'] }, examples: { en: ['a', 'b', 'c'] } },
+        {
+          stableKey: 'GET /api/teams',
+          description: 'Lists the teams of the signed-in user. Use it to show teams; use tasks.list for tasks.',
+          module: 'teams',
+          synonyms: { en: ['groups', 'squads'] },
+          examples: { en: ['list my teams', 'which teams am I in', 'show all teams'] },
+          origin: { module: 'teams', synonyms: 'human' },
+          locked: { description: `sha256:${'a'.repeat(43)}` },
+          invented: true,
+        },
+      ],
+    });
+    const api = platform();
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model: writingModel(undefined, careless) });
+
+    expect(await result.code).toBe(0);
+    expect(api.requests[0]!.items.map((item) => item.stableKey)).toEqual(['GET /api/teams']);
+    const committed = JSON.parse(await git(fixture, 'show', 'HEAD:.glirastes/tool-semantics.json')) as { tools: Array<Record<string, unknown>> };
+    expect(committed.tools.slice(0, 2)).toEqual(stored.tools);
+    expect(committed.tools[2]).toEqual({
+      stableKey: 'GET /api/teams',
+      description: 'Lists the teams of the signed-in user. Use it to show teams; use tasks.list for tasks.',
+      module: 'teams',
+      synonyms: { en: ['groups', 'squads'] },
+      examples: { en: ['list my teams', 'which teams am I in', 'show all teams'] },
+      origin: { description: 'agent', module: 'agent', synonyms: 'agent', examples: 'agent' },
+      agent: { model: MODEL, interfaceDigest: expect.stringMatching(/^sha256:/) },
+    });
+    // tool-contracts.json changes only for the tool in scope; the bot commit passes the check.
+    const contractsAfter = JSON.parse(await git(fixture, 'show', 'HEAD:.glirastes/tool-contracts.json')) as { tools: Array<{ stableKey: string }> };
+    expect(contractsAfter.tools.filter((tool) => tool.stableKey !== 'GET /api/teams'))
+      .toEqual(contractsBefore.tools.filter((tool) => tool.stableKey !== 'GET /api/teams'));
+    expect(await check(fixture)).toBe(0);
+  }, 240_000);
+
+  it('takes back an entry the generator rejects and commits nothing when nothing is left', async () => {
+    const fixture = await committedApp('feature/tasks');
+    await describeCurrent(fixture);
+    await fixture.write('src/app/api/teams/route.ts', TEAMS_ROUTE);
+    await git(fixture, 'add', '.');
+    await git(fixture, 'commit', '--quiet', '-m', 'feat: teams api');
+    const before = await git(fixture, 'rev-parse', 'HEAD');
+    const stored = await fixture.read('.glirastes/tool-semantics.json');
+    const tooLong = () => JSON.stringify({
+      schemaVersion: 1,
+      tools: [...(JSON.parse(stored) as { tools: unknown[] }).tools, {
+        stableKey: 'GET /api/teams',
+        description: 'Lists teams. '.repeat(100),
+        synonyms: { en: ['groups'] },
+        examples: { en: ['list my teams', 'which teams am I in', 'show all teams'] },
+      }],
+    });
+    const api = platform();
+
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model: writingModel(undefined, tooLong) });
+
+    expect(await result.code).toBe(1);
+    expect(result.out).toContain('glirastes tools enrich: 1 rejected entry taken back');
+    expect(api.ledgers[0]!.items).toEqual([{ stableKey: 'GET /api/teams', state: 'failed', reasonCode: 'resolution-rejected' }]);
+    expect(await git(fixture, 'rev-parse', 'HEAD')).toBe(before);
+    expect(await fixture.read('.glirastes/tool-semantics.json')).toBe(stored);
+  }, 240_000);
   it('describes module by module and reports a job that leaves tools untouched as partial', async () => {
     const fixture = await committedApp('feature/tasks');
     await fixture.write('src/app/api/teams/route.ts', TEAMS_ROUTE);
@@ -487,49 +601,7 @@ describe('glirastes tools enrich --managed', () => {
     expect(await git(fixture, 'rev-parse', 'HEAD')).toBe(before);
   }, 240_000);
 
-  it('works after a push only what the push changed, and the backlog only on request', async () => {
-    const fixture = await committedApp('main');
-    await git(fixture, 'push', '--quiet', 'origin', 'main');
-    const pushedBefore = await git(fixture, 'rev-parse', 'HEAD');
-    await fixture.write('src/app/api/teams/route.ts', TEAMS_ROUTE);
-    await git(fixture, 'add', '.');
-    await git(fixture, 'commit', '--quiet', '-m', 'feat: teams api');
-    expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
-    const api = platform();
-
-    // No earlier state to compare with (a new branch, a manual start): nothing runs without --first-run.
-    const unbounded = run(fixture, { GITHUB_REF_NAME: 'main', GLIRASTES_BEFORE_SHA: '0'.repeat(40) }, { platform: api });
-    expect(await unbounded.code).toBe(0);
-    expect(api.requests).toHaveLength(0);
-    expect(JSON.parse(unbounded.out.at(-1)!)).toEqual({ schemaVersion: 1, status: 'skipped', code: 'backlog_needs_first_run' });
-    expect(api.requests).toHaveLength(0);
-
-    // The workflow's manual start sets GLIRASTES_FIRST_RUN: the whole backlog, with the first-run budget.
-    const manual = run(fixture, { GITHUB_REF_NAME: 'main', GLIRASTES_FIRST_RUN: 'true' }, { platform: platform({ refuse: { status: 402, code: 'tool_generation_requires_pro' } }) });
-    expect(await manual.code).toBe(0);
-    expect(JSON.parse(manual.out.at(-1)!)).toMatchObject({ code: 'tool_generation_requires_pro' });
-    expect(manual.out).toContain('glirastes tools enrich: scope=all items=3');
-
-    const { model, tasks } = upsertingModel();
-    const pushed = run(fixture, { GITHUB_REF_NAME: 'main', GLIRASTES_BEFORE_SHA: pushedBefore }, { platform: api, model });
-    expect(await pushed.code).toBe(0);
-    expect(api.requests[0]!.items.map((item) => item.stableKey)).toEqual(['GET /api/teams']);
-    expect(tasks).toEqual([['GET /api/teams']]);
-    expect(JSON.parse(pushed.out.at(-1)!)).toMatchObject({ status: 'finished', outcome: 'pull_request' });
-  }, 240_000);
-
-  it('fails before any request when the base branch cannot be read', async () => {
-    const fixture = await committedApp('feature/tasks');
-    const api = platform();
-
-    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, args: ['--base', 'release'] });
-
-    expect(await result.code).toBe(1);
-    expect(JSON.parse(result.out.at(-1)!)).toEqual({ schemaVersion: 1, status: 'failed', code: 'base_unreadable' });
-    expect([api.requests.length, result.loadOpenAI.mock.calls.length]).toEqual([0, 0]);
-  }, 240_000);
-
-  it('commits finished tasks along the way, so a cancelled run loses at most the last ones', async () => {
+  it('commits once per job, after all tasks, and the commit passes tools check', async () => {
     const fixture = await committedApp('feature/tasks');
     await fixture.write('src/app/api/teams/route.ts', TEAMS_ROUTE);
     await git(fixture, 'add', '.');
@@ -537,41 +609,108 @@ describe('glirastes tools enrich --managed', () => {
     expect(await runToolsCommand(['refresh'], { cwd: fixture.root, env: {}, log: () => undefined, error: () => undefined })).toBe(0);
     const start = await git(fixture, 'rev-parse', 'HEAD');
     const api = platform();
-    const { model } = upsertingModel();
+    const { model, tasks } = upsertingModel();
 
-    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model, checkpointEvery: 1 });
+    const result = run(fixture, { GITHUB_HEAD_REF: 'feature/tasks' }, { platform: api, model });
 
     expect(await result.code).toBe(0);
-    const summary = JSON.parse(result.out.at(-1)!) as { commitSha: string };
-    const botCommits = (await git(fixture, 'log', '--format=%an', `${start}..HEAD`)).split('\n');
-    // The modules run side by side, so one checkpoint may already hold both; it is made before the run ends.
-    expect(botCommits.length).toBeGreaterThanOrEqual(1);
-    expect(new Set(botCommits)).toEqual(new Set([BOT_NAME]));
-    expect(result.out.some((line) => line.startsWith('glirastes tools enrich: checkpoint '))).toBe(true);
-    expect(await git(fixture, 'rev-parse', 'HEAD')).toBe(summary.commitSha);
-    expect(await git(fixture, '--git-dir', '.origin.git', 'rev-parse', 'refs/heads/feature/tasks')).toBe(summary.commitSha);
-    expect(await git(fixture, 'status', '--porcelain')).toBe('');
-    expect(api.ledgers[0]).toMatchObject({ outcome: 'committed', commitSha: summary.commitSha });
-    expect(api.ledgers[0]!.changedFiles).toBeGreaterThanOrEqual(6);
+    expect(tasks).toHaveLength(2);
+    expect((await git(fixture, 'log', '--format=%an', `${start}..HEAD`)).split('\n')).toEqual([BOT_NAME]);
+    expect(await git(fixture, '--git-dir', '.origin.git', 'rev-parse', 'refs/heads/feature/tasks')).toBe(await git(fixture, 'rev-parse', 'HEAD'));
+    expect(await check(fixture)).toBe(0);
   }, 240_000);
 
-  it('counts a tool without a contract as unchanged when the base has it without one too', async () => {
-    const base = JSON.stringify({ tools: [
-      { stableKey: 'GET /api/a', contract: { interfaceDigest: 'sha256:a' } },
-      { stableKey: 'UI theme.set', contract: null },
-      { stableKey: 'GET /api/c', contract: { interfaceDigest: 'sha256:old' } },
-    ] });
-    const repository = { fileAt: async () => base } as never;
-    const contract = {};
-    const result = { tools: [
-      { stableKey: 'GET /api/a', interfaceDigest: 'sha256:a', contract },
-      // The code has an interface, but no contract was ever resolved: backlog on both sides.
-      { stableKey: 'UI theme.set', interfaceDigest: 'sha256:code', contract: null },
-      { stableKey: 'GET /api/c', interfaceDigest: 'sha256:new', contract },
-      { stableKey: 'GET /api/d', interfaceDigest: 'sha256:d', contract: null },
-    ] } as never;
+  describe('environment chains', () => {
+    /** An app on every branch of `chain` at origin, with tools whose semantics are missing. */
+    async function chainApp(chain: string[]): Promise<AppFixture> {
+      const fixture = await committedApp('main');
+      for (const environment of chain) await git(fixture, 'push', '--quiet', 'origin', `HEAD:refs/heads/${environment}`);
+      return fixture;
+    }
+    const refused = () => platform({ refuse: { status: 402, code: 'tool_generation_requires_pro' } });
+    async function enrich(fixture: AppFixture, head: string, base: string, env: Record<string, string> = {}) {
+      const api = refused();
+      const result = run(fixture, { GITHUB_HEAD_REF: head, ...env }, { platform: api, args: ['--base', base] });
+      const code = await result.code;
+      return { code, summary: JSON.parse(result.out.at(-1)!) as Record<string, unknown>, out: result.out, requests: api.requests.length };
+    }
+    const FOUR = 'pre-dev,dev,staging,master';
 
-    expect([...(await changedSince(repository, 'main', result))!]).toEqual(['GET /api/c', 'GET /api/d']);
+    it('never enriches a promotion across any hop of a four-stage chain', async () => {
+      const fixture = await chainApp(['pre-dev', 'dev', 'staging', 'master']);
+      for (const [head, base] of [['pre-dev', 'dev'], ['dev', 'staging'], ['staging', 'master']]) {
+        await git(fixture, 'switch', '--quiet', '-C', head!);
+        const promoted = await enrich(fixture, head!, base!, { GLIRASTES_ENVIRONMENT_BRANCHES: FOUR });
+        expect(promoted).toMatchObject({ code: 0, requests: 0, summary: { status: 'skipped', code: 'promotion' } });
+        expect(promoted.out).toContain(`glirastes tools enrich: promotion from ${head}, nothing to enrich`);
+      }
+    }, 240_000);
+
+    it('treats a release branch cut from an environment as a promotion and a hotfix as new code', async () => {
+      const fixture = await chainApp(['pre-dev', 'dev', 'staging', 'master']);
+      // The chain comes from the config this time.
+      const config = JSON.parse(await fixture.read('.glirastes/tools.json')) as Record<string, unknown>;
+      await fixture.write('.glirastes/tools.json', `${JSON.stringify({ ...config, enrich: { environments: FOUR.split(',') } })}\n`);
+      await git(fixture, 'commit', '--quiet', '-am', 'chore: environments');
+      await git(fixture, 'push', '--quiet', 'origin', 'HEAD:refs/heads/staging');
+      await git(fixture, 'switch', '--quiet', '-c', 'release/1.0');
+      const release = await enrich(fixture, 'release/1.0', 'master');
+      expect(release).toMatchObject({ requests: 0, summary: { status: 'skipped', code: 'promotion' } });
+      expect(release.out).toContain('glirastes tools enrich: promotion from staging, nothing to enrich');
+
+      for (const [hotfix, base] of [['hotfix/middle', 'dev'], ['hotfix/top', 'master']]) {
+        await git(fixture, 'switch', '--quiet', '-c', hotfix!, 'release/1.0');
+        await fixture.write('README.md', `${hotfix}\n`);
+        await git(fixture, 'add', 'README.md');
+        await git(fixture, 'commit', '--quiet', '-m', `fix: ${hotfix}`);
+        // New code reaches the Platform with its open items (here refused for the plan).
+        expect(await enrich(fixture, hotfix!, base!)).toMatchObject({
+          code: 0, requests: 1, summary: { status: 'skipped', code: 'tool_generation_requires_pro' },
+        });
+      }
+    }, 240_000);
+
+    it('enriches a feature into the only environment of a two-stage chain and a push there', async () => {
+      const fixture = await chainApp(['main']);
+      await git(fixture, 'switch', '--quiet', '-c', 'feature/x');
+      await fixture.write('README.md', 'feature\n');
+      await git(fixture, 'add', 'README.md');
+      await git(fixture, 'commit', '--quiet', '-m', 'feat: x');
+      // No chain configured: the environments are detected on origin.
+      expect(await enrich(fixture, 'feature/x', 'main')).toMatchObject({ requests: 1, summary: { code: 'tool_generation_requires_pro' } });
+      await git(fixture, 'switch', '--quiet', 'main');
+      await git(fixture, 'merge', '--quiet', '--no-ff', '-m', 'merge feature/x', 'feature/x');
+      expect(await enrich(fixture, 'main', 'main')).toMatchObject({ requests: 1, summary: { code: 'tool_generation_requires_pro' } });
+    }, 240_000);
+
+    it('skips a push whose commit a lower environment already holds', async () => {
+      const fixture = await chainApp(['dev', 'staging']);
+      await git(fixture, 'switch', '--quiet', '-C', 'staging');
+      const pushed = await enrich(fixture, 'staging', 'staging', { GLIRASTES_ENVIRONMENT_BRANCHES: 'dev,staging' });
+      expect(pushed).toMatchObject({ requests: 0, summary: { code: 'promotion' } });
+      expect(pushed.out).toContain('glirastes tools enrich: promotion from dev, nothing to enrich');
+    }, 240_000);
+  });
+
+  it('scopes stale and missing semantics always, schema gaps only on a first run, routing never', () => {
+    const resolve = [
+      { stableKey: 'GET /api/r', toolId: 't-r', owner: 'agent' as const, code: 'input-contract-unresolved', target: { kind: 'file' as const, file: '.glirastes/tool-resolutions.json', key: 'x' } },
+      { stableKey: 'GET /api/app', toolId: 't-a', owner: 'agent' as const, code: 'handler-unresolved', target: { kind: 'app-code' as const, files: [] } },
+      { stableKey: 'GET /api/dev', toolId: 't-d', owner: 'developer' as const, code: 'risk-lower-available', target: { kind: 'developer' as const, command: 'x' } },
+    ];
+    const describe = [
+      { stableKey: 'GET /api/new', gaps: ['description-templated', 'contract-derived'] as never },
+      { stableKey: 'GET /api/stale', gaps: ['semantics-stale'] as never },
+      { stableKey: 'GET /api/schema', gaps: ['contract-derived'] as never },
+      { stableKey: 'GET /api/routing', gaps: ['routing-ambiguous'] as never },
+    ];
+
+    const automatic = enrichScope(resolve, describe, false);
+    expect([...automatic.semantics].sort()).toEqual(['GET /api/new', 'GET /api/stale']);
+    expect([...automatic.resolutions].sort()).toEqual(['GET /api/new', 'GET /api/r']);
+    const first = enrichScope(resolve, describe, true);
+    expect([...first.semantics].sort()).toEqual(['GET /api/new', 'GET /api/schema', 'GET /api/stale']);
+    expect([...first.resolutions].sort()).toEqual(['GET /api/new', 'GET /api/r', 'GET /api/schema']);
   });
 
   it('ends its work well before the CI job is cancelled and before the job key expires', () => {
