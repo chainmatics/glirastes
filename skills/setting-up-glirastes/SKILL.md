@@ -33,6 +33,10 @@ material questions that the code and earlier decisions cannot answer.
   read, copy or print it, and never reuse your coding-agent login for the app.
 - Preserve app changes, tuned prompts, identities and modified installed
   skills. Never force-replace an installed skill; reconcile its instructions.
+  `glirastes tools refresh` (predev/prebuild) keeps unedited installed skills
+  current with the SDK and keeps edited ones; commit
+  `.glirastes/installed-skills.json` with the skill folders. The developer
+  opts out with `GLIRASTES_SKILLS_AUTO_UPDATE=0` or `--no-skills`.
 - No unsigned fallback, silent Managed downgrade or approval bypass. No push,
   merge, package publication or deployment without explicit authority.
 

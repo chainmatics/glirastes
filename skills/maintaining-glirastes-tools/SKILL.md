@@ -39,7 +39,13 @@ keeps its fallback.
    `.glirastes/tool-contracts.json`), and `glirastes tools check` reports
    drift until the refreshed outputs are committed. Read the summary: added,
    changed, risk raised, removed, needs attention, excluded, each with its
-   next step.
+   next step. The same refresh brings the installed Glirastes skills up to
+   the new version (`Skills updated to …`): unedited copies are replaced,
+   new skills of the installed parts added, dropped ones removed, and
+   `.glirastes/installed-skills.json` updated; commit them with the outputs.
+   An edited copy is kept and named; merge the shipped version from
+   `node_modules/glirastes/skills/<name>` into it yourself. `--no-skills` or
+   `GLIRASTES_SKILLS_AUTO_UPDATE=0` leaves the skills alone.
 2. Run `glirastes tools resolve --print` and work through `items`:
    - `owner: "agent"`, `target.kind: "file"`: write the `expected` entry at
      `target.key` of `target.file`. Replace every `<…>` placeholder: `model`
@@ -138,7 +144,8 @@ glirastes doctor
 - `glirastes tools resolve --print` shows no agent item; developer items are
   reported with their commands.
 - `glirastes tools check` reports `Tool outputs match the code.`; CI fails on
-  stale outputs instead of keeping obsolete tools.
+  stale outputs instead of keeping obsolete tools, and on unedited installed
+  skills older than the SDK (edited copies only warn).
 - Adding, changing and deleting an endpoint, a navigation page and a filter
   changes the tools; a removed tool cannot be called, also not after a
   restart or a rollback.

@@ -36,7 +36,13 @@ npx --no-install glirastes install --host codex --with-setup-skills
 
 Hosts install into `.agents/skills` (Codex), `.claude/skills` (Claude), or
 `.gemini/skills` (Gemini). Owned, unchanged copies refresh; customized copies
-are preserved and never force-replaced. The supported stacks and their test
+are preserved and never force-replaced. After an SDK upgrade,
+`glirastes tools refresh` (the app's `predev`/`prebuild` step) does the same
+for every recorded install in `.glirastes/installed-skills.json`: unedited
+copies are replaced, new skills of the installed parts added and dropped ones
+removed, edited copies kept with a warning. `glirastes tools check` fails while
+unedited copies are behind. Opt out with `GLIRASTES_SKILLS_AUTO_UPDATE=0` or
+`glirastes tools refresh --no-skills`. The supported stacks and their test
 status are listed in [the support matrix](../docs/support-matrix.md);
 `integrating-glirastes-web` explains generic paths and their per-layer gaps; manifest detection and skill
 installation alone do not prove an integration. Use this Foundation package,
