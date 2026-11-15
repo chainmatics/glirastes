@@ -10,6 +10,7 @@ import {
   createSetupPlan,
 } from './setup-plan.js';
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
+import { inspectSkillsStaleness, skillsAutoUpdateDisabled } from './skills-auto-update.js';
 export { formatDoctorReport } from './doctor-presentation.js';
 import {
   OBSOLETE_CONNECTION_VARIABLES,
@@ -124,6 +125,20 @@ async function hasObsoleteConnectionVariables(options: {
   }
 }
 
+/** Only for apps that installed skills; stale skills are a hint, not a setup failure. */
+async function agentSkillsCheck(rootDir: string, env: NodeJS.ProcessEnv): Promise<DoctorCheck | null> {
+  if (skillsAutoUpdateDisabled(env)) return null;
+  try {
+    const skills = await inspectSkillsStaleness({ rootDir });
+    if (!skills) return null;
+    if (skills.stale) return check('agent-skills', 'warn', 'E-SETUP-107', 'refresh-agent-skills');
+    if (skills.warnings.length > 0) return check('agent-skills', 'warn', 'E-SETUP-107', 'review-edited-agent-skills');
+    return check('agent-skills', 'pass', 'E-SETUP-107');
+  } catch {
+    return check('agent-skills', 'warn', 'E-SETUP-107', 'review-edited-agent-skills');
+  }
+}
+
 export async function createDoctorReport(
   options: CreateDoctorReportOptions,
 ): Promise<DoctorReport> {
@@ -139,6 +154,7 @@ export async function createDoctorReport(
     ? 'managed'
     : hasConnectionDescriptor ? 'connected' : 'standalone';
   const checks: DoctorCheck[] = [];
+  const skillsCheck = await agentSkillsCheck(rootDir, options.env ?? process.env);
   let profile: Awaited<ReturnType<typeof detectSetupProfile>>;
   try {
     profile = await detectSetupProfile({ rootDir, managed: options.managed });
@@ -152,6 +168,7 @@ export async function createDoctorReport(
         ? error.remediation
         : 'repair-local-project-profile',
     ));
+    if (skillsCheck) checks.push(skillsCheck);
     return finish(mode, 0, checks);
   }
 
@@ -331,5 +348,6 @@ export async function createDoctorReport(
     ? check('runtime-mode', 'pass', 'E-SETUP-106')
     : check('runtime-mode', 'fail', 'E-SETUP-009', 'align-explicit-runtime-mode'));
 
+  if (skillsCheck) checks.push(skillsCheck);
   return finish(mode, profile.toolCount, checks);
 }

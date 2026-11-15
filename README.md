@@ -328,8 +328,8 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 |---|---|
 | `glirastes init [--agent codex\|claude] [--dry-run] [--json]` | Scaffold inputs, install skills, hand setup to your coding agent |
 | `glirastes init --ci github [...]` | Write the GitHub tools workflow ([CI](#ci)) |
-| `glirastes tools refresh [--watch] [--mode write\|frozen\|integrity]` | Derive tools from the code |
-| `glirastes tools check [--strict] [--integrity-only]` | Verify committed tool outputs |
+| `glirastes tools refresh [--watch] [--mode write\|frozen\|integrity] [--no-skills]` | Derive tools from the code and update installed skills |
+| `glirastes tools check [--strict] [--integrity-only] [--no-skills]` | Verify committed tool outputs and installed skills |
 | `glirastes tools status` | Show what the chat can do |
 | `glirastes tools resolve --print` | Work list of open findings for your agent |
 | `glirastes tools describe --print [<tool>...\|--all]` | Work list of descriptions, synonyms and examples |
@@ -356,7 +356,10 @@ existing coding agent (Codex, Claude Code, Gemini): `setting-up-glirastes`,
 `building-glirastes-chat-ui`, `curating-glirastes-chat-interactions` and
 `migrating-to-glirastes`. `glirastes init`
 installs them; `glirastes install --host codex --with-setup-skills` installs
-them without starting setup.
+them without starting setup. After an SDK upgrade, `glirastes tools refresh`
+replaces the unedited copies, adds new skills and keeps edited ones, and
+`glirastes tools check` fails while unedited copies are behind. Opt out with
+`GLIRASTES_SKILLS_AUTO_UPDATE=0` or `--no-skills`.
 
 ## Support matrix
 

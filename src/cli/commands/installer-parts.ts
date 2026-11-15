@@ -121,3 +121,25 @@ export const PART_LABELS: Record<InstallerPart, string> = {
   tools: 'tool maintenance',
   setup: 'setup and assessment',
 };
+
+/**
+ * Every skill of each part an install already has a skill from — the install's
+ * selection as the current SDK defines it. Each framework stack counts as its
+ * own part, so a Next.js install never gains the web skill.
+ */
+export function selectionOfInstalledSkills(
+  installed: ReadonlyArray<string>,
+): string[] {
+  const groups: ReadonlyArray<ReadonlyArray<string>> = [
+    ...Object.values(FRAMEWORK_SKILLS),
+    ...Object.values(PART_SKILLS),
+  ];
+  const selection: string[] = [];
+  for (const group of groups) {
+    if (!group.some((skill) => installed.includes(skill))) continue;
+    for (const skill of group) {
+      if (!selection.includes(skill)) selection.push(skill);
+    }
+  }
+  return selection;
+}
