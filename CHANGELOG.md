@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Configured Node runtime container V1 for non-Node HTTP backends: JSON configuration, generator-built data-only artifacts, backend-verified identities, persistent PostgreSQL approvals and a single-active-instance guard. Includes a PHP reference, browser/container acceptance and build-only CI.
+- `glirastes-runtime` build/validate/serve/healthcheck commands and the framework-neutral `glirastes/server/http` alias.
+
+### Fixed
+
+- Request and tool-timeout cancellation reaches model streams and backend HTTP calls. HTTP endpoint callers reject redirects by default, limit responses and support explicit API path boundaries.
+- Output-schema diagnostics omit backend values and schema issue paths from logs.
+
 ## [0.13.1] - 2026-11-15
 
 ### Fixed

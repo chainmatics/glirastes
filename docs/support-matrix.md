@@ -65,3 +65,11 @@ Svelte, Express, Django or Java stack support is claimed by these paths.
 The exports `glirastes/server/nestjs`, `glirastes/openapi` and `glirastes/react/langgraph`
 are deferred and not shipped. `glirastes/server/testing` is ESM only, because Vitest
 cannot be required from CommonJS.
+
+## Configured runtime service V1
+
+The runtime container (`docs/runtime-container.md`) packages the same SDK for
+non-Node APIs. `tests/runtime-container-e2e.mjs` is the PHP acceptance harness
+(real PHP/PostgreSQL, scripted model, optional built image and browser). It does
+not establish full Rust/Java framework support or replace the complete-stack
+criteria above. One active runtime per application/environment; no HA claim.

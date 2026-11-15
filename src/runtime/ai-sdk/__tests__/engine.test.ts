@@ -370,3 +370,25 @@ describe('createAiSdkTools', () => {
     });
   });
 });
+
+describe('execution cancellation', () => {
+  it('aborts the source operation when its tool timeout expires', async () => {
+    let operationSignal: AbortSignal | undefined;
+    const tools = createAiSdkTools({ toolTimeoutMs: 10, tools: {
+      wait: { description: 'Wait', parameters: z.object({}), execute: async (_input: unknown, options: unknown) => {
+        operationSignal = (options as { abortSignal: AbortSignal }).abortSignal;
+        return new Promise((_resolve, reject) => operationSignal!.addEventListener('abort', () => reject(operationSignal!.reason), { once: true }));
+      } },
+    } });
+    await expect(tools.wait!.execute!({}, {})).rejects.toThrow('timed out');
+    expect(operationSignal?.aborted).toBe(true);
+  });
+
+  it('does not start another operation on an already aborted stream', async () => {
+    const controller = new AbortController(); controller.abort();
+    const execute = vi.fn();
+    const tools = createAiSdkTools({ tools: { wait: { description: 'Wait', parameters: z.object({}), execute } } });
+    await expect(tools.wait!.execute!({}, { abortSignal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(execute).not.toHaveBeenCalled();
+  });
+});

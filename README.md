@@ -407,3 +407,13 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## Rust, PHP and Java backends
+
+A configured customer-hosted runtime container can run this SDK next to an
+existing HTTP API without customer Node server code. See
+[Runtime container V1](docs/runtime-container.md) and the
+[PHP reference](examples/php-runtime/README.md). It uses generated OpenAPI tools,
+backend-verified user credentials, persistent approvals and one active service
+per app/environment. Image publication and customer deployment are separate
+release steps; V1 does not provide HA or native backend SDKs.

@@ -69,6 +69,8 @@ export interface RuntimeContext {
  * Context passed to every tool execution.
  */
 export interface ToolContext {
+  /** Request/tool cancellation; custom tools should honor it. */
+  abortSignal?: AbortSignal;
   currentDate: Date;
   locale: string;
   runtime?: RuntimeContext;

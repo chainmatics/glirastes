@@ -1,0 +1,60 @@
+# Local reference only: fixture login/reset endpoints are intentionally public.
+# For production use the customer's API, existing ingress and restricted DB.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    read_only: true
+    tmpfs: [/tmp]
+    expose: ['8080']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+  state:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: glirastes
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [state:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d glirastes']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  runtime:
+    image: glirastes-runtime:v1-test
+    depends_on:
+      state:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    volumes:
+      - ./runtime.json:/etc/glirastes/runtime.json:ro
+      - ./.prepared/artifact:/app/artifact:ro
+    secrets: [model_key, approval_key, state_dsn]
+    read_only: true
+    tmpfs: [/tmp]
+    expose: ['8787']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    restart: unless-stopped
+    stop_grace_period: 45s
+  ingress:
+    image: nginx:1.28-alpine
+    depends_on: [backend, runtime]
+    ports: ['127.0.0.1:8088:8080']
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./.prepared/web:/usr/share/nginx/html:ro
+secrets:
+  model_key:
+    file: ./.secrets/model_key
+  approval_key:
+    file: ./.secrets/approval_key
+  state_dsn:
+    file: ./.secrets/state_dsn
+  db_password:
+    file: ./.secrets/db_password
+volumes:
+  state:

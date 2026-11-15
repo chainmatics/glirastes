@@ -255,3 +255,35 @@ coverage above, then verify in the real app:
 
 Report observed results and missing checks separately. A passing CLI check
 alone does not establish browser behavior or complete framework support.
+
+## Configured runtime container (V1)
+
+For a non-Node backend, the SDK now also contains `glirastes-runtime`:
+`build --project DIR --out NEW_DIR [--frozen]`, `validate --artifact DIR`, and
+`serve --config FILE`. See `docs/runtime-container.md` for the strict JSON
+configuration and `containers/runtime/Dockerfile` for the image. This is one
+active service per app/environment, not a sidecar per backend replica. Image
+publication and a customer's deployment are separate from a successful local build.
+
+The runtime calls a fixed identity endpoint with selected cookie or bearer
+credentials. It expects exactly `userId`, `tenantId` (business tenant), and
+`roles`; it maps these to the SDK's runtime tenant and an isolated subject.
+Tool calls carry verified `x-glirastes-business-tenant` and
+`x-glirastes-user-id` headers. The backend must reject a mismatch with its
+current session as well as apply all existing permissions. These headers never
+grant access. Never replace the user credentials with a service account.
+
+`createHttpEndpointCaller` uses `HttpExecutionLimits`: `timeoutMs`,
+`maxResponseBytes`, and `signal`. The HTTP caller defaults to a 30-second
+limit and 2 MiB responses, denies redirects, and supports segment-bounded
+`allowedPathPrefixes`. The handler passes request cancellation through to
+model streaming and endpoint execution. A cancelled mutation is not rolled
+back and must not be retried without backend idempotency support.
+
+The container uses PostgreSQL for restart-safe approval consumption and a
+single-active-runtime advisory lock. Readiness is separate from liveness.
+Connected production starts serving only after an accepted SDK deployment;
+standalone is explicitly configured and never inferred from a failed key.
+Builds use the existing generator with a stricter supported OpenAPI subset,
+JSON-only artifacts, exact SDK version checks and coverage reports. Unsupported
+operations require explicit exclusion or a supported API representation.

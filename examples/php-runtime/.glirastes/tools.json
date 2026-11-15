@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "appId": "019fb007-0000-7000-8000-000000000005",
+  "targetAppKey": "php-runtime-fixture",
+  "locale": "en-US",
+  "sources": [
+    { "kind": "openapi", "document": "api/openapi.json" },
+    { "kind": "react-actions", "srcDir": "web" }
+  ],
+  "emit": { "module": ".glirastes/build/tools.generated.mjs" }
+}

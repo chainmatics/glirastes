@@ -1,0 +1,51 @@
+name: Runtime container V1
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-container-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-container:
+    name: Container and PHP integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Build SDK for the test harness
+        run: bun run build
+      - name: Build runtime image
+        run: docker build --file containers/runtime/Dockerfile --tag glirastes-runtime:ci .
+      - name: Install pinned browser test driver
+        run: |
+          npm install --prefix "$RUNNER_TEMP/glirastes-browser" --no-save --package-lock=false playwright@1.62.1
+          node "$RUNNER_TEMP/glirastes-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: PHP and PostgreSQL end-to-end acceptance
+        env:
+          GLIRASTES_RUNTIME_TEST_IMAGE: glirastes-runtime:ci
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/glirastes-browser/node_modules/playwright/index.mjs
+        run: node tests/runtime-container-e2e.mjs
+      # This workflow deliberately has no registry credentials or push step.
+      # Publishing a reviewed version is a separate, explicitly authorized release.

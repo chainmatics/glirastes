@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "server": { "publicOrigin": "http://localhost:8088", "port": 8787 },
+  "application": {
+    "artifact": "/app/artifact",
+    "apiOrigin": "http://backend:8080",
+    "allowedPathPrefixes": ["/api"],
+    "timeoutMs": 15000,
+    "maxResponseBytes": 2097152
+  },
+  "identity": { "endpoint": "/api/me", "credential": { "type": "cookie", "names": ["session"] } },
+  "model": { "name": "REPLACE_WITH_MODEL_ID", "apiKeyFile": "/run/secrets/model_key" },
+  "approvals": { "secretFile": "/run/secrets/approval_key", "connectionStringFile": "/run/secrets/state_dsn" },
+  "platform": { "enabled": false }
+}

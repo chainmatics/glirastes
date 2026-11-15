@@ -49,7 +49,8 @@
     "dist/react/components/ai-chat-panel.js"
   ],
   "bin": {
-    "glirastes": "dist/cli/bin.js"
+    "glirastes": "dist/cli/bin.js",
+    "glirastes-runtime": "dist/runtime-service/bin.js"
   },
   "exports": {
     ".": {
@@ -183,6 +184,16 @@
     "./codegen": {
       "types": "./dist/codegen/index.d.ts",
       "default": "./dist/codegen/index.js"
+    },
+    "./server/http": {
+      "import": {
+        "types": "./dist/server/adapters/nextjs/index.d.ts",
+        "default": "./dist/server/adapters/nextjs/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/adapters/nextjs/index.d.ts",
+        "default": "./dist/cjs/server/adapters/nextjs/index.js"
+      }
     }
   },
   "files": [
@@ -283,12 +294,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "typescript": "^5.7.3",
+    "ai": "^6.0.0",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
-    "zod": "^4.0.0",
+    "pg": "^8.23.1",
     "snowball-stemmers": "^0.6.0",
-    "ai": "^6.0.0"
+    "typescript": "^5.7.3",
+    "zod": "^4.0.0"
   },
   "peerDependencies": {
     "@ai-sdk/openai": "^3",
@@ -369,6 +381,7 @@
     "@testing-library/react": "^16.3.2",
     "@types/express": "^5.0.0",
     "@types/node": "^25.6.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/snowball-stemmers": "^0.6.0",

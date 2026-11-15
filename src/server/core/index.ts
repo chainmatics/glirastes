@@ -33,6 +33,8 @@ export interface InternalApiRequest {
   method: EndpointMethod;
   path: string;
   body?: unknown;
+  /** Cancels this invocation, including response-body reads. */
+  signal?: AbortSignal;
 }
 
 export interface InternalApiResponse {
@@ -55,13 +57,21 @@ export type NodeIncomingHeaders = Record<
 // Transport Adapter Options
 // ============================================================================
 
-export interface FetchInternalApiCallerOptions {
+export interface HttpExecutionLimits {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  maxResponseBytes?: number;
+  /** Never follow redirects when caller credentials are present. */
+  redirect?: 'error' | 'manual';
+}
+
+export interface FetchInternalApiCallerOptions extends HttpExecutionLimits {
   baseUrl: string;
   fetchImpl?: typeof fetch;
   defaultHeaders?: Record<string, string>;
 }
 
-export interface NextInternalApiCallerOptions {
+export interface NextInternalApiCallerOptions extends HttpExecutionLimits {
   origin: string;
   cookieHeader?: string;
   defaultHeaders?: Record<string, string>;
@@ -76,7 +86,9 @@ export interface ExpressInternalApiCallerOptions {
   fetchImpl?: typeof fetch;
 }
 
-export interface HttpEndpointCallerOptions {
+export interface HttpEndpointCallerOptions extends HttpExecutionLimits {
+  /** Segment-bounded, canonical API path prefixes. Empty list denies all. */
+  allowedPathPrefixes?: ReadonlyArray<string>;
   /**
    * Origin of the API the tools call, e.g. `http://127.0.0.1:4000`. The app
    * fixes it; it is never read from the chat request, so a `Host` or
@@ -270,10 +282,10 @@ export function buildQueryString(
 ): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(payload)) {
-    if (value === undefined || value === null || value === '') continue;
+    if (value === undefined || value === null) continue;
     if (Array.isArray(value)) {
       for (const item of value) {
-        if (item === undefined || item === null || item === '') continue;
+        if (item === undefined || item === null) continue;
         params.append(key, String(item));
       }
       continue;
@@ -895,10 +907,20 @@ export function toolToAiTool(
           return needed;
         }
       : undefined,
-    execute: async (input: unknown) => {
+    execute: async (input: unknown, executionOptions?: { abortSignal?: AbortSignal }) => {
+      const signals = [context.abortSignal, executionOptions?.abortSignal].filter((value): value is AbortSignal => Boolean(value));
+      const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+      signal?.throwIfAborted();
+      const endpoint = context as Partial<EndpointToolContext>;
+      const executionContext = signal ? {
+        ...context, abortSignal: signal,
+        ...(endpoint.callEndpoint ? { callEndpoint: (request: InternalApiRequest) => endpoint.callEndpoint!({
+          ...request, signal: request.signal ? AbortSignal.any([signal, request.signal]) : signal,
+        }) } : {}),
+      } : context;
       const startTime = Date.now();
       try {
-        const result = await tool.execute(input, context);
+        const result = await tool.execute(input, executionContext);
 
         // Audit: tool executed successfully
         options?.onAudit?.({
@@ -960,13 +982,10 @@ export function toolToAiTool(
           } else {
             // Schema mismatch — retain bounded diagnostics locally, but never
             // expose an undeclared backend payload to the model.
-            console.warn(
-              `[glirastes] Output schema mismatch for tool "${name}":`,
-              parsed.error.issues.map(
-                (i: { path?: ReadonlyArray<PropertyKey>; message?: string }) =>
-                  `${i.path?.join('.') ?? ''}: ${i.message ?? 'invalid value'}`,
-                ),
-            );
+            // Validation paths and messages may embed backend data (including
+            // object keys and custom validator messages). Keep diagnostics
+            // technical; never print those values from a runtime process.
+            console.warn(`[glirastes] Output schema mismatch for tool "${name}": ${parsed.error.issues.length} issue(s).`);
             // The tool ran, and a write may already have happened: report it
             // as done, so the model neither claims a failure nor calls again.
             cleanResult = {
@@ -1116,17 +1135,39 @@ function toErrorMessage(data: unknown, fallback: string): string {
   return fallback;
 }
 
-async function parseResponseBody(response: Response): Promise<unknown> {
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
+async function parseResponseBody(response: Response, maxBytes?: number): Promise<unknown> {
+  let text: string;
+  if (maxBytes !== undefined && response.body) {
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
     try {
-      return await response.json();
-    } catch {
-      return undefined;
-    }
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) {
+          await reader.cancel();
+          throw new Error('Endpoint response exceeds maxResponseBytes');
+        }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    text = new TextDecoder().decode(bytes);
+  } else { text = await response.text(); }
+  if ((response.headers.get('content-type') ?? '').includes('application/json')) {
+    try { return JSON.parse(text); } catch { return undefined; }
   }
-  const text = await response.text();
-  return text.length > 0 ? text : undefined;
+  return text.length ? text : undefined;
+}
+
+function positiveLimit(value: number | undefined, name: string): void {
+  if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
+    throw new RangeError(`${name} must be a positive safe integer`);
+  }
 }
 
 export function normalizeNodeHeaders(
@@ -1158,6 +1199,8 @@ export function createFetchInternalApiCaller(
   options: FetchInternalApiCallerOptions,
 ): InternalApiCaller {
   const fetchImpl = options.fetchImpl ?? fetch;
+  positiveLimit(options.timeoutMs, 'timeoutMs');
+  positiveLimit(options.maxResponseBytes, 'maxResponseBytes');
 
   return async (request) => {
     const url = new URL(request.path, options.baseUrl).toString();
@@ -1169,31 +1212,42 @@ export function createFetchInternalApiCaller(
       ...(options.defaultHeaders ?? {}),
     };
 
-    const init: RequestInit = { method: request.method, headers };
+    const timeout = new AbortController();
+    const signals = [options.signal, request.signal, ...(options.timeoutMs ? [timeout.signal] : [])]
+      .filter((value): value is AbortSignal => Boolean(value));
+    const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+    signal?.throwIfAborted();
+    const timer = options.timeoutMs ? setTimeout(() => timeout.abort(new DOMException('Endpoint timed out', 'TimeoutError')), options.timeoutMs) : undefined;
+    timer?.unref();
+    const init: RequestInit = { method: request.method, headers,
+      ...(signal ? { signal } : {}), ...(options.redirect ? { redirect: options.redirect } : {}),
+    };
 
-    if (methodAllowsBody && request.body !== undefined) {
-      if (!headers['content-type']) {
-        headers['content-type'] = 'application/json';
+    try {
+      if (methodAllowsBody && request.body !== undefined) {
+        if (!headers['content-type']) {
+          headers['content-type'] = 'application/json';
+        }
+        init.body = JSON.stringify(request.body);
       }
-      init.body = JSON.stringify(request.body);
-    }
 
-    const response = await fetchImpl(url, init);
-    const data = await parseResponseBody(response);
+      const response = await fetchImpl(url, init);
+      const data = await parseResponseBody(response, options.maxResponseBytes);
 
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: response.status,
-        data,
-        error: toErrorMessage(
+      if (!response.ok) {
+        return {
+          ok: false,
+          status: response.status,
           data,
-          `Endpoint failed (${response.status})`,
-        ),
-      };
-    }
+          error: toErrorMessage(
+            data,
+            `Endpoint failed (${response.status})`,
+          ),
+        };
+      }
 
-    return { ok: true, status: response.status, data };
+      return { ok: true, status: response.status, data };
+    } finally { if (timer) clearTimeout(timer); }
   };
 }
 
@@ -1206,6 +1260,7 @@ export function createNextInternalApiCaller(
   if (options.cookieHeader) headers.cookie = options.cookieHeader;
 
   return createFetchInternalApiCaller({
+    ...options,
     baseUrl: options.origin,
     fetchImpl: options.fetchImpl,
     defaultHeaders: headers,
@@ -1250,6 +1305,11 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
   if (base.pathname !== '/' || base.search || base.hash || base.username || base.password) {
     throw new Error('createHttpEndpointCaller: baseUrl is an origin; tool paths carry the full API path');
   }
+  const prefixes = options.allowedPathPrefixes?.map((prefix) => {
+    if (!staysOnOrigin(prefix, base.origin) || prefix.includes('?') || prefix.includes('#') || /[%]/.test(prefix)
+      || new URL(prefix, base.origin).pathname !== prefix) throw new Error('Invalid allowedPathPrefixes');
+    return prefix === '/' ? '/' : prefix.replace(/\/$/, '');
+  });
   const names = new Set((options.forwardHeaderNames ?? HTTP_FORWARDED_HEADERS).map((name) => name.toLowerCase()));
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(options.defaultHeaders ?? {})) {
@@ -1261,12 +1321,25 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
   }
   const call = createFetchInternalApiCaller({
     baseUrl: base.origin,
+    signal: options.signal && options.request ? AbortSignal.any([options.signal, options.request.signal]) : options.signal ?? options.request?.signal,
+    timeoutMs: options.timeoutMs ?? 30_000,
+    maxResponseBytes: options.maxResponseBytes ?? 2 * 1024 * 1024,
+    redirect: options.redirect ?? 'error',
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     defaultHeaders: headers,
   });
   return async (request) => {
     if (!staysOnOrigin(request.path, base.origin)) {
       return { ok: false, status: 400, error: 'Endpoint path must be relative to the API' };
+    }
+    if (prefixes) {
+      const rawPath = request.path.split(/[?#]/, 1)[0]!;
+      const pathname = new URL(request.path, base.origin).pathname;
+      // Do not let upstream double decoding or encoded separators escape a prefix.
+      if (/%(?:2e|2f|5c|25)/i.test(rawPath) || rawPath !== pathname
+        || !prefixes.some((prefix) => prefix === '/' || pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+        return { ok: false, status: 403, error: 'Endpoint path is not allowed' };
+      }
     }
     return call(request);
   };

@@ -107,6 +107,8 @@ import { defaultIntentRouterFor, previousTurnScope } from './default-intent-rout
  * calls streamText() themselves with full type safety.
  */
 export interface StreamHandlerContext {
+  /** Cancellation from the browser/HTTP host. Custom stream handlers must honor it. */
+  abortSignal?: AbortSignal;
   /** Locale of the chat, for texts the handler writes itself. */
   locale?: string;
   /** How earlier turns are sent to the model (see `AiChatHandlerConfig.history`). */
@@ -601,6 +603,7 @@ async function defaultStreamHandler(
       );
 
       const result = streamText({
+        abortSignal: ctx.abortSignal,
         model: ctx.model as Parameters<typeof streamText>[0]['model'],
         messages: promptMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
         ...(promptCaching ? {} : { system: systemPrompt }),
@@ -692,10 +695,9 @@ async function defaultStreamHandler(
           ctx.onStepReport?.(report);
         },
         onAbort: (event) => {
-          // The runtime time budget is the only abort source of this handler,
-          // so an abort at the hard limit is a budget stop, not a user abort.
+          // Distinguish request cancellation from a runtime budget stop.
           const abortedByBudget =
-            ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
+            !ctx.abortSignal?.aborted && ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
           ctx.turnMetrics?.finish(
             abortedByBudget
               ? { status: 'safety-stop', errorCode: 'budget_exhausted' }
@@ -982,11 +984,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         }
       }
     };
-    return customStreamHandler
-      ? customStreamHandler
-      : (ctx: StreamHandlerContext) => defaultStreamHandler(
-          ctx, wrappedOnFinish, (error) => onError?.(error, req),
-        );
+    return (ctx: StreamHandlerContext) => {
+      const context = { ...ctx, abortSignal: req.signal };
+      return customStreamHandler ? customStreamHandler(context) : defaultStreamHandler(
+        context, wrappedOnFinish, (error) => onError?.(error, req),
+      );
+    };
   }
 
   if (!staticTools && !loadTools) {
