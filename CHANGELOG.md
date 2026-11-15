@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Skills catch up with 0.6.0 to 0.11.0: `integrating-glirastes-nextjs` and `integrating-glirastes-web` cover the `history`, `promptCaching` and `hideIds` defaults (and how a custom `streamHandler` applies `createHideIdsTransform`), and `glirastes connect` without `--base-url`. `building-glirastes-chat-ui` gets `references/composer-chips-attachments.md` (the `useChatComposer` API, `useOptionalChatComposer`, `onOpenRequest`, `entityLinks` options with trailing-name chips and `useChatEntityLinks` for a custom `Markdown` slot, attachment limits and error codes, `dispatchToolResultUiActions` for a chat without the SDK provider), since `docs/` is not in the package.
-- `curating-glirastes-chat-interactions` lists all chat-internal action prefixes; `maintaining-glirastes-tools` says to refresh after an SDK upgrade.
+- `curating-glirastes-chat-interactions` lists all chat-internal action prefixes; `maintaining-glirastes-tools` says to refresh after an SDK upgrade. The README mentions `hideIds`.
 
 ## [0.11.0] - 2026-11-15
 

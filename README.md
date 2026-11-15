@@ -169,6 +169,9 @@ commands, is the bundled skill
 - **Lean history.** Earlier turns go to the model compacted (`history`), and
   the system prompt and tools stay a stable, cacheable prefix
   (`promptCaching`).
+- **No technical ids in answers.** `hideIds` (on by default) tells the model
+  not to write ids and replaces one it writes anyway with the readable label
+  from the tool result, or removes it.
 - **The Platform gets metadata only.** A connected app sends content-free
   metrics (tokens, cost, latency, errors, tool use) in batches off the turn
   path, and receives signed configuration revisions.
