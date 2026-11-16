@@ -97,7 +97,7 @@ Patterns support `$variable` placeholders that get replaced with actual values f
 The bridge between AI tool results and your frontend components.
 
 - **UiActionBus**: An event bus. When a tool produces a UI action, the bus dispatches it to registered handlers.
-- **useAiClientAction(actionId, handler, contract?, { route? })**: React hook. You register a handler for a specific action ID (e.g., `'task-details.open'`) in the component that owns the effect, and it fires when that action comes through. When that component lives on one page, pass its static path as `route`: from any other page the chat opens the route through the navigation bridge, waits for the page to register the action and then runs it. A handler returns `false` when it could not do its work, so the chat does not report it as done. `registerAiClientAction` (`glirastes/browser`) takes the same `{ route }` options.
+- **useAiClientAction(actionId, handler, contract?, { route? })**: React hook. You register a handler for a specific action ID (e.g., `'task-details.open'`) in the component that owns the effect, and it fires when that action comes through. When that component lives on one page, pass its static path as `route`: from any other page the chat opens the route through the navigation bridge, waits for the page to register the action and then runs it. A handler returns `false` when it could not do its work, so local execution feedback reports rejection. Server results confirm only the request (`executionStatus: unconfirmed`), never browser execution. `registerAiClientAction` (`glirastes/browser`) takes the same `{ route }` options.
 - **ActionIdRegistry**: Auto-generated map of all action IDs. In dev mode, warns you if an action fires but no handler is registered.
 
 ---

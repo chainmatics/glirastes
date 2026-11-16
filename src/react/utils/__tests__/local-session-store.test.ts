@@ -155,3 +155,26 @@ describe('attachments in stored chats', () => {
     expect(loaded!.parts[1]).toEqual({ type: 'file', mediaType: 'image/png', url: '', filename: 'a.png' });
   });
 });
+
+it('uses a command label as title without changing its stored invocation', async () => {
+ const sessions = store();
+ const text = '<!--glirastes:command {"commandId":"team","tool":"ui.navigate","args":{}}-->\nTeam öffnen';
+ await sessions.save!('default', [user(text)]);
+ expect((await sessions.list!())[0]!.title).toBe('Team öffnen');
+ expect(JSON.stringify(await sessions.load!('default'))).toContain('glirastes:command');
+});
+
+
+it('inherits default titles without renaming conversations or overriding explicit titles', async () => {
+  const { storage } = memory();
+  const sessions = createLocalSessionStore({ storageKey: 'locale', storage });
+  await sessions.list!();
+  sessions.setDefaultTitle!('Neues Gespräch');
+  expect((await sessions.list!())[0]?.title).toBe('Neues Gespräch');
+  await sessions.rename!('default', 'Meine Planung');
+  sessions.setDefaultTitle!('New chat');
+  expect((await sessions.list!())[0]?.title).toBe('Meine Planung');
+  const explicit = store();
+  explicit.setDefaultTitle!('New chat');
+  expect((await explicit.list!())[0]?.title).toBe('Neuer Chat');
+});

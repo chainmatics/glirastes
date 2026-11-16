@@ -268,3 +268,41 @@ describe('defineQueryFilters', () => {
     expect(() => defineQueryFilters(definition as never)).toThrow();
   });
 });
+
+describe('browser execution outcomes', () => {
+  const result = { success: true, requested: true, executionStatus: 'unconfirmed', uiAction: { type: 'glirastes.action', actionId: 'highlight', payload: {} } };
+  it('does not count a missing handler as execution', async () => {
+    await expect(dispatchToolResultUiActions(result, new UiActionBus())).rejects.toMatchObject({ status: 'missing-handler' });
+  });
+  it('distinguishes rejection from exceptions', async () => {
+    const bus = new UiActionBus();
+    registerAiClientAction('highlight', () => false, undefined, { bus });
+    await expect(dispatchToolResultUiActions(result, bus)).rejects.toMatchObject({ status: 'rejected' });
+  });
+  it('does not trust an old bus that cannot report registered handlers', async () => {
+    const dispatch = vi.fn();
+    const old = { dispatch, subscribeById: vi.fn(), subscribeByType: vi.fn() } as unknown as UiActionBus;
+    await expect(dispatchToolResultUiActions(result, old)).rejects.toMatchObject({ status: 'missing-handler' });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+  it('distinguishes a thrown exception', async () => {
+    const bus = new UiActionBus();
+    registerAiClientAction('highlight', () => { throw new Error('failure'); }, undefined, { bus });
+    await expect(dispatchToolResultUiActions(result, bus)).rejects.toMatchObject({ status: 'exception' });
+  });
+  it('bounds a hanging handler without retrying it', async () => {
+    const bus = new UiActionBus();
+    const handler = vi.fn(() => new Promise<void>(() => {}));
+    registerAiClientAction('highlight', handler, undefined, { bus });
+    await expect(dispatchToolResultUiActions(result, bus, { executionTimeoutMs: 5 })).rejects.toMatchObject({ status: 'timeout' });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+  it('does not start work after a session has been cancelled', async () => {
+    const bus = new UiActionBus();
+    const handler = vi.fn();
+    registerAiClientAction('highlight', handler, undefined, { bus });
+    const controller = new AbortController(); controller.abort();
+    await expect(dispatchToolResultUiActions(result, bus, { signal: controller.signal })).rejects.toMatchObject({ status: 'cancelled' });
+    expect(handler).not.toHaveBeenCalled();
+  });
+});

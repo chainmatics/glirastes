@@ -1756,3 +1756,17 @@
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="message-attachment"] [data-element="attachment-note"] {
   font-size: 0.75rem;
 }
+
+/* Keep stopped-turn feedback visible independently of collapsed tool details. */
+[data-element="pipeline-notice"]:where(:not([data-unstyled], [data-unstyled] *)), [data-element="ui-action-status"]:where(:not([data-unstyled], [data-unstyled] *)) { overflow-wrap: anywhere; }
+@media (max-width: 440px) {
+  [data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="header"] {
+    gap: 0.25rem;
+    padding-inline: 0.375rem;
+    min-width: 0;
+  }
+  [data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="header"] > [data-component="session-switcher"] {
+    flex: 1 1 0%; min-width: 0;
+  }
+  [data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="header"] > [data-action] { flex-shrink: 0; }
+}

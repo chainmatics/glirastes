@@ -51,3 +51,11 @@ describe('readLatestPlan', () => {
     expect(readLatestPlan(parts.slice(0, 2))).toBeNull();
   });
 });
+
+
+it('does not report an unconfirmed or rejected browser action as completed', () => {
+  const action = { type: 'tool-highlight', toolCallId: 'ui1', state: 'output-available', output: { executionStatus: 'unconfirmed', message: 'Requested' } };
+  expect(readActivitySteps([action], () => true)[0]).toMatchObject({ status: 'waiting' });
+  expect(readActivitySteps([action, { type: 'data-ui-action-status', data: { toolCallId: 'ui1', status: 'rejected' } }], () => true)[0]).toMatchObject({ status: 'error' });
+  expect(readActivitySteps([action, { type: 'data-ui-action-status', data: { toolCallId: 'ui1', status: 'succeeded' } }], () => true)[0]).toMatchObject({ status: 'done' });
+});

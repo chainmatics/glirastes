@@ -1,0 +1,5 @@
+{
+  "mode": "deterministic SSE",
+  "notice": "Die Verarbeitung wurde am konfigurierten Sicherheitsbudget gestoppt (6 Modellschritte, Schrittlimit 6). Bisherige Ergebnisse bleiben erhalten. Offene Planschritte sind noch nicht abgeschlossen. Bitte konkret angeben, welche offene Arbeit fortgesetzt werden soll; Änderungen nicht erneut beauftragen.",
+  "partialPlanVisible": true
+}

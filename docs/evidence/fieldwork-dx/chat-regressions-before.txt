@@ -1,0 +1,64 @@
+
+ RUN  v4.1.4 /Users/philipprollmann/Dev/chainmatics/glirastes/.worktrees/fieldwork-dx
+
+ ❯ src/react/utils/__tests__/approval-names.test.ts (8 tests | 1 failed) 6ms
+   × resolves case-sensitive short IDs only from finished results without altering approval args 3ms
+ ❯ src/react/components/__tests__/message-bubble.test.tsx (15 tests | 2 failed) 106ms
+     × shows a persisted safety stop even without tool calls and outside collapsed activity 2ms
+     × shows rejected browser action feedback independently of result visibility 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/react/components/__tests__/message-bubble.test.tsx > durable stop feedback > shows a persisted safety stop even without tool calls and outside collapsed activity
+AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+ ❯ src/react/components/__tests__/message-bubble.test.tsx:337:33
+    335|     ] }} />);
+    336|     const notice = document.querySelector('[data-element="pipeline-not…
+    337|     expect(notice?.textContent).toContain('6');
+       |                                 ^
+    338|     expect(notice?.closest('details')).toBeNull();
+    339|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/react/components/__tests__/message-bubble.test.tsx > durable stop feedback > shows rejected browser action feedback independently of result visibility
+AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+ ❯ src/react/components/__tests__/message-bubble.test.tsx:345:86
+    343|       { type: 'data-ui-action-status', data: { toolCallId: 'c1', statu…
+    344|     ] }} />);
+    345|     expect(document.querySelector('[data-element="ui-action-status"]')…
+       |                                                                                      ^
+    346|   });
+    347| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/react/utils/__tests__/approval-names.test.ts > resolves case-sensitive short IDs only from finished results without altering approval args
+AssertionError: expected [ 'Auftrag: Job-107', …(1) ] to deeply equal [ 'Auftrag: Außenbeleuchtung', …(1) ]
+
+- Expected
++ Received
+
+  [
+-   "Auftrag: Außenbeleuchtung",
+-   "Techniker: Mara",
++   "Auftrag: Job-107",
++   "Techniker: Tech-1",
+  ]
+
+ ❯ src/react/utils/__tests__/approval-names.test.ts:85:24
+     83|   const args = { job: { id: 'job-107' }, technicianId: 'Tech-1' };
+     84|   const card = createApprovalDescriptionGenerator({ fieldLabels: { id:…
+     85|   expect(card.details).toEqual(['Auftrag: Außenbeleuchtung', 'Technike…
+       |                        ^
+     86|   expect(card.args).toBe(args);
+     87|   expect(names.has('tech-1')).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 20 passed (23)
+   Start at  21:40:31
+   Duration  765ms (transform 112ms, setup 0ms, import 206ms, tests 112ms, environment 376ms)
+

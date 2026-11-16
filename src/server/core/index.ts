@@ -1,3 +1,4 @@
+import { uiActionRequestResult } from './generated-ui-tool.js';
 import type {
   AiEndpointToolDefinition,
   AiUiToolDefinition,
@@ -764,7 +765,7 @@ export function uiToolToTool<TInput extends SchemaLike>(
     inputSchema: uiTool.inputSchema,
     outputSchema: uiTool.outputSchema,
     needsApproval: uiTool.needsApproval ?? false,
-    execute: async (rawInput: InferSchema<TInput>) => {
+    execute: async (rawInput: InferSchema<TInput>, context) => {
       const inputPayload = isRecord(rawInput) ? { ...rawInput } : {};
 
       // Priority: 1) uiPattern (dynamic), 2) uiAction (static template)
@@ -801,13 +802,8 @@ export function uiToolToTool<TInput extends SchemaLike>(
         }
       }
 
-      const message = uiTool.successMessage
-        ? (applyUiTemplateValue(uiTool.successMessage, inputPayload) as string) || 'Action executed.'
-        : 'Action executed.';
-
       return {
-        success: true,
-        message,
+        ...uiActionRequestResult(context?.locale),
         ...(uiAction ? { uiAction } : {}),
       };
     },

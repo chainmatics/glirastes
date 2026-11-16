@@ -1,0 +1,1 @@
+{"at":"2026-11-15T20:48:02.450Z","totalSteps":7,"finishReason":"stop","usage":{"inputTokens":33117,"outputTokens":1383,"totalTokens":34500},"wasTruncated":false,"maxSteps":10,"stepLimitSource":"runtime-budget"}

@@ -65,7 +65,7 @@ function shouldRenderToolResult(
 function pipelineNotice(state: PipelineState | null, locale: ChatLocale): string | undefined {
   switch (state?.status) {
     case 'safety-stop':
-      return locale.pipelineSafetyStopLabel;
+      return (locale.pipelineBudgetStopLabel ?? locale.pipelineSafetyStopLabel).replace('{count}', String(state.totalSteps)).replace('{max}', String(state.maxSteps));
     case 'aborted':
       return locale.pipelineAbortedLabel;
     case 'error':
@@ -209,7 +209,15 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const planItems = isAssistant ? readLatestPlan(message.parts) : null;
   const hasPlan = (planItems?.length ?? 0) >= 2;
   const turnActive = isLatestMessage && isLoading;
-  const notice = isLatestMessage ? pipelineNotice(pipelineState, locale) : undefined;
+  const storedState = [...message.parts as unknown[]].reverse().find((part) => isRecord(part) && part.type === 'data-pipeline-state' && isRecord(part.data));
+  const notice = isAssistant ? pipelineNotice(
+    storedState && isRecord(storedState) ? storedState.data as PipelineState : isLatestMessage ? pipelineState : null, locale,
+  ) : undefined;
+  const actionFeedback = isAssistant ? (message.parts as unknown[]).filter((part) => isRecord(part) && part.type === 'data-ui-action-status' && isRecord(part.data)) : [];
+  const actionLabel = (status: unknown): string => {
+    const labels = locale.uiActionStatusLabels ?? { succeeded: 'Browser action completed.', rejected: 'Browser action rejected.', 'missing-handler': 'Browser action unavailable on this page.', exception: 'Browser action failed.', timeout: 'Browser action timed out; execution is unconfirmed.', cancelled: 'Browser action cancelled; execution is unconfirmed.' };
+    return typeof status === 'string' && Object.hasOwn(labels, status) ? labels[status as keyof typeof labels] : '';
+  };
 
   // Extract tool result summaries as fallback text when no text parts exist
   const cleanTextParts = message.parts
@@ -237,6 +245,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         const toolName = partType.replace('tool-', '');
         if (
           shouldRenderToolResult(toolName, mode, allowlist)
+          && part.output.executionStatus !== 'unconfirmed'
           && typeof part.output.message === 'string'
         ) {
           summaries.push(part.output.message);
@@ -250,7 +259,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         && shouldRenderToolResult(part.toolName, mode, allowlist)
         && isRecord(part.result)
       ) {
-        if (typeof part.result.message === 'string') {
+        if (part.result.executionStatus !== 'unconfirmed' && typeof part.result.message === 'string') {
           summaries.push(part.result.message);
         }
       }
@@ -266,6 +275,8 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
     && activitySteps.length === 0
     && !hasPlan
     && fileParts.length === 0
+    && !notice
+    && actionFeedback.length === 0
   ) {
     const hasVisibleToolOutput = message.parts.some(p => {
       if (readClarificationPart(p)) return true;
@@ -291,7 +302,9 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
       data-role={message.role}
     >
       {hasPlan && <PlanChecklist items={planItems!} active={turnActive} />}
-      <ActivityLog steps={activitySteps} active={turnActive} notice={notice} />
+      <ActivityLog steps={activitySteps} active={turnActive} />
+      {notice && <p role="status" data-element="pipeline-notice">{notice}</p>}
+      {actionFeedback.map((part, index) => <p key={`action-status-${index}`} role="status" data-element="ui-action-status">{actionLabel((part as unknown as { data: { status: string } }).data.status)}</p>)}
 
       {fileParts.length > 0 && (
         <div data-element="message-attachments">

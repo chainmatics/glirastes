@@ -40,7 +40,7 @@ import {
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
-import { dispatchToolResultUiActions } from '../../browser/client-actions.js';
+import { dispatchToolResultUiActions, UiActionDispatchError } from '../../browser/client-actions.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
@@ -79,6 +79,8 @@ export const DEFAULT_LOCALE: ChatLocale = {
   pipelineRunningLabel: 'Running',
   pipelineCompletedLabel: 'Completed',
   pipelineSafetyStopLabel: 'Safety stop',
+  uiActionStatusLabels: { succeeded: 'Browser action completed.', rejected: 'Browser action rejected.', 'missing-handler': 'Browser action unavailable on this page.', exception: 'Browser action failed.', timeout: 'Browser action timed out; execution is unconfirmed.', cancelled: 'Browser action cancelled; execution is unconfirmed.' },
+  pipelineBudgetStopLabel: 'Processing stopped at the configured safety budget ({count} model steps, step limit {max}). Previous results are preserved. Open plan steps are unfinished. Specify the remaining work to continue; do not request completed changes again.',
   pipelineAbortedLabel: 'Stopped',
   pipelineErrorLabel: 'Error',
   pipelineStepLabel: 'Step',
@@ -109,6 +111,8 @@ export const DEFAULT_LOCALE: ChatLocale = {
   clarificationInputLabel: 'Your answer',
   clarificationSubmitButton: 'Answer',
   retryRecordingAriaLabel: 'Retry recording',
+  recordingErrorLabel: 'Recording failed. Check microphone permission and your connection, then try again.',
+  recordingAssetErrorLabel: 'The audio capture file could not be loaded. Ask the app administrator to check the speech asset setup.',
   completionListLabel: 'Suggestions',
   completionResultsLabel: '{count} suggestions',
   completionEmptyLabel: 'No matches. @ for things, / for commands',
@@ -446,7 +450,7 @@ export function AiChatProvider({
     [userSuggestions],
   );
   const toolResultConfig = useMemo(
-    () => resolveToolResultConfig(userToolResults, Boolean(toolRenderers && toolRenderers.length > 0)),
+    () => resolveToolResultConfig(userToolResults, Boolean(toolRenderers && toolRenderers.length > 0), toolRenderers?.flatMap((renderer) => [renderer.definitionId, renderer.definitionId.replace(/\./g, '_')])),
     [userToolResults, toolRenderers],
   );
   const toolRendererRegistry = useMemo(
@@ -517,6 +521,16 @@ export function AiChatProvider({
     () => session?.activeId ?? session?.defaultActiveId ?? 'default',
   );
   const activeSessionId = session?.activeId ?? uncontrolledActiveId;
+  const actionOutcomesRef = useRef(new Map<string, { messageId: string; status: string }>());
+  const actionSessionRef = useRef(activeSessionId);
+  actionSessionRef.current = activeSessionId;
+  const actionAbortRef = useRef(new AbortController());
+  useEffect(() => {
+    const controller = new AbortController();
+    actionAbortRef.current = controller;
+    actionOutcomesRef.current.clear();
+    return () => { controller.abort(); actionAbortRef.current.abort(); };
+  }, [activeSessionId]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const isBootstrapSentinel = activeSessionId === 'default'
     && session?.list !== undefined && session.defaultActiveId === undefined
@@ -531,6 +545,14 @@ export function AiChatProvider({
   // without re-binding on every render.
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  useEffect(() => {
+    if (!session?.setDefaultTitle) return;
+    session.setDefaultTitle(locale.newChatLabel);
+    let cancelled = false;
+    void session.list?.().then((list) => { if (!cancelled) setSessions(list); });
+    return () => { cancelled = true; };
+  }, [session, locale.newChatLabel]);
+
 
   // Truncation
   const [truncation, setTruncation] = useState<TruncationInfo | null>(null);
@@ -647,6 +669,8 @@ export function AiChatProvider({
     addToolApprovalResponse,
   } = resolvedTransport;
 
+  const actionMessagesRef = useRef(rawMessages);
+  actionMessagesRef.current = rawMessages;
   const isLoading = status === 'submitted' || status === 'streaming';
   const streamActiveRef = useRef(isLoading);
   streamActiveRef.current = isLoading;
@@ -824,17 +848,49 @@ export function AiChatProvider({
             processedToolCallsRef.current.add(toolCallId);
             onToolResultRef.current?.(toolName, toolPart.output);
             // Generated UI tools run in the browser through the app's bridge.
+            const originSession = activeSessionId;
+            const signal = actionAbortRef.current.signal;
+            const recordOutcome = (status: string) => {
+              if (signal.aborted || actionSessionRef.current !== originSession) return;
+              actionOutcomesRef.current.set(toolCallId, { messageId: lastMessage.id, status });
+              const updated = actionMessagesRef.current.map((message) => message.id !== lastMessage.id ? message : {
+                ...message,
+                parts: [...message.parts, { type: 'data-ui-action-status', data: { toolCallId, status } }],
+              }) as typeof rawMessages;
+              actionMessagesRef.current = updated;
+              setMessages(updated);
+            };
             void dispatchToolResultUiActions(
               toolPart.output,
               uiActionBusRef.current ?? getDefaultUiActionBus(),
-            ).catch(() => {
-              console.warn('[glirastes] A generated UI action failed');
+              { signal },
+            ).then((count) => {
+              if (count > 0) recordOutcome('succeeded');
+            }).catch((error: unknown) => {
+              recordOutcome(error instanceof UiActionDispatchError ? error.status : 'exception');
             });
           }
         }
       }
     }
   }, [rawMessages]);
+
+  // Streaming transports may replace their last message after local feedback arrived.
+  // Reattach receipts without re-running actions; persisted history then retains the outcome.
+  useEffect(() => {
+    let changed = false;
+    const updated = rawMessages.map((message) => {
+      const additions = [...actionOutcomesRef.current].filter(([toolCallId, receipt]) =>
+        receipt.messageId === message.id && !message.parts.some((part: unknown) =>
+          isRecord(part) && part.type === 'data-ui-action-status' && isRecord(part.data) && part.data.toolCallId === toolCallId));
+      if (!additions.length) return message;
+      changed = true;
+      return { ...message, parts: [...message.parts, ...additions.map(([toolCallId, receipt]) => ({
+        type: 'data-ui-action-status', data: { toolCallId, status: receipt.status },
+      }))] };
+    });
+    if (changed) setMessages(updated as typeof rawMessages);
+  }, [rawMessages, setMessages]);
 
   // Extract suggestions from suggest_followups tool, with a strict text
   // fallback for models that append a trailing Markdown suggestion section.
@@ -1148,6 +1204,9 @@ export function AiChatProvider({
   }, [transportStop, pipelineSteps.length]);
 
   const clear = useCallback(() => {
+    actionAbortRef.current.abort();
+    actionAbortRef.current = new AbortController();
+    actionOutcomesRef.current.clear();
     setMessages([]);
     void Promise.resolve(sessionRef.current?.clear?.(activeSessionId));
     processedToolCallsRef.current.clear();

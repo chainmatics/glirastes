@@ -97,3 +97,35 @@ describe('RecordedSttAdapter', () => {
     expect(wav.getInt16(46, true)).toBe(-1);
   });
 });
+
+it('disposes capture if cancellation arrives while the worklet loads', async () => {
+  let ready!: (stop: () => Promise<void>) => void;
+  const stop = vi.fn(async () => {});
+  const fetchImpl = vi.fn();
+  const signal = new AbortController();
+  const adapter = new RecordedSttAdapter({ capture: () => new Promise((resolve) => { ready = resolve; }), fetch: fetchImpl });
+  const connecting = adapter.connect({ stream: {} as MediaStream, language: 'de', signal: signal.signal, events: { onError: vi.fn(), onSegment: vi.fn(), onClosed: vi.fn() } });
+  signal.abort();
+  ready(stop);
+  const connection = await connecting;
+  await connection.finalize();
+  expect(stop).toHaveBeenCalledTimes(1);
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it('coalesces repeated stop and ignores a late transcript after cancel', async () => {
+  let respond!: (response: Response) => void;
+  const t = setup({ response: () => new Promise((resolve) => { respond = resolve; }) });
+  const connection = await t.connect();
+  t.feed(1600);
+  const first = connection.finalize();
+  const second = connection.finalize();
+  expect(second).toBe(first);
+  await vi.waitFor(() => expect(t.fetchImpl).toHaveBeenCalledTimes(1));
+  await connection.cancel();
+  respond(new Response(JSON.stringify({ text: 'Stale text' })));
+  await first;
+  expect(t.fetchImpl).toHaveBeenCalledTimes(1);
+  expect(t.events.onSegment).not.toHaveBeenCalled();
+  expect(t.closeCapture).toHaveBeenCalledTimes(1);
+});

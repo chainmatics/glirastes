@@ -113,6 +113,41 @@ describe('AiChatProvider and generated UI actions', () => {
     expect(onToolResult).toHaveBeenCalledWith('ui_navigate', expect.objectContaining({ success: true }));
   });
 
+  it('records false as rejection, preserves feedback across streamed updates, and never replays the call', async () => {
+    const bus = new UiActionBus();
+    const handler = vi.fn(() => false);
+    const { registerAiClientAction } = await import('../../browser/client-actions.js');
+    registerAiClientAction('tasks.highlight', handler, undefined, { bus });
+    const output = { success: true, requested: true, executionStatus: 'unconfirmed', uiAction: {
+      type: 'glirastes.action', actionId: 'tasks.highlight', payload: { taskId: 'job_003' },
+    } };
+    const t = transport(output);
+    const view = render(<AiChatProvider transport={t} uiActionBus={bus}><div /></AiChatProvider>);
+    await waitFor(() => expect(t.setMessages).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ parts: expect.arrayContaining([expect.objectContaining({
+        type: 'data-ui-action-status', data: { toolCallId: 'call-1', status: 'rejected' },
+      })]) }),
+    ])));
+    const streamed = { ...t, messages: t.messages.map((message) => ({ ...message, parts: [...message.parts, { type: 'text' as const, text: 'Requested.' }] })) };
+    view.rerender(<AiChatProvider transport={streamed} uiActionBus={bus}><div /></AiChatProvider>);
+    await waitFor(() => expect(t.setMessages).toHaveBeenCalledTimes(2));
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels route-bound work after unmount before the page registers', async () => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    bus.subscribeById('glirastes.navigate', push);
+    const handler = vi.fn();
+    const t = transport({ success: true, uiAction: { type: 'glirastes.action', actionId: 'tasks.highlight', route: '/tasks' } });
+    const view = render(<AiChatProvider transport={t} uiActionBus={bus}><div /></AiChatProvider>);
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+    view.unmount();
+    bus.subscribeById('tasks.highlight', handler);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('leaves app-specific uiActions to the app', async () => {
     const bus = new UiActionBus();
     const seen = vi.fn();

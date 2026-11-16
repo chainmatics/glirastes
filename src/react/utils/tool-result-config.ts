@@ -8,9 +8,10 @@ import type { ToolResultDisplayConfig, ToolResultDisplayMode } from '../types.js
 export function resolveToolResultConfig(
   config: ToolResultDisplayConfig | undefined,
   hasRenderers: boolean,
+  rendererNames?: string[],
 ): { mode: ToolResultDisplayMode; allowlist: string[] } {
   return {
-    mode: config?.mode ?? (hasRenderers ? 'default' : 'hidden'),
-    allowlist: config?.allowlist ?? [],
+    mode: config?.mode ?? (hasRenderers ? (rendererNames ? 'allowlist' : 'default') : 'hidden'),
+    allowlist: config?.allowlist ?? rendererNames ?? [],
   };
 }

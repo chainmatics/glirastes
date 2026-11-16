@@ -1,0 +1,21 @@
+$ vitest run
+
+ RUN  v4.1.4 /Users/philipprollmann/Dev/chainmatics/glirastes/.worktrees/fieldwork-dx
+
+{"type":"runtime_listening"}
+{"type":"runtime_listening"}
+{"type":"runtime_listening"}
+{"type":"runtime_listening"}
+{"type":"runtime_listening"}
+{"type":"runtime_listening"}
+{"type":"runtime_lease_lost"}
+{"type":"runtime_listening"}
+{"type":"runtime_listening"}
+{"type":"runtime_listening"}
+{"type":"runtime_listening"}
+
+ Test Files  339 passed (339)
+      Tests  3892 passed | 6 skipped (3898)
+   Start at  21:52:04
+   Duration  155.29s (transform 24.63s, setup 0ms, import 117.33s, tests 1160.81s, environment 36.36s)
+

@@ -1,0 +1,16 @@
+Glirastes — local setup check
+  ✓ Local app setup
+  ✓ Framework integration
+  ! Sign-in integration
+  ✓ Signed-in user verification
+  ✓ Local tool configuration
+  ✓ Generated app files
+  ✓ Recorded setup version
+  ✓ Runtime connection settings
+  ✓ Installed agent skills
+
+Local checks passed for 14 tools.
+1 warning needs review.
+This offline check does not execute a chat or tool action.
+Next: Ask your coding agent to verify how the app signs users in and passes their identity to Glirastes.
+Technical details: glirastes doctor --verbose or glirastes doctor --json.

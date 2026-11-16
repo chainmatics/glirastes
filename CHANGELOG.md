@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Browser tools report requested/unconfirmed work instead of executed success. Local chat feedback distinguishes rejection, missing handler, exception, timeout and cancellation; session changes cancel pending route work and persisted history does not replay it.
+- Recorded speech exposes a public worklet asset and configurable URL, reports asset failures, releases capture resources and uses localized icons/labels. See [speech migration](docs/speech-input.md).
+- Budget stops remain visible after reload; planning guidance batches updates without increasing default limits. Session titles strip command markup and inherit chat locale; shell/toggle inherit theme.
+- Approval display supports short record IDs through explicit field-scoped name maps, avoiding cross-entity collisions without changing signed arguments. Registered result renderers no longer enable unrelated technical cards by default.
+- Generator diagnostics distinguish unavailable schema conversion from invalid schema shape and name invalid configuration fields without printing submitted values.
+- Updated Zod and locked fast-uri to patched versions; npm homepage points to SDK documentation.
+
+### Documentation
+
+- Added [OpenRouter standalone integration](docs/openrouter-standalone.md), [browser execution semantics](docs/browser-action-outcomes.md), and [chat migration notes](docs/chat-dx-migration.md).
+- Existing clients must treat `success: true` on UI tools as request creation only; inspect `executionStatus` and local browser feedback. Custom transports must preserve data parts. No trusted server execution acknowledgement or exactly-once external mutation guarantee is introduced.
+
 ## [0.14.0] - 2026-11-15
 
 ### Added

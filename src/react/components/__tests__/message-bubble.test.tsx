@@ -260,8 +260,8 @@ describe('MessageBubble tool-result visibility', () => {
         }}
       />,
     );
-    expect(document.querySelector('[data-element="activity-notice"]')!.textContent)
-      .toBe('Sicherheitsstopp');
+    expect(document.querySelector('[data-element="pipeline-notice"]')!.textContent)
+      .toContain('Sicherheitsbudget');
   });
 });
 
@@ -323,5 +323,25 @@ describe('MessageBubble attachments', () => {
     expect(open).toHaveBeenCalledWith('blob:shot', '_blank', 'noopener,noreferrer');
     open.mockRestore();
     vi.unstubAllGlobals();
+  });
+});
+
+
+describe('durable stop feedback', () => {
+  afterEach(cleanup);
+  it('shows a persisted safety stop even without tool calls and outside collapsed activity', () => {
+    render(<MessageBubble message={{ id: 'old-stop', role: 'assistant', parts: [
+      { type: 'data-pipeline-state', data: { status: 'safety-stop', totalSteps: 6, maxSteps: 6, stepLimitSource: 'runtime-budget' } } as never,
+    ] }} />);
+    const notice = document.querySelector('[data-element="pipeline-notice"]');
+    expect(notice?.textContent).toContain('6');
+    expect(notice?.closest('details')).toBeNull();
+  });
+  it('shows rejected browser action feedback independently of result visibility', () => {
+    chatContext.current.toolResults = { mode: 'hidden' };
+    render(<MessageBubble message={{ id: 'ui-rejected', role: 'assistant', parts: [
+      { type: 'data-ui-action-status', data: { toolCallId: 'c1', status: 'rejected' } } as never,
+    ] }} />);
+    expect(document.querySelector('[data-element="ui-action-status"]')?.textContent).toContain('abgelehnt');
   });
 });

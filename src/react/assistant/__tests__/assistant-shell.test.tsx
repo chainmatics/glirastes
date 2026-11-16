@@ -196,3 +196,11 @@ describe('several chats in the assistant header', () => {
     expect(value.createSession).not.toHaveBeenCalled();
   });
 });
+
+
+it('inherits provider theme variables on the standalone toggle', () => {
+  render(<ChatContext.Provider value={{ themeVars: { '--cm-primary': '#123456' } } as unknown as ChatContextValue}>
+    <AssistantLayoutProvider><AssistantToggle /></AssistantLayoutProvider>
+  </ChatContext.Provider>);
+  expect(document.querySelector('[data-component="assistant-toggle"]')?.getAttribute('style')).toContain('--cm-primary: #123456');
+});

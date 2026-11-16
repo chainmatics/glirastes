@@ -165,6 +165,7 @@
       "types": "./dist/react/transports/vercel/index.d.ts",
       "default": "./dist/react/transports/vercel/index.js"
     },
+    "./stt/audio-worklet-processor.js": "./dist/react/audio-worklet-processor.js",
     "./react/styles.css": "./dist/react/styles.css",
     "./react/pills.css": "./dist/react/pills.css",
     "./embed": {
@@ -301,7 +302,7 @@
     "pg": "^8.23.1",
     "snowball-stemmers": "^0.6.0",
     "typescript": "^5.7.3",
-    "zod": "^4.0.0"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "@ai-sdk/openai": "^3",

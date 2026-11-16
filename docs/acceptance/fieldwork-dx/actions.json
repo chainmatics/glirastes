@@ -1,0 +1,8 @@
+{
+  "mode": "deterministic SSE replay, packed SDK, real app handlers",
+  "rejectedUnknownId": true,
+  "highlightedValidId": true,
+  "reloadNoReplay": true,
+  "receiptsPersisted": true,
+  "calls": 3
+}

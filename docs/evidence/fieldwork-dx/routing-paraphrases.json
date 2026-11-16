@@ -1,0 +1,11 @@
+{
+  "corpus": "held-out-de-en",
+  "hits": 7,
+  "cases": 8,
+  "tools": 101,
+  "averageActiveTools": 10.125,
+  "maxActiveTools": 11,
+  "modelCalls": 0,
+  "providerTokens": 0,
+  "discoveryRecoveryHits": 1
+}

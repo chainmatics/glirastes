@@ -1,0 +1,224 @@
+CHAT_MS 24059 HTTP 200
+EDITORS [
+  {
+    tag: 'INPUT',
+    role: null,
+    placeholder: 'Aufträge durchsuchen …',
+    label: 'Aufträge suchen'
+  },
+  { tag: 'INPUT', role: null, placeholder: null, label: null },
+  {
+    tag: 'DIV',
+    role: 'textbox',
+    placeholder: null,
+    label: 'Was kann ich für dich übernehmen?'
+  }
+]
+f.
+fieldwork®
+N
+Nordwerk Service
+Dein Arbeitsplatz
+⌄
+
+ARBEITSPLATZ
+
+Einsatzplanung
+Team
+Material
+Aktivitäten
+Weniger koordinieren.
+Mehr bewegen.
+
+Dein Assistent kennt den Plan und hilft beim nächsten Schritt.
+
+Mit Glirastes
+AM
+Alex Morgan
+Disposition · Demo
+Arbeitsplatz / Einsatzplanung
+Live-Demo
+KI fragen
+I
+
+GUTEN MORGEN, ALEX
+
+Ein guter Tag beginnt hier.
+
+Dein Team ist bereit. Bringen wir die Dinge ins Rollen.
+
+Neuer Auftrag
+Einsätze gesamt
+08
+Für dein Team im Überblick
+Heute eingeplant
+05
+Montag, 16. November
+Brauchen Aufmerksamkeit
+02Dringend
+Gemeinsam schnell gelöst
+Ein bisschen Unterstützung macht den Unterschied.
+
+Für das Café Morgenrot fehlt noch ein Termin. Dein Assistent findet einen passenden Slot.
+
+Gemeinsam planen
+Einsatzübersicht 8
+
+Montag, 16. November 2026 / Demo-Planungstag
+
+Alle Prioritäten
+Dringend
+Normal
+Niedrig
+Alle Status
+Ungeplant
+Eingeplant
+Im Einsatz
+Erledigt
+Ungeplant
+3
+Heizung
+Heizung ohne Leistung
+Café Morgenrot
+Bergstraße 42
+Zeit offen
+· 90 Min.
++
+Noch nicht zugewiesen
+Heizung
+Heizkreis entlüften
+Büro Kollektiv
+Wiesenweg 11
+Zeit offen
+· 60 Min.
++
+Noch nicht zugewiesen
+Elektro
+Außenbeleuchtung reparieren
+Galerie Forma
+Auguststraße 9
+Zeit offen
+· 60 Min.
++
+Noch nicht zugewiesen
+Eingeplant
+3
+Heizung
+Wärmepumpe · Jahreswartung
+Atelier Nord
+Lindenstraße 18
+09:00
+· 120 Min.
+MV
+Mara Vogel
+Elektro
+Unterverteilung prüfen
+Studio West
+Kantstraße 7
+10:00
+· 90 Min.
+JB
+Jonas Berg
+Heizung
+Thermostate austauschen
+Loft Spree
+Uferstraße 22
+11:00
+· 60 Min.
+LF
+Lina Frank
+Im Einsatz
+1
+Sanitär
+Wasseranschluss Küche
+Haus am Park
+Parkallee 3
+08:00
+· 120 Min.
+NW
+Noah Winter
+Erledigt
+1
+Sanitär
+Druckprüfung abgeschlossen
+Praxis Grün
+Gartenstraße 5
+07:00
+· 60 Min.
+NW
+Noah Winter
+Alles an einem Ort. Mehr Zeit fürs Wesentliche.
+FIELDWORK · 2026
+Prüfe dringende Aufträge, die…
+
+Prüfe dringende Aufträge, die Qualifikationen im Team und den Materialbestand. Arbeite mit einer Plan-Checkliste. Nur lesen, nichts ändern. Fasse am Ende alle drei Ergebnisse zusammen.
+
+Plan
+Dringende Aufträge prüfen
+Qualifikationen im Team prüfen
+Materialbestand prüfen
+3 Schritte ausgeführt
+
+Ich erstelle einen Plan und prüfe dann die drei Bereiche für dich.
+
+Zusammenfassung der Prüfung
+🔴 Dringende Aufträge (2)
+
+1. 
+Heizung ohne Leistung
+ – Café Morgenrot, Bergstraße 42
+
+Status: Rückstand (noch nicht geplant)
+Qualifikation: Heizung
+Dauer: 90 Minuten
+Hinweis: Gastraum bleibt kalt, Thermostat und Pumpe prüfen
+
+2. 
+Außenbeleuchtung reparieren
+ – Galerie Forma, Auguststraße 9
+
+Status: Rückstand (noch nicht geplant)
+Qualifikation: Elektrik
+Dauer: 60 Minuten
+Hinweis: Eingangsbeleuchtung fällt sporadisch aus
+👥 Team-Qualifikationen (4 Techniker)
+Mara Vogel
+ – Heizung
+Jonas Berg
+ – Elektrik
+Lina Frank
+ – Heizung
+Noah Winter
+ – Sanitär
+
+Verfügbar für dringende Aufträge:
+
+Heizung: 2 Techniker (
+Mara Vogel
+, 
+Lina Frank
+)
+Elektrik: 1 Techniker (
+Jonas Berg
+)
+📦 Materialbestand
+
+| Material | Bestand | Einheit | Preis | |----------|---------|---------|-------| | 
+Thermostat T200
+ | 12 | Stück | 89,00 € | | 
+Dichtungssatz Universal
+ | 24 | Set | 18,50 € | | 
+Umwälzpumpe P40
+ | 3 | Stück | 249,00 € | | 
+Sicherungsautomat B16
+ | 18 | Stück | 12,00 € |
+
+Kritisch: 
+Umwälzpumpe P40
+ nur noch 3 Stück auf Lager.
+
+Handlungsbedarf: Beide dringenden Aufträge sind noch nicht eingeplant und sollten zeitnah disponiert werden.
+
+Welche Einsätze sind dringend?
+Was kann ich für dich übernehmen?
+Senden

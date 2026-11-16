@@ -59,7 +59,15 @@ export function readActivitySteps(
     if (!isRecord(part)) return;
     const toolName = toolPartName(part);
     if (!toolName || BUILTIN_TOOL_NAMES.has(toolName)) return;
-    const status = stepStatus(part.state);
+    let status = isRecord(part.output) && part.output.executionStatus === 'unconfirmed' ? 'waiting' : stepStatus(part.state);
+    if (isRecord(part.output) && part.output.executionStatus === 'unconfirmed') {
+      const receipt = [...parts].reverse().find((candidate) => isRecord(candidate)
+        && candidate.type === 'data-ui-action-status' && isRecord(candidate.data)
+        && candidate.data.toolCallId === part.toolCallId);
+      if (isRecord(receipt) && isRecord(receipt.data)) {
+        status = receipt.data.status === 'succeeded' ? 'done' : 'error';
+      }
+    }
     const step: ActivityStep = {
       id: typeof part.toolCallId === 'string' ? part.toolCallId : `part-${index}`,
       toolName,
@@ -68,7 +76,7 @@ export function readActivitySteps(
     if (allowDetail(toolName)) {
       const detail = status === 'error'
         ? part.errorText
-        : status === 'done' && isRecord(part.output) ? part.output.message : undefined;
+        : status === 'done' && isRecord(part.output) && part.output.executionStatus !== 'unconfirmed' ? part.output.message : undefined;
       if (typeof detail === 'string' && detail.trim()) step.detail = detail.trim();
     }
     steps.push(step);

@@ -106,7 +106,7 @@ describe('native UI through generated tools and the app bridge', () => {
     const native = await nativeApp();
     const view = render(createElement(native.Bridge));
     view.unmount();
-    await native.run('ui_navigate', { destination: '/overview' });
+    await expect(native.run('ui_navigate', { destination: '/overview' })).rejects.toMatchObject({ status: 'missing-handler' });
     expect(navigation.push).not.toHaveBeenCalled();
   }, 120_000);
 });

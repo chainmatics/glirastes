@@ -180,8 +180,8 @@ describe('tool prose', () => {
       ],
     }));
     expect(loaded.findings.map((finding) => [finding.code, finding.message])).toEqual([
-      ['resolution-rejected', 'Entry 0 of tool-semantics.json is invalid at origin.<key> and is ignored.'],
-      ['tool-semantics-invalid', 'Entry 1 of tool-semantics.json is invalid at locked.<key> and is ignored.'],
+      ['resolution-rejected', 'Entry 0 of tool-semantics.json is invalid at origin and is ignored.'],
+      ['tool-semantics-invalid', 'Entry 1 of tool-semantics.json is invalid at locked and is ignored.'],
       ['resolution-rejected', 'Entry 2 of tool-semantics.json is invalid at agent.interfaceDigest and is ignored.'],
     ]);
     for (const finding of loaded.findings) {

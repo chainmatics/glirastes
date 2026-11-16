@@ -145,11 +145,11 @@ export type ToolSourceConfig =
   | { kind: 'next-pages' | 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[] }
   | { kind: 'react-router' | 'vue-router' | 'react-actions'; srcDir?: string };
 
-function invalidConfig(): FoundationDiagnosticError {
+function invalidConfig(detail: string): FoundationDiagnosticError {
   return new FoundationDiagnosticError({
     code: 'E-TOOLS-002',
     operation: 'tools.config',
-    message: 'The Glirastes tools configuration is invalid.',
+    message: `${TOOLS_PATHS.config}: ${detail} Repair this file and run glirastes tools refresh.`,
     remediation: 'repair-tools-config',
     path: TOOLS_PATHS.config,
   });
@@ -175,10 +175,20 @@ export function loadToolsConfig(root: string): ToolsConfig {
   try {
     json = JSON.parse(raw);
   } catch {
-    throw invalidConfig();
+    throw invalidConfig('Expected valid JSON (no comments or trailing commas).');
   }
   const parsed = ToolsConfigSchema.safeParse(json);
-  if (!parsed.success) throw invalidConfig();
+  if (!parsed.success) {
+    // Never interpolate submitted values: this file may accidentally contain credentials.
+    const details = parsed.error.issues.map((issue) => {
+      const path = issue.path.join('.') || '<root>';
+      const expected = issue.code === 'unrecognized_keys'
+        ? 'Remove unsupported fields; see the tools.json schema.'
+        : issue.message;
+      return `${path}: ${expected}`;
+    });
+    throw invalidConfig(details.join('; '));
+  }
   return parsed.data;
 }
 

@@ -246,3 +246,5 @@ what each file in `.glirastes` is and who writes it.
 - Adding, changing and removing a route, a page and a filter changes the tools
   after `glirastes tools refresh`, without editing any tool list by hand.
 - `glirastes doctor` passes; the developer entered the model key themselves.
+
+For a complete provider-specific standalone path (identity, generated tools, chat, sessions, attachments and speech assets), follow [OpenRouter standalone](https://github.com/chainmatics/glirastes/blob/main/docs/openrouter-standalone.md). Validate the locked Next/TypeScript combination in a fresh packed consumer; do not install unversioned TypeScript into Next 15.

@@ -49,9 +49,9 @@ describe('speech into the draft', () => {
     const editor = screen.getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.change(editor, { target: { value: 'Bitte:' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'mic' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'stop' })).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: 'stop' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Stop recording' })[0]).toBeTruthy());
+    fireEvent.click(screen.getAllByRole('button', { name: 'Stop recording' })[0]);
 
     await waitFor(() => expect(editor.value).toBe('Bitte: Neue Aufgabe für morgen'));
     expect(chat.sendMessage).not.toHaveBeenCalled();
