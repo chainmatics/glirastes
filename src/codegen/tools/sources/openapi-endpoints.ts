@@ -14,7 +14,7 @@ import {
   type OpenapiDocument,
   type OpenapiOperationEntry,
 } from '../../openapi-document.js';
-import { compareCodeUnits, sortKeysDeep } from '../canonical.js';
+import { compareCodeUnits, JsonSchemaCompileError, sortKeysDeep } from '../canonical.js';
 import {
   probeItemFor,
   probeKey,
@@ -508,10 +508,16 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
         ...(previousContract ? { previousContract } : {}),
       });
     } catch (error) {
+      // Only a schema of this operation that Ajv cannot compile is the
+      // export's fault. Anything else (a programming error, a schema from
+      // tool-resolutions.json) keeps its own error and stack.
+      const own = error instanceof JsonSchemaCompileError
+        && (error.schema === entry.output || entry.input.parts.some((part) => part.json === error.schema));
+      if (!own) throw error;
       // The runtime compiles every schema with Ajv; a schema it cannot compile
       // would fail at boot. Name the operation and Ajv's reason (keywords and
       // schema paths only, never values) instead of failing the whole command.
-      const reason = (error instanceof Error ? error.message : String(error)).split('\n')[0]!.slice(0, 300);
+      const reason = error.message.split('\n')[0]!.slice(0, 300);
       findings.push(toolFinding('schema-uncompilable', 'error', entry.stableKey,
         `${documentPath} ${entry.operation.operationKey.toUpperCase()} ${entry.operation.documentPath} has a schema the JSON Schema validator cannot compile: ${reason}`));
       return [];

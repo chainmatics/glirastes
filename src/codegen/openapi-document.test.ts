@@ -38,7 +38,12 @@ describe('parseOpenapiDocument versions', () => {
   });
 
   it.each([
-    [{ swagger: '2.0', paths: {} }, 'is not an OpenAPI document'],
+    [{ swagger: '2.0', paths: {} }, 'is Swagger 2.0; the generator reads OpenAPI 3.0 and 3.1 exports'],
+    [{ swagger: `2.0${'x'.repeat(100)}`, paths: {} }, 'is a Swagger document; the generator reads OpenAPI 3.0 and 3.1 exports'],
+    [{ swagger: '2.0 <secret text>', paths: {} }, 'is a Swagger document; the generator'],
+    [{ swagger: 2, paths: {} }, 'is not an OpenAPI document'],
+    [{ paths: {} }, 'is not an OpenAPI document'],
+    [[], 'is not an OpenAPI document'],
     [{ openapi: '3.2.0', paths: {} }, 'is OpenAPI 3.2.0; the generator reads OpenAPI 3.0 and 3.1 exports'],
     [{ openapi: '3.0', paths: {} }, 'is OpenAPI 3.0; the generator reads OpenAPI 3.0 and 3.1 exports'],
     [{ openapi: '4.0.0', paths: {} }, 'is OpenAPI 4.0.0;'],

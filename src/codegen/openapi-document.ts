@@ -48,6 +48,11 @@ export function parseOpenapiDocument(text: string): { ok: true; document: Openap
   } catch {
     return { ok: false, reason: 'is not valid JSON' };
   }
+  if (isObject(json) && typeof json.openapi !== 'string' && typeof json.swagger === 'string') {
+    // Only a short version-shaped value is echoed; anything else is not repeated.
+    const version = /^\d[\w.+-]{0,15}$/.test(json.swagger) ? `Swagger ${json.swagger}` : 'a Swagger document';
+    return { ok: false, reason: `is ${version}; the generator reads OpenAPI 3.0 and 3.1 exports` };
+  }
   if (!isObject(json) || typeof json.openapi !== 'string') return { ok: false, reason: 'is not an OpenAPI document' };
   const v30 = /^3\.0\.\d+$/.test(json.openapi);
   if (!v30 && !/^3\.1\.\d+$/.test(json.openapi)) {
