@@ -272,6 +272,28 @@ describe('classifyToolFailure in the Next chat handler', () => {
     expect(prompt).not.toContain('max.');
     expect(wire).not.toContain('max.');
   });
+
+  it('leaves no partial email for the PII shield at the error text cut', async () => {
+    // A text body is also the `error` message, capped at 1000 characters.
+    const detector: PiiDetector = {
+      detect: (text) => [...text.matchAll(/[\w.]+@[\w-]+\.[a-z]{2,}/g)].map((match) => ({
+        type: 'email', start: match.index, end: match.index + match[0].length, score: 1, text: match[0],
+      })),
+    };
+    const lead = `${'word '.repeat(197)}mail `;
+    const fetchImpl = (async () => new Response(
+      `${lead}max.mueller@example.com is not allowed. ${'tail '.repeat(100)}`,
+      { status: 500, headers: { 'content-type': 'text/plain' } },
+    )) as typeof fetch;
+    const { model, wire } = await runTurn({
+      piiShield: createPiiShield({ locale: 'de', detector }),
+      endpointCaller: () => createHttpEndpointCaller({ baseUrl: 'http://api.test', fetchImpl }),
+    });
+    const prompt = JSON.stringify(model.doStreamCalls[1]!.prompt);
+    expect(prompt).toContain('"status":500');
+    expect(prompt).not.toContain('max.');
+    expect(wire).not.toContain('max.');
+  });
 });
 
 describe('classifyToolFailure in a direct command', () => {
