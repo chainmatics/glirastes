@@ -200,13 +200,41 @@ describe.each([
     expect(seen.handed).toEqual(['tasks_archive', 'tasks_list']);
   });
 
+  describe('a turn without managedRuntime with toolDiscovery', () => {
+    it('find_tools still returns and activates a tool and keeps the active ones', async () => {
+      const { registry } = tools();
+      const model = scriptedModel([toolCall('find_tools', { query: 'archive a task' }, 'call-2')]);
+      const chunks = await streamChunks(await createAiChatHandler(config({
+        tools: registry, model, toolDiscovery: true,
+      }, ['tasks_list']))(post([user])));
+      const found = chunks.find((chunk) => chunk.type === 'tool-output-available' && chunk.toolCallId === 'call-2');
+      expect(JSON.stringify(found)).toContain('tasks_archive');
+      expect(offered(model)).toEqual([
+        ['find_tools', 'tasks_list'],
+        ['find_tools', 'tasks_archive', 'tasks_list'],
+      ]);
+    });
+
+    it('gets no authorization check for its steps and searches', async () => {
+      const { registry } = tools();
+      const seen: unknown[] = [];
+      await (await createAiChatHandler(config({
+        tools: registry, model: scriptedModel(), toolDiscovery: true,
+        streamHandler: async (ctx) => { seen.push(ctx.authorizedToolNames); return new Response('ok'); },
+      }, ['tasks_list']))(post([user]))).text();
+      expect(seen).toEqual([undefined]);
+    });
+  });
+
   it('does not run a call to a tool that was left out', async () => {
     const { registry, list } = tools();
     const model = scriptedModel([toolCall('tasks_list', {})]);
     const response = await createAiChatHandler(config({ tools: registry, model, managedRuntime: runtime() }))(post([user]));
     expect(response.status).toBe(200);
-    await streamChunks(response);
+    const chunks = await streamChunks(response);
+    expect(offered(model).every((names) => !names.includes('tasks_list'))).toBe(true);
     expect(list).not.toHaveBeenCalled();
+    expect(chunks.some((chunk) => chunk.type === 'tool-output-available')).toBe(false);
   });
 
   it('still denies the call in the guard with authorizedToolsOnly: false', async () => {
@@ -224,13 +252,24 @@ describe.each([
     async function firstTurn(roles: () => string[]) {
       const { registry, archive } = tools();
       const model = scriptedModel([toolCall('tasks_archive', { id: 't1' })]);
-      const handler = createAiChatHandler(config({
+      const shared = config({
         tools: registry, model,
         managedRuntime: runtime({ roles, revoked: () => (roles().includes('revoked') ? [ARCHIVE_TASK_ID] : []) }),
-      }));
+      });
+      const handler = createAiChatHandler(shared);
       const first = await streamChunks(await handler(post([user])));
       expect(first.find((chunk) => chunk.type === 'tool-approval-request')).toMatchObject({ toolCallId: 'call-1' });
-      return { handler, archive, model, answered: approve(await clientMessage(first)) };
+      const answered = approve(await clientMessage(first));
+      /** The archive tool as a custom stream handler gets it in the request that answers the approval. */
+      const handedArchiveTool = async () => {
+        let handed: unknown;
+        await (await createAiChatHandler({
+          ...shared,
+          streamHandler: async (ctx) => { handed = ctx.tools.tasks_archive; return new Response('ok'); },
+        })(post([user, answered]))).text();
+        return handed as { description?: string; parameters?: z.ZodTypeAny; inputSchema?: unknown } | undefined;
+      };
+      return { handler, archive, model, answered, handedArchiveTool };
     }
 
     it('runs the approved call of a tool the principal may still use', async () => {
@@ -253,6 +292,25 @@ describe.each([
       expect(second.some((chunk) => chunk.type === 'error')).toBe(false);
       // The tool only stays so the approved call gets its tool error; what it does is not described again.
       expect(JSON.stringify(model.doStreamCalls.at(-1)!.tools)).not.toContain('Archive a task.');
+    });
+
+    it('hands a custom stream handler the tool as it is while the principal may use it', async () => {
+      const { handedArchiveTool } = await firstTurn(() => ['viewer']);
+      const tool = await handedArchiveTool();
+      expect(tool?.description).toBe('Archive a task.');
+      expect(tool?.parameters?.safeParse({ unrelated: 1 }).success).toBe(false);
+    });
+
+    it('hands over only a stub of a tool revoked since: neutral description, any object as input', async () => {
+      let roles = ['viewer'];
+      const { handedArchiveTool } = await firstTurn(() => roles);
+      roles = ['viewer', 'revoked'];
+      const tool = await handedArchiveTool();
+      expect(tool?.description).toBe('This tool is not available.');
+      // The tool's own schema is strict and requires `id`; the stub accepts any object and names no field.
+      expect(tool?.parameters?.safeParse({ unrelated: 1 })).toEqual({ success: true, data: { unrelated: 1 } });
+      expect(tool?.parameters?.safeParse({})).toEqual({ success: true, data: {} });
+      expect(Object.keys((tool?.parameters as z.ZodObject<z.ZodRawShape>).shape)).toEqual([]);
     });
   });
 
