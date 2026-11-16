@@ -252,6 +252,13 @@ increments nor resets the consecutive-error count, and it is no tool error in
 the metric event. The result carries `expectedFailure: true`, so the model
 knows the failure is a known outcome rather than a fault to retry.
 
+Loop detection fingerprints a failure result without its `body` and
+`bodyTruncated`: tool, arguments, `success`, `status`, `error`, `retryable`
+and `expectedFailure` stay in. A backend that stamps every error body with a
+timestamp or trace id therefore still trips the repeated-fingerprint limit
+when the model repeats the same failing call, also for expected failures.
+Successful results are fingerprinted whole, as before.
+
 Expected failures are counted locally only, as `expectedToolFailureCount` in
 the handler's `onFinish` event. This version sends nothing about them to the
 Platform: the metric event keeps its fields. Without `managedRuntime` there is
