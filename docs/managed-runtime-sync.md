@@ -171,17 +171,35 @@ custom `streamHandler` gets the per-step check as `authorizedToolNames` in
 its context and has to intersect its active tools with it. A legacy
 `intentRouter` gets only these tool names as well (as of the start of the
 request), since it may pass them to a model of its own; the built-in
-start-set routing works on the same set. Tool names an app writes into its
-own `pipeline` modules, router result or `systemPrompt` (which also gets the
-whole pinned manifest as `turnSnapshot`) are the app's own data and are not
-filtered. A tool with an approved call of an earlier
-request stays in the tool set so that call gets its result. When the
+start-set routing works on the same set. A tool with an approved call of an
+earlier request stays in the tool set so that call gets its result, also when
+the routing of the answering request does not select it. When the
 principal may no longer use it, the model sees it as a stub: its name, the
 neutral description "This tool is not available." and an input schema that
 accepts any object, instead of its own description and input schema; the
 guard then ends the call as a tool error. `authorizedToolsOnly: false` on
 `createAiChatHandler` hands every registry tool to the model as before; the
 guard still refuses the calls.
+
+Only `tools`, the `intentRouter` names, `authorizedToolNames`,
+`toolPresentation` and `find_tools` are reduced. Everything else the handler
+passes to the app's own code in a managed turn is server-side app data and is
+**not** filtered. An app that forwards it to a model (a prompt, a model of its
+own) names tools the principal may not use:
+
+- `systemPrompt` callback: `turnSnapshot` (the whole pinned manifest, agent
+  and policy), `routing`, `pipelineResult`.
+- `model` callback: `routing`, `pipelineResult`.
+- `loadTools` and every tool's `execute`: `turnSnapshot` in the endpoint tool
+  context, also for a direct command. The registry `loadTools` returns is the
+  app's own and is filtered only afterwards.
+- A custom `streamHandler`: `managedTurn.snapshot`, `routing`,
+  `pipelineResult` (its `tools` are reduced).
+- `onPipelineResult`: the `pipelineResult`.
+- The app's own `pipeline` modules: `pipelineResult.tools` and
+  `pipelineResult.module` carry the tool names the app configured there.
+- The result of `intentRouter`: `routing.toolNames` is what the router
+  returned, whatever names it was given.
 
 A signed decision (`toolOverrides` of the policy revision) disables a tool,
 raises its risk class, narrows its roles, requires confirmation, or replaces

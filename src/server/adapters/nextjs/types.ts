@@ -206,6 +206,15 @@ export interface AiChatHandlerConfig {
    * built-in start-set routing get the same names. `false` hands over
    * every registry tool, as before this option existed; the guard still
    * denies their calls. No effect without managedRuntime.
+   *
+   * NOT filtered, because it is server-side app data: `routing` and
+   * `pipelineResult` (`model` and `systemPrompt` callbacks,
+   * `onPipelineResult`, a custom `streamHandler`; they carry the tool names
+   * of the app's own `pipeline` modules and router result), `turnSnapshot`
+   * with the whole pinned manifest (`systemPrompt` callback, the endpoint
+   * tool context of `loadTools` and of every tool's `execute`) and
+   * `managedTurn.snapshot` (custom `streamHandler`). An app that forwards
+   * any of it to a model names tools the principal may not use.
    */
   authorizedToolsOnly?: boolean;
 
