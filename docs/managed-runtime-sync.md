@@ -260,8 +260,11 @@ when the model repeats the same failing call, also for expected failures.
 Successful results are fingerprinted whole, as before.
 
 Expected failures are counted locally only, as `expectedToolFailureCount` in
-the handler's `onFinish` event. This version sends nothing about them to the
-Platform: the metric event keeps its fields. Without `managedRuntime` there is
+the handler's `onFinish` event. A direct command (a `/command` that runs its
+tool without a model call) is classified the same way, so an expected failure
+is no tool error in its metric event, but it never calls `onFinish` and is
+therefore not part of that count. This version sends nothing about expected
+failures to the Platform: the metric event keeps its fields. Without `managedRuntime` there is
 no consecutive-error budget, so the classifier only affects the metrics there.
 The runtime container cannot take a function in its JSON configuration and
 keeps the default (every failure is an error).

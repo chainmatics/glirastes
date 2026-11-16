@@ -356,7 +356,8 @@ export interface AiChatHandlerConfig {
    * nor resets the `maxConsecutiveErrors` budget of `managedRuntime`, and is
    * not a tool error in `metrics` (`toolErrorCount`, per-tool `errors`). It
    * is counted locally only, in `onFinish`'s `expectedToolFailureCount`;
-   * nothing about it is sent to the Platform. Without `managedRuntime` there
+   * nothing about it is sent to the Platform. A direct command is classified
+   * too but never calls `onFinish`, so its expected failure is not counted. Without `managedRuntime` there
    * is no consecutive-error budget, so it only affects metrics. Without this
    * option every failure counts as an error, as before.
    */
