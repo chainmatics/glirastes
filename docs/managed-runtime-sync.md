@@ -338,12 +338,32 @@ keeps the default (every failure is an error).
 
 #### Denied tool calls
 
-The managed guard checks every tool call against the pinned snapshot and the
-freshly resolved principal before it executes, including a call to a
-registered tool that tool discovery does not advertise. When it denies the
-call because the tool is not available to this principal or agent revision,
-the model receives a failed tool call and the turn continues, so it can
-answer without the tool:
+With the default `authorizedToolsOnly`, a tool the principal may not use is
+not offered to the model, so most denials never happen. Which answer a call
+gets depends on whether the tool is in the request's tool set:
+
+| Call | Answer |
+| --- | --- |
+| tool never offered in this request (default `authorizedToolsOnly`) | the AI SDK's tool error "Model tried to call unavailable tool ..." naming only the offered tools; the guard is not asked; the turn continues |
+| tool offered at the start of the request and denied later in it, or any registry tool with `authorizedToolsOnly: false` | the managed guard decides, see below |
+
+A call that was never offered does not execute and asks for no approval. It
+is a tool call and a tool error in the metric event, but the guard does not
+see it: it counts neither toward `maxToolCalls` nor `maxConsecutiveErrors`,
+and no terminal condition ends the turn through it. A model that repeats it
+stops at `maxModelSteps` (or the token, cost or time budget).
+
+The managed guard checks every call that reaches it against the pinned
+snapshot and the freshly resolved principal before it executes. The tool set
+is fixed at the start of the request and only the offer narrows per step, so
+with the default this is a tool that became denied after the request started;
+pinned revisions do not change within a turn, which leaves a lost role
+(`principal_role_denied`) and the terminal conditions. With
+`authorizedToolsOnly: false` it is every call, including one to a registered
+tool that tool discovery does not advertise. When the guard denies the call
+because the tool is not available to this principal or agent revision, the
+model receives a failed tool call and the turn continues, so it can answer
+without the tool:
 
 | Reason | Result |
 | --- | --- |
@@ -357,8 +377,8 @@ pinned agent or policy revision or of the tool. In any of these states the
 turn ends with that reason, even when the call is to a tool that is not in the
 manifest or would otherwise get a recoverable denial.
 
-The tool error names only the reason code and the tool, never the policy, its
-roles or the principal. A denied call never executes and never asks for
+The guard's tool error names only the reason code and the tool, never the
+policy, its roles or the principal. A denied call never executes and never asks for
 approval, whatever the tool's policy says about confirmation. It always counts
 as a tool call and toward `maxConsecutiveErrors`, so a model that keeps calling
 denied tools stops at that budget; `classifyToolFailure` never sees a denial

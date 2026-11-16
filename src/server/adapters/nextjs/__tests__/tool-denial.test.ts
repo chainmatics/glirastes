@@ -50,8 +50,8 @@ function scriptedModel(steps: Array<() => ReadableStream>) {
   });
 }
 
-function tools() {
-  const list = vi.fn(async () => ({ tasks: [] }));
+function tools(options: TurnHooks = {}) {
+  const list = vi.fn(async () => { options.onList?.(); return { tasks: [] }; });
   const archive = vi.fn(async () => ({ success: true, archived: 't1' }));
   const registry: ToolRegistry = {
     tasks_list: defineTool({ id: 'tasks.list', description: 'List tasks.', inputSchema: z.object({ query: z.string() }).strict(), execute: list }),
@@ -59,8 +59,18 @@ function tools() {
       id: 'tasks.archive', description: 'Archive a task.', inputSchema: z.object({ id: z.string() }).strict(),
       needsApproval: true, execute: archive,
     }),
+    ...(options.withPurgeTool
+      ? { tasks_purge: defineTool({ id: 'tasks.purge', description: 'Purge all tasks.', inputSchema: z.object({}).strict(), execute: async () => ({ success: true }) }) }
+      : {}),
   };
   return { registry, list, archive };
+}
+
+interface TurnHooks {
+  /** Runs when `tasks_list` executes: the point where a test changes roles, session or revocations mid-request. */
+  onList?: () => void;
+  /** Registers `tasks_purge`, a tool the signed manifest does not carry. */
+  withPurgeTool?: boolean;
 }
 
 interface TurnRevisions {
@@ -69,8 +79,8 @@ interface TurnRevisions {
   policy?: RuntimePolicyRevision;
   roles?: string[];
   limits?: ExecutionBudget;
-  /** What `loadRevocations` returns for every tool call of the turn. */
-  revocations?: SecurityRevocation[];
+  /** What `loadRevocations` returns for every tool call of the turn; a function is asked each time. */
+  revocations?: SecurityRevocation[] | (() => SecurityRevocation[]);
 }
 
 function withListPolicy(patch: Partial<RuntimePolicyRevision['toolPolicies'][number]>): RuntimePolicyRevision {
@@ -97,13 +107,17 @@ const recoverable: Array<{ reason: string; revisions: TurnRevisions }> = [
   },
 ];
 
-async function runTurn(
+type ResolvePrincipal = () => Promise<ReturnType<typeof principal> | undefined>;
+
+/** A managed turn with the handler's defaults: the model gets only the tools the principal may use. */
+async function runDefaultTurn(
   revisions: TurnRevisions,
   steps: Array<() => ReadableStream>,
   config: Partial<AiChatHandlerConfig> = {},
-  resolvePrincipal: () => Promise<ReturnType<typeof principal> | undefined> = async () => principal(revisions.roles),
+  resolvePrincipal: ResolvePrincipal = async () => principal(revisions.roles),
+  hooks: TurnHooks = {},
 ) {
-  const { registry, list, archive } = tools();
+  const { registry, list, archive } = tools(hooks);
   const { sink, events } = collectingSink();
   const onError = vi.fn();
   const onFinish = vi.fn();
@@ -126,7 +140,9 @@ async function runTurn(
         principal: principal(revisions.roles),
         localLimits: revisions.limits ?? localLimits,
       }),
-      loadRevocations: async () => revisions.revocations ?? [],
+      loadRevocations: async () => (
+        typeof revisions.revocations === 'function' ? revisions.revocations() : revisions.revocations ?? []
+      ),
     },
     ...config,
   });
@@ -138,6 +154,18 @@ async function runTurn(
   return { wire, model, events, onError, onFinish, list, archive };
 }
 
+/**
+ * `authorizedToolsOnly: false`: every registry tool reaches the model, so the
+ * guard is asked for every call the model makes, also for a tool the
+ * principal could never use.
+ */
+const runTurn = (
+  revisions: TurnRevisions,
+  steps: Array<() => ReadableStream>,
+  config: Partial<AiChatHandlerConfig> = {},
+  resolvePrincipal?: ResolvePrincipal,
+) => runDefaultTurn(revisions, steps, { authorizedToolsOnly: false, ...config }, resolvePrincipal);
+
 /** The tool results the model received in its second call. */
 function toolResultsSentToModel(model: MockLanguageModelV3, call = 1): unknown[] {
   const prompt = model.doStreamCalls[call]?.prompt ?? [];
@@ -146,7 +174,7 @@ function toolResultsSentToModel(model: MockLanguageModelV3, call = 1): unknown[]
     .flatMap((message) => message.content as unknown[]);
 }
 
-describe('recoverable tool denials in a managed model turn', () => {
+describe('recoverable tool denials in a managed model turn (authorizedToolsOnly: false)', () => {
   it.each(recoverable)('gives the model a tool error for $reason and continues the turn', async ({ reason, revisions }) => {
     const turn = await runTurn(revisions, [listStep(), textStep]);
 
@@ -232,7 +260,7 @@ describe('recoverable tool denials in a managed model turn', () => {
   });
 });
 
-describe('approval and tool denials', () => {
+describe('approval and tool denials (authorizedToolsOnly: false)', () => {
   it('still asks for approval of an allowed tool that needs it', async () => {
     const turn = await runTurn({}, [archiveStep(), textStep]);
     expect(turn.wire).toContain('"type":"tool-approval-request"');
@@ -256,7 +284,7 @@ describe('approval and tool denials', () => {
   });
 });
 
-describe('terminal tool denials', () => {
+describe('terminal tool denials (authorizedToolsOnly: false)', () => {
   it.each([
     { reason: 'missing_principal', resolvePrincipal: async () => undefined },
     {
@@ -282,7 +310,7 @@ describe('terminal tool denials', () => {
   });
 });
 
-describe('terminal conditions win over a recoverable tool denial', () => {
+describe('terminal conditions win over a recoverable tool denial (authorizedToolsOnly: false)', () => {
   const roleDenied = policyRevision({ listRoles: ['admin'] });
   /** `tasks_list` stays registered, but the signed manifest no longer carries it. */
   const withoutList: TurnRevisions = {
@@ -350,5 +378,245 @@ describe('terminal conditions win over a recoverable tool denial', () => {
     })]);
     expect(turn.wire).toContain('Final answer.');
     expect(turn.onError).not.toHaveBeenCalled();
+  });
+});
+
+/** What the AI SDK itself answers when the model calls a tool it was not given (an empty list when it got none). */
+const unavailable = (toolName: string, available: string[]) => ({
+  type: 'error-text',
+  value: `Model tried to call unavailable tool '${toolName}'. Available tools: ${available.join(', ')}.`,
+});
+const offeredNames = (model: MockLanguageModelV3) =>
+  model.doStreamCalls.map((call) => (call.tools ?? []).map((tool) => tool.name).sort());
+const securityRevocation = (patch: Partial<SecurityRevocation>): SecurityRevocation => ({
+  revocationId: '019fb710-0000-7000-8000-0000000000c2',
+  environmentId: manifestRevision.environmentId,
+  effectiveAt: new Date(0).toISOString(),
+  reasonCode: 'security-disable',
+  toolIds: [],
+  agentRevisionIds: [],
+  policyRevisionIds: [],
+  signature: agentRevision.signature,
+  ...patch,
+});
+
+describe('a tool the model was never offered (default authorizedToolsOnly)', () => {
+  const roleDenied = policyRevision({ listRoles: ['admin'] });
+
+  it.each(recoverable)('is answered by the AI SDK as an unavailable tool, not by the guard ($reason)', async ({ revisions }) => {
+    const turn = await runDefaultTurn(revisions, [listStep(), textStep]);
+
+    expect(offeredNames(turn.model)).toEqual([['tasks_archive'], ['tasks_archive']]);
+    expect(toolResultsSentToModel(turn.model)).toEqual([expect.objectContaining({
+      type: 'tool-result',
+      toolCallId: 'call-1',
+      toolName: 'tasks_list',
+      output: unavailable('tasks_list', ['tasks_archive']),
+    })]);
+    expect(JSON.stringify(turn.model.doStreamCalls[1]!.prompt)).not.toContain('Tool execution denied');
+    expect(turn.wire).toContain('"type":"tool-output-error"');
+    expect(turn.wire).toContain('Final answer.');
+    expect(turn.wire).not.toContain('tool-approval-request');
+    expect(turn.wire).not.toContain('"type":"error"');
+    expect(turn.list).not.toHaveBeenCalled();
+    expect(turn.onError).not.toHaveBeenCalled();
+    expect(turn.onFinish).toHaveBeenCalledWith(expect.objectContaining({ finishReason: 'stop' }));
+  });
+
+  it('names only offered tools to the model: no description and no name of another tool left out', async () => {
+    // `tasks_list` is role-denied, `tasks_purge` is registered but not in the manifest.
+    const turn = await runDefaultTurn({ policy: roleDenied }, [listStep(), textStep], {}, undefined, { withPurgeTool: true });
+
+    expect(offeredNames(turn.model)).toEqual([['tasks_archive'], ['tasks_archive']]);
+    const seen = JSON.stringify(turn.model.doStreamCalls.map((call) => ({ prompt: call.prompt, tools: call.tools })));
+    expect(seen).toContain("unavailable tool 'tasks_list'");
+    expect(seen).not.toContain('List tasks.');
+    expect(seen).not.toContain('tasks_purge');
+    expect(seen).not.toContain('Purge all tasks.');
+    expect(seen).not.toContain('principal_role_denied');
+    expect(seen).not.toContain(LIST_TASKS_ID);
+  });
+
+  it('never asks for approval of a tool that was left out', async () => {
+    const turn = await runDefaultTurn({ policy: policyRevision({ archiveEnabled: false }) }, [archiveStep(), textStep]);
+
+    expect(toolResultsSentToModel(turn.model)).toEqual([expect.objectContaining({
+      toolName: 'tasks_archive',
+      output: unavailable('tasks_archive', ['tasks_list']),
+    })]);
+    expect(turn.wire).not.toContain('tool-approval-request');
+    expect(turn.wire).not.toContain('approvalId');
+    expect(turn.wire).toContain('Final answer.');
+    expect(turn.archive).not.toHaveBeenCalled();
+  });
+
+  it('counts in the turn metrics but not against maxToolCalls or maxConsecutiveErrors', async () => {
+    const limits = { ...localLimits, maxToolCalls: 2, maxConsecutiveErrors: 2 };
+    const turn = await runDefaultTurn(
+      { policy: roleDenied, limits },
+      [listStep('call-1'), listStep('call-2'), listStep('call-3'), textStep],
+    );
+
+    // Three calls: under the guard the turn would have stopped after the second.
+    expect(turn.model.doStreamCalls).toHaveLength(4);
+    expect(turn.wire).not.toContain('Stopped at runtime budget');
+    expect(turn.wire).toContain('Final answer.');
+    expect(turn.list).not.toHaveBeenCalled();
+    const event = turn.events[0]!;
+    expect(event).toMatchObject({
+      status: 'completed',
+      errorCode: null,
+      toolCallCount: 3,
+      toolErrorCount: 3,
+      tools: [{ toolId: LIST_TASKS_ID, calls: 3, errors: 3 }],
+    });
+    expect(TechnicalRuntimeEventV2Schema.safeParse(event).success).toBe(true);
+    expect(turn.onFinish).toHaveBeenCalledWith(expect.objectContaining({ finishReason: 'stop', expectedToolFailureCount: 0 }));
+  });
+
+  it('stops a model that keeps calling it at maxModelSteps', async () => {
+    const limits = { ...localLimits, maxModelSteps: 3 };
+    const turn = await runDefaultTurn({ policy: roleDenied, limits }, [listStep()]);
+
+    expect(turn.model.doStreamCalls).toHaveLength(3);
+    expect(turn.wire).toContain('Stopped at runtime budget: maxModelSteps.');
+    expect(turn.wire).not.toContain('"type":"error"');
+    expect(turn.list).not.toHaveBeenCalled();
+    expect(turn.onError).not.toHaveBeenCalled();
+    expect(turn.events[0]).toMatchObject({
+      status: 'safety-stop',
+      errorCode: 'budget_exhausted',
+      toolCallCount: 3,
+      toolErrorCount: 3,
+    });
+  });
+
+  it('does not reach the guard, so a terminal condition does not end the turn through such a call', async () => {
+    // The pinned agent revision is revoked from the start: nothing is offered.
+    const revocations = [securityRevocation({ agentRevisionIds: [agentRevision.revisionId] })];
+    const turn = await runDefaultTurn({ revocations }, [listStep(), textStep]);
+
+    expect(offeredNames(turn.model)).toEqual([[], []]);
+    expect(toolResultsSentToModel(turn.model)).toEqual([expect.objectContaining({
+      toolName: 'tasks_list',
+      output: unavailable('tasks_list', []),
+    })]);
+    expect(turn.wire).toContain('Final answer.');
+    expect(turn.wire).not.toContain('"type":"error"');
+    expect(turn.list).not.toHaveBeenCalled();
+    expect(turn.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('a tool offered at the start of the request and denied later in it (default authorizedToolsOnly)', () => {
+  const adminOnly = policyRevision({ listRoles: ['admin'] });
+
+  /**
+   * `tasks_list` runs in step 1; `change` runs once that step is finished,
+   * before the tools of step 2 are decided. The model then calls it again.
+   */
+  const runWithChangeAfterFirstStep = (
+    revisions: TurnRevisions,
+    steps: Array<() => ReadableStream>,
+    resolvePrincipal: ResolvePrincipal,
+    change: () => void,
+  ) => runDefaultTurn(revisions, steps, { onStepReport: () => change() }, resolvePrincipal);
+
+  it('gives the model a tool error when the role was lost, and continues the turn', async () => {
+    let roles = ['admin'];
+    const turn = await runWithChangeAfterFirstStep(
+      { policy: adminOnly, roles: ['admin'] },
+      [listStep('call-1'), listStep('call-2'), textStep],
+      async () => principal(roles),
+      () => { roles = ['member']; },
+    );
+
+    // The tool object stays in the request's tool set; only the offer narrows.
+    expect(offeredNames(turn.model)).toEqual([['tasks_archive', 'tasks_list'], ['tasks_archive'], ['tasks_archive']]);
+    expect(turn.list).toHaveBeenCalledTimes(1);
+    expect(toolResultsSentToModel(turn.model, 2)).toEqual([
+      expect.objectContaining({ toolCallId: 'call-1', output: expect.objectContaining({ type: 'json' }) }),
+      expect.objectContaining({
+        type: 'tool-result',
+        toolCallId: 'call-2',
+        toolName: 'tasks_list',
+        output: { type: 'error-text', value: 'Tool execution denied: principal_role_denied (tasks_list)' },
+      }),
+    ]);
+    expect(turn.wire).toContain('Final answer.');
+    expect(turn.wire).not.toContain('tool-approval-request');
+    expect(turn.wire).not.toContain('"type":"error"');
+    expect(turn.onError).not.toHaveBeenCalled();
+    expect(turn.onFinish).toHaveBeenCalledWith(expect.objectContaining({ finishReason: 'stop', expectedToolFailureCount: 0 }));
+    expect(turn.events[0]).toMatchObject({
+      status: 'completed',
+      toolCallCount: 2,
+      toolErrorCount: 1,
+      tools: [{ toolId: LIST_TASKS_ID, calls: 2, errors: 1 }],
+    });
+  });
+
+  it('stops repeated calls to it at maxConsecutiveErrors', async () => {
+    let roles = ['admin'];
+    const limits = { ...localLimits, maxConsecutiveErrors: 2 };
+    const turn = await runWithChangeAfterFirstStep(
+      { policy: adminOnly, roles: ['admin'], limits },
+      [listStep('call-1'), listStep('call-2'), listStep('call-3'), textStep],
+      async () => principal(roles),
+      () => { roles = ['member']; },
+    );
+
+    expect(turn.list).toHaveBeenCalledTimes(1);
+    expect(turn.wire).toContain('Stopped at runtime budget: maxConsecutiveErrors.');
+    expect(turn.events[0]).toMatchObject({
+      status: 'safety-stop',
+      errorCode: 'budget_exhausted',
+      toolCallCount: 3,
+      toolErrorCount: 2,
+    });
+  });
+
+  const otherTenant = { ...principal(), tenantId: '019fb710-0000-7000-8000-0000000000ff' };
+  const terminal: Array<{
+    label: string;
+    reason: string;
+    after: { principal?: ReturnType<typeof principal> | undefined; signedOut?: boolean; revocations?: SecurityRevocation[] };
+  }> = [
+    { label: 'the session expired', reason: 'missing_principal', after: { signedOut: true } },
+    { label: 'the tenant changed', reason: 'tenant_mismatch', after: { principal: otherTenant } },
+    { label: 'the tool was revoked', reason: 'revoked', after: { revocations: [securityRevocation({ toolIds: [LIST_TASKS_ID] })] } },
+    {
+      label: 'the pinned agent revision was revoked',
+      reason: 'revoked',
+      after: { revocations: [securityRevocation({ agentRevisionIds: [agentRevision.revisionId] })] },
+    },
+  ];
+
+  it.each(terminal)('ends the turn with $reason when $label', async ({ reason, after }) => {
+    let changed = false;
+    const turn = await runWithChangeAfterFirstStep(
+      { revocations: () => (changed ? after.revocations ?? [] : []) },
+      [listStep('call-1'), listStep('call-2'), textStep],
+      async () => {
+        if (!changed) return principal();
+        return after.signedOut ? undefined : after.principal ?? principal();
+      },
+      () => { changed = true; },
+    );
+
+    expect(offeredNames(turn.model)[0]).toEqual(['tasks_archive', 'tasks_list']);
+    expect(offeredNames(turn.model)[1]).not.toContain('tasks_list');
+    expect(turn.list).toHaveBeenCalledTimes(1);
+    // No tool error is handed to the model: it is never called again.
+    expect(turn.model.doStreamCalls).toHaveLength(2);
+    expect(turn.wire).not.toContain('"type":"tool-output-error"');
+    expect(turn.wire).toContain('"type":"error"');
+    expect(turn.wire).not.toContain('Final answer.');
+    const error = turn.onError.mock.calls[0]?.[0];
+    expect(error).toBeInstanceOf(ToolExecutionDeniedError);
+    expect(error).toMatchObject({ reason, recoverable: false });
+    expect(String(error)).toContain(`Tool execution denied: ${reason} (tasks_list)`);
+    // The call that ended the turn is a tool call of its step, but no tool error.
+    expect(turn.events[0]).toMatchObject({ toolCallCount: 2, toolErrorCount: 0 });
   });
 });
