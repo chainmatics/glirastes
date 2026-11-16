@@ -211,9 +211,11 @@ function boundedToolFailure(
   result: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
   const rawError = result.error;
-  const error = typeof rawError === 'string' && rawError.trim().length > 0
+  const cutError = typeof rawError === 'string'
     ? cutToolErrorText(rawError, MAX_TOOL_ERROR_MESSAGE_CHARS)
-    : 'Tool execution failed.';
+    : '';
+  // Also when the cut leaves nothing but whitespace.
+  const error = cutError.trim().length > 0 ? cutError : 'Tool execution failed.';
 
   const fromEndpoint = (result as { [ENDPOINT_FAILURE]?: unknown })[ENDPOINT_FAILURE] === true;
   return {
