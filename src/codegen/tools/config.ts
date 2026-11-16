@@ -51,7 +51,7 @@ const SourceSchema = z.union([
   z.object({ kind: z.literal('nest'), srcDir: appPath.optional() }).strict(),
   z.object({
     kind: z.literal('openapi'),
-    /** The exported OpenAPI 3.1 document, app-relative; `openapi.json` by default. */
+    /** The exported OpenAPI 3.0 or 3.1 JSON document, app-relative; `openapi.json` by default. */
     document: appPath.regex(/\.json$/, 'The OpenAPI document must be a .json export').optional(),
     /** The folder of the FastAPI code; its routes are counted against the export. */
     fastapi: appPath.optional(),

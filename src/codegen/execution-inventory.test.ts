@@ -478,6 +478,24 @@ describe('endpoint source kinds', () => {
     });
   });
 
+  it('verifies an OpenAPI 3.0 operation against the fingerprint of its normalized form', async () => {
+    const document = JSON.parse(OPENAPI) as { openapi: string; paths: Record<string, Record<string, Record<string, unknown>>> };
+    document.openapi = '3.0.3';
+    document.paths['/api/tasks']!.get!.parameters = [{ name: 'q', in: 'query', schema: { type: 'string', nullable: true } }];
+    const v30 = JSON.stringify(document);
+    const rootDir = await fixture({ 'api/openapi.json': v30 });
+    await expect(discoverFoundationExecutions({
+      rootDir,
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [openapiExecution(v30)] },
+    })).resolves.toMatchObject({ executions: [{ sourceKind: 'openapi' }] });
+    // The fingerprint covers the normalized schema: dropping nullable changes it.
+    const strict = v30.replace('"nullable":true', '"nullable":false');
+    await expect(discoverFoundationExecutions({
+      rootDir: await fixture({ 'api/openapi.json': strict }),
+      inventory: { schemaVersion: 2, targetAppKey: 'fixture', executions: [openapiExecution(v30)] },
+    })).rejects.toThrow(/fingerprint mismatch/);
+  });
+
   it.each([
     ['the operation is gone', OPENAPI.replace('"get"', '"post"'), /missing OpenAPI operation/],
     ['the operation changed', OPENAPI.replace('"Tasks"}', '"Open tasks"}'), /fingerprint mismatch/],

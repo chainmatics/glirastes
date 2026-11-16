@@ -1,0 +1,215 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Tasks API (OpenAPI 3.0 fixture)",
+    "description": "Synthetic OpenAPI 3.0 document in the shape @nestjs/swagger writes. Used by the tests of the openapi tool source.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/tasks": {
+      "get": {
+        "operationId": "listTasks",
+        "summary": "List tasks",
+        "description": "Lists the tasks of the signed-in user.",
+        "security": [{ "bearer": [] }],
+        "parameters": [
+          { "name": "status", "in": "query", "required": false, "schema": { "type": "string", "nullable": true, "enum": ["open", "done"] } },
+          { "name": "search", "in": "query", "required": false, "schema": { "type": "string", "nullable": true } },
+          { "name": "minScore", "in": "query", "required": false, "schema": { "type": "number", "minimum": 0, "exclusiveMinimum": true, "maximum": 10, "exclusiveMaximum": false } },
+          { "$ref": "#/components/parameters/Limit" }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tasks",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } } } }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTask",
+        "summary": "Create a task",
+        "security": [{ "api_key": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskCreate" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "The created task",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } }
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}": {
+      "get": {
+        "operationId": "getTask",
+        "summary": "Get a task",
+        "security": [{ "bearer": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/TaskId" }],
+        "responses": {
+          "200": {
+            "description": "The task, or null when it was archived",
+            "content": {
+              "application/json": {
+                "schema": { "nullable": true, "description": "The task, or null when it was archived", "allOf": [{ "$ref": "#/components/schemas/Task" }] }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "patch": {
+        "operationId": "updateTask",
+        "summary": "Update a task",
+        "security": [{ "bearer": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/TaskId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": { "type": "string", "nullable": true },
+                  "done": { "type": "boolean", "nullable": true },
+                  "position": { "type": "integer", "nullable": true },
+                  "tag": { "nullable": true, "description": "Primary tag; null removes it", "allOf": [{ "$ref": "#/components/schemas/Tag" }] }
+                },
+                "example": { "notes": null, "done": true }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated task",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } }
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}/attachments": {
+      "post": {
+        "operationId": "uploadAttachment",
+        "summary": "Attach a file to a task",
+        "security": [{ "bearer": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/TaskId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "type": "object", "properties": { "file": { "type": "string", "format": "binary" } }, "required": ["file"] }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Attached" } }
+      }
+    },
+    "/api/tags": {
+      "get": {
+        "operationId": "listTags",
+        "summary": "List tags of a workspace",
+        "security": [{ "api_key": [] }],
+        "parameters": [
+          { "name": "X-Workspace-Id", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tags",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Tag" } } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "api_key": { "type": "apiKey", "in": "header", "name": "X-API-Key" },
+      "bearer": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "parameters": {
+      "TaskId": { "name": "taskId", "in": "path", "required": true, "schema": { "type": "string" } },
+      "Limit": { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "nullable": true, "minimum": 1, "maximum": 100 } }
+    },
+    "responses": {
+      "NotFound": {
+        "description": "Not found",
+        "content": {
+          "application/json": {
+            "schema": { "type": "object", "properties": { "message": { "type": "string", "nullable": true } } }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": { "id": { "type": "string" }, "displayName": { "type": "string" } },
+        "required": ["id", "displayName"]
+      },
+      "Tag": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "color": { "type": "string", "nullable": true, "example": "#3366ff" }
+        },
+        "required": ["id", "name"]
+      },
+      "EmailReminder": {
+        "type": "object",
+        "properties": { "channel": { "type": "string", "enum": ["email"] }, "address": { "type": "string", "format": "email" } },
+        "required": ["channel", "address"]
+      },
+      "PushReminder": {
+        "type": "object",
+        "properties": { "channel": { "type": "string", "enum": ["push"] }, "device": { "type": "string" } },
+        "required": ["channel", "device"]
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "notes": { "type": "string", "nullable": true },
+          "estimate": { "type": "number", "nullable": true, "minimum": 0, "exclusiveMinimum": true },
+          "position": { "type": "integer", "nullable": true },
+          "done": { "type": "boolean", "nullable": true },
+          "meta": { "type": "object", "nullable": true, "additionalProperties": { "type": "string" } },
+          "tagIds": { "type": "array", "nullable": true, "items": { "type": "string" } },
+          "priority": { "type": "string", "nullable": true, "enum": ["low", "high"] },
+          "tag": { "nullable": true, "description": "Primary tag", "allOf": [{ "$ref": "#/components/schemas/Tag" }] },
+          "owner": { "description": "The user who owns the task", "allOf": [{ "$ref": "#/components/schemas/User" }] },
+          "nullable": { "type": "boolean", "description": "A property that happens to be named nullable" }
+        },
+        "required": ["id", "title", "owner"],
+        "example": { "id": "t-1", "title": "Write the docs", "nullable": true, "notes": null }
+      },
+      "TaskCreate": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "notes": { "type": "string", "nullable": true },
+          "priority": { "type": "string", "nullable": true, "enum": ["low", "high"] },
+          "estimate": { "type": "number", "nullable": true, "minimum": 0, "exclusiveMinimum": true, "maximum": 1000, "exclusiveMaximum": true },
+          "position": { "type": "integer", "nullable": true },
+          "done": { "type": "boolean", "nullable": true },
+          "meta": { "type": "object", "nullable": true, "additionalProperties": { "type": "string" } },
+          "tagIds": { "type": "array", "nullable": true, "items": { "type": "string" } },
+          "tag": { "nullable": true, "description": "Primary tag", "allOf": [{ "$ref": "#/components/schemas/Tag" }] },
+          "reminder": {
+            "oneOf": [{ "$ref": "#/components/schemas/EmailReminder" }, { "$ref": "#/components/schemas/PushReminder" }],
+            "discriminator": {
+              "propertyName": "channel",
+              "mapping": { "email": "#/components/schemas/EmailReminder", "push": "#/components/schemas/PushReminder" }
+            }
+          },
+          "nullable": { "type": "boolean", "description": "A property that happens to be named nullable" }
+        },
+        "required": ["title"],
+        "example": { "title": "Write the docs", "nullable": false, "priority": null }
+      }
+    }
+  }
+}

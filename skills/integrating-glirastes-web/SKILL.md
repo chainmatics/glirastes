@@ -33,9 +33,9 @@ replace the generator with a hand-written tool list.
 | URL filters of SPA views declared with `defineQueryFilters`, or `nuqs` `useQueryState` in a routed page | yes | `url-filters` |
 | NestJS controllers with Zod pipes or `createZodDto` | yes | `nest` |
 | react-router route objects (`createBrowserRouter([...])`, `useRoutes([...])`) | yes | `react-router` |
-| FastAPI (or any API) through its committed OpenAPI 3.1 JSON export | yes | `openapi` |
+| FastAPI, `@nestjs/swagger` (or any API) through its committed OpenAPI 3.0 or 3.1 JSON export | yes | `openapi` |
 | vue-router routes of `createRouter({ routes: [...] })` | yes | `vue-router` |
-| JSX `<Route>` trees, OpenAPI 3.0 or YAML exports, `<script>` blocks in another language than ts or js | not yet | report as an open gap |
+| JSX `<Route>` trees, YAML or Swagger 2.0 exports, `<script>` blocks in another language than ts or js | not yet | report as an open gap |
 
 If two NestJS controllers declare the same method and path, `glirastes tools refresh` reports one `route-declared-twice` error naming both files, gives that route no enabled tool and still generates every other tool; remove one declaration, or exclude the route with `glirastes tools policy exclude`.
 
@@ -58,7 +58,7 @@ contracts; it is not proof that its whole stack is officially supported.
    `<glirastes-chat>` and verify custom-element mounting in the target framework.
    The element still requires the React/AI SDK dependencies listed below.
 2. **Endpoints:** use `next-app` or `nest` when their source shapes match.
-   Otherwise use a committed OpenAPI 3.1 JSON export. With no supported source
+   Otherwise use a committed OpenAPI 3.0 or 3.1 JSON export. With no supported source
    or suitable export, endpoint discovery is a gap; do not invent a tool list.
 3. **Runtime:** embed in an existing suitable Node server using the handler's
    Web `Request`/`Response` contract (`glirastes/server/http`), or choose the
@@ -96,9 +96,12 @@ Regenerate the export from the backend's authoritative API/schema before
 `tools refresh`, and make CI detect stale exports. The generic source reads
 only the document; the Python source-route count is specific to `fastapi`
 and does not prove that paths or schemas with unchanged counts are current.
-OpenAPI 3.0 and YAML are not accepted by this source. Check generator findings
-for unsupported operations/schemas and authentication evidence; a valid 3.1
-file alone does not prove that every endpoint becomes an enabled tool.
+OpenAPI 3.0.x and 3.1.x JSON are accepted; a 3.0 document's `nullable` and
+boolean `exclusiveMinimum`/`exclusiveMaximum` are normalized to 3.1 on load.
+YAML and Swagger 2.0 are not. Multipart bodies stay excluded
+(`unsupported-body`). Check generator findings for unsupported
+operations/schemas and authentication evidence; a valid export
+alone does not prove that every endpoint becomes an enabled tool.
 
 ## Workflow
 

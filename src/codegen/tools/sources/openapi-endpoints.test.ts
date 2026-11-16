@@ -213,7 +213,8 @@ describe('OpenAPI endpoint source', () => {
   });
 
   it.each([
-    ['an OpenAPI 3.0 export', documentOf(TASK_PATHS).replace('"3.1.0"', '"3.0.3"'), 'is OpenAPI 3.0.3'],
+    ['an OpenAPI 3.2 export', documentOf(TASK_PATHS).replace('"3.1.0"', '"3.2.0"'), 'is OpenAPI 3.2.0'],
+    ['a Swagger 2.0 export', JSON.stringify({ swagger: '2.0', paths: {} }), 'is not an OpenAPI document'],
     ['a file that is not JSON', '{ openapi: 3.1.0 }', 'is not valid JSON'],
   ])('stops with E-INVENTORY-011 for %s', async (_label, text, reason) => {
     const observed = await observe({ 'api/openapi.json': text });
@@ -221,6 +222,64 @@ describe('OpenAPI endpoint source', () => {
     expect(observed.complete).toBe(false);
     expect(observed.findings).toEqual([expect.objectContaining({ code: 'E-INVENTORY-011', severity: 'error' })]);
     expect(observed.findings[0]!.message).toContain(`api/openapi.json ${reason}`);
+  });
+
+  it('reads an OpenAPI 3.0 export with nullable parameters as their 3.1 shape', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    paths['/api/tasks']!.get!.parameters = [
+      { name: 'status', in: 'query', required: false, schema: { type: 'string', nullable: true, enum: ['open', 'done'] } },
+    ];
+    const observed = await observe({ 'api/openapi.json': documentOf(paths).replace('"3.1.0"', '"3.0.3"') });
+
+    expect(observed.complete).toBe(true);
+    expect(observed.findings).toEqual([]);
+    const list = observed.observations.find((tool) => tool.execution.stableKey === 'GET /api/tasks')!;
+    expect(list.contract!.input).toMatchObject({
+      properties: { status: { type: ['string', 'null'], enum: ['open', 'done', null] } },
+    });
+  });
+
+  it('names the operation whose schema the runtime validator cannot compile', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    // A 3.0 keyword in a 3.1 document is kept as written, and Ajv rejects it.
+    paths['/api/tasks']!.get!.parameters = [
+      { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 0, exclusiveMinimum: true } },
+    ];
+    const observed = await observe({ 'api/openapi.json': documentOf(paths) });
+
+    expect(observed.complete).toBe(true);
+    expect(observed.findings).toEqual([expect.objectContaining({
+      code: 'schema-uncompilable', severity: 'error', subjectRef: 'GET /api/tasks',
+    })]);
+    expect(observed.findings[0]!.message).toBe(
+      'api/openapi.json GET /api/tasks has a schema the JSON Schema validator cannot compile: schema is invalid: data/properties/limit/exclusiveMinimum must be number',
+    );
+    expect(observed.observations.map((tool) => tool.execution.stableKey)).toEqual(['DELETE /api/tasks/:task_id', 'POST /api/tasks']);
+  });
+
+  it('keeps a nullable request body visible instead of reading it as an object', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    const nullableBody = { content: { 'application/json': { schema: { ...TASK_CREATE, nullable: true } } } };
+    paths['/api/tasks']!.post!.requestBody = nullableBody;
+    paths['/api/tasks/{task_id}']!.patch = {
+      security: SECURED,
+      parameters: [{ name: 'task_id', in: 'path', required: true, schema: { type: 'string' } }],
+      requestBody: nullableBody,
+      responses: { '200': { description: 'ok' } },
+    };
+    const observed = await observe({ 'api/openapi.json': documentOf(paths).replace('"3.1.0"', '"3.0.3"') });
+    const byKey = new Map(observed.observations.map((tool) => [tool.execution.stableKey, tool]));
+
+    // Alone, the body stays the whole input; the pipeline then reports
+    // input-schema-not-object and keeps the tool disabled (openapi-3-0.test.ts).
+    const create = byKey.get('POST /api/tasks')!;
+    expect(create.contract!.input).toMatchObject({ type: ['object', 'null'] });
+    // Next to a path parameter, it cannot be merged, and says so.
+    const update = byKey.get('PATCH /api/tasks/:task_id')!;
+    expect(update.contract).toBeUndefined();
+    expect(update.findings).toEqual(expect.arrayContaining([expect.objectContaining({
+      code: 'input-role-unsupported', severity: 'needs_attention',
+    })]));
   });
 });
 

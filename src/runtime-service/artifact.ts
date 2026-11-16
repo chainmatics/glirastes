@@ -151,7 +151,8 @@ async function checkOpenapiSubset(projectRoot: string): Promise<void> {
       };
       const op = data.operation;
       // Runtime validators use Ajv's draft-07 evaluator. Do not silently ignore
-      // newer validation keywords from an otherwise valid OpenAPI 3.1 schema.
+      // newer validation keywords from an otherwise valid OpenAPI 3.1 schema
+      // (or a 3.0 schema, which parseOpenapiDocument normalized to 3.1).
       const unsupportedSchemaKeys = new Set([
         "unevaluatedProperties",
         "unevaluatedItems",
@@ -257,6 +258,9 @@ async function checkOpenapiSubset(projectRoot: string): Promise<void> {
             ))
         )
           fail("structured array parameter is unsupported");
+        // A nullable parameter (3.1 `type: [T, 'null']`, or OpenAPI 3.0
+        // `nullable: true` after normalization) is a type list and stays
+        // unsupported here: the caller has no wire form for null.
         if (
           schema.anyOf ||
           schema.oneOf ||

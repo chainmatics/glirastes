@@ -49,7 +49,7 @@ export interface ResolveEndpointContractInput {
   resolution?: ResolutionEntry;
   previousContract?: ToolContract;
   /**
-   * An exported OpenAPI 3.1 operation (FastAPI): the dereferenced parameter
+   * An exported OpenAPI operation (3.1, or 3.0 normalized to 3.1): the dereferenced parameter
    * and body schemas the server validates. Read after native schemas and
    * before a sibling contract module.
    */

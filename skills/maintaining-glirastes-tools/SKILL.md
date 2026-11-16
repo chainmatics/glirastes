@@ -83,7 +83,7 @@ maintains a Node server or imports a generated TypeScript module.
 
 ## OpenAPI and configured runtime updates
 
-1. Regenerate OpenAPI 3.1 JSON from the backend's authoritative schema before
+1. Regenerate OpenAPI 3.0 or 3.1 JSON from the backend's authoritative schema before
    refreshing tools. CI must detect stale exports separately; frozen generation
    cannot detect backend changes hidden by an old document. Preserve the appId.
 2. Use the same generator, resolution, description and developer-owned policy

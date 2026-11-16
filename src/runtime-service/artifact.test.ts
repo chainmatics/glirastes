@@ -269,6 +269,50 @@ describe("runtime container artifact", () => {
     },
   );
 
+  it("builds from an OpenAPI 3.0 export and keeps nullable parameters unsupported", async () => {
+    const app = await fixture();
+    const spec = JSON.parse(await app.read("api/openapi.json"));
+    spec.openapi = "3.0.3";
+    spec.paths["/api/tasks"].get.responses["200"].content[
+      "application/json"
+    ].schema.items = {
+      type: "object",
+      properties: { notes: { type: "string", nullable: true } },
+    };
+    await app.write("api/openapi.json", JSON.stringify(spec));
+    const result = await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    expect(result.coverage.tools).toHaveLength(1);
+
+    spec.paths["/api/tasks"].get.parameters = [
+      { name: "q", in: "query", schema: { type: "string", nullable: true } },
+    ];
+    await app.write("api/openapi.json", JSON.stringify(spec));
+    await expect(
+      buildRuntimeArtifact({
+        projectRoot: app.root,
+        outputDirectory: app.path("artifact-nullable"),
+      }),
+    ).rejects.toThrow(/explicit scalar or scalar-array type/);
+  });
+
+  it("names the OpenAPI version the container build does not read", async () => {
+    const app = await fixture();
+    const spec = JSON.parse(await app.read("api/openapi.json"));
+    spec.openapi = "3.2.0";
+    await app.write("api/openapi.json", JSON.stringify(spec));
+    await expect(
+      buildRuntimeArtifact({
+        projectRoot: app.root,
+        outputDirectory: app.path("artifact"),
+      }),
+    ).rejects.toThrow(
+      "OpenAPI unsupported: is OpenAPI 3.2.0; the generator reads OpenAPI 3.0 and 3.1 exports",
+    );
+  });
+
   it("keeps explicitly ignored unsupported operations in coverage", async () => {
     const app = await fixture({
       "x-glirastes-ignore": true,
