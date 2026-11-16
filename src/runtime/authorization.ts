@@ -3,9 +3,11 @@ import type {
   ManifestRevision,
   Principal,
   RuntimePolicyRevision,
+  SecurityRevocation,
   ToolRiskClass,
 } from '../contracts/index.js';
 import { confirmationFloor } from '../contracts/tool-policy.js';
+import { isToolRevoked, type TurnSnapshot } from './turn-snapshot.js';
 
 export type ToolAuthorizationResult =
   | {
@@ -73,4 +75,51 @@ export function authorizeToolCall(options: {
     requiresApproval: confirmationFloor(policy.riskClass, policy.requiresApproval),
     riskClass: policy.riskClass,
   };
+}
+
+export type TurnToolAuthorizationResult =
+  | ToolAuthorizationResult
+  | { allowed: false; reason: 'revoked' };
+
+/**
+ * The decision for one tool of a pinned turn: `authorizeToolCall` against the
+ * pinned agent, manifest and policy revisions for the given principal, then
+ * the current revocations. The execution guard, tool discovery and the tool
+ * presentation all use it, so what a turn offers or names never differs from
+ * what it would run.
+ */
+export function authorizeTurnTool(options: {
+  snapshot: TurnSnapshot;
+  principal: Principal | undefined;
+  toolId: string;
+  revocations?: ReadonlyArray<SecurityRevocation>;
+  at?: Date;
+}): TurnToolAuthorizationResult {
+  const { snapshot } = options;
+  const authorization = authorizeToolCall({
+    principal: options.principal,
+    agentRevision: snapshot.agentRevision,
+    manifestRevision: snapshot.manifestRevision,
+    policyRevision: snapshot.policyRevision,
+    toolId: options.toolId,
+  });
+  if (!authorization.allowed) return authorization;
+  if (isToolRevoked(snapshot, options.toolId, options.revocations ?? [], options.at)) {
+    return { allowed: false, reason: 'revoked' };
+  }
+  return authorization;
+}
+
+/** The manifest tool ids of a pinned turn that `authorizeTurnTool` allows. */
+export function authorizedTurnToolIds(options: {
+  snapshot: TurnSnapshot;
+  principal: Principal | undefined;
+  revocations?: ReadonlyArray<SecurityRevocation>;
+  at?: Date;
+}): ReadonlySet<string> {
+  const allowed = new Set<string>();
+  for (const tool of options.snapshot.manifestRevision.tools) {
+    if (authorizeTurnTool({ ...options, toolId: tool.toolId }).allowed) allowed.add(tool.toolId);
+  }
+  return allowed;
 }

@@ -76,14 +76,19 @@ import {
   silentTurnFallbackText,
   withSilentTurnFallback,
 } from './silent-turn-fallback.js';
-import { toolPresentationOf } from './tool-presentation.js';
-import { PrincipalSchema } from '../../../contracts/index.js';
+import { toolPresentationOf, type ToolPresentationPart } from './tool-presentation.js';
+import {
+  PrincipalSchema,
+  type Principal,
+  type SecurityRevocation,
+} from '../../../contracts/index.js';
+import { authorizedTurnToolIds } from '../../../runtime/authorization.js';
+import { withTurnPrincipal } from '../../../runtime/turn-snapshot.js';
 import {
   createManagedTurnGuard,
   createRegistryToolDiscovery,
   createTurnMetricsRecorder,
   createTurnToolDiscovery,
-  isToolRevoked,
   rawChunkCostUsd,
   resolveStepCost,
   RuntimePriceTableSchema,
@@ -161,6 +166,13 @@ export interface StreamHandlerContext {
   managedTurn?: ManagedTurnGuard;
   /** Immutable turn-local controller for custom stream integrations. */
   toolDiscovery?: HybridToolDiscovery;
+  /**
+   * Labels of the tools the principal of this managed turn may use (pinned
+   * revisions, freshly resolved principal, current revocations). The
+   * built-in stream handler sends it as a transient `data-tool-presentation`
+   * part ahead of the answer.
+   */
+  toolPresentation?: ToolPresentationPart;
   /**
    * Identity set of SDK built-ins (`NON_DOMAIN_TOOL_NAMES`) whose tool
    * instance this handler created itself for the turn. Only these run outside
@@ -587,7 +599,7 @@ async function defaultStreamHandler(
       };
 
       // Ahead of the first chunk, so the UI can name a tool the moment it is called.
-      const presentation = toolPresentationOf(ctx.managedTurn?.snapshot.manifestRevision);
+      const presentation = ctx.toolPresentation;
       if (presentation) {
         writer.write({ type: 'data-tool-presentation', data: presentation, transient: true });
       }
@@ -1154,6 +1166,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const turnId = deriveSessionId(messages);
 
       let managedTurn: ManagedTurnGuard | undefined;
+      let managedPrincipal: Principal | undefined;
       if (managedRuntime) {
         const principalResult = PrincipalSchema.safeParse(
           await managedRuntime.resolvePrincipal(req),
@@ -1165,21 +1178,25 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           );
         }
 
-        const snapshot = await managedRuntime.resolveTurnSnapshot({
+        const resolvedSnapshot = await managedRuntime.resolveTurnSnapshot({
           request: req,
           turnId,
           principal: principalResult.data,
         });
         if (
-          snapshot.turnId !== turnId
-          || snapshot.principal.subjectId !== principalResult.data.subjectId
-          || snapshot.principal.tenantId !== principalResult.data.tenantId
+          resolvedSnapshot.turnId !== turnId
+          || resolvedSnapshot.principal.subjectId !== principalResult.data.subjectId
+          || resolvedSnapshot.principal.tenantId !== principalResult.data.tenantId
         ) {
           return new Response(
             JSON.stringify({ error: 'Turn snapshot identity mismatch' }),
             { status: 403, headers: { 'Content-Type': 'application/json' } },
           );
         }
+        // The revisions stay pinned; what the turn offers and names follows
+        // the principal of this request.
+        const snapshot = withTurnPrincipal(resolvedSnapshot, principalResult.data);
+        managedPrincipal = principalResult.data;
 
         managedTurn = createManagedTurnGuard({
           snapshot,
@@ -1203,6 +1220,28 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             startedAtMs: requestStart,
           })
         : undefined;
+
+      // Revocations as of the start of this request, loaded once for
+      // discovery and presentation; every tool call loads them again.
+      let turnRevocations: Promise<ReadonlyArray<SecurityRevocation>> | undefined;
+      const loadTurnRevocations = () => {
+        turnRevocations ??= Promise.resolve(managedTurn && managedRuntime?.loadRevocations
+          ? managedRuntime.loadRevocations({ request: req, snapshot: managedTurn.snapshot })
+          : []);
+        return turnRevocations;
+      };
+      /** Labels of the tools this principal may use in the managed turn. */
+      const managedToolPresentation = async (): Promise<ToolPresentationPart | undefined> => {
+        if (!managedTurn) return undefined;
+        return toolPresentationOf(
+          managedTurn.snapshot.manifestRevision,
+          authorizedTurnToolIds({
+            snapshot: managedTurn.snapshot,
+            principal: managedPrincipal,
+            revocations: await loadTurnRevocations(),
+          }),
+        ) ?? undefined;
+      };
 
       const buildDiscovery = async (
         registry: ToolRegistry,
@@ -1229,24 +1268,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             builtinToolNames,
           });
         }
-        const revocations = managedRuntime?.loadRevocations
-          ? await managedRuntime.loadRevocations({
-            request: req,
-            snapshot: managedTurn.snapshot,
-          })
-          : [];
-        const revokedToolIds = managedTurn.snapshot.manifestRevision.tools
-          .filter((tool) => isToolRevoked(
-            managedTurn!.snapshot,
-            tool.toolId,
-            revocations,
-          ))
-          .map((tool) => tool.toolId);
         return createHybridToolDiscovery({
           discovery: createTurnToolDiscovery({
             snapshot: managedTurn.snapshot,
             registry,
-            revokedToolIds,
+            ...(managedPrincipal ? { principal: managedPrincipal } : {}),
+            revocations: await loadTurnRevocations(),
             semantics: toolSemantics,
           }),
           initialToolNames,
@@ -1612,6 +1639,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           turnMetrics,
           modelPricing,
           toolDiscovery: discoveryController,
+          toolPresentation: await managedToolPresentation(),
           handlerBuiltinToolNames: discoveryController
             ? [...handlerBuiltinNames, 'find_tools']
             : handlerBuiltinNames,
@@ -1779,6 +1807,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         turnMetrics,
         modelPricing,
         toolDiscovery: discoveryController,
+        toolPresentation: await managedToolPresentation(),
         handlerBuiltinToolNames: discoveryController
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,

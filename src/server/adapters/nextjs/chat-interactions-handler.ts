@@ -7,9 +7,9 @@ import {
   type ChatInteractionsData,
 } from '../../../contracts/chat-interactions.js';
 import { PrincipalSchema } from '../../../contracts/index.js';
-import { authorizeToolCall } from '../../../runtime/authorization.js';
+import { authorizeTurnTool } from '../../../runtime/authorization.js';
 import { modelFacingToolName } from '../../../runtime/local-tool-bindings.js';
-import { isToolRevoked, type TurnSnapshot } from '../../../runtime/turn-snapshot.js';
+import type { TurnSnapshot } from '../../../runtime/turn-snapshot.js';
 import type { ManagedLocalRuntimeConfig } from './types.js';
 
 export interface ChatInteractionsHandlerConfig {
@@ -66,13 +66,9 @@ export function createChatInteractionsHandler(config: ChatInteractionsHandlerCon
       const manifestTool = snapshot.manifestRevision.tools.find((candidate) => (
         candidate.name === tool || modelFacingToolName(candidate.name) === modelFacingToolName(tool)
       ));
-      if (!manifestTool || isToolRevoked(snapshot, manifestTool.toolId, revocations)) return false;
-      return authorizeToolCall({
-        principal: principal.data,
-        agentRevision: snapshot.agentRevision,
-        manifestRevision: snapshot.manifestRevision,
-        policyRevision: snapshot.policyRevision,
-        toolId: manifestTool.toolId,
+      if (!manifestTool) return false;
+      return authorizeTurnTool({
+        snapshot, principal: principal.data, toolId: manifestTool.toolId, revocations,
       }).allowed;
     };
     const entities = merged.entities.flatMap((entity): ChatEntityData[] => {

@@ -1,7 +1,11 @@
-import type { ToolPresentation } from '../contracts/index.js';
+import type {
+  Principal,
+  SecurityRevocation,
+  ToolPresentation,
+} from '../contracts/index.js';
 import { riskTier } from '../contracts/tool-policy.js';
 import type { ToolRegistry } from '../types.js';
-import { authorizeToolCall } from './authorization.js';
+import { authorizeTurnTool } from './authorization.js';
 import { modelFacingToolName } from './local-tool-bindings.js';
 import { createToolSearchIndex } from './tool-search.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
@@ -133,13 +137,18 @@ function createDiscovery(
 
 /**
  * Builds a content-bounded search index from the immutable turn snapshot and
- * the already materialized local registry. Discovery neither grants access
- * nor holds an executor or schema reference.
+ * the already materialized local registry. A tool is eligible only when
+ * `authorizeTurnTool`, the decision of the execution guard, allows it for
+ * `principal` (the freshly resolved one; defaults to `snapshot.principal`)
+ * and `revocations`. Discovery neither grants access nor holds an executor
+ * or schema reference.
  */
 export function createTurnToolDiscovery(
   input: {
     snapshot: TurnSnapshot;
     registry: ToolRegistry;
+    principal?: Principal;
+    revocations?: ReadonlyArray<SecurityRevocation>;
     revokedToolIds?: ReadonlyArray<string>;
     semantics?: ToolSearchSemanticsMap;
   },
@@ -157,12 +166,11 @@ export function createTurnToolDiscovery(
     const name = modelFacingToolName(manifestTool.name);
     const binding = input.registry[name];
     const policy = policies.get(manifestTool.toolId);
-    const authorization = authorizeToolCall({
-      principal: input.snapshot.principal,
-      agentRevision: input.snapshot.agentRevision,
-      manifestRevision: input.snapshot.manifestRevision,
-      policyRevision: input.snapshot.policyRevision,
+    const authorization = authorizeTurnTool({
+      snapshot: input.snapshot,
+      principal: input.principal ?? input.snapshot.principal,
       toolId: manifestTool.toolId,
+      ...(input.revocations ? { revocations: input.revocations } : {}),
     });
     if (
       revoked.has(manifestTool.toolId)

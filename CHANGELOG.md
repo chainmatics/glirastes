@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Tool discovery (the initial active tools and `find_tools` results) and the tool labels of the `data-tool-presentation` part follow the freshly resolved principal and the current revocations, with the same decision the tool-call guard uses. The presentation part names only tools the principal may use.
+- A turn snapshot reused for a later request of the same turn keeps its pinned revisions, budget, prompt revision and start time, and carries the principal resolved for that request, so role changes take effect for discovery and for `turnSnapshot` in `systemPrompt` and tool loading. Approval scope (tenant and subject) is unchanged.
+
 ## [0.14.0] - 2026-11-15
 
 ### Added

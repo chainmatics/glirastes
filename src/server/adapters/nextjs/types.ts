@@ -115,7 +115,10 @@ export interface ManagedLocalRuntimeConfig {
 
   /**
    * Return the immutable snapshot pinned for this turn. Approval
-   * continuations must return the same snapshot for the same turnId.
+   * continuations must return the same pinned revisions for the same turnId.
+   * The handler uses the snapshot with the principal it resolved for the
+   * request, so tool discovery, tool labels and the system prompt context
+   * follow the current roles and revocations.
    */
   resolveTurnSnapshot: (
     context: ResolveTurnSnapshotContext,

@@ -147,6 +147,14 @@ const source = createLocalRuntimeSource({
 });
 ```
 
+The source pins the revisions, budget and prompt revision of a turn by its
+turn id; a continuation of the turn (for example an approval answer) runs on
+the same pin. The principal is not pinned: every request of a turn uses the
+principal resolved for that request, and tool discovery, the tool labels sent
+to the chat (`data-tool-presentation`) and every tool call follow the same
+decision (`authorizeToolCall` on the pinned revisions with that principal,
+then the current revocations).
+
 A signed decision (`toolOverrides` of the policy revision) disables a tool,
 raises its risk class, narrows its roles, requires confirmation, or replaces
 its model-facing description. It never enables a tool the code lacks or keeps

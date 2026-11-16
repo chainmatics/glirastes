@@ -7,7 +7,7 @@ import type {
   AiSdkToolFailure,
   AiSdkToolSuccess,
 } from './ai-sdk/engine.js';
-import { authorizeToolCall } from './authorization.js';
+import { authorizeTurnTool } from './authorization.js';
 import { modelFacingToolName } from './local-tool-bindings.js';
 import {
   ExecutionBudgetTracker,
@@ -15,10 +15,7 @@ import {
   type ExecutionUsage,
 } from './budget.js';
 import { createExecutionFingerprint } from './fingerprint.js';
-import {
-  isToolRevoked,
-  type TurnSnapshot,
-} from './turn-snapshot.js';
+import type { TurnSnapshot } from './turn-snapshot.js';
 
 export interface ManagedTurnBudgetSignal {
   evaluation: BudgetEvaluation;
@@ -77,20 +74,15 @@ export function createManagedTurnGuard(
   const authorize = async (call: AiSdkToolCall) => {
     const manifestTool = resolveManifestTool(call.toolName);
     const principal = await options.resolvePrincipal();
-    const authorization = authorizeToolCall({
+    const revocations = await options.loadRevocations?.(options.snapshot) ?? [];
+    const authorization = authorizeTurnTool({
+      snapshot: options.snapshot,
       principal,
-      agentRevision: options.snapshot.agentRevision,
-      manifestRevision: options.snapshot.manifestRevision,
-      policyRevision: options.snapshot.policyRevision,
       toolId: manifestTool.toolId,
+      revocations,
     });
     if (!authorization.allowed) {
       throw new Error(`Tool execution denied: ${authorization.reason} (${call.toolName})`);
-    }
-
-    const revocations = await options.loadRevocations?.(options.snapshot) ?? [];
-    if (isToolRevoked(options.snapshot, manifestTool.toolId, revocations)) {
-      throw new Error(`Tool execution denied: revoked (${call.toolName})`);
     }
 
     return { authorization, manifestTool };
