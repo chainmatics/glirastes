@@ -113,4 +113,44 @@ describe('createHybridToolDiscovery', () => {
     expect(first.activeToolNames()).toContain('reports_summary');
     expect(second.activeToolNames()).toEqual(['find_tools']);
   });
+
+  describe('with a check of what the principal may use right now', () => {
+    it('neither returns nor activates a found tool the principal may no longer use', async () => {
+      let allowed = ['tasks_list', 'reports_summary'];
+      const controller = createHybridToolDiscovery({
+        discovery: discovery(),
+        initialToolNames: ['tasks_list'],
+        currentlyAuthorized: async () => new Set(allowed),
+      });
+      allowed = ['tasks_list'];
+      const result = await controller.tool.execute({ query: 'report' });
+      expect(result).toEqual({ tools: [], note: expect.stringMatching(/no tool/i) });
+      expect(controller.activeToolNames()).toEqual(['find_tools', 'tasks_list']);
+    });
+
+    it('drops an active tool the principal may no longer use at the next search', async () => {
+      let allowed = ['tasks_list', 'reports_summary'];
+      const controller = createHybridToolDiscovery({
+        discovery: discovery(),
+        initialToolNames: ['tasks_list'],
+        builtinToolNames: ['ask_clarification'],
+        currentlyAuthorized: async () => new Set(allowed),
+      });
+      allowed = ['reports_summary'];
+      const result = await controller.tool.execute({ query: 'report' });
+      expect(result.tools.map((tool) => tool.name)).toEqual(['reports_summary']);
+      expect(controller.prepareStep()).toEqual({ activeTools: ['ask_clarification', 'find_tools', 'reports_summary'] });
+    });
+
+    it('finds nothing when the check fails', async () => {
+      const controller = createHybridToolDiscovery({
+        discovery: discovery(),
+        initialToolNames: ['tasks_list'],
+        currentlyAuthorized: async () => { throw new Error('session store down'); },
+      });
+      const result = await controller.tool.execute({ query: 'report' });
+      expect(result.tools).toEqual([]);
+      expect(controller.activeToolNames()).toEqual(['find_tools']);
+    });
+  });
 });

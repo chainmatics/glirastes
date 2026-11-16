@@ -7,6 +7,7 @@ import {
   type AiSdkApprovalGate,
 } from '../engine.js';
 import { createJsonSchemaLike } from '../../json-schema.js';
+import { ToolExecutionDeniedError } from '../../tool-denial.js';
 
 describe('createAiSdkTools', () => {
   it('passes generated JSON schemas to AI SDK with local validation', async () => {
@@ -390,5 +391,69 @@ describe('execution cancellation', () => {
     const tools = createAiSdkTools({ tools: { wait: { description: 'Wait', parameters: z.object({}), execute } } });
     await expect(tools.wait!.execute!({}, { abortSignal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
     expect(execute).not.toHaveBeenCalled();
+  });
+});
+
+describe('tool denials in the approval check', () => {
+  const deniedTools = (options: {
+    reason: ConstructorParameters<typeof ToolExecutionDeniedError>[0];
+    beforeToolCall?: () => Promise<void>;
+    onToolError?: () => Promise<void>;
+  }) => {
+    const execute = vi.fn(async () => ({ success: true }));
+    const tools = createAiSdkTools({
+      tools: { tasks_archive: { description: 'Archive.', parameters: z.object({ id: z.string() }), execute } },
+      resolveApproval: async ({ toolName }) => { throw new ToolExecutionDeniedError(options.reason, toolName); },
+      ...(options.beforeToolCall ? { beforeToolCall: options.beforeToolCall } : {}),
+      ...(options.onToolError ? { onToolError: options.onToolError } : {}),
+    });
+    const tool = tools.tasks_archive!;
+    return {
+      execute,
+      needsApproval: tool.needsApproval as (input: unknown, options: unknown) => Promise<boolean>,
+      run: (toolCallId: string) => tool.execute!({ id: 't1' }, { toolCallId }),
+    };
+  };
+
+  it('does not ask for a recoverable denial; execute refuses it with the same error', async () => {
+    const denial = (toolName: string) => new ToolExecutionDeniedError('principal_role_denied', toolName);
+    const beforeToolCall = vi.fn(async () => { throw denial('tasks_archive'); });
+    const onToolError = vi.fn(async () => undefined);
+    const tool = deniedTools({ reason: 'principal_role_denied', beforeToolCall, onToolError });
+
+    await expect(tool.needsApproval({ id: 't1' }, { toolCallId: 'c1' })).resolves.toBe(false);
+    await expect(tool.run('c1')).rejects.toThrow('Tool execution denied: principal_role_denied (tasks_archive)');
+    expect(beforeToolCall).toHaveBeenCalledTimes(1);
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it('never runs a call whose approval check was denied, even if the guard allows it at execution', async () => {
+    const beforeToolCall = vi.fn(async () => undefined);
+    const onToolError = vi.fn(async () => undefined);
+    const tool = deniedTools({ reason: 'policy_tool_denied', beforeToolCall, onToolError });
+
+    await expect(tool.needsApproval({ id: 't1' }, { toolCallId: 'c1' })).resolves.toBe(false);
+    await expect(tool.run('c1')).rejects.toMatchObject({ reason: 'policy_tool_denied' });
+    expect(tool.execute).not.toHaveBeenCalled();
+    expect(onToolError).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: 'tasks_archive',
+      error: expect.objectContaining({ reason: 'policy_tool_denied' }),
+    }));
+  });
+
+  it.each(['revoked', 'missing_principal', 'tenant_mismatch'] as const)(
+    'keeps a %s denial terminal in the approval check',
+    async (reason) => {
+      const tool = deniedTools({ reason, beforeToolCall: async () => undefined });
+      await expect(tool.needsApproval({ id: 't1' }, { toolCallId: 'c1' })).rejects.toMatchObject({ reason });
+    },
+  );
+
+  it('keeps a recoverable denial terminal without a guard or a tool call id', async () => {
+    await expect(deniedTools({ reason: 'principal_role_denied' }).needsApproval({ id: 't1' }, { toolCallId: 'c1' }))
+      .rejects.toMatchObject({ reason: 'principal_role_denied' });
+    await expect(deniedTools({ reason: 'principal_role_denied', beforeToolCall: async () => undefined })
+      .needsApproval({ id: 't1' }, {}))
+      .rejects.toMatchObject({ reason: 'principal_role_denied' });
   });
 });

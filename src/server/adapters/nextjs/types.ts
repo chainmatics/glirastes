@@ -18,7 +18,7 @@ import type { Lancer } from '../../lancer/index.js';
 import type { ApprovalStore } from './approval-binding.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions } from './prepare-model-messages.js';
-import type { ClarificationConfig, InternalApiCaller, PlanningConfig } from '../../core/index.js';
+import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ToolFailureClassifier } from '../../core/index.js';
 import type {
   Principal,
   SecurityRevocation,
@@ -115,7 +115,11 @@ export interface ManagedLocalRuntimeConfig {
 
   /**
    * Return the immutable snapshot pinned for this turn. Approval
-   * continuations must return the same snapshot for the same turnId.
+   * continuations must return the same pinned revisions for the same turnId.
+   * The handler uses the snapshot with the principal it resolved for the
+   * request, so tool discovery, tool labels and the system prompt context
+   * follow the roles and revocations as of the start of the request; the
+   * tools offered per model step and `find_tools` follow the current ones.
    */
   resolveTurnSnapshot: (
     context: ResolveTurnSnapshotContext,
@@ -190,6 +194,29 @@ export interface AiChatHandlerConfig {
    * app-authorized tool set. false preserves static scoping.
    */
   toolDiscovery?: boolean;
+
+  /**
+   * With managedRuntime (default `true`): the model and the stream handler
+   * get only the handler's built-ins and the manifest tools the principal
+   * may use, by the decision of the tool-call guard (`authorizeTurnTool`)
+   * on the pinned revisions: decided at the start of the request, and
+   * again before every model step with a freshly resolved principal and
+   * freshly loaded revocations. Name, description and input schema of any
+   * other tool never reach the model. A legacy `intentRouter` and the
+   * built-in start-set routing get the same names. `false` hands over
+   * every registry tool, as before this option existed; the guard still
+   * denies their calls. No effect without managedRuntime.
+   *
+   * NOT filtered, because it is server-side app data: `routing` and
+   * `pipelineResult` (`model` and `systemPrompt` callbacks,
+   * `onPipelineResult`, a custom `streamHandler`; they carry the tool names
+   * of the app's own `pipeline` modules and router result), `turnSnapshot`
+   * with the whole pinned manifest (`systemPrompt` callback, the endpoint
+   * tool context of `loadTools` and of every tool's `execute`) and
+   * `managedTurn.snapshot` (custom `streamHandler`). An app that forwards
+   * any of it to a model names tools the principal may not use.
+   */
+  authorizedToolsOnly?: boolean;
 
   /**
    * Built-in start-set routing for `toolDiscovery` without `intentRouter`
@@ -344,6 +371,25 @@ export interface AiChatHandlerConfig {
   onError?: (error: unknown, req: Request) => void;
   onToolError?: (toolId: string, error: unknown) => void;
   /**
+   * Classifies a failed backend call of an endpoint tool (non-2xx response)
+   * as `'error'` (the default) or `'expected'`, e.g. a 403 for a user
+   * without the role or an app error code in the body. Receives the
+   * endpoint tool's `toolName`, the HTTP status and the FULL parsed response
+   * body. Synchronous; a throw or any other return value counts as
+   * `'error'`. Not called for thrown errors (timeout, network, response
+   * size) or for calls the endpoint caller refused locally.
+   *
+   * An expected failure still counts as a tool call, but neither increments
+   * nor resets the `maxConsecutiveErrors` budget of `managedRuntime`, and is
+   * not a tool error in `metrics` (`toolErrorCount`, per-tool `errors`). It
+   * is counted locally only, in `onFinish`'s `expectedToolFailureCount`;
+   * nothing about it is sent to the Platform. A direct command is classified
+   * too but never calls `onFinish`, so its expected failure is not counted. Without `managedRuntime` there
+   * is no consecutive-error budget, so it only affects metrics. Without this
+   * option every failure counts as an error, as before.
+   */
+  classifyToolFailure?: ToolFailureClassifier;
+  /**
    * Called after pipeline classification and tool scoping, before streaming.
    * Use this to log which intent, module, model, and tools were selected.
    */
@@ -360,6 +406,11 @@ export interface AiChatHandlerConfig {
     wasTruncated: boolean;
     maxSteps: number;
     stepLimitSource: StepLimitSource;
+    /**
+     * Tool calls of the turn that ended in a failure `classifyToolFailure`
+     * classified as expected. Local only; never sent to the Platform.
+     */
+    expectedToolFailureCount: number;
   }) => void;
 
   /**

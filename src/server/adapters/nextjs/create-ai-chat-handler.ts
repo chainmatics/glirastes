@@ -76,14 +76,21 @@ import {
   silentTurnFallbackText,
   withSilentTurnFallback,
 } from './silent-turn-fallback.js';
-import { toolPresentationOf } from './tool-presentation.js';
-import { PrincipalSchema } from '../../../contracts/index.js';
+import { toolPresentationOf, type ToolPresentationPart } from './tool-presentation.js';
+import {
+  PrincipalSchema,
+  type Principal,
+  type SecurityRevocation,
+} from '../../../contracts/index.js';
+import { z } from 'zod';
+import { authorizedTurnToolIds } from '../../../runtime/authorization.js';
+import { modelFacingToolName } from '../../../runtime/local-tool-bindings.js';
+import { withTurnPrincipal } from '../../../runtime/turn-snapshot.js';
 import {
   createManagedTurnGuard,
   createRegistryToolDiscovery,
   createTurnMetricsRecorder,
   createTurnToolDiscovery,
-  isToolRevoked,
   rawChunkCostUsd,
   resolveStepCost,
   RuntimePriceTableSchema,
@@ -92,6 +99,7 @@ import {
   type RuntimePriceTable,
   type TurnMetricsRecorder,
 } from '../../../runtime/index.js';
+import { toolResultFailure } from '../../../runtime/tool-failure.js';
 import {
   createHybridToolDiscovery,
   NON_DOMAIN_TOOL_NAMES,
@@ -161,6 +169,23 @@ export interface StreamHandlerContext {
   managedTurn?: ManagedTurnGuard;
   /** Immutable turn-local controller for custom stream integrations. */
   toolDiscovery?: HybridToolDiscovery;
+  /**
+   * Labels of the tools the principal of this managed turn may use (pinned
+   * revisions, principal and revocations as of the start of the request). The
+   * built-in stream handler sends it as a transient `data-tool-presentation`
+   * part ahead of the answer.
+   */
+  toolPresentation?: ToolPresentationPart;
+  /**
+   * Set in a managed turn (unless `authorizedToolsOnly: false` without
+   * `toolDiscovery`): the names in `tools` the principal may use right now,
+   * that is the handler's built-ins plus the manifest tools the guard's
+   * decision allows for a freshly resolved principal and freshly loaded
+   * revocations. Only the built-ins when the principal cannot be resolved.
+   * The built-in stream handler asks it before every model step and offers
+   * no other tool; a custom one should intersect its `activeTools` with it.
+   */
+  authorizedToolNames?: () => Promise<ReadonlySet<string>>;
   /**
    * Identity set of SDK built-ins (`NON_DOMAIN_TOOL_NAMES`) whose tool
    * instance this handler created itself for the turn. Only these run outside
@@ -291,26 +316,22 @@ function stepModelId(event: unknown): string | null {
 }
 
 /**
- * Names of the tool calls of a step that failed: thrown errors and the
- * `{ error }` results SDK tools return. Only names leave this function.
+ * Names of the tool calls of a step that failed (`'error'`: thrown errors
+ * and the `{ error }` results SDK tools return) or ended in a failure the
+ * app classified as expected (`'expected'`). Only names leave this function.
  */
-function failedToolNames(content: ReadonlyArray<unknown>): string[] {
+function failedToolNames(
+  content: ReadonlyArray<unknown>,
+  kind: 'error' | 'expected' = 'error',
+): string[] {
   const names: string[] = [];
   for (const part of content) {
     const record = part as { type?: unknown; toolName?: unknown; output?: unknown };
     if (typeof record?.toolName !== 'string') continue;
-    const output = record.output as { error?: unknown } | null | undefined;
-    if (
-      record.type === 'tool-error'
-      || (
-        record.type === 'tool-result'
-        && typeof output === 'object'
-        && output !== null
-        && typeof output.error === 'string'
-      )
-    ) {
-      names.push(record.toolName);
-    }
+    const outcome = record.type === 'tool-error'
+      ? 'error'
+      : record.type === 'tool-result' ? toolResultFailure(record.output) : undefined;
+    if (outcome === kind) names.push(record.toolName);
   }
   return names;
 }
@@ -587,7 +608,7 @@ async function defaultStreamHandler(
       };
 
       // Ahead of the first chunk, so the UI can name a tool the moment it is called.
-      const presentation = toolPresentationOf(ctx.managedTurn?.snapshot.manifestRevision);
+      const presentation = ctx.toolPresentation;
       if (presentation) {
         writer.write({ type: 'data-tool-presentation', data: presentation, transient: true });
       }
@@ -612,13 +633,18 @@ async function defaultStreamHandler(
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
-        prepareStep: () => {
+        prepareStep: async () => {
           if (budgetExhausted()) {
             return { activeTools: [], toolChoice: 'none' as const };
           }
-          return ctx.toolDiscovery
-            ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
-            : {};
+          // A role lost or a revocation loaded since the request started
+          // takes the tool away from the next step, not only from its call.
+          const permitted = await ctx.authorizedToolNames?.();
+          const active = ctx.toolDiscovery
+            ? [...ctx.toolDiscovery.activeToolNames()]
+            : permitted ? Object.keys(orderedTools) : undefined;
+          if (!active) return {};
+          return { activeTools: permitted ? active.filter((name) => permitted.has(name)) : active };
         },
         maxOutputTokens: ctx.maxOutputTokens,
         temperature: ctx.temperature,
@@ -786,6 +812,10 @@ async function defaultStreamHandler(
             wasTruncated,
             maxSteps: ctx.maxSteps,
             stepLimitSource: ctx.stepLimitSource,
+            expectedToolFailureCount: event.steps.reduce(
+              (count, step) => count + failedToolNames(step.content, 'expected').length,
+              0,
+            ),
           });
         },
       });
@@ -884,11 +914,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     wrapHandler,
     onError: onErrorConfig,
     onToolError,
+    classifyToolFailure,
     onPipelineResult,
     onStepReport,
     onFinish,
     streamHandler: customStreamHandler,
     toolDiscovery: enableToolDiscovery = false,
+    authorizedToolsOnly = true,
     toolSemantics,
     metrics,
     modelPricing: configuredModelPricing,
@@ -1014,6 +1046,30 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     const kept = { ...scoped };
     for (const name of ALWAYS_ON_BUILTINS) {
       if (source[name]) kept[name] = source[name];
+    }
+    return kept;
+  };
+  /**
+   * Keeps the tools with an approval verified for this request next to a
+   * scoped selection. An approval verified (and consumed) for this request
+   * answers a call that an earlier request already routed. Routing for this
+   * request must not drop that tool: the AI SDK runs approved calls from
+   * `tools` (not `activeTools`) and drops an approved call whose tool is
+   * missing without a tool result, which leaves the earlier call unanswered.
+   * `source` is the unscoped set after `offeredTools`, so a tool the
+   * principal may no longer use comes back as its stub and the guard ends
+   * the call as a tool error. Only tools with a verified approval come back;
+   * a new call to one of them still needs its own approval.
+   */
+  const keepApproved = <T,>(
+    scoped: Record<string, T>,
+    source: Record<string, T>,
+    verified: ReadonlyArray<VerifiedApproval>,
+  ) => {
+    let kept = scoped;
+    for (const { toolName } of verified) {
+      const approvedTool = source[toolName];
+      if (approvedTool && !kept[toolName]) kept = { ...kept, [toolName]: approvedTool };
     }
     return kept;
   };
@@ -1154,6 +1210,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const turnId = deriveSessionId(messages);
 
       let managedTurn: ManagedTurnGuard | undefined;
+      let managedPrincipal: Principal | undefined;
+      /** The manifest tool ids the guard would allow right now; empty when that cannot be decided. */
+      let currentToolIds: () => Promise<ReadonlySet<string>> = async () => new Set();
       if (managedRuntime) {
         const principalResult = PrincipalSchema.safeParse(
           await managedRuntime.resolvePrincipal(req),
@@ -1165,35 +1224,53 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           );
         }
 
-        const snapshot = await managedRuntime.resolveTurnSnapshot({
+        const resolvedSnapshot = await managedRuntime.resolveTurnSnapshot({
           request: req,
           turnId,
           principal: principalResult.data,
         });
         if (
-          snapshot.turnId !== turnId
-          || snapshot.principal.subjectId !== principalResult.data.subjectId
-          || snapshot.principal.tenantId !== principalResult.data.tenantId
+          resolvedSnapshot.turnId !== turnId
+          || resolvedSnapshot.principal.subjectId !== principalResult.data.subjectId
+          || resolvedSnapshot.principal.tenantId !== principalResult.data.tenantId
         ) {
           return new Response(
             JSON.stringify({ error: 'Turn snapshot identity mismatch' }),
             { status: 403, headers: { 'Content-Type': 'application/json' } },
           );
         }
+        // The revisions stay pinned; what the turn offers and names follows
+        // the principal of this request.
+        const snapshot = withTurnPrincipal(resolvedSnapshot, principalResult.data);
+        managedPrincipal = principalResult.data;
 
+        const resolveCurrentPrincipal = async () => {
+          const current = PrincipalSchema.safeParse(
+            await managedRuntime.resolvePrincipal(req),
+          );
+          return current.success ? current.data : undefined;
+        };
+        const loadCurrentRevocations = managedRuntime.loadRevocations
+          ? () => managedRuntime.loadRevocations!({ request: req, snapshot })
+          : undefined;
         managedTurn = createManagedTurnGuard({
           snapshot,
-          resolvePrincipal: async () => {
-            const current = PrincipalSchema.safeParse(
-              await managedRuntime.resolvePrincipal(req),
-            );
-            return current.success ? current.data : undefined;
-          },
-          loadRevocations: managedRuntime.loadRevocations
-            ? () => managedRuntime.loadRevocations!({ request: req, snapshot })
-            : undefined,
+          resolvePrincipal: resolveCurrentPrincipal,
+          loadRevocations: loadCurrentRevocations,
           onBudgetSignal: managedRuntime.onBudgetSignal,
         });
+        // The same sources as the guard, asked again; fails closed.
+        currentToolIds = async () => {
+          try {
+            return authorizedTurnToolIds({
+              snapshot,
+              principal: await resolveCurrentPrincipal(),
+              revocations: await loadCurrentRevocations?.() ?? [],
+            });
+          } catch {
+            return new Set();
+          }
+        };
       }
 
       turnMetrics = metrics
@@ -1203,6 +1280,97 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             startedAtMs: requestStart,
           })
         : undefined;
+
+      // Revocations as of the start of this request, loaded once for the tool
+      // set, the discovery index and the presentation; every model step,
+      // `find_tools` search and tool call loads them again.
+      let turnRevocations: Promise<ReadonlyArray<SecurityRevocation>> | undefined;
+      const loadTurnRevocations = () => {
+        turnRevocations ??= Promise.resolve(managedTurn && managedRuntime?.loadRevocations
+          ? managedRuntime.loadRevocations({ request: req, snapshot: managedTurn.snapshot })
+          : []);
+        return turnRevocations;
+      };
+      /** Registry keys are the model-safe encoding of the manifest names. */
+      const manifestToolNames = (toolIds: ReadonlySet<string>) =>
+        (managedTurn?.snapshot.manifestRevision.tools ?? [])
+          .filter((tool) => toolIds.has(tool.toolId))
+          .map((tool) => modelFacingToolName(tool.name));
+      /**
+       * What `offeredTools` decided at the start of the request, decided
+       * again for the next model step or `find_tools` search with the
+       * principal and revocations of that moment.
+       */
+      const currentToolNames = async (builtinNames: ReadonlyArray<string>) =>
+        new Set([...builtinNames, ...manifestToolNames(await currentToolIds())]);
+      /**
+       * Whether a registry name belongs to what a managed turn offers: the
+       * handler's own built-ins and the manifest tools this principal may
+       * use, as of the start of this request. `undefined` when nothing is
+       * left out (`authorizedToolsOnly: false`, unmanaged turns).
+       */
+      const offeredNameCheck = async (
+        builtinNames: ReadonlyArray<string>,
+      ): Promise<((name: string) => boolean) | undefined> => {
+        if (!managedTurn || !authorizedToolsOnly) return undefined;
+        const allowedNames = new Set(manifestToolNames(authorizedTurnToolIds({
+          snapshot: managedTurn.snapshot,
+          principal: managedPrincipal,
+          revocations: await loadTurnRevocations(),
+        })));
+        return (name) => builtinNames.includes(name) || allowedNames.has(name);
+      };
+      /**
+       * The tools a managed turn hands to the stream handler and the model:
+       * the handler's own built-ins and the manifest tools this principal may
+       * use (`authorizedTurnToolIds`, principal and revocations as of the
+       * start of this request; `currentToolNames` narrows it per step).
+       * Everything else in the registry would be denied by the guard and is
+       * not named to the model at all.
+       * `authorizedToolsOnly: false` and unmanaged turns keep every tool.
+       *
+       * The AI SDK drops an approved call whose tool is missing without a
+       * tool result, which leaves the earlier tool call unanswered. So a
+       * tool with an approval verified for this request stays in the set
+       * even when the principal may no longer use it, as a stub: the
+       * neutral description 'This tool is not available.' and an input
+       * schema that accepts any object replace its own, so neither reaches
+       * the model. The guard then ends the approved call as a tool error. Its name is in the history of this turn
+       * already.
+       */
+      const offeredTools = async <T,>(
+        aiTools: Record<string, T>,
+        builtinNames: ReadonlyArray<string>,
+        verified: ReadonlyArray<VerifiedApproval>,
+      ): Promise<Record<string, T>> => {
+        const isOffered = await offeredNameCheck(builtinNames);
+        if (!isOffered) return aiTools;
+        const offered: Record<string, T> = {};
+        for (const [name, tool] of Object.entries(aiTools)) {
+          if (isOffered(name)) {
+            offered[name] = tool;
+          } else if (verified.some((approval) => approval.toolName === name)) {
+            offered[name] = {
+              ...tool,
+              description: 'This tool is not available.',
+              parameters: z.object({}).passthrough(),
+            };
+          }
+        }
+        return offered;
+      };
+      /** Labels of the tools this principal may use in the managed turn. */
+      const managedToolPresentation = async (): Promise<ToolPresentationPart | undefined> => {
+        if (!managedTurn) return undefined;
+        return toolPresentationOf(
+          managedTurn.snapshot.manifestRevision,
+          authorizedTurnToolIds({
+            snapshot: managedTurn.snapshot,
+            principal: managedPrincipal,
+            revocations: await loadTurnRevocations(),
+          }),
+        ) ?? undefined;
+      };
 
       const buildDiscovery = async (
         registry: ToolRegistry,
@@ -1229,28 +1397,17 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             builtinToolNames,
           });
         }
-        const revocations = managedRuntime?.loadRevocations
-          ? await managedRuntime.loadRevocations({
-            request: req,
-            snapshot: managedTurn.snapshot,
-          })
-          : [];
-        const revokedToolIds = managedTurn.snapshot.manifestRevision.tools
-          .filter((tool) => isToolRevoked(
-            managedTurn!.snapshot,
-            tool.toolId,
-            revocations,
-          ))
-          .map((tool) => tool.toolId);
         return createHybridToolDiscovery({
           discovery: createTurnToolDiscovery({
             snapshot: managedTurn.snapshot,
             registry,
-            revokedToolIds,
+            ...(managedPrincipal ? { principal: managedPrincipal } : {}),
+            revocations: await loadTurnRevocations(),
             semantics: toolSemantics,
           }),
           initialToolNames,
           builtinToolNames,
+          currentlyAuthorized: () => currentToolNames([]),
         });
       };
 
@@ -1304,6 +1461,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             ? { turnSnapshot: managedTurn.snapshot }
             : {}),
           ...contractRejectionReporter(turnMetrics),
+          ...(classifyToolFailure ? { classifyToolFailure } : {}),
         };
         const registry = staticTools ?? await loadTools!(endpointToolContext);
         const commandScope = await requestApprovalScope(req, managedTurn);
@@ -1358,6 +1516,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             ? { turnSnapshot: managedTurn.snapshot }
             : {}),
           ...contractRejectionReporter(turnMetrics),
+          ...(classifyToolFailure ? { classifyToolFailure } : {}),
         };
 
         // Get tools (static or dynamic)
@@ -1457,7 +1616,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           : await buildDiscovery(registry, initialToolNames, handlerBuiltinNames);
 
         // Convert all tools to AI tools
-        let aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
+        let aiTools = await offeredTools(
+          await toolsToAiTools(registry, endpointToolContext, toolOptions),
+          handlerBuiltinNames,
+          pipelineApprovals.verified,
+        );
         const unscopedAiTools = aiTools;
 
         // Scope tools to pipeline selection
@@ -1475,18 +1638,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           // focused selection.
           aiTools = keepAlwaysOn(aiTools, unscopedAiTools);
         }
-        // An approval verified (and consumed) above answers a call that an
-        // earlier request already routed. Routing for this request must not
-        // turn that approved call into a tool error, so its tool stays in the
-        // set (the AI SDK runs approved calls from `tools`, not `activeTools`).
-        // Only tools with a verified approval come back; a new call to one of
-        // them still needs its own approval. A guardrail block keeps no tools,
-        // so the approved call then ends as a tool error and is not run.
+        // Routing for this request must not drop the tool of an approval
+        // verified above (see `keepApproved`). A guardrail block keeps no
+        // tools, so the approved call then ends as a tool error and is not run.
         if (!pipelineResult.blocked) {
-          for (const { toolName } of pipelineApprovals.verified) {
-            const approvedTool = unscopedAiTools[toolName];
-            if (approvedTool && !aiTools[toolName]) aiTools = { ...aiTools, [toolName]: approvedTool };
-          }
+          aiTools = keepApproved(aiTools, unscopedAiTools, pipelineApprovals.verified);
         }
 
         // Resolve model — config callback > pipeline instance > error
@@ -1612,6 +1768,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           turnMetrics,
           modelPricing,
           toolDiscovery: discoveryController,
+          toolPresentation: await managedToolPresentation(),
+          ...(managedTurn && (authorizedToolsOnly || discoveryController)
+            ? {
+                authorizedToolNames: () => currentToolNames(discoveryController
+                  ? [...handlerBuiltinNames, 'find_tools']
+                  : handlerBuiltinNames),
+              }
+            : {}),
           handlerBuiltinToolNames: discoveryController
             ? [...handlerBuiltinNames, 'find_tools']
             : handlerBuiltinNames,
@@ -1632,6 +1796,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ? { turnSnapshot: managedTurn.snapshot }
           : {}),
         ...contractRejectionReporter(turnMetrics),
+        ...(classifyToolFailure ? { classifyToolFailure } : {}),
       };
 
       // Load tools
@@ -1645,7 +1810,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool, planTool]);
       const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
       processedMessages = legacyApprovals.messages;
-      const allToolNames = Object.keys(registry)
+      // Routing sees what the model may see: a consumer router can hand the
+      // names on to a model of its own, so a managed turn names only the
+      // tools it offers (see `offeredTools`).
+      const isOffered = await offeredNameCheck(handlerBuiltinNames);
+      const routableRegistry: ToolRegistry = isOffered
+        ? Object.fromEntries(Object.entries(registry).filter(([name]) => isOffered(name)))
+        : registry;
+      const allToolNames = Object.keys(routableRegistry)
         .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
 
       // PII Shield: anonymize for legacy mode
@@ -1667,7 +1839,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // this principal may use and can always widen it.
         const manifest = managedTurn?.snapshot.manifestRevision;
         defaultStartToolNames = defaultIntentRouterFor({
-          registry,
+          registry: routableRegistry,
           ...(manifest ? { manifest: { revisionId: manifest.revisionId, tools: manifest.tools } } : {}),
           semantics: toolSemantics,
           ...(typeof intentRouting === 'object' ? { options: intentRouting } : {}),
@@ -1678,7 +1850,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
 
       // Convert to AI tools
-      let aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
+      const convertTools = async () => offeredTools(
+        await toolsToAiTools(registry, endpointToolContext, toolOptions),
+        handlerBuiltinNames,
+        legacyApprovals.verified,
+      );
+      let aiTools = await convertTools();
 
       // Scope tools by intent
       if (routing?.toolNames && routing.toolNames.length > 0) {
@@ -1687,7 +1864,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           if (aiTools[name]) scoped[name] = aiTools[name];
         }
         if (Object.keys(scoped).length > 0) {
-          aiTools = keepAlwaysOn(scoped, aiTools);
+          // The router is not asked about the tool of an approval verified
+          // above (it only gets the names this turn offers), and need not
+          // select it for this request: it stays (see `keepApproved`).
+          aiTools = keepApproved(keepAlwaysOn(scoped, aiTools), aiTools, legacyApprovals.verified);
         }
       }
 
@@ -1699,7 +1879,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (discoveryController) {
         // Discovery needs the full eligible server-side set; `activeTools`
         // preserves the intent router's fast initial scope.
-        aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
+        aiTools = await convertTools();
       }
 
       // Resolve model + system prompt (legacy mode — no pipeline fallback)
@@ -1779,6 +1959,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         turnMetrics,
         modelPricing,
         toolDiscovery: discoveryController,
+        toolPresentation: await managedToolPresentation(),
+        ...(managedTurn && (authorizedToolsOnly || discoveryController)
+          ? {
+              authorizedToolNames: () => currentToolNames(discoveryController
+                ? [...handlerBuiltinNames, 'find_tools']
+                : handlerBuiltinNames),
+            }
+          : {}),
         handlerBuiltinToolNames: discoveryController
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,

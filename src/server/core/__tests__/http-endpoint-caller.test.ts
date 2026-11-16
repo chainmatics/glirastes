@@ -107,7 +107,7 @@ describe('createHttpEndpointCaller', () => {
     const caller = createHttpEndpointCaller({ baseUrl: 'http://127.0.0.1:4000', fetchImpl });
 
     expect(await caller({ method: 'GET', path })).toEqual({
-      ok: false, status: 400, error: 'Endpoint path must be relative to the API',
+      ok: false, status: 400, error: 'Endpoint path must be relative to the API', refusedLocally: true,
     });
     expect(fetchImpl).not.toHaveBeenCalled();
   });

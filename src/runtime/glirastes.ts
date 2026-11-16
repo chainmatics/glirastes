@@ -43,6 +43,7 @@ import { resolveRuntimeConnectionConfig } from './runtime-mode.js';
 import { resolveLocalLimits, type LocalLimits } from './local-limits.js';
 import { SDK_VERSION } from './sdk-version.js';
 import type { ToolSearchSemanticsMap } from './tool-discovery.js';
+import type { ToolFailureClassifier } from './tool-failure.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
 
 const DEFAULT_FIRST_SYNC_TIMEOUT_MS = 5_000;
@@ -84,6 +85,13 @@ export interface CreateGlirastesOptions {
   pollIntervalMs?: number;
   /** How long `ready()` waits for the first sync (default 5 s). */
   firstSyncTimeoutMs?: number;
+  /**
+   * Classifies failed backend calls of endpoint tools as `'error'` or
+   * `'expected'`; `chatTurn()` hands it to `createAiChatHandler` (see
+   * `AiChatHandlerConfig.classifyToolFailure`). Expected failures are
+   * counted locally only and never sent to the Platform.
+   */
+  classifyToolFailure?: ToolFailureClassifier;
   /** Options for the metrics sink, or false to send no metrics. */
   metrics?: Omit<
     RuntimeMetricsSinkOptions,
@@ -107,6 +115,7 @@ export interface GlirastesChatTurn {
   loadTools: (context: { turnSnapshot?: TurnSnapshot }) => ToolRegistry;
   toolSemantics?: ToolSearchSemanticsMap;
   metrics?: RuntimeMetricsSink;
+  classifyToolFailure?: ToolFailureClassifier;
 }
 
 export interface Glirastes {
@@ -541,6 +550,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           ? { toolSemantics: options.generated.toolSearchSemantics }
           : {}),
         ...(currentMetrics ? { metrics: currentMetrics } : {}),
+        ...(options.classifyToolFailure ? { classifyToolFailure: options.classifyToolFailure } : {}),
       };
     },
     async stop() {

@@ -23,6 +23,7 @@ it. The type's JSDoc carries the full detail.
 | `loadTools` | `LoadTools` callback that builds the registry per request |
 | `managedRuntime` | `ManagedLocalRuntimeConfig`: verified principal, pinned turn snapshot, local guard per tool call |
 | `toolDiscovery` | local `find_tools` recovery |
+| `authorizedToolsOnly` | with `managedRuntime` (default `true`): the model gets only built-ins and the manifest tools the principal may use, checked again before every model step; `false` hands over every registry tool, the guard still refuses the calls |
 | `intentRouting` | start-set routing for `toolDiscovery` (default on); `DefaultIntentRoutingOptions` tunes it |
 | `toolSemantics` | search-only synonyms per model-facing tool name |
 | `directCommands` | `/` commands and entity actions run without a model call (default `true`) |
@@ -85,7 +86,8 @@ it. The type's JSDoc carries the full detail.
 | --- | --- |
 | `onError` | request failed |
 | `onToolError` | a tool threw |
-| `onFinish` | steps, finish reason, token usage, truncation and `StepLimitSource` |
+| `classifyToolFailure` | `ToolFailureClassifier`: gets `ToolFailureInfo` (`toolName`, HTTP `status`, full parsed `body`) of a failed backend call and returns a `ToolFailureClassification`, `'expected'` or `'error'`; expected failures skip `maxConsecutiveErrors` and metric errors, counted locally only; never applies to managed-guard denials, which always count as errors; also on `createGlirastes`; not in the runtime container |
+| `onFinish` | steps, finish reason, token usage, truncation, `StepLimitSource` and the local `expectedToolFailureCount` |
 | `emitStepReports` | `data-step-report` stream parts (default on) |
 | `onStepReport` | one `PipelineStepReport` per step |
 | `onPipelineResult` | intent, module, model and tools chosen by `pipeline` |

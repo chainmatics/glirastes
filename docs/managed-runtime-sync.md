@@ -147,6 +147,60 @@ const source = createLocalRuntimeSource({
 });
 ```
 
+The source pins the revisions, budget and prompt revision of a turn by its
+turn id; a continuation of the turn (for example an approval answer) runs on
+the same pin. The principal is not pinned: every request of a turn uses the
+principal resolved for that request, and tool discovery, the tool labels sent
+to the chat (`data-tool-presentation`) and every tool call follow the same
+decision (`authorizeToolCall` on the pinned revisions with that principal,
+then the current revocations).
+
+The model of a managed turn gets only the tools this decision allows, plus
+the handler's own built-ins (clarification, plan, follow-ups, `find_tools`):
+name, description and input schema of a tool the principal may not use, a
+revoked tool or a registry tool outside the pinned manifest never reach it.
+This holds with and without `toolDiscovery`. The tool set is decided at the
+start of a request, with the principal and revocations of that moment. Before
+every model step and on every `find_tools` search the handler resolves the
+principal and loads the revocations again, as the guard does before every
+call: a role lost or a revocation loaded in the middle of a multi-step request
+takes the tool away from the next step and the next search, and a principal
+that cannot be resolved any more leaves only the built-ins. The tool labels
+(`data-tool-presentation`) are sent once, as of the start of the request. A
+custom `streamHandler` gets the per-step check as `authorizedToolNames` in
+its context and has to intersect its active tools with it. A legacy
+`intentRouter` gets only these tool names as well (as of the start of the
+request), since it may pass them to a model of its own; the built-in
+start-set routing works on the same set. A tool with an approved call of an
+earlier request stays in the tool set so that call gets its result, also when
+the routing of the answering request does not select it. When the
+principal may no longer use it, the model sees it as a stub: its name, the
+neutral description "This tool is not available." and an input schema that
+accepts any object, instead of its own description and input schema; the
+guard then ends the call as a tool error. `authorizedToolsOnly: false` on
+`createAiChatHandler` hands every registry tool to the model as before; the
+guard still refuses the calls.
+
+Only `tools`, the `intentRouter` names, `authorizedToolNames`,
+`toolPresentation` and `find_tools` are reduced. Everything else the handler
+passes to the app's own code in a managed turn is server-side app data and is
+**not** filtered. An app that forwards it to a model (a prompt, a model of its
+own) names tools the principal may not use:
+
+- `systemPrompt` callback: `turnSnapshot` (the whole pinned manifest, agent
+  and policy), `routing`, `pipelineResult`.
+- `model` callback: `routing`, `pipelineResult`.
+- `loadTools` and every tool's `execute`: `turnSnapshot` in the endpoint tool
+  context, also for a direct command. The registry `loadTools` returns is the
+  app's own and is filtered only afterwards.
+- A custom `streamHandler`: `managedTurn.snapshot`, `routing`,
+  `pipelineResult` (its `tools` are reduced).
+- `onPipelineResult`: the `pipelineResult`.
+- The app's own `pipeline` modules: `pipelineResult.tools` and
+  `pipelineResult.module` carry the tool names the app configured there.
+- The result of `intentRouter`: `routing.toolNames` is what the router
+  returned, whatever names it was given.
+
 A signed decision (`toolOverrides` of the policy revision) disables a tool,
 raises its risk class, narrows its roles, requires confirmation, or replaces
 its model-facing description. It never enables a tool the code lacks or keeps
@@ -207,3 +261,110 @@ Without either, the cost stays unknown (`null`), never 0. A known cost also
 counts against the turn's `maxEstimatedCostUsd`. The legacy Lancer `telemetry`
 option posts to `/v1/proctor/events`, which the Foundation control plane does
 not serve; the handler refuses it together with `managedRuntime`.
+
+### Failed tool calls
+
+When the backend answers an endpoint tool's call with a non-2xx status, the
+tool result tells the model what happened:
+
+```ts
+{ success: false, error: string, retryable: false, status: 403, body?: unknown, bodyTruncated?: true }
+```
+
+`status` is the HTTP status. `body` is the response body (parsed JSON, or its
+text), omitted when there was none; a text body is cut to at most 4000
+characters, a JSON body whose serialization is longer is replaced by that
+serialization cut to at most 4000 characters, and both set
+`bodyTruncated: true`. `error` is cut to at most 1000 characters. Both cuts
+move back to the last whitespace or JSON delimiter (at most 256 characters; a
+text without one there is cut at exactly the limit), so they end on a whole
+token. Like any tool result, the failure goes through a configured PII shield
+before the model reads it. The shield reads the cut text, which is why the cut
+drops a partial token: a detector would not recognize an email address split
+in the middle. This keeps single-token values whole. A value written with
+spaces (an IBAN in groups, a phone number) can still be cut, and a detector
+may then miss the part that remains. A call the
+endpoint caller refused locally (a path outside `allowedPathPrefixes`) carries
+its status but no body.
+
+By default every failure counts as a tool error: against the turn's
+`maxConsecutiveErrors` and as `toolErrorCount` and per-tool `errors` in the
+metric event. Some failures are business outcomes rather than errors, e.g. a
+403 for a user without the role, or a 409 with an app error code.
+`classifyToolFailure` on `createGlirastes` (handed on by `chatTurn()`) or on
+`createAiChatHandler` tells them apart:
+
+```ts
+const glirastes = createGlirastes({
+  generated,
+  classifyToolFailure: ({ toolName, status, body }) =>
+    status === 403 || (body as { code?: string } | undefined)?.code === 'TASK_LOCKED'
+      ? 'expected'
+      : 'error',
+});
+```
+
+It receives the endpoint tool's `toolName`, the status and the full parsed
+body (not the truncated copy), runs synchronously, and is called only for real
+backend responses: never for thrown errors (timeout, network, response size)
+and never for local refusals. A throw or any value other than `'expected'`
+counts as `'error'`. An expected failure still counts as a tool call and for
+the other budgets (tool calls, repeated fingerprint, timeouts), but neither
+increments nor resets the consecutive-error count, and it is no tool error in
+the metric event. The result carries `expectedFailure: true`, so the model
+knows the failure is a known outcome rather than a fault to retry.
+
+Loop detection fingerprints an endpoint failure (a failure result with a
+`status`) by its stable fields only: tool, arguments, `success`, `status`,
+`retryable` and `expectedFailure`. `error`, `body` and `bodyTruncated` are
+left out, because `error` is taken from the body (its text, or its `message`,
+`error` or `detail`). A backend that stamps every error answer with a
+timestamp or trace id therefore still trips the repeated-fingerprint limit
+when the model repeats the same failing call, also for expected failures. Two
+failures of the same call with the same status count as a repetition even when
+their messages differ. A failure result without a `status` (a tool's own
+`success: false`) keeps its `error` in the fingerprint.
+Successful results are fingerprinted whole, as before.
+
+Expected failures are counted locally only, as `expectedToolFailureCount` in
+the handler's `onFinish` event. A direct command (a `/command` that runs its
+tool without a model call) is classified the same way, so an expected failure
+is no tool error in its metric event, but it never calls `onFinish` and is
+therefore not part of that count. This version sends nothing about expected
+failures to the Platform: the metric event keeps its fields. Without `managedRuntime` there is
+no consecutive-error budget, so the classifier only affects the metrics there.
+The runtime container cannot take a function in its JSON configuration and
+keeps the default (every failure is an error).
+
+#### Denied tool calls
+
+The managed guard checks every tool call against the pinned snapshot and the
+freshly resolved principal before it executes, including a call to a
+registered tool that tool discovery does not advertise. When it denies the
+call because the tool is not available to this principal or agent revision,
+the model receives a failed tool call and the turn continues, so it can
+answer without the tool:
+
+| Reason | Result |
+| --- | --- |
+| `principal_role_denied`, `policy_tool_denied`, `agent_tool_denied`, `manifest_tool_unavailable` | tool error `Tool execution denied: <reason> (<tool>)` to the model; the turn continues |
+| `revoked`, `missing_principal`, `tenant_mismatch` | the turn ends with an error, as before |
+| `budget_exhausted` | the call fails and the turn stops at the runtime budget, as before |
+
+The terminal conditions are checked first and independently of the tool: a
+missing principal, then a tenant mismatch, then a current revocation of the
+pinned agent or policy revision or of the tool. In any of these states the
+turn ends with that reason, even when the call is to a tool that is not in the
+manifest or would otherwise get a recoverable denial.
+
+The tool error names only the reason code and the tool, never the policy, its
+roles or the principal. A denied call never executes and never asks for
+approval, whatever the tool's policy says about confirmation. It always counts
+as a tool call and toward `maxConsecutiveErrors`, so a model that keeps calling
+denied tools stops at that budget; `classifyToolFailure` never sees a denial
+and cannot mark it expected. In the metric event it counts as a tool call and
+a tool error; the reason is not sent. The guard throws a
+`ToolExecutionDeniedError` (`reason`, `toolName`, `recoverable`) from
+`glirastes/runtime`; a terminal denial reaches the handler's `onError` with it.
+Direct commands keep answering a denial with a `tool-output-error` whose
+`errorText` is the reason code.

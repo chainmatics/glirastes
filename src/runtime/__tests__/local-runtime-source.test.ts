@@ -21,6 +21,7 @@ import {
 import { createManagedTurnGuard } from '../managed-turn.js';
 import type { VerifiedPolicyOverlay } from '../policy-overlay.js';
 import { isToolRevoked } from '../turn-snapshot.js';
+import { createTurnToolDiscovery } from '../tool-discovery.js';
 
 const DIGEST = `sha256:${'A'.repeat(43)}`;
 const ENDPOINT_TOOL_ID = '11111111-1111-4111-8111-111111111111';
@@ -233,6 +234,57 @@ describe('createLocalRuntimeSource', () => {
       turnId: 't-2',
       principal: fixturePrincipal('someone-elses-tenant'),
     })).toThrow(/tenant/i);
+  });
+
+  it('keeps the pinned revisions of a turn and follows the current roles of its principal', () => {
+    const source = createLocalRuntimeSource(fixtureOptions({ promptBundle: fixturePromptBundle() }));
+    const member = fixturePrincipal(source.identity.tenantId);
+    const discoverable = (snapshot: ReturnType<typeof source.resolveTurnSnapshot>) => createTurnToolDiscovery({
+      snapshot,
+      registry: materializeManifestToolRegistry({ snapshot, bindings: fixtureBindings() }),
+    }).eligibleNames;
+
+    const first = source.resolveTurnSnapshot({ turnId: 't-1', principal: member });
+    const reduced = source.resolveTurnSnapshot({
+      turnId: 't-1',
+      principal: { ...member, roles: ['viewer'] },
+    });
+    const extended = source.resolveTurnSnapshot({
+      turnId: 't-1',
+      principal: { ...member, roles: ['viewer', 'member'] },
+    });
+
+    expect(discoverable(first)).toEqual(['tasks_listTasks', 'ui_navigate']);
+    expect(reduced.principal.roles).toEqual(['viewer']);
+    expect(discoverable(reduced)).toEqual([]);
+    expect(extended.principal.roles).toEqual(['viewer', 'member']);
+    expect(discoverable(extended)).toEqual(['tasks_listTasks', 'ui_navigate']);
+    for (const snapshot of [reduced, extended]) {
+      expect(Object.isFrozen(snapshot)).toBe(true);
+      expect(snapshot.agentRevision).toEqual(first.agentRevision);
+      expect(snapshot.manifestRevision).toEqual(first.manifestRevision);
+      expect(snapshot.policyRevision).toEqual(first.policyRevision);
+      expect(snapshot.budget).toEqual(first.budget);
+      expect(snapshot.startedAt).toBe(first.startedAt);
+      expect(snapshot.promptPin).toEqual(first.promptPin);
+    }
+    // The cache keeps the pinned turn; an unchanged principal gets it back as is.
+    expect(source.resolveTurnSnapshot({ turnId: 't-1', principal: member })).toBe(first);
+  });
+
+  it('gives a turn of another subject or tenant back unchanged, for the caller to refuse', () => {
+    const source = createLocalRuntimeSource(fixtureOptions());
+    const member = fixturePrincipal(source.identity.tenantId);
+    const first = source.resolveTurnSnapshot({ turnId: 't-1', principal: member });
+
+    expect(source.resolveTurnSnapshot({
+      turnId: 't-1',
+      principal: { ...member, subjectId: 'user-2', roles: ['admin'] },
+    })).toBe(first);
+    expect(source.resolveTurnSnapshot({
+      turnId: 't-1',
+      principal: { ...member, tenantId: 'someone-elses-tenant', roles: ['admin'] },
+    })).toBe(first);
   });
 
   it('derives a stable identity across boots', () => {

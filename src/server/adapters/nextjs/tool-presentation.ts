@@ -3,7 +3,8 @@
  * tool, keyed by the name the model calls it by, and the language of the app.
  * It comes from the pinned manifest (`presentation`, derived by
  * `glirastes tools refresh` or written with the tool descriptions), so a chat
- * without any `toolLabels` of its own never shows a raw tool name.
+ * without any `toolLabels` of its own never shows a raw tool name. Only the
+ * tools the turn's principal may use are named (`authorizedTurnToolIds`).
  */
 export interface ToolPresentationPart {
   locale: string;
@@ -12,19 +13,26 @@ export interface ToolPresentationPart {
 
 interface WordedManifest {
   tools: ReadonlyArray<{
+    toolId: string;
     name: string;
     modelName?: string;
     presentation?: { locale: string; approval: string };
   }>;
 }
 
-/** Null when the manifest words none of its tools. */
-export function toolPresentationOf(manifest: WordedManifest | undefined): ToolPresentationPart | null {
+/**
+ * Null when the manifest words none of the tools in `allowedToolIds`, the
+ * tool ids the turn's principal may use.
+ */
+export function toolPresentationOf(
+  manifest: WordedManifest | undefined,
+  allowedToolIds: ReadonlySet<string>,
+): ToolPresentationPart | null {
   if (!manifest) return null;
   const tools: ToolPresentationPart['tools'] = {};
   let locale: string | undefined;
   for (const tool of manifest.tools) {
-    if (!tool.presentation) continue;
+    if (!tool.presentation || !allowedToolIds.has(tool.toolId)) continue;
     // The confirmation may be phrased as a question; the label is the action.
     const label = tool.presentation.approval.replace(/\s*\?+\s*$/, '').trim();
     if (label === '') continue;
