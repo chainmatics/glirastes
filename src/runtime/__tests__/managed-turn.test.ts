@@ -9,7 +9,7 @@ import {
 } from './turn-snapshot.test.js';
 import { createTurnSnapshot, type TurnSnapshot } from '../turn-snapshot.js';
 import { createManagedTurnGuard } from '../managed-turn.js';
-import { ToolExecutionDeniedError } from '../tool-denial.js';
+import { isRecoverableToolDenial, ToolExecutionDeniedError } from '../tool-denial.js';
 
 function createSnapshot() {
   return createTurnSnapshot({
@@ -335,6 +335,43 @@ describe('createManagedTurnGuard: tool denials', () => {
     await expect(guard.beforeToolCall({ toolName: 'list_tasks', input: {} }))
       .rejects.toMatchObject({ reason, recoverable: false });
     expect(guard.tracker.usage).toMatchObject({ toolCalls: 0, consecutiveErrors: 0 });
+  });
+
+  describe('a failing terminal check is never a recoverable denial', () => {
+    // The checks that end a turn run before any recoverable denial. When one
+    // of them cannot be evaluated, the guard fails closed: the plain error
+    // propagates, uncounted, instead of the denial the model could recover from.
+    const unreachable = new Error('revocation store unreachable');
+    const noSession = new Error('session lookup failed');
+
+    it.each([
+      {
+        label: 'loadRevocations rejecting for a tool not in the manifest', toolName: 'unknown_tool', error: unreachable,
+        resolvePrincipal: async () => principal, loadRevocations: async () => { throw unreachable; },
+      },
+      {
+        label: 'loadRevocations rejecting for a role-denied tool', toolName: 'list_tasks', error: unreachable,
+        resolvePrincipal: async () => viewer, loadRevocations: async () => { throw unreachable; },
+      },
+      {
+        label: 'resolvePrincipal rejecting for a tool not in the manifest', toolName: 'unknown_tool', error: noSession,
+        resolvePrincipal: async () => { throw noSession; }, loadRevocations: async () => [],
+      },
+    ])('$label propagates the error, uncounted', async ({ toolName, error, resolvePrincipal, loadRevocations }) => {
+      const guard = createManagedTurnGuard({ snapshot: createSnapshot(), resolvePrincipal, loadRevocations });
+      const call = { toolName, input: {} };
+
+      const before = await guard.beforeToolCall(call).then(() => 'resolved', (rejection: unknown) => rejection);
+      expect(before).toBe(error);
+      expect(before).not.toBeInstanceOf(ToolExecutionDeniedError);
+      expect(isRecoverableToolDenial(before)).toBe(false);
+      expect(guard.tracker.usage).toMatchObject({ toolCalls: 0, consecutiveErrors: 0 });
+
+      const approval = await guard.resolveApproval(call).then(() => 'resolved', (rejection: unknown) => rejection);
+      expect(approval).toBe(error);
+      expect(isRecoverableToolDenial(approval)).toBe(false);
+      expect(guard.tracker.usage).toMatchObject({ toolCalls: 0, consecutiveErrors: 0 });
+    });
   });
 
   describe('terminal conditions win over a recoverable denial', () => {
