@@ -14,7 +14,7 @@ import {
   type OpenapiDocument,
   type OpenapiOperationEntry,
 } from '../../openapi-document.js';
-import { compareCodeUnits, sortKeysDeep } from '../canonical.js';
+import { compareCodeUnits, JsonSchemaCompileError, sortKeysDeep } from '../canonical.js';
 import {
   probeItemFor,
   probeKey,
@@ -26,6 +26,14 @@ import { findExclusion } from '../exclusions.js';
 import { toolFinding } from '../findings.js';
 import { assignDefinitionIds } from '../identity.js';
 import type { InputRole } from '../input-roles.js';
+import {
+  declaredGroup,
+  declaredName,
+  declaredRoles,
+  selectionExclusion,
+  toolMarkerOf,
+  type OpenapiSelection,
+} from '../openapi-selection.js';
 import { validateResolutionEntry, type ResolutionEntry } from '../resolutions.js';
 import type { SchemaProbeItem, SchemaProbeResult } from '../schema-probe.js';
 import type {
@@ -33,6 +41,7 @@ import type {
   JsonSchemaLike,
   ObservedTool,
   ToolFinding,
+  ToolProseHints,
   ToolSource,
   ToolSourceContext,
   ToolSourceObservation,
@@ -46,12 +55,14 @@ const READ_METHODS: ReadonlySet<EndpointMethod> = new Set(['GET', 'HEAD', 'DELET
 const SUCCESS_STATUSES = ['200', '201', '202'];
 
 export interface OpenapiSourceOptions {
-  /** App-relative path of the exported OpenAPI 3.1 document. */
+  /** App-relative path of the exported OpenAPI 3.0 or 3.1 JSON document. */
   document?: string;
   /** App-relative folder of the FastAPI code whose routes are counted against the export. */
   fastapi?: string;
   /** The Python interpreter that counts the routes; tests point it at a missing file. */
   python?: string;
+  /** `all` (default) or `opt-in`: only operations marked `x-glirastes-tool: true` become tools. */
+  selection?: OpenapiSelection;
 }
 
 interface FastapiRoute {
@@ -76,6 +87,12 @@ interface OpenapiEntry {
   description: string | undefined;
   normalizedText: string;
   sourceFingerprint: string;
+  /** `x-glirastes-name`, checked against the tool name pattern by `assignDefinitionIds`. */
+  explicitName?: string;
+  /** `x-glirastes-group`: the module, above tool-semantics.json and any derivation. */
+  group?: string;
+  /** `x-glirastes-roles`: the code default of `allowedRoles`; empty means no restriction. */
+  roles?: string[];
 }
 
 interface OpenapiPiece {
@@ -206,6 +223,22 @@ function readEntry(
     findings.push(toolFinding('contract-effect-invalid', 'needs_attention', stableKey,
       `${where} declares an x-glirastes-effect that is not read, write, destructive, external or financial, so the declaration is ignored.`));
   }
+  const name = declaredName(operation.operation);
+  if (name && 'invalid' in name) {
+    findings.push(toolFinding('definition-id-invalid', 'warning', stableKey,
+      `${where} declares an x-glirastes-name that is not a string; a derived name is used.`));
+  }
+  const group = declaredGroup(operation.operation);
+  if (group && 'invalid' in group) {
+    findings.push(toolFinding('tool-group-invalid', 'warning', stableKey,
+      `${where} declares an x-glirastes-group that is not a non-empty string of at most 200 characters; the module is derived instead.`));
+  }
+  const roles = declaredRoles(operation.operation);
+  if (roles && 'invalid' in roles) {
+    // Fail closed: a tool never runs without the restriction its code declares.
+    findings.push(toolFinding('tool-roles-invalid', 'needs_attention', stableKey,
+      `${where} declares x-glirastes-roles that are not a list of at most 50 role names (non-empty strings of at most 200 characters); the tool stays disabled.`));
+  }
   const description = typeof operation.operation.description === 'string' && operation.operation.description.trim()
     ? operation.operation.description.trim()
     : typeof operation.operation.summary === 'string' && operation.operation.summary.trim()
@@ -227,6 +260,9 @@ function readEntry(
     description,
     normalizedText: JSON.stringify(sortKeysDeep(subject)),
     sourceFingerprint: operationFingerprint(document, operation, method, path),
+    ...(name && 'value' in name ? { explicitName: name.value } : {}),
+    ...(group && 'value' in group ? { group: group.value } : {}),
+    ...(roles && 'value' in roles && roles.value.length > 0 ? { roles: roles.value } : {}),
   };
 }
 
@@ -280,6 +316,8 @@ function countFastapiRoutes(
 function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: string): ObservedTool {
   const { entry, resolved } = piece;
   const findings = [...entry.findings, ...resolved.findings];
+  // Only this source reads x-glirastes-name, so only its names without a dot take their resource from the route.
+  const prose: ToolProseHints = { ...resolved.prose, ...(entry.group ? { module: entry.group } : {}), resourceFromRoute: true };
   const bodyKeys = bodyKeysOf(entry.body);
   if (!entry.authEvidence) {
     findings.push(toolFinding('auth-evidence-missing', 'needs_attention', entry.stableKey,
@@ -315,7 +353,8 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
       ...(entry.description ? { jsDoc: entry.description } : {}),
     },
     findings,
-    ...(Object.keys(resolved.prose).length > 0 ? { prose: resolved.prose } : {}),
+    prose,
+    ...(entry.roles ? { codeRoles: [...entry.roles] } : {}),
   };
 }
 
@@ -363,34 +402,55 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
   for (const operation of operations) {
     const method = OPENAPI_TOOL_METHODS[operation.operationKey];
     const shownPath = operation.path ?? operation.documentPath;
+    const marker = toolMarkerOf(operation.operation);
+    let stableKey: string;
+    let exclusion: ExcludedTool | undefined;
+    let entry: OpenapiEntry | undefined;
     if (!method) {
-      const stableKey = `${operation.operationKey.toUpperCase()} ${shownPath}`;
-      excluded.set(stableKey, { stableKey, reason: 'unsupported-method', origin: 'code' });
-      continue;
+      stableKey = `${operation.operationKey.toUpperCase()} ${shownPath}`;
+      exclusion = { stableKey, reason: 'unsupported-method', origin: 'code' };
+    } else if (operation.path === undefined) {
+      stableKey = `${method} ${shownPath}`;
+      exclusion = { stableKey, reason: 'unsupported-path', origin: 'code' };
+    } else {
+      stableKey = `${method} ${operation.path}`;
+      exclusion = findExclusion({
+        stableKey,
+        method,
+        path: operation.path,
+        chatHandler: false,
+        aiIgnore: operation.operation['x-glirastes-ignore'] === true,
+      }, policyExcludes);
+      if (!exclusion) {
+        const read = readEntry(document, documentPath, operation, method, operation.path);
+        if ('unsupportedBody' in read) exclusion = { stableKey, reason: 'unsupported-body', origin: 'code' };
+        else entry = read;
+      }
     }
-    if (operation.path === undefined) {
-      const stableKey = `${method} ${shownPath}`;
-      excluded.set(stableKey, { stableKey, reason: 'unsupported-path', origin: 'code' });
-      continue;
+    const where = `${documentPath} ${operation.operationKey.toUpperCase()} ${operation.documentPath}`;
+    // Either finding may be on an operation that is no tool; the work list then takes the document from `expected`.
+    const inDocument = (finding: ToolFinding): ToolFinding => ({ ...finding, expected: { file: documentPath } });
+    // A malformed marker is always reported, also on an operation that is no tool.
+    if (marker === 'invalid') {
+      findings.push(inDocument(toolFinding('tool-marker-invalid', 'warning', stableKey,
+        `${where} declares an x-glirastes-tool that is not true or false, so the marker is ignored.`)));
     }
-    const stableKey = `${method} ${operation.path}`;
-    const exclusion = findExclusion({
-      stableKey,
-      method,
-      path: operation.path,
-      chatHandler: false,
-      aiIgnore: operation.operation['x-glirastes-ignore'] === true,
-    }, policyExcludes);
     if (exclusion) {
+      // Existing exclusions win over the marker, but never silently.
+      if (marker === true) {
+        findings.push(inDocument(toolFinding('opt-in-excluded', 'warning', stableKey,
+          `${where} is marked x-glirastes-tool: true but stays excluded (${exclusion.reason}, ${exclusion.origin}).`)));
+      }
       excluded.set(stableKey, exclusion);
       continue;
     }
-    const entry = readEntry(document, documentPath, operation, method, operation.path);
-    if ('unsupportedBody' in entry) {
-      excluded.set(stableKey, { stableKey, reason: 'unsupported-body', origin: 'code' });
+    const selected = selectionExclusion(stableKey, operation.operation, options.selection);
+    if (selected) {
+      // Not a tool: its other x-glirastes-* values are never read, so they report nothing.
+      excluded.set(stableKey, selected);
       continue;
     }
-    kept.push(entry);
+    kept.push(entry!);
   }
   const excludedList = [...excluded.values()].sort((left, right) => compareCodeUnits(left.stableKey, right.stableKey));
   kept.sort((left, right) => compareCodeUnits(left.stableKey, right.stableKey));
@@ -423,36 +483,58 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
     results[index] ?? { ok: false, reason: 'probe-failed' },
   ]));
 
-  const pieces = kept.map((entry): OpenapiPiece => {
+  const pieces = kept.flatMap((entry): OpenapiPiece[] => {
     const resolution = resolutions.get(entry.stableKey);
     const previousContract = ctx.previousContracts.get(entry.stableKey);
-    const resolved = resolveEndpointContract({
-      stableKey: entry.stableKey,
-      method: entry.method,
-      path: entry.path,
-      pathParams: entry.pathParams,
-      evidence: {
-        schemaUses: [],
-        queryKeys: entry.queryKeys,
-        repeatedQueryKeys: [],
-        bodyKeys: bodyKeysOf(entry.body),
-        readsBody: entry.body !== undefined,
-        normalizedText: entry.normalizedText,
-      },
-      ...(entry.output ? { inferredOutput: entry.output } : {}),
-      probes,
-      openapi: entry.input,
-      ...(resolution ? { resolution } : {}),
-      ...(previousContract ? { previousContract } : {}),
-    });
-    return { entry, resolved };
+    let resolved: ResolvedEndpointContract;
+    try {
+      resolved = resolveEndpointContract({
+        stableKey: entry.stableKey,
+        method: entry.method,
+        path: entry.path,
+        pathParams: entry.pathParams,
+        evidence: {
+          schemaUses: [],
+          queryKeys: entry.queryKeys,
+          repeatedQueryKeys: [],
+          bodyKeys: bodyKeysOf(entry.body),
+          readsBody: entry.body !== undefined,
+          normalizedText: entry.normalizedText,
+        },
+        ...(entry.output ? { inferredOutput: entry.output } : {}),
+        probes,
+        openapi: entry.input,
+        ...(resolution ? { resolution } : {}),
+        ...(previousContract ? { previousContract } : {}),
+      });
+    } catch (error) {
+      // Only a schema of this operation that Ajv cannot compile is the
+      // export's fault: its response, one of its input parts, or the input
+      // merged from nothing but its parts. Anything else (a programming error,
+      // a schema from tool-resolutions.json) keeps its own error and stack.
+      const isPart = (schema: unknown): boolean => entry.input.parts.some((part) => part.json === schema);
+      const own = error instanceof JsonSchemaCompileError
+        && (error.schema === entry.output || isPart(error.schema)
+          || (error.composedFrom.length > 0 && error.composedFrom.every(isPart)));
+      if (!own) throw error;
+      // The runtime compiles every schema with Ajv; a schema it cannot compile
+      // would fail at boot. Name the operation and Ajv's reason (keywords and
+      // schema paths only, never values) instead of failing the whole command.
+      const reason = error.message.split('\n')[0]!.slice(0, 300);
+      findings.push(toolFinding('schema-uncompilable', 'error', entry.stableKey,
+        `${documentPath} ${entry.operation.operationKey.toUpperCase()} ${entry.operation.documentPath} has a schema the JSON Schema validator cannot compile: ${reason}`));
+      return [];
+    }
+    return [{ entry, resolved }];
   });
   const naming = assignDefinitionIds(
     pieces.map(({ entry, resolved }) => ({
       stableKey: entry.stableKey,
       method: entry.method,
       path: entry.path,
-      ...(resolved.explicitId ? { explicitId: resolved.explicitId } : {}),
+      ...(entry.explicitName !== undefined
+        ? { explicitId: entry.explicitName, explicitIdSource: 'x-glirastes-name' }
+        : resolved.explicitId ? { explicitId: resolved.explicitId } : {}),
     })),
     new Map((ctx.previous?.inventory.executions ?? []).map((execution) => [execution.stableKey, execution.definitionId])),
   );
@@ -466,7 +548,8 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
 }
 
 /**
- * An exported OpenAPI 3.1 document (FastAPI writes one), read as JSON. With
+ * An exported OpenAPI 3.1 document (FastAPI writes one) or 3.0 document
+ * (@nestjs/swagger writes one; normalized to 3.1 on load), read as JSON. With
  * `fastapi` set, the routes of the FastAPI code are counted with Python's
  * `ast` module (`python3 -I`, the app is never imported) and a stale export
  * stops the refresh.

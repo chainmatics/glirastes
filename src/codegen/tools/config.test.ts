@@ -90,6 +90,12 @@ describe('tools config', () => {
     expect(normalizeSources(config)).toEqual([source, { kind: 'vue-router' }]);
   });
 
+  it('accepts an opt-in selection per OpenAPI source; the bare string keeps the default', async () => {
+    const optIn = { kind: 'openapi', document: 'api/openapi.json', selection: 'opt-in' };
+    const config = loadToolsConfig(await appWith({ ...minimal, sources: [optIn, { kind: 'openapi', selection: 'all' }, 'openapi'] }));
+    expect(normalizeSources(config)).toEqual([optIn, { kind: 'openapi', selection: 'all' }, { kind: 'openapi' }]);
+  });
+
   it('accepts vue-router routes as the page source of navigation and filters', async () => {
     const config = loadToolsConfig(await appWith({ ...minimal, sources: [{ kind: 'vue-router', srcDir: 'web/src' }, 'url-filters'] }));
     expect(normalizeSources(config)).toEqual([{ kind: 'vue-router', srcDir: 'web/src' }, { kind: 'url-filters' }]);
@@ -123,6 +129,8 @@ describe('tools config', () => {
     ['an unknown source kind', { ...minimal, sources: ['rails'] }],
     ['an OpenAPI document that is not JSON', { ...minimal, sources: [{ kind: 'openapi', document: 'api/openapi.yaml' }] }],
     ['a FastAPI folder outside the app', { ...minimal, sources: [{ kind: 'openapi', fastapi: '../api' }] }],
+    ['an unknown OpenAPI selection', { ...minimal, sources: [{ kind: 'openapi', selection: 'some' }] }],
+    ['a selection on another source', { ...minimal, sources: [{ kind: 'nest', selection: 'opt-in' }] }],
     ['an empty source list', { ...minimal, sources: [] }],
     ['a strip segment that is a path', { ...minimal, sources: [{ kind: 'next-pages', stripSegments: ['a/b'] }] }],
     ['a page option on the endpoint source', { ...minimal, sources: [{ kind: 'next-app', stripSegments: [] }] }],

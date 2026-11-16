@@ -1,0 +1,185 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Opt-in tags API (synthetic)",
+    "version": "1.0.0",
+    "description": "Synthetic fixture for the opt-in selection: only the tag operations are marked as tools, while every protected operation declares its roles."
+  },
+  "security": [{ "bearer": [] }],
+  "paths": {
+    "/api/tags": {
+      "get": {
+        "operationId": "listTags",
+        "summary": "List the tags of the workspace",
+        "x-glirastes-tool": true,
+        "x-glirastes-name": "list_tags",
+        "x-glirastes-group": "tag",
+        "x-glirastes-roles": ["tag.read"],
+        "parameters": [
+          { "name": "search", "in": "query", "required": false, "schema": { "type": "string", "nullable": true } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tags",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Tag" } } } }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTag",
+        "summary": "Create a tag",
+        "x-glirastes-tool": true,
+        "x-glirastes-name": "create_tag",
+        "x-glirastes-group": "tag",
+        "x-glirastes-roles": ["tag.write"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TagInput" } } }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Tag" } } } }
+        }
+      }
+    },
+    "/api/tags/{tagId}": {
+      "patch": {
+        "operationId": "updateTag",
+        "summary": "Rename or recolor a tag",
+        "x-glirastes-tool": true,
+        "x-glirastes-name": "update_tag",
+        "x-glirastes-group": "tag",
+        "x-glirastes-roles": ["tag.write"],
+        "parameters": [{ "name": "tagId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TagInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Tag" } } } }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTag",
+        "summary": "Delete a tag",
+        "x-glirastes-tool": true,
+        "x-glirastes-name": "delete_tag",
+        "x-glirastes-group": "tag",
+        "x-glirastes-roles": ["tag.delete", "admin"],
+        "parameters": [{ "name": "tagId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "operationId": "listTasks",
+        "summary": "List tasks",
+        "x-glirastes-roles": ["task.read"],
+        "responses": {
+          "200": {
+            "description": "The tasks",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } } } }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTask",
+        "summary": "Create a task",
+        "x-glirastes-roles": "task.write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "title": { "type": "string" } }, "required": ["title"] }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } }
+        }
+      }
+    },
+    "/api/tasks/{taskId}": {
+      "delete": {
+        "operationId": "deleteTask",
+        "summary": "Delete a task",
+        "x-glirastes-tool": false,
+        "x-glirastes-roles": ["task.delete"],
+        "parameters": [{ "name": "taskId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/api/tasks/{taskId}/attachments": {
+      "post": {
+        "operationId": "uploadAttachment",
+        "summary": "Upload an attachment",
+        "x-glirastes-roles": ["task.write"],
+        "parameters": [{ "name": "taskId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": { "type": "object", "properties": { "file": { "type": "string", "format": "binary" } } }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Uploaded" } }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login",
+        "summary": "Sign in",
+        "security": [],
+        "x-glirastes-tool": true,
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "type": "object", "properties": { "email": { "type": "string" } } } }
+          }
+        },
+        "responses": { "200": { "description": "Signed in" } }
+      }
+    },
+    "/api/reports": {
+      "get": {
+        "operationId": "listReports",
+        "summary": "List reports",
+        "x-glirastes-tool": "yes",
+        "x-glirastes-roles": ["report.read"],
+        "responses": {
+          "200": {
+            "description": "The reports",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "schemas": {
+      "Tag": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "color": { "type": "string", "nullable": true }
+        },
+        "required": ["id", "name"]
+      },
+      "TagInput": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "color": { "type": "string", "nullable": true }
+        },
+        "required": ["name"]
+      },
+      "Task": {
+        "type": "object",
+        "properties": { "id": { "type": "string" }, "title": { "type": "string" } },
+        "required": ["id", "title"]
+      }
+    }
+  }
+}

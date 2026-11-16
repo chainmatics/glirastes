@@ -25,7 +25,7 @@ have browser host tests. Neither establishes a full Rust/Java stack acceptance.
 ## Customer inputs and build
 
 Keep the existing backend and its authorization. Export its authoritative API
-as committed **OpenAPI 3.1 JSON** and add the normal SDK inputs. Generate a unique
+as committed **OpenAPI 3.0 or 3.1 JSON** and add the normal SDK inputs. Generate a unique
 UUID for the app once and use the same value in both files below; preserve an
 existing appId. Example `.glirastes/tools.json` (replace this example appId):
 
@@ -89,13 +89,17 @@ not automatically update a running container. CI must also regenerate the
 backend OpenAPI export and detect stale exports; frozen generation alone cannot
 prove that a stale document matches the backend.
 
-The supported subset is intentionally narrower than all OpenAPI 3.1: simple
-path parameters, supported query parameters on GET/HEAD/DELETE, and JSON-object
+The supported subset is intentionally narrower than all OpenAPI 3.0/3.1: simple
+path parameters (nullable parameters are unsupported), supported query parameters on GET/HEAD/DELETE, and JSON-object
 bodies on POST/PUT/PATCH. Unsupported active operations fail the build, including
 write-method query parameters, multipart, custom header/cookie arguments,
 external/recursive references and unsupported schema/serialization features.
 Declare authentication with `securitySchemes`, not model-supplied credentials.
 Explicit `x-glirastes-ignore` and normal policy exclusions remain in coverage.
+The build uses the generator's selection: with `"selection": "opt-in"` it
+validates only operations marked `x-glirastes-tool: true`, and an operation
+marked `x-glirastes-tool: false` is skipped in either mode; a selected
+unsupported operation still fails the build.
 OpenAPI `servers` does not select the API target.
 
 ## Identity contract

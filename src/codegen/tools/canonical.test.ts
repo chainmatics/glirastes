@@ -5,6 +5,7 @@ import {
   canonicalJson,
   compareCodeUnits,
   deterministicUuid,
+  JsonSchemaCompileError,
   jsonSchemaDigest,
   OPAQUE_JSON_SCHEMA,
   sha256Digest,
@@ -30,6 +31,20 @@ describe('canonical helpers', () => {
 
   it('digests text as sha256 base64url', () => {
     expect(sha256Digest('abc')).toBe('sha256:ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0');
+  });
+
+  it('throws a typed error carrying the schema the validator cannot compile', () => {
+    const schema = { type: 'integer', minimum: 0, exclusiveMinimum: true };
+    let thrown: unknown;
+    try {
+      jsonSchemaDigest(schema);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(JsonSchemaCompileError);
+    expect((thrown as JsonSchemaCompileError).schema).toBe(schema);
+    expect((thrown as JsonSchemaCompileError).message).toBe('schema is invalid: data/exclusiveMinimum must be number');
+    expect((thrown as JsonSchemaCompileError).cause).toBeInstanceOf(Error);
   });
 
   it('digests JSON schemas exactly like a runtime JsonSchemaLike binding', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { findExclusion, hasAiIgnoreMarker, importsChatHandler, matchesExcludePattern } from './exclusions.js';
+import { declaredGroup, declaredName, declaredRoles, selectionExclusion, toolMarkerOf } from './openapi-selection.js';
 import type { ExcludedTool } from './types.js';
 
 const subject = (method: string, path: string, chatHandler = false) => ({
@@ -99,5 +100,41 @@ describe('tool exclusions', () => {
     expect(hasAiIgnoreMarker(`import { a } from '@/lib/a';\n// @ai-ignored once\n${handler}`)).toBe(false);
     expect(hasAiIgnoreMarker("import { db } from '@/lib/db';\n")).toBe(false);
     expect(hasAiIgnoreMarker('')).toBe(false);
+  });
+});
+
+describe('OpenAPI selection', () => {
+  it.each([
+    [{}, 'all', undefined],
+    [{}, 'opt-in', 'not-opted-in'],
+    [{ 'x-glirastes-tool': true }, 'all', undefined],
+    [{ 'x-glirastes-tool': true }, 'opt-in', undefined],
+    [{ 'x-glirastes-tool': false }, 'all', 'opted-out'],
+    [{ 'x-glirastes-tool': false }, 'opt-in', 'opted-out'],
+    // A marker that is not a boolean reads as absent.
+    [{ 'x-glirastes-tool': 'true' }, 'all', undefined],
+    [{ 'x-glirastes-tool': 1 }, 'opt-in', 'not-opted-in'],
+  ] as const)('selects %j with %s as %s', (operation, selection, reason) => {
+    expect(selectionExclusion('GET /api/tags', operation, selection))
+      .toEqual(reason ? { stableKey: 'GET /api/tags', reason, origin: 'code' } : undefined);
+  });
+
+  it('selects every operation by default and tells the marker states apart', () => {
+    expect(selectionExclusion('GET /api/tags', {})).toBeUndefined();
+    expect([{}, { 'x-glirastes-tool': true }, { 'x-glirastes-tool': false }, { 'x-glirastes-tool': null }].map(toolMarkerOf))
+      .toEqual([undefined, true, false, 'invalid']);
+  });
+
+  it('reads declared roles, groups and names', () => {
+    expect(declaredRoles({ 'x-glirastes-roles': ['b', ' a ', 'b'] })).toEqual({ value: ['a', 'b'] });
+    expect(declaredRoles({ 'x-glirastes-roles': [] })).toEqual({ value: [] });
+    expect(declaredRoles({})).toBeUndefined();
+    for (const invalid of ['a', null, [1], [''], ['x'.repeat(201)], Array.from({ length: 51 }, (_, index) => `r${index}`)]) {
+      expect(declaredRoles({ 'x-glirastes-roles': invalid })).toEqual({ invalid: true });
+    }
+    expect(declaredGroup({ 'x-glirastes-group': ' tag ' })).toEqual({ value: 'tag' });
+    expect(declaredGroup({ 'x-glirastes-group': '' })).toEqual({ invalid: true });
+    expect(declaredName({ 'x-glirastes-name': 'list_tags' })).toEqual({ value: 'list_tags' });
+    expect(declaredName({ 'x-glirastes-name': false })).toEqual({ invalid: true });
   });
 });

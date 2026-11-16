@@ -277,8 +277,28 @@ describe('manifest-bound tools named like an SDK built-in', () => {
     { toolDiscovery: false, offered: ['suggest_followups'] },
     { toolDiscovery: true, offered: ['find_tools'] },
   ])(
-    'denies a revoked manifest-bound suggest_followups (toolDiscovery: $toolDiscovery)',
+    'denies a revoked manifest-bound suggest_followups in the guard when every registry tool is handed over (toolDiscovery: $toolDiscovery)',
     async ({ toolDiscovery, offered }) => {
+      await revokedFollowupTurn({ toolDiscovery, offered, authorizedToolsOnly: false });
+    },
+  );
+
+  it.each([
+    { toolDiscovery: false, offered: undefined },
+    { toolDiscovery: true, offered: ['find_tools'] },
+  ])(
+    'does not hand a revoked manifest-bound suggest_followups to the model (toolDiscovery: $toolDiscovery)',
+    async ({ toolDiscovery, offered }) => {
+      await revokedFollowupTurn({ toolDiscovery, offered });
+    },
+  );
+
+  async function revokedFollowupTurn({ toolDiscovery, offered, authorizedToolsOnly }: {
+    toolDiscovery: boolean;
+    offered: string[] | undefined;
+    authorizedToolsOnly?: false;
+  }) {
+    {
       const execute = vi.fn(async () => ({ success: true }));
       const onError = vi.fn();
       const model = followupModel();
@@ -296,6 +316,7 @@ describe('manifest-bound tools named like an SDK built-in', () => {
         systemPrompt: 'Assistant',
         followups: {},
         toolDiscovery,
+        ...(authorizedToolsOnly === false ? { authorizedToolsOnly } : {}),
         onError,
         managedRuntime: {
           resolvePrincipal: async () => principal,
@@ -322,10 +343,12 @@ describe('manifest-bound tools named like an SDK built-in', () => {
       const wire = await response.text();
 
       expect(model.doStreamCalls[0]!.tools?.map((tool) => tool.name)).toEqual(offered);
-      expect(wire).toContain('"toolName":"suggest_followups"');
       expect(wire).not.toContain('tool-output-available');
       expect(execute).not.toHaveBeenCalled();
-      expect(String(onError.mock.calls[0]?.[0])).toMatch(/Tool execution denied: revoked/);
-    },
-  );
+      if (authorizedToolsOnly === false) {
+        expect(wire).toContain('"toolName":"suggest_followups"');
+        expect(String(onError.mock.calls[0]?.[0])).toMatch(/Tool execution denied: revoked/);
+      }
+    }
+  }
 });

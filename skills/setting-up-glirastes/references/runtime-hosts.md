@@ -34,8 +34,9 @@ The matching `.glirastes/prompt-bundle.json` contains schemaVersion 1, that same
 appId, a local artifactRef and sections `planner`, `appBehavior`, `responseStyle`
 and `capabilityFragments`. These are normal SDK inputs, not a new tool inventory.
 
-Export OpenAPI 3.1 JSON from the authoritative backend schema. Omit `fastapi` for
-non-Python APIs. The runtime supports a strict subset: simple path parameters,
+Export OpenAPI 3.0 or 3.1 JSON from the authoritative backend schema. Omit `fastapi` for
+non-Python APIs. To expose only chosen operations, add `"selection":"opt-in"` and
+mark them `x-glirastes-tool: true` in the export (see `integrating-glirastes-web`). The runtime supports a strict subset: simple path parameters,
 supported GET/HEAD/DELETE query parameters and POST/PUT/PATCH JSON-object bodies.
 Unsupported active operations fail build; explicitly excluded operations appear
 in coverage. Never manually enable generated tools to bypass diagnostics.
@@ -84,6 +85,17 @@ absolute. Supply a 32+ character random approval secret and a restricted Postgre
 connection through mounted files, not source code. PostgreSQL persists approval
 consumption and the one-active-runtime lock; all processes for the same scope
 must use the same store. Initialization needs permission to create its tables.
+
+A failed backend call reaches the model with its HTTP `status` and capped
+`body`. The SDK's `classifyToolFailure` (expected business failures such as a
+403 outside the error budget) is a function and not configurable in this JSON
+yet: in the container every failed backend call counts as a tool error. A tool the
+identity's roles or the policy do not allow is not offered to the model. A call
+to it anyway never executes: the AI SDK answers it as an unavailable tool and
+the turn continues, bounded by `maxModelSteps`. A tool that becomes denied
+after the request started (a role lost) gets
+`Tool execution denied: <reason> (<tool>)` as a tool error instead, counted
+toward `maxConsecutiveErrors`.
 
 The identity endpoint validates the selected cookie/bearer credential and returns
 exactly `{"userId":"42","tenantId":"business-a","roles":["editor"]}`.

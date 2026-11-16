@@ -210,6 +210,73 @@ describe('tool prose', () => {
   });
 });
 
+/** What the openapi source sets: its names without a dot come from `x-glirastes-name`. */
+const FROM_ROUTE = { resourceFromRoute: true } as const;
+
+describe('tool prose for endpoint names without a dot', () => {
+  const named = (definitionId: string, method: string, path: string, operationGroup: ResolveToolProseInput['operationGroup'], locale: string) => (
+    resolveToolProse({ ...base, stableKey: `${method} ${path}`, definitionId, method, path, operationGroup, locale, hints: FROM_ROUTE })
+  );
+
+  it.each([
+    ['update_tag', 'PATCH', '/api/tags/:id', 'update', 'en-US', 'Update tags'],
+    ['update_tag', 'PATCH', '/api/tags/:id', 'update', 'de-DE', 'Tags ändern'],
+    ['list_tags', 'GET', '/api/tags', 'read', 'en-US', 'List tags'],
+    ['list_tags', 'GET', '/api/tags', 'read', 'de-DE', 'Tags auflisten'],
+    ['create_tag', 'POST', '/api/tags', 'create', 'de-DE', 'Tags anlegen'],
+    ['delete_tag', 'DELETE', '/api/tags/:id', 'delete', 'en-US', 'Delete tags'],
+  ] as const)('labels %s (%s %s, %s) without repeating the verb', (definitionId, method, path, group, locale, label) => {
+    const prose = named(definitionId, method, path, group, locale);
+    expect(prose.presentation).toMatchObject({ singular: label, plural: label, approval: label });
+    expect(prose.description).toBe(`${label} (${method} ${path}).`);
+  });
+
+  it('takes the module from the path, never from the name', () => {
+    expect(named('list_tags', 'GET', '/api/tags', 'read', 'en-US').module).toBe('tags');
+    expect(named('update_tag', 'PATCH', '/api/tags/:id', 'update', 'en-US').module).toBe('tags');
+    // A dotted name keeps the part before the first dot.
+    expect(named('labels.rename', 'PATCH', '/api/tags/:id', 'update', 'en-US').module).toBe('labels');
+  });
+
+  it('puts a group hint (x-glirastes-group) above tool-semantics.json and the name', async () => {
+    const { semantics } = await semanticsFile(JSON.stringify({
+      schemaVersion: 1,
+      tools: [{ stableKey: 'GET /api/tags', module: 'labels', description: 'Lists the tags.' }],
+    }));
+    const prose = resolveToolProse({
+      ...base, stableKey: 'GET /api/tags', definitionId: 'list_tags', method: 'GET', path: '/api/tags',
+      operationGroup: 'read', semantics, hints: { ...FROM_ROUTE, module: 'tag' },
+    });
+    expect(prose.module).toBe('tag');
+    expect(resolveToolProse({
+      ...base, stableKey: 'GET /api/tags', definitionId: 'list_tags', method: 'GET', path: '/api/tags', operationGroup: 'read', semantics,
+      hints: FROM_ROUTE,
+    }).module).toBe('labels');
+  });
+
+  // Backward compatibility: next-app, nest and contract-module sources never set the hint.
+  it.each([
+    ['listTags', 'GET', '/api/tags', 'read', 'en-US', 'List list tags'],
+    ['listTags', 'GET', '/api/tags', 'read', 'de-DE', 'List tags auflisten'],
+    ['update_tag', 'PATCH', '/api/tags/:id', 'update', 'en-US', 'Update update tag'],
+    ['removeTag', 'DELETE', '/api/tags/:id', 'delete', 'de-DE', 'Remove tag löschen'],
+  ] as const)('keeps module and label of %s (%s %s, %s) from the name for every other source', (definitionId, method, path, group, locale, label) => {
+    // The rule before method and path were considered: the part before the first dot, split into words.
+    const resource = definitionId.split('.')[0]!;
+    const words = resource.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase().trim();
+    for (const hints of [undefined, {}, { usageHints: ['Use it.'] }]) {
+      const prose = resolveToolProse({
+        ...base, stableKey: `${method} ${path}`, definitionId, method, path, operationGroup: group, locale,
+        ...(hints ? { hints } : {}),
+      });
+      expect(prose.module).toBe(resource);
+      expect(prose.presentation).toMatchObject({ singular: label, plural: label, approval: label });
+      expect(prose.presentation.singular.toLowerCase()).toContain(words);
+      expect(prose.description).toBe(`${label} (${method} ${path}).`);
+    }
+  });
+});
+
 describe('tool prose for UI tools', () => {
   it('names a client action template after its id, not after the ui namespace', () => {
     const prose = resolveToolProse({

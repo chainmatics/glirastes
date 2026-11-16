@@ -5,8 +5,10 @@ import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
 import { ToolPresentationSchema, type ToolPresentation } from '../../contracts/index.js';
 import type { ToolPolicyDefaults } from '../../contracts/tool-policy.js';
 import { compareCodeUnits } from './canonical.js';
+import type { EndpointMethod } from '../../types.js';
 import { TOOLS_PATHS } from './config.js';
 import { toolFinding } from './findings.js';
+import { deriveDefinitionId } from './identity.js';
 import { isAgenticSemantics, SEMANTICS_LANGUAGES, SemanticsEntrySchema, type ToolSemanticsEntry } from './semantics.js';
 import type { ToolFinding, ToolProseHints } from './types.js';
 
@@ -112,11 +114,34 @@ function capitalized(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+interface ResourceInput {
+  definitionId: string;
+  method?: string;
+  path?: string;
+  hints?: ToolProseHints;
+}
+
+/**
+ * The resource an endpoint's name stands for: the part before the first dot.
+ * Only where the source says so (`hints.resourceFromRoute`, the openapi
+ * source), a name without a dot (`list_tags` from `x-glirastes-name`) carries
+ * its verb, so the resource comes from method and path as for a derived name.
+ * The id alone never decides: a contract id such as `listTags` of another
+ * source keeps naming its own module and label.
+ */
+function endpointResource(input: ResourceInput): string {
+  const { definitionId, method, path } = input;
+  if (input.hints?.resourceFromRoute === true && !definitionId.includes('.') && method && path) {
+    return deriveDefinitionId({ method: method as EndpointMethod, path }).split('.')[0]!;
+  }
+  return definitionId.split('.')[0] ?? definitionId;
+}
+
 /** The resource of an endpoint tool; everything after `ui.` for a UI tool. */
-function resourceWords(definitionId: string, operation: Operation): string {
+function resourceWords(input: ResourceInput, operation: Operation): string {
   const resource = operation === 'ui'
-    ? definitionId.split('.').slice(1).join(' ')
-    : definitionId.split('.')[0] ?? definitionId;
+    ? input.definitionId.split('.').slice(1).join(' ')
+    : endpointResource(input);
   return resource
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
@@ -205,7 +230,7 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     : entry?.origin?.description === 'code' ? 'code' : 'human';
   const language = input.locale.toLowerCase().startsWith('de') ? 'de' : 'en';
   const operation = operationOf(input.operationGroup, input.path);
-  const label = labelOf(language, operation, resourceWords(input.definitionId, operation));
+  const label = labelOf(language, operation, resourceWords(input, operation));
   const candidates: ReadonlyArray<readonly [string | undefined, DescriptionOrigin]> = [
     [input.policyDescription, 'human'],
     [input.jsDoc, 'code'],
@@ -229,9 +254,10 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     findings.push(toolFinding('description-templated', 'warning', input.stableKey,
       'Only a template description is available; the model may pick this tool less reliably.'));
   }
+  // Highest first: a code hint (OpenAPI x-glirastes-group, a contract module), tool-semantics.json, the name.
   const module = identifier(input.hints?.module)
     ?? identifier(entry?.module)
-    ?? (input.definitionId.split('.')[0] || 'tools');
+    ?? (endpointResource(input) || 'tools');
   const sharedWith = [...new Set((entry?.sharedWith ?? [])
     .map(identifier)
     .filter((value): value is string => value !== undefined && value !== module))]

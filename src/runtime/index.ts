@@ -18,6 +18,10 @@ export {
   type ToolAuthorizationResult,
 } from './authorization.js';
 export {
+  ToolExecutionDeniedError,
+  type ToolDenialReason,
+} from './tool-denial.js';
+export {
   ExecutionBudgetTracker,
   type BudgetEvaluation,
   type BudgetReason,
@@ -149,6 +153,11 @@ export {
   type RuntimePriceTable,
   type StepCostInput,
 } from './metrics/cost.js';
+export type {
+  ToolFailureClassification,
+  ToolFailureClassifier,
+  ToolFailureInfo,
+} from './tool-failure.js';
 export {
   createTurnMetricsRecorder,
   type RuntimeMetricsIdentity,

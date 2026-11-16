@@ -279,3 +279,78 @@ describe('tools describe work list', () => {
     expect(item?.routing.map((failure) => failure.sentence)).toEqual(['Was steht an?', 'what is up']);
   }, 180_000);
 });
+
+describe('tools resolve work list for an opt-in OpenAPI source', () => {
+  const operation = (extensions: Record<string, unknown>) => ({
+    security: [{ session: [] }],
+    responses: { 200: { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: { ok: { type: 'boolean' } } } } } } },
+    ...extensions,
+  });
+  const openapiApp = (paths: Record<string, unknown>) => createAppFixture({
+    'api/openapi.json': JSON.stringify({
+      openapi: '3.1.0',
+      info: { title: 'Fixture', version: '1' },
+      components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: 'sid' } } },
+      paths,
+    }),
+  }, { toolsConfig: { sources: [{ kind: 'openapi', document: 'api/openapi.json', selection: 'opt-in' }] } });
+  const worklist = async (paths: Record<string, unknown>) => {
+    const fixture = await openapiApp(paths);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'frozen', keepGoing: true });
+    return { result, items: byCode(buildResolveWorklist(result).items) };
+  };
+
+  it('lists a marked operation an exclusion rule drops, although it is no tool', async () => {
+    const { result, items } = await worklist({
+      '/api/tags': { get: operation({ 'x-glirastes-tool': true }) },
+      '/api/auth/login': { post: operation({ 'x-glirastes-tool': true }) },
+    });
+    expect((result.tools ?? []).map((tool) => tool.stableKey)).toEqual(['GET /api/tags']);
+    const item = items.get('opt-in-excluded POST /api/auth/login')!;
+    expect(item).toMatchObject({
+      stableKey: 'POST /api/auth/login',
+      toolId: null,
+      severity: 'warning',
+      owner: 'agent',
+      evidence: null,
+      files: ['api/openapi.json'],
+      target: { kind: 'app-code', files: ['api/openapi.json'] },
+    });
+    expect(item.message).toContain('api/openapi.json POST /api/auth/login is marked x-glirastes-tool: true but stays excluded (auth-route, default)');
+    expect(item.nextAction).toContain('x-glirastes-ignore');
+    expect(item.expected).toBeUndefined();
+  }, 120_000);
+
+  it('lists a marker that is the string "true", although its operation is no tool', async () => {
+    const { result, items } = await worklist({
+      '/api/tags': { get: operation({ 'x-glirastes-tool': true }) },
+      '/api/reports': { get: operation({ 'x-glirastes-tool': 'true' }) },
+    });
+    expect((result.tools ?? []).map((tool) => tool.stableKey)).toEqual(['GET /api/tags']);
+    expect(result.excluded).toContainEqual({ stableKey: 'GET /api/reports', reason: 'not-opted-in', origin: 'code' });
+    expect(items.get('tool-marker-invalid GET /api/reports')).toMatchObject({
+      stableKey: 'GET /api/reports',
+      toolId: null,
+      severity: 'warning',
+      owner: 'agent',
+      files: ['api/openapi.json'],
+      target: { kind: 'app-code', files: ['api/openapi.json'] },
+    });
+  }, 120_000);
+
+  it('keeps pointing at the tool when the operation with the malformed marker is one', async () => {
+    const fixture = await createAppFixture({
+      'api/openapi.json': JSON.stringify({
+        openapi: '3.1.0',
+        info: { title: 'Fixture', version: '1' },
+        components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: 'sid' } } },
+        paths: { '/api/reports': { get: operation({ 'x-glirastes-tool': 'true' }) } },
+      }),
+    }, { toolsConfig: { sources: [{ kind: 'openapi', document: 'api/openapi.json' }] } });
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'frozen', keepGoing: true });
+    const item = byCode(buildResolveWorklist(result).items).get('tool-marker-invalid reports.list')!;
+    expect(item).toMatchObject({ stableKey: 'GET /api/reports', owner: 'agent', target: { kind: 'app-code', files: ['api/openapi.json'] } });
+    expect(item.toolId).not.toBeNull();
+  }, 120_000);
+});
+

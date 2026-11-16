@@ -83,13 +83,17 @@ maintains a Node server or imports a generated TypeScript module.
 
 ## OpenAPI and configured runtime updates
 
-1. Regenerate OpenAPI 3.1 JSON from the backend's authoritative schema before
+1. Regenerate OpenAPI 3.0 or 3.1 JSON from the backend's authoritative schema before
    refreshing tools. CI must detect stale exports separately; frozen generation
    cannot detect backend changes hidden by an old document. Preserve the appId.
 2. Use the same generator, resolution, description and developer-owned policy
    workflows above. Unsupported active operations fail the runtime artifact
    build. Report the affected operation and supported alternatives; only an
    explicitly authorized exclusion may remove it, and it remains in coverage.
+   With `"selection": "opt-in"` only operations marked `x-glirastes-tool: true`
+   are tools and validated. Findings `opt-in-excluded`, `tool-marker-invalid`,
+   `tool-group-invalid` and `tool-roles-invalid` (tool stays disabled) are
+   fixed in the backend that writes the export, never in generated files.
 3. Build a new artifact directory with the exact deployed SDK/image version:
    `glirastes-runtime build --project /workspace/app --out /artifacts/release-2`.
    Review and commit the generated inputs/outputs. Then CI builds a separate

@@ -18,6 +18,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'auth-evidence-missing': 'Call your session helper in the handler or list it in tool-resolutions.json conventions.authHelpers. For an OpenAPI export: declare the security scheme on the operation (FastAPI: a Security dependency such as APIKeyCookie or HTTPBearer).',
   'route-hidden': 'Nothing to do while the route must stay out of the chat. Otherwise remove include_in_schema=False, export the OpenAPI document again and run glirastes tools refresh.',
   'schema-reference-unresolved': 'Optional: replace the recursive or external $ref by an inline schema so the model sees the shape; the server keeps validating meanwhile.',
+  'schema-uncompilable': 'Fix the schema keyword the message names in the OpenAPI export (it must be valid JSON Schema), export the document again and run glirastes tools refresh; to keep the operation out of the chat instead, glirastes tools policy exclude "<METHOD> <path>".',
   'contract-stale': 'Update the descriptive contract for the changed interface, then run glirastes tools refresh.',
   'handler-unresolved': 'Export the handler as a function or as a wrapper call around an inline function.',
   'contract-derived': 'Optional: validate the input with an exported Zod schema to give the model typed parameters.',
@@ -26,8 +27,14 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'resolution-rejected': 'Fix or remove the tool-resolutions.json or tool-semantics.json entry the message names; the tool keeps its fallback meanwhile.',
   'enrichment-stale': 'Optional: describe the changed tool again (glirastes tools describe --print <tool>); it uses the contract derived from code meanwhile.',
   'semantics-stale': 'Optional: describe the changed tool again (glirastes tools describe --print <tool>); the earlier agent description stays in use meanwhile.',
-  'definition-id-invalid': 'Use a contract id like resource.action (letters and digits, dot-separated).',
-  'definition-id-conflict': 'Give one of the tools a distinct contract id.',
+  'definition-id-invalid': 'Use a tool name like resource.action or list_tasks (starts with a lowercase letter; letters, digits and _, dot-separated) as the contract id or OpenAPI x-glirastes-name, then run glirastes tools refresh.',
+  'definition-id-conflict': 'Give one of the tools a distinct contract id or OpenAPI x-glirastes-name, then run glirastes tools refresh.',
+  'definition-id-reassigned': 'The name moved to another tool and the earlier holder was renamed. If that is intended, check .glirastes/tool-semantics.json: an entry matched by "name" now describes the new holder, so key the entries of both tools by "stableKey" ("METHOD /path") or move them. Otherwise give this tool a name no other tool holds (contract id or OpenAPI x-glirastes-name). Then run glirastes tools refresh. Policy, resolutions and tool ids are keyed on METHOD /path and are unaffected.',
+  'tool-marker-invalid': 'Set x-glirastes-tool to true or false (a JSON boolean) on the operation in the OpenAPI export, export it again and run glirastes tools refresh.',
+  'opt-in-excluded': 'The operation is marked x-glirastes-tool: true, but the rule the message names excludes it. Remove the marker if the exclusion is intended; otherwise remove x-glirastes-ignore, the matching exclude entry in .glirastes/tool-policy.json, or make the operation supported (JSON body, GET/POST/PUT/PATCH/DELETE/HEAD, plain path parameters).',
+  'tool-group-invalid': 'Set x-glirastes-group on the operation to a non-empty string of at most 200 characters (for example tag), export the OpenAPI document again and run glirastes tools refresh.',
+  'tool-roles-invalid': 'Set x-glirastes-roles on the operation to a list of at most 50 role names (non-empty strings), or [] for no restriction, export the OpenAPI document again and run glirastes tools refresh; the tool stays disabled until then.',
+  'policy-roles-disjoint': 'Nobody may call the tool, so it is disabled. In .glirastes/tool-policy.json, set allowedRoles of the tool to roles the code also declares (the entry can only narrow them) or remove allowedRoles; or change x-glirastes-roles in the OpenAPI export. If the tool is meant to be off, set "enabled": false instead. Then run glirastes tools refresh.',
   'tool-semantics-invalid': 'Fix .glirastes/tool-semantics.json; descriptions fall back to code and templates meanwhile.',
   'prompt-bundle-missing': 'Create .glirastes/prompt-bundle.json for this app (glirastes init sets it up).',
   'prompt-bundle-invalid': 'Fix .glirastes/prompt-bundle.json: it must match its schema and this appId.',
@@ -83,6 +90,8 @@ const POLICY_RELAXATION_FALLBACK = POLICY_RELAXATION_ACTIONS['tier-3-always-requ
 /** Findings that describe a change relative to the previous state; never written to outputs. */
 export const TRANSIENT_FINDING_CODES: ReadonlySet<string> = new Set([
   'risk-raised',
+  // Relative to the previous inventory: gone once the refresh that reported it wrote the new names.
+  'definition-id-reassigned',
   'tool-outputs-drift',
 ]);
 

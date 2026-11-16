@@ -68,6 +68,13 @@ export interface ToolProseHints {
   module?: string;
   usageHints?: string[];
   presentation?: ToolPresentation;
+  /**
+   * Set by the openapi source only: a name without a dot there comes from
+   * `x-glirastes-name` (`list_tags`) and carries its verb, so module and
+   * template label take the resource from method and path. Every other
+   * source leaves it unset and keeps the part of the name before the first dot.
+   */
+  resourceFromRoute?: true;
 }
 
 /** The interface a tool has now, also when no contract could be resolved. */
@@ -93,12 +100,22 @@ export interface ObservedTool {
   };
   findings: ToolFinding[];
   prose?: ToolProseHints;
+  /**
+   * Roles the code declares (OpenAPI `x-glirastes-roles`), any of which may
+   * call the tool. The code default of `allowedRoles`: local policy and
+   * Platform only narrow it. Absent or empty: no additional restriction.
+   */
+  codeRoles?: string[];
 }
 
 export interface ExcludedTool {
   stableKey: string;
   reason: string;
-  /** `code`: the generator itself left the route out, e.g. an `unsupported-method` export. */
+  /**
+   * `code`: the generator itself left the route out, e.g. an
+   * `unsupported-method` export, or an OpenAPI operation that is `opted-out`
+   * (`x-glirastes-tool: false`) or `not-opted-in` (selection `opt-in`).
+   */
   origin: 'default' | 'policy' | 'code';
 }
 

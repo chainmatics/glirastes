@@ -907,3 +907,28 @@ describe('runToolsPipeline (MCP endpoint catalog)', () => {
     expect(module.slice(module.indexOf('export function createMcpEndpointCatalog() {')).match(/"name": "\w+"/g)).toEqual(['"name": "tasks_list"']);
   }, 180_000);
 });
+
+describe('a contract id without a dot outside the openapi source', () => {
+  it('keeps the module and template label derived from the id, as before method and path were considered', async () => {
+    const fixture = await createAppFixture({
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      'src/lib/session.ts': SESSION,
+      'src/app/api/tags/route.ts': "import { getSession } from '@/lib/session';\n"
+        + 'export async function GET(request: Request) {\n  await getSession(request);\n  return Response.json({ tags: [] as string[] });\n}\n',
+      'src/app/api/tags/contract.ts': "import { z } from 'zod';\n"
+        + "export const contract = { GET: { id: 'listTags', input: z.object({}).strict() } };\n",
+    });
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect((result.tools ?? []).map((tool) => [tool.stableKey, tool.definitionId, tool.module])).toEqual([
+      ['GET /api/tags', 'listTags', 'listTags'],
+    ]);
+    const [tool] = (await artifactOf(fixture)).tools;
+    expect(tool).toMatchObject({
+      name: 'listTags',
+      module: 'listTags',
+      description: 'List list tags (GET /api/tags).',
+      presentation: { singular: 'List list tags', plural: 'List list tags', approval: 'List list tags' },
+    });
+  }, 180_000);
+});
+

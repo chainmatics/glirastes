@@ -85,6 +85,96 @@ describe('createAiChatHandler managed runtime', () => {
     expect(streamHandler).toHaveBeenCalledTimes(1);
   });
 
+  describe('on a turn whose snapshot was pinned for other roles', () => {
+    const revisionBoundTools = {
+      list_tasks: defineTool({
+        id: agentRevision.toolAllowlist[0]!,
+        description: 'List visible tasks.',
+        inputSchema: { safeParse: () => ({ success: true, data: {} }) } as never,
+        execute: async () => ({ tasks: [] }),
+      }),
+    };
+    /** The snapshot a runtime pinned when the turn started with the `admin` role. */
+    const pinned = createTurnSnapshot({
+      turnId: 'ai-message-1', agentRevision, manifestRevision, policyRevision, principal, localLimits,
+    });
+
+    async function offered(options: {
+      roles: string[];
+      revokedToolIds?: string[];
+      pinned?: typeof pinned;
+    }) {
+      const turn = options.pinned ?? pinned;
+      const seen: {
+        roles?: ReadonlyArray<string>;
+        promptRoles?: ReadonlyArray<string>;
+        active?: ReadonlyArray<string>;
+        found?: ReadonlyArray<string>;
+      } = {};
+      const handler = createAiChatHandler({
+        tools: revisionBoundTools,
+        model: {},
+        systemPrompt: ({ turnSnapshot }) => {
+          seen.promptRoles = turnSnapshot?.principal.roles;
+          return 'Assistant';
+        },
+        toolDiscovery: true,
+        managedRuntime: {
+          resolvePrincipal: async () => ({ ...principal, roles: options.roles }),
+          resolveTurnSnapshot: async () => turn,
+          loadRevocations: async () => (options.revokedToolIds ? [{
+            revocationId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3a09',
+            environmentId: manifestRevision.environmentId,
+            effectiveAt: '2026-07-28T20:00:00.000Z',
+            reasonCode: 'incident',
+            toolIds: options.revokedToolIds,
+            agentRevisionIds: [],
+            policyRevisionIds: [],
+            signature: { algorithm: 'Ed25519' as const, keyId: 'key-1', value: 'c2lnbmF0dXJl' },
+          }] : []),
+        },
+        streamHandler: async (context) => {
+          seen.roles = context.managedTurn?.snapshot.principal.roles;
+          const findTools = context.tools.find_tools as {
+            execute(input: unknown): Promise<{ tools: Array<{ name: string }> }>;
+          };
+          seen.found = (await findTools.execute({ query: 'list' })).tools.map((tool) => tool.name);
+          seen.active = context.toolDiscovery?.activeToolNames();
+          expect(context.managedTurn?.snapshot.manifestRevision).toEqual(turn.manifestRevision);
+          expect(context.managedTurn?.snapshot.startedAt).toBe(turn.startedAt);
+          return new Response('ok');
+        },
+      });
+      expect((await handler(request())).status).toBe(200);
+      return seen;
+    }
+
+    it('offers and finds only the tools the current roles allow', async () => {
+      expect(await offered({ roles: ['viewer'] })).toEqual({
+        roles: ['viewer'], promptRoles: ['viewer'], active: ['find_tools'], found: [],
+      });
+      expect(await offered({ roles: ['admin'] })).toEqual({
+        roles: ['admin'], promptRoles: ['admin'], active: ['find_tools', 'list_tasks'], found: ['list_tasks'],
+      });
+    });
+
+    it('takes a role the principal gained into account', async () => {
+      const viewerPinned = createTurnSnapshot({
+        turnId: 'ai-message-1', agentRevision, manifestRevision, policyRevision,
+        principal: { ...principal, roles: ['viewer'] }, localLimits,
+      });
+      expect(await offered({ roles: ['viewer', 'admin'], pinned: viewerPinned })).toEqual({
+        roles: ['viewer', 'admin'], promptRoles: ['viewer', 'admin'], active: ['find_tools', 'list_tasks'], found: ['list_tasks'],
+      });
+    });
+
+    it('neither offers nor finds a revoked tool', async () => {
+      expect(await offered({ roles: ['admin'], revokedToolIds: [agentRevision.toolAllowlist[0]!] })).toEqual({
+        roles: ['admin'], promptRoles: ['admin'], active: ['find_tools'], found: [],
+      });
+    });
+  });
+
   it('fails closed before streaming when no verified principal exists', async () => {
     const streamHandler = vi.fn(async () => new Response('unexpected'));
     const handler = createAiChatHandler({

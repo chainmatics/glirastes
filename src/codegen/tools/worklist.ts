@@ -107,6 +107,13 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'filter-keys-capped',
   'input-schema-not-object',
   'ui-control-contract-mismatch',
+  // OpenAPI x-glirastes-* values, fixed in the backend that writes the export.
+  'tool-marker-invalid',
+  'opt-in-excluded',
+  'tool-group-invalid',
+  'tool-roles-invalid',
+  // A name (contract id or x-glirastes-name) taken from another tool, fixed where it is declared.
+  'definition-id-reassigned',
 ]);
 
 /**
@@ -122,12 +129,23 @@ const DROPPED_CODES: ReadonlySet<string> = new Set([
   'contract-presentation-invalid',
 ]);
 
+/**
+ * OpenAPI marker findings on an operation that never became a tool (excluded
+ * by a rule, or left out by `selection: 'opt-in'`). They carry the source
+ * document as `expected.file` and are fixed there, in the backend's export.
+ */
+const SOURCE_DOCUMENT_CODES: ReadonlySet<string> = new Set([
+  'tool-marker-invalid',
+  'opt-in-excluded',
+]);
+
 /** Codes only the developer resolves, through `glirastes tools policy`. */
 const DEVELOPER_CODES: ReadonlySet<string> = new Set([
   'ui-action-write-unproven',
   'risk-lower-available',
   'policy-entry-orphaned',
   'override-lapsed-risk-raised',
+  'policy-roles-disjoint',
   'E-POLICY-002',
 ]);
 
@@ -259,6 +277,12 @@ function resolveItem(finding: ToolFinding, tool: ToolsPipelineTool | undefined):
     // `src/a.tsx:12` or `src/a.tsx` when no tool exists for the registration.
     const files = tool ? tool.files : [finding.subjectRef.replace(/:\d+$/, '')];
     return { ...base, owner: 'agent', target: { kind: 'app-code', files } };
+  }
+  if (!tool && SOURCE_DOCUMENT_CODES.has(code)) {
+    // No tool exists for the operation: the item points at the OpenAPI document that declares the marker.
+    const file = (finding.expected as { file?: unknown } | undefined)?.file;
+    if (typeof file !== 'string') return undefined;
+    return { ...base, files: [file], owner: 'agent', target: { kind: 'app-code', files: [file] } };
   }
   if (!tool) return undefined;
   if (code === 'contract-stale') {

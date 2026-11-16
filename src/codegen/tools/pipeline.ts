@@ -14,6 +14,7 @@ import {
 import {
   confirmationFloor,
   deriveToolPolicyDefaults,
+  intersectAllowedRoles,
   resolveToolPolicy,
   riskTier,
   type EffectiveToolPolicy,
@@ -180,6 +181,7 @@ export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
         return createOpenapiEndpointSource({
           ...(source.document ? { document: source.document } : {}),
           ...(source.fastapi ? { fastapi: source.fastapi } : {}),
+          ...(source.selection ? { selection: source.selection } : {}),
         });
       case 'next-pages':
         return createNextPagesSource(source);
@@ -268,6 +270,62 @@ function policyWarningMessage(code: string, field: string | undefined): string {
     default:
       return field ? `Policy warning for ${field}.` : 'Policy warning.';
   }
+}
+
+/**
+ * Roles the code declares (OpenAPI `x-glirastes-roles`) as the code default
+ * of `allowedRoles`. Applied after the shared `resolveToolPolicy`, whose
+ * inputs and vectors stay unchanged: the result is the intersection of the
+ * code roles with what tool-policy.json resolved, where an empty side means
+ * no restriction. Local policy therefore only narrows the code roles, and a
+ * disjoint intersection means nobody: the tool is disabled. The Platform
+ * overlay intersects again at runtime and can only narrow further.
+ */
+export function applyCodeRoles(
+  effective: EffectiveToolPolicy,
+  codeRoles: ReadonlyArray<string> | undefined,
+): EffectiveToolPolicy {
+  if (!codeRoles || codeRoles.length === 0) return effective;
+  const narrowed = intersectAllowedRoles(codeRoles, effective.allowedRoles);
+  if (narrowed.disjoint) {
+    return {
+      ...effective,
+      enabled: false,
+      allowedRoles: [],
+      origin: {
+        ...effective.origin,
+        enabled: effective.enabled ? effective.origin.allowedRoles : effective.origin.enabled,
+      },
+    };
+  }
+  const code = intersectAllowedRoles(codeRoles, []).roles;
+  const narrowedLocally = narrowed.roles.length !== code.length;
+  return {
+    ...effective,
+    allowedRoles: narrowed.roles,
+    origin: { ...effective.origin, allowedRoles: narrowedLocally ? effective.origin.allowedRoles : 'code-default' },
+  };
+}
+
+/**
+ * The warning for a tool `applyCodeRoles` disables because the roles
+ * tool-policy.json resolved share nothing with the code roles. Disabling is
+ * right (fail closed), but it must be visible. A tool the resolved policy
+ * already disabled (`enabled: false`, or the code side) is not reported: the
+ * roles are not what turns it off. Role names are configuration, not
+ * business data; the committed report keeps code and subject only.
+ */
+export function disjointCodeRolesFinding(
+  execution: { stableKey: string; definitionId: string },
+  resolved: EffectiveToolPolicy,
+  codeRoles: ReadonlyArray<string> | undefined,
+): ToolFinding | undefined {
+  if (!resolved.enabled || !codeRoles || codeRoles.length === 0) return undefined;
+  if (!intersectAllowedRoles(codeRoles, resolved.allowedRoles).disjoint) return undefined;
+  const sorted = (roles: ReadonlyArray<string>) => JSON.stringify(intersectAllowedRoles(roles, []).roles);
+  return toolFinding('policy-roles-disjoint', 'warning', execution.stableKey,
+    `${execution.definitionId} is disabled: ${TOOLS_PATHS.policy} allows the roles ${sorted(resolved.allowedRoles)}, `
+      + `the code (x-glirastes-roles) allows ${sorted(codeRoles)}, and no role is in both.`);
 }
 
 interface DerivedOutputInput {
@@ -540,15 +598,18 @@ async function generate(
       ...(acceptedRisk ? { acceptedRisk } : {}),
       ...(previousRisk ? { previousEffectiveRiskClass: previousRisk } : {}),
     });
+    const effective = applyCodeRoles(resolved.effective, tool.codeRoles);
+    const disjointRoles = disjointCodeRolesFinding(execution, resolved.effective, tool.codeRoles);
+    if (disjointRoles) findings.push(disjointRoles);
     for (const warning of resolved.warnings) {
       findings.push(toolFinding(warning.code, 'warning', execution.stableKey, policyWarningMessage(warning.code, warning.field)));
     }
     for (const error of resolved.errors) {
       findings.push(toolFinding(error.code, 'error', execution.stableKey, `${error.field}: ${error.reason}`, error.reason));
     }
-    if (previousRisk && riskTier(resolved.effective.riskClass) > riskTier(previousRisk)) {
+    if (previousRisk && riskTier(effective.riskClass) > riskTier(previousRisk)) {
       findings.push(toolFinding('risk-raised', 'warning', execution.stableKey,
-        `Risk raised from ${previousRisk} to ${resolved.effective.riskClass}; confirmation follows automatically.`));
+        `Risk raised from ${previousRisk} to ${effective.riskClass}; confirmation follows automatically.`));
     }
     findings.push(...tool.findings);
     const semanticsEntry = lookupSemantics(inputs.semantics, execution.stableKey, execution.definitionId);
@@ -577,8 +638,8 @@ async function generate(
       ...(tool.prose ? { hints: tool.prose } : {}),
       semantics: inputs.semantics,
       entry: semantics.entry ?? null,
-      ...(resolved.effective.description && resolved.effective.origin.description !== 'code-default'
-        ? { policyDescription: resolved.effective.description }
+      ...(effective.description && effective.origin.description !== 'code-default'
+        ? { policyDescription: effective.description }
         : {}),
     });
     findings.push(...prose.findings);
@@ -586,10 +647,10 @@ async function generate(
     artifactTools.push({
       execution,
       prose,
-      effective: resolved.effective,
+      effective,
       operationGroup: needsAttention ? 'needs_attention' : defaults.operationGroup,
       provenance: {
-        policyOrigin: localPolicyOrigin(resolved.effective.origin, local),
+        policyOrigin: localPolicyOrigin(effective.origin, local),
         ...(tool.contract ? { contractSource: tool.contract.source } : {}),
         descriptionSource: prose.descriptionOrigin,
         schemaSource: schemaQuality,
@@ -615,7 +676,7 @@ async function generate(
         : {}),
       ...(title ? { title } : {}),
     });
-    const requiresApproval = confirmationFloor(resolved.effective.riskClass, resolved.effective.requiresApproval);
+    const requiresApproval = confirmationFloor(effective.riskClass, effective.requiresApproval);
     toolViews.push({
       toolId: execution.toolId,
       stableKey: execution.stableKey,
@@ -630,8 +691,8 @@ async function generate(
       interfaceDigest: tool.interface?.digest ?? null,
       params: tool.interface?.params ?? null,
       defaults,
-      enabled: resolved.effective.enabled,
-      riskClass: resolved.effective.riskClass,
+      enabled: effective.enabled,
+      riskClass: effective.riskClass,
       requiresApproval,
       localPolicy: local !== undefined,
       module: prose.module,
@@ -649,8 +710,8 @@ async function generate(
       toolId: execution.toolId,
       stableKey: execution.stableKey,
       definitionId: execution.definitionId,
-      enabled: resolved.effective.enabled,
-      riskClass: resolved.effective.riskClass,
+      enabled: effective.enabled,
+      riskClass: effective.riskClass,
       requiresApproval,
       contractSource: tool.contract?.source ?? null,
       quality: {
