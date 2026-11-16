@@ -82,7 +82,9 @@ import {
   type Principal,
   type SecurityRevocation,
 } from '../../../contracts/index.js';
+import { z } from 'zod';
 import { authorizedTurnToolIds } from '../../../runtime/authorization.js';
+import { modelFacingToolName } from '../../../runtime/local-tool-bindings.js';
 import { withTurnPrincipal } from '../../../runtime/turn-snapshot.js';
 import {
   createManagedTurnGuard,
@@ -901,6 +903,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     onFinish,
     streamHandler: customStreamHandler,
     toolDiscovery: enableToolDiscovery = false,
+    authorizedToolsOnly = true,
     toolSemantics,
     metrics,
     modelPricing: configuredModelPricing,
@@ -1230,6 +1233,51 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           : []);
         return turnRevocations;
       };
+      /**
+       * The tools a managed turn hands to the stream handler and the model:
+       * the handler's own built-ins and the manifest tools this principal may
+       * use (`authorizedTurnToolIds`, principal and revocations as of the
+       * start of this request). Everything else in the registry would be
+       * denied by the guard and is not named to the model at all.
+       * `authorizedToolsOnly: false` and unmanaged turns keep every tool.
+       *
+       * The AI SDK drops an approved call whose tool is missing without a
+       * tool result, which leaves the earlier tool call unanswered. So a
+       * tool with an approval verified for this request stays in the set
+       * even when the principal may no longer use it, without its
+       * description and input schema: the guard then ends the approved
+       * call as a tool error. Its name is in the history of this turn
+       * already.
+       */
+      const offeredTools = async <T,>(
+        aiTools: Record<string, T>,
+        builtinNames: ReadonlyArray<string>,
+        verified: ReadonlyArray<VerifiedApproval>,
+      ): Promise<Record<string, T>> => {
+        if (!managedTurn || !authorizedToolsOnly) return aiTools;
+        const allowedIds = authorizedTurnToolIds({
+          snapshot: managedTurn.snapshot,
+          principal: managedPrincipal,
+          revocations: await loadTurnRevocations(),
+        });
+        // Registry keys are the model-safe encoding of the manifest names.
+        const allowedNames = new Set(managedTurn.snapshot.manifestRevision.tools
+          .filter((tool) => allowedIds.has(tool.toolId))
+          .map((tool) => modelFacingToolName(tool.name)));
+        const offered: Record<string, T> = {};
+        for (const [name, tool] of Object.entries(aiTools)) {
+          if (builtinNames.includes(name) || allowedNames.has(name)) {
+            offered[name] = tool;
+          } else if (verified.some((approval) => approval.toolName === name)) {
+            offered[name] = {
+              ...tool,
+              description: 'This tool is not available.',
+              parameters: z.object({}).passthrough(),
+            };
+          }
+        }
+        return offered;
+      };
       /** Labels of the tools this principal may use in the managed turn. */
       const managedToolPresentation = async (): Promise<ToolPresentationPart | undefined> => {
         if (!managedTurn) return undefined;
@@ -1484,7 +1532,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           : await buildDiscovery(registry, initialToolNames, handlerBuiltinNames);
 
         // Convert all tools to AI tools
-        let aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
+        let aiTools = await offeredTools(
+          await toolsToAiTools(registry, endpointToolContext, toolOptions),
+          handlerBuiltinNames,
+          pipelineApprovals.verified,
+        );
         const unscopedAiTools = aiTools;
 
         // Scope tools to pipeline selection
@@ -1706,7 +1758,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
 
       // Convert to AI tools
-      let aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
+      const convertTools = async () => offeredTools(
+        await toolsToAiTools(registry, endpointToolContext, toolOptions),
+        handlerBuiltinNames,
+        legacyApprovals.verified,
+      );
+      let aiTools = await convertTools();
 
       // Scope tools by intent
       if (routing?.toolNames && routing.toolNames.length > 0) {
@@ -1727,7 +1784,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (discoveryController) {
         // Discovery needs the full eligible server-side set; `activeTools`
         // preserves the intent router's fast initial scope.
-        aiTools = await toolsToAiTools(registry, endpointToolContext, toolOptions);
+        aiTools = await convertTools();
       }
 
       // Resolve model + system prompt (legacy mode — no pipeline fallback)

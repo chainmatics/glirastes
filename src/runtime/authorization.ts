@@ -84,9 +84,19 @@ export type TurnToolAuthorizationResult =
 /**
  * The decision for one tool of a pinned turn: `authorizeToolCall` against the
  * pinned agent, manifest and policy revisions for the given principal, then
- * the current revocations. The execution guard, tool discovery and the tool
- * presentation all use it, so what a turn offers or names never differs from
- * what it would run.
+ * the given revocations.
+ *
+ * The execution guard calls it before every tool call with a freshly
+ * resolved principal and freshly loaded revocations. The chat handler calls
+ * it once per request, with the principal and the revocations as of the
+ * start of that request, for the tools it hands to the model, for tool
+ * discovery (`find_tools`, active tools) and for the tool presentation. So
+ * a request never offers or names a tool its principal could not use when
+ * it started; a role lost or a revocation loaded during a multi-step
+ * request is enforced by the guard on the next call and shows in what is
+ * offered from the next request on. With `authorizedToolsOnly: false` the
+ * handler hands every registry tool to the model again and only discovery,
+ * presentation and the guard use this decision.
  */
 export function authorizeTurnTool(options: {
   snapshot: TurnSnapshot;

@@ -155,6 +155,19 @@ to the chat (`data-tool-presentation`) and every tool call follow the same
 decision (`authorizeToolCall` on the pinned revisions with that principal,
 then the current revocations).
 
+The model of a managed turn gets only the tools this decision allows, plus
+the handler's own built-ins (clarification, plan, follow-ups, `find_tools`):
+name, description and input schema of a tool the principal may not use, a
+revoked tool or a registry tool outside the pinned manifest never reach it.
+This holds with and without `toolDiscovery`. The tool set is decided once per
+request, with the principal and revocations as of its start; the guard
+decides again before every call. A tool with an approved call of an earlier
+request stays callable so that call gets its result, without description and
+input schema when the principal may no longer use it; the guard then ends
+the call as a tool error. `authorizedToolsOnly: false` on
+`createAiChatHandler` hands every registry tool to the model as before; the
+guard still refuses the calls.
+
 A signed decision (`toolOverrides` of the policy revision) disables a tool,
 raises its risk class, narrows its roles, requires confirmation, or replaces
 its model-facing description. It never enables a tool the code lacks or keeps

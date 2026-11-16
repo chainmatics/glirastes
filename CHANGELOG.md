@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Behaviour change:** a managed turn (`managedRuntime`, also through `createGlirastes().chatTurn()` and the runtime container) now hands the model only the tools the current principal may use: the handler's own built-ins plus the manifest tools that the tool-call guard's decision allows for the pinned revisions with the principal and revocations of the request. Until now every registry tool reached the model with name, description and input schema, and only the guard refused the call. With and without `toolDiscovery`, in the pipeline and the legacy path; a custom `streamHandler` gets the same reduced `tools`. A registry tool that is not in the pinned manifest is no longer handed over either (the guard always refused it). An approved call whose tool the principal may no longer use still ends as a tool error. To get the previous tool set, pass `authorizedToolsOnly: false` to `createAiChatHandler`; the guard decides every call either way. Turns without `managedRuntime` are unchanged.
+
 ### Fixed
 
 - Tool discovery (the initial active tools and `find_tools` results) and the tool labels of the `data-tool-presentation` part follow the freshly resolved principal and the current revocations, with the same decision the tool-call guard uses. The presentation part names only tools the principal may use.

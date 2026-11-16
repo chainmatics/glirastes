@@ -195,6 +195,18 @@ export interface AiChatHandlerConfig {
   toolDiscovery?: boolean;
 
   /**
+   * With managedRuntime (default `true`): the model and the stream handler
+   * get only the handler's built-ins and the manifest tools the principal
+   * may use, by the decision of the tool-call guard (`authorizeTurnTool`)
+   * on the pinned revisions with the principal and revocations of the
+   * request. Name, description and input schema of any other tool never
+   * reach the model. `false` hands over every registry tool, as before
+   * 0.15; the guard still denies their calls. No effect without
+   * managedRuntime.
+   */
+  authorizedToolsOnly?: boolean;
+
+  /**
    * Built-in start-set routing for `toolDiscovery` without `intentRouter`
    * (default on): modules derived from the tool metadata, the request
    * classified locally (German and English), the previous turn's tools kept
