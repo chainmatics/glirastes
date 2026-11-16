@@ -204,13 +204,17 @@ describe('an opt-in OpenAPI source through the tools pipeline', () => {
         schemaVersion: 1,
         tools: {
           'GET /api/tasks': { allowedRoles: ['guest'] },
-          'GET /api/tags': { enabled: false },
+          // Switched off, with roles the code (tag.read) does not share: the switch disables it, not the roles.
+          'GET /api/tags': { enabled: false, allowedRoles: ['guest'] },
         },
       },
     }));
     expect(result.tools!.map((tool) => tool.stableKey)).not.toContain('GET /api/tasks');
-    expect(result.tools!.find((tool) => tool.stableKey === 'GET /api/tags')!.enabled).toBe(false);
+    expect(candidates(result).get('GET /api/tags')).toMatchObject({
+      enabled: false, provenance: { policyOrigin: { enabled: 'local-policy' } },
+    });
     expect(result.findings.map((finding) => finding.code)).not.toContain('policy-roles-disjoint');
+    expect(result.outputs[TOOLS_PATHS.report]).not.toContain('policy-roles-disjoint');
   }, 60_000);
 
   it('disables a marked operation whose roles are invalid (fail closed)', async () => {
@@ -401,6 +405,23 @@ describe('applyCodeRoles', () => {
       { stableKey: 'PATCH /api/tags/:id', definitionId: 'update_tag' }, resolved(local ? [...local] : undefined), code,
     );
     expect(finding?.code).toBe(enabled ? undefined : 'policy-roles-disjoint');
+  });
+
+  it.each([
+    ['tool-policy.json', { codeEnabled: true, local: { enabled: false, allowedRoles: ['c'] } }],
+    ['the code', { codeEnabled: false, local: { allowedRoles: ['c'] } }],
+  ] as const)('reports no disjoint roles for a tool %s already disabled', (_by, input) => {
+    const disabled = resolveToolPolicy({
+      toolId: '019fb007-0000-7000-8000-0000000000b1',
+      defaults: deriveToolPolicyDefaults({ executionKind: 'endpoint', method: 'PATCH', path: '/api/tags/:id', definitionId: 'update_tag' }),
+      codeEnabled: input.codeEnabled,
+      local: { ...input.local, allowedRoles: [...input.local.allowedRoles] },
+    }).effective;
+    expect(disabled.enabled).toBe(false);
+    const execution = { stableKey: 'PATCH /api/tags/:id', definitionId: 'update_tag' };
+    // The roles are disjoint, but they are not what disables the tool.
+    expect(disjointCodeRolesFinding(execution, disabled, ['a', 'b'])).toBeUndefined();
+    expect(applyCodeRoles(disabled, ['a', 'b'])).toMatchObject({ enabled: false, origin: { enabled: disabled.origin.enabled } });
   });
 
   it('reports nothing without code roles', () => {

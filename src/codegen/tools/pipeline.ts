@@ -310,15 +310,17 @@ export function applyCodeRoles(
 /**
  * The warning for a tool `applyCodeRoles` disables because the roles
  * tool-policy.json resolved share nothing with the code roles. Disabling is
- * right (fail closed), but it must be visible. Role names are configuration,
- * not business data; the committed report keeps code and subject only.
+ * right (fail closed), but it must be visible. A tool the resolved policy
+ * already disabled (`enabled: false`, or the code side) is not reported: the
+ * roles are not what turns it off. Role names are configuration, not
+ * business data; the committed report keeps code and subject only.
  */
 export function disjointCodeRolesFinding(
   execution: { stableKey: string; definitionId: string },
   resolved: EffectiveToolPolicy,
   codeRoles: ReadonlyArray<string> | undefined,
 ): ToolFinding | undefined {
-  if (!codeRoles || codeRoles.length === 0) return undefined;
+  if (!resolved.enabled || !codeRoles || codeRoles.length === 0) return undefined;
   if (!intersectAllowedRoles(codeRoles, resolved.allowedRoles).disjoint) return undefined;
   const sorted = (roles: ReadonlyArray<string>) => JSON.stringify(intersectAllowedRoles(roles, []).roles);
   return toolFinding('policy-roles-disjoint', 'warning', execution.stableKey,

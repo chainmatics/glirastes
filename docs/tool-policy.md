@@ -30,7 +30,8 @@ either way. Roles the code declares (`x-glirastes-roles`, see below) are the
 code default; `tool-policy.json` and the Platform intersect with it, so a role
 listed there but not in the code grants nothing, and a disjoint intersection
 disables the tool (nobody). When `tool-policy.json` causes that, the refresh
-reports `policy-roles-disjoint` (warning) with the tool and both role sets;
+reports `policy-roles-disjoint` (warning) with the tool and both role sets
+(not for a tool that is already disabled, e.g. by `"enabled": false`);
 `glirastes tools resolve --print` shows it to the developer. The setup artifact names the roles' origin
 `code-default` while the code roles apply and `local-policy` once
 `tool-policy.json` narrowed them.
