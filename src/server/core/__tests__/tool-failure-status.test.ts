@@ -103,6 +103,28 @@ describe('failure results of endpoint tools', () => {
     expect(result.bodyTruncated).toBe(true);
   });
 
+  it('cuts the error text before a token that straddles the 1000 boundary', async () => {
+    // A text body is also the `error` message, which is capped at 1000.
+    const lead = `${'word '.repeat(197)}mail `;
+    expect(lead.length).toBe(990);
+    const result = await run({
+      ...context({ ok: true, status: 200 }),
+      callEndpoint: createHttpEndpointCaller({
+        baseUrl: 'http://api.test',
+        fetchImpl: jsonFetch(500, `${lead}max.mueller@example.com is not allowed. ${'tail '.repeat(100)}`, 'text/plain'),
+      }),
+    }) as Record<string, unknown>;
+    // A hard cut would leave `max.mueller@exa`, which no email detector matches.
+    expect(result.error).toBe(lead.trimEnd());
+    expect(result.error).not.toContain('max.');
+    expect(result.body).toContain('max.mueller@example.com');
+  });
+
+  it('still caps an error text without any delimiter near the boundary', async () => {
+    const result = await run(context({ ok: false, status: 500, error: `head ${'x'.repeat(2_000)}` })) as Record<string, unknown>;
+    expect(result.error).toBe(`head ${'x'.repeat(995)}`);
+  });
+
   it('still caps a body without any delimiter near the boundary', async () => {
     const result = await run(context({ ok: false, status: 500, data: `head ${'x'.repeat(5_000)}` })) as Record<string, unknown>;
     expect(result.body).toBe(`head ${'x'.repeat(3_995)}`);

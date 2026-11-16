@@ -158,25 +158,32 @@ const MAX_TOOL_ERROR_BODY_CHARS = 4_000;
  */
 const ENDPOINT_FAILURE = Symbol.for('glirastes.endpointFailure');
 
-/** How far a body cut may move back to end on a whole token. */
-const MAX_TOOL_ERROR_BODY_BACKTRACK_CHARS = 256;
-const TOOL_ERROR_BODY_DELIMITER = /[\s",:{}[\]]/;
+/** How far a cut may move back to end on a whole token. */
+const MAX_TOOL_ERROR_BACKTRACK_CHARS = 256;
+const TOOL_ERROR_TOKEN_DELIMITER = /[\s",:{}[\]]/;
 
 /**
- * Cuts a failure body to at most `MAX_TOOL_ERROR_BODY_CHARS`. A configured
- * PII shield reads the body after this cut, and a value split by it (an
- * email reduced to `max.mueller@exa`) no longer matches a detector. So the
- * cut moves back to the last whitespace or JSON delimiter and drops the
- * partial token. A body without a delimiter in the last
- * `MAX_TOOL_ERROR_BODY_BACKTRACK_CHARS` characters is cut hard.
+ * Cuts a failure text (the body, or the `error` message taken from it) to at
+ * most `limit` characters. A configured PII shield reads the text after this
+ * cut, and a value split by it (an email reduced to `max.mueller@exa`) no
+ * longer matches a detector. So the cut moves back to the last whitespace or
+ * JSON delimiter and drops the partial token. That keeps a single-token value
+ * whole; a value written with spaces (a grouped IBAN, a phone number) can
+ * still be split. A text without a delimiter in the last
+ * `MAX_TOOL_ERROR_BACKTRACK_CHARS` characters is cut hard. The window is the
+ * same for both limits: it is sized by the longest token worth keeping whole
+ * (an email address has at most 254 characters), not by the limit.
  */
-function cutToolErrorBody(text: string): string {
-  const cut = text.slice(0, MAX_TOOL_ERROR_BODY_CHARS);
+function cutToolErrorText(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const cut = text.slice(0, limit);
   // The cut already ends on a whole token.
-  if (TOOL_ERROR_BODY_DELIMITER.test(text.charAt(MAX_TOOL_ERROR_BODY_CHARS))) return cut;
-  const floor = MAX_TOOL_ERROR_BODY_CHARS - MAX_TOOL_ERROR_BODY_BACKTRACK_CHARS;
+  if (TOOL_ERROR_TOKEN_DELIMITER.test(text.charAt(limit))) return cut;
+  const floor = Math.max(0, limit - MAX_TOOL_ERROR_BACKTRACK_CHARS);
   for (let index = cut.length - 1; index >= floor; index -= 1) {
-    if (TOOL_ERROR_BODY_DELIMITER.test(cut.charAt(index))) return cut.slice(0, index);
+    if (!TOOL_ERROR_TOKEN_DELIMITER.test(cut.charAt(index))) continue;
+    // Never cut a text down to nothing but whitespace.
+    return cut.slice(0, index).trim().length > 0 ? cut.slice(0, index) : cut;
   }
   return cut;
 }
@@ -185,7 +192,7 @@ function endpointFailureBody(data: unknown): { body?: unknown; bodyTruncated?: t
   if (data === undefined) return {};
   if (typeof data === 'string') {
     return data.length > MAX_TOOL_ERROR_BODY_CHARS
-      ? { body: cutToolErrorBody(data), bodyTruncated: true }
+      ? { body: cutToolErrorText(data, MAX_TOOL_ERROR_BODY_CHARS), bodyTruncated: true }
       : { body: data };
   }
   let serialized: string | undefined;
@@ -196,7 +203,7 @@ function endpointFailureBody(data: unknown): { body?: unknown; bodyTruncated?: t
   }
   if (serialized === undefined) return {};
   return serialized.length > MAX_TOOL_ERROR_BODY_CHARS
-    ? { body: cutToolErrorBody(serialized), bodyTruncated: true }
+    ? { body: cutToolErrorText(serialized, MAX_TOOL_ERROR_BODY_CHARS), bodyTruncated: true }
     : { body: data };
 }
 
@@ -205,7 +212,7 @@ function boundedToolFailure(
 ): Record<string, unknown> {
   const rawError = result.error;
   const error = typeof rawError === 'string' && rawError.trim().length > 0
-    ? rawError.slice(0, MAX_TOOL_ERROR_MESSAGE_CHARS)
+    ? cutToolErrorText(rawError, MAX_TOOL_ERROR_MESSAGE_CHARS)
     : 'Tool execution failed.';
 
   const fromEndpoint = (result as { [ENDPOINT_FAILURE]?: unknown })[ENDPOINT_FAILURE] === true;

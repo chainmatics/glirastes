@@ -9,6 +9,7 @@ import {
 } from '../../../../contracts/index.js';
 import { defineEndpointTool, type PiiDetector } from '../../../../types.js';
 import {
+  createHttpEndpointCaller,
   endpointToolToTool,
   type InternalApiResponse,
   type ToolFailureClassifier,
@@ -190,6 +191,41 @@ describe('classifyToolFailure in the Next chat handler', () => {
     expect(classified.onFinish).toHaveBeenCalledWith(expect.objectContaining({ expectedToolFailureCount: 2 }));
   });
 
+  it('stops a repeated failing call whose text body differs on every answer', async () => {
+    // An nginx-style plain-text 500 with a request id: `createHttpEndpointCaller`
+    // puts the text into `error` as well as `body`, so both differ per call.
+    const sameCall = (callId: string) => () => convertArrayToReadableStream([
+      { type: 'stream-start', warnings: [] },
+      { type: 'tool-call', toolCallId: callId, toolName: 'list_tasks', input: JSON.stringify({ query: 'open' }) },
+      { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+    ] as never);
+    let answers = 0;
+    const fetchImpl = (async () => {
+      answers += 1;
+      return new Response(`500 Internal Server Error, request id req-${answers}`, {
+        status: 500,
+        headers: { 'content-type': 'text/plain' },
+      });
+    }) as typeof fetch;
+    const limit = localLimits.maxRepeatedFingerprint;
+    const steps = [
+      ...Array.from({ length: limit + 2 }, (_, index) => sameCall(`call-${index}`)),
+      () => textStep(),
+    ];
+    const { wire, onFinish } = await runTurn({
+      steps,
+      endpointCaller: () => createHttpEndpointCaller({ baseUrl: 'http://api.test', fetchImpl }),
+      classifyToolFailure: ({ status }) => (status === 500 ? 'expected' : 'error'),
+    });
+    expect(wire).toContain('req-1');
+    expect(wire).toContain(`req-${limit}`);
+    expect(wire).toContain('Stopped at runtime budget: maxRepeatedFingerprint.');
+    expect(wire).not.toContain('maxConsecutiveErrors');
+    // The guard refuses the next identical call: the backend is not asked again.
+    expect(answers).toBe(limit);
+    expect(onFinish).toHaveBeenCalledWith(expect.objectContaining({ expectedToolFailureCount: limit }));
+  });
+
   it('only affects metrics on the legacy path without managedRuntime', async () => {
     const { events } = await runTurn({ managedRuntime: undefined, classifyToolFailure: expectForbidden });
     expect(events[0]).toMatchObject({ toolCallCount: 1, toolErrorCount: 0 });
@@ -233,6 +269,28 @@ describe('classifyToolFailure in the Next chat handler', () => {
     const prompt = JSON.stringify(model.doStreamCalls[1]!.prompt);
     expect(prompt).toContain('bodyTruncated');
     expect(prompt).not.toContain('first.contact');
+    expect(prompt).not.toContain('max.');
+    expect(wire).not.toContain('max.');
+  });
+
+  it('leaves no partial email for the PII shield at the error text cut', async () => {
+    // A text body is also the `error` message, capped at 1000 characters.
+    const detector: PiiDetector = {
+      detect: (text) => [...text.matchAll(/[\w.]+@[\w-]+\.[a-z]{2,}/g)].map((match) => ({
+        type: 'email', start: match.index, end: match.index + match[0].length, score: 1, text: match[0],
+      })),
+    };
+    const lead = `${'word '.repeat(197)}mail `;
+    const fetchImpl = (async () => new Response(
+      `${lead}max.mueller@example.com is not allowed. ${'tail '.repeat(100)}`,
+      { status: 500, headers: { 'content-type': 'text/plain' } },
+    )) as typeof fetch;
+    const { model, wire } = await runTurn({
+      piiShield: createPiiShield({ locale: 'de', detector }),
+      endpointCaller: () => createHttpEndpointCaller({ baseUrl: 'http://api.test', fetchImpl }),
+    });
+    const prompt = JSON.stringify(model.doStreamCalls[1]!.prompt);
+    expect(prompt).toContain('"status":500');
     expect(prompt).not.toContain('max.');
     expect(wire).not.toContain('max.');
   });
