@@ -46,14 +46,15 @@ export function toolResultFailure(result: unknown): ToolFailureClassification | 
 
 /**
  * What loop detection fingerprints for a tool result. A `success: false`
- * result with an HTTP `status` is an endpoint failure, and only its stable
- * fields count: `success`, `status`, `retryable` and `expectedFailure`. The
- * backend `body` (and `bodyTruncated`) and `error` are left out, because
- * `error` is taken from the body (its text, or its `message`) and many
- * backends put a timestamp or a trace id into every error body, which would
- * make each repetition of the same failing call look new. A failure without
- * a `status` (a tool's own failure) keeps its `error`. Any other result is
- * fingerprinted whole.
+ * result with a numeric `status` counts as an endpoint failure, and exactly
+ * its stable fields are fingerprinted: `success`, `status`, `retryable` and
+ * `expectedFailure`. The backend `body` (and `bodyTruncated`) and `error`
+ * are left out, because `error` is taken from the body (its text, or its
+ * `message`, `error` or `detail`) and many backends put a timestamp or a
+ * trace id into every error body, which would make each repetition of the
+ * same failing call look new. A failure without a numeric `status` (a
+ * tool's own failure) keeps its `error` and its other fields. Any other
+ * result is fingerprinted whole.
  */
 export function toolResultForFingerprint(result: unknown): unknown {
   if (typeof result !== 'object' || result === null || Array.isArray(result)) return result;
@@ -61,6 +62,13 @@ export function toolResultForFingerprint(result: unknown): unknown {
   const {
     body: _body, bodyTruncated: _bodyTruncated, error, ...stable
   } = result as Record<string, unknown>;
-  if (typeof stable.status === 'number') return stable;
+  if (typeof stable.status === 'number') {
+    return {
+      success: false,
+      status: stable.status,
+      retryable: stable.retryable === true,
+      expectedFailure: stable.expectedFailure === true,
+    };
+  }
   return error === undefined ? stable : { ...stable, error };
 }

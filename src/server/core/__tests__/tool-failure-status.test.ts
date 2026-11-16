@@ -125,6 +125,11 @@ describe('failure results of endpoint tools', () => {
     expect(result.error).toBe(`head ${'x'.repeat(995)}`);
   });
 
+  it('falls back to the generic message when the cut leaves only whitespace', async () => {
+    const result = await run(context({ ok: false, status: 500, error: `${' '.repeat(1_000)}Forbidden` })) as Record<string, unknown>;
+    expect(result.error).toBe('Tool execution failed.');
+  });
+
   it('still caps a body without any delimiter near the boundary', async () => {
     const result = await run(context({ ok: false, status: 500, data: `head ${'x'.repeat(5_000)}` })) as Record<string, unknown>;
     expect(result.body).toBe(`head ${'x'.repeat(3_995)}`);

@@ -302,6 +302,16 @@ describe('createManagedTurnGuard: expected tool failures', () => {
     expect(evaluation.reasons).toContain('maxRepeatedFingerprint');
   });
 
+  it('fingerprints an endpoint failure by its stable fields only, whatever else the result carries', async () => {
+    const turn = guard();
+    const limit = turn.snapshot.budget.maxRepeatedFingerprint;
+    for (let index = 0; index <= limit; index += 1) {
+      await turn.afterToolCall(call({ ...expected, requestId: `req-${index}`, details: { attempt: index } }));
+    }
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(limit + 1);
+    expect(turn.tracker.evaluate().reasons).toContain('maxRepeatedFingerprint');
+  });
+
   it('keeps status, retryable and classification in the fingerprint of an endpoint failure', async () => {
     const turn = guard();
     await turn.afterToolCall(call({ ...error, body: 'a' }));
