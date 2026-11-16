@@ -13,7 +13,17 @@ import { z } from 'zod';
 import { defineTool, type ToolRegistry } from '../../../../types.js';
 import { createAiChatHandler, type StreamHandlerContext } from '../create-ai-chat-handler.js';
 import { wrapToolsForVercelAi } from '../prepare-model-messages.js';
-import { principal, snapshot, streamChunks } from './command-fixtures.js';
+import { createTurnSnapshot, type TurnSnapshot } from '../../../../runtime/turn-snapshot.js';
+import {
+  agentRevision,
+  ARCHIVE_TASK_ID,
+  localLimits,
+  manifestRevision,
+  policyRevision,
+  principal,
+  snapshot,
+  streamChunks,
+} from './command-fixtures.js';
 
 /**
  * The second layer of the approval binding: whatever messages reach
@@ -253,6 +263,59 @@ describe('approval execution gate', () => {
       expect(archive).toHaveBeenCalledTimes(1);
       expect(approvalStore.consume).toHaveBeenCalledWith(expect.any(String), expect.any(Number), {
         scope: JSON.stringify([principal().tenantId, principal().subjectId]),
+      });
+    });
+
+    describe('whose principal changes roles between the approval request and its answer', () => {
+      const editorPolicy = {
+        ...policyRevision(),
+        toolPolicies: policyRevision().toolPolicies.map((policy) => (policy.toolId === ARCHIVE_TASK_ID
+          ? { ...policy, allowedRoles: ['editor'] }
+          : policy)),
+      };
+      /** Pins one snapshot per turn, as the local runtime source does. */
+      function pinningRuntime(roles: () => string[]) {
+        const pinned = new Map<string, TurnSnapshot>();
+        return {
+          resolvePrincipal: async () => principal(roles()),
+          resolveTurnSnapshot: async ({ turnId }: { turnId: string }) => {
+            const existing = pinned.get(turnId);
+            if (existing) return existing;
+            const created = createTurnSnapshot({
+              turnId, agentRevision, manifestRevision, policyRevision: editorPolicy, principal: principal(roles()), localLimits,
+            });
+            pinned.set(turnId, created);
+            return created;
+          },
+        };
+      }
+
+      it('runs the approved call when the current roles still allow its tool', async () => {
+        const { registry, archive } = managedTools();
+        let roles = ['editor', 'member'];
+        const handler = createAiChatHandler({
+          tools: registry, systemPrompt: 'A', approvalSecret: SECRET, managedRuntime: pinningRuntime(() => roles),
+          model: scriptedModel([toolCall('tasks_archive', { id: 't1' })]),
+        });
+        const first = await streamChunks(await handler(post([user])));
+        expect(first.find((chunk) => chunk.type === 'tool-approval-request')).toMatchObject({ toolCallId: 'call-1' });
+        roles = ['editor'];
+        await streamChunks(await handler(post([user, approve(await clientMessage(first))])));
+        expect(archive).toHaveBeenCalledTimes(1);
+      });
+
+      it('refuses the approved call in the guard when the current roles no longer allow its tool', async () => {
+        const { registry, archive } = managedTools();
+        let roles = ['editor', 'member'];
+        const handler = createAiChatHandler({
+          tools: registry, systemPrompt: 'A', approvalSecret: SECRET, managedRuntime: pinningRuntime(() => roles),
+          model: scriptedModel([toolCall('tasks_archive', { id: 't1' })]),
+        });
+        const first = await streamChunks(await handler(post([user])));
+        roles = ['member'];
+        const second = await streamChunks(await handler(post([user, approve(await clientMessage(first))])));
+        expect(archive).not.toHaveBeenCalled();
+        expect(second).toContainEqual(expect.objectContaining({ type: 'tool-output-error', toolCallId: 'call-1' }));
       });
     });
 

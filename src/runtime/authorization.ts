@@ -3,9 +3,11 @@ import type {
   ManifestRevision,
   Principal,
   RuntimePolicyRevision,
+  SecurityRevocation,
   ToolRiskClass,
 } from '../contracts/index.js';
 import { confirmationFloor } from '../contracts/tool-policy.js';
+import { isToolRevoked, type TurnSnapshot } from './turn-snapshot.js';
 
 export type ToolAuthorizationResult =
   | {
@@ -92,4 +94,69 @@ export function authorizeToolCall(options: {
     requiresApproval: confirmationFloor(policy.riskClass, policy.requiresApproval),
     riskClass: policy.riskClass,
   };
+}
+
+export type TurnToolAuthorizationResult =
+  | ToolAuthorizationResult
+  | { allowed: false; reason: 'revoked' };
+
+/**
+ * The decision for one tool of a pinned turn: `authorizeToolCall` against the
+ * pinned agent, manifest and policy revisions for the given principal, then
+ * the given revocations.
+ *
+ * Per call, with a freshly resolved principal and freshly loaded
+ * revocations: the execution guard before every tool call; the chat
+ * handler before every model step (the tools active in that step, built-in
+ * stream handler) and on every `find_tools` search (what it returns and
+ * activates). A principal that cannot be resolved, or a failing lookup,
+ * allows no manifest tool there.
+ *
+ * Once per request, with the principal and the revocations as of its
+ * start: the tool objects the chat handler hands to the stream handler
+ * (`tools`), the discovery index and its start set, and the tool
+ * presentation. A role lost or a revocation loaded during a multi-step
+ * request therefore takes a tool away from the next step, the next search
+ * and the next call, while its label stays in the presentation part that
+ * was already sent, and a custom stream handler has to apply
+ * `authorizedToolNames` of its context itself.
+ *
+ * With `authorizedToolsOnly: false` the chat handler hands every registry
+ * tool to the model again; discovery, presentation and the guard still use
+ * this decision.
+ */
+export function authorizeTurnTool(options: {
+  snapshot: TurnSnapshot;
+  principal: Principal | undefined;
+  toolId: string;
+  revocations?: ReadonlyArray<SecurityRevocation>;
+  at?: Date;
+}): TurnToolAuthorizationResult {
+  const { snapshot } = options;
+  const authorization = authorizeToolCall({
+    principal: options.principal,
+    agentRevision: snapshot.agentRevision,
+    manifestRevision: snapshot.manifestRevision,
+    policyRevision: snapshot.policyRevision,
+    toolId: options.toolId,
+  });
+  if (!authorization.allowed) return authorization;
+  if (isToolRevoked(snapshot, options.toolId, options.revocations ?? [], options.at)) {
+    return { allowed: false, reason: 'revoked' };
+  }
+  return authorization;
+}
+
+/** The manifest tool ids of a pinned turn that `authorizeTurnTool` allows. */
+export function authorizedTurnToolIds(options: {
+  snapshot: TurnSnapshot;
+  principal: Principal | undefined;
+  revocations?: ReadonlyArray<SecurityRevocation>;
+  at?: Date;
+}): ReadonlySet<string> {
+  const allowed = new Set<string>();
+  for (const tool of options.snapshot.manifestRevision.tools) {
+    if (authorizeTurnTool({ ...options, toolId: tool.toolId }).allowed) allowed.add(tool.toolId);
+  }
+  return allowed;
 }

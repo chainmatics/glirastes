@@ -115,7 +115,11 @@ export interface ManagedLocalRuntimeConfig {
 
   /**
    * Return the immutable snapshot pinned for this turn. Approval
-   * continuations must return the same snapshot for the same turnId.
+   * continuations must return the same pinned revisions for the same turnId.
+   * The handler uses the snapshot with the principal it resolved for the
+   * request, so tool discovery, tool labels and the system prompt context
+   * follow the roles and revocations as of the start of the request; the
+   * tools offered per model step and `find_tools` follow the current ones.
    */
   resolveTurnSnapshot: (
     context: ResolveTurnSnapshotContext,
@@ -190,6 +194,29 @@ export interface AiChatHandlerConfig {
    * app-authorized tool set. false preserves static scoping.
    */
   toolDiscovery?: boolean;
+
+  /**
+   * With managedRuntime (default `true`): the model and the stream handler
+   * get only the handler's built-ins and the manifest tools the principal
+   * may use, by the decision of the tool-call guard (`authorizeTurnTool`)
+   * on the pinned revisions: decided at the start of the request, and
+   * again before every model step with a freshly resolved principal and
+   * freshly loaded revocations. Name, description and input schema of any
+   * other tool never reach the model. A legacy `intentRouter` and the
+   * built-in start-set routing get the same names. `false` hands over
+   * every registry tool, as before this option existed; the guard still
+   * denies their calls. No effect without managedRuntime.
+   *
+   * NOT filtered, because it is server-side app data: `routing` and
+   * `pipelineResult` (`model` and `systemPrompt` callbacks,
+   * `onPipelineResult`, a custom `streamHandler`; they carry the tool names
+   * of the app's own `pipeline` modules and router result), `turnSnapshot`
+   * with the whole pinned manifest (`systemPrompt` callback, the endpoint
+   * tool context of `loadTools` and of every tool's `execute`) and
+   * `managedTurn.snapshot` (custom `streamHandler`). An app that forwards
+   * any of it to a model names tools the principal may not use.
+   */
+  authorizedToolsOnly?: boolean;
 
   /**
    * Built-in start-set routing for `toolDiscovery` without `intentRouter`

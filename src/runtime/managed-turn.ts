@@ -7,7 +7,7 @@ import type {
   AiSdkToolFailure,
   AiSdkToolSuccess,
 } from './ai-sdk/engine.js';
-import { authorizeToolCall, principalDenialReason } from './authorization.js';
+import { authorizeTurnTool, principalDenialReason } from './authorization.js';
 import { modelFacingToolName } from './local-tool-bindings.js';
 import {
   ExecutionBudgetTracker,
@@ -87,23 +87,23 @@ export function createManagedTurnGuard(
     if (isToolRevoked(options.snapshot, toolId, revocations)) {
       throw new ToolExecutionDeniedError('revoked', toolName);
     }
+    return revocations;
   };
 
   const authorize = async (call: AiSdkToolCall) => {
     const principal = await options.resolvePrincipal();
     const manifestTool = findManifestTool(call.toolName);
-    await assertTurnMayContinue(principal, manifestTool?.toolId, call.toolName);
+    const revocations = await assertTurnMayContinue(principal, manifestTool?.toolId, call.toolName);
 
     // Only from here on may a denial be recoverable.
     if (!manifestTool) {
       throw new ToolExecutionDeniedError('manifest_tool_unavailable', call.toolName);
     }
-    const authorization = authorizeToolCall({
+    const authorization = authorizeTurnTool({
+      snapshot: options.snapshot,
       principal,
-      agentRevision: options.snapshot.agentRevision,
-      manifestRevision: options.snapshot.manifestRevision,
-      policyRevision: options.snapshot.policyRevision,
       toolId: manifestTool.toolId,
+      revocations,
     });
     if (!authorization.allowed) {
       throw new ToolExecutionDeniedError(authorization.reason, call.toolName);

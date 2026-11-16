@@ -165,6 +165,34 @@ export function createTurnSnapshot(options: {
   return deepFreeze(snapshot);
 }
 
+function samePrincipal(left: Principal, right: Principal): boolean {
+  const leftRoles = new Set(left.roles);
+  const rightRoles = new Set(right.roles);
+  return left.subjectId === right.subjectId
+    && left.tenantId === right.tenantId
+    && leftRoles.size === rightRoles.size
+    && [...leftRoles].every((role) => rightRoles.has(role))
+    && JSON.stringify(left.attributes ?? {}) === JSON.stringify(right.attributes ?? {});
+}
+
+/**
+ * The pinned turn for the freshly resolved principal of the same subject and
+ * tenant. Revisions, budget, prompt pin and `startedAt` stay as pinned; only
+ * the principal (roles, attributes) follows the current server-side session,
+ * so nothing that reads `snapshot.principal` sees roles the user no longer
+ * has. Returns the snapshot itself when the principal is unchanged.
+ */
+export function withTurnPrincipal(snapshot: TurnSnapshot, principal: Principal): TurnSnapshot {
+  if (
+    principal.subjectId !== snapshot.principal.subjectId
+    || principal.tenantId !== snapshot.principal.tenantId
+  ) {
+    throw new Error('Cannot move a turn snapshot to another subject or tenant');
+  }
+  if (samePrincipal(snapshot.principal, principal)) return snapshot;
+  return deepFreeze({ ...snapshot, principal: clone(principal) });
+}
+
 /**
  * Resuming a turn must never silently change its prompt revision. A turn that
  * pinned a prompt bundle can only resume on the identical revision and digest.

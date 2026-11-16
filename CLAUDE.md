@@ -116,7 +116,7 @@ enforces it. The current Foundation package exposes:
 **Deliberately not exported here** (the confirmed pilot cut — still versioned in
 the repo, deferred from the package): NestJS server adapter, LangGraph, the
 `glirastes/openapi` subpath, Skill/MCP generation, Lancer, and remote Aegis.
-The CLI **does** support the OpenAPI 3.1 JSON source and runtime artifacts. Reintroducing any of them needs its own
+The CLI **does** support the OpenAPI 3.0/3.1 JSON source and runtime artifacts. Reintroducing any of them needs its own
 acceptance gate; do not simply add the export back.
 
 ## Architecture

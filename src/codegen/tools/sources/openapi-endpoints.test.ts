@@ -1,12 +1,29 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToolPolicyFileSchema } from '../../../contracts/tool-policy.js';
 import { createAppFixture, removeAppFixtures } from '../__tests__/app-fixture.js';
+import { JsonSchemaCompileError } from '../canonical.js';
 import { loadToolsConfig } from '../config.js';
 import { EMPTY_CONVENTIONS } from '../resolutions.js';
 import { createSchemaProbe } from '../schema-probe.js';
 import type { ToolSourceContext } from '../types.js';
 import { createOpenapiEndpointSource, type OpenapiSourceOptions } from './openapi-endpoints.js';
 
+/** Set by a test to make contract resolution fail; reset after each test. */
+const resolveFailure = vi.hoisted(() => ({ error: undefined as unknown }));
+vi.mock('../contract-tiers.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../contract-tiers.js')>();
+  return {
+    ...actual,
+    resolveEndpointContract: (input: Parameters<typeof actual.resolveEndpointContract>[0]) => {
+      if (resolveFailure.error !== undefined) throw resolveFailure.error;
+      return actual.resolveEndpointContract(input);
+    },
+  };
+});
+
+afterEach(() => {
+  resolveFailure.error = undefined;
+});
 afterEach(removeAppFixtures);
 
 const SECURED = [{ APIKeyCookie: [] }];
@@ -213,7 +230,8 @@ describe('OpenAPI endpoint source', () => {
   });
 
   it.each([
-    ['an OpenAPI 3.0 export', documentOf(TASK_PATHS).replace('"3.1.0"', '"3.0.3"'), 'is OpenAPI 3.0.3'],
+    ['an OpenAPI 3.2 export', documentOf(TASK_PATHS).replace('"3.1.0"', '"3.2.0"'), 'is OpenAPI 3.2.0'],
+    ['a Swagger 2.0 export', JSON.stringify({ swagger: '2.0', paths: {} }), 'is Swagger 2.0; the generator reads OpenAPI 3.0 and 3.1 exports'],
     ['a file that is not JSON', '{ openapi: 3.1.0 }', 'is not valid JSON'],
   ])('stops with E-INVENTORY-011 for %s', async (_label, text, reason) => {
     const observed = await observe({ 'api/openapi.json': text });
@@ -221,6 +239,120 @@ describe('OpenAPI endpoint source', () => {
     expect(observed.complete).toBe(false);
     expect(observed.findings).toEqual([expect.objectContaining({ code: 'E-INVENTORY-011', severity: 'error' })]);
     expect(observed.findings[0]!.message).toContain(`api/openapi.json ${reason}`);
+  });
+
+  it('reads an OpenAPI 3.0 export with nullable parameters as their 3.1 shape', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    paths['/api/tasks']!.get!.parameters = [
+      { name: 'status', in: 'query', required: false, schema: { type: 'string', nullable: true, enum: ['open', 'done'] } },
+    ];
+    const observed = await observe({ 'api/openapi.json': documentOf(paths).replace('"3.1.0"', '"3.0.3"') });
+
+    expect(observed.complete).toBe(true);
+    expect(observed.findings).toEqual([]);
+    const list = observed.observations.find((tool) => tool.execution.stableKey === 'GET /api/tasks')!;
+    expect(list.contract!.input).toMatchObject({
+      properties: { status: { type: ['string', 'null'], enum: ['open', 'done', null] } },
+    });
+  });
+
+  it('names the operation whose schema the runtime validator cannot compile', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    // A 3.0 keyword in a 3.1 document is kept as written, and Ajv rejects it.
+    paths['/api/tasks']!.get!.parameters = [
+      { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 0, exclusiveMinimum: true } },
+    ];
+    const observed = await observe({ 'api/openapi.json': documentOf(paths) });
+
+    expect(observed.complete).toBe(true);
+    expect(observed.findings).toEqual([expect.objectContaining({
+      code: 'schema-uncompilable', severity: 'error', subjectRef: 'GET /api/tasks',
+    })]);
+    expect(observed.findings[0]!.message).toBe(
+      'api/openapi.json GET /api/tasks has a schema the JSON Schema validator cannot compile: schema is invalid: data/properties/limit/exclusiveMinimum must be number',
+    );
+    expect(observed.observations.map((tool) => tool.execution.stableKey)).toEqual(['DELETE /api/tasks/:task_id', 'POST /api/tasks']);
+  });
+
+  it('names the operation whose combined input the runtime validator cannot compile', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    // Each part compiles alone; merged, the same $id names two different schemas.
+    paths['/api/tasks']!.post!.parameters = [
+      { name: 'filter', in: 'query', schema: { $ref: '#/components/schemas/Status', description: 'Only tasks in this status.' } },
+    ];
+    paths['/api/tasks']!.post!.requestBody = {
+      required: true,
+      content: { 'application/json': { schema: {
+        type: 'object', properties: { status: { $ref: '#/components/schemas/Status' } }, required: ['status'],
+      } } },
+    };
+    const document = JSON.parse(documentOf(paths)) as { components: { schemas: Record<string, unknown> } };
+    document.components.schemas.Status = { $id: 'Status', type: 'string', enum: ['open', 'done'] };
+    const observed = await observe({ 'api/openapi.json': JSON.stringify(document) });
+
+    expect(observed.complete).toBe(true);
+    expect(observed.findings).toEqual([expect.objectContaining({
+      code: 'schema-uncompilable', severity: 'error', subjectRef: 'POST /api/tasks',
+    })]);
+    expect(observed.findings[0]!.message).toBe(
+      'api/openapi.json POST /api/tasks has a schema the JSON Schema validator cannot compile: reference "Status" resolves to more than one schema',
+    );
+    expect(observed.observations.map((tool) => tool.execution.stableKey)).toEqual(['DELETE /api/tasks/:task_id', 'GET /api/tasks']);
+  });
+
+  it('names the operation whose response schema the runtime validator cannot compile', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    paths['/api/tasks']!.get!.responses = {
+      '200': { description: 'Tasks', content: { 'application/json': { schema: {
+        type: 'object', properties: { total: { type: 'integer', minimum: 0, exclusiveMinimum: true } },
+      } } } },
+    };
+    const observed = await observe({ 'api/openapi.json': documentOf(paths) });
+
+    expect(observed.complete).toBe(true);
+    expect(observed.findings).toEqual([expect.objectContaining({
+      code: 'schema-uncompilable', severity: 'error', subjectRef: 'GET /api/tasks',
+    })]);
+    expect(observed.findings[0]!.message).toBe(
+      'api/openapi.json GET /api/tasks has a schema the JSON Schema validator cannot compile: schema is invalid: data/properties/total/exclusiveMinimum must be number',
+    );
+    expect(observed.observations.map((tool) => tool.execution.stableKey)).toEqual(['DELETE /api/tasks/:task_id', 'POST /api/tasks']);
+  });
+
+  it.each([
+    ['a programming error', new TypeError("Cannot read properties of undefined (reading 'parts')")],
+    // E.g. a tool-resolutions.json schema: uncompilable, but not written by the OpenAPI export.
+    ['a compile failure of a schema the document does not hold', new JsonSchemaCompileError({ type: 'nope' }, new Error('schema is invalid'))],
+    ['a compile failure of an input merged from schemas the document does not hold', new JsonSchemaCompileError({ type: 'object' }, new Error('schema is invalid'), [{ type: 'nope' }])],
+  ])('does not blame the OpenAPI export for %s while resolving a contract', async (_label, error) => {
+    resolveFailure.error = error;
+
+    await expect(observe({ 'api/openapi.json': documentOf(TASK_PATHS) })).rejects.toBe(error);
+  });
+
+  it('keeps a nullable request body visible instead of reading it as an object', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    const nullableBody = { content: { 'application/json': { schema: { ...TASK_CREATE, nullable: true } } } };
+    paths['/api/tasks']!.post!.requestBody = nullableBody;
+    paths['/api/tasks/{task_id}']!.patch = {
+      security: SECURED,
+      parameters: [{ name: 'task_id', in: 'path', required: true, schema: { type: 'string' } }],
+      requestBody: nullableBody,
+      responses: { '200': { description: 'ok' } },
+    };
+    const observed = await observe({ 'api/openapi.json': documentOf(paths).replace('"3.1.0"', '"3.0.3"') });
+    const byKey = new Map(observed.observations.map((tool) => [tool.execution.stableKey, tool]));
+
+    // Alone, the body stays the whole input; the pipeline then reports
+    // input-schema-not-object and keeps the tool disabled (openapi-3-0.test.ts).
+    const create = byKey.get('POST /api/tasks')!;
+    expect(create.contract!.input).toMatchObject({ type: ['object', 'null'] });
+    // Next to a path parameter, it cannot be merged, and says so.
+    const update = byKey.get('PATCH /api/tasks/:task_id')!;
+    expect(update.contract).toBeUndefined();
+    expect(update.findings).toEqual(expect.arrayContaining([expect.objectContaining({
+      code: 'input-role-unsupported', severity: 'needs_attention',
+    })]));
   });
 });
 

@@ -9,7 +9,9 @@ import {
   policyRevision,
   principal,
 } from '../../../../runtime/__tests__/turn-snapshot.test.js';
+import { authorizedTurnToolIds } from '../../../../runtime/authorization.js';
 import { createTurnSnapshot } from '../../../../runtime/turn-snapshot.js';
+import * as commands from './command-fixtures.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
 import { toolPresentationOf } from '../tool-presentation.js';
 
@@ -23,9 +25,11 @@ const worded = {
     : tool)),
 };
 
+const everyTool = new Set(manifestRevision.tools.map((tool) => tool.toolId));
+
 describe('the wording the chat UI gets for the tools of a turn', () => {
   it('names every worded tool by its model name, without the question mark of the confirmation', () => {
-    expect(toolPresentationOf(worded)).toEqual({
+    expect(toolPresentationOf(worded, everyTool)).toEqual({
       locale: 'de-DE',
       tools: { list_tasks: { label: 'Aufgaben auflisten' } },
     });
@@ -33,12 +37,76 @@ describe('the wording the chat UI gets for the tools of a turn', () => {
 
   it('falls back to the tool name when the manifest has no model name', () => {
     const tool = { ...worded.tools[0]!, modelName: undefined };
-    expect(Object.keys(toolPresentationOf({ ...worded, tools: [tool] })!.tools)).toEqual([tool.name]);
+    expect(Object.keys(toolPresentationOf({ ...worded, tools: [tool] }, everyTool)!.tools)).toEqual([tool.name]);
   });
 
   it('is nothing for a manifest without wordings', () => {
-    expect(toolPresentationOf({ ...worded, tools: worded.tools.map(({ presentation: _dropped, ...tool }) => tool) })).toBeNull();
-    expect(toolPresentationOf(undefined)).toBeNull();
+    expect(toolPresentationOf({ ...worded, tools: worded.tools.map(({ presentation: _dropped, ...tool }) => tool) }, everyTool)).toBeNull();
+    expect(toolPresentationOf(undefined, everyTool)).toBeNull();
+  });
+
+  it('is nothing when the principal may use none of the worded tools', () => {
+    expect(toolPresentationOf(worded, new Set())).toBeNull();
+  });
+});
+
+describe('the wording for the principal of a turn', () => {
+  const wording = (approval: string) => ({ locale: 'de-DE', singular: 'Aufgabe', plural: 'Aufgaben', approval });
+  const wordedCommands = {
+    ...commands.manifestRevision,
+    tools: commands.manifestRevision.tools.map((tool) => ({
+      ...tool,
+      presentation: wording(tool.toolId === commands.LIST_TASKS_ID ? 'Aufgaben auflisten' : 'Aufgabe archivieren?'),
+    })),
+  };
+  const labels = (options: {
+    roles?: string[];
+    listRoles?: string[];
+    archiveEnabled?: boolean;
+    revokedToolIds?: string[];
+  } = {}) => {
+    const snapshot = createTurnSnapshot({
+      turnId: 'turn-1',
+      agentRevision: commands.agentRevision,
+      manifestRevision: wordedCommands,
+      policyRevision: commands.policyRevision({
+        ...(options.listRoles ? { listRoles: options.listRoles } : {}),
+        ...(options.archiveEnabled === undefined ? {} : { archiveEnabled: options.archiveEnabled }),
+      }),
+      principal: commands.principal(),
+      localLimits: commands.localLimits,
+    });
+    const allowed = authorizedTurnToolIds({
+      snapshot,
+      principal: commands.principal(options.roles),
+      revocations: options.revokedToolIds ? [{
+        revocationId: '019fb710-0000-7000-8000-0000000000f1',
+        environmentId: snapshot.manifestRevision.environmentId,
+        effectiveAt: '2026-10-05T08:00:00.000Z',
+        reasonCode: 'incident',
+        toolIds: options.revokedToolIds,
+        agentRevisionIds: [],
+        policyRevisionIds: [],
+        signature: { algorithm: 'Ed25519', keyId: 'key-1', value: 'c2lnbmF0dXJl' },
+      }] : [],
+    });
+    return Object.keys(toolPresentationOf(snapshot.manifestRevision, allowed)?.tools ?? {});
+  };
+
+  it('names the tools of a role the principal has, and unrestricted tools', () => {
+    expect(labels({ roles: ['member'], listRoles: ['member'] })).toEqual(['tasks.list', 'tasks.archive']);
+  });
+
+  it('leaves out a tool restricted to a role the principal does not have', () => {
+    expect(labels({ roles: ['viewer'], listRoles: ['member'] })).toEqual(['tasks.archive']);
+  });
+
+  it('leaves out a revoked tool', () => {
+    expect(labels({ revokedToolIds: [commands.ARCHIVE_TASK_ID] })).toEqual(['tasks.list']);
+  });
+
+  it('leaves out a tool the policy disables', () => {
+    expect(labels({ archiveEnabled: false })).toEqual(['tasks.list']);
   });
 });
 
@@ -93,6 +161,51 @@ describe('a managed chat turn', () => {
     expect(body).toContain('"type":"data-tool-presentation"');
     expect(body).toContain('"list_tasks":{"label":"Aufgaben auflisten"}');
     expect(body.indexOf('data-tool-presentation')).toBeLessThan(body.indexOf('text-delta'));
+    expect(body).toContain(
+      'data: {"type":"data-tool-presentation","data":{"locale":"de-DE","tools":{"list_tasks":{"label":"Aufgaben auflisten"}}},"transient":true}',
+    );
+  });
+
+  const pinnedFor = (roles: string[], allowedRoles: string[]) => createTurnSnapshot({
+    turnId: 'ai-message-1',
+    agentRevision,
+    manifestRevision: worded,
+    policyRevision: {
+      ...policyRevision,
+      toolPolicies: policyRevision.toolPolicies.map((policy) => ({ ...policy, allowedRoles })),
+    },
+    principal: { ...principal, roles },
+    localLimits,
+  });
+
+  it('names no tool the current principal lost the role for, although the turn was pinned with it', async () => {
+    const pinned = pinnedFor(['admin'], ['admin']);
+    const handler = createAiChatHandler({
+      tools,
+      model: model(),
+      systemPrompt: 'Assistant',
+      managedRuntime: {
+        resolvePrincipal: async () => ({ ...principal, roles: ['viewer'] }),
+        resolveTurnSnapshot: async () => pinned,
+      },
+    });
+
+    expect(await (await handler(request())).text()).not.toContain('data-tool-presentation');
+  });
+
+  it('names a tool without role restriction for any principal', async () => {
+    const pinned = pinnedFor(['viewer'], []);
+    const handler = createAiChatHandler({
+      tools,
+      model: model(),
+      systemPrompt: 'Assistant',
+      managedRuntime: {
+        resolvePrincipal: async () => ({ ...principal, roles: ['viewer'] }),
+        resolveTurnSnapshot: async () => pinned,
+      },
+    });
+
+    expect(await (await handler(request())).text()).toContain('"list_tasks":{"label":"Aufgaben auflisten"}');
   });
 
   it('sends none without a pinned tool state', async () => {

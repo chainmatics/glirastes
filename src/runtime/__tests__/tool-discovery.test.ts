@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ToolRiskClass } from '../../contracts/index.js';
+import type { SecurityRevocation, ToolRiskClass } from '../../contracts/index.js';
 import type { ToolRegistry } from '../../types.js';
 import type { TurnSnapshot } from '../turn-snapshot.js';
 import { createTurnToolDiscovery } from '../tool-discovery.js';
 
 const TENANT = '99999999-9999-4999-8999-999999999999';
+const ENVIRONMENT = '88888888-8888-4888-8888-888888888888';
 const toolId = (suffix: string) =>
   `11111111-1111-4111-8111-1111111111${suffix.padStart(2, '0')}`;
 
@@ -59,7 +60,7 @@ function fixture(): { snapshot: TurnSnapshot; registry: ToolRegistry } {
     startedAt: '2026-08-14T08:00:00.000Z',
     principal: { subjectId: 'u1', tenantId: TENANT, roles: ['member'], attributes: {} },
     agentRevision: { tenantId: TENANT, toolAllowlist: facts.map((fact) => fact.id) },
-    manifestRevision: { tenantId: TENANT, tools: manifestTools },
+    manifestRevision: { tenantId: TENANT, environmentId: ENVIRONMENT, tools: manifestTools },
     policyRevision: {
       tenantId: TENANT,
       toolPolicies: facts.map((fact) => ({
@@ -111,6 +112,36 @@ describe('createTurnToolDiscovery', () => {
     });
     expect(discovery.eligibleNames).toEqual([]);
     expect(discovery.search('list')).toEqual([]);
+  });
+
+  it('decides eligibility for the principal it is given, not the one pinned in the snapshot', () => {
+    const { snapshot, registry } = fixture();
+    const reduced = { ...snapshot.principal, roles: ['viewer'] };
+    const extended = { ...snapshot.principal, roles: ['member', 'admin'] };
+
+    const afterDowngrade = createTurnToolDiscovery({ snapshot, registry, principal: reduced });
+    expect(afterDowngrade.eligibleNames).toEqual([]);
+    expect(afterDowngrade.search('list')).toEqual([]);
+
+    expect(createTurnToolDiscovery({ snapshot, registry, principal: extended }).eligibleNames)
+      .toEqual(['admin_listAudit', 'reports_taskSummary', 'tasks_listTasks']);
+  });
+
+  it('leaves out a tool of a current revocation', () => {
+    const { snapshot, registry } = fixture();
+    const revocation: SecurityRevocation = {
+      revocationId: '77777777-7777-4777-8777-777777777777',
+      environmentId: ENVIRONMENT,
+      effectiveAt: '2026-08-14T07:00:00.000Z',
+      reasonCode: 'incident',
+      toolIds: [toolId('1')],
+      agentRevisionIds: [],
+      policyRevisionIds: [],
+      signature: { algorithm: 'Ed25519', keyId: 'key-1', value: 'c2lnbmF0dXJl' },
+    };
+    const discovery = createTurnToolDiscovery({ snapshot, registry, revocations: [revocation] });
+    expect(discovery.eligibleNames).toEqual(['reports_taskSummary']);
+    expect(discovery.search('list').map((result) => result.name)).toEqual(['reports_taskSummary']);
   });
 
   it('returns frozen bounded metadata without schemas or executors', () => {

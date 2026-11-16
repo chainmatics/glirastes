@@ -40,7 +40,7 @@ Choose the backend host and browser UI independently:
 | Your application | Recommended path |
 | --- | --- |
 | Existing suitable Node/Next.js server | Embed the SDK and its HTTP handler; use the Next.js quickstart below or `glirastes/server/http` |
-| Rust, PHP, Java or another HTTP backend without a suitable Node host | Deploy the official configured runtime container beside the app; supply OpenAPI 3.1 JSON, an authenticated identity endpoint and JSON configuration |
+| Rust, PHP, Java or another HTTP backend without a suitable Node host | Deploy the official configured runtime container beside the app; supply OpenAPI 3.0 or 3.1 JSON, an authenticated identity endpoint and JSON configuration |
 | React frontend | Use `VercelAiChat` and the React navigation/action hooks |
 | Angular, SvelteKit, Nuxt, Vue or plain JavaScript frontend | Mount `<glirastes-chat>` client-side and connect the app's router/actions through `glirastes/browser` |
 

@@ -11,6 +11,7 @@ import {
   assertPromptPinForResume,
   createTurnSnapshot,
   isToolRevoked,
+  withTurnPrincipal,
 } from '../turn-snapshot.js';
 
 const signature = {
@@ -241,6 +242,34 @@ describe('assertPromptPinForResume', () => {
 
     expect(() => assertPromptPinForResume(unpinned, undefined)).not.toThrow();
     expect(() => assertPromptPinForResume(unpinned, promptPin)).not.toThrow();
+  });
+});
+
+describe('withTurnPrincipal', () => {
+  const pinned = () => createTurnSnapshot({
+    turnId: 'turn-1', agentRevision, manifestRevision, policyRevision, principal, localLimits,
+    startedAt: '2026-07-28T20:01:00.000Z',
+  });
+
+  it('keeps everything pinned and takes the current roles and attributes', () => {
+    const snapshot = pinned();
+    const current = withTurnPrincipal(snapshot, { ...principal, roles: ['viewer'], attributes: { team: 'a' } });
+    expect(current.principal).toEqual({ ...principal, roles: ['viewer'], attributes: { team: 'a' } });
+    expect({ ...current, principal: snapshot.principal }).toEqual(snapshot);
+    expect(Object.isFrozen(current.principal)).toBe(true);
+  });
+
+  it('returns the snapshot itself for an unchanged principal, also with roles in another order', () => {
+    const snapshot = createTurnSnapshot({
+      turnId: 'turn-1', agentRevision, manifestRevision, policyRevision,
+      principal: { ...principal, roles: ['admin', 'member'] }, localLimits,
+    });
+    expect(withTurnPrincipal(snapshot, { ...principal, roles: ['member', 'admin'] })).toBe(snapshot);
+  });
+
+  it('refuses another subject or tenant', () => {
+    expect(() => withTurnPrincipal(pinned(), { ...principal, subjectId: 'user-2' })).toThrow(/subject or tenant/);
+    expect(() => withTurnPrincipal(pinned(), { ...principal, tenantId: crypto.randomUUID() })).toThrow(/subject or tenant/);
   });
 });
 

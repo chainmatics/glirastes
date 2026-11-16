@@ -51,7 +51,9 @@ content needed for inference. Frontend actions execute in the browser.
 
 ## Build and update tools
 
-Export **OpenAPI 3.1 JSON** from the backend into the application repository.
+Export **OpenAPI 3.0.x or 3.1.x JSON** from the backend into the application
+repository (YAML and Swagger 2.0 are not read; a 3.0 document's `nullable` and
+boolean exclusive bounds are normalized to their 3.1 form on load).
 The application CI must regenerate and diff this export: validating an already
 stale document is not sufficient. Configure the normal `.glirastes/tools.json`
 with a stable appId, targetAppKey and source:

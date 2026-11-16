@@ -14,7 +14,7 @@ import {
   type OpenapiDocument,
   type OpenapiOperationEntry,
 } from '../../openapi-document.js';
-import { compareCodeUnits, sortKeysDeep } from '../canonical.js';
+import { compareCodeUnits, JsonSchemaCompileError, sortKeysDeep } from '../canonical.js';
 import {
   probeItemFor,
   probeKey,
@@ -46,7 +46,7 @@ const READ_METHODS: ReadonlySet<EndpointMethod> = new Set(['GET', 'HEAD', 'DELET
 const SUCCESS_STATUSES = ['200', '201', '202'];
 
 export interface OpenapiSourceOptions {
-  /** App-relative path of the exported OpenAPI 3.1 document. */
+  /** App-relative path of the exported OpenAPI 3.0 or 3.1 JSON document. */
   document?: string;
   /** App-relative folder of the FastAPI code whose routes are counted against the export. */
   fastapi?: string;
@@ -423,29 +423,49 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
     results[index] ?? { ok: false, reason: 'probe-failed' },
   ]));
 
-  const pieces = kept.map((entry): OpenapiPiece => {
+  const pieces = kept.flatMap((entry): OpenapiPiece[] => {
     const resolution = resolutions.get(entry.stableKey);
     const previousContract = ctx.previousContracts.get(entry.stableKey);
-    const resolved = resolveEndpointContract({
-      stableKey: entry.stableKey,
-      method: entry.method,
-      path: entry.path,
-      pathParams: entry.pathParams,
-      evidence: {
-        schemaUses: [],
-        queryKeys: entry.queryKeys,
-        repeatedQueryKeys: [],
-        bodyKeys: bodyKeysOf(entry.body),
-        readsBody: entry.body !== undefined,
-        normalizedText: entry.normalizedText,
-      },
-      ...(entry.output ? { inferredOutput: entry.output } : {}),
-      probes,
-      openapi: entry.input,
-      ...(resolution ? { resolution } : {}),
-      ...(previousContract ? { previousContract } : {}),
-    });
-    return { entry, resolved };
+    let resolved: ResolvedEndpointContract;
+    try {
+      resolved = resolveEndpointContract({
+        stableKey: entry.stableKey,
+        method: entry.method,
+        path: entry.path,
+        pathParams: entry.pathParams,
+        evidence: {
+          schemaUses: [],
+          queryKeys: entry.queryKeys,
+          repeatedQueryKeys: [],
+          bodyKeys: bodyKeysOf(entry.body),
+          readsBody: entry.body !== undefined,
+          normalizedText: entry.normalizedText,
+        },
+        ...(entry.output ? { inferredOutput: entry.output } : {}),
+        probes,
+        openapi: entry.input,
+        ...(resolution ? { resolution } : {}),
+        ...(previousContract ? { previousContract } : {}),
+      });
+    } catch (error) {
+      // Only a schema of this operation that Ajv cannot compile is the
+      // export's fault: its response, one of its input parts, or the input
+      // merged from nothing but its parts. Anything else (a programming error,
+      // a schema from tool-resolutions.json) keeps its own error and stack.
+      const isPart = (schema: unknown): boolean => entry.input.parts.some((part) => part.json === schema);
+      const own = error instanceof JsonSchemaCompileError
+        && (error.schema === entry.output || isPart(error.schema)
+          || (error.composedFrom.length > 0 && error.composedFrom.every(isPart)));
+      if (!own) throw error;
+      // The runtime compiles every schema with Ajv; a schema it cannot compile
+      // would fail at boot. Name the operation and Ajv's reason (keywords and
+      // schema paths only, never values) instead of failing the whole command.
+      const reason = error.message.split('\n')[0]!.slice(0, 300);
+      findings.push(toolFinding('schema-uncompilable', 'error', entry.stableKey,
+        `${documentPath} ${entry.operation.operationKey.toUpperCase()} ${entry.operation.documentPath} has a schema the JSON Schema validator cannot compile: ${reason}`));
+      return [];
+    }
+    return [{ entry, resolved }];
   });
   const naming = assignDefinitionIds(
     pieces.map(({ entry, resolved }) => ({
@@ -466,7 +486,8 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
 }
 
 /**
- * An exported OpenAPI 3.1 document (FastAPI writes one), read as JSON. With
+ * An exported OpenAPI 3.1 document (FastAPI writes one) or 3.0 document
+ * (@nestjs/swagger writes one; normalized to 3.1 on load), read as JSON. With
  * `fastapi` set, the routes of the FastAPI code are counted with Python's
  * `ast` module (`python3 -I`, the app is never imported) and a stale export
  * stops the refresh.
