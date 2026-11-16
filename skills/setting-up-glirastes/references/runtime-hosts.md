@@ -35,7 +35,8 @@ appId, a local artifactRef and sections `planner`, `appBehavior`, `responseStyle
 and `capabilityFragments`. These are normal SDK inputs, not a new tool inventory.
 
 Export OpenAPI 3.0 or 3.1 JSON from the authoritative backend schema. Omit `fastapi` for
-non-Python APIs. The runtime supports a strict subset: simple path parameters,
+non-Python APIs. To expose only chosen operations, add `"selection":"opt-in"` and
+mark them `x-glirastes-tool: true` in the export (see `integrating-glirastes-web`). The runtime supports a strict subset: simple path parameters,
 supported GET/HEAD/DELETE query parameters and POST/PUT/PATCH JSON-object bodies.
 Unsupported active operations fail build; explicitly excluded operations appear
 in coverage. Never manually enable generated tools to bypass diagnostics.

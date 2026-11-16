@@ -230,6 +230,12 @@ external or financial always ask. Change that locally with
 `roles`, `exclude`, ...); it writes `.glirastes/tool-policy.json`. See
 [docs/tool-policy.md](docs/tool-policy.md).
 
+**OpenAPI opt-in.** With `"selection": "opt-in"` on the `openapi` source only
+operations marked `x-glirastes-tool: true` become tools; `x-glirastes-name`,
+`x-glirastes-group` and `x-glirastes-roles` set their name, module and code
+default roles (local policy and Platform only narrow them). See
+[the extension table](docs/tool-policy.md#openapi-source-selection-and-x-glirastes--extensions).
+
 **Describing tools.** The source generator never calls a model. Descriptions,
 synonyms and example calls are written by a coding agent from work lists;
 the chat runtime uses your configured model provider:

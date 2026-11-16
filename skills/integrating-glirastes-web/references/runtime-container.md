@@ -96,6 +96,10 @@ write-method query parameters, multipart, custom header/cookie arguments,
 external/recursive references and unsupported schema/serialization features.
 Declare authentication with `securitySchemes`, not model-supplied credentials.
 Explicit `x-glirastes-ignore` and normal policy exclusions remain in coverage.
+The build uses the generator's selection: with `"selection": "opt-in"` it
+validates only operations marked `x-glirastes-tool: true`, and an operation
+marked `x-glirastes-tool: false` is skipped in either mode; a selected
+unsupported operation still fails the build.
 OpenAPI `servers` does not select the API target.
 
 ## Identity contract

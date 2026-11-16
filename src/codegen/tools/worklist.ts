@@ -107,6 +107,11 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'filter-keys-capped',
   'input-schema-not-object',
   'ui-control-contract-mismatch',
+  // OpenAPI x-glirastes-* values, fixed in the backend that writes the export.
+  'tool-marker-invalid',
+  'opt-in-excluded',
+  'tool-group-invalid',
+  'tool-roles-invalid',
 ]);
 
 /**

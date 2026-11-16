@@ -65,6 +65,32 @@ describe('definition identity', () => {
     expect(invalid.findings.map((finding) => finding.code)).toEqual(['definition-id-invalid']);
   });
 
+  it('lets an x-glirastes-name win over the previous name and names the extension in its findings', () => {
+    const named = (stableKey: string, explicitId: string) => ({ ...request(stableKey, explicitId), explicitIdSource: 'x-glirastes-name' });
+    const previous = new Map([['GET /api/tags', 'tags.list'], ['PATCH /api/tags/:id', 'tags.update']]);
+    const first = assignDefinitionIds([named('GET /api/tags', 'list_tags'), request('PATCH /api/tags/:id')], previous);
+    expect(Object.fromEntries(first.ids)).toEqual({ 'GET /api/tags': 'list_tags', 'PATCH /api/tags/:id': 'tags.update' });
+    // Stable across refreshes: the previous inventory now holds the explicit name.
+    const again = assignDefinitionIds([named('GET /api/tags', 'list_tags')], new Map([['GET /api/tags', 'list_tags']]));
+    expect(again.ids.get('GET /api/tags')).toBe('list_tags');
+    // A sticky name another operation held gives way to the explicit name.
+    const taken = assignDefinitionIds(
+      [named('GET /api/labels', 'tags.list'), request('GET /api/tags')],
+      new Map([['GET /api/tags', 'tags.list']]),
+    );
+    expect(Object.fromEntries(taken.ids)).toEqual({ 'GET /api/labels': 'tags.list', 'GET /api/tags': 'tags.listGet' });
+
+    const invalid = assignDefinitionIds([named('GET /api/a', 'List Tags')], new Map());
+    expect(invalid.ids.get('GET /api/a')).toBe('a.list');
+    expect(invalid.findings[0]).toMatchObject({ code: 'definition-id-invalid', severity: 'warning' });
+    expect(invalid.findings[0]!.message).toBe('x-glirastes-name "List Tags" is not a valid tool name; a derived name is used.');
+    expect(invalid.findings[0]!.nextAction).toContain('x-glirastes-name');
+    const conflict = assignDefinitionIds([named('GET /api/a', 'list_tags'), named('GET /api/b', 'list_tags')], new Map());
+    expect(conflict.findings.map((finding) => [finding.code, finding.severity, finding.message])).toEqual([
+      ['definition-id-conflict', 'error', 'x-glirastes-name list_tags is already used by GET /api/a.'],
+    ]);
+  });
+
   it('reports names that collide after model-safe encoding', () => {
     const { findings } = assignDefinitionIds([
       request('GET /api/tasks'),

@@ -269,6 +269,55 @@ describe("runtime container artifact", () => {
     },
   );
 
+  it("validates only the operations the generator selects (opt-in, x-glirastes-tool)", async () => {
+    const upload = {
+      description: "Upload",
+      requestBody: {
+        content: { "multipart/form-data": { schema: { type: "object" } } },
+      },
+      responses: response,
+    };
+    const write = async (
+      selection: "all" | "opt-in" | undefined,
+      tasks: Record<string, unknown>,
+      uploadMarker?: boolean,
+    ) => {
+      const app = await createAppFixture(
+        {
+          "api/openapi.json": JSON.stringify({
+            openapi: "3.1.0",
+            security: [{ session: [] }],
+            paths: {
+              "/api/tasks": { get: { description: "List tasks", responses: response, ...tasks } },
+              "/api/uploads": {
+                post: uploadMarker === undefined ? upload : { ...upload, "x-glirastes-tool": uploadMarker },
+              },
+            },
+          }),
+        },
+        {
+          toolsConfig: {
+            sources: [{ kind: "openapi", document: "api/openapi.json", ...(selection ? { selection } : {}) }],
+          },
+        },
+      );
+      return buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") });
+    };
+    // The unsupported upload fails the build as long as it is selected.
+    await expect(write(undefined, {})).rejects.toThrow(/POST \/api\/uploads: unsupported request body/);
+    await expect(write("opt-in", { "x-glirastes-tool": true }, true)).rejects.toThrow(/unsupported request body/);
+    // Unmarked under opt-in, or opted out in either mode: skipped, like in the generator.
+    const optIn = await write("opt-in", { "x-glirastes-tool": true, "x-glirastes-roles": ["task.read"] });
+    expect(optIn.coverage.tools).toHaveLength(1);
+    expect(optIn.coverage.excluded).toEqual([
+      // The generator names the existing reason first.
+      { stableKey: "POST /api/uploads", reason: "unsupported-body", origin: "code" },
+    ]);
+    expect((await write("all", {}, false)).coverage.tools).toHaveLength(1);
+    // Nothing selected: nothing to validate, and no tool.
+    expect((await write("opt-in", {})).coverage.tools).toHaveLength(0);
+  });
+
   it("builds from an OpenAPI 3.0 export and keeps nullable parameters unsupported", async () => {
     const app = await fixture();
     const spec = JSON.parse(await app.read("api/openapi.json"));

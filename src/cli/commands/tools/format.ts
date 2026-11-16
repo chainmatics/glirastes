@@ -102,6 +102,32 @@ function outcomeLine(result: ToolsPipelineResult): string {
   return result.mode === 'integrity' ? 'Tool outputs verified (integrity).' : 'Tool outputs match the code.';
 }
 
+/**
+ * One line per excluded route, except `not-opted-in`: an opt-in OpenAPI
+ * source leaves out most operations, so they collapse into one counted line
+ * (tool-report.json keeps the full list).
+ */
+function excludedSection(lines: string[], excluded: ToolsPipelineResult['excluded']): void {
+  if (excluded.length === 0) return;
+  const notOptedIn = excluded.filter((entry) => entry.reason === 'not-opted-in');
+  const listed = excluded.filter((entry) => entry.reason !== 'not-opted-in');
+  lines.push('', `Excluded (${excluded.length})`, ...listed.map((entry) => `  . ${entry.stableKey}  ${entry.reason} (${entry.origin})`));
+  if (notOptedIn.length > 0) {
+    lines.push(`  . ${notOptedIn.length} OpenAPI operation${notOptedIn.length === 1 ? '' : 's'}  not-opted-in (code), listed in .glirastes/tool-report.json`);
+  }
+  const next: string[] = [];
+  if (listed.some((entry) => entry.reason !== 'opted-out')) {
+    next.push('Excluded routes are never tools; remove a matching exclude entry from .glirastes/tool-policy.json to include a policy exclusion.');
+  }
+  if (notOptedIn.length > 0) {
+    next.push('To make an operation a tool, mark it with x-glirastes-tool: true in the OpenAPI export.');
+  }
+  if (listed.some((entry) => entry.reason === 'opted-out')) {
+    next.push('x-glirastes-tool: false keeps an operation out; remove it to include the operation.');
+  }
+  lines.push(`  Next: ${next.join(' ')}`);
+}
+
 export function formatToolsHuman(result: ToolsPipelineResult): string {
   const lookup = labels(result);
   const describe = (toolId: string) => {
@@ -134,8 +160,7 @@ export function formatToolsHuman(result: ToolsPipelineResult): string {
   section('Removed', result.changes.removed.map((toolId) => `- ${describe(toolId)}`),
     'Nothing to do: the tool is tombstoned and stops working after the next build or restart.');
   detailed('Needs attention', '!', result.findings.filter((finding) => finding.severity === 'needs_attention'));
-  section('Excluded', result.excluded.map((entry) => `. ${entry.stableKey}  ${entry.reason} (${entry.origin})`),
-    'Excluded routes are never tools; remove a matching exclude entry from .glirastes/tool-policy.json to include a policy exclusion.');
+  excludedSection(lines, result.excluded);
   detailed('Errors', 'x', result.findings.filter((finding) => finding.severity === 'error'));
   const warnings = result.findings.filter((finding) => finding.severity === 'warning' && finding.code !== 'risk-raised');
   if (warnings.length > 0) {

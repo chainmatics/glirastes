@@ -98,8 +98,12 @@ describe('an OpenAPI 3.0 export through the tools pipeline', () => {
  * A larger real-world export, never committed: point GLIRASTES_TEST_OPENAPI_SPEC
  * at an OpenAPI 3.0 or 3.1 JSON file. The file is linked, not copied, into a
  * temporary app outside the repository, and only generic properties are checked.
+ * GLIRASTES_TEST_OPENAPI_SELECTION=opt-in reads it with the opt-in selection,
+ * GLIRASTES_TEST_OPENAPI_LOCALE sets the label locale (en-US by default).
  */
 const EXTERNAL_SPEC = process.env.GLIRASTES_TEST_OPENAPI_SPEC;
+const EXTERNAL_SELECTION = process.env.GLIRASTES_TEST_OPENAPI_SELECTION === 'opt-in' ? 'opt-in' : 'all';
+const EXTERNAL_LOCALE = process.env.GLIRASTES_TEST_OPENAPI_LOCALE ?? 'en-US';
 
 describe.skipIf(!EXTERNAL_SPEC)('an external OpenAPI export (GLIRASTES_TEST_OPENAPI_SPEC)', () => {
   let root: string | undefined;
@@ -114,22 +118,43 @@ describe.skipIf(!EXTERNAL_SPEC)('an external OpenAPI export (GLIRASTES_TEST_OPEN
     await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'openapi-check', private: true, type: 'module' }));
     await writeFile(join(root, '.glirastes/prompt-bundle.json'), JSON.stringify(FIXTURE_PROMPT_BUNDLE));
     await writeFile(join(root, '.glirastes/tools.json'), JSON.stringify({
-      schemaVersion: 1, appId: FIXTURE_APP_ID, targetAppKey: 'openapi-check', locale: 'en-US', ...OPENAPI_SOURCE,
+      schemaVersion: 1,
+      appId: FIXTURE_APP_ID,
+      targetAppKey: 'openapi-check',
+      locale: EXTERNAL_LOCALE,
+      sources: [{ kind: 'openapi', document: 'openapi.json', selection: EXTERNAL_SELECTION }],
     }));
     await symlink(EXTERNAL_SPEC!, join(root, 'openapi.json'));
 
     const result: ToolsPipelineResult = await runToolsPipeline({ root, mode: 'write', keepGoing: true });
     const tools = result.tools ?? [];
     const count = (values: string[]) => Object.fromEntries([...new Set(values)].sort().map((value) => [value, values.filter((item) => item === value).length]));
+    const artifact = JSON.parse(result.outputs['.glirastes/setup-artifact.json']!) as {
+      tools: Array<{ name: string; module?: string; allowedRoles?: string[]; enabled: boolean; presentation?: { singular: string } }>;
+    };
     console.info(JSON.stringify({
+      selection: EXTERNAL_SELECTION,
       tools: tools.length,
       excluded: count(result.excluded.map((entry) => entry.reason)),
       findings: count(result.findings.map((finding) => `${finding.severity} ${finding.code}`)),
-    }));
+      ...(EXTERNAL_SELECTION === 'opt-in'
+        ? {
+          toolDetails: artifact.tools.map((tool) => ({
+            name: tool.name, module: tool.module, allowedRoles: tool.allowedRoles, enabled: tool.enabled, label: tool.presentation?.singular,
+          })),
+        }
+        : {}),
+    }, null, 2));
 
     expect(result.findings.filter((finding) => finding.severity === 'error')).toEqual([]);
     expect(result.wrote).toBe(true);
     expect(tools.length).toBeGreaterThan(0);
+    if (EXTERNAL_SELECTION === 'opt-in') {
+      // Only marked operations are tools, and an operation that is no tool reports nothing about its extensions.
+      const notOptedIn = new Set(result.excluded.filter((entry) => entry.reason === 'not-opted-in').map((entry) => entry.stableKey));
+      expect(result.findings.filter((finding) => notOptedIn.has(finding.subjectRef) && finding.code !== 'tool-marker-invalid')).toEqual([]);
+      expect(result.findings.map((finding) => finding.code)).not.toContain('tool-roles-invalid');
+    }
     expect(result.findings.map((finding) => finding.code)).not.toContain('schema-reference-unresolved');
     for (const tool of tools) {
       const input = tool.contract?.runtime.input;

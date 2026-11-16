@@ -28,6 +28,7 @@ import {
   TOOLS_PATHS,
 } from "../codegen/tools/config.js";
 import { findExclusion } from "../codegen/tools/exclusions.js";
+import { selectionExclusion } from "../codegen/tools/openapi-selection.js";
 import { ToolContractsFileSchema } from "../codegen/tools/files.js";
 import { readToolInputs } from "../codegen/tools/inputs.js";
 import { runToolsPipeline } from "../codegen/tools/pipeline.js";
@@ -133,6 +134,10 @@ async function checkOpenapiSubset(projectRoot: string): Promise<void> {
           inputs.policy.exclude ?? [],
         )
       )
+        continue;
+      // The generator's selection: with `opt-in`, only operations marked
+      // x-glirastes-tool: true are validated (and become tools).
+      if (selectionExclusion(stableKey, entry.operation, source.selection))
         continue;
       const fail = (reason: string) => errors.push(`${stableKey}: ${reason}`);
       if (!method || entry.path === undefined) {

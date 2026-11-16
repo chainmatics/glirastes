@@ -103,6 +103,16 @@ YAML and Swagger 2.0 are not. Multipart bodies stay excluded
 operations/schemas and authentication evidence; a valid export
 alone does not prove that every endpoint becomes an enabled tool.
 
+To expose only chosen operations, add `"selection": "opt-in"` to the source
+and have the backend mark them in its export with `x-glirastes-tool: true`
+(operation level). `x-glirastes-name` sets the tool name, `x-glirastes-group`
+the module and `x-glirastes-roles` the roles any of which may call the tool
+(the code default; tool-policy.json and the Platform only narrow it).
+`x-glirastes-tool: false` keeps an operation out in either mode. Existing
+exclusions win over the marker and are reported as `opt-in-excluded`. Policy
+entries stay keyed on `METHOD /path`, so renaming is lossless. The full table
+is in the package's `docs/tool-policy.md`.
+
 ## Workflow
 
 1. Decide the host using the choices above. For the configured service, follow

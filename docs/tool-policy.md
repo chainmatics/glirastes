@@ -7,7 +7,7 @@ the strictest value wins.
 
 | Layer | Where | Written by |
 | --- | --- | --- |
-| Code defaults | method, destructive path tokens, declared effects | the generator |
+| Code defaults | method, destructive path tokens, declared effects, declared roles (OpenAPI `x-glirastes-roles`) | the generator |
 | Local policy | `.glirastes/tool-policy.json`, committed | the developer or the CLI, never an agent |
 | Platform decisions | signed `toolOverrides` of the deployed configuration | owners and admins of a connected app |
 
@@ -23,6 +23,70 @@ the strictest value wins.
 Every layer may disable a tool, raise its risk class, narrow its roles and
 require confirmation. No layer enables a tool the code disabled or lacks,
 lowers a risk class or adds roles.
+
+Roles are any-of: a caller needs one of the tool's `allowedRoles`. An empty
+list means no additional restriction; the endpoint's own authorization applies
+either way. Roles the code declares (`x-glirastes-roles`, see below) are the
+code default; `tool-policy.json` and the Platform intersect with it, so a role
+listed there but not in the code grants nothing, and a disjoint intersection
+disables the tool (nobody). The setup artifact names the roles' origin
+`code-default` while the code roles apply and `local-policy` once
+`tool-policy.json` narrowed them.
+
+## OpenAPI source: selection and `x-glirastes-*` extensions
+
+By default the `openapi` source turns every supported operation that no rule
+excludes into a tool. A backend can instead mark in its export which
+operations become tools, and with which name, group and roles:
+
+```json
+{"kind": "openapi", "document": "api/openapi.json", "selection": "opt-in"}
+```
+
+`selection` is per source: `all` (the default, also for the bare `"openapi"`
+string) or `opt-in`. The extensions are read on the operation object only
+(not on the path item):
+
+| Extension | Type | Effect | Invalid value |
+| --- | --- | --- | --- |
+| `x-glirastes-tool` | boolean | `true`: with `opt-in`, the operation may become a tool. `false`: never a tool, in both modes (excluded as `opted-out`) | Finding `tool-marker-invalid` (warning, also on an operation that is no tool); read as absent |
+| `x-glirastes-name` | string | The tool name, e.g. `list_tags` or `tags.list`. Wins over the derived name and over the name an earlier inventory kept; no `refresh --adopt` needed | Not a valid tool name: `definition-id-invalid` (warning), derived name. Two operations with one name: `definition-id-conflict` (error) |
+| `x-glirastes-group` | string | The module, above `tool-semantics.json` and any derivation | Finding `tool-group-invalid` (warning); module derived |
+| `x-glirastes-roles` | string array | Code default of `allowedRoles` (any-of); `[]` means no restriction; duplicates are removed | Not a list of at most 50 non-empty role names: `tool-roles-invalid` (needs attention), the tool stays disabled |
+| `x-glirastes-effect` | `read`, `write`, `destructive`, `external`, `financial` | Declared effect; can only raise the risk class | `contract-effect-invalid` (needs attention); ignored |
+| `x-glirastes-ignore` | `true` | Never a tool (excluded as `ai-ignore`) | – |
+
+Precedence: an operation is first checked for an unsupported method or path,
+the default rules (`auth-route`, `webhook`, `cron`, `callback`, `health`,
+`catch-all`, `chat-handler`, `stt-handler`), the `exclude` entries of
+`tool-policy.json`, `x-glirastes-ignore` and an unsupported (non-JSON) body.
+Any of these wins over the marker and keeps its reason. Only the remainder is
+excluded as `opted-out` (`x-glirastes-tool: false`) or, with `opt-in`,
+`not-opted-in` (no `x-glirastes-tool: true`); both have origin `code`. An
+operation marked `x-glirastes-tool: true` that an earlier rule excludes is
+reported as `opt-in-excluded` (warning) with the rule's name, never silently.
+The other extensions of an operation that is no tool are not read: roles on
+hundreds of protected non-tool operations report nothing.
+`glirastes tools refresh` prints the `not-opted-in` operations as one counted
+line; `.glirastes/tool-report.json` lists each of them.
+
+Renaming is lossless. `tool-policy.json` (`tools`, `exclude`, `acceptedRisk`),
+`tool-resolutions.json`, `mcp-tool-names.json` and the tool id are keyed on
+`METHOD /path`, never on the name, so adding or changing `x-glirastes-name`
+keeps every entry and the tool id. Removing the extension later keeps the
+name the inventory holds (it stays sticky) rather than switching back to the
+derived one.
+
+Without a group, a name with a dot keeps its module (the part before the first
+dot); a name without a dot (`list_tags`) takes the module from the path
+(`GET /api/tags` gives `tags`), and its template labels are built from method
+and path the same way ("List tags", "Tags auflisten"), so the verb is not
+repeated.
+
+The runtime container build applies the same selection: with `opt-in` it
+validates only the operations marked `x-glirastes-tool: true` and skips every
+other one, so an unsupported operation that is no tool no longer fails the
+build. A marked operation the container cannot call still fails it.
 
 ## Switching a confirmation off locally
 

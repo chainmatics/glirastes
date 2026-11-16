@@ -55,6 +55,11 @@ const SourceSchema = z.union([
     document: appPath.regex(/\.json$/, 'The OpenAPI document must be a .json export').optional(),
     /** The folder of the FastAPI code; its routes are counted against the export. */
     fastapi: appPath.optional(),
+    /**
+     * `all` (the default): every supported operation becomes a tool unless it is
+     * excluded. `opt-in`: only operations marked `x-glirastes-tool: true` do.
+     */
+    selection: z.enum(['all', 'opt-in']).optional(),
   }).strict(),
   z.object({
     kind: z.literal('next-pages'),
@@ -141,7 +146,7 @@ export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 export type ToolSourceConfig =
   | { kind: 'next-app'; apiDir?: string }
   | { kind: 'nest'; srcDir?: string }
-  | { kind: 'openapi'; document?: string; fastapi?: string }
+  | { kind: 'openapi'; document?: string; fastapi?: string; selection?: 'all' | 'opt-in' }
   | { kind: 'next-pages' | 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[] }
   | { kind: 'react-router' | 'vue-router' | 'react-actions'; srcDir?: string };
 

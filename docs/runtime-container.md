@@ -62,6 +62,12 @@ with a stable appId, targetAppKey and source:
 {"kind":"openapi","document":"api/openapi.json"}
 ```
 
+To expose only selected operations, add `"selection":"opt-in"` and mark them
+with `x-glirastes-tool: true` in the export; `x-glirastes-name`,
+`x-glirastes-group` and `x-glirastes-roles` set their name, module and code
+default roles. The [tool policy guide](tool-policy.md#openapi-source-selection-and-x-glirastes--extensions)
+lists every extension with its precedence and invalid-value behaviour.
+
 Use the existing SDK initialization/policy/description workflows for the rest of
 the `.glirastes` inputs. Do not hand-edit generated tools, policy or app IDs.
 The PHP reference includes a complete input project. No package.json is needed
@@ -90,7 +96,11 @@ parameters on POST/PUT/PATCH, custom header/cookie parameters, multipart,
 required bodies that can be empty objects, external/recursive refs, unsupported schema keywords and mixed path placeholders
 are not supported. Authentication belongs in `securitySchemes`, not model input
 headers. Explicit `x-glirastes-ignore` or existing policy exclusions remain in the
-coverage report. OpenAPI `servers` never selects a runtime API destination.
+coverage report. The build applies the generator's selection: operations marked
+`x-glirastes-tool: false`, and with `"selection":"opt-in"` every operation without
+`x-glirastes-tool: true`, are skipped (coverage lists them as `opted-out` or
+`not-opted-in` unless an earlier reason applies); a selected operation that is
+unsupported still fails the build. OpenAPI `servers` never selects a runtime API destination.
 
 ## Identity and permissions
 

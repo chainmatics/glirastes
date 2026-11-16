@@ -283,6 +283,171 @@ describe('OpenAPI endpoint source', () => {
   });
 });
 
+const TAG_PATHS = {
+  '/api/tags': {
+    get: {
+      summary: 'List tags', security: SECURED,
+      'x-glirastes-tool': true, 'x-glirastes-name': 'list_tags', 'x-glirastes-group': 'tag', 'x-glirastes-roles': ['tag.read', 'admin', 'tag.read'],
+      responses: { '200': { description: 'ok' } },
+    },
+    // Not a tool: its roles, name, group and effect are never read, even malformed.
+    post: {
+      summary: 'Create tag', security: SECURED,
+      'x-glirastes-roles': 'tag.write', 'x-glirastes-name': 42, 'x-glirastes-group': '', 'x-glirastes-effect': 'erase',
+      requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } } } } } },
+      responses: { '201': { description: 'ok' } },
+    },
+  },
+  '/api/tags/{tag_id}': {
+    delete: {
+      summary: 'Delete tag', security: SECURED, 'x-glirastes-tool': false, 'x-glirastes-roles': ['tag.delete'],
+      parameters: [{ name: 'tag_id', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: { '204': { description: 'Deleted' } },
+    },
+  },
+};
+
+async function observeWith(
+  paths: Readonly<Record<string, unknown>>,
+  options: OpenapiSourceOptions = {},
+  exclude: Array<{ match: string; reason: string }> = [],
+) {
+  const app = await createAppFixture({ 'api/openapi.json': documentOf(paths) }, {
+    toolsConfig: { sources: [{ kind: 'openapi', document: 'api/openapi.json' }] },
+  });
+  const ctx = context(app.root);
+  ctx.policy = ToolPolicyFileSchema.parse({ schemaVersion: 1, tools: {}, exclude, acceptedRisk: {} });
+  return createOpenapiEndpointSource({ document: 'api/openapi.json', ...options }).observe(ctx);
+}
+
+const codes = (findings: ReadonlyArray<{ code: string; severity: string; subjectRef: string }>) => (
+  findings.map((finding) => [finding.code, finding.severity, finding.subjectRef])
+);
+
+describe('OpenAPI selection and x-glirastes-* extensions', () => {
+  it('turns only marked operations into tools with opt-in, and reports nothing about the others', async () => {
+    const observed = await observeWith(TAG_PATHS, { selection: 'opt-in' });
+
+    expect(observed.complete).toBe(true);
+    expect(observed.findings).toEqual([]);
+    expect(observed.excluded).toEqual([
+      { stableKey: 'DELETE /api/tags/:tag_id', reason: 'opted-out', origin: 'code' },
+      { stableKey: 'POST /api/tags', reason: 'not-opted-in', origin: 'code' },
+    ]);
+    expect(observed.observations).toHaveLength(1);
+    const [list] = observed.observations;
+    expect(list!.execution).toMatchObject({ stableKey: 'GET /api/tags', definitionId: 'list_tags' });
+    expect(list!.prose).toEqual({ module: 'tag' });
+    expect(list!.codeRoles).toEqual(['admin', 'tag.read']);
+    expect(codes(list!.findings)).toEqual([['output-contract-opaque', 'warning', 'GET /api/tags']]);
+  });
+
+  it('keeps every unmarked operation with the default selection; x-glirastes-tool: false still opts out', async () => {
+    const paths = structuredClone(TAG_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    paths['/api/tags']!.post!['x-glirastes-roles'] = ['tag.write'];
+    delete paths['/api/tags']!.post!['x-glirastes-name'];
+    delete paths['/api/tags']!.post!['x-glirastes-group'];
+    delete paths['/api/tags']!.post!['x-glirastes-effect'];
+    for (const selection of [undefined, 'all'] as const) {
+      const observed = await observeWith(paths, selection ? { selection } : {});
+      expect(observed.excluded).toEqual([{ stableKey: 'DELETE /api/tags/:tag_id', reason: 'opted-out', origin: 'code' }]);
+      const byKey = new Map(observed.observations.map((tool) => [tool.execution.stableKey, tool]));
+      expect([...byKey.keys()]).toEqual(['GET /api/tags', 'POST /api/tags']);
+      expect(byKey.get('POST /api/tags')!.execution.definitionId).toBe('tags.create');
+      expect(byKey.get('POST /api/tags')!.codeRoles).toEqual(['tag.write']);
+      expect(byKey.get('POST /api/tags')!.prose).toBeUndefined();
+    }
+  });
+
+  it('lets existing exclusions win over the marker and keep their reason, but never silently', async () => {
+    const marked = { security: SECURED, 'x-glirastes-tool': true, responses: { '200': { description: 'ok' } } };
+    const paths = {
+      '/api/auth/login': { post: marked },
+      '/api/internal/reindex': { post: { ...marked, 'x-glirastes-ignore': true } },
+      '/api/reports': { get: marked },
+      '/api/tasks/export': { options: marked },
+      '/api/files/{name}.json': { get: marked },
+      '/api/uploads': {
+        post: { ...marked, requestBody: { content: { 'multipart/form-data': { schema: { type: 'object' } } } } },
+      },
+      // Unmarked: an existing reason still wins over not-opted-in.
+      '/api/auth/logout': { post: { security: SECURED, responses: { '200': { description: 'ok' } } } },
+    };
+    for (const selection of ['all', 'opt-in'] as const) {
+      const observed = await observeWith(paths, { selection }, [{ match: 'GET /api/reports', reason: 'internal reporting' }]);
+      expect(observed.observations).toEqual([]);
+      expect(observed.excluded).toEqual([
+        { stableKey: 'GET /api/files/{name}.json', reason: 'unsupported-path', origin: 'code' },
+        { stableKey: 'GET /api/reports', reason: 'internal reporting', origin: 'policy' },
+        { stableKey: 'OPTIONS /api/tasks/export', reason: 'unsupported-method', origin: 'code' },
+        { stableKey: 'POST /api/auth/login', reason: 'auth-route', origin: 'default' },
+        { stableKey: 'POST /api/auth/logout', reason: 'auth-route', origin: 'default' },
+        { stableKey: 'POST /api/internal/reindex', reason: 'ai-ignore', origin: 'code' },
+        { stableKey: 'POST /api/uploads', reason: 'unsupported-body', origin: 'code' },
+      ]);
+      expect(codes(observed.findings).sort()).toEqual([
+        ['opt-in-excluded', 'warning', 'GET /api/files/{name}.json'],
+        ['opt-in-excluded', 'warning', 'GET /api/reports'],
+        ['opt-in-excluded', 'warning', 'OPTIONS /api/tasks/export'],
+        ['opt-in-excluded', 'warning', 'POST /api/auth/login'],
+        ['opt-in-excluded', 'warning', 'POST /api/internal/reindex'],
+        ['opt-in-excluded', 'warning', 'POST /api/uploads'],
+      ]);
+      const login = observed.findings.find((finding) => finding.subjectRef === 'POST /api/auth/login')!;
+      expect(login.message).toContain('stays excluded (auth-route, default)');
+      expect(login.nextAction).toContain('x-glirastes-tool: true');
+    }
+  });
+
+  it.each([
+    ['all', 1, []],
+    ['opt-in', 0, [{ stableKey: 'GET /api/tags', reason: 'not-opted-in', origin: 'code' }]],
+  ] as const)('reports a marker that is not a boolean and reads it as absent (%s)', async (selection, tools, excluded) => {
+    const observed = await observeWith({
+      '/api/tags': { get: { security: SECURED, 'x-glirastes-tool': 'yes', 'x-glirastes-roles': 7, responses: { '200': { description: 'ok' } } } },
+    }, { selection });
+    expect(observed.observations).toHaveLength(tools);
+    expect(observed.excluded).toEqual(excluded);
+    expect(codes(observed.findings)).toEqual([['tool-marker-invalid', 'warning', 'GET /api/tags']]);
+    expect(observed.findings[0]!.nextAction).toContain('true or false');
+  });
+
+  it('falls back visibly for an invalid name or group and fails closed for invalid roles', async () => {
+    const operation = (extensions: Record<string, unknown>) => ({
+      get: { security: SECURED, 'x-glirastes-tool': true, ...extensions, responses: { '200': { description: 'ok' } } },
+    });
+    const observed = await observeWith({
+      '/api/a': operation({ 'x-glirastes-name': ['list_a'] }),
+      '/api/b': operation({ 'x-glirastes-name': 'List B' }),
+      '/api/c': operation({ 'x-glirastes-group': '   ' }),
+      '/api/d': operation({ 'x-glirastes-roles': 'admin' }),
+      '/api/e': operation({ 'x-glirastes-roles': ['admin', 3] }),
+      '/api/f': operation({ 'x-glirastes-roles': ['admin', ''] }),
+      '/api/g': operation({ 'x-glirastes-roles': Array.from({ length: 51 }, (_, index) => `role${index}`) }),
+      '/api/h': operation({ 'x-glirastes-roles': [], 'x-glirastes-group': 7 }),
+      '/api/i': operation({ 'x-glirastes-roles': [...Array.from({ length: 50 }, (_, index) => `role${index}`), 'role0'] }),
+    }, { selection: 'opt-in' });
+
+    const byKey = new Map(observed.observations.map((tool) => [tool.execution.stableKey, tool]));
+    const own = (key: string) => codes(byKey.get(key)!.findings).filter(([code]) => code !== 'output-contract-opaque');
+    expect(byKey.get('GET /api/a')!.execution.definitionId).toBe('a.list');
+    expect(own('GET /api/a')).toEqual([['definition-id-invalid', 'warning', 'GET /api/a']]);
+    expect(byKey.get('GET /api/b')!.execution.definitionId).toBe('b.list');
+    expect(codes(observed.findings)).toEqual([['definition-id-invalid', 'warning', 'GET /api/b']]);
+    expect(observed.findings[0]!.message).toContain('x-glirastes-name "List B"');
+    expect(byKey.get('GET /api/c')!.prose).toBeUndefined();
+    expect(own('GET /api/c')).toEqual([['tool-group-invalid', 'warning', 'GET /api/c']]);
+    for (const key of ['GET /api/d', 'GET /api/e', 'GET /api/f', 'GET /api/g']) {
+      expect(own(key)).toEqual([['tool-roles-invalid', 'needs_attention', key]]);
+      expect(byKey.get(key)!.codeRoles).toBeUndefined();
+    }
+    expect(own('GET /api/h')).toEqual([['tool-group-invalid', 'warning', 'GET /api/h']]);
+    expect(byKey.get('GET /api/h')!.codeRoles).toBeUndefined();
+    expect(byKey.get('GET /api/i')!.codeRoles).toHaveLength(50);
+    expect(own('GET /api/i')).toEqual([]);
+  });
+});
+
 describe('FastAPI route count', () => {
   it('accepts an export that lists every declared route and names the hidden one', async () => {
     const observed = await observe({ 'api/openapi.json': documentOf(TASK_PATHS), 'api/app/main.py': MAIN_PY }, { fastapi: 'api/app' });

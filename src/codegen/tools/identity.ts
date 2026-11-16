@@ -51,9 +51,15 @@ export interface DefinitionIdRequest {
   method: EndpointMethod;
   path: string;
   explicitId?: string;
+  /** Where the explicit id was declared, for the findings; `Contract id` by default. */
+  explicitIdSource?: string;
 }
 
-/** Contract id → previous inventory name → derived name, collision-free and order-independent. */
+/**
+ * Explicit id (contract id or OpenAPI `x-glirastes-name`) → previous inventory
+ * name → derived name, collision-free and order-independent. An explicit id
+ * wins over the name a previous inventory kept.
+ */
 export function assignDefinitionIds(
   entries: ReadonlyArray<DefinitionIdRequest>,
   previousByKey: ReadonlyMap<string, string>,
@@ -69,15 +75,16 @@ export function assignDefinitionIds(
 
   for (const entry of sorted) {
     if (entry.explicitId === undefined) continue;
+    const declared = entry.explicitIdSource ?? 'Contract id';
     if (!TOOL_NAME_PATTERN.test(entry.explicitId)) {
       findings.push(toolFinding('definition-id-invalid', 'warning', entry.stableKey,
-        `Contract id ${JSON.stringify(entry.explicitId)} is not a valid tool name; a derived name is used.`));
+        `${declared} ${JSON.stringify(entry.explicitId)} is not a valid tool name; a derived name is used.`));
       continue;
     }
     const owner = owners.get(entry.explicitId);
     if (owner !== undefined) {
       findings.push(toolFinding('definition-id-conflict', 'error', entry.stableKey,
-        `Contract id ${entry.explicitId} is already used by ${owner}.`));
+        `${declared} ${entry.explicitId} is already used by ${owner}.`));
       continue;
     }
     claim(entry, entry.explicitId);
