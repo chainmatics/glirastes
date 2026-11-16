@@ -212,3 +212,45 @@ describe('createManagedTurnGuard', () => {
     })).resolves.toBe(true);
   });
 });
+
+describe('createManagedTurnGuard: expected tool failures', () => {
+  const call = (result: unknown, input: Record<string, unknown> = {}) => ({
+    toolName: 'list_tasks',
+    input,
+    result,
+    durationMs: 1,
+  });
+  const error = { success: false, error: 'Forbidden', retryable: false, status: 403 };
+  const expected = { ...error, expectedFailure: true };
+  const guard = () => createManagedTurnGuard({
+    snapshot: createSnapshot(),
+    resolvePrincipal: async () => principal,
+  });
+
+  it('counts a failure result as a consecutive error by default', async () => {
+    const turn = guard();
+    await turn.afterToolCall(call(error, { n: 1 }));
+    await turn.afterToolCall(call({ error: 'x' }, { n: 2 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(2);
+    await turn.afterToolCall(call({ tasks: [] }, { n: 3 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(0);
+  });
+
+  it('neither increments nor resets the consecutive errors for an expected failure', async () => {
+    const turn = guard();
+    await turn.afterToolCall(call(expected, { n: 1 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(0);
+    await turn.afterToolCall(call(error, { n: 2 }));
+    await turn.afterToolCall(call(expected, { n: 3 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(1);
+    await turn.afterToolCall(call(error, { n: 4 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(2);
+  });
+
+  it('still records the fingerprint of an expected failure', async () => {
+    const turn = guard();
+    await turn.afterToolCall(call(expected));
+    await turn.afterToolCall(call(expected));
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(2);
+  });
+});

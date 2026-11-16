@@ -19,6 +19,7 @@ import type {
 } from '../../types.js';
 import { defineTool } from '../../types.js';
 import { zodToCompactDescription } from './zod-compact.js';
+import type { ToolFailureClassifier } from '../../runtime/tool-failure.js';
 export { createLocalGuardrails } from './local-guardrails.js';
 export {
   createAdaptiveFastPath,
@@ -42,6 +43,12 @@ export interface InternalApiResponse {
   status: number;
   data?: unknown;
   error?: string;
+  /**
+   * The caller refused the request itself (e.g. a path outside
+   * `allowedPathPrefixes`); it never reached the backend. Such a failure is
+   * never classified and carries no response body.
+   */
+  refusedLocally?: true;
 }
 
 export type InternalApiCaller = (
@@ -122,6 +129,11 @@ export interface EndpointToolContext extends ToolContext {
    * throw.
    */
   onContractRejected?: (rejection: { toolName: string; status: 400 | 422 }) => void;
+  /**
+   * Classifies a non-2xx backend response as `'error'` (default) or
+   * `'expected'`; see `ToolFailureClassifier`.
+   */
+  classifyToolFailure?: ToolFailureClassifier;
 }
 
 // ============================================================================
@@ -133,6 +145,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const MAX_TOOL_ERROR_MESSAGE_CHARS = 1_000;
+const MAX_TOOL_ERROR_BODY_CHARS = 4_000;
+
+/**
+ * Marks a failure result `endpointToolToTool` built from a backend response.
+ * Non-enumerable and module-private: a backend body (or a 2xx answer with
+ * `success: false`) cannot set it, so only such a result keeps its status,
+ * body and classification through `boundedToolFailure`.
+ */
+const ENDPOINT_FAILURE = Symbol('glirastes.endpointFailure');
+
+function endpointFailureBody(data: unknown): { body?: unknown; bodyTruncated?: true } {
+  if (data === undefined) return {};
+  if (typeof data === 'string') {
+    return data.length > MAX_TOOL_ERROR_BODY_CHARS
+      ? { body: data.slice(0, MAX_TOOL_ERROR_BODY_CHARS), bodyTruncated: true }
+      : { body: data };
+  }
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(data);
+  } catch {
+    return {};
+  }
+  if (serialized === undefined) return {};
+  return serialized.length > MAX_TOOL_ERROR_BODY_CHARS
+    ? { body: serialized.slice(0, MAX_TOOL_ERROR_BODY_CHARS), bodyTruncated: true }
+    : { body: data };
+}
 
 function boundedToolFailure(
   result: Readonly<Record<string, unknown>>,
@@ -142,10 +182,15 @@ function boundedToolFailure(
     ? rawError.slice(0, MAX_TOOL_ERROR_MESSAGE_CHARS)
     : 'Tool execution failed.';
 
+  const fromEndpoint = (result as { [ENDPOINT_FAILURE]?: unknown })[ENDPOINT_FAILURE] === true;
   return {
     success: false,
     error,
     retryable: result.retryable === true,
+    ...(fromEndpoint && Number.isInteger(result.status) ? { status: result.status } : {}),
+    ...(fromEndpoint && result.body !== undefined ? { body: result.body } : {}),
+    ...(fromEndpoint && result.bodyTruncated === true ? { bodyTruncated: true } : {}),
+    ...(fromEndpoint && result.expectedFailure === true ? { expectedFailure: true } : {}),
   };
 }
 
@@ -637,10 +682,28 @@ export function endpointToolToTool<TInput extends SchemaLike>(
             // Metrics never change a tool result.
           }
         }
-        return {
+        const fromBackend = response.refusedLocally !== true && Number.isInteger(response.status);
+        let expected = false;
+        if (fromBackend && endpointContext.classifyToolFailure) {
+          try {
+            expected = endpointContext.classifyToolFailure({
+              toolName: endpointTool.toolName,
+              status: response.status,
+              body: response.data,
+            }) === 'expected';
+          } catch {
+            // A failing classifier counts the failure as an error.
+          }
+        }
+        const failure: Record<string, unknown> = {
           success: false,
           error: response.error ?? `Endpoint failed (${response.status})`,
+          ...(Number.isInteger(response.status) ? { status: response.status } : {}),
+          ...(fromBackend ? endpointFailureBody(response.data) : {}),
+          ...(expected ? { expectedFailure: true } : {}),
         };
+        Object.defineProperty(failure, ENDPOINT_FAILURE, { value: true });
+        return failure;
       }
 
       // A list or scalar answer has no fields of its own, so it travels under `data`.
@@ -1330,7 +1393,7 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
   });
   return async (request) => {
     if (!staysOnOrigin(request.path, base.origin)) {
-      return { ok: false, status: 400, error: 'Endpoint path must be relative to the API' };
+      return { ok: false, status: 400, error: 'Endpoint path must be relative to the API', refusedLocally: true };
     }
     if (prefixes) {
       const rawPath = request.path.split(/[?#]/, 1)[0]!;
@@ -1338,7 +1401,7 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
       // Do not let upstream double decoding or encoded separators escape a prefix.
       if (/%(?:2e|2f|5c|25)/i.test(rawPath) || rawPath !== pathname
         || !prefixes.some((prefix) => prefix === '/' || pathname === prefix || pathname.startsWith(`${prefix}/`))) {
-        return { ok: false, status: 403, error: 'Endpoint path is not allowed' };
+        return { ok: false, status: 403, error: 'Endpoint path is not allowed', refusedLocally: true };
       }
     }
     return call(request);
@@ -1370,6 +1433,11 @@ function staysOnOrigin(path: string, origin: string): boolean {
 // ============================================================================
 
 export { zodToCompactDescription } from './zod-compact.js';
+export type {
+  ToolFailureClassification,
+  ToolFailureClassifier,
+  ToolFailureInfo,
+} from '../../runtime/tool-failure.js';
 export {
   uiActionToolToTool,
   type GeneratedUiAction,

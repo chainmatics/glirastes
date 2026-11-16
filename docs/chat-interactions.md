@@ -291,6 +291,10 @@ runs it. Every such request records one metric event: `model: null`, tokens 0,
 cost unknown (`null`), the executed call as tool count. An endpoint that
 refuses the command's schema-valid call with 400 or 422 also records a
 `tool_contract_rejected` event, without content, exactly as for a model call.
+A failed backend call returns its status and body in the tool result, and a
+failure the handler's `classifyToolFailure` marks as expected is no tool error
+in that event, as on the model path (see
+[managed-runtime-sync.md](managed-runtime-sync.md#failed-tool-calls)).
 `directCommands: false` on `createAiChatHandler` turns this off; the message
 then goes to the model.
 

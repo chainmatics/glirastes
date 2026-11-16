@@ -140,6 +140,11 @@ The model uses an OpenAI-compatible chat API, defaulting to OpenRouter. Configur
 an operator-controlled `model.baseUrl` if necessary; it is a separate trust
 boundary, not supplied by the browser/model. The container includes its provider.
 
+Failed backend calls reach the model with their HTTP status and (capped)
+response body, as in the SDK. The SDK's `classifyToolFailure` is a function
+and cannot be configured in the JSON yet: in the container every failed
+backend call counts as a tool error for `maxConsecutiveErrors` and the metrics.
+
 ## State, cancellation and lifecycle
 
 PostgreSQL stores only hashed consumed approval IDs, scope and expiration. The

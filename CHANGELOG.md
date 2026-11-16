@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `classifyToolFailure({ toolName, status, body })` on `createAiChatHandler` and `createGlirastes` (handed on by `chatTurn()`): a failed backend call classified as `'expected'` (e.g. a 403 for a user without the role) neither counts toward nor resets `maxConsecutiveErrors` and is no tool error in the turn metrics. It is counted locally only, as `expectedToolFailureCount` in `onFinish`; the Platform metric event is unchanged. Not configurable in the runtime container yet. New types `ToolFailureClassifier`, `ToolFailureClassification` and `ToolFailureInfo` from `glirastes/server` and `glirastes/runtime`.
+- `InternalApiResponse.refusedLocally` marks the local refusals of `createHttpEndpointCaller`, which are never classified.
+
+### Changed
+
+- The result of an endpoint tool whose backend call fails now carries the HTTP `status` and the response `body` (cut at 4000 characters, then with `bodyTruncated: true`) next to `success: false`, `error` and `retryable`, so the model can tell a 403 from a 500. The body goes through a configured PII shield like any tool result. Without `classifyToolFailure` errors count exactly as before.
+
 ## [0.14.0] - 2026-11-15
 
 ### Added

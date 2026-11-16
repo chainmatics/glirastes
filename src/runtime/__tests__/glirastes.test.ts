@@ -230,6 +230,17 @@ describe('createGlirastes in standalone', () => {
     expect(http.mock).not.toHaveBeenCalled();
   });
 
+  it('hands classifyToolFailure to the chat turn, and nothing without it', async () => {
+    const classifyToolFailure = () => 'expected' as const;
+    const classified = track(createGlirastes({ generated: generated(), env: {}, classifyToolFailure }));
+    expect((await classified.chatTurn(principal)).classifyToolFailure).toBe(classifyToolFailure);
+    await classified.stop();
+    instances.splice(instances.indexOf(classified), 1);
+
+    const plain = track(createGlirastes({ generated: generated(), env: {} }));
+    expect(await plain.chatTurn(principal)).not.toHaveProperty('classifyToolFailure');
+  });
+
   it('runs without localLimits', async () => {
     const glirastes = track(createGlirastes({ generated: generated(), env: {} }));
     await glirastes.ready();

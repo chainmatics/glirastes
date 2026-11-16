@@ -15,6 +15,7 @@ import {
   type ExecutionUsage,
 } from './budget.js';
 import { createExecutionFingerprint } from './fingerprint.js';
+import { toolResultFailure } from './tool-failure.js';
 import {
   isToolRevoked,
   type TurnSnapshot,
@@ -49,13 +50,6 @@ export interface ManagedTurnGuard {
   afterToolCall(call: AiSdkToolSuccess): Promise<void>;
   onToolError(call: AiSdkToolFailure): Promise<void>;
   resolveApproval(call: AiSdkToolCall): Promise<boolean>;
-}
-
-function errorResult(result: unknown): boolean {
-  return typeof result === 'object'
-    && result !== null
-    && 'error' in result
-    && typeof (result as { error?: unknown }).error === 'string';
 }
 
 export function createManagedTurnGuard(
@@ -141,11 +135,13 @@ export function createManagedTurnGuard(
         arguments: call.input,
         result: call.result,
       }));
-      if (errorResult(call.result)) {
+      const failure = toolResultFailure(call.result);
+      if (failure === 'error') {
         tracker.recordError();
-      } else {
+      } else if (failure === undefined) {
         tracker.recordSuccess();
       }
+      // An expected failure neither counts as an error nor resets the run.
       await emitBudgetSignal();
     },
 

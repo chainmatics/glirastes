@@ -207,3 +207,54 @@ Without either, the cost stays unknown (`null`), never 0. A known cost also
 counts against the turn's `maxEstimatedCostUsd`. The legacy Lancer `telemetry`
 option posts to `/v1/proctor/events`, which the Foundation control plane does
 not serve; the handler refuses it together with `managedRuntime`.
+
+### Failed tool calls
+
+When the backend answers an endpoint tool's call with a non-2xx status, the
+tool result tells the model what happened:
+
+```ts
+{ success: false, error: string, retryable: false, status: 403, body?: unknown, bodyTruncated?: true }
+```
+
+`status` is the HTTP status. `body` is the response body (parsed JSON, or its
+text), omitted when there was none; a text body is cut at 4000 characters, a
+JSON body whose serialization is longer is replaced by that serialization cut
+at 4000 characters, and both set `bodyTruncated: true`. Like any tool result,
+it goes through a configured PII shield before the model reads it. A call the
+endpoint caller refused locally (a path outside `allowedPathPrefixes`) carries
+its status but no body.
+
+By default every failure counts as a tool error: against the turn's
+`maxConsecutiveErrors` and as `toolErrorCount` and per-tool `errors` in the
+metric event. Some failures are business outcomes rather than errors, e.g. a
+403 for a user without the role, or a 409 with an app error code.
+`classifyToolFailure` on `createGlirastes` (handed on by `chatTurn()`) or on
+`createAiChatHandler` tells them apart:
+
+```ts
+const glirastes = createGlirastes({
+  generated,
+  classifyToolFailure: ({ toolName, status, body }) =>
+    status === 403 || (body as { code?: string } | undefined)?.code === 'TASK_LOCKED'
+      ? 'expected'
+      : 'error',
+});
+```
+
+It receives the endpoint tool's `toolName`, the status and the full parsed
+body (not the truncated copy), runs synchronously, and is called only for real
+backend responses: never for thrown errors (timeout, network, response size)
+and never for local refusals. A throw or any value other than `'expected'`
+counts as `'error'`. An expected failure still counts as a tool call and for
+the other budgets (tool calls, repeated fingerprint, timeouts), but neither
+increments nor resets the consecutive-error count, and it is no tool error in
+the metric event. The result carries `expectedFailure: true`, so the model
+knows the failure is a known outcome rather than a fault to retry.
+
+Expected failures are counted locally only, as `expectedToolFailureCount` in
+the handler's `onFinish` event. This version sends nothing about them to the
+Platform: the metric event keeps its fields. Without `managedRuntime` there is
+no consecutive-error budget, so the classifier only affects the metrics there.
+The runtime container cannot take a function in its JSON configuration and
+keeps the default (every failure is an error).
