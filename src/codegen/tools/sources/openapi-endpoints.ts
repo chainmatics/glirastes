@@ -449,10 +449,13 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
       });
     } catch (error) {
       // Only a schema of this operation that Ajv cannot compile is the
-      // export's fault. Anything else (a programming error, a schema from
-      // tool-resolutions.json) keeps its own error and stack.
+      // export's fault: its response, one of its input parts, or the input
+      // merged from nothing but its parts. Anything else (a programming error,
+      // a schema from tool-resolutions.json) keeps its own error and stack.
+      const isPart = (schema: unknown): boolean => entry.input.parts.some((part) => part.json === schema);
       const own = error instanceof JsonSchemaCompileError
-        && (error.schema === entry.output || entry.input.parts.some((part) => part.json === error.schema));
+        && (error.schema === entry.output || isPart(error.schema)
+          || (error.composedFrom.length > 0 && error.composedFrom.every(isPart)));
       if (!own) throw error;
       // The runtime compiles every schema with Ajv; a schema it cannot compile
       // would fail at boot. Name the operation and Ajv's reason (keywords and
