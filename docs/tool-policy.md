@@ -65,6 +65,9 @@ excluded as `opted-out` (`x-glirastes-tool: false`) or, with `opt-in`,
 `not-opted-in` (no `x-glirastes-tool: true`); both have origin `code`. An
 operation marked `x-glirastes-tool: true` that an earlier rule excludes is
 reported as `opt-in-excluded` (warning) with the rule's name, never silently.
+`glirastes tools resolve --print` lists `opt-in-excluded` and
+`tool-marker-invalid` as items to fix in the OpenAPI document, also when the
+operation is no tool.
 The other extensions of an operation that is no tool are not read: roles on
 hundreds of protected non-tool operations report nothing.
 `glirastes tools refresh` prints the `not-opted-in` operations as one counted

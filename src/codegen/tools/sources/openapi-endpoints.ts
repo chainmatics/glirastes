@@ -428,16 +428,18 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
       }
     }
     const where = `${documentPath} ${operation.operationKey.toUpperCase()} ${operation.documentPath}`;
+    // Either finding may be on an operation that is no tool; the work list then takes the document from `expected`.
+    const inDocument = (finding: ToolFinding): ToolFinding => ({ ...finding, expected: { file: documentPath } });
     // A malformed marker is always reported, also on an operation that is no tool.
     if (marker === 'invalid') {
-      findings.push(toolFinding('tool-marker-invalid', 'warning', stableKey,
-        `${where} declares an x-glirastes-tool that is not true or false, so the marker is ignored.`));
+      findings.push(inDocument(toolFinding('tool-marker-invalid', 'warning', stableKey,
+        `${where} declares an x-glirastes-tool that is not true or false, so the marker is ignored.`)));
     }
     if (exclusion) {
       // Existing exclusions win over the marker, but never silently.
       if (marker === true) {
-        findings.push(toolFinding('opt-in-excluded', 'warning', stableKey,
-          `${where} is marked x-glirastes-tool: true but stays excluded (${exclusion.reason}, ${exclusion.origin}).`));
+        findings.push(inDocument(toolFinding('opt-in-excluded', 'warning', stableKey,
+          `${where} is marked x-glirastes-tool: true but stays excluded (${exclusion.reason}, ${exclusion.origin}).`)));
       }
       excluded.set(stableKey, exclusion);
       continue;
