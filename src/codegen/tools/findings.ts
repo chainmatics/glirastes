@@ -29,6 +29,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'semantics-stale': 'Optional: describe the changed tool again (glirastes tools describe --print <tool>); the earlier agent description stays in use meanwhile.',
   'definition-id-invalid': 'Use a tool name like resource.action or list_tasks (starts with a lowercase letter; letters, digits and _, dot-separated) as the contract id or OpenAPI x-glirastes-name, then run glirastes tools refresh.',
   'definition-id-conflict': 'Give one of the tools a distinct contract id or OpenAPI x-glirastes-name, then run glirastes tools refresh.',
+  'definition-id-reassigned': 'The name moved to another tool and the earlier holder was renamed. If that is intended, check .glirastes/tool-semantics.json: an entry matched by "name" now describes the new holder, so key the entries of both tools by "stableKey" ("METHOD /path") or move them. Otherwise give this tool a name no other tool holds (contract id or OpenAPI x-glirastes-name). Then run glirastes tools refresh. Policy, resolutions and tool ids are keyed on METHOD /path and are unaffected.',
   'tool-marker-invalid': 'Set x-glirastes-tool to true or false (a JSON boolean) on the operation in the OpenAPI export, export it again and run glirastes tools refresh.',
   'opt-in-excluded': 'The operation is marked x-glirastes-tool: true, but the rule the message names excludes it. Remove the marker if the exclusion is intended; otherwise remove x-glirastes-ignore, the matching exclude entry in .glirastes/tool-policy.json, or make the operation supported (JSON body, GET/POST/PUT/PATCH/DELETE/HEAD, plain path parameters).',
   'tool-group-invalid': 'Set x-glirastes-group on the operation to a non-empty string of at most 200 characters (for example tag), export the OpenAPI document again and run glirastes tools refresh.',
@@ -88,6 +89,8 @@ const POLICY_RELAXATION_FALLBACK = POLICY_RELAXATION_ACTIONS['tier-3-always-requ
 /** Findings that describe a change relative to the previous state; never written to outputs. */
 export const TRANSIENT_FINDING_CODES: ReadonlySet<string> = new Set([
   'risk-raised',
+  // Relative to the previous inventory: gone once the refresh that reported it wrote the new names.
+  'definition-id-reassigned',
   'tool-outputs-drift',
 ]);
 

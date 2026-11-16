@@ -50,7 +50,7 @@ string) or `opt-in`. The extensions are read on the operation object only
 | Extension | Type | Effect | Invalid value |
 | --- | --- | --- | --- |
 | `x-glirastes-tool` | boolean | `true`: with `opt-in`, the operation may become a tool. `false`: never a tool, in both modes (excluded as `opted-out`) | Finding `tool-marker-invalid` (warning, also on an operation that is no tool); read as absent |
-| `x-glirastes-name` | string | The tool name, e.g. `list_tags` or `tags.list`. Wins over the derived name and over the name an earlier inventory kept; no `refresh --adopt` needed | Not a valid tool name: `definition-id-invalid` (warning), derived name. Two operations with one name: `definition-id-conflict` (error) |
+| `x-glirastes-name` | string | The tool name, e.g. `list_tags` or `tags.list`. Wins over the derived name and over the name an earlier inventory kept; no `refresh --adopt` needed | Not a valid tool name: `definition-id-invalid` (warning), derived name. Two operations with one name: `definition-id-conflict` (error). A name another tool held before: `definition-id-reassigned` (warning), the name moves |
 | `x-glirastes-group` | string | The module, above `tool-semantics.json` and any derivation | Finding `tool-group-invalid` (warning); module derived |
 | `x-glirastes-roles` | string array | Code default of `allowedRoles` (any-of); `[]` means no restriction; duplicates are removed | Not a list of at most 50 non-empty role names: `tool-roles-invalid` (needs attention), the tool stays disabled |
 | `x-glirastes-effect` | `read`, `write`, `destructive`, `external`, `financial` | Declared effect; can only raise the risk class | `contract-effect-invalid` (needs attention); ignored |
@@ -73,12 +73,24 @@ hundreds of protected non-tool operations report nothing.
 `glirastes tools refresh` prints the `not-opted-in` operations as one counted
 line; `.glirastes/tool-report.json` lists each of them.
 
-Renaming is lossless. `tool-policy.json` (`tools`, `exclude`, `acceptedRisk`),
-`tool-resolutions.json`, `mcp-tool-names.json` and the tool id are keyed on
-`METHOD /path`, never on the name, so adding or changing `x-glirastes-name`
-keeps every entry and the tool id. Removing the extension later keeps the
-name the inventory holds (it stays sticky) rather than switching back to the
-derived one.
+Renaming keeps everything that is keyed on `METHOD /path`: `tool-policy.json`
+(`tools`, `exclude`, `acceptedRisk`), `tool-resolutions.json`,
+`mcp-tool-names.json` and the tool id never use the name, so adding or
+changing `x-glirastes-name` keeps every such entry and the tool id. Removing
+the extension later keeps the name the inventory holds (it stays sticky)
+rather than switching back to the derived one.
+
+`tool-semantics.json` is the exception. An entry with a `stableKey` follows
+the operation; an entry that only has a `name` is matched by the tool name and
+does not follow a rename: after `tags.update` becomes `update_tag`, the entry
+named `tags.update` describes no tool. And when an `x-glirastes-name` (or a
+contract id) takes a name that another tool still holds, the earlier holder is
+renamed and the entry matched by that name now describes the new holder. The
+refresh reports this once as `definition-id-reassigned` (warning, naming both
+operations; it also appears in `glirastes tools resolve --print`). Before
+renaming, give the affected entries a `stableKey` (`"GET /api/tags"`), or move
+them to the new name in the same change; if the takeover was not intended,
+choose a name no other tool holds.
 
 Without a group, a name with a dot keeps its module (the part before the first
 dot); a name without a dot (`list_tags`) takes the module from the path

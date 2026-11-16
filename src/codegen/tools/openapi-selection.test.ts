@@ -9,6 +9,7 @@ import { applyPolicyOverlay } from '../../runtime/policy-overlay.js';
 import { createAppFixture, removeAppFixtures, SDK_ROOT, type AppFixture } from './__tests__/app-fixture.js';
 import { generatedModulePath, loadToolsConfig, TOOLS_PATHS } from './config.js';
 import { applyCodeRoles, runToolsPipelineWith, type ToolsPipelineResult } from './pipeline.js';
+import { buildResolveWorklist } from './worklist.js';
 
 afterEach(removeAppFixtures);
 
@@ -244,7 +245,7 @@ describe('an opt-in OpenAPI source through the tools pipeline', () => {
     expect(overlaid([])).toMatchObject({ enabled: true, allowedRoles: ['tag.write'] });
   }, 60_000);
 
-  it('renames losslessly: policy, accepted risk and toolId stay keyed on METHOD + path', async () => {
+  it('keeps policy, accepted risk and toolId across a rename: they are keyed on METHOD + path', async () => {
     const spec = await optInSpec();
     delete spec.paths['/api/tags/{tagId}']!.patch!['x-glirastes-name'];
     const policy = {
@@ -283,6 +284,52 @@ describe('an opt-in OpenAPI source through the tools pipeline', () => {
     // The kept name still takes its label from the route: the signal is the source, not the extension being present.
     expect(candidates(renamed).get('PATCH /api/tags/:tagId')?.presentation?.singular).toBe('Tags ändern');
     expect(candidates(removed).get('PATCH /api/tags/:tagId')?.presentation?.singular).toBe('Tags ändern');
+  }, 60_000);
+});
+
+describe('an x-glirastes-name that takes the name of another tool', () => {
+  it('warns once, re-points name-keyed tool-semantics.json entries and settles on the next refresh', async () => {
+    const spec = await optInSpec();
+    delete spec.paths['/api/tags/{tagId}']!.patch!['x-glirastes-name'];
+    const app = await optInApp({ spec });
+    await app.write(TOOLS_PATHS.semantics, JSON.stringify({
+      schemaVersion: 1,
+      tools: [{ name: 'tags.update', usageHints: ['Use it to rename a tag.'] }],
+    }));
+    const before = await refresh(app);
+    expect(before.findings.map((finding) => finding.code)).not.toContain('definition-id-reassigned');
+    expect(candidates(before).get('PATCH /api/tags/:tagId')).toMatchObject({ name: 'tags.update', usageHints: ['Use it to rename a tag.'] });
+
+    // The delete operation now claims the name the update operation holds.
+    spec.paths['/api/tags/{tagId}']!.delete!['x-glirastes-name'] = 'tags.update';
+    await app.write('openapi.json', JSON.stringify(spec));
+    const frozen = await runToolsPipelineWith({ root: app.root, mode: 'frozen', keepGoing: true }, { now: NOW });
+    const taken = await refresh(app);
+    for (const result of [frozen, taken]) {
+      expect(result.findings.filter((finding) => finding.code === 'definition-id-reassigned')).toEqual([expect.objectContaining({
+        severity: 'warning',
+        subjectRef: 'DELETE /api/tags/:tagId',
+        message: 'x-glirastes-name tags.update on DELETE /api/tags/:tagId was the name of PATCH /api/tags/:tagId, which is now tags.updatePatch.',
+      })]);
+    }
+    // Who gets the name is unchanged; the entry matched by name follows the name, not the operation.
+    expect(candidates(taken).get('DELETE /api/tags/:tagId')).toMatchObject({ name: 'tags.update', usageHints: ['Use it to rename a tag.'] });
+    expect(candidates(taken).get('PATCH /api/tags/:tagId')?.name).toBe('tags.updatePatch');
+    expect(candidates(taken).get('PATCH /api/tags/:tagId')?.usageHints).not.toContain('Use it to rename a tag.');
+
+    expect(formatToolsHuman(taken)).toContain('  - DELETE /api/tags/:tagId  definition-id-reassigned: x-glirastes-name tags.update on DELETE /api/tags/:tagId was the name of PATCH /api/tags/:tagId');
+    const item = buildResolveWorklist(frozen).items.find((candidate) => candidate.code === 'definition-id-reassigned')!;
+    expect(item).toMatchObject({
+      tool: 'tags.update', stableKey: 'DELETE /api/tags/:tagId', owner: 'agent', target: { kind: 'app-code', files: ['openapi.json'] },
+    });
+    expect(item.nextAction).toContain('tool-semantics.json');
+    // Relative to the previous inventory, so never part of a committed output.
+    expect(taken.outputs[TOOLS_PATHS.report]).not.toContain('definition-id-reassigned');
+    expect(taken.outputs[TOOLS_PATHS.setupArtifact]).not.toContain('definition-id-reassigned');
+
+    const settled = await refresh(app);
+    expect(settled.wrote).toBe(false);
+    expect(settled.findings.map((finding) => finding.code)).not.toContain('definition-id-reassigned');
   }, 60_000);
 });
 

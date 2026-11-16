@@ -110,7 +110,9 @@ the module and `x-glirastes-roles` the roles any of which may call the tool
 (the code default; tool-policy.json and the Platform only narrow it).
 `x-glirastes-tool: false` keeps an operation out in either mode. Existing
 exclusions win over the marker and are reported as `opt-in-excluded`. Policy
-entries stay keyed on `METHOD /path`, so renaming is lossless. The full table
+entries stay keyed on `METHOD /path` and survive a rename; tool-semantics.json
+entries matched by `name` do not (key them by `stableKey`), and a name taken
+from another tool is reported as `definition-id-reassigned`. The full table
 is in the package's `docs/tool-policy.md`.
 
 ## Workflow

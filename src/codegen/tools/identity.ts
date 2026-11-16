@@ -58,7 +58,10 @@ export interface DefinitionIdRequest {
 /**
  * Explicit id (contract id or OpenAPI `x-glirastes-name`) → previous inventory
  * name → derived name, collision-free and order-independent. An explicit id
- * wins over the name a previous inventory kept.
+ * wins over the name a previous inventory kept. When that name belonged to a
+ * different tool that still exists, the takeover stands and is reported as
+ * `definition-id-reassigned`: whatever is matched by name (tool-semantics.json
+ * entries without a stable key) now reaches the new holder.
  */
 export function assignDefinitionIds(
   entries: ReadonlyArray<DefinitionIdRequest>,
@@ -72,6 +75,12 @@ export function assignDefinitionIds(
     ids.set(entry.stableKey, id);
     owners.set(id, entry.stableKey);
   };
+  const present = new Set(sorted.map((entry) => entry.stableKey));
+  const previousHolders = new Map<string, string>();
+  for (const [stableKey, name] of [...previousByKey].sort(([left], [right]) => compareCodeUnits(left, right))) {
+    if (present.has(stableKey) && !previousHolders.has(name)) previousHolders.set(name, stableKey);
+  }
+  const takeovers: Array<{ entry: DefinitionIdRequest; declared: string; from: string }> = [];
 
   for (const entry of sorted) {
     if (entry.explicitId === undefined) continue;
@@ -88,6 +97,8 @@ export function assignDefinitionIds(
       continue;
     }
     claim(entry, entry.explicitId);
+    const from = previousHolders.get(entry.explicitId);
+    if (from !== undefined && from !== entry.stableKey) takeovers.push({ entry, declared, from });
   }
 
   for (const entry of sorted) {
@@ -112,6 +123,11 @@ export function assignDefinitionIds(
       const suffix = sha256Digest(entry.stableKey).slice(7, 15).replace(/[^A-Za-z0-9]/g, 'x');
       claim(entry, owners.has(withMethod) ? `${withMethod}${suffix}` : withMethod);
     }
+  }
+
+  for (const { entry, declared, from } of takeovers) {
+    findings.push(toolFinding('definition-id-reassigned', 'warning', entry.stableKey,
+      `${declared} ${entry.explicitId} on ${entry.stableKey} was the name of ${from}, which is now ${ids.get(from)}.`));
   }
 
   const modelOwners = new Map<string, string>();
