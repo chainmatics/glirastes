@@ -202,9 +202,10 @@ export interface AiChatHandlerConfig {
    * on the pinned revisions: decided at the start of the request, and
    * again before every model step with a freshly resolved principal and
    * freshly loaded revocations. Name, description and input schema of any
-   * other tool never reach the model. `false` hands over every registry
-   * tool, as before this option existed; the guard still denies their
-   * calls. No effect without managedRuntime.
+   * other tool never reach the model. A legacy `intentRouter` and the
+   * built-in start-set routing get the same names. `false` hands over
+   * every registry tool, as before this option existed; the guard still
+   * denies their calls. No effect without managedRuntime.
    */
   authorizedToolsOnly?: boolean;
 

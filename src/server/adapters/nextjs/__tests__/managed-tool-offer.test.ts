@@ -333,3 +333,36 @@ describe.each([
     });
   });
 });
+
+describe('the tool names a consumer intentRouter gets (legacy path)', () => {
+  /** The names passed to the router; it may hand them on to a model of its own. */
+  async function routed(overrides: Partial<AiChatHandlerFullConfig>) {
+    const { registry } = tools();
+    const intentRouter = vi.fn(async (_text: string, _toolNames: string[]) => ({ toolNames: everyTool }));
+    await streamChunks(await createAiChatHandler({
+      systemPrompt: 'A', approvalSecret: SECRET, tools: registry, model: scriptedModel(), intentRouter, ...overrides,
+    } as AiChatHandlerFullConfig)(post([user])));
+    return [...intentRouter.mock.calls[0]![1]].sort();
+  }
+
+  it('leaves out a tool the principal may not use in a managed turn', async () => {
+    expect(await routed({ managedRuntime: runtime() })).toEqual(['tasks_archive']);
+  });
+
+  it('leaves out a revoked tool in a managed turn', async () => {
+    expect(await routed({ managedRuntime: runtime({ roles: () => ['member'], revoked: () => [ARCHIVE_TASK_ID] }) }))
+      .toEqual(['tasks_list']);
+  });
+
+  it('names every tool to a principal who may use them', async () => {
+    expect(await routed({ managedRuntime: runtime({ roles: () => ['member'] }) })).toEqual(everyTool.slice().sort());
+  });
+
+  it('names every registry tool with authorizedToolsOnly: false', async () => {
+    expect(await routed({ authorizedToolsOnly: false, managedRuntime: runtime() })).toEqual(['tasks_archive', 'tasks_list']);
+  });
+
+  it('names every registry tool without managedRuntime', async () => {
+    expect(await routed({})).toEqual(['tasks_archive', 'tasks_list']);
+  });
+});

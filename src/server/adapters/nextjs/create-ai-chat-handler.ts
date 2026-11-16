@@ -1278,6 +1278,23 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const currentToolNames = async (builtinNames: ReadonlyArray<string>) =>
         new Set([...builtinNames, ...manifestToolNames(await currentToolIds())]);
       /**
+       * Whether a registry name belongs to what a managed turn offers: the
+       * handler's own built-ins and the manifest tools this principal may
+       * use, as of the start of this request. `undefined` when nothing is
+       * left out (`authorizedToolsOnly: false`, unmanaged turns).
+       */
+      const offeredNameCheck = async (
+        builtinNames: ReadonlyArray<string>,
+      ): Promise<((name: string) => boolean) | undefined> => {
+        if (!managedTurn || !authorizedToolsOnly) return undefined;
+        const allowedNames = new Set(manifestToolNames(authorizedTurnToolIds({
+          snapshot: managedTurn.snapshot,
+          principal: managedPrincipal,
+          revocations: await loadTurnRevocations(),
+        })));
+        return (name) => builtinNames.includes(name) || allowedNames.has(name);
+      };
+      /**
        * The tools a managed turn hands to the stream handler and the model:
        * the handler's own built-ins and the manifest tools this principal may
        * use (`authorizedTurnToolIds`, principal and revocations as of the
@@ -1299,16 +1316,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         builtinNames: ReadonlyArray<string>,
         verified: ReadonlyArray<VerifiedApproval>,
       ): Promise<Record<string, T>> => {
-        if (!managedTurn || !authorizedToolsOnly) return aiTools;
-        const allowedIds = authorizedTurnToolIds({
-          snapshot: managedTurn.snapshot,
-          principal: managedPrincipal,
-          revocations: await loadTurnRevocations(),
-        });
-        const allowedNames = new Set(manifestToolNames(allowedIds));
+        const isOffered = await offeredNameCheck(builtinNames);
+        if (!isOffered) return aiTools;
         const offered: Record<string, T> = {};
         for (const [name, tool] of Object.entries(aiTools)) {
-          if (builtinNames.includes(name) || allowedNames.has(name)) {
+          if (isOffered(name)) {
             offered[name] = tool;
           } else if (verified.some((approval) => approval.toolName === name)) {
             offered[name] = {
@@ -1775,7 +1787,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool, planTool]);
       const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
       processedMessages = legacyApprovals.messages;
-      const allToolNames = Object.keys(registry)
+      // Routing sees what the model may see: a consumer router can hand the
+      // names on to a model of its own, so a managed turn names only the
+      // tools it offers (see `offeredTools`).
+      const isOffered = await offeredNameCheck(handlerBuiltinNames);
+      const routableRegistry: ToolRegistry = isOffered
+        ? Object.fromEntries(Object.entries(registry).filter(([name]) => isOffered(name)))
+        : registry;
+      const allToolNames = Object.keys(routableRegistry)
         .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
 
       // PII Shield: anonymize for legacy mode
@@ -1797,7 +1816,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // this principal may use and can always widen it.
         const manifest = managedTurn?.snapshot.manifestRevision;
         defaultStartToolNames = defaultIntentRouterFor({
-          registry,
+          registry: routableRegistry,
           ...(manifest ? { manifest: { revisionId: manifest.revisionId, tools: manifest.tools } } : {}),
           semantics: toolSemantics,
           ...(typeof intentRouting === 'object' ? { options: intentRouting } : {}),

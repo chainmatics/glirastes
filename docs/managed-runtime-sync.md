@@ -168,7 +168,13 @@ takes the tool away from the next step and the next search, and a principal
 that cannot be resolved any more leaves only the built-ins. The tool labels
 (`data-tool-presentation`) are sent once, as of the start of the request. A
 custom `streamHandler` gets the per-step check as `authorizedToolNames` in
-its context and has to intersect its active tools with it. A tool with an approved call of an earlier
+its context and has to intersect its active tools with it. A legacy
+`intentRouter` gets only these tool names as well (as of the start of the
+request), since it may pass them to a model of its own; the built-in
+start-set routing works on the same set. Tool names an app writes into its
+own `pipeline` modules, router result or `systemPrompt` (which also gets the
+whole pinned manifest as `turnSnapshot`) are the app's own data and are not
+filtered. A tool with an approved call of an earlier
 request stays callable so that call gets its result, without description and
 input schema when the principal may no longer use it; the guard then ends
 the call as a tool error. `authorizedToolsOnly: false` on
