@@ -212,6 +212,30 @@ describe('classifyToolFailure in the Next chat handler', () => {
     expect(prompt).not.toContain('Müller');
     expect(wire).not.toContain('Müller');
   });
+
+  it('leaves no partial email for the PII shield at the body cut', async () => {
+    // The shield sees the capped body. An email split by the cut would no
+    // longer match the detector and reach the model as `max.mueller@exa`.
+    const detector: PiiDetector = {
+      detect: (text) => [...text.matchAll(/[\w.]+@[\w-]+\.[a-z]{2,}/g)].map((match) => ({
+        type: 'email', start: match.index, end: match.index + match[0].length, score: 1, text: match[0],
+      })),
+    };
+    const lead = `${'word '.repeat(797)}mail `;
+    const { model, wire } = await runTurn({
+      piiShield: createPiiShield({ locale: 'de', detector }),
+      endpointCaller: () => async () => ({
+        ok: false,
+        status: 500,
+        data: `first.contact@example.com ${lead.slice(26)}max.mueller@example.com ${'tail '.repeat(100)}`,
+      }),
+    });
+    const prompt = JSON.stringify(model.doStreamCalls[1]!.prompt);
+    expect(prompt).toContain('bodyTruncated');
+    expect(prompt).not.toContain('first.contact');
+    expect(prompt).not.toContain('max.');
+    expect(wire).not.toContain('max.');
+  });
 });
 
 describe('classifyToolFailure in a direct command', () => {

@@ -68,7 +68,44 @@ describe('failure results of endpoint tools', () => {
   it('replaces a large JSON body by its cut serialization', async () => {
     const body = { items: Array.from({ length: 500 }, (_, index) => ({ index, note: 'long enough' })) };
     const result = await run(context({ ok: false, status: 422, data: body })) as Record<string, unknown>;
-    expect(result.body).toBe(JSON.stringify(body).slice(0, 4_000));
+    const serialized = JSON.stringify(body);
+    const cut = result.body as string;
+    expect(serialized.startsWith(cut)).toBe(true);
+    expect(cut.length).toBeLessThanOrEqual(4_000);
+    expect(cut.length).toBeGreaterThan(4_000 - 256);
+    // The cut ends at a JSON delimiter, not inside a key or value.
+    expect(serialized[cut.length]).toMatch(/[\s",:{}[\]]/);
+    expect(result.bodyTruncated).toBe(true);
+  });
+
+  it('cuts a text body before a token that straddles the 4000 boundary', async () => {
+    const lead = `${'word '.repeat(797)}mail `;
+    expect(lead.length).toBe(3_990);
+    const result = await run(context({
+      ok: false,
+      status: 500,
+      data: `${lead}max.mueller@example.com is not allowed. ${'tail '.repeat(100)}`,
+    })) as Record<string, unknown>;
+    // A hard cut would leave `max.mueller@exa`, which no email detector matches.
+    expect(result.body).toBe(lead.trimEnd());
+    expect(result.body).not.toContain('max.');
+    expect(result.bodyTruncated).toBe(true);
+  });
+
+  it('cuts a JSON body before a value that straddles the 4000 boundary', async () => {
+    const body = { note: 'n'.repeat(3_970), email: 'max.mueller@example.com', more: 'm'.repeat(200) };
+    const serialized = JSON.stringify(body);
+    expect(serialized.indexOf('max.mueller')).toBeLessThan(4_000);
+    expect(serialized.indexOf('example.com')).toBeGreaterThanOrEqual(3_990);
+    const result = await run(context({ ok: false, status: 422, data: body })) as Record<string, unknown>;
+    expect(serialized.startsWith(result.body as string)).toBe(true);
+    expect(result.body).not.toContain('max.');
+    expect(result.bodyTruncated).toBe(true);
+  });
+
+  it('still caps a body without any delimiter near the boundary', async () => {
+    const result = await run(context({ ok: false, status: 500, data: `head ${'x'.repeat(5_000)}` })) as Record<string, unknown>;
+    expect(result.body).toBe(`head ${'x'.repeat(3_995)}`);
     expect(result.bodyTruncated).toBe(true);
   });
 

@@ -218,10 +218,15 @@ tool result tells the model what happened:
 ```
 
 `status` is the HTTP status. `body` is the response body (parsed JSON, or its
-text), omitted when there was none; a text body is cut at 4000 characters, a
-JSON body whose serialization is longer is replaced by that serialization cut
-at 4000 characters, and both set `bodyTruncated: true`. Like any tool result,
-it goes through a configured PII shield before the model reads it. A call the
+text), omitted when there was none; a text body is cut to at most 4000
+characters, a JSON body whose serialization is longer is replaced by that
+serialization cut to at most 4000 characters, and both set
+`bodyTruncated: true`. The cut moves back to the last whitespace or JSON
+delimiter (at most 256 characters; a body without one there is cut at exactly
+4000), so no half value trails. Like any tool result, the body goes through a
+configured PII shield before the model reads it. The shield reads the cut
+body, which is why the cut drops a partial token: a detector would not
+recognize an email or number split in the middle. A call the
 endpoint caller refused locally (a path outside `allowedPathPrefixes`) carries
 its status but no body.
 

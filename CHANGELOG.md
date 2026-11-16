@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The result of an endpoint tool whose backend call fails now carries the HTTP `status` and the response `body` (cut at 4000 characters, then with `bodyTruncated: true`) next to `success: false`, `error` and `retryable`, so the model can tell a 403 from a 500. The body goes through a configured PII shield like any tool result. Without `classifyToolFailure` errors count exactly as before. Loop detection fingerprints such a failure without `body` and `bodyTruncated`, so a timestamp or trace id in the error body does not hide a repeated failing call from the repeated-fingerprint limit.
+- The result of an endpoint tool whose backend call fails now carries the HTTP `status` and the response `body` (cut to at most 4000 characters, then with `bodyTruncated: true`; the cut moves back up to 256 characters to the last whitespace or JSON delimiter, so no partial value such as half an email reaches the PII shield or the model) next to `success: false`, `error` and `retryable`, so the model can tell a 403 from a 500. The body goes through a configured PII shield like any tool result. Without `classifyToolFailure` errors count exactly as before. Loop detection fingerprints such a failure without `body` and `bodyTruncated`, so a timestamp or trace id in the error body does not hide a repeated failing call from the repeated-fingerprint limit.
 
 ## [0.14.0] - 2026-11-15
 
