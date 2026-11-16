@@ -274,10 +274,56 @@ describe('OpenAPI endpoint source', () => {
     expect(observed.observations.map((tool) => tool.execution.stableKey)).toEqual(['DELETE /api/tasks/:task_id', 'POST /api/tasks']);
   });
 
+  it('names the operation whose combined input the runtime validator cannot compile', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    // Each part compiles alone; merged, the same $id names two different schemas.
+    paths['/api/tasks']!.post!.parameters = [
+      { name: 'filter', in: 'query', schema: { $ref: '#/components/schemas/Status', description: 'Only tasks in this status.' } },
+    ];
+    paths['/api/tasks']!.post!.requestBody = {
+      required: true,
+      content: { 'application/json': { schema: {
+        type: 'object', properties: { status: { $ref: '#/components/schemas/Status' } }, required: ['status'],
+      } } },
+    };
+    const document = JSON.parse(documentOf(paths)) as { components: { schemas: Record<string, unknown> } };
+    document.components.schemas.Status = { $id: 'Status', type: 'string', enum: ['open', 'done'] };
+    const observed = await observe({ 'api/openapi.json': JSON.stringify(document) });
+
+    expect(observed.complete).toBe(true);
+    expect(observed.findings).toEqual([expect.objectContaining({
+      code: 'schema-uncompilable', severity: 'error', subjectRef: 'POST /api/tasks',
+    })]);
+    expect(observed.findings[0]!.message).toBe(
+      'api/openapi.json POST /api/tasks has a schema the JSON Schema validator cannot compile: reference "Status" resolves to more than one schema',
+    );
+    expect(observed.observations.map((tool) => tool.execution.stableKey)).toEqual(['DELETE /api/tasks/:task_id', 'GET /api/tasks']);
+  });
+
+  it('names the operation whose response schema the runtime validator cannot compile', async () => {
+    const paths = structuredClone(TASK_PATHS) as Record<string, Record<string, Record<string, unknown>>>;
+    paths['/api/tasks']!.get!.responses = {
+      '200': { description: 'Tasks', content: { 'application/json': { schema: {
+        type: 'object', properties: { total: { type: 'integer', minimum: 0, exclusiveMinimum: true } },
+      } } } },
+    };
+    const observed = await observe({ 'api/openapi.json': documentOf(paths) });
+
+    expect(observed.complete).toBe(true);
+    expect(observed.findings).toEqual([expect.objectContaining({
+      code: 'schema-uncompilable', severity: 'error', subjectRef: 'GET /api/tasks',
+    })]);
+    expect(observed.findings[0]!.message).toBe(
+      'api/openapi.json GET /api/tasks has a schema the JSON Schema validator cannot compile: schema is invalid: data/properties/total/exclusiveMinimum must be number',
+    );
+    expect(observed.observations.map((tool) => tool.execution.stableKey)).toEqual(['DELETE /api/tasks/:task_id', 'POST /api/tasks']);
+  });
+
   it.each([
     ['a programming error', new TypeError("Cannot read properties of undefined (reading 'parts')")],
     // E.g. a tool-resolutions.json schema: uncompilable, but not written by the OpenAPI export.
     ['a compile failure of a schema the document does not hold', new JsonSchemaCompileError({ type: 'nope' }, new Error('schema is invalid'))],
+    ['a compile failure of an input merged from schemas the document does not hold', new JsonSchemaCompileError({ type: 'object' }, new Error('schema is invalid'), [{ type: 'nope' }])],
   ])('does not blame the OpenAPI export for %s while resolving a contract', async (_label, error) => {
     resolveFailure.error = error;
 

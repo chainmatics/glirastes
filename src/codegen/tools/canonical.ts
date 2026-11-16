@@ -54,9 +54,15 @@ export function jsonSchemaDigest(schema: LocalJsonSchema): string {
  * The runtime JSON Schema validator (Ajv) could not compile `schema`. Carries
  * the schema by identity so a caller can tell whose schema failed; the message
  * is the validator's own (keywords and schema paths, never values).
+ * `composedFrom` holds, also by identity, the schemas a schema built on the
+ * fly was merged from: such a schema belongs to whoever owns all of them.
  */
 export class JsonSchemaCompileError extends Error {
-  constructor(readonly schema: LocalJsonSchema, cause: unknown) {
+  constructor(
+    readonly schema: LocalJsonSchema,
+    cause: unknown,
+    readonly composedFrom: ReadonlyArray<LocalJsonSchema> = [],
+  ) {
     super(cause instanceof Error ? cause.message : String(cause), { cause });
     this.name = 'JsonSchemaCompileError';
   }

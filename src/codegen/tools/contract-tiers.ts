@@ -1,6 +1,6 @@
 import type { DeclaredEffect } from '../../contracts/tool-policy.js';
 import type { EndpointMethod } from '../../types.js';
-import { compareCodeUnits, jsonSchemaDigest, OPAQUE_JSON_SCHEMA } from './canonical.js';
+import { compareCodeUnits, JsonSchemaCompileError, jsonSchemaDigest, OPAQUE_JSON_SCHEMA } from './canonical.js';
 import { toolFinding } from './findings.js';
 import type { SchemaUse } from './handler-analysis.js';
 import type { InputRole } from './input-roles.js';
@@ -262,7 +262,15 @@ function composeInput(
     ...(required.size ? { required: [...required].sort(compareCodeUnits) } : {}),
     additionalProperties: false,
   };
-  return { source: jsonSource(json), json, digest: jsonSchemaDigest(json), findings: [] };
+  let digest: string;
+  try {
+    digest = jsonSchemaDigest(json);
+  } catch (error) {
+    // Parts that compile alone can fail merged; say which schemas were merged.
+    if (!(error instanceof JsonSchemaCompileError)) throw error;
+    throw new JsonSchemaCompileError(json, error.cause, parts.flatMap((part) => (part.json ? [part.json] : [])));
+  }
+  return { source: jsonSource(json), json, digest, findings: [] };
 }
 
 function paramsFrom(
