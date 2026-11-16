@@ -86,17 +86,25 @@ export type TurnToolAuthorizationResult =
  * pinned agent, manifest and policy revisions for the given principal, then
  * the given revocations.
  *
- * The execution guard calls it before every tool call with a freshly
- * resolved principal and freshly loaded revocations. The chat handler calls
- * it once per request, with the principal and the revocations as of the
- * start of that request, for the tools it hands to the model, for tool
- * discovery (`find_tools`, active tools) and for the tool presentation. So
- * a request never offers or names a tool its principal could not use when
- * it started; a role lost or a revocation loaded during a multi-step
- * request is enforced by the guard on the next call and shows in what is
- * offered from the next request on. With `authorizedToolsOnly: false` the
- * handler hands every registry tool to the model again and only discovery,
- * presentation and the guard use this decision.
+ * Per call, with a freshly resolved principal and freshly loaded
+ * revocations: the execution guard before every tool call; the chat
+ * handler before every model step (the tools active in that step, built-in
+ * stream handler) and on every `find_tools` search (what it returns and
+ * activates). A principal that cannot be resolved, or a failing lookup,
+ * allows no manifest tool there.
+ *
+ * Once per request, with the principal and the revocations as of its
+ * start: the tool objects the chat handler hands to the stream handler
+ * (`tools`), the discovery index and its start set, and the tool
+ * presentation. A role lost or a revocation loaded during a multi-step
+ * request therefore takes a tool away from the next step, the next search
+ * and the next call, while its label stays in the presentation part that
+ * was already sent, and a custom stream handler has to apply
+ * `authorizedToolNames` of its context itself.
+ *
+ * With `authorizedToolsOnly: false` the chat handler hands every registry
+ * tool to the model again; discovery, presentation and the guard still use
+ * this decision.
  */
 export function authorizeTurnTool(options: {
   snapshot: TurnSnapshot;

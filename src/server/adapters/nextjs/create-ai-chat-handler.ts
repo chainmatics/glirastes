@@ -170,11 +170,21 @@ export interface StreamHandlerContext {
   toolDiscovery?: HybridToolDiscovery;
   /**
    * Labels of the tools the principal of this managed turn may use (pinned
-   * revisions, freshly resolved principal, current revocations). The
+   * revisions, principal and revocations as of the start of the request). The
    * built-in stream handler sends it as a transient `data-tool-presentation`
    * part ahead of the answer.
    */
   toolPresentation?: ToolPresentationPart;
+  /**
+   * Set in a managed turn (unless `authorizedToolsOnly: false` without
+   * `toolDiscovery`): the names in `tools` the principal may use right now,
+   * that is the handler's built-ins plus the manifest tools the guard's
+   * decision allows for a freshly resolved principal and freshly loaded
+   * revocations. Only the built-ins when the principal cannot be resolved.
+   * The built-in stream handler asks it before every model step and offers
+   * no other tool; a custom one should intersect its `activeTools` with it.
+   */
+  authorizedToolNames?: () => Promise<ReadonlySet<string>>;
   /**
    * Identity set of SDK built-ins (`NON_DOMAIN_TOOL_NAMES`) whose tool
    * instance this handler created itself for the turn. Only these run outside
@@ -626,13 +636,18 @@ async function defaultStreamHandler(
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
-        prepareStep: () => {
+        prepareStep: async () => {
           if (budgetExhausted()) {
             return { activeTools: [], toolChoice: 'none' as const };
           }
-          return ctx.toolDiscovery
-            ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
-            : {};
+          // A role lost or a revocation loaded since the request started
+          // takes the tool away from the next step, not only from its call.
+          const permitted = await ctx.authorizedToolNames?.();
+          const active = ctx.toolDiscovery
+            ? [...ctx.toolDiscovery.activeToolNames()]
+            : permitted ? Object.keys(orderedTools) : undefined;
+          if (!active) return {};
+          return { activeTools: permitted ? active.filter((name) => permitted.has(name)) : active };
         },
         maxOutputTokens: ctx.maxOutputTokens,
         temperature: ctx.temperature,
@@ -1170,6 +1185,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       let managedTurn: ManagedTurnGuard | undefined;
       let managedPrincipal: Principal | undefined;
+      /** The manifest tool ids the guard would allow right now; empty when that cannot be decided. */
+      let currentToolIds: () => Promise<ReadonlySet<string>> = async () => new Set();
       if (managedRuntime) {
         const principalResult = PrincipalSchema.safeParse(
           await managedRuntime.resolvePrincipal(req),
@@ -1201,19 +1218,33 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         const snapshot = withTurnPrincipal(resolvedSnapshot, principalResult.data);
         managedPrincipal = principalResult.data;
 
+        const resolveCurrentPrincipal = async () => {
+          const current = PrincipalSchema.safeParse(
+            await managedRuntime.resolvePrincipal(req),
+          );
+          return current.success ? current.data : undefined;
+        };
+        const loadCurrentRevocations = managedRuntime.loadRevocations
+          ? () => managedRuntime.loadRevocations!({ request: req, snapshot })
+          : undefined;
         managedTurn = createManagedTurnGuard({
           snapshot,
-          resolvePrincipal: async () => {
-            const current = PrincipalSchema.safeParse(
-              await managedRuntime.resolvePrincipal(req),
-            );
-            return current.success ? current.data : undefined;
-          },
-          loadRevocations: managedRuntime.loadRevocations
-            ? () => managedRuntime.loadRevocations!({ request: req, snapshot })
-            : undefined,
+          resolvePrincipal: resolveCurrentPrincipal,
+          loadRevocations: loadCurrentRevocations,
           onBudgetSignal: managedRuntime.onBudgetSignal,
         });
+        // The same sources as the guard, asked again; fails closed.
+        currentToolIds = async () => {
+          try {
+            return authorizedTurnToolIds({
+              snapshot,
+              principal: await resolveCurrentPrincipal(),
+              revocations: await loadCurrentRevocations?.() ?? [],
+            });
+          } catch {
+            return new Set();
+          }
+        };
       }
 
       turnMetrics = metrics
@@ -1224,8 +1255,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           })
         : undefined;
 
-      // Revocations as of the start of this request, loaded once for
-      // discovery and presentation; every tool call loads them again.
+      // Revocations as of the start of this request, loaded once for the tool
+      // set, the discovery index and the presentation; every model step,
+      // `find_tools` search and tool call loads them again.
       let turnRevocations: Promise<ReadonlyArray<SecurityRevocation>> | undefined;
       const loadTurnRevocations = () => {
         turnRevocations ??= Promise.resolve(managedTurn && managedRuntime?.loadRevocations
@@ -1233,12 +1265,25 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           : []);
         return turnRevocations;
       };
+      /** Registry keys are the model-safe encoding of the manifest names. */
+      const manifestToolNames = (toolIds: ReadonlySet<string>) =>
+        (managedTurn?.snapshot.manifestRevision.tools ?? [])
+          .filter((tool) => toolIds.has(tool.toolId))
+          .map((tool) => modelFacingToolName(tool.name));
+      /**
+       * What `offeredTools` decided at the start of the request, decided
+       * again for the next model step or `find_tools` search with the
+       * principal and revocations of that moment.
+       */
+      const currentToolNames = async (builtinNames: ReadonlyArray<string>) =>
+        new Set([...builtinNames, ...manifestToolNames(await currentToolIds())]);
       /**
        * The tools a managed turn hands to the stream handler and the model:
        * the handler's own built-ins and the manifest tools this principal may
        * use (`authorizedTurnToolIds`, principal and revocations as of the
-       * start of this request). Everything else in the registry would be
-       * denied by the guard and is not named to the model at all.
+       * start of this request; `currentToolNames` narrows it per step).
+       * Everything else in the registry would be denied by the guard and is
+       * not named to the model at all.
        * `authorizedToolsOnly: false` and unmanaged turns keep every tool.
        *
        * The AI SDK drops an approved call whose tool is missing without a
@@ -1260,10 +1305,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           principal: managedPrincipal,
           revocations: await loadTurnRevocations(),
         });
-        // Registry keys are the model-safe encoding of the manifest names.
-        const allowedNames = new Set(managedTurn.snapshot.manifestRevision.tools
-          .filter((tool) => allowedIds.has(tool.toolId))
-          .map((tool) => modelFacingToolName(tool.name)));
+        const allowedNames = new Set(manifestToolNames(allowedIds));
         const offered: Record<string, T> = {};
         for (const [name, tool] of Object.entries(aiTools)) {
           if (builtinNames.includes(name) || allowedNames.has(name)) {
@@ -1326,6 +1368,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           }),
           initialToolNames,
           builtinToolNames,
+          currentlyAuthorized: () => currentToolNames([]),
         });
       };
 
@@ -1692,6 +1735,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           modelPricing,
           toolDiscovery: discoveryController,
           toolPresentation: await managedToolPresentation(),
+          ...(managedTurn && (authorizedToolsOnly || discoveryController)
+            ? {
+                authorizedToolNames: () => currentToolNames(discoveryController
+                  ? [...handlerBuiltinNames, 'find_tools']
+                  : handlerBuiltinNames),
+              }
+            : {}),
           handlerBuiltinToolNames: discoveryController
             ? [...handlerBuiltinNames, 'find_tools']
             : handlerBuiltinNames,
@@ -1865,6 +1915,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         modelPricing,
         toolDiscovery: discoveryController,
         toolPresentation: await managedToolPresentation(),
+        ...(managedTurn && (authorizedToolsOnly || discoveryController)
+          ? {
+              authorizedToolNames: () => currentToolNames(discoveryController
+                ? [...handlerBuiltinNames, 'find_tools']
+                : handlerBuiltinNames),
+            }
+          : {}),
         handlerBuiltinToolNames: discoveryController
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,

@@ -58,8 +58,8 @@ const toolCall = (toolName: string, input: unknown, toolCallId = 'call-1') =>
 const offered = (model: MockLanguageModelV3) =>
   model.doStreamCalls.map((call) => (call.tools ?? []).map((tool) => tool.name).sort());
 
-function tools() {
-  const list = vi.fn(async (_input: unknown) => ({ tasks: [] }));
+function tools(onList?: () => void) {
+  const list = vi.fn(async (_input: unknown) => { onList?.(); return { tasks: [] }; });
   const archive = vi.fn(async (_input: unknown) => ({ success: true, archived: true }));
   const registry: ToolRegistry = {
     tasks_list: defineTool({ id: LIST_TASKS_ID, description: 'List the tasks.', inputSchema: z.object({}).strict(), execute: list }),
@@ -107,12 +107,13 @@ const post = (messages: unknown[]) => new Request('https://app.example/api/chat'
 });
 const user = { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Archive t1' }] };
 
-const pipeline = {
+const pipelineSelecting = (selected: string[]) => ({
   process: async (input: string) => ({
-    model: { modelId: 'm' }, tools: ['tasks_list', 'tasks_archive'], toolSelection: 'explicit' as const, sanitizedInput: input,
+    model: { modelId: 'm' }, tools: selected, toolSelection: 'explicit' as const, sanitizedInput: input,
     intent: { intent: 'x', confidence: 1 }, module: null, followupsEnabled: false,
   }),
-};
+});
+const everyTool = ['tasks_list', 'tasks_archive'];
 
 async function clientMessage(chunks: Array<Record<string, unknown>>): Promise<UIMessage> {
   let last: UIMessage | undefined;
@@ -135,11 +136,11 @@ function approve(message: UIMessage): UIMessage {
 }
 
 describe.each([
-  ['legacy', {}],
-  ['pipeline', { pipeline: pipeline as never }],
-] as Array<[string, Partial<AiChatHandlerFullConfig>]>)('the tools a managed turn hands to the model (%s path)', (_path, pathConfig) => {
-  const config = (overrides: Partial<AiChatHandlerFullConfig>): AiChatHandlerFullConfig => ({
-    systemPrompt: 'A', approvalSecret: SECRET, intentRouting: false, ...pathConfig, ...overrides,
+  ['legacy', (selected: string[]) => ({ intentRouter: async () => ({ toolNames: selected }) })],
+  ['pipeline', (selected: string[]) => ({ pipeline: pipelineSelecting(selected) as never })],
+] as Array<[string, (selected: string[]) => Partial<AiChatHandlerFullConfig>]>)('the tools a managed turn hands to the model (%s path)', (_path, selecting) => {
+  const config = (overrides: Partial<AiChatHandlerFullConfig>, selected = everyTool): AiChatHandlerFullConfig => ({
+    systemPrompt: 'A', approvalSecret: SECRET, intentRouting: false, ...selecting(selected), ...overrides,
   } as AiChatHandlerFullConfig);
 
   /** The tool names handed to the stream handler and those the model was given in the first step. */
@@ -252,6 +253,83 @@ describe.each([
       expect(second.some((chunk) => chunk.type === 'error')).toBe(false);
       // The tool only stays so the approved call gets its tool error; what it does is not described again.
       expect(JSON.stringify(model.doStreamCalls.at(-1)!.tools)).not.toContain('Archive a task.');
+    });
+  });
+
+  describe('when the principal or the revocations change during a multi-step request', () => {
+    describe.each([[false], [true]])('with toolDiscovery %s', (toolDiscovery) => {
+      const builtins = toolDiscovery ? ['find_tools'] : [];
+
+      it('no longer offers a tool in the step after its role was lost', async () => {
+        let roles = ['member'];
+        const { registry, list } = tools(() => { roles = ['viewer']; });
+        const model = scriptedModel([toolCall('tasks_list', {})]);
+        await streamChunks(await createAiChatHandler(config({
+          tools: registry, model, toolDiscovery, managedRuntime: runtime({ roles: () => roles }),
+        }))(post([user])));
+        expect(list).toHaveBeenCalledTimes(1);
+        expect(offered(model)).toEqual([
+          [...builtins, 'tasks_archive', 'tasks_list'],
+          [...builtins, 'tasks_archive'],
+        ]);
+      });
+
+      it('no longer offers a tool in the step after it was revoked', async () => {
+        let revoked: string[] = [];
+        const { registry } = tools(() => { revoked = [ARCHIVE_TASK_ID]; });
+        const model = scriptedModel([toolCall('tasks_list', {})]);
+        await streamChunks(await createAiChatHandler(config({
+          tools: registry, model, toolDiscovery, managedRuntime: runtime({ roles: () => ['member'], revoked: () => revoked }),
+        }))(post([user])));
+        expect(offered(model)).toEqual([
+          [...builtins, 'tasks_archive', 'tasks_list'],
+          [...builtins, 'tasks_list'],
+        ]);
+      });
+
+      it('offers only its own built-ins once the principal cannot be resolved any more', async () => {
+        let signedIn = true;
+        const { registry } = tools(() => { signedIn = false; });
+        const model = scriptedModel([toolCall('tasks_list', {})]);
+        await streamChunks(await createAiChatHandler(config({
+          tools: registry, model, toolDiscovery,
+          managedRuntime: runtime({ resolvePrincipal: async () => (signedIn ? principal(['member']) : undefined) }),
+        }))(post([user])));
+        expect(offered(model)).toEqual([[...builtins, 'tasks_archive', 'tasks_list'], builtins]);
+      });
+    });
+
+    it('find_tools neither returns nor activates a tool revoked since the request started', async () => {
+      let revoked: string[] = [];
+      const { registry } = tools(() => { revoked = [ARCHIVE_TASK_ID]; });
+      const model = scriptedModel(
+        [toolCall('tasks_list', {})],
+        [toolCall('find_tools', { query: 'archive a task' }, 'call-2')],
+      );
+      const chunks = await streamChunks(await createAiChatHandler(config({
+        tools: registry, model, toolDiscovery: true,
+        managedRuntime: runtime({ roles: () => ['member'], revoked: () => revoked }),
+      }, ['tasks_list']))(post([user])));
+      const found = chunks.find((chunk) => chunk.type === 'tool-output-available' && chunk.toolCallId === 'call-2');
+      expect(JSON.stringify(found)).toContain('"tools":');
+      expect(JSON.stringify(found)).not.toContain('tasks_archive');
+      expect(offered(model)).toEqual([
+        ['find_tools', 'tasks_list'],
+        ['find_tools', 'tasks_list'],
+        ['find_tools', 'tasks_list'],
+      ]);
+    });
+
+    it('find_tools returns and activates the tool while it is not revoked', async () => {
+      const { registry } = tools();
+      const model = scriptedModel([toolCall('find_tools', { query: 'archive a task' }, 'call-2')]);
+      await streamChunks(await createAiChatHandler(config({
+        tools: registry, model, toolDiscovery: true, managedRuntime: runtime({ roles: () => ['member'] }),
+      }, ['tasks_list']))(post([user])));
+      expect(offered(model)).toEqual([
+        ['find_tools', 'tasks_list'],
+        ['find_tools', 'tasks_archive', 'tasks_list'],
+      ]);
     });
   });
 });

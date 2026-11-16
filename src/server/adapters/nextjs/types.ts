@@ -118,7 +118,8 @@ export interface ManagedLocalRuntimeConfig {
    * continuations must return the same pinned revisions for the same turnId.
    * The handler uses the snapshot with the principal it resolved for the
    * request, so tool discovery, tool labels and the system prompt context
-   * follow the current roles and revocations.
+   * follow the roles and revocations as of the start of the request; the
+   * tools offered per model step and `find_tools` follow the current ones.
    */
   resolveTurnSnapshot: (
     context: ResolveTurnSnapshotContext,
@@ -198,11 +199,12 @@ export interface AiChatHandlerConfig {
    * With managedRuntime (default `true`): the model and the stream handler
    * get only the handler's built-ins and the manifest tools the principal
    * may use, by the decision of the tool-call guard (`authorizeTurnTool`)
-   * on the pinned revisions with the principal and revocations of the
-   * request. Name, description and input schema of any other tool never
-   * reach the model. `false` hands over every registry tool, as before
-   * 0.15; the guard still denies their calls. No effect without
-   * managedRuntime.
+   * on the pinned revisions: decided at the start of the request, and
+   * again before every model step with a freshly resolved principal and
+   * freshly loaded revocations. Name, description and input schema of any
+   * other tool never reach the model. `false` hands over every registry
+   * tool, as before this option existed; the guard still denies their
+   * calls. No effect without managedRuntime.
    */
   authorizedToolsOnly?: boolean;
 

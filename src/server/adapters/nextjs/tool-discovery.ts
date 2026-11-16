@@ -47,6 +47,15 @@ export function createHybridToolDiscovery(options: {
    * active for the whole turn. They are never searchable or model-supplied.
    */
   builtinToolNames?: ReadonlyArray<string>;
+  /**
+   * The model-facing names of the tools the principal may use right now
+   * (freshly resolved principal, freshly loaded revocations). `find_tools`
+   * asks it on every search: it neither returns nor activates a tool that
+   * is not in the set and drops such a tool from the active ones. A check
+   * that throws counts as an empty set. Without it, eligibility is the one
+   * of the discovery index, as of its creation.
+   */
+  currentlyAuthorized?: () => Promise<ReadonlySet<string>>;
 }): HybridToolDiscovery {
   const eligible = new Set(options.discovery.eligibleNames);
   const builtins = [...new Set(options.builtinToolNames ?? [])]
@@ -69,7 +78,16 @@ export function createHybridToolDiscovery(options: {
       parameters: FindToolsInputSchema,
       async execute(input: unknown) {
         const { query } = FindToolsInputSchema.parse(input);
-        const tools = options.discovery.search(query);
+        const found = options.discovery.search(query);
+        const allowed = options.currentlyAuthorized
+          ? await options.currentlyAuthorized().catch(() => new Set<string>())
+          : undefined;
+        if (allowed) {
+          for (const name of [...active]) {
+            if (!allowed.has(name)) active.delete(name);
+          }
+        }
+        const tools = allowed ? found.filter((match) => allowed.has(match.name)) : found;
         const before = active.size;
         for (const match of tools) {
           if (eligible.has(match.name)) active.add(match.name);
