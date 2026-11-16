@@ -280,6 +280,9 @@ describe('an opt-in OpenAPI source through the tools pipeline', () => {
     expect(removed.tools!.find((candidate) => candidate.stableKey === 'PATCH /api/tags/:tagId')).toMatchObject({
       definitionId: 'update_tag', toolId: derived.toolId,
     });
+    // The kept name still takes its label from the route: the signal is the source, not the extension being present.
+    expect(candidates(renamed).get('PATCH /api/tags/:tagId')?.presentation?.singular).toBe('Tags ändern');
+    expect(candidates(removed).get('PATCH /api/tags/:tagId')?.presentation?.singular).toBe('Tags ändern');
   }, 60_000);
 });
 

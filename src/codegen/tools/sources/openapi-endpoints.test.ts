@@ -337,7 +337,7 @@ describe('OpenAPI selection and x-glirastes-* extensions', () => {
     expect(observed.observations).toHaveLength(1);
     const [list] = observed.observations;
     expect(list!.execution).toMatchObject({ stableKey: 'GET /api/tags', definitionId: 'list_tags' });
-    expect(list!.prose).toEqual({ module: 'tag' });
+    expect(list!.prose).toEqual({ module: 'tag', resourceFromRoute: true });
     expect(list!.codeRoles).toEqual(['admin', 'tag.read']);
     expect(codes(list!.findings)).toEqual([['output-contract-opaque', 'warning', 'GET /api/tags']]);
   });
@@ -355,7 +355,7 @@ describe('OpenAPI selection and x-glirastes-* extensions', () => {
       expect([...byKey.keys()]).toEqual(['GET /api/tags', 'POST /api/tags']);
       expect(byKey.get('POST /api/tags')!.execution.definitionId).toBe('tags.create');
       expect(byKey.get('POST /api/tags')!.codeRoles).toEqual(['tag.write']);
-      expect(byKey.get('POST /api/tags')!.prose).toBeUndefined();
+      expect(byKey.get('POST /api/tags')!.prose).toEqual({ resourceFromRoute: true });
     }
   });
 
@@ -435,7 +435,7 @@ describe('OpenAPI selection and x-glirastes-* extensions', () => {
     expect(byKey.get('GET /api/b')!.execution.definitionId).toBe('b.list');
     expect(codes(observed.findings)).toEqual([['definition-id-invalid', 'warning', 'GET /api/b']]);
     expect(observed.findings[0]!.message).toContain('x-glirastes-name "List B"');
-    expect(byKey.get('GET /api/c')!.prose).toBeUndefined();
+    expect(byKey.get('GET /api/c')!.prose).toEqual({ resourceFromRoute: true });
     expect(own('GET /api/c')).toEqual([['tool-group-invalid', 'warning', 'GET /api/c']]);
     for (const key of ['GET /api/d', 'GET /api/e', 'GET /api/f', 'GET /api/g']) {
       expect(own(key)).toEqual([['tool-roles-invalid', 'needs_attention', key]]);

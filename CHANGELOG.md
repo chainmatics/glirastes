@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- A tool name without a dot (for example `list_tags` from `x-glirastes-name`) takes its module and its template label resource from the endpoint path instead of the name, so the module is not the name itself and labels read "Tags ändern" / "Update tags" instead of repeating the verb. Dotted names and UI tools are unchanged. The `definition-id-invalid` and `definition-id-conflict` messages name the extension (`x-glirastes-name`) when it declared the name.
+- In the `openapi` source, a tool name without a dot (for example `list_tags` from `x-glirastes-name`) takes its module and its template label resource from the endpoint path instead of the name, so the module is not the name itself and labels read "Tags ändern" / "Update tags" instead of repeating the verb. Dotted names, UI tools and every other source (`next-app`, `nest`, contract modules: a contract id such as `listTags` keeps module `listTags` and its label) are unchanged. The `definition-id-invalid` and `definition-id-conflict` messages name the extension (`x-glirastes-name`) when it declared the name.
 
 ### Fixed
 

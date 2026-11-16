@@ -81,7 +81,9 @@ Without a group, a name with a dot keeps its module (the part before the first
 dot); a name without a dot (`list_tags`) takes the module from the path
 (`GET /api/tags` gives `tags`), and its template labels are built from method
 and path the same way ("List tags", "Tags auflisten"), so the verb is not
-repeated.
+repeated. This applies to the `openapi` source only, where such a name comes
+from `x-glirastes-name`; a contract id without a dot in any other source
+(`listTags`) keeps naming its module and label as before.
 
 The runtime container build applies the same selection: with `opt-in` it
 validates only the operations marked `x-glirastes-tool: true` and skips every

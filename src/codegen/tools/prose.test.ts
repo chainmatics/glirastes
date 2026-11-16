@@ -210,9 +210,12 @@ describe('tool prose', () => {
   });
 });
 
+/** What the openapi source sets: its names without a dot come from `x-glirastes-name`. */
+const FROM_ROUTE = { resourceFromRoute: true } as const;
+
 describe('tool prose for endpoint names without a dot', () => {
   const named = (definitionId: string, method: string, path: string, operationGroup: ResolveToolProseInput['operationGroup'], locale: string) => (
-    resolveToolProse({ ...base, stableKey: `${method} ${path}`, definitionId, method, path, operationGroup, locale })
+    resolveToolProse({ ...base, stableKey: `${method} ${path}`, definitionId, method, path, operationGroup, locale, hints: FROM_ROUTE })
   );
 
   it.each([
@@ -242,12 +245,35 @@ describe('tool prose for endpoint names without a dot', () => {
     }));
     const prose = resolveToolProse({
       ...base, stableKey: 'GET /api/tags', definitionId: 'list_tags', method: 'GET', path: '/api/tags',
-      operationGroup: 'read', semantics, hints: { module: 'tag' },
+      operationGroup: 'read', semantics, hints: { ...FROM_ROUTE, module: 'tag' },
     });
     expect(prose.module).toBe('tag');
     expect(resolveToolProse({
       ...base, stableKey: 'GET /api/tags', definitionId: 'list_tags', method: 'GET', path: '/api/tags', operationGroup: 'read', semantics,
+      hints: FROM_ROUTE,
     }).module).toBe('labels');
+  });
+
+  // Backward compatibility: next-app, nest and contract-module sources never set the hint.
+  it.each([
+    ['listTags', 'GET', '/api/tags', 'read', 'en-US', 'List list tags'],
+    ['listTags', 'GET', '/api/tags', 'read', 'de-DE', 'List tags auflisten'],
+    ['update_tag', 'PATCH', '/api/tags/:id', 'update', 'en-US', 'Update update tag'],
+    ['removeTag', 'DELETE', '/api/tags/:id', 'delete', 'de-DE', 'Remove tag löschen'],
+  ] as const)('keeps module and label of %s (%s %s, %s) from the name for every other source', (definitionId, method, path, group, locale, label) => {
+    // The rule before method and path were considered: the part before the first dot, split into words.
+    const resource = definitionId.split('.')[0]!;
+    const words = resource.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase().trim();
+    for (const hints of [undefined, {}, { usageHints: ['Use it.'] }]) {
+      const prose = resolveToolProse({
+        ...base, stableKey: `${method} ${path}`, definitionId, method, path, operationGroup: group, locale,
+        ...(hints ? { hints } : {}),
+      });
+      expect(prose.module).toBe(resource);
+      expect(prose.presentation).toMatchObject({ singular: label, plural: label, approval: label });
+      expect(prose.presentation.singular.toLowerCase()).toContain(words);
+      expect(prose.description).toBe(`${label} (${method} ${path}).`);
+    }
   });
 });
 

@@ -41,6 +41,7 @@ import type {
   JsonSchemaLike,
   ObservedTool,
   ToolFinding,
+  ToolProseHints,
   ToolSource,
   ToolSourceContext,
   ToolSourceObservation,
@@ -315,7 +316,8 @@ function countFastapiRoutes(
 function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: string): ObservedTool {
   const { entry, resolved } = piece;
   const findings = [...entry.findings, ...resolved.findings];
-  const prose = entry.group ? { ...resolved.prose, module: entry.group } : resolved.prose;
+  // Only this source reads x-glirastes-name, so only its names without a dot take their resource from the route.
+  const prose: ToolProseHints = { ...resolved.prose, ...(entry.group ? { module: entry.group } : {}), resourceFromRoute: true };
   const bodyKeys = bodyKeysOf(entry.body);
   if (!entry.authEvidence) {
     findings.push(toolFinding('auth-evidence-missing', 'needs_attention', entry.stableKey,
@@ -351,7 +353,7 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
       ...(entry.description ? { jsDoc: entry.description } : {}),
     },
     findings,
-    ...(Object.keys(prose).length > 0 ? { prose } : {}),
+    prose,
     ...(entry.roles ? { codeRoles: [...entry.roles] } : {}),
   };
 }

@@ -68,6 +68,13 @@ export interface ToolProseHints {
   module?: string;
   usageHints?: string[];
   presentation?: ToolPresentation;
+  /**
+   * Set by the openapi source only: a name without a dot there comes from
+   * `x-glirastes-name` (`list_tags`) and carries its verb, so module and
+   * template label take the resource from method and path. Every other
+   * source leaves it unset and keeps the part of the name before the first dot.
+   */
+  resourceFromRoute?: true;
 }
 
 /** The interface a tool has now, also when no contract could be resolved. */
