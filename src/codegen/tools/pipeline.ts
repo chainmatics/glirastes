@@ -307,6 +307,25 @@ export function applyCodeRoles(
   };
 }
 
+/**
+ * The warning for a tool `applyCodeRoles` disables because the roles
+ * tool-policy.json resolved share nothing with the code roles. Disabling is
+ * right (fail closed), but it must be visible. Role names are configuration,
+ * not business data; the committed report keeps code and subject only.
+ */
+export function disjointCodeRolesFinding(
+  execution: { stableKey: string; definitionId: string },
+  resolved: EffectiveToolPolicy,
+  codeRoles: ReadonlyArray<string> | undefined,
+): ToolFinding | undefined {
+  if (!codeRoles || codeRoles.length === 0) return undefined;
+  if (!intersectAllowedRoles(codeRoles, resolved.allowedRoles).disjoint) return undefined;
+  const sorted = (roles: ReadonlyArray<string>) => JSON.stringify(intersectAllowedRoles(roles, []).roles);
+  return toolFinding('policy-roles-disjoint', 'warning', execution.stableKey,
+    `${execution.definitionId} is disabled: ${TOOLS_PATHS.policy} allows the roles ${sorted(resolved.allowedRoles)}, `
+      + `the code (x-glirastes-roles) allows ${sorted(codeRoles)}, and no role is in both.`);
+}
+
 interface DerivedOutputInput {
   config: ToolsConfig;
   inventory: FoundationExecutionInventory;
@@ -578,6 +597,8 @@ async function generate(
       ...(previousRisk ? { previousEffectiveRiskClass: previousRisk } : {}),
     });
     const effective = applyCodeRoles(resolved.effective, tool.codeRoles);
+    const disjointRoles = disjointCodeRolesFinding(execution, resolved.effective, tool.codeRoles);
+    if (disjointRoles) findings.push(disjointRoles);
     for (const warning of resolved.warnings) {
       findings.push(toolFinding(warning.code, 'warning', execution.stableKey, policyWarningMessage(warning.code, warning.field)));
     }

@@ -29,7 +29,9 @@ list means no additional restriction; the endpoint's own authorization applies
 either way. Roles the code declares (`x-glirastes-roles`, see below) are the
 code default; `tool-policy.json` and the Platform intersect with it, so a role
 listed there but not in the code grants nothing, and a disjoint intersection
-disables the tool (nobody). The setup artifact names the roles' origin
+disables the tool (nobody). When `tool-policy.json` causes that, the refresh
+reports `policy-roles-disjoint` (warning) with the tool and both role sets;
+`glirastes tools resolve --print` shows it to the developer. The setup artifact names the roles' origin
 `code-default` while the code roles apply and `local-policy` once
 `tool-policy.json` narrowed them.
 
@@ -52,7 +54,7 @@ string) or `opt-in`. The extensions are read on the operation object only
 | `x-glirastes-tool` | boolean | `true`: with `opt-in`, the operation may become a tool. `false`: never a tool, in both modes (excluded as `opted-out`) | Finding `tool-marker-invalid` (warning, also on an operation that is no tool); read as absent |
 | `x-glirastes-name` | string | The tool name, e.g. `list_tags` or `tags.list`. Wins over the derived name and over the name an earlier inventory kept; no `refresh --adopt` needed | Not a valid tool name: `definition-id-invalid` (warning), derived name. Two operations with one name: `definition-id-conflict` (error). A name another tool held before: `definition-id-reassigned` (warning), the name moves |
 | `x-glirastes-group` | string | The module, above `tool-semantics.json` and any derivation | Finding `tool-group-invalid` (warning); module derived |
-| `x-glirastes-roles` | string array | Code default of `allowedRoles` (any-of); `[]` means no restriction; duplicates are removed | Not a list of at most 50 non-empty role names: `tool-roles-invalid` (needs attention), the tool stays disabled |
+| `x-glirastes-roles` | string array | Code default of `allowedRoles` (any-of); `[]` means no restriction; duplicates are removed. `tool-policy.json` roles that share none with it disable the tool: `policy-roles-disjoint` (warning) | Not a list of at most 50 non-empty role names: `tool-roles-invalid` (needs attention), the tool stays disabled |
 | `x-glirastes-effect` | `read`, `write`, `destructive`, `external`, `financial` | Declared effect; can only raise the risk class | `contract-effect-invalid` (needs attention); ignored |
 | `x-glirastes-ignore` | `true` | Never a tool (excluded as `ai-ignore`) | – |
 

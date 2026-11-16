@@ -8,7 +8,7 @@ import { deriveToolPolicyDefaults, resolveToolPolicy, type EffectiveToolPolicy }
 import { applyPolicyOverlay } from '../../runtime/policy-overlay.js';
 import { createAppFixture, removeAppFixtures, SDK_ROOT, type AppFixture } from './__tests__/app-fixture.js';
 import { generatedModulePath, loadToolsConfig, TOOLS_PATHS } from './config.js';
-import { applyCodeRoles, runToolsPipelineWith, type ToolsPipelineResult } from './pipeline.js';
+import { applyCodeRoles, disjointCodeRolesFinding, runToolsPipelineWith, type ToolsPipelineResult } from './pipeline.js';
 import { buildResolveWorklist } from './worklist.js';
 
 afterEach(removeAppFixtures);
@@ -192,6 +192,25 @@ describe('an opt-in OpenAPI source through the tools pipeline', () => {
     expect(text).toContain('x-glirastes-tool: false keeps an operation out');
   }, 60_000);
 
+  it('reports no disjoint roles for operations that are not tools or for a tool the policy itself disables', async () => {
+    const spec = await optInSpec();
+    // Unmarked, with roles: no tool, so its roles are never read.
+    spec.paths['/api/tasks']!.get!['x-glirastes-roles'] = ['task.read'];
+    const result = await refresh(await optInApp({
+      spec,
+      policy: {
+        schemaVersion: 1,
+        tools: {
+          'GET /api/tasks': { allowedRoles: ['guest'] },
+          'GET /api/tags': { enabled: false },
+        },
+      },
+    }));
+    expect(result.tools!.map((tool) => tool.stableKey)).not.toContain('GET /api/tasks');
+    expect(result.tools!.find((tool) => tool.stableKey === 'GET /api/tags')!.enabled).toBe(false);
+    expect(result.findings.map((finding) => finding.code)).not.toContain('policy-roles-disjoint');
+  }, 60_000);
+
   it('disables a marked operation whose roles are invalid (fail closed)', async () => {
     const spec = await optInSpec();
     spec.paths['/api/tags']!.get!['x-glirastes-roles'] = 'tag.read';
@@ -228,6 +247,27 @@ describe('an opt-in OpenAPI source through the tools pipeline', () => {
     expect(tools.get('GET /api/tags')).toMatchObject({
       enabled: false, allowedRoles: [], provenance: { policyOrigin: { enabled: 'local-policy', allowedRoles: 'local-policy' } },
     });
+    // Disabled, but never silently: the finding names the tool and both role sets. Narrowing alone reports nothing.
+    const disjoint = result.findings.filter((finding) => finding.code === 'policy-roles-disjoint');
+    expect(disjoint).toEqual([expect.objectContaining({
+      severity: 'warning',
+      subjectRef: 'GET /api/tags',
+      message: 'list_tags is disabled: .glirastes/tool-policy.json allows the roles ["guest"], the code (x-glirastes-roles) allows ["tag.read"], and no role is in both.',
+    })]);
+    expect(disjoint[0]!.nextAction).toContain('tool-policy.json');
+    expect(result.tools!.find((tool) => tool.stableKey === 'GET /api/tags')!.findings.map((finding) => finding.code)).toContain('policy-roles-disjoint');
+    expect(formatToolsHuman(result)).toContain('  - GET /api/tags  policy-roles-disjoint: list_tags is disabled');
+    expect(buildResolveWorklist(result).items.find((item) => item.code === 'policy-roles-disjoint')).toMatchObject({
+      tool: 'list_tags',
+      stableKey: 'GET /api/tags',
+      owner: 'developer',
+      target: { kind: 'developer', command: 'glirastes tools policy show list_tags' },
+    });
+    // The committed report carries code and subject only, never the role names of the message.
+    const report = JSON.parse(result.outputs[TOOLS_PATHS.report]!) as { findings: Array<Record<string, string>> };
+    expect(report.findings.filter((finding) => finding.code === 'policy-roles-disjoint')).toEqual([
+      { code: 'policy-roles-disjoint', severity: 'warning', subjectRef: 'GET /api/tags', nextAction: disjoint[0]!.nextAction },
+    ]);
 
     // The runtime overlay intersects the generated policy again: a Platform decision can only narrow.
     const local = artifactOf(result).tools.map((tool) => ({
@@ -354,5 +394,16 @@ describe('applyCodeRoles', () => {
   ] as const)('local %j with code %j: enabled %s, roles %j (%s)', (local, code, enabled, roles, rolesOrigin, enabledOrigin) => {
     const effective = applyCodeRoles(resolved(local ? [...local] : undefined), code);
     expect(effective).toMatchObject({ enabled, allowedRoles: roles, origin: { allowedRoles: rolesOrigin, enabled: enabledOrigin } });
+    // Exactly the disjoint case is reported.
+    const finding = disjointCodeRolesFinding(
+      { stableKey: 'PATCH /api/tags/:id', definitionId: 'update_tag' }, resolved(local ? [...local] : undefined), code,
+    );
+    expect(finding?.code).toBe(enabled ? undefined : 'policy-roles-disjoint');
+  });
+
+  it('reports nothing without code roles', () => {
+    const execution = { stableKey: 'PATCH /api/tags/:id', definitionId: 'update_tag' };
+    expect(disjointCodeRolesFinding(execution, resolved(['a']), undefined)).toBeUndefined();
+    expect(disjointCodeRolesFinding(execution, resolved(['a']), [])).toBeUndefined();
   });
 });

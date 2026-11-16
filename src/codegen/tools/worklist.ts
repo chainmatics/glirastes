@@ -145,6 +145,7 @@ const DEVELOPER_CODES: ReadonlySet<string> = new Set([
   'risk-lower-available',
   'policy-entry-orphaned',
   'override-lapsed-risk-raised',
+  'policy-roles-disjoint',
   'E-POLICY-002',
 ]);
 
