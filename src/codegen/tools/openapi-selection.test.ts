@@ -189,7 +189,9 @@ describe('an opt-in OpenAPI source through the tools pipeline', () => {
     expect(text).not.toContain('GET /api/tasks  not-opted-in');
     expect(text).toContain('  . POST /api/auth/login  auth-route (default)');
     expect(text).toContain('mark it with x-glirastes-tool: true');
-    expect(text).toContain('x-glirastes-tool: false keeps an operation out');
+    // Under opt-in, removing the marker would leave the operation out: the advice is to set it to true.
+    expect(text).toContain('x-glirastes-tool: false keeps an operation out; set it to true to include the operation, unless an exclusion rule applies to it.');
+    expect(text).not.toContain('remove it to include');
   }, 60_000);
 
   it('reports no disjoint roles for operations that are not tools or for a tool the policy itself disables', async () => {

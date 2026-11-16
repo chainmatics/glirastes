@@ -123,7 +123,8 @@ function excludedSection(lines: string[], excluded: ToolsPipelineResult['exclude
     next.push('To make an operation a tool, mark it with x-glirastes-tool: true in the OpenAPI export.');
   }
   if (listed.some((entry) => entry.reason === 'opted-out')) {
-    next.push('x-glirastes-tool: false keeps an operation out; remove it to include the operation.');
+    // Valid for both selections: under opt-in an operation without the marker stays out as well.
+    next.push('x-glirastes-tool: false keeps an operation out; set it to true to include the operation, unless an exclusion rule applies to it.');
   }
   lines.push(`  Next: ${next.join(' ')}`);
 }
