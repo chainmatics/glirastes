@@ -46,15 +46,21 @@ export function toolResultFailure(result: unknown): ToolFailureClassification | 
 
 /**
  * What loop detection fingerprints for a tool result. A `success: false`
- * result is reduced to its stable fields: the backend `body` (and
- * `bodyTruncated`) is left out, because many backends put a timestamp or a
- * trace id into every error body, which would make each repetition of the
- * same failing call look new. Status, error and classification stay in. Any
- * other result is fingerprinted whole.
+ * result with an HTTP `status` is an endpoint failure, and only its stable
+ * fields count: `success`, `status`, `retryable` and `expectedFailure`. The
+ * backend `body` (and `bodyTruncated`) and `error` are left out, because
+ * `error` is taken from the body (its text, or its `message`) and many
+ * backends put a timestamp or a trace id into every error body, which would
+ * make each repetition of the same failing call look new. A failure without
+ * a `status` (a tool's own failure) keeps its `error`. Any other result is
+ * fingerprinted whole.
  */
 export function toolResultForFingerprint(result: unknown): unknown {
   if (typeof result !== 'object' || result === null || Array.isArray(result)) return result;
   if ((result as { success?: unknown }).success !== false) return result;
-  const { body: _body, bodyTruncated: _bodyTruncated, ...stable } = result as Record<string, unknown>;
-  return stable;
+  const {
+    body: _body, bodyTruncated: _bodyTruncated, error, ...stable
+  } = result as Record<string, unknown>;
+  if (typeof stable.status === 'number') return stable;
+  return error === undefined ? stable : { ...stable, error };
 }

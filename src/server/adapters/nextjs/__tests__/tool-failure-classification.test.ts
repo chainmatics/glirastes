@@ -9,6 +9,7 @@ import {
 } from '../../../../contracts/index.js';
 import { defineEndpointTool, type PiiDetector } from '../../../../types.js';
 import {
+  createHttpEndpointCaller,
   endpointToolToTool,
   type InternalApiResponse,
   type ToolFailureClassifier,
@@ -188,6 +189,41 @@ describe('classifyToolFailure in the Next chat handler', () => {
     expect(classified.wire).not.toContain('maxConsecutiveErrors');
     expect(classified.events[0]).toMatchObject({ toolCallCount: 2, toolErrorCount: 0 });
     expect(classified.onFinish).toHaveBeenCalledWith(expect.objectContaining({ expectedToolFailureCount: 2 }));
+  });
+
+  it('stops a repeated failing call whose text body differs on every answer', async () => {
+    // An nginx-style plain-text 500 with a request id: `createHttpEndpointCaller`
+    // puts the text into `error` as well as `body`, so both differ per call.
+    const sameCall = (callId: string) => () => convertArrayToReadableStream([
+      { type: 'stream-start', warnings: [] },
+      { type: 'tool-call', toolCallId: callId, toolName: 'list_tasks', input: JSON.stringify({ query: 'open' }) },
+      { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+    ] as never);
+    let answers = 0;
+    const fetchImpl = (async () => {
+      answers += 1;
+      return new Response(`500 Internal Server Error, request id req-${answers}`, {
+        status: 500,
+        headers: { 'content-type': 'text/plain' },
+      });
+    }) as typeof fetch;
+    const limit = localLimits.maxRepeatedFingerprint;
+    const steps = [
+      ...Array.from({ length: limit + 2 }, (_, index) => sameCall(`call-${index}`)),
+      () => textStep(),
+    ];
+    const { wire, onFinish } = await runTurn({
+      steps,
+      endpointCaller: () => createHttpEndpointCaller({ baseUrl: 'http://api.test', fetchImpl }),
+      classifyToolFailure: ({ status }) => (status === 500 ? 'expected' : 'error'),
+    });
+    expect(wire).toContain('req-1');
+    expect(wire).toContain(`req-${limit}`);
+    expect(wire).toContain('Stopped at runtime budget: maxRepeatedFingerprint.');
+    expect(wire).not.toContain('maxConsecutiveErrors');
+    // The guard refuses the next identical call: the backend is not asked again.
+    expect(answers).toBe(limit);
+    expect(onFinish).toHaveBeenCalledWith(expect.objectContaining({ expectedToolFailureCount: limit }));
   });
 
   it('only affects metrics on the legacy path without managedRuntime', async () => {
