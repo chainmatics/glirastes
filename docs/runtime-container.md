@@ -51,7 +51,9 @@ content needed for inference. Frontend actions execute in the browser.
 
 ## Build and update tools
 
-Export **OpenAPI 3.1 JSON** from the backend into the application repository.
+Export **OpenAPI 3.0.x or 3.1.x JSON** from the backend into the application
+repository (YAML and Swagger 2.0 are not read; a 3.0 document's `nullable` and
+boolean exclusive bounds are normalized to their 3.1 form on load).
 The application CI must regenerate and diff this export: validating an already
 stale document is not sufficient. Configure the normal `.glirastes/tools.json`
 with a stable appId, targetAppKey and source:
@@ -139,6 +141,11 @@ while disconnected. Local SDK budgets remain hard upper bounds.
 The model uses an OpenAI-compatible chat API, defaulting to OpenRouter. Configure
 an operator-controlled `model.baseUrl` if necessary; it is a separate trust
 boundary, not supplied by the browser/model. The container includes its provider.
+
+Failed backend calls reach the model with their HTTP status and (capped)
+response body, as in the SDK. The SDK's `classifyToolFailure` is a function
+and cannot be configured in the JSON yet: in the container every failed
+backend call counts as a tool error for `maxConsecutiveErrors` and the metrics.
 
 ## State, cancellation and lifecycle
 

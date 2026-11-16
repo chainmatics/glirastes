@@ -56,7 +56,7 @@ Pin the released image by digest in production.
 ## Build customer artifacts
 
 The customer project supplies `.glirastes/tools.json`,
-`.glirastes/prompt-bundle.json` and its committed OpenAPI 3.1 JSON export. Optional
+`.glirastes/prompt-bundle.json` and its committed OpenAPI 3.0 or 3.1 JSON export. Optional
 policy, descriptions and browser-action declarations use the existing SDK inputs.
 There is no separate hand-written tool inventory. Backend export generation and
 its freshness check remain part of the customer's build.
@@ -98,8 +98,9 @@ identity are required. Hashes detect corruption; they do not authenticate an
 untrusted publisher. Mount artifacts from your reviewed build read-only.
 
 The container accepts only the subset the existing HTTP caller can execute:
-OpenAPI 3.1 JSON, simple scalar path parameters, supported scalar/repeated query
-parameters on GET/HEAD/DELETE, and JSON-object bodies on POST/PUT/PATCH. Explicitly
+OpenAPI 3.0 or 3.1 JSON, simple scalar path parameters, supported scalar/repeated query
+parameters on GET/HEAD/DELETE (a nullable parameter, 3.1 `type: [T, 'null']` or
+3.0 `nullable: true`, is not supported), and JSON-object bodies on POST/PUT/PATCH. Explicitly
 exclude unsupported operations. Unresolved references, custom header/cookie tool
 arguments, write-method query parameters, multipart bodies and unsupported schema
 validation keywords fail the build. Declare session authentication using OpenAPI

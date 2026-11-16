@@ -18,6 +18,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'auth-evidence-missing': 'Call your session helper in the handler or list it in tool-resolutions.json conventions.authHelpers. For an OpenAPI export: declare the security scheme on the operation (FastAPI: a Security dependency such as APIKeyCookie or HTTPBearer).',
   'route-hidden': 'Nothing to do while the route must stay out of the chat. Otherwise remove include_in_schema=False, export the OpenAPI document again and run glirastes tools refresh.',
   'schema-reference-unresolved': 'Optional: replace the recursive or external $ref by an inline schema so the model sees the shape; the server keeps validating meanwhile.',
+  'schema-uncompilable': 'Fix the schema keyword the message names in the OpenAPI export (it must be valid JSON Schema), export the document again and run glirastes tools refresh; to keep the operation out of the chat instead, glirastes tools policy exclude "<METHOD> <path>".',
   'contract-stale': 'Update the descriptive contract for the changed interface, then run glirastes tools refresh.',
   'handler-unresolved': 'Export the handler as a function or as a wrapper call around an inline function.',
   'contract-derived': 'Optional: validate the input with an exported Zod schema to give the model typed parameters.',

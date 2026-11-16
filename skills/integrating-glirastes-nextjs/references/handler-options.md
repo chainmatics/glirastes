@@ -86,7 +86,8 @@ it. The type's JSDoc carries the full detail.
 | --- | --- |
 | `onError` | request failed |
 | `onToolError` | a tool threw |
-| `onFinish` | steps, finish reason, token usage, truncation and `StepLimitSource` |
+| `classifyToolFailure` | `ToolFailureClassifier`: gets `ToolFailureInfo` (`toolName`, HTTP `status`, full parsed `body`) of a failed backend call and returns a `ToolFailureClassification`, `'expected'` or `'error'`; expected failures skip `maxConsecutiveErrors` and metric errors, counted locally only; also on `createGlirastes`; not in the runtime container |
+| `onFinish` | steps, finish reason, token usage, truncation, `StepLimitSource` and the local `expectedToolFailureCount` |
 | `emitStepReports` | `data-step-report` stream parts (default on) |
 | `onStepReport` | one `PipelineStepReport` per step |
 | `onPipelineResult` | intent, module, model and tools chosen by `pipeline` |

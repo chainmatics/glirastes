@@ -99,6 +99,7 @@ import {
   type RuntimePriceTable,
   type TurnMetricsRecorder,
 } from '../../../runtime/index.js';
+import { toolResultFailure } from '../../../runtime/tool-failure.js';
 import {
   createHybridToolDiscovery,
   NON_DOMAIN_TOOL_NAMES,
@@ -315,26 +316,22 @@ function stepModelId(event: unknown): string | null {
 }
 
 /**
- * Names of the tool calls of a step that failed: thrown errors and the
- * `{ error }` results SDK tools return. Only names leave this function.
+ * Names of the tool calls of a step that failed (`'error'`: thrown errors
+ * and the `{ error }` results SDK tools return) or ended in a failure the
+ * app classified as expected (`'expected'`). Only names leave this function.
  */
-function failedToolNames(content: ReadonlyArray<unknown>): string[] {
+function failedToolNames(
+  content: ReadonlyArray<unknown>,
+  kind: 'error' | 'expected' = 'error',
+): string[] {
   const names: string[] = [];
   for (const part of content) {
     const record = part as { type?: unknown; toolName?: unknown; output?: unknown };
     if (typeof record?.toolName !== 'string') continue;
-    const output = record.output as { error?: unknown } | null | undefined;
-    if (
-      record.type === 'tool-error'
-      || (
-        record.type === 'tool-result'
-        && typeof output === 'object'
-        && output !== null
-        && typeof output.error === 'string'
-      )
-    ) {
-      names.push(record.toolName);
-    }
+    const outcome = record.type === 'tool-error'
+      ? 'error'
+      : record.type === 'tool-result' ? toolResultFailure(record.output) : undefined;
+    if (outcome === kind) names.push(record.toolName);
   }
   return names;
 }
@@ -815,6 +812,10 @@ async function defaultStreamHandler(
             wasTruncated,
             maxSteps: ctx.maxSteps,
             stepLimitSource: ctx.stepLimitSource,
+            expectedToolFailureCount: event.steps.reduce(
+              (count, step) => count + failedToolNames(step.content, 'expected').length,
+              0,
+            ),
           });
         },
       });
@@ -913,6 +914,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     wrapHandler,
     onError: onErrorConfig,
     onToolError,
+    classifyToolFailure,
     onPipelineResult,
     onStepReport,
     onFinish,
@@ -1459,6 +1461,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             ? { turnSnapshot: managedTurn.snapshot }
             : {}),
           ...contractRejectionReporter(turnMetrics),
+          ...(classifyToolFailure ? { classifyToolFailure } : {}),
         };
         const registry = staticTools ?? await loadTools!(endpointToolContext);
         const commandScope = await requestApprovalScope(req, managedTurn);
@@ -1513,6 +1516,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             ? { turnSnapshot: managedTurn.snapshot }
             : {}),
           ...contractRejectionReporter(turnMetrics),
+          ...(classifyToolFailure ? { classifyToolFailure } : {}),
         };
 
         // Get tools (static or dynamic)
@@ -1792,6 +1796,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ? { turnSnapshot: managedTurn.snapshot }
           : {}),
         ...contractRejectionReporter(turnMetrics),
+        ...(classifyToolFailure ? { classifyToolFailure } : {}),
       };
 
       // Load tools

@@ -1,6 +1,6 @@
 import type { DeclaredEffect } from '../../contracts/tool-policy.js';
 import type { EndpointMethod } from '../../types.js';
-import { compareCodeUnits, jsonSchemaDigest, OPAQUE_JSON_SCHEMA } from './canonical.js';
+import { compareCodeUnits, JsonSchemaCompileError, jsonSchemaDigest, OPAQUE_JSON_SCHEMA } from './canonical.js';
 import { toolFinding } from './findings.js';
 import type { SchemaUse } from './handler-analysis.js';
 import type { InputRole } from './input-roles.js';
@@ -49,7 +49,7 @@ export interface ResolveEndpointContractInput {
   resolution?: ResolutionEntry;
   previousContract?: ToolContract;
   /**
-   * An exported OpenAPI 3.1 operation (FastAPI): the dereferenced parameter
+   * An exported OpenAPI operation (3.1, or 3.0 normalized to 3.1): the dereferenced parameter
    * and body schemas the server validates. Read after native schemas and
    * before a sibling contract module.
    */
@@ -262,7 +262,15 @@ function composeInput(
     ...(required.size ? { required: [...required].sort(compareCodeUnits) } : {}),
     additionalProperties: false,
   };
-  return { source: jsonSource(json), json, digest: jsonSchemaDigest(json), findings: [] };
+  let digest: string;
+  try {
+    digest = jsonSchemaDigest(json);
+  } catch (error) {
+    // Parts that compile alone can fail merged; say which schemas were merged.
+    if (!(error instanceof JsonSchemaCompileError)) throw error;
+    throw new JsonSchemaCompileError(json, error.cause, parts.flatMap((part) => (part.json ? [part.json] : [])));
+  }
+  return { source: jsonSource(json), json, digest, findings: [] };
 }
 
 function paramsFrom(

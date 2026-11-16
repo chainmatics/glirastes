@@ -18,7 +18,7 @@ import type { Lancer } from '../../lancer/index.js';
 import type { ApprovalStore } from './approval-binding.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions } from './prepare-model-messages.js';
-import type { ClarificationConfig, InternalApiCaller, PlanningConfig } from '../../core/index.js';
+import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ToolFailureClassifier } from '../../core/index.js';
 import type {
   Principal,
   SecurityRevocation,
@@ -371,6 +371,25 @@ export interface AiChatHandlerConfig {
   onError?: (error: unknown, req: Request) => void;
   onToolError?: (toolId: string, error: unknown) => void;
   /**
+   * Classifies a failed backend call of an endpoint tool (non-2xx response)
+   * as `'error'` (the default) or `'expected'`, e.g. a 403 for a user
+   * without the role or an app error code in the body. Receives the
+   * endpoint tool's `toolName`, the HTTP status and the FULL parsed response
+   * body. Synchronous; a throw or any other return value counts as
+   * `'error'`. Not called for thrown errors (timeout, network, response
+   * size) or for calls the endpoint caller refused locally.
+   *
+   * An expected failure still counts as a tool call, but neither increments
+   * nor resets the `maxConsecutiveErrors` budget of `managedRuntime`, and is
+   * not a tool error in `metrics` (`toolErrorCount`, per-tool `errors`). It
+   * is counted locally only, in `onFinish`'s `expectedToolFailureCount`;
+   * nothing about it is sent to the Platform. A direct command is classified
+   * too but never calls `onFinish`, so its expected failure is not counted. Without `managedRuntime` there
+   * is no consecutive-error budget, so it only affects metrics. Without this
+   * option every failure counts as an error, as before.
+   */
+  classifyToolFailure?: ToolFailureClassifier;
+  /**
    * Called after pipeline classification and tool scoping, before streaming.
    * Use this to log which intent, module, model, and tools were selected.
    */
@@ -387,6 +406,11 @@ export interface AiChatHandlerConfig {
     wasTruncated: boolean;
     maxSteps: number;
     stepLimitSource: StepLimitSource;
+    /**
+     * Tool calls of the turn that ended in a failure `classifyToolFailure`
+     * classified as expected. Local only; never sent to the Platform.
+     */
+    expectedToolFailureCount: number;
   }) => void;
 
   /**

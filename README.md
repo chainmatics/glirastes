@@ -40,7 +40,7 @@ Choose the backend host and browser UI independently:
 | Your application | Recommended path |
 | --- | --- |
 | Existing suitable Node/Next.js server | Embed the SDK and its HTTP handler; use the Next.js quickstart below or `glirastes/server/http` |
-| Rust, PHP, Java or another HTTP backend without a suitable Node host | Deploy the official configured runtime container beside the app; supply OpenAPI 3.1 JSON, an authenticated identity endpoint and JSON configuration |
+| Rust, PHP, Java or another HTTP backend without a suitable Node host | Deploy the official configured runtime container beside the app; supply OpenAPI 3.0 or 3.1 JSON, an authenticated identity endpoint and JSON configuration |
 | React frontend | Use `VercelAiChat` and the React navigation/action hooks |
 | Angular, SvelteKit, Nuxt, Vue or plain JavaScript frontend | Mount `<glirastes-chat>` client-side and connect the app's router/actions through `glirastes/browser` |
 
@@ -147,6 +147,10 @@ export async function POST(request: Request) {
 ```
 
 Budgets default to safe values; pass `localLimits: { maxToolCalls: 4 }` to override single fields.
+A failed backend call reaches the model with its HTTP `status` and response
+`body`; pass `classifyToolFailure: ({ status, body }) => 'expected' | 'error'`
+to keep business outcomes such as a 403 out of the error budget and metrics
+(see [docs/managed-runtime-sync.md](docs/managed-runtime-sync.md#failed-tool-calls)).
 `toolDiscovery: true` turns on routing: each turn starts with the few tools the
 request needs plus `find_tools`, not the whole tool list (see [How it works](#how-it-works)).
 
