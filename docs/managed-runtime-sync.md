@@ -258,3 +258,30 @@ Platform: the metric event keeps its fields. Without `managedRuntime` there is
 no consecutive-error budget, so the classifier only affects the metrics there.
 The runtime container cannot take a function in its JSON configuration and
 keeps the default (every failure is an error).
+
+#### Denied tool calls
+
+The managed guard checks every tool call against the pinned snapshot and the
+freshly resolved principal before it executes, including a call to a
+registered tool that tool discovery does not advertise. When it denies the
+call because the tool is not available to this principal or agent revision,
+the model receives a failed tool call and the turn continues, so it can
+answer without the tool:
+
+| Reason | Result |
+| --- | --- |
+| `principal_role_denied`, `policy_tool_denied`, `agent_tool_denied`, `manifest_tool_unavailable` | tool error `Tool execution denied: <reason> (<tool>)` to the model; the turn continues |
+| `revoked`, `missing_principal`, `tenant_mismatch` | the turn ends with an error, as before |
+| `budget_exhausted` | the call fails and the turn stops at the runtime budget, as before |
+
+The tool error names only the reason code and the tool, never the policy, its
+roles or the principal. A denied call never executes and never asks for
+approval, whatever the tool's policy says about confirmation. It always counts
+as a tool call and toward `maxConsecutiveErrors`, so a model that keeps calling
+denied tools stops at that budget; `classifyToolFailure` never sees a denial
+and cannot mark it expected. In the metric event it counts as a tool call and
+a tool error; the reason is not sent. The guard throws a
+`ToolExecutionDeniedError` (`reason`, `toolName`, `recoverable`) from
+`glirastes/runtime`; a terminal denial reaches the handler's `onError` with it.
+Direct commands keep answering a denial with a `tool-output-error` whose
+`errorText` is the reason code.

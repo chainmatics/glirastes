@@ -12,6 +12,7 @@ import { modelFacingToolName } from '../../../runtime/local-tool-bindings.js';
 import type { ManagedTurnGuard } from '../../../runtime/managed-turn.js';
 import { UNKNOWN_TURN_COST } from '../../../runtime/metrics/cost.js';
 import type { TurnMetricsRecorder } from '../../../runtime/metrics/turn-recorder.js';
+import { ToolExecutionDeniedError } from '../../../runtime/tool-denial.js';
 import { toolResultFailure } from '../../../runtime/tool-failure.js';
 import type { PiiShield, ToolRegistry } from '../../../types.js';
 import { NON_DOMAIN_TOOL_NAMES } from './tool-discovery.js';
@@ -164,9 +165,8 @@ export function resolveCommandToolName(registry: ToolRegistry, tool: string): st
 
 /** Content-free reason for the client: a denial code from the guard, never a backend message. */
 function failureCode(error: unknown): string {
+  if (error instanceof ToolExecutionDeniedError) return error.reason;
   const message = error instanceof Error ? error.message : '';
-  const denied = /^Tool execution denied: ([a-z_]{1,80})\b/.exec(message);
-  if (denied) return denied[1]!;
   if (/ timed out after \d+ms$/.test(message)) return 'command_timeout';
   return 'command_failed';
 }

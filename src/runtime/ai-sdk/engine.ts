@@ -1,4 +1,5 @@
 import { jsonSchema, tool, zodSchema } from 'ai';
+import { isRecoverableToolDenial } from '../tool-denial.js';
 
 export interface AiSdkSourceTool {
   description: string;
@@ -141,6 +142,8 @@ export function createAiSdkTools(
   for (const [toolName, rawTool] of Object.entries(options.tools)) {
     const source = rawTool as AiSdkSourceTool;
     const gate = approvalGateOf(rawTool);
+    // Calls whose approval check was a recoverable denial, by tool call id.
+    const deniedCalls = new Map<string, Error>();
     const baseNeedsApproval = options.resolveApproval
       ? (input: unknown) => options.resolveApproval!({ toolName, input })
       : source.needsApproval;
@@ -153,7 +156,20 @@ export function createAiSdkTools(
           // The AI SDK validated the call just before; ask rather than guess.
           return true;
         }
-        return Boolean(await (baseNeedsApproval as (value: unknown, extra?: unknown) => unknown)(input, approvalOptions));
+        try {
+          return Boolean(await (baseNeedsApproval as (value: unknown, extra?: unknown) => unknown)(input, approvalOptions));
+        } catch (error) {
+          // A call this principal may not make never asks for approval: it
+          // goes on to `execute`, which refuses it, and the model receives
+          // the denial as the tool's error. Without a guard or a call id to
+          // hold the denial to, it stays terminal.
+          const toolCallId = (approvalOptions as { toolCallId?: unknown } | undefined)?.toolCallId;
+          if (options.beforeToolCall && typeof toolCallId === 'string' && isRecoverableToolDenial(error)) {
+            deniedCalls.set(toolCallId, error);
+            return false;
+          }
+          throw error;
+        }
       }
       : undefined;
     const needsApproval = gate
@@ -209,6 +225,16 @@ export function createAiSdkTools(
             toolCallId: (executionOptions as { toolCallId?: string } | undefined)?.toolCallId,
             input: rawInput,
           });
+        }
+        const callId = (executionOptions as { toolCallId?: unknown } | undefined)?.toolCallId;
+        const denied = typeof callId === 'string' ? deniedCalls.get(callId) : undefined;
+        if (denied) {
+          deniedCalls.delete(callId as string);
+          // The guard denies the call again and counts it; should it allow
+          // it now, the call still never runs: it skipped its approval check.
+          await options.beforeToolCall?.({ toolName, input: rawInput });
+          await options.onToolError?.({ toolName, input: rawInput, error: denied, durationMs: 0 });
+          throw denied;
         }
         await options.beforeToolCall?.({ toolName, input: rawInput });
         const startedAt = now();

@@ -9,6 +9,7 @@ import {
 } from './turn-snapshot.test.js';
 import { createTurnSnapshot } from '../turn-snapshot.js';
 import { createManagedTurnGuard } from '../managed-turn.js';
+import { ToolExecutionDeniedError } from '../tool-denial.js';
 
 function createSnapshot() {
   return createTurnSnapshot({
@@ -252,5 +253,54 @@ describe('createManagedTurnGuard: expected tool failures', () => {
     await turn.afterToolCall(call(expected));
     await turn.afterToolCall(call(expected));
     expect(turn.tracker.usage.maxFingerprintRepeats).toBe(2);
+  });
+});
+
+describe('createManagedTurnGuard: tool denials', () => {
+  const viewer = { ...principal, roles: ['viewer'] };
+
+  it('throws a typed, recoverable denial and counts it as a call and an error', async () => {
+    const guard = createManagedTurnGuard({ snapshot: createSnapshot(), resolvePrincipal: async () => viewer });
+
+    const denial = await guard.beforeToolCall({ toolName: 'list_tasks', input: {} }).catch((error: unknown) => error);
+    expect(denial).toBeInstanceOf(ToolExecutionDeniedError);
+    expect(denial).toMatchObject({
+      reason: 'principal_role_denied',
+      toolName: 'list_tasks',
+      recoverable: true,
+      message: 'Tool execution denied: principal_role_denied (list_tasks)',
+    });
+    expect(guard.tracker.usage).toMatchObject({ toolCalls: 1, consecutiveErrors: 1 });
+    await expect(guard.resolveApproval({ toolName: 'list_tasks', input: {} }))
+      .rejects.toMatchObject({ reason: 'principal_role_denied', recoverable: true });
+  });
+
+  it('reaches maxConsecutiveErrors through repeated denials', async () => {
+    const snapshot = createTurnSnapshot({
+      turnId: 'turn-denials', agentRevision, manifestRevision, policyRevision, principal,
+      localLimits: { ...localLimits, maxConsecutiveErrors: 2 },
+    });
+    const guard = createManagedTurnGuard({ snapshot, resolvePrincipal: async () => viewer });
+    await expect(guard.beforeToolCall({ toolName: 'list_tasks', input: {} })).rejects.toThrow(/principal_role_denied/);
+    await expect(guard.beforeToolCall({ toolName: 'list_tasks', input: {} })).rejects.toThrow(/principal_role_denied/);
+    expect(guard.tracker.evaluate()).toMatchObject({ state: 'hard-limit', reasons: ['maxConsecutiveErrors'] });
+    await expect(guard.beforeToolCall({ toolName: 'list_tasks', input: {} }))
+      .rejects.toMatchObject({ reason: 'budget_exhausted', recoverable: false });
+  });
+
+  it('marks an unknown tool as a recoverable manifest_tool_unavailable denial', async () => {
+    const guard = createManagedTurnGuard({ snapshot: createSnapshot(), resolvePrincipal: async () => principal });
+    await expect(guard.beforeToolCall({ toolName: 'unknown_tool', input: {} }))
+      .rejects.toMatchObject({ reason: 'manifest_tool_unavailable', recoverable: true });
+  });
+
+  it.each([
+    { reason: 'missing_principal', resolved: undefined },
+    { reason: 'tenant_mismatch', resolved: { ...principal, tenantId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3aff' } },
+  ])('keeps $reason terminal and uncounted', async ({ reason, resolved }) => {
+    const guard = createManagedTurnGuard({ snapshot: createSnapshot(), resolvePrincipal: async () => resolved });
+    await expect(guard.beforeToolCall({ toolName: 'list_tasks', input: {} }))
+      .rejects.toMatchObject({ reason, recoverable: false });
+    expect(guard.tracker.usage).toMatchObject({ toolCalls: 0, consecutiveErrors: 0 });
   });
 });

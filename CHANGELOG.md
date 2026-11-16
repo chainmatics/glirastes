@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The result of an endpoint tool whose backend call fails now carries the HTTP `status` and the response `body` (cut at 4000 characters, then with `bodyTruncated: true`) next to `success: false`, `error` and `retryable`, so the model can tell a 403 from a 500. The body goes through a configured PII shield like any tool result. Without `classifyToolFailure` errors count exactly as before.
 
+### Fixed
+
+- In a managed turn, a tool call the managed guard denies with `principal_role_denied`, `policy_tool_denied`, `agent_tool_denied` or `manifest_tool_unavailable` no longer ends the turn with a stream error. The model receives a tool error `Tool execution denied: <reason> (<tool>)` and the turn continues; the call never executes and never asks for approval. This also covers a registered tool that tool discovery does not advertise. Such a denial always counts as a tool call and toward `maxConsecutiveErrors`, is never classified by `classifyToolFailure`, and counts as a tool error in the turn metrics (the metric event is unchanged). `revoked`, `missing_principal`, `tenant_mismatch` and `budget_exhausted` behave as before. The guard throws a typed `ToolExecutionDeniedError` (`reason`, `toolName`, `recoverable`, exported from `glirastes/runtime`) with the same message as before.
+
 ## [0.14.0] - 2026-11-15
 
 ### Added

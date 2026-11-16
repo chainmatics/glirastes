@@ -18,6 +18,10 @@ export {
   type ToolAuthorizationResult,
 } from './authorization.js';
 export {
+  ToolExecutionDeniedError,
+  type ToolDenialReason,
+} from './tool-denial.js';
+export {
   ExecutionBudgetTracker,
   type BudgetEvaluation,
   type BudgetReason,

@@ -15,6 +15,7 @@ import {
   type ExecutionUsage,
 } from './budget.js';
 import { createExecutionFingerprint } from './fingerprint.js';
+import { isRecoverableToolDenial, ToolExecutionDeniedError } from './tool-denial.js';
 import { toolResultFailure } from './tool-failure.js';
 import {
   isToolRevoked,
@@ -63,7 +64,7 @@ export function createManagedTurnGuard(
       (candidate) => modelFacingToolName(candidate.name) === toolName,
     );
     if (!tool) {
-      throw new Error(`Tool execution denied: manifest_tool_unavailable (${toolName})`);
+      throw new ToolExecutionDeniedError('manifest_tool_unavailable', toolName);
     }
     return tool;
   };
@@ -79,12 +80,12 @@ export function createManagedTurnGuard(
       toolId: manifestTool.toolId,
     });
     if (!authorization.allowed) {
-      throw new Error(`Tool execution denied: ${authorization.reason} (${call.toolName})`);
+      throw new ToolExecutionDeniedError(authorization.reason, call.toolName);
     }
 
     const revocations = await options.loadRevocations?.(options.snapshot) ?? [];
     if (isToolRevoked(options.snapshot, manifestTool.toolId, revocations)) {
-      throw new Error(`Tool execution denied: revoked (${call.toolName})`);
+      throw new ToolExecutionDeniedError('revoked', call.toolName);
     }
 
     return { authorization, manifestTool };
@@ -109,12 +110,26 @@ export function createManagedTurnGuard(
     async beforeToolCall(call) {
       const currentBudget = await emitBudgetSignal();
       if (currentBudget.state === 'hard-limit') {
-        throw new Error(
-          `Tool execution denied: budget_exhausted (${currentBudget.reasons.join(',')})`,
+        throw new ToolExecutionDeniedError(
+          'budget_exhausted',
+          call.toolName,
+          currentBudget.reasons.join(','),
         );
       }
 
-      await authorize(call);
+      try {
+        await authorize(call);
+      } catch (error) {
+        if (isRecoverableToolDenial(error)) {
+          // The model called the tool and gets the denial as its result: a
+          // call and an error, like in the turn metrics, so repeated denied
+          // calls end at maxConsecutiveErrors (or maxToolCalls).
+          tracker.recordToolCall();
+          tracker.recordError();
+          await emitBudgetSignal();
+        }
+        throw error;
+      }
       tracker.recordToolCall();
       await emitBudgetSignal();
     },
