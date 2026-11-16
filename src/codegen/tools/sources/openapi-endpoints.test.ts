@@ -231,7 +231,7 @@ describe('OpenAPI endpoint source', () => {
 
   it.each([
     ['an OpenAPI 3.2 export', documentOf(TASK_PATHS).replace('"3.1.0"', '"3.2.0"'), 'is OpenAPI 3.2.0'],
-    ['a Swagger 2.0 export', JSON.stringify({ swagger: '2.0', paths: {} }), 'is not an OpenAPI document'],
+    ['a Swagger 2.0 export', JSON.stringify({ swagger: '2.0', paths: {} }), 'is Swagger 2.0; the generator reads OpenAPI 3.0 and 3.1 exports'],
     ['a file that is not JSON', '{ openapi: 3.1.0 }', 'is not valid JSON'],
   ])('stops with E-INVENTORY-011 for %s', async (_label, text, reason) => {
     const observed = await observe({ 'api/openapi.json': text });

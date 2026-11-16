@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The `openapi` tool source and the runtime container build read OpenAPI 3.0.x JSON exports (what `@nestjs/swagger` writes) in addition to 3.1.x. A 3.0 document is normalized to the 3.1 / JSON Schema shape on load: `nullable: true` becomes `type: [T, 'null']` (with `null` added to a closed `enum`) or, next to `$ref`/`allOf`/`oneOf`/`anyOf`/`not`, an `anyOf` with `{ type: 'null' }`; boolean `exclusiveMinimum`/`exclusiveMaximum` become numeric bounds. Payloads such as `example` and `default` are untouched, and 3.1 documents are read exactly as before. YAML, Swagger 2.0 and OpenAPI 3.2 are still rejected; multipart bodies stay excluded as `unsupported-body`; the container still rejects nullable parameters.
+- The `openapi` tool source and the runtime container build read OpenAPI 3.0.x JSON exports (what `@nestjs/swagger` writes) in addition to 3.1.x. A 3.0 document is normalized to the 3.1 / JSON Schema shape on load: `nullable: true` becomes `type: [T, 'null']` (with `null` added to a closed `enum`) or, next to `$ref`/`allOf`/`oneOf`/`anyOf`/`not`, an `anyOf` with `{ type: 'null' }`; boolean `exclusiveMinimum`/`exclusiveMaximum` become numeric bounds. Payloads such as `example` and `default` are untouched, and 3.1 documents are read exactly as before. YAML, Swagger 2.0 and OpenAPI 3.2 are still rejected (the message names a Swagger or unsupported OpenAPI version); multipart bodies stay excluded as `unsupported-body`; the container still rejects nullable parameters.
 
 ### Fixed
 
