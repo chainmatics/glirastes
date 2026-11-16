@@ -88,10 +88,13 @@ must use the same store. Initialization needs permission to create its tables.
 A failed backend call reaches the model with its HTTP `status` and capped
 `body`. The SDK's `classifyToolFailure` (expected business failures such as a
 403 outside the error budget) is a function and not configurable in this JSON
-yet: in the container every failed backend call counts as a tool error. A call the
-identity's roles or the policy do not allow never executes; the model gets
-`Tool execution denied: <reason> (<tool>)` as a tool error and the turn
-continues, counted toward `maxConsecutiveErrors`.
+yet: in the container every failed backend call counts as a tool error. A tool the
+identity's roles or the policy do not allow is not offered to the model. A call
+to it anyway never executes: the AI SDK answers it as an unavailable tool and
+the turn continues, bounded by `maxModelSteps`. A tool that becomes denied
+after the request started (a role lost) gets
+`Tool execution denied: <reason> (<tool>)` as a tool error instead, counted
+toward `maxConsecutiveErrors`.
 
 The identity endpoint validates the selected cookie/bearer credential and returns
 exactly `{"userId":"42","tenantId":"business-a","roles":["editor"]}`.
