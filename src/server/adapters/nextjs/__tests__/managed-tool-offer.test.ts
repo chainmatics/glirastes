@@ -249,13 +249,13 @@ describe.each([
   });
 
   describe('an approval answered in a later request', () => {
-    async function firstTurn(roles: () => string[]) {
+    async function firstTurn(roles: () => string[], selected = everyTool) {
       const { registry, archive } = tools();
       const model = scriptedModel([toolCall('tasks_archive', { id: 't1' })]);
       const shared = config({
         tools: registry, model,
         managedRuntime: runtime({ roles, revoked: () => (roles().includes('revoked') ? [ARCHIVE_TASK_ID] : []) }),
-      });
+      }, selected);
       const handler = createAiChatHandler(shared);
       const first = await streamChunks(await handler(post([user])));
       expect(first.find((chunk) => chunk.type === 'tool-approval-request')).toMatchObject({ toolCallId: 'call-1' });
@@ -292,6 +292,41 @@ describe.each([
       expect(second.some((chunk) => chunk.type === 'error')).toBe(false);
       // The tool only stays so the approved call gets its tool error; what it does is not described again.
       expect(JSON.stringify(model.doStreamCalls.at(-1)!.tools)).not.toContain('Archive a task.');
+    });
+
+    describe('when the routing of the answering request selects only another tool', () => {
+      /** Read by the router or pipeline on every request: all tools first, then only the list tool. */
+      const routedFirstToAll = () => [...everyTool];
+      const routeOnlyToList = (selected: string[]) => { selected.splice(0, selected.length, 'tasks_list'); };
+
+      it('runs the approved call of a tool the principal may still use exactly once', async () => {
+        const selected = routedFirstToAll();
+        const { handler, archive, model, answered } = await firstTurn(() => ['member'], selected);
+        routeOnlyToList(selected);
+        const second = await streamChunks(await handler(post([user, answered])));
+        expect(archive).toHaveBeenCalledTimes(1);
+        expect(archive).toHaveBeenCalledWith({ id: 't1' }, expect.anything());
+        expect(second).toContainEqual(expect.objectContaining({ type: 'tool-output-available', toolCallId: 'call-1' }));
+        expect(second.some((chunk) => chunk.type === 'tool-output-error' || chunk.type === 'error')).toBe(false);
+        expect(offered(model).at(-1)).toContain('tasks_list');
+      });
+
+      it('ends the approved call of a tool revoked since as a tool error, without a dangling call', async () => {
+        let roles = ['member'];
+        const selected = routedFirstToAll();
+        const { handler, archive, model, answered } = await firstTurn(() => roles, selected);
+        roles = ['member', 'revoked'];
+        routeOnlyToList(selected);
+        const response = await handler(post([user, answered]));
+        expect(response.status).toBe(200);
+        const second = await streamChunks(response);
+        expect(archive).not.toHaveBeenCalled();
+        expect(second).toContainEqual(expect.objectContaining({ type: 'tool-output-error', toolCallId: 'call-1' }));
+        expect(second.some((chunk) => chunk.type === 'error')).toBe(false);
+        // The model continues with the earlier call answered: its prompt carries a result for it.
+        expect(JSON.stringify(model.doStreamCalls.at(-1)!.prompt)).toContain('"type":"tool-result","toolCallId":"call-1"');
+        expect(JSON.stringify(model.doStreamCalls.at(-1)!.tools)).not.toContain('Archive a task.');
+      });
     });
 
     it('hands a custom stream handler the tool as it is while the principal may use it', async () => {

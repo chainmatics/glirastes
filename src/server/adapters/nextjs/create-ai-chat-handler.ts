@@ -1047,6 +1047,30 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     }
     return kept;
   };
+  /**
+   * Keeps the tools with an approval verified for this request next to a
+   * scoped selection. An approval verified (and consumed) for this request
+   * answers a call that an earlier request already routed. Routing for this
+   * request must not drop that tool: the AI SDK runs approved calls from
+   * `tools` (not `activeTools`) and drops an approved call whose tool is
+   * missing without a tool result, which leaves the earlier call unanswered.
+   * `source` is the unscoped set after `offeredTools`, so a tool the
+   * principal may no longer use comes back as its stub and the guard ends
+   * the call as a tool error. Only tools with a verified approval come back;
+   * a new call to one of them still needs its own approval.
+   */
+  const keepApproved = <T,>(
+    scoped: Record<string, T>,
+    source: Record<string, T>,
+    verified: ReadonlyArray<VerifiedApproval>,
+  ) => {
+    let kept = scoped;
+    for (const { toolName } of verified) {
+      const approvedTool = source[toolName];
+      if (approvedTool && !kept[toolName]) kept = { ...kept, [toolName]: approvedTool };
+    }
+    return kept;
+  };
 
   /**
    * The approval binder of a request, and the history with every approved
@@ -1610,18 +1634,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           // focused selection.
           aiTools = keepAlwaysOn(aiTools, unscopedAiTools);
         }
-        // An approval verified (and consumed) above answers a call that an
-        // earlier request already routed. Routing for this request must not
-        // turn that approved call into a tool error, so its tool stays in the
-        // set (the AI SDK runs approved calls from `tools`, not `activeTools`).
-        // Only tools with a verified approval come back; a new call to one of
-        // them still needs its own approval. A guardrail block keeps no tools,
-        // so the approved call then ends as a tool error and is not run.
+        // Routing for this request must not drop the tool of an approval
+        // verified above (see `keepApproved`). A guardrail block keeps no
+        // tools, so the approved call then ends as a tool error and is not run.
         if (!pipelineResult.blocked) {
-          for (const { toolName } of pipelineApprovals.verified) {
-            const approvedTool = unscopedAiTools[toolName];
-            if (approvedTool && !aiTools[toolName]) aiTools = { ...aiTools, [toolName]: approvedTool };
-          }
+          aiTools = keepApproved(aiTools, unscopedAiTools, pipelineApprovals.verified);
         }
 
         // Resolve model — config callback > pipeline instance > error
@@ -1842,7 +1859,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           if (aiTools[name]) scoped[name] = aiTools[name];
         }
         if (Object.keys(scoped).length > 0) {
-          aiTools = keepAlwaysOn(scoped, aiTools);
+          // The router is not asked about the tool of an approval verified
+          // above (it only gets the names this turn offers), and need not
+          // select it for this request: it stays (see `keepApproved`).
+          aiTools = keepApproved(keepAlwaysOn(scoped, aiTools), aiTools, legacyApprovals.verified);
         }
       }
 
