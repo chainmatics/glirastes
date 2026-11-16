@@ -1306,9 +1306,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
        * The AI SDK drops an approved call whose tool is missing without a
        * tool result, which leaves the earlier tool call unanswered. So a
        * tool with an approval verified for this request stays in the set
-       * even when the principal may no longer use it, without its
-       * description and input schema: the guard then ends the approved
-       * call as a tool error. Its name is in the history of this turn
+       * even when the principal may no longer use it, as a stub: the
+       * neutral description 'This tool is not available.' and an input
+       * schema that accepts any object replace its own, so neither reaches
+       * the model. The guard then ends the approved call as a tool error. Its name is in the history of this turn
        * already.
        */
       const offeredTools = async <T,>(

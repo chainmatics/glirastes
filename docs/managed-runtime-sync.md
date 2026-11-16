@@ -175,9 +175,11 @@ start-set routing works on the same set. Tool names an app writes into its
 own `pipeline` modules, router result or `systemPrompt` (which also gets the
 whole pinned manifest as `turnSnapshot`) are the app's own data and are not
 filtered. A tool with an approved call of an earlier
-request stays callable so that call gets its result, without description and
-input schema when the principal may no longer use it; the guard then ends
-the call as a tool error. `authorizedToolsOnly: false` on
+request stays in the tool set so that call gets its result. When the
+principal may no longer use it, the model sees it as a stub: its name, the
+neutral description "This tool is not available." and an input schema that
+accepts any object, instead of its own description and input schema; the
+guard then ends the call as a tool error. `authorizedToolsOnly: false` on
 `createAiChatHandler` hands every registry tool to the model as before; the
 guard still refuses the calls.
 
