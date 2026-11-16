@@ -221,12 +221,15 @@ tool result tells the model what happened:
 text), omitted when there was none; a text body is cut to at most 4000
 characters, a JSON body whose serialization is longer is replaced by that
 serialization cut to at most 4000 characters, and both set
-`bodyTruncated: true`. The cut moves back to the last whitespace or JSON
-delimiter (at most 256 characters; a body without one there is cut at exactly
-4000), so no half value trails. Like any tool result, the body goes through a
-configured PII shield before the model reads it. The shield reads the cut
-body, which is why the cut drops a partial token: a detector would not
-recognize an email or number split in the middle. A call the
+`bodyTruncated: true`. `error` is cut to at most 1000 characters. Both cuts
+move back to the last whitespace or JSON delimiter (at most 256 characters; a
+text without one there is cut at exactly the limit), so they end on a whole
+token. Like any tool result, the failure goes through a configured PII shield
+before the model reads it. The shield reads the cut text, which is why the cut
+drops a partial token: a detector would not recognize an email address split
+in the middle. This keeps single-token values whole. A value written with
+spaces (an IBAN in groups, a phone number) can still be cut, and a detector
+may then miss the part that remains. A call the
 endpoint caller refused locally (a path outside `allowedPathPrefixes`) carries
 its status but no body.
 
@@ -257,11 +260,16 @@ increments nor resets the consecutive-error count, and it is no tool error in
 the metric event. The result carries `expectedFailure: true`, so the model
 knows the failure is a known outcome rather than a fault to retry.
 
-Loop detection fingerprints a failure result without its `body` and
-`bodyTruncated`: tool, arguments, `success`, `status`, `error`, `retryable`
-and `expectedFailure` stay in. A backend that stamps every error body with a
+Loop detection fingerprints an endpoint failure (a failure result with a
+`status`) by its stable fields only: tool, arguments, `success`, `status`,
+`retryable` and `expectedFailure`. `error`, `body` and `bodyTruncated` are
+left out, because `error` is taken from the body (its text, or its `message`,
+`error` or `detail`). A backend that stamps every error answer with a
 timestamp or trace id therefore still trips the repeated-fingerprint limit
-when the model repeats the same failing call, also for expected failures.
+when the model repeats the same failing call, also for expected failures. Two
+failures of the same call with the same status count as a repetition even when
+their messages differ. A failure result without a `status` (a tool's own
+`success: false`) keeps its `error` in the fingerprint.
 Successful results are fingerprinted whole, as before.
 
 Expected failures are counted locally only, as `expectedToolFailureCount` in
