@@ -16,7 +16,7 @@ import {
 } from './budget.js';
 import { createExecutionFingerprint } from './fingerprint.js';
 import { isRecoverableToolDenial, ToolExecutionDeniedError } from './tool-denial.js';
-import { toolResultFailure } from './tool-failure.js';
+import { toolResultFailure, toolResultForFingerprint } from './tool-failure.js';
 import {
   isToolRevoked,
   type TurnSnapshot,
@@ -169,7 +169,7 @@ export function createManagedTurnGuard(
       tracker.recordFingerprint(createExecutionFingerprint({
         toolId: manifestTool.toolId,
         arguments: call.input,
-        result: call.result,
+        result: toolResultForFingerprint(call.result),
       }));
       const failure = toolResultFailure(call.result);
       if (failure === 'error') {

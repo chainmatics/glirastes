@@ -293,8 +293,9 @@ refuses the command's schema-valid call with 400 or 422 also records a
 `tool_contract_rejected` event, without content, exactly as for a model call.
 A failed backend call returns its status and body in the tool result, and a
 failure the handler's `classifyToolFailure` marks as expected is no tool error
-in that event, as on the model path (see
-[managed-runtime-sync.md](managed-runtime-sync.md#failed-tool-calls)).
+in that event. Unlike on the model path it is not counted anywhere: a direct
+command never calls `onFinish`, so `expectedToolFailureCount` does not include
+it (see [managed-runtime-sync.md](managed-runtime-sync.md#failed-tool-calls)).
 `directCommands: false` on `createAiChatHandler` turns this off; the message
 then goes to the model.
 

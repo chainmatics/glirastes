@@ -218,10 +218,15 @@ tool result tells the model what happened:
 ```
 
 `status` is the HTTP status. `body` is the response body (parsed JSON, or its
-text), omitted when there was none; a text body is cut at 4000 characters, a
-JSON body whose serialization is longer is replaced by that serialization cut
-at 4000 characters, and both set `bodyTruncated: true`. Like any tool result,
-it goes through a configured PII shield before the model reads it. A call the
+text), omitted when there was none; a text body is cut to at most 4000
+characters, a JSON body whose serialization is longer is replaced by that
+serialization cut to at most 4000 characters, and both set
+`bodyTruncated: true`. The cut moves back to the last whitespace or JSON
+delimiter (at most 256 characters; a body without one there is cut at exactly
+4000), so no half value trails. Like any tool result, the body goes through a
+configured PII shield before the model reads it. The shield reads the cut
+body, which is why the cut drops a partial token: a detector would not
+recognize an email or number split in the middle. A call the
 endpoint caller refused locally (a path outside `allowedPathPrefixes`) carries
 its status but no body.
 
@@ -252,9 +257,19 @@ increments nor resets the consecutive-error count, and it is no tool error in
 the metric event. The result carries `expectedFailure: true`, so the model
 knows the failure is a known outcome rather than a fault to retry.
 
+Loop detection fingerprints a failure result without its `body` and
+`bodyTruncated`: tool, arguments, `success`, `status`, `error`, `retryable`
+and `expectedFailure` stay in. A backend that stamps every error body with a
+timestamp or trace id therefore still trips the repeated-fingerprint limit
+when the model repeats the same failing call, also for expected failures.
+Successful results are fingerprinted whole, as before.
+
 Expected failures are counted locally only, as `expectedToolFailureCount` in
-the handler's `onFinish` event. This version sends nothing about them to the
-Platform: the metric event keeps its fields. Without `managedRuntime` there is
+the handler's `onFinish` event. A direct command (a `/command` that runs its
+tool without a model call) is classified the same way, so an expected failure
+is no tool error in its metric event, but it never calls `onFinish` and is
+therefore not part of that count. This version sends nothing about expected
+failures to the Platform: the metric event keeps its fields. Without `managedRuntime` there is
 no consecutive-error budget, so the classifier only affects the metrics there.
 The runtime container cannot take a function in its JSON configuration and
 keeps the default (every failure is an error).
