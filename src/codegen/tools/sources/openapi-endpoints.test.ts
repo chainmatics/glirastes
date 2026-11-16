@@ -1,12 +1,29 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToolPolicyFileSchema } from '../../../contracts/tool-policy.js';
 import { createAppFixture, removeAppFixtures } from '../__tests__/app-fixture.js';
+import { JsonSchemaCompileError } from '../canonical.js';
 import { loadToolsConfig } from '../config.js';
 import { EMPTY_CONVENTIONS } from '../resolutions.js';
 import { createSchemaProbe } from '../schema-probe.js';
 import type { ToolSourceContext } from '../types.js';
 import { createOpenapiEndpointSource, type OpenapiSourceOptions } from './openapi-endpoints.js';
 
+/** Set by a test to make contract resolution fail; reset after each test. */
+const resolveFailure = vi.hoisted(() => ({ error: undefined as unknown }));
+vi.mock('../contract-tiers.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../contract-tiers.js')>();
+  return {
+    ...actual,
+    resolveEndpointContract: (input: Parameters<typeof actual.resolveEndpointContract>[0]) => {
+      if (resolveFailure.error !== undefined) throw resolveFailure.error;
+      return actual.resolveEndpointContract(input);
+    },
+  };
+});
+
+afterEach(() => {
+  resolveFailure.error = undefined;
+});
 afterEach(removeAppFixtures);
 
 const SECURED = [{ APIKeyCookie: [] }];
@@ -255,6 +272,16 @@ describe('OpenAPI endpoint source', () => {
       'api/openapi.json GET /api/tasks has a schema the JSON Schema validator cannot compile: schema is invalid: data/properties/limit/exclusiveMinimum must be number',
     );
     expect(observed.observations.map((tool) => tool.execution.stableKey)).toEqual(['DELETE /api/tasks/:task_id', 'POST /api/tasks']);
+  });
+
+  it.each([
+    ['a programming error', new TypeError("Cannot read properties of undefined (reading 'parts')")],
+    // E.g. a tool-resolutions.json schema: uncompilable, but not written by the OpenAPI export.
+    ['a compile failure of a schema the document does not hold', new JsonSchemaCompileError({ type: 'nope' }, new Error('schema is invalid'))],
+  ])('does not blame the OpenAPI export for %s while resolving a contract', async (_label, error) => {
+    resolveFailure.error = error;
+
+    await expect(observe({ 'api/openapi.json': documentOf(TASK_PATHS) })).rejects.toBe(error);
   });
 
   it('keeps a nullable request body visible instead of reading it as an object', async () => {

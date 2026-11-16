@@ -41,5 +41,23 @@ export const OPAQUE_JSON_SCHEMA: LocalJsonSchema = Object.freeze({});
 
 /** Must equal what the runtime computes for `createJsonSchemaLike(schema)` at boot. */
 export function jsonSchemaDigest(schema: LocalJsonSchema): string {
-  return createLocalSchemaDigest(createJsonSchemaLike(schema));
+  let compiled: ReturnType<typeof createJsonSchemaLike>;
+  try {
+    compiled = createJsonSchemaLike(schema);
+  } catch (error) {
+    throw new JsonSchemaCompileError(schema, error);
+  }
+  return createLocalSchemaDigest(compiled);
+}
+
+/**
+ * The runtime JSON Schema validator (Ajv) could not compile `schema`. Carries
+ * the schema by identity so a caller can tell whose schema failed; the message
+ * is the validator's own (keywords and schema paths, never values).
+ */
+export class JsonSchemaCompileError extends Error {
+  constructor(readonly schema: LocalJsonSchema, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'JsonSchemaCompileError';
+  }
 }
