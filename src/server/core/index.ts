@@ -149,11 +149,14 @@ const MAX_TOOL_ERROR_BODY_CHARS = 4_000;
 
 /**
  * Marks a failure result `endpointToolToTool` built from a backend response.
- * Non-enumerable and module-private: a backend body (or a 2xx answer with
- * `success: false`) cannot set it, so only such a result keeps its status,
- * body and classification through `boundedToolFailure`.
+ * A non-enumerable symbol key: a backend body (or a 2xx answer with
+ * `success: false`) is JSON and cannot set it, so only such a result keeps
+ * its status, body and classification through `boundedToolFailure`. It is a
+ * registry symbol (`Symbol.for`) so the ESM and the CJS build of this module
+ * share it: a tool built by one copy and wrapped by the other keeps its
+ * fields instead of silently losing them.
  */
-const ENDPOINT_FAILURE = Symbol('glirastes.endpointFailure');
+const ENDPOINT_FAILURE = Symbol.for('glirastes.endpointFailure');
 
 function endpointFailureBody(data: unknown): { body?: unknown; bodyTruncated?: true } {
   if (data === undefined) return {};

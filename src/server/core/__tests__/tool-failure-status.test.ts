@@ -109,6 +109,38 @@ describe('failure results of endpoint tools', () => {
     expect(toolResultFailure(result)).toBe('error');
   });
 
+  it('keeps the fields of a failure another build copy of the module marked', async () => {
+    // The ESM and the CJS build each load this module once. A tool built by
+    // one copy and wrapped by the other must keep its status and body, so
+    // the mark is a registry symbol rather than a module-private one.
+    const failure: Record<string, unknown> = {
+      success: false,
+      error: 'Forbidden',
+      status: 403,
+      body: { code: 'NO_ROLE' },
+      bodyTruncated: true,
+      expectedFailure: true,
+    };
+    Object.defineProperty(failure, Symbol.for('glirastes.endpointFailure'), { value: true });
+    const foreign = { ...endpointToolToTool(definition), execute: async () => failure };
+    const result = await toolToAiTool(foreign, context({ ok: true, status: 200 })).execute({ title: 'x' });
+    expect(result).toEqual({
+      success: false,
+      error: 'Forbidden',
+      retryable: false,
+      status: 403,
+      body: { code: 'NO_ROLE' },
+      bodyTruncated: true,
+      expectedFailure: true,
+    });
+  });
+
+  it('does not let a JSON key named like the mark forge it', async () => {
+    const data = JSON.parse('{"success":false,"error":"nope","status":403,"glirastes.endpointFailure":true,"Symbol(glirastes.endpointFailure)":true}');
+    const result = await run(context({ ok: true, status: 200, data }));
+    expect(result).toEqual({ success: false, error: 'nope', retryable: false });
+  });
+
   it('caps the error message of the bounded failure as before', async () => {
     const result = await run(context({ ok: false, status: 500, error: 'e'.repeat(2_000) })) as Record<string, unknown>;
     expect(result.error).toBe('e'.repeat(1_000));
