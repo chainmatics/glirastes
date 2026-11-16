@@ -7,6 +7,7 @@ import {
   type ExecutionBudget,
   type ManifestRevision,
   type RuntimePolicyRevision,
+  type SecurityRevocation,
 } from '../../../../contracts/index.js';
 import { ToolExecutionDeniedError } from '../../../../runtime/tool-denial.js';
 import { createTurnSnapshot } from '../../../../runtime/turn-snapshot.js';
@@ -68,6 +69,8 @@ interface TurnRevisions {
   policy?: RuntimePolicyRevision;
   roles?: string[];
   limits?: ExecutionBudget;
+  /** What `loadRevocations` returns for every tool call of the turn. */
+  revocations?: SecurityRevocation[];
 }
 
 function withListPolicy(patch: Partial<RuntimePolicyRevision['toolPolicies'][number]>): RuntimePolicyRevision {
@@ -123,6 +126,7 @@ async function runTurn(
         principal: principal(revisions.roles),
         localLimits: revisions.limits ?? localLimits,
       }),
+      loadRevocations: async () => revisions.revocations ?? [],
     },
     ...config,
   });
@@ -275,5 +279,76 @@ describe('terminal tool denials', () => {
     expect(error).toBeInstanceOf(ToolExecutionDeniedError);
     expect(error).toMatchObject({ reason, recoverable: false });
     expect(String(error)).toMatch(new RegExp(`Tool execution denied: ${reason} \\(tasks_list\\)`));
+  });
+});
+
+describe('terminal conditions win over a recoverable tool denial', () => {
+  const roleDenied = policyRevision({ listRoles: ['admin'] });
+  /** `tasks_list` stays registered, but the signed manifest no longer carries it. */
+  const withoutList: TurnRevisions = {
+    agent: { ...agentRevision, toolAllowlist: [ARCHIVE_TASK_ID] },
+    manifest: { ...manifestRevision, tools: manifestRevision.tools.filter((tool) => tool.toolId !== LIST_TASKS_ID) },
+    policy: { ...policyRevision(), toolPolicies: policyRevision().toolPolicies.filter((entry) => entry.toolId !== LIST_TASKS_ID) },
+  };
+  const revocation = (patch: Partial<SecurityRevocation>): SecurityRevocation => ({
+    revocationId: '019fb710-0000-7000-8000-0000000000c1',
+    environmentId: manifestRevision.environmentId,
+    effectiveAt: new Date(0).toISOString(),
+    reasonCode: 'security-disable',
+    toolIds: [],
+    agentRevisionIds: [],
+    policyRevisionIds: [],
+    signature: agentRevision.signature,
+    ...patch,
+  });
+  const agentRevoked = revocation({ agentRevisionIds: [agentRevision.revisionId] });
+  const policyRevoked = revocation({ policyRevisionIds: [roleDenied.revisionId] });
+  const otherTenant = { ...principal(), tenantId: '019fb710-0000-7000-8000-0000000000ff' };
+
+  const cases: Array<{
+    label: string;
+    reason: string;
+    revisions: TurnRevisions;
+    /** The principal at the tool call; the request itself always starts with a valid one. */
+    atToolCall?: ReturnType<typeof principal> | undefined;
+    sessionEnds?: boolean;
+  }> = [
+    { label: 'expired session + tool not in the manifest', reason: 'missing_principal', revisions: withoutList, sessionEnds: true },
+    { label: 'expired session + role-denied tool', reason: 'missing_principal', revisions: { policy: roleDenied }, sessionEnds: true },
+    { label: 'tenant mismatch + role-denied tool', reason: 'tenant_mismatch', revisions: { policy: roleDenied }, atToolCall: otherTenant },
+    { label: 'tenant mismatch + tool not in the manifest', reason: 'tenant_mismatch', revisions: withoutList, atToolCall: otherTenant },
+    { label: 'revoked agent revision + role-denied tool', reason: 'revoked', revisions: { policy: roleDenied, revocations: [agentRevoked] } },
+    { label: 'revoked policy revision + role-denied tool', reason: 'revoked', revisions: { policy: roleDenied, revocations: [policyRevoked] } },
+    { label: 'revoked agent revision + tool not in the manifest', reason: 'revoked', revisions: { ...withoutList, revocations: [agentRevoked] } },
+  ];
+
+  it.each(cases)('$label ends the turn with $reason', async ({ reason, revisions, atToolCall, sessionEnds }) => {
+    let resolved = 0;
+    const turn = await runTurn(revisions, [listStep(), textStep], {}, async () => {
+      resolved += 1;
+      if (resolved === 1) return principal();
+      return sessionEnds ? undefined : atToolCall ?? principal();
+    });
+
+    expect(turn.list).not.toHaveBeenCalled();
+    // No tool error is handed to the model: it is never called again.
+    expect(turn.model.doStreamCalls).toHaveLength(1);
+    expect(turn.wire).not.toContain('"type":"tool-output-error"');
+    expect(turn.wire).toContain('"type":"error"');
+    expect(turn.wire).not.toContain('Final answer.');
+    const error = turn.onError.mock.calls[0]?.[0];
+    expect(error).toBeInstanceOf(ToolExecutionDeniedError);
+    expect(error).toMatchObject({ reason, recoverable: false });
+    expect(String(error)).toContain(`Tool execution denied: ${reason} (tasks_list)`);
+  });
+
+  it('still recovers from a tool that is not in the manifest when no terminal condition applies', async () => {
+    const turn = await runTurn(withoutList, [listStep(), textStep]);
+    expect(toolResultsSentToModel(turn.model)).toEqual([expect.objectContaining({
+      toolName: 'tasks_list',
+      output: { type: 'error-text', value: 'Tool execution denied: manifest_tool_unavailable (tasks_list)' },
+    })]);
+    expect(turn.wire).toContain('Final answer.');
+    expect(turn.onError).not.toHaveBeenCalled();
   });
 });

@@ -7,7 +7,7 @@ import type {
   AiSdkToolFailure,
   AiSdkToolSuccess,
 } from './ai-sdk/engine.js';
-import { authorizeToolCall } from './authorization.js';
+import { authorizeToolCall, principalDenialReason } from './authorization.js';
 import { modelFacingToolName } from './local-tool-bindings.js';
 import {
   ExecutionBudgetTracker,
@@ -58,20 +58,46 @@ export function createManagedTurnGuard(
 ): ManagedTurnGuard {
   const tracker = new ExecutionBudgetTracker(options.snapshot.budget);
 
-  const resolveManifestTool = (toolName: string) => {
-    // Calls arrive under the model-safe encoding of the signed manifest name.
-    const tool = options.snapshot.manifestRevision.tools.find(
-      (candidate) => modelFacingToolName(candidate.name) === toolName,
-    );
-    if (!tool) {
-      throw new ToolExecutionDeniedError('manifest_tool_unavailable', toolName);
+  // Calls arrive under the model-safe encoding of the signed manifest name.
+  const findManifestTool = (toolName: string) => options.snapshot.manifestRevision.tools.find(
+    (candidate) => modelFacingToolName(candidate.name) === toolName,
+  );
+
+  /**
+   * The conditions that end the turn. They are checked before any recoverable
+   * denial, and independently of the tool, so a tool that is unknown or not
+   * permitted never keeps a turn alive for a principal that no longer exists,
+   * belongs to another tenant, or runs on a revoked revision.
+   */
+  const assertTurnMayContinue = async (
+    principal: Principal | undefined,
+    toolId: string | undefined,
+    toolName: string,
+  ) => {
+    const principalDenial = principalDenialReason({
+      principal,
+      agentRevision: options.snapshot.agentRevision,
+      manifestRevision: options.snapshot.manifestRevision,
+      policyRevision: options.snapshot.policyRevision,
+    });
+    if (principalDenial) {
+      throw new ToolExecutionDeniedError(principalDenial, toolName);
     }
-    return tool;
+    const revocations = await options.loadRevocations?.(options.snapshot) ?? [];
+    if (isToolRevoked(options.snapshot, toolId, revocations)) {
+      throw new ToolExecutionDeniedError('revoked', toolName);
+    }
   };
 
   const authorize = async (call: AiSdkToolCall) => {
-    const manifestTool = resolveManifestTool(call.toolName);
     const principal = await options.resolvePrincipal();
+    const manifestTool = findManifestTool(call.toolName);
+    await assertTurnMayContinue(principal, manifestTool?.toolId, call.toolName);
+
+    // Only from here on may a denial be recoverable.
+    if (!manifestTool) {
+      throw new ToolExecutionDeniedError('manifest_tool_unavailable', call.toolName);
+    }
     const authorization = authorizeToolCall({
       principal,
       agentRevision: options.snapshot.agentRevision,
@@ -81,11 +107,6 @@ export function createManagedTurnGuard(
     });
     if (!authorization.allowed) {
       throw new ToolExecutionDeniedError(authorization.reason, call.toolName);
-    }
-
-    const revocations = await options.loadRevocations?.(options.snapshot) ?? [];
-    if (isToolRevoked(options.snapshot, manifestTool.toolId, revocations)) {
-      throw new ToolExecutionDeniedError('revoked', call.toolName);
     }
 
     return { authorization, manifestTool };

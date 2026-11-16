@@ -188,9 +188,14 @@ export function assertPromptPinForResume(
   }
 }
 
+/**
+ * Whether a current revocation covers the tool, or the pinned agent or policy
+ * revision as a whole. Without a `toolId` (a call to a tool the manifest does
+ * not carry) only the revision-level revocations can apply.
+ */
 export function isToolRevoked(
   snapshot: TurnSnapshot,
-  toolId: string,
+  toolId: string | undefined,
   revocations: ReadonlyArray<SecurityRevocation>,
   at = new Date(),
 ): boolean {
@@ -198,7 +203,7 @@ export function isToolRevoked(
   return revocations.some((revocation) => {
     if (revocation.environmentId !== snapshot.manifestRevision.environmentId) return false;
     if (Date.parse(revocation.effectiveAt) > timestamp) return false;
-    return revocation.toolIds.includes(toolId)
+    return (toolId !== undefined && revocation.toolIds.includes(toolId))
       || revocation.agentRevisionIds.includes(snapshot.agentRevision.revisionId)
       || revocation.policyRevisionIds.includes(snapshot.policyRevision.revisionId);
   });

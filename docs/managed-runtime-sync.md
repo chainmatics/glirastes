@@ -274,6 +274,12 @@ answer without the tool:
 | `revoked`, `missing_principal`, `tenant_mismatch` | the turn ends with an error, as before |
 | `budget_exhausted` | the call fails and the turn stops at the runtime budget, as before |
 
+The terminal conditions are checked first and independently of the tool: a
+missing principal, then a tenant mismatch, then a current revocation of the
+pinned agent or policy revision or of the tool. In any of these states the
+turn ends with that reason, even when the call is to a tool that is not in the
+manifest or would otherwise get a recoverable denial.
+
 The tool error names only the reason code and the tool, never the policy, its
 roles or the principal. A denied call never executes and never asks for
 approval, whatever the tool's policy says about confirmation. It always counts

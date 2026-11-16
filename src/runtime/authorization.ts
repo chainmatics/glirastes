@@ -24,6 +24,29 @@ export type ToolAuthorizationResult =
         | 'principal_role_denied';
     };
 
+/**
+ * The tool-independent part of `authorizeToolCall`: a principal must exist and
+ * belong to the tenant of all three revisions. Returns the denial reason, or
+ * `undefined` when the principal may use these revisions at all.
+ */
+export function principalDenialReason(options: {
+  principal: Principal | undefined;
+  agentRevision: AgentRevision;
+  manifestRevision: ManifestRevision;
+  policyRevision: RuntimePolicyRevision;
+}): 'missing_principal' | 'tenant_mismatch' | undefined {
+  const { principal, agentRevision, manifestRevision, policyRevision } = options;
+  if (!principal) return 'missing_principal';
+  if (
+    principal.tenantId !== agentRevision.tenantId
+    || principal.tenantId !== manifestRevision.tenantId
+    || principal.tenantId !== policyRevision.tenantId
+  ) {
+    return 'tenant_mismatch';
+  }
+  return undefined;
+}
+
 export function authorizeToolCall(options: {
   principal: Principal | undefined;
   agentRevision: AgentRevision;
@@ -39,13 +62,9 @@ export function authorizeToolCall(options: {
     toolId,
   } = options;
 
-  if (!principal) return { allowed: false, reason: 'missing_principal' };
-  if (
-    principal.tenantId !== agentRevision.tenantId
-    || principal.tenantId !== manifestRevision.tenantId
-    || principal.tenantId !== policyRevision.tenantId
-  ) {
-    return { allowed: false, reason: 'tenant_mismatch' };
+  const principalDenial = principalDenialReason(options);
+  if (principalDenial || !principal) {
+    return { allowed: false, reason: principalDenial ?? 'missing_principal' };
   }
   if (!agentRevision.toolAllowlist.includes(toolId)) {
     return { allowed: false, reason: 'agent_tool_denied' };

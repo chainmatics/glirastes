@@ -7,7 +7,7 @@ import {
   policyRevision,
   principal,
 } from './turn-snapshot.test.js';
-import { createTurnSnapshot } from '../turn-snapshot.js';
+import { createTurnSnapshot, type TurnSnapshot } from '../turn-snapshot.js';
 import { createManagedTurnGuard } from '../managed-turn.js';
 import { ToolExecutionDeniedError } from '../tool-denial.js';
 
@@ -302,5 +302,124 @@ describe('createManagedTurnGuard: tool denials', () => {
     await expect(guard.beforeToolCall({ toolName: 'list_tasks', input: {} }))
       .rejects.toMatchObject({ reason, recoverable: false });
     expect(guard.tracker.usage).toMatchObject({ toolCalls: 0, consecutiveErrors: 0 });
+  });
+
+  describe('terminal conditions win over a recoverable denial', () => {
+    const otherTenant = { ...principal, tenantId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3aff' };
+    const revocation = (patch: Partial<SecurityRevocation>): SecurityRevocation => ({
+      revocationId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3a09',
+      environmentId: manifestRevision.environmentId,
+      effectiveAt: new Date(0).toISOString(),
+      reasonCode: 'security-disable',
+      toolIds: [],
+      agentRevisionIds: [],
+      policyRevisionIds: [],
+      signature: agentRevision.signature,
+      ...patch,
+    });
+    const agentRevoked = revocation({ agentRevisionIds: [agentRevision.revisionId] });
+    const policyRevoked = revocation({ policyRevisionIds: [policyRevision.revisionId] });
+    const toolRevoked = revocation({ toolIds: [agentRevision.toolAllowlist[0]!] });
+    /** Pinned revisions under which `list_tasks` is denied with each recoverable reason. */
+    type DeniedReason = 'agent_tool_denied' | 'manifest_tool_unavailable' | 'policy_tool_denied' | 'principal_role_denied';
+    const denied: Record<DeniedReason, Partial<TurnSnapshot>> = {
+      agent_tool_denied: { agentRevision: { ...agentRevision, toolAllowlist: [] } },
+      manifest_tool_unavailable: {
+        manifestRevision: { ...manifestRevision, tools: manifestRevision.tools.map((tool) => ({ ...tool, enabled: false })) },
+      },
+      policy_tool_denied: {
+        policyRevision: {
+          ...policyRevision,
+          toolPolicies: policyRevision.toolPolicies.map((policy) => ({ ...policy, enabled: false })),
+        },
+      },
+      principal_role_denied: {},
+    };
+    const snapshotFor = (reason: DeniedReason): TurnSnapshot => ({ ...createSnapshot(), ...denied[reason] });
+    const principalFor = (reason: DeniedReason) => (reason === 'principal_role_denied' ? viewer : principal);
+
+    const cases: Array<{
+      label: string;
+      expected: string;
+      toolName: string;
+      resolved: Principal | undefined;
+      revocations?: SecurityRevocation[];
+      snapshot?: TurnSnapshot;
+    }> = [
+      { label: 'expired session + tool not in the manifest', expected: 'missing_principal', toolName: 'unknown_tool', resolved: undefined },
+      { label: 'tenant mismatch + tool not in the manifest', expected: 'tenant_mismatch', toolName: 'unknown_tool', resolved: otherTenant },
+      {
+        label: 'tenant mismatch + role-denied tool', expected: 'tenant_mismatch', toolName: 'list_tasks',
+        resolved: { ...otherTenant, roles: ['viewer'] },
+      },
+      { label: 'revoked agent revision + role-denied tool', expected: 'revoked', toolName: 'list_tasks', resolved: viewer, revocations: [agentRevoked] },
+      { label: 'revoked policy revision + role-denied tool', expected: 'revoked', toolName: 'list_tasks', resolved: viewer, revocations: [policyRevoked] },
+      { label: 'revoked tool + role-denied tool', expected: 'revoked', toolName: 'list_tasks', resolved: viewer, revocations: [toolRevoked] },
+      { label: 'revoked agent revision + tool not in the manifest', expected: 'revoked', toolName: 'unknown_tool', resolved: principal, revocations: [agentRevoked] },
+      { label: 'revoked policy revision + tool not in the manifest', expected: 'revoked', toolName: 'unknown_tool', resolved: principal, revocations: [policyRevoked] },
+      ...(['agent_tool_denied', 'manifest_tool_unavailable', 'policy_tool_denied'] as const).flatMap((reason) => [
+        { label: `expired session + ${reason}`, expected: 'missing_principal', toolName: 'list_tasks', resolved: undefined, snapshot: snapshotFor(reason) },
+        {
+          label: `revoked agent revision + ${reason}`, expected: 'revoked', toolName: 'list_tasks', resolved: principal,
+          revocations: [agentRevoked], snapshot: snapshotFor(reason),
+        },
+        {
+          label: `revoked tool + ${reason}`, expected: 'revoked', toolName: 'list_tasks', resolved: principal,
+          revocations: [toolRevoked], snapshot: snapshotFor(reason),
+        },
+      ]),
+      // A missing principal outranks a revocation, as before.
+      { label: 'expired session + revoked agent revision', expected: 'missing_principal', toolName: 'list_tasks', resolved: undefined, revocations: [agentRevoked] },
+    ];
+
+    it.each(cases)('$label ends the turn with $expected, uncounted', async ({ expected, toolName, resolved, revocations, snapshot }) => {
+      const guard = createManagedTurnGuard({
+        snapshot: snapshot ?? createSnapshot(),
+        resolvePrincipal: async () => resolved,
+        loadRevocations: async () => revocations ?? [],
+      });
+      const call = { toolName, input: {} };
+
+      const denial = await guard.beforeToolCall(call).catch((error: unknown) => error);
+      expect(denial).toBeInstanceOf(ToolExecutionDeniedError);
+      expect(denial).toMatchObject({ reason: expected, toolName, recoverable: false });
+      expect(guard.tracker.usage).toMatchObject({ toolCalls: 0, consecutiveErrors: 0 });
+      await expect(guard.resolveApproval(call)).rejects.toMatchObject({ reason: expected, recoverable: false });
+      await expect(guard.afterToolCall({ ...call, result: {}, durationMs: 1 }))
+        .rejects.toMatchObject({ reason: expected, recoverable: false });
+    });
+
+    it.each(Object.keys(denied) as DeniedReason[])(
+      'still recovers from %s when no terminal condition applies',
+      async (reason) => {
+        const future = revocation({
+          agentRevisionIds: [agentRevision.revisionId],
+          effectiveAt: new Date(Date.now() + 3_600_000).toISOString(),
+        });
+        const otherEnvironment = revocation({
+          agentRevisionIds: [agentRevision.revisionId],
+          environmentId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3afe',
+        });
+        const guard = createManagedTurnGuard({
+          snapshot: snapshotFor(reason),
+          resolvePrincipal: async () => principalFor(reason),
+          loadRevocations: async () => [future, otherEnvironment],
+        });
+        await expect(guard.beforeToolCall({ toolName: 'list_tasks', input: {} }))
+          .rejects.toMatchObject({ reason, recoverable: true });
+        expect(guard.tracker.usage).toMatchObject({ toolCalls: 1, consecutiveErrors: 1 });
+      },
+    );
+
+    it('still recovers from a tool that is not in the manifest when no terminal condition applies', async () => {
+      const guard = createManagedTurnGuard({
+        snapshot: createSnapshot(),
+        resolvePrincipal: async () => principal,
+        loadRevocations: async () => [toolRevoked],
+      });
+      await expect(guard.beforeToolCall({ toolName: 'unknown_tool', input: {} }))
+        .rejects.toMatchObject({ reason: 'manifest_tool_unavailable', recoverable: true });
+      expect(guard.tracker.usage).toMatchObject({ toolCalls: 1, consecutiveErrors: 1 });
+    });
   });
 });
