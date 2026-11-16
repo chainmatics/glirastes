@@ -12,6 +12,7 @@ import { modelFacingToolName } from '../../../runtime/local-tool-bindings.js';
 import type { ManagedTurnGuard } from '../../../runtime/managed-turn.js';
 import { UNKNOWN_TURN_COST } from '../../../runtime/metrics/cost.js';
 import type { TurnMetricsRecorder } from '../../../runtime/metrics/turn-recorder.js';
+import { toolResultFailure } from '../../../runtime/tool-failure.js';
 import type { PiiShield, ToolRegistry } from '../../../types.js';
 import { NON_DOMAIN_TOOL_NAMES } from './tool-discovery.js';
 import type { ApprovalBinder, ApprovalStore } from './approval-binding.js';
@@ -168,10 +169,6 @@ function failureCode(error: unknown): string {
   if (denied) return denied[1]!;
   if (/ timed out after \d+ms$/.test(message)) return 'command_timeout';
   return 'command_failed';
-}
-
-function failedResult(result: unknown): boolean {
-  return isRecord(result) && (typeof result.error === 'string' || result.success === false);
 }
 
 /**
@@ -350,7 +347,7 @@ export async function runDirectCommand(options: RunDirectCommandOptions): Promis
           return;
         }
         writer.write({ type: 'tool-output-available', toolCallId, output });
-        end(1, failedResult(output) ? 1 : 0);
+        end(1, toolResultFailure(output) === 'error' ? 1 : 0);
       } catch (error) {
         turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
         options.onError?.(error);

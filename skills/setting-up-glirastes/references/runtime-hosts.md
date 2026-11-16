@@ -85,6 +85,11 @@ connection through mounted files, not source code. PostgreSQL persists approval
 consumption and the one-active-runtime lock; all processes for the same scope
 must use the same store. Initialization needs permission to create its tables.
 
+A failed backend call reaches the model with its HTTP `status` and capped
+`body`. The SDK's `classifyToolFailure` (expected business failures such as a
+403 outside the error budget) is a function and not configurable in this JSON
+yet: in the container every failed backend call counts as a tool error.
+
 The identity endpoint validates the selected cookie/bearer credential and returns
 exactly `{"userId":"42","tenantId":"business-a","roles":["editor"]}`.
 The tenant here is the business tenant, not the platform tenant. Tool requests

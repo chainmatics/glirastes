@@ -212,3 +212,128 @@ describe('createManagedTurnGuard', () => {
     })).resolves.toBe(true);
   });
 });
+
+describe('createManagedTurnGuard: expected tool failures', () => {
+  const call = (result: unknown, input: Record<string, unknown> = {}) => ({
+    toolName: 'list_tasks',
+    input,
+    result,
+    durationMs: 1,
+  });
+  const error = { success: false, error: 'Forbidden', retryable: false, status: 403 };
+  const expected = { ...error, expectedFailure: true };
+  const guard = () => createManagedTurnGuard({
+    snapshot: createSnapshot(),
+    resolvePrincipal: async () => principal,
+  });
+
+  it('counts a failure result as a consecutive error by default', async () => {
+    const turn = guard();
+    await turn.afterToolCall(call(error, { n: 1 }));
+    await turn.afterToolCall(call({ error: 'x' }, { n: 2 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(2);
+    await turn.afterToolCall(call({ tasks: [] }, { n: 3 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(0);
+  });
+
+  it('neither increments nor resets the consecutive errors for an expected failure', async () => {
+    const turn = guard();
+    await turn.afterToolCall(call(expected, { n: 1 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(0);
+    await turn.afterToolCall(call(error, { n: 2 }));
+    await turn.afterToolCall(call(expected, { n: 3 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(1);
+    await turn.afterToolCall(call(error, { n: 4 }));
+    expect(turn.tracker.usage.consecutiveErrors).toBe(2);
+  });
+
+  it('still records the fingerprint of an expected failure', async () => {
+    const turn = guard();
+    await turn.afterToolCall(call(expected));
+    await turn.afterToolCall(call(expected));
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(2);
+  });
+
+  it('trips the repeated-fingerprint limit when failure bodies differ only by a timestamp', async () => {
+    const turn = guard();
+    const limit = turn.snapshot.budget.maxRepeatedFingerprint;
+    for (let index = 0; index <= limit; index += 1) {
+      await turn.afterToolCall(call({
+        ...expected,
+        body: { code: 'NO_ROLE', timestamp: `2026-11-16T10:00:0${index % 10}.000Z`, traceId: `trace-${index}` },
+        ...(index % 2 === 0 ? { bodyTruncated: true } : {}),
+      }));
+    }
+    expect(turn.tracker.usage.consecutiveErrors).toBe(0);
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(limit + 1);
+    const evaluation = turn.tracker.evaluate();
+    expect(evaluation.state).toBe('hard-limit');
+    expect(evaluation.reasons).toContain('maxRepeatedFingerprint');
+  });
+
+  it('trips the repeated-fingerprint limit when a text body repeats in error and body', async () => {
+    // A plain-text 500: `error` is the body text, so both differ per call.
+    const turn = guard();
+    const limit = turn.snapshot.budget.maxRepeatedFingerprint;
+    for (let index = 0; index <= limit; index += 1) {
+      const text = `500 Internal Server Error, request ${index} at 10:00:0${index}`;
+      await turn.afterToolCall(call({
+        success: false, error: text, retryable: false, status: 500, body: text, expectedFailure: true,
+      }));
+    }
+    expect(turn.tracker.usage.consecutiveErrors).toBe(0);
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(limit + 1);
+    const evaluation = turn.tracker.evaluate();
+    expect(evaluation.state).toBe('hard-limit');
+    expect(evaluation.reasons).toContain('maxRepeatedFingerprint');
+  });
+
+  it('trips the repeated-fingerprint limit when a JSON message carries a trace id', async () => {
+    const turn = guard();
+    const limit = turn.snapshot.budget.maxRepeatedFingerprint;
+    for (let index = 0; index <= limit; index += 1) {
+      const message = `Access denied, traceId=abc${index}`;
+      await turn.afterToolCall(call({ ...expected, error: message, body: { message } }));
+    }
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(limit + 1);
+    const evaluation = turn.tracker.evaluate();
+    expect(evaluation.state).toBe('hard-limit');
+    expect(evaluation.reasons).toContain('maxRepeatedFingerprint');
+  });
+
+  it('fingerprints an endpoint failure by its stable fields only, whatever else the result carries', async () => {
+    const turn = guard();
+    const limit = turn.snapshot.budget.maxRepeatedFingerprint;
+    for (let index = 0; index <= limit; index += 1) {
+      await turn.afterToolCall(call({ ...expected, requestId: `req-${index}`, details: { attempt: index } }));
+    }
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(limit + 1);
+    expect(turn.tracker.evaluate().reasons).toContain('maxRepeatedFingerprint');
+  });
+
+  it('keeps status, retryable and classification in the fingerprint of an endpoint failure', async () => {
+    const turn = guard();
+    await turn.afterToolCall(call({ ...error, body: 'a' }));
+    await turn.afterToolCall(call({ ...error, status: 500, body: 'a' }));
+    await turn.afterToolCall(call({ ...error, retryable: true, body: 'a' }));
+    await turn.afterToolCall(call({ ...expected, body: 'a' }));
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(1);
+  });
+
+  it('keeps the error text in the fingerprint of a failure without a status', async () => {
+    // A tool's own failure: its text is not backend noise.
+    const turn = guard();
+    await turn.afterToolCall(call({ success: false, error: 'Missing title', retryable: false }));
+    await turn.afterToolCall(call({ success: false, error: 'Missing assignee', retryable: false }));
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(1);
+    await turn.afterToolCall(call({ success: false, error: 'Missing title', retryable: false }));
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(2);
+  });
+
+  it('keeps the whole result in the fingerprint of a success', async () => {
+    const turn = guard();
+    await turn.afterToolCall(call({ body: 'a', tasks: [] }));
+    await turn.afterToolCall(call({ body: 'b', tasks: [] }));
+    expect(turn.tracker.usage.maxFingerprintRepeats).toBe(1);
+  });
+});

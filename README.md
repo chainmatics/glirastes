@@ -147,6 +147,10 @@ export async function POST(request: Request) {
 ```
 
 Budgets default to safe values; pass `localLimits: { maxToolCalls: 4 }` to override single fields.
+A failed backend call reaches the model with its HTTP `status` and response
+`body`; pass `classifyToolFailure: ({ status, body }) => 'expected' | 'error'`
+to keep business outcomes such as a 403 out of the error budget and metrics
+(see [docs/managed-runtime-sync.md](docs/managed-runtime-sync.md#failed-tool-calls)).
 `toolDiscovery: true` turns on routing: each turn starts with the few tools the
 request needs plus `find_tools`, not the whole tool list (see [How it works](#how-it-works)).
 
