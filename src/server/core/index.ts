@@ -1108,11 +1108,13 @@ export function toolToAiTool(
           }
         }
         const fromStore = store?.isIssued(result) === true;
-        const payloadRecord = isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success !== false;
-        // The default view applies when it leaves something out, also below the limit.
-        if (defaultTree && successful && payloadRecord && !fromStore && !bound) {
+        // The default view needs the record form: a list or scalar result travels
+        // under `data`, as it does under a bound (which has normalized it already).
+        if (defaultTree && successful && !fromStore && !bound
+          && !(isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success === false)) {
           cleanResult = toJsonRecord(cleanResult) ?? cleanResult;
         }
+        const payloadRecord = isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success !== false;
         const viewed = defaultTree !== undefined && successful && payloadRecord && !fromStore
           && leftOutFields(cleanResult as Record<string, unknown>, defaultTree).length > 0;
 

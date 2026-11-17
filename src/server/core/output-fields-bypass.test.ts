@@ -323,3 +323,16 @@ describe('review round 2: a withheld result keeps no denied value in its uiActio
     expect(JSON.stringify(answer)).not.toContain('SECRETSIG');
   });
 });
+
+describe('review round 3: the default view also applies to a list result', () => {
+  it('shows only the default fields of a directly returned array, without a bound', async () => {
+    const tool = defineTool({
+      id: 'custom.list', description: 'List.', inputSchema: z.object({}).strict(),
+      outputDefaultFields: ['data[].id'],
+      execute: async () => [{ id: 1, description: 'Details' }, { id: 2, description: 'More' }],
+    } as never);
+    const answer = await toolToAiTool(tool, ctx({ ok: true, status: 200, data: {} } as never), 'custom_list').execute({}) as Record<string, unknown>;
+    expect(answer.data).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(JSON.stringify(answer)).not.toContain('Details');
+  });
+});
