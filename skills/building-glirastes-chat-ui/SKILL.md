@@ -328,7 +328,7 @@ denial, expiry, replay, cross-app and cross-tenant cases.
 
 `ApprovalCard` handles one request; `BulkApprovalCard` groups same-tool requests
 but keeps each approval independent (no bulk authorization). A failed approval
-is retryable without losing the request.
+is retryable without losing the request. Both name the call's ids and warn about unknown ones ([hooks and building blocks](references/hooks-and-building-blocks.md)).
 
 ## Speech-to-text gate
 

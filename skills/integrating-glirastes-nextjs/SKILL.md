@@ -105,7 +105,9 @@ second, hand-maintained catalogue.
    context and must apply it itself: append `HIDE_IDS_PROMPT`, fill an
    `IdLabels` map with `collectIdLabels(messages, labels)` and pass
    `createHideIdsTransform(labels)` to `streamText` as
-   `experimental_transform` (all from `glirastes/server/nextjs`). A turn
+   `experimental_transform` (all from `glirastes/server/nextjs`). `hideIds`
+   only rewrites answer text; the approval card names the ids of a call on
+   its own, in the browser (`building-glirastes-chat-ui`, Approvals). A turn
    without visible output shows a short fallback text and is reported as
    `model_error`. A tool result over `maxResultChars` reaches the model (and
    the browser) as an overview with a `_result` handle; the built-in

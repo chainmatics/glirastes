@@ -79,6 +79,7 @@ export type {
   // Hook returns
   UseAiChatReturn,
   PendingApproval,
+  ApprovalSubject,
   UseApprovalsReturn,
   UseMentionsReturn,
   UseSuggestionsReturn,

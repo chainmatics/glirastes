@@ -309,7 +309,6 @@
   "PairingTokenResult": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "PairingTokenResultSchema": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "PayloadContract": "Type or helper of the glirastes/browser UI bridge; the skill teaches the function it belongs to.",
-  "PendingApproval": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "PendingChatCommand": "Chat interactions wire type or parser; createChatInteractionsHandler, defineChatEntity and defineChatCommand cover it.",
   "PiiAuditEntry": "Pre-Foundation root-barrel API (hand-written tool definitions, pipeline, PII); Foundation apps derive tools with glirastes tools refresh.",
   "PiiCategory": "Pre-Foundation root-barrel API (hand-written tool definitions, pipeline, PII); Foundation apps derive tools with glirastes tools refresh.",
