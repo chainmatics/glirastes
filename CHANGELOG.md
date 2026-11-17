@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - Unreleased candidate
+
 ### Privacy integration
 
 - Protected turns withhold tool results exceeding `maxResultChars` with a visible
@@ -836,3 +838,5 @@ No code changes — patch-level docs release.
 [0.14.0]: https://github.com/chainmatics/glirastes/compare/v0.13.1...v0.14.0
 [0.15.0]: https://github.com/chainmatics/glirastes/compare/v0.14.0...v0.15.0
 [0.16.0]: https://github.com/chainmatics/glirastes/compare/v0.15.0...v0.16.0
+
+[0.17.0]: https://github.com/chainmatics/glirastes/compare/v0.16.0...Piwo96/pii-stage1
