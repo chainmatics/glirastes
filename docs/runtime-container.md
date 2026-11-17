@@ -167,6 +167,16 @@ A result over the bound keeps a turn-scoped handle that the model reads with
 the built-in `read_result` (see `docs/concepts.md`); `application.resultHandles:
 false` turns that off, so large results are only cut.
 
+An operation's `x-glirastes-output-allowed-fields`, `x-glirastes-output-denied-fields`
+(also `**.<key>` at any depth, e.g. `**.fileUrl` for signed URLs) and
+`x-glirastes-output-default-fields` travel the same way, as `outputAllowedFields`,
+`outputDeniedFields` and `outputDefaultFields` in the artifact's local tool
+contracts (absent when not declared; never sent to the Platform). The container
+applies them like the SDK: fields outside the upper bound are removed before the
+result is stored, shown or cut, and the first answer shows the default view. An
+invalid allow- or deny-list disables the tool at build time; an artifact whose
+lists are not valid field paths is refused when it is loaded.
+
 ## State, cancellation and lifecycle
 
 PostgreSQL stores only hashed consumed approval IDs, scope and expiration. The

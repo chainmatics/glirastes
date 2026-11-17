@@ -1,5 +1,7 @@
 import { isValidMaxResultChars } from '../../runtime/result-limit.js';
-import type { ExcludedTool } from './types.js';
+import { normalizeOutputFields } from '../../server/core/output-fields.js';
+import { invalidOutputFieldsFinding, type DeclaredOutputFields } from './output-fields.js';
+import type { ExcludedTool, ToolFinding } from './types.js';
 
 /**
  * Which operations of an OpenAPI export become tools. `all` (the default):
@@ -85,4 +87,57 @@ export function declaredMaxResultChars(operation: Operation): DeclaredValue<numb
   const value = operation['x-glirastes-max-result-chars'];
   if (value === undefined) return undefined;
   return isValidMaxResultChars(value) ? { value } : { invalid: true };
+}
+
+/** The two OpenAPI extensions of declared output fields. */
+export const OUTPUT_ALLOWED_FIELDS_EXTENSION = 'x-glirastes-output-allowed-fields';
+export const OUTPUT_DENIED_FIELDS_EXTENSION = 'x-glirastes-output-denied-fields';
+export const OUTPUT_DEFAULT_FIELDS_EXTENSION = 'x-glirastes-output-default-fields';
+
+/**
+ * `x-glirastes-output-allowed-fields` / `-denied-fields` / `-default-fields`:
+ * at most 200 field paths in the `read_result` grammar without an index,
+ * de-duplicated and sorted. Anything else is invalid.
+ */
+export function declaredOutputFields(
+  operation: Operation,
+  extension:
+    | typeof OUTPUT_ALLOWED_FIELDS_EXTENSION
+    | typeof OUTPUT_DENIED_FIELDS_EXTENSION
+    | typeof OUTPUT_DEFAULT_FIELDS_EXTENSION,
+): DeclaredValue<string[]> {
+  const value = operation[extension];
+  if (value === undefined) return undefined;
+  const paths = normalizeOutputFields(value, extension === OUTPUT_DENIED_FIELDS_EXTENSION ? 'outputDeniedFields' : 'outputAllowedFields');
+  return paths ? { value: paths } : { invalid: true };
+}
+
+/**
+ * The three `x-glirastes-output-*` extensions of an operation, read for
+ * `resolveEndpointContract`, with a finding per invalid one (`where` names
+ * the operation; the value is never repeated).
+ */
+export function readOutputFieldExtensions(
+  operation: Operation,
+  where: string,
+  subject: string,
+): { declared?: DeclaredOutputFields; findings: ToolFinding[] } {
+  const findings: ToolFinding[] = [];
+  const declared: DeclaredOutputFields = { where, form: 'openapi' };
+  for (const [which, extension] of [
+    ['allowed', OUTPUT_ALLOWED_FIELDS_EXTENSION],
+    ['denied', OUTPUT_DENIED_FIELDS_EXTENSION],
+    ['default', OUTPUT_DEFAULT_FIELDS_EXTENSION],
+  ] as const) {
+    const value = declaredOutputFields(operation, extension);
+    if (!value) continue;
+    if ('invalid' in value) {
+      declared[which] = 'invalid';
+      findings.push(invalidOutputFieldsFinding(subject, where, 'openapi', which));
+    } else {
+      declared[which] = value.value;
+    }
+  }
+  const any = declared.allowed !== undefined || declared.denied !== undefined || declared.default !== undefined;
+  return { ...(any ? { declared } : {}), findings };
 }

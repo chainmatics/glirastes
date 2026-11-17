@@ -713,6 +713,9 @@ async function generate(
         : {}),
       ...(title ? { title } : {}),
       ...(tool.maxResultChars !== undefined ? { maxResultChars: tool.maxResultChars } : {}),
+      ...(tool.outputAllowedFields ? { outputAllowedFields: tool.outputAllowedFields } : {}),
+      ...(tool.outputDeniedFields ? { outputDeniedFields: tool.outputDeniedFields } : {}),
+      ...(tool.outputDefaultFields ? { outputDefaultFields: tool.outputDefaultFields } : {}),
     });
     const requiresApproval = confirmationFloor(effective.riskClass, effective.requiresApproval);
     toolViews.push({

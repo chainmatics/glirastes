@@ -102,6 +102,14 @@ async function main() {
     };
   };
 
+  const fieldList = (value) => {
+    if (value === undefined || value === null) return null;
+    return Array.isArray(value) && value.length <= 200
+      && value.every((path) => typeof path === 'string' && path.length <= 200)
+      ? [...value]
+      : 'invalid';
+  };
+
   const describeEntry = async (entry) => {
     if (entry === null || typeof entry !== 'object') return { ok: false, reason: 'invalid-entry' };
     const input = await describeSchema(entry.input, 'input');
@@ -129,6 +137,10 @@ async function main() {
         : typeof entry.maxResultChars === 'number' && Number.isFinite(entry.maxResultChars)
           ? entry.maxResultChars
           : 'invalid',
+      // A list of at most 200 strings goes on to the path check; any other declared value is invalid.
+      outputAllowedFields: fieldList(entry.outputAllowedFields),
+      outputDeniedFields: fieldList(entry.outputDeniedFields),
+      outputDefaultFields: fieldList(entry.outputDefaultFields),
     };
   };
 

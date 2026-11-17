@@ -1,4 +1,5 @@
 import { normalizeResultUiAction } from '../../core/index.js';
+import { applyOutputBound, outputBoundOf } from '../../core/output-fields.js';
 import type { ExecuteToolOptions, ExecuteToolResult } from './types.js';
 
 /**
@@ -28,7 +29,13 @@ export async function executeTool(
   };
 
   try {
-    const rawResult = await tool.execute(input, context);
+    const executed = await tool.execute(input, context);
+    // The upper bound of the tool's result holds here too: the caller is a client.
+    const failed = typeof executed === 'object' && executed !== null && (executed as Record<string, unknown>).success === false;
+    const bound = outputBoundOf(tool);
+    const rawResult = bound && !failed
+      ? applyOutputBound(executed, bound) ?? { success: true, outputWithheld: true }
+      : executed;
     const result = uiActionSchema
       ? normalizeResultUiAction(rawResult, uiActionSchema)
       : rawResult;

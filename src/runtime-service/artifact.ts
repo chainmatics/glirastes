@@ -415,6 +415,7 @@ function materialize(
   const bindings: GeneratedToolBinding[] = tools.map((tool) => {
     const contract = byId.get(tool.toolId)?.contract;
     const maxResultChars = byId.get(tool.toolId)?.maxResultChars;
+    const { outputAllowedFields, outputDeniedFields, outputDefaultFields } = byId.get(tool.toolId) ?? {};
     if (
       !contract ||
       contract.runtime.input.kind !== "json" ||
@@ -458,6 +459,9 @@ function materialize(
           method: tool.method,
           path: tool.path,
           ...(maxResultChars !== undefined ? { maxResultChars } : {}),
+          ...(outputAllowedFields ? { outputAllowedFields } : {}),
+          ...(outputDeniedFields ? { outputDeniedFields } : {}),
+          ...(outputDefaultFields ? { outputDefaultFields } : {}),
         }),
       };
     }

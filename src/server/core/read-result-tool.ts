@@ -15,6 +15,7 @@ import { dominantArrayRoute } from './result-overview.js';
 import {
   describeMissingPath,
   formatResultPath,
+  isAnyDepthForm,
   MAX_RESULT_PATH_CHARS,
   MAX_RESULT_PATHS,
   mixedArraySelections,
@@ -489,7 +490,8 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
         const invalid: number[] = [];
         input.fields.forEach((text, index) => {
           const parsed = parseResultPath(text);
-          if (parsed) paths!.push(parsed);
+          // "**.key" is no read path (only outputDeniedFields knows it): invalid, never a field named "**".
+          if (parsed && !isAnyDepthForm(parsed.steps)) paths!.push(parsed);
           else invalid.push(index + 1);
         });
         if (invalid.length > 0) {

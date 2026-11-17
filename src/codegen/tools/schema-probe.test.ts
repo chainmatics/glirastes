@@ -84,6 +84,31 @@ describe('schema probe', () => {
     expect(post?.moduleDigest).toBe(del?.moduleDigest);
   }, 30_000);
 
+  it('reads the output fields of a contract entry, normalized, and flags invalid ones without their value', async () => {
+    const app = await createAppFixture({
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  GET: { input: z.object({}), outputAllowedFields: ['meta', 'data[].name', 'meta'], outputDeniedFields: ['**.fileUrl'] },\n"
+        + "  POST: { input: z.object({}), outputAllowedFields: ['data[7].SECRETNAME'], outputDeniedFields: ['**.a.SECRETNAME'], outputDefaultFields: 3 },\n"
+        + "  PUT: { input: z.object({}), outputDefaultFields: ['**.fileUrl'] },\n"
+        + '  DELETE: { input: z.object({}) },\n};\n',
+    });
+    const entry = (method: string): SchemaProbeItem => ({
+      kind: 'contract-entry', io: 'input', module: 'src/app/api/notes/contract.ts', export: 'contract', property: [method],
+    });
+    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'PUT', 'DELETE'].map(entry));
+    const [get, post, put, del] = results.map((result) => (
+      result.ok && result.kind === 'contract-entry' ? result : undefined
+    ));
+    expect(get).toMatchObject({ outputAllowedFields: ['data[].name', 'meta'], outputDeniedFields: ['**.fileUrl'] });
+    expect(get).not.toHaveProperty('invalidFields');
+    expect(post).toMatchObject({ invalidFields: ['outputAllowedFields', 'outputDeniedFields', 'outputDefaultFields'] });
+    expect(put).toMatchObject({ invalidFields: ['outputDefaultFields'] });
+    expect(del).not.toHaveProperty('outputAllowedFields');
+    expect(JSON.stringify(results)).not.toContain('SECRETNAME');
+    // They shape results, not the contract module: the digest ignores them.
+    expect(get?.moduleDigest).toBe(del?.moduleDigest);
+  }, 30_000);
+
   it('reads maxResultChars of a contract entry and flags an invalid one without its value', async () => {
     const app = await createAppFixture({
       'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"

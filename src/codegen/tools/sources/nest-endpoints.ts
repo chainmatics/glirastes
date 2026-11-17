@@ -10,6 +10,7 @@ import {
   resolveEndpointContract,
   type ResolvedEndpointContract,
 } from '../contract-tiers.js';
+import { outputFieldLists } from '../output-fields.js';
 import { collectHandlerEvidence } from '../evidence.js';
 import { findExclusion, hasAiIgnoreMarker, importsChatHandler } from '../exclusions.js';
 import { toolFinding } from '../findings.js';
@@ -489,6 +490,7 @@ function toObserved(piece: NestPiece, definitionId: string): ObservedTool {
     findings: piece.findings,
     ...(resolved && Object.keys(resolved.prose).length > 0 ? { prose: resolved.prose } : {}),
     ...(resolved?.maxResultChars !== undefined ? { maxResultChars: resolved.maxResultChars } : {}),
+    ...outputFieldLists(resolved),
   };
 }
 

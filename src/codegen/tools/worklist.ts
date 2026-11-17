@@ -113,6 +113,13 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'tool-group-invalid',
   'tool-roles-invalid',
   'max-result-chars-invalid',
+  'output-allowed-fields-invalid',
+  'output-denied-fields-invalid',
+  'output-default-fields-invalid',
+  'output-field-unknown',
+  'output-default-fields-outside-allowed',
+  'output-default-fields-denied',
+  'output-schema-unprojected',
   // A name (contract id or x-glirastes-name) taken from another tool, fixed where it is declared.
   'definition-id-reassigned',
 ]);

@@ -108,7 +108,11 @@ second, hand-maintained catalogue.
    `model_error`. A tool result over `maxResultChars` reaches the model (and
    the browser) as an overview with a `_result` handle; the built-in
    `read_result` reads the rest within the same request, without calling
-   the backend again (`resultHandles: false` cuts it instead). With metrics, an endpoint that
+   the backend again (`resultHandles: false` cuts it instead). Per tool,
+   `outputAllowedFields`, `outputDeniedFields` (`**.key` at any depth) and
+   `outputDefaultFields` (on the endpoint tool, `defineTool` or the
+   `contract.ts` entry) bound what a result shows and pick the first answer;
+   see `references/handler-options.md`. With metrics, an endpoint that
    refuses a call its schema accepted (400 or 422) is reported as
    `tool_contract_rejected`, without content.
    Every other `AiChatHandlerConfig` option (approvals, origins, limits,

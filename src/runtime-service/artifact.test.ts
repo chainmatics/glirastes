@@ -92,6 +92,84 @@ describe("runtime container artifact", () => {
     ).not.toHaveProperty("code");
   });
 
+  it("carries and applies the x-glirastes-output-* fields through tool-contracts.json, the generated module and the container", async () => {
+    const declared = {
+      "x-glirastes-output-allowed-fields": ["data"],
+      "x-glirastes-output-denied-fields": ["**.fileUrl"],
+      "x-glirastes-output-default-fields": ["data[].title"],
+    };
+    const app = await fixture(declared);
+    await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    const written = ToolContractsFileSchema.parse(
+      JSON.parse(await app.read(".glirastes/tool-contracts.json")),
+    );
+    expect(written.tools[0]).toMatchObject({
+      outputAllowedFields: ["data"],
+      outputDeniedFields: ["**.fileUrl"],
+      outputDefaultFields: ["data[].title"],
+    });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    expect(payload.contracts.tools[0].outputDeniedFields).toEqual(["**.fileUrl"]);
+    const module = renderGeneratedModule({
+      modulePath: "generated.ts",
+      artifact: payload.setupArtifact,
+      contracts: payload.contracts.tools,
+    });
+    expect(module).toContain('        outputAllowedFields: [\n          "data"\n        ],\n');
+    expect(module).toContain('        outputDeniedFields: [\n          "**.fileUrl"\n        ],\n');
+    expect(module).toContain('        outputDefaultFields: [\n          "data[].title"\n        ],\n');
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    expect(createContractBindings(loaded).disabled).toEqual([]);
+    const [binding] = loaded.createToolBindings();
+    expect(binding!.tool).toMatchObject({
+      outputAllowedFields: ["data"],
+      outputDeniedFields: ["**.fileUrl"],
+      outputDefaultFields: ["data[].title"],
+    });
+    // The container applies them: the bound tool reduces the backend answer.
+    const result = await binding!.tool.execute({}, {
+      currentDate: "2026-11-17", locale: "en-US",
+      callEndpoint: async () => ({ ok: true, status: 200, data: [{ title: "T", fileUrl: "https://s3.example/x?sig=SIG" }] }),
+    } as never);
+    const { toolToAiTool } = await import("../server/core/index.js");
+    const shown = await toolToAiTool(
+      { ...binding!.tool, execute: async () => result },
+      { currentDate: "2026-11-17", locale: "en-US" } as never,
+    ).execute({});
+    expect(JSON.stringify(shown)).not.toContain("SIG");
+    expect(shown).toMatchObject({ data: [{ title: "T" }] });
+
+    // Without the extensions nothing is written: existing outputs stay byte-identical.
+    const plain = await fixture();
+    await buildRuntimeArtifact({
+      projectRoot: plain.root,
+      outputDirectory: plain.path("artifact"),
+    });
+    expect(await plain.read(".glirastes/tool-contracts.json")).not.toContain("outputAllowedFields");
+    const plainLoaded = await loadRuntimeArtifact(plain.path("artifact"));
+    expect(plainLoaded.createToolBindings()[0]!.tool).not.toHaveProperty("outputAllowedFields");
+  });
+
+  it("refuses to build a container artifact for a tool with an invalid upper bound (fail closed)", async () => {
+    for (const extension of ["x-glirastes-output-allowed-fields", "x-glirastes-output-denied-fields"]) {
+      const app = await fixture({ [extension]: ["data[0]"] });
+      await expect(
+        buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") }),
+      ).rejects.toThrow(/output-(allowed|denied)-fields-invalid/);
+    }
+  });
+
+  it("refuses an artifact whose tool-contracts.json declares the any-depth form outside outputDeniedFields", async () => {
+    const app = await fixture({ "x-glirastes-output-allowed-fields": ["data"] });
+    await buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    payload.contracts.tools[0].outputAllowedFields = ["**.fileUrl"];
+    expect(() => ToolContractsFileSchema.parse(payload.contracts)).toThrow();
+  });
+
   it("carries x-glirastes-max-result-chars through tool-contracts.json, the generated module and the container", async () => {
     const app = await fixture({ "x-glirastes-max-result-chars": 40_000 });
     await buildRuntimeArtifact({

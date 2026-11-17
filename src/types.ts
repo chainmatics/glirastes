@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertOutputFields } from './server/core/output-fields.js';
 
 // ============================================================================
 // Host schema boundary
@@ -116,6 +117,47 @@ export interface Tool {
    */
   maxResultChars?: number;
 
+  /**
+   * Upper bound of what a successful result shows the model and the browser:
+   * field paths in the `read_result` grammar without an index
+   * (`data[].name`, `data[].owner`, `meta`); a path includes everything
+   * below it. Everything else is removed before the PII shield, the result
+   * store, the overview and the size limit see the result, so for the model
+   * a field that is not listed does not exist. `success` and `uiAction` are
+   * never removed (`uiAction` is built from the full answer); a failure
+   * (`success: false`) is not a record of the declared shape and stays as
+   * it is. A result that is not a record travels under `data`. Absent:
+   * everything is allowed. At most 200 paths of at most 200 characters; an
+   * invalid value throws in `defineTool` and `endpointToolToTool`.
+   * OpenAPI: `x-glirastes-output-allowed-fields`.
+   */
+  outputAllowedFields?: string[];
+
+  /**
+   * Fields a successful result never shows the model and the browser (same
+   * grammar): each path removes that field and everything below it, at any
+   * depth and through arrays (`data[].variants[].fileUrl`). Part of the same
+   * upper bound as `outputAllowedFields`, applied at the same place: the
+   * result is the allowed fields (or all, when not declared) minus these;
+   * a denied field wins over an allowed parent and over the default view.
+   * Use it to hide a few fields while new ones stay visible; use
+   * `outputAllowedFields` when new fields must stay hidden until listed.
+   * Invalid: throws like `outputAllowedFields`. OpenAPI:
+   * `x-glirastes-output-denied-fields`.
+   */
+  outputDeniedFields?: string[];
+
+  /**
+   * The fields the first answer shows (same grammar), also when the whole
+   * result would fit the limit. When anything is left out, the result is
+   * kept as a result handle and the answer carries a `_result` marker that
+   * lists the rest in `omitted` for `read_result`; without a result store
+   * the rest cannot be read and a `_truncated` marker says so. Applied after
+   * the upper bound (only allowed, not denied fields can be shown). OpenAPI:
+   * `x-glirastes-output-default-fields`.
+   */
+  outputDefaultFields?: string[];
+
   /** The actual implementation */
   execute: (input: unknown, context: ToolContext) => Promise<unknown>;
 }
@@ -131,6 +173,12 @@ export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
   method?: string;
   /** Upper bound of the serialized result in characters; see `Tool.maxResultChars`. */
   maxResultChars?: number;
+  /** Fields a successful result may show at all; see `Tool.outputAllowedFields`. */
+  outputAllowedFields?: string[];
+  /** Fields a successful result never shows; see `Tool.outputDeniedFields`. */
+  outputDeniedFields?: string[];
+  /** Fields the first answer shows; see `Tool.outputDefaultFields`. */
+  outputDefaultFields?: string[];
   /** @deprecated Use Glirastes approval flows via `lancer.approvals` instead. Kept for backward compatibility. */
   needsApproval?:
     | boolean
@@ -140,6 +188,9 @@ export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
       ) => boolean | Promise<boolean>);
   execute: (input: InferSchema<TInput>, context: ToolContext) => Promise<TOutput>;
 }): Tool {
+  assertOutputFields(tool.outputAllowedFields, `defineTool(${tool.id})`, 'outputAllowedFields');
+  assertOutputFields(tool.outputDeniedFields, `defineTool(${tool.id})`, 'outputDeniedFields');
+  assertOutputFields(tool.outputDefaultFields, `defineTool(${tool.id})`, 'outputDefaultFields');
   return tool as Tool;
 }
 
@@ -345,6 +396,24 @@ export interface AiEndpointToolDefinition<
    * of the handler; default 16,000. OpenAPI: `x-glirastes-max-result-chars`.
    */
   maxResultChars?: number;
+  /**
+   * Fields a successful result may show the model and the browser at all;
+   * see `Tool.outputAllowedFields`. Paths address the result as the model
+   * sees it: a list or scalar response travels under `data`
+   * (`data[].name`). The `Returns:` description of `outputSchema` is reduced
+   * to them. OpenAPI: `x-glirastes-output-allowed-fields`.
+   */
+  outputAllowedFields?: string[];
+  /**
+   * Fields a successful result never shows; see `Tool.outputDeniedFields`.
+   * OpenAPI: `x-glirastes-output-denied-fields`.
+   */
+  outputDeniedFields?: string[];
+  /**
+   * Fields the first answer shows; see `Tool.outputDefaultFields`. OpenAPI:
+   * `x-glirastes-output-default-fields`.
+   */
+  outputDefaultFields?: string[];
   /**
    * Static uiAction template with $variable placeholders.
    * Use for simple cases where action is always the same.

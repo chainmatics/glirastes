@@ -114,6 +114,16 @@ the module and `x-glirastes-roles` the roles any of which may call the tool
 and ignored. A larger result reaches the model as an overview with a
 turn-scoped handle that the built-in `read_result` reads from (no second
 backend call); renderers only see the overview's fields.
+Three field lists (paths like `data[].name`, `meta`; no index) shape what a
+result shows: `x-glirastes-output-allowed-fields` (only these, ever; new fields
+stay hidden), `x-glirastes-output-denied-fields` (never these; `**.fileUrl`
+removes the key at any depth, the way to hide signed URLs) and
+`x-glirastes-output-default-fields` (the first answer; the rest via
+`read_result`). The first two are an upper bound applied before PII sealing,
+handles, overview and the size limit, on every channel (model and browser);
+`success`, `uiAction` and failures stay. NestJS: `@ApiExtension(name, [...])`.
+An invalid allow- or deny-list disables the tool (`output-allowed-fields-invalid`,
+`output-denied-fields-invalid`); see `docs/concepts.md`.
 `x-glirastes-tool: false` keeps an operation out in either mode. Existing
 exclusions win over the marker and are reported as `opt-in-excluded`. Policy
 entries stay keyed on `METHOD /path` and survive a rename; tool-semantics.json

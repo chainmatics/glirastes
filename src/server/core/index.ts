@@ -26,6 +26,16 @@ import {
   isValidMaxResultChars,
 } from '../../runtime/result-limit.js';
 import { truncateToolResult } from './truncate-tool-result.js';
+import {
+  applyOutputBound,
+  assertOutputFields,
+  leftOutFields,
+  normalizeOutputFields,
+  outputBoundOf,
+  outputFieldTree,
+  toJsonRecord,
+} from './output-fields.js';
+import { applyDefaultViewWithoutStore } from './default-view.js';
 import type { ResultStore } from './result-store.js';
 import { isResultReader } from './read-result-tool.js';
 export {
@@ -50,6 +60,18 @@ export {
   type ResultStoreOptions,
 } from './result-store.js';
 export { createReadResultTool, type ReadResultGuard } from './read-result-tool.js';
+export {
+  applyOutputBound,
+  assertOutputFields,
+  isValidOutputFields,
+  MAX_OUTPUT_FIELD_CHARS,
+  MAX_OUTPUT_FIELDS,
+  normalizeOutputFields,
+  outputBoundOf,
+  type OutputBound,
+  type OutputFieldsName,
+} from './output-fields.js';
+export { type DefaultViewMarker } from './default-view.js';
 export { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 export { createLocalGuardrails } from './local-guardrails.js';
 export {
@@ -625,10 +647,25 @@ function withoutReservedUiActions(
 export function endpointToolToTool<TInput extends SchemaLike>(
   endpointTool: AiEndpointToolDefinition<TInput>,
 ): Tool {
-  assertMaxResultChars(endpointTool.maxResultChars, `endpointToolToTool(${endpointTool.id})`);
+  const label = `endpointToolToTool(${endpointTool.id})`;
+  assertMaxResultChars(endpointTool.maxResultChars, label);
+  assertOutputFields(endpointTool.outputAllowedFields, label, 'outputAllowedFields');
+  assertOutputFields(endpointTool.outputDeniedFields, label, 'outputDeniedFields');
+  assertOutputFields(endpointTool.outputDefaultFields, label, 'outputDefaultFields');
+  const outputAllowedFields = endpointTool.outputAllowedFields !== undefined
+    ? normalizeOutputFields(endpointTool.outputAllowedFields)!
+    : undefined;
+  const outputDeniedFields = endpointTool.outputDeniedFields !== undefined
+    ? normalizeOutputFields(endpointTool.outputDeniedFields, 'outputDeniedFields')!
+    : undefined;
+  const outputDefaultFields = endpointTool.outputDefaultFields !== undefined
+    ? normalizeOutputFields(endpointTool.outputDefaultFields, 'outputDefaultFields')!
+    : undefined;
   let description = endpointTool.description;
   if (endpointTool.outputSchema) {
-    description += `\n\nReturns: ${zodToCompactDescription(endpointTool.outputSchema)}`;
+    // The model is told only about the fields it can get.
+    const bound = outputBoundOf({ outputAllowedFields, outputDeniedFields });
+    description += `\n\nReturns: ${zodToCompactDescription(endpointTool.outputSchema, 3, bound)}`;
   }
 
   return defineTool({
@@ -638,6 +675,9 @@ export function endpointToolToTool<TInput extends SchemaLike>(
     outputSchema: endpointTool.outputSchema,
     method: endpointTool.method,
     ...(endpointTool.maxResultChars !== undefined ? { maxResultChars: endpointTool.maxResultChars } : {}),
+    ...(outputAllowedFields ? { outputAllowedFields } : {}),
+    ...(outputDeniedFields ? { outputDeniedFields } : {}),
+    ...(outputDefaultFields ? { outputDefaultFields } : {}),
     needsApproval:
       endpointTool.needsApproval ??
       (endpointTool.method === 'GET' || endpointTool.method === 'HEAD' ? false : true),
@@ -944,6 +984,16 @@ export interface ToolToAiToolOptions {
   resultStore?: ResultStore;
 }
 
+/** What the model gets for a successful result whose details may not be shown. */
+function withheldResult(uiAction: unknown): Record<string, unknown> {
+  return {
+    success: true,
+    outputWithheld: true,
+    message: 'The tool ran, but its result did not match its declared output, so the details are withheld. Do not call it again for the same request.',
+    ...(uiAction ? { uiAction } : {}),
+  };
+}
+
 /** Whether `value` serializes to more than `limit` characters (false when it cannot be serialized). */
 function exceedsLimit(value: unknown, limit: number): boolean {
   try {
@@ -986,6 +1036,13 @@ export function toolToAiTool(
     ? method === 'GET' || method === 'HEAD'
     : !tool.needsApproval;
   const requiresApproval = !!needsApproval;
+  // Declared output fields. An invalid allow- or deny-list (a tool not built
+  // with defineTool) allows nothing: it fails closed. An invalid default view is ignored.
+  const bound = outputBoundOf(tool);
+  const defaultFields = tool.outputDefaultFields !== undefined
+    ? normalizeOutputFields(tool.outputDefaultFields, 'outputDefaultFields')
+    : undefined;
+  const defaultTree = defaultFields ? outputFieldTree(defaultFields) : undefined;
 
   return {
     _toolId: tool.id,
@@ -1048,6 +1105,8 @@ export function toolToAiTool(
 
         // Output schema: parse to strip extra fields, re-attach uiAction for client
         let cleanResult: unknown = result;
+        // A successful result of the declared shape (not a failure, not withheld): output fields apply to it.
+        let successful = !(isRecord(result) && result.success === false);
         if (isRecord(result) && result.success === false) {
           cleanResult = boundedToolFailure(result);
         } else if (
@@ -1096,30 +1155,50 @@ export function toolToAiTool(
             console.warn(`[glirastes] Output schema mismatch for tool "${name}": ${parsed.error.issues.length} issue(s).`);
             // The tool ran, and a write may already have happened: report it
             // as done, so the model neither claims a failure nor calls again.
-            cleanResult = {
-              success: true,
-              outputWithheld: true,
-              message: 'The tool ran, but its result did not match its declared output, so the details are withheld. Do not call it again for the same request.',
-              ...(rec.uiAction ? { uiAction: rec.uiAction } : {}),
-            };
+            cleanResult = withheldResult(rec.uiAction);
+            successful = false;
           }
         }
+
+        // The upper bound comes first: nothing outside outputAllowedFields, and
+        // nothing in outputDeniedFields, reaches the PII shield, the store, the
+        // overview, the cut or the browser.
+        if (bound && successful) {
+          const bounded = applyOutputBound(cleanResult, bound);
+          if (bounded) cleanResult = bounded;
+          else {
+            // Not serializable, so it cannot be bounded: withheld.
+            cleanResult = withheldResult(isRecord(cleanResult) ? cleanResult.uiAction : undefined);
+            successful = false;
+          }
+        }
+        const fromStore = store?.isIssued(result) === true;
+        const payloadRecord = isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success !== false;
+        // The default view applies when it leaves something out, also below the limit.
+        if (defaultTree && successful && payloadRecord && !fromStore && !bound) {
+          cleanResult = toJsonRecord(cleanResult) ?? cleanResult;
+        }
+        const viewed = defaultTree !== undefined && successful && payloadRecord && !fromStore
+          && leftOutFields(cleanResult as Record<string, unknown>, defaultTree).length > 0;
 
         // Bound the result so it cannot overflow the model context: with a
         // result store an oversized record result keeps its handle and the
         // model gets an overview, otherwise (or when the store refuses) it is cut.
-        const fromStore = store?.isIssued(result) === true;
-        const overview = store && !fromStore
-          && isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success !== false
+        const overview = store && !fromStore && payloadRecord
           // A payload with its own `_result` keeps it: no overview would replace it.
           && !Object.prototype.hasOwnProperty.call(cleanResult, '_result')
-          && exceedsLimit(cleanResult, resultLimit)
+          && (viewed || exceedsLimit(cleanResult, resultLimit))
           ? await store.put({
-              toolName: name, readOnly, maxChars: resultLimit, value: cleanResult,
+              toolName: name, readOnly, maxChars: resultLimit, value: cleanResult as Record<string, unknown>,
+              ...(viewed ? { defaultFields: defaultFields! } : {}),
               ...(capturedOwner ? { owner: capturedOwner } : {}),
             })
           : undefined;
-        cleanResult = overview
+        // Without a handle the default view still applies; the rest cannot be read.
+        const unreadableView = !overview && viewed
+          ? applyDefaultViewWithoutStore(cleanResult as Record<string, unknown>, defaultTree!, resultLimit, { readOnly, inputSchema: tool.inputSchema })
+          : undefined;
+        cleanResult = overview ?? unreadableView
           ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
 
         const output = options?.uiActionSchema

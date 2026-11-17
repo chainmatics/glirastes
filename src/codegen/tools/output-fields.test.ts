@@ -1,0 +1,138 @@
+import { describe, expect, it } from 'vitest';
+import { projectOutputSchema, resolveOutputFields, unknownOutputFields, type DeclaredOutputFields } from './output-fields.js';
+import type { JsonSchemaLike } from './types.js';
+
+const DESIGN: JsonSchemaLike = {
+  type: 'object',
+  properties: {
+    data: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          fileUrl: { type: 'string', examples: ['https://s3.example/x?sig=1'] },
+          owner: { anyOf: [{ type: 'object', properties: { name: { type: 'string' }, email: { type: 'string' } }, required: ['name', 'email'] }, { type: 'null' }] },
+          draftVersion: {
+            type: 'object',
+            properties: { title: { type: 'string' }, fileUrl: { type: 'string' }, variants: { type: 'array', items: { type: 'object', properties: { size: { type: 'integer' }, fileUrl: { type: 'string' } }, required: ['size', 'fileUrl'] } } },
+            required: ['title', 'fileUrl'],
+          },
+          extra: { type: 'object', additionalProperties: { type: 'string' } },
+        },
+        required: ['id', 'name', 'fileUrl'],
+      },
+    },
+    meta: { type: 'object', properties: { page: { type: 'integer' } } },
+  },
+  required: ['data', 'meta'],
+  examples: [{ data: [{ fileUrl: 'https://s3.example/y?sig=2' }] }],
+};
+
+describe('projectOutputSchema', () => {
+  it('keeps only the allowed fields; required only for whole fields', () => {
+    const { schema, unprojected } = projectOutputSchema(DESIGN, ['data[].name', 'data[].owner.name', 'meta']);
+    expect(unprojected).toBe(0);
+    expect(schema).toEqual({
+      type: 'object',
+      properties: {
+        data: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              owner: { anyOf: [{ type: 'object', properties: { name: { type: 'string' } }, required: ['name'], additionalProperties: false }] },
+            },
+            required: ['name'],
+            additionalProperties: false,
+          },
+        },
+        meta: { type: 'object', properties: { page: { type: 'integer' } } },
+      },
+      required: ['meta'],
+      additionalProperties: false,
+    });
+  });
+
+  it('removes denied paths and any-depth keys everywhere, also from required and examples, without changing the input', () => {
+    const before = JSON.stringify(DESIGN);
+    const exact = projectOutputSchema(DESIGN, undefined, ['data[].draftVersion.variants[].fileUrl']).schema as never as {
+      properties: { data: { items: { properties: Record<string, { properties: Record<string, { items: { properties: object; required: string[] } }> }> } } };
+    };
+    const variants = exact.properties.data.items.properties.draftVersion!.properties.variants!.items;
+    expect(Object.keys(variants.properties)).toEqual(['size']);
+    expect(variants.required).toEqual(['size']);
+    expect(JSON.stringify(exact)).toContain('fileUrl');
+    const any = projectOutputSchema(DESIGN, undefined, ['**.fileUrl']).schema;
+    expect(JSON.stringify(any)).not.toContain('fileUrl');
+    expect(JSON.stringify(any)).not.toContain('s3.example');
+    expect(JSON.stringify(DESIGN)).toBe(before);
+  });
+
+  it('reduces a list response under data and counts what it cannot reduce', () => {
+    const list: JsonSchemaLike = { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, secret: { type: 'string' } } } };
+    expect(projectOutputSchema(list, ['data[].id']).schema).toEqual({
+      type: 'array', items: { type: 'object', properties: { id: { type: 'string' } }, additionalProperties: false },
+    });
+    expect(projectOutputSchema({ type: 'object', properties: { a: { $ref: '#/$defs/A' } } }, ['a.b'])).toMatchObject({ unprojected: 1 });
+    // An opaque schema says nothing and stays.
+    expect(projectOutputSchema({}, ['a']).schema).toEqual({});
+  });
+});
+
+describe('unknownOutputFields', () => {
+  it('reports paths a closed schema does not have, never for open or opaque parts', () => {
+    expect(unknownOutputFields(DESIGN, [
+      'data[].name', 'data[].nme', 'data.name', 'meta.page', 'meta.pgae', 'data[].extra.anything', 'success', 'uiAction',
+      '**.fileUrl', '**.fileUlr', '**.size',
+    ], )).toEqual(['data[].nme', 'data.name', 'meta.pgae', '**.fileUlr']);
+    expect(unknownOutputFields({}, ['x', '**.y'])).toEqual([]);
+    expect(unknownOutputFields({ type: 'object', properties: { a: {} } }, ['**.b'])).toEqual([]);
+    expect(unknownOutputFields({ type: 'array', items: { type: 'object', properties: { id: { type: 'string' } } } }, ['data[].id', 'data[].x', 'id']))
+      .toEqual(['data[].x', 'id']);
+  });
+});
+
+describe('resolveOutputFields', () => {
+  const declared = (fields: Partial<DeclaredOutputFields>): DeclaredOutputFields => ({ where: 'api.json GET /x', form: 'openapi', ...fields });
+  const codes = (result: ReturnType<typeof resolveOutputFields>) => result.findings.map((finding) => [finding.code, finding.severity]);
+
+  it('reports nothing and changes nothing without a declaration', () => {
+    expect(resolveOutputFields('GET /x', undefined, DESIGN)).toEqual({ findings: [] });
+  });
+
+  it('intersects the default view with the upper bound and reports each problem once', () => {
+    const result = resolveOutputFields('GET /x', declared({
+      allowed: ['data', 'meta'], denied: ['**.fileUrl', 'data[].owner.email', 'data[].nope'], default: ['data[].fileUrl', 'data[].name', 'data[].owner', 'other'],
+    }), DESIGN);
+    expect(codes(result)).toEqual([
+      ['output-field-unknown', 'warning'],
+      ['output-field-unknown', 'warning'],
+      ['output-default-fields-outside-allowed', 'warning'],
+      ['output-default-fields-denied', 'warning'],
+    ]);
+    expect(result.findings[0]!.message).toContain('NOT excluded');
+    expect(result.findings[0]!.message).toContain('data[].nope');
+    expect(result.default).toEqual(['data[].name', 'data[].owner']);
+    expect(result.denied).toEqual(['**.fileUrl', 'data[].owner.email', 'data[].nope']);
+    expect(JSON.stringify(result.output)).not.toContain('fileUrl');
+    expect(JSON.stringify(result.output)).not.toContain('email');
+  });
+
+  it('fails closed for an invalid upper bound: nothing allowed', () => {
+    for (const fields of [{ allowed: 'invalid' as const }, { denied: 'invalid' as const }]) {
+      const result = resolveOutputFields('GET /x', declared({ ...fields, default: ['data[].name'] }), DESIGN);
+      expect(result.allowed).toEqual([]);
+      expect(result.default).toEqual([]);
+      expect(result.output).toEqual({ type: 'object', properties: {}, additionalProperties: false });
+    }
+    expect(resolveOutputFields('GET /x', declared({ default: 'invalid' }), DESIGN)).toEqual({ findings: [] });
+  });
+
+  it('warns when a part of the schema cannot be reduced', () => {
+    const result = resolveOutputFields('GET /x', declared({ allowed: ['a.b'] }), { type: 'object', properties: { a: { $ref: '#/$defs/A' } } });
+    expect(codes(result)).toEqual([['output-schema-unprojected', 'warning']]);
+  });
+});

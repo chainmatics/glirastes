@@ -237,6 +237,80 @@ With `piiShield`, the complete result (including `uiAction`) is pseudonymized on
 
 Set the limit globally with `maxResultChars` on `createAiChatHandler` or `createGlirastes` (the runtime container: `application.maxResultChars`), or per tool with `maxResultChars` on the endpoint tool definition, `maxResultChars` in a sibling `contract.ts` entry, or the OpenAPI extension `x-glirastes-max-result-chars`. The tool value wins over the global one, the global one over the default. Values are integers from 1,000 to 200,000 (`MIN_MAX_RESULT_CHARS`, `MAX_MAX_RESULT_CHARS`); an invalid global value throws when the handler is created, an invalid extension is reported as `max-result-chars-invalid` (warning) and ignored. The per-tool value stays local in `.glirastes/tool-contracts.json` and the generated module; it is never sent to the Platform.
 
+### Output fields: upper bound and default view
+
+Three optional per-tool declarations shape what a successful result shows. Each is a list of field paths in the `read_result` syntax **without an index** (`data[].name`, `data[].owner`, `meta`); a path includes everything below it. Paths address the result as the model sees it: an endpoint's list or scalar response travels under `data` (`data[].name` for a JSON array).
+
+| Declaration | OpenAPI operation extension | `Tool`, `defineTool`, `defineEndpointTool`, `contract.ts` entry | Meaning |
+| --- | --- | --- | --- |
+| Allow-list | `x-glirastes-output-allowed-fields` | `outputAllowedFields` | Only these fields can ever be shown. A new backend field stays hidden until it is listed |
+| Deny-list | `x-glirastes-output-denied-fields` | `outputDeniedFields` | These fields are never shown; everything else is. A new backend field is visible. `**.<key>` removes every property named `<key>` at any depth |
+| Default view | `x-glirastes-output-default-fields` | `outputDefaultFields` | The fields the first answer shows; the rest is read with `read_result` |
+
+**The upper bound** is the allowed fields (all, when no allow-list is declared) minus the denied ones; a denied field wins over an allowed parent and over the default view. It is a security boundary, applied once, right after the tool returned and its output schema was checked, before anything else sees the result: before the PII shield seals it, before it is stored as a result handle, before the overview, the default view and the size limit, and before the browser receives its copy of the tool result. What lies outside it is gone: it never reaches the model, the browser, the overview's `omitted`, `keys` or `arrays`, a `read_result` answer, `unknownFields`, `parentKeys` or an `index_out_of_range` hint. Reading a removed field answers exactly like reading a field that does not exist (same shape, same error, same counts). An array keeps its entries (an entry without an allowed field stays as `{}`), so counts and positions of an allowed array are unchanged. This holds for model turns with and without result handles, direct commands, the legacy and the pipeline path, `toolsToAiTools` used directly (also the NestJS adapter), `executeTool` for Server Actions (upper bound only, no default view) and the runtime container.
+
+- `success` and `uiAction` are never removed. `uiAction` is built from the full backend answer as before (`uiPattern`, `uiActionOnSuccess`), so client actions get the data they always got; a value a `uiPattern` copies into it is outside the bound, so do not build a UI action from a field the model must not see.
+- A failure (`success: false`, the error, status and body of a failed backend call) is not a record of the declared shape and stays as it is (bounded as before). The answer of a schema mismatch (`outputWithheld`) stays as well. A successful result that cannot be serialized is withheld.
+- A result that is not a record (a custom tool returning an array) travels under `data` once a bound is declared.
+- `**.<key>` (deny-list only; exactly one field name after `**.`, no other wildcard) also removes a top-level key of that name, except `success` and `uiAction`. Its check walks the result once; containers nested deeper than 32 levels are dropped rather than passed on unchecked (fail closed). An exact path (`data[].draftVersion.variants[].fileUrl`) removes only that place: the same name elsewhere stays visible. For secrets such as signed URLs, which appear in many places, use the pattern.
+- The model is told about the output only within the bound: the output schema in `tool-contracts.json` (and the runtime schema and its digest for OpenAPI and JSON outputs) is reduced, `required` included, and the `Returns:` text a Zod `outputSchema` adds to the description is reduced in `endpointToolToTool`. A part of the schema that cannot be reduced (a `$ref`, `patternProperties`, an open `additionalProperties` on the way) is kept and reported (`output-schema-unprojected`); results are reduced all the same.
+
+Use the allow-list when new backend fields must stay hidden until someone lists them; use the deny-list when everything but a few fields may be shown and new fields may appear without a code change.
+
+**The default view** is applied after the upper bound, also when the whole result would fit the limit. When it leaves something out and the turn has a result store, the full (bounded) result is kept as a handle and the answer carries the `_result` marker of an overview: `omitted` lists what the view left out (with `keys` of left-out objects, bounded like any overview, at most twenty paths with the rest in `omittedMore`) and the hint tells the model to read the rest with `read_result`; a write tool keeps the wording that it must not be called again. When nothing is left out, the result is returned as before, without a marker. When the view itself is over the limit, the usual overview runs on the view, so the declared fields are the last to go (among them the usual ranking applies). Without a store (`resultHandles: false`, a direct command, `toolsToAiTools` without `resultStore`, a registry tool named `read_result`, or a store whose limits are used up) the view is applied all the same, and a `_truncated` marker lists `omitted` with a hint that these fields cannot be read in this turn and must not be inferred (cut further, with the cut's own fields, when the view is over the limit); it never points to `read_result`. Default fields outside the upper bound are never shown.
+
+Worked example: a paginated list `{ "data": [...], "meta": {...} }` of designs whose versions carry signed URLs (`fileUrl`) under `draftVersion`, `publishedVersion` and their `variants[]`, plus an internal cost:
+
+```json
+"get": {
+  "operationId": "listDesigns",
+  "x-glirastes-output-allowed-fields": ["data", "meta"],
+  "x-glirastes-output-denied-fields": ["**.fileUrl", "**.thumbnailUrl", "data[].internalCost"],
+  "x-glirastes-output-default-fields": ["data[].id", "data[].name", "data[].status", "meta"]
+}
+```
+
+NestJS (`@nestjs/swagger`, then export the document again):
+
+```ts
+@Get()
+@ApiExtension('x-glirastes-output-allowed-fields', ['data', 'meta'])
+@ApiExtension('x-glirastes-output-denied-fields', ['**.fileUrl', '**.thumbnailUrl', 'data[].internalCost'])
+@ApiExtension('x-glirastes-output-default-fields', ['data[].id', 'data[].name', 'data[].status', 'meta'])
+list(@Query() query: ListDesignsDto) { /* … */ }
+```
+
+Next.js `contract.ts` entry and a hand-written endpoint tool take the same lists:
+
+```ts
+export const contract = {
+  GET: { input: listDesignsQuery, outputDeniedFields: ['**.fileUrl'], outputDefaultFields: ['data[].id', 'data[].name', 'meta'] },
+};
+
+defineEndpointTool({
+  id: 'designs.list', toolName: 'designs_list', description: 'List designs.', method: 'GET', path: '/api/designs',
+  inputSchema: listDesignsQuery,
+  outputDeniedFields: ['**.fileUrl', '**.thumbnailUrl'],
+  outputDefaultFields: ['data[].id', 'data[].name', 'data[].status', 'meta'],
+});
+```
+
+To hide one field deep in the tree, one exact denied path is enough (`"data[].draftVersion.variants[].fileUrl"`); the allow-list does not have to name every sibling. First answer for three designs, below the limit (the view leaves `draftVersion` and `description` out, so the result gets a handle; `fileUrl` and `internalCost` do not exist for the model at all):
+
+```json
+{ "success": true,
+  "data": [{ "id": "d0", "name": "Design 0", "status": "live" }, "…3 entries…"],
+  "meta": { "page": 1, "pageSize": 3, "total": 57 },
+  "_result": { "id": "ro_kw7fymb4", "arrays": { "data": 3 }, "showing": 3, "total": 3,
+    "omitted": [{ "path": "data[].draftVersion", "approxChars": 180, "keys": ["variants", "title"] },
+                { "path": "data[].description", "approxChars": 110 }],
+    "hint": "Overview: all 3 entries of data, without the fields in omitted. … Read more with read_result in this turn …" } }
+```
+
+For 200 designs at a limit of 4,000 the view itself does not fit: the overview keeps 105 entries with `id` and `name` and lists the declared `data[].status` and `meta` last in `omitted` (`"omitted": [data[].draftVersion, data[].description, data[].status, meta]`, `"showing": 105, "total": 200`). `read_result` with `fields: ["data[].draftVersion.variants"]` returns the variants without `fileUrl`; `fields: ["data[].draftVersion.variants[].fileUrl"]` answers `unknown_fields`, exactly as for a field that never existed. `**.fileUrl` is not a `read_result` path (`invalid_fields`).
+
+Validation (`glirastes tools refresh`, OpenAPI and `contract.ts` alike; a message never repeats an invalid value): a declaration that is not a list of at most 200 valid paths (at most 200 characters each, starting with a field name, no index, `**.` only in the deny-list) is `output-allowed-fields-invalid` or `output-denied-fields-invalid` (needs attention: the tool stays disabled, and an empty allow-list is written, because an upper bound that cannot be read must not expose everything), or `output-default-fields-invalid` (warning; ignored). A path the response schema provably does not have is `output-field-unknown` (warning; only where the schema is closed enough to tell, never for open or `$ref` parts; for the deny-list the message says that a misspelt path excludes nothing). Default fields outside the allow-list are `output-default-fields-outside-allowed`, denied default fields `output-default-fields-denied` (warnings; the effective view is the part within the bound). At runtime an invalid list throws in `defineTool` and `endpointToolToTool`, and a hand-built `Tool` with an invalid allow- or deny-list shows nothing but `success` and `uiAction` (fail closed). All three lists stay local in `.glirastes/tool-contracts.json`, the generated module and the container artifact; they are never sent to the Platform. The generated MCP catalog (`createMcpEndpointCatalog`) does not carry them: an app's own MCP server calls its endpoints itself.
+
 ---
 
 ## Followup Suggestions
