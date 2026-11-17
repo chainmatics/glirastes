@@ -225,6 +225,24 @@ With `createAiChatHandler` a large result is not simply cut (on by default, `res
 
 A handle lives only in its request. The id is random (`ro_` for a read tool, `rw_` otherwise), so an id from the history never reaches a handle of a later turn; an approval continuation (a new request) or a later turn answers `result_expired`. The hint is written for that: after a read tool the model calls the tool again, after any other tool it must not (the tool has run) and tells the user the details are no longer available. Per turn at most 8 handles, 2 MiB per result and 16 MiB in total are kept (`resultHandles: { maxResults, maxResultBytes, maxTotalBytes }`); beyond that, and with `resultHandles: false`, the result is cut as described above. Direct commands, `toolsToAiTools` without `resultStore`, the NestJS adapter and a turn whose registry has its own tool named `read_result` never create handles. The store is dropped when the response stream ends, fails or is cancelled; until then a request holds up to `maxTotalBytes` of serialized JSON per turn (more as JS objects in the heap).
 
+In a later turn the chat handler re-sends the previous turn's tool results compacted (`history` option): strings cut to 300 characters, arrays to their first 10 entries complete. The further entries of the largest array keep only their identity fields (the keys above, scalar, at most 200 characters; ids are never cut), so every id the model sees stays next to its own name, and a `_history` marker (`field`, `showing`, `full`, `total`, `keys`, `hint`) says that this is a shortened copy, that an id must never be paired with a name from another entry, and which entries are not listed. Within the history budget (`maxTokens`, 4000 estimated tokens) complete entries give way first, then all identity fields but one id and one name, then names are clipped to 60 characters (marked `…[clipped]`), then trailing entries, which the hint says must be fetched again with a read tool before their id is used. An entry that has an id and a name always keeps both. An overview's `_result.hint` is replaced by one saying the handle expired (with the read or write instruction above). Older turns go as text without tool results; the newest of them that had tool results ends with a note that no ids from them are available and that entries must be looked up by name with a read tool before a tool that needs an id is called.
+
+How far the default budget reaches, measured for the previous turn with the default settings (`maxItems: 10`, `maxTokens: 4000`; entries with a UUID id and a name of about 30 characters; tokens estimated at 4 characters each):
+
+| List in the previous turn | Characters | Estimated tokens | Ids kept |
+| --- | --- | --- | --- |
+| 20 entries | 4,507 | 1,127 | 20 |
+| 45 entries | 7,139 | 1,785 | 45 |
+| 100 entries | 14,404 | 3,601 | 100 |
+| 300 entries | 15,956 | 3,989 | 33 to 165, the rest counted in the marker |
+
+The default covers lists of up to about 100 entries. For longer lists raise `history.maxTokens` (with 8000, 207 to all 300 of 300 entries keep their id and name; how many depends on how long the model's own answer in that turn was). The larger budget is only spent in a turn that follows such a list.
+
+Known limits of the history copy:
+
+- Only the largest array of a result keeps the identity of every entry. An array inside an entry (the items of a playlist, the variants of a design) is still cut to its first entries plus a count, so ids of nested entries beyond those are not available in a later turn.
+- The rolling chat summary (`memory.chat`) folds lists to a count. Once a turn has moved into the summary, the ids of its tool results are gone; the model has to look entries up by name again.
+
 Behaviour notes:
 
 - A payload that carries its own top-level `_result` gets no handle; it is cut as described above, so its field is never dropped or overwritten. Loop detection strips `_result.id` only when it has the form of an issued handle id (`ro_`/`rw_` and 8 base36 characters).

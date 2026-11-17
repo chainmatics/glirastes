@@ -91,10 +91,12 @@ describe('prepareModelMessages', () => {
       user('u2', 'Und die von Person 1?'),
       assistant('a2', [{ type: 'step-start' }, toolPart('tasks_list', 'c2', { assignee: 'user-1' }, { tasks: tasks(40) })]),
     ]);
-    const [earlier, current] = toolResults(messages) as Array<{ output: { value: { tasks: unknown[] } } }>;
-    expect(earlier!.output.value.tasks).toHaveLength(11);
-    expect(earlier!.output.value.tasks[0]).toMatchObject({ id: 'task-1' });
-    expect(earlier!.output.value.tasks[10]).toBe('[40 more items, 50 total]');
+    const [earlier, current] = toolResults(messages) as Array<{ output: { value: { tasks: unknown[]; _history?: unknown } } }>;
+    // The first 10 complete, the other 40 reduced to their identity fields.
+    expect(earlier!.output.value.tasks).toHaveLength(50);
+    expect(earlier!.output.value.tasks[0]).toMatchObject({ id: 'task-1', status: 'done' });
+    expect(earlier!.output.value.tasks[10]).toEqual({ id: 'task-11', title: tasks(11)[10]!.title });
+    expect(earlier!.output.value._history).toMatchObject({ field: 'tasks', showing: 50, full: 10, total: 50 });
     expect(current!.output.value.tasks).toHaveLength(40);
   });
 

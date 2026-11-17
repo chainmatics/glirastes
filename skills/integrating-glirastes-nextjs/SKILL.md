@@ -93,8 +93,10 @@ second, hand-maintained catalogue.
    or `examples` per tool in `toolSemantics`. A custom `intentRouter`
    replaces it; `intentRouting: false` starts every turn with all tools.
    Further defaults, each with an opt-out: `history` sends earlier turns
-   compacted (`{ maxTurns, toolTurns, maxTokens, maxItems, maxStringLength }`,
-   `false` for the flat slice), `promptCaching` adds cache breakpoints for
+   compacted (`{ maxTurns, toolTurns, maxTokens, maxItems, maxStringLength,
+   keepIdentity }`, `false` for the flat slice; lists beyond `maxItems`
+   keep id and name per entry, so a tool that takes an id should say to look
+   it up by name when it is not visible), `promptCaching` adds cache breakpoints for
    `@ai-sdk/anthropic` and `@openrouter/ai-sdk-provider`, and `hideIds`
    keeps technical ids out of answers: the prompt forbids them and the stream
    replaces an id the model writes anyway with the label its tool result gave

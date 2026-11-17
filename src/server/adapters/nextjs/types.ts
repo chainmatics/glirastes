@@ -334,10 +334,12 @@ export interface AiChatHandlerConfig {
   maxContextMessages?: number;
   /**
    * How earlier turns reach the model (default on): the current turn
-   * complete, the previous turn with compacted tool results (long arrays
-   * shortened to their first items plus a count, long strings cut), older
-   * turns as text only, at most `maxTurns` (6) within `maxTokens` (4000,
-   * estimated). `false` keeps the flat slice-and-prune of earlier versions.
+   * complete, the previous turn with compacted tool results (long strings
+   * cut, arrays to their first `maxItems` entries plus a count; the largest
+   * array's further entries reduced to their identity fields such as `id`
+   * and `name` under a `_history` marker unless `keepIdentity: false`),
+   * older turns as text only, at most `maxTurns` (6) within `maxTokens`
+   * (4000, estimated). `false` keeps the flat slice-and-prune of earlier versions.
    */
   history?: HistoryOptions | false;
   /**

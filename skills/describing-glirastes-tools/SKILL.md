@@ -114,6 +114,10 @@ in each description which neighbour fits better for which request.
   `resolution-rejected` for an agent entry): its other texts are lost too.
 - An entry whose `stableKey` or `name` matches no tool is reported as
   `semantics-entry-orphaned`; re-key it (`"METHOD /path"`) or delete it.
+- In later turns the model sees earlier lists reduced to id and name (only
+  the first 10 entries complete), and older turns without tool results. A
+  tool that takes an id should say in its description to look the id up by
+  name with a list or search tool when it is not visible.
 
 ## Chat entities and commands
 

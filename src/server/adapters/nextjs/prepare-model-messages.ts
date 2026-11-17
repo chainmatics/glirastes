@@ -21,6 +21,14 @@ import {
 } from '../../../runtime/ai-sdk/engine.js';
 import { attachmentPlaceholderText } from '../../../contracts/attachments.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
+import {
+  compactHistoryResult,
+  compactToolOutput,
+  HISTORY_DEFAULTS,
+  HISTORY_TEXT_ONLY_NOTE,
+} from './history-compaction.js';
+
+export { compactToolOutput };
 
 // ---------------------------------------------------------------------------
 // prepareModelMessages
@@ -34,10 +42,16 @@ export interface HistoryOptions {
   toolTurns?: number;
   /** Estimated token budget of all earlier turns; the oldest drop first (default 4000). */
   maxTokens?: number;
-  /** Array items kept per array in compacted tool results (default 10). */
+  /** Array items kept complete per array in compacted tool results (default 10). */
   maxItems?: number;
   /** Characters kept per string in compacted tool results (default 300). */
   maxStringLength?: number;
+  /**
+   * Entries of a compacted result's dominant array beyond `maxItems` keep
+   * their identity fields (`id`, `name`, …) instead of being dropped, under a
+   * `_history` marker (default true). `false` drops them with a count.
+   */
+  keepIdentity?: boolean;
 }
 
 export interface PrepareModelMessagesOptions {
@@ -60,14 +74,6 @@ export interface PrepareModelMessagesOptions {
   };
 }
 
-const HISTORY_DEFAULTS = {
-  maxTurns: 6,
-  toolTurns: 1,
-  maxTokens: 4_000,
-  maxItems: 10,
-  maxStringLength: 300,
-} as const;
-const MAX_COMPACT_DEPTH = 6;
 const CHARS_PER_TOKEN = 4;
 const MIN_TEXT_SHARE = 1_000;
 /** Flat history estimate per file part; its encoded bytes say little about the model's cost. */
@@ -127,14 +133,19 @@ function isFilePart(value: unknown): value is { type: 'file'; filename?: unknown
     && (value as { type?: unknown }).type === 'file' && 'data' in value;
 }
 
-function estimateTokens(messages: ReadonlyArray<unknown>): number {
+/** Estimated size in characters: the JSON without file parts, plus a flat charge per file part. */
+function estimateChars(messages: ReadonlyArray<unknown>): number {
   let files = 0;
   const json = JSON.stringify(messages, (_key, value: unknown) => {
     if (!isFilePart(value)) return value;
     files += 1;
     return undefined;
   });
-  return Math.ceil(json.length / CHARS_PER_TOKEN) + files * FILE_PART_TOKENS;
+  return json.length + files * FILE_PART_TOKENS * CHARS_PER_TOKEN;
+}
+
+function estimateTokens(messages: ReadonlyArray<unknown>): number {
+  return Math.ceil(estimateChars(messages) / CHARS_PER_TOKEN);
 }
 
 function withoutFiles(message: ModelMessageLike): ModelMessageLike {
@@ -171,31 +182,92 @@ function textOnly(turn: ModelMessageLike[]): ModelMessageLike[] {
     .filter((message) => !Array.isArray(message.content) || message.content.length > 0);
 }
 
+/** Whether a turn holds tool calls or results, which `textOnly` leaves out. */
+function hasToolContent(turn: ModelMessageLike[]): boolean {
+  return turn.some((message) => message.role === 'tool' || (message.role === 'assistant'
+    && Array.isArray(message.content)
+    && (message.content as Array<{ type?: unknown }>).some((part) => part.type === 'tool-call')));
+}
+
+/** A text-only turn that says its tool results (and their ids) are left out. */
+function withTextOnlyNote(turn: ModelMessageLike[]): ModelMessageLike[] {
+  const note = { type: 'text', text: HISTORY_TEXT_ONLY_NOTE };
+  const last = turn.length - 1;
+  const message = turn[last];
+  if (message?.role === 'assistant' && Array.isArray(message.content)) {
+    return [...turn.slice(0, last), { ...message, content: [...message.content, note] }];
+  }
+  if (message?.role === 'assistant' && typeof message.content === 'string') {
+    return [...turn.slice(0, last), { ...message, content: [{ type: 'text', text: message.content }, note] }];
+  }
+  return [...turn, { role: 'assistant', content: [note] }];
+}
+
+type CompactablePart = Record<string, unknown> & { output: { type: string; value: unknown } };
+
+function isCompactable(part: Record<string, unknown>): part is CompactablePart {
+  const output = part.output as { type?: unknown } | undefined;
+  return part.type === 'tool-result' && !!output
+    && (output.type === 'json' || output.type === 'text' || output.type === 'error-text' || output.type === 'error-json');
+}
+
+/**
+ * The turn without reasoning, its tool results compacted. When the turn
+ * does not fit `maxTokens` so, the results share what its other content
+ * leaves (a result smaller than its share keeps its size, the rest is split
+ * evenly) and each is compacted within its share.
+ */
 function withCompactedResults(
   turn: ModelMessageLike[],
   limits: Required<HistoryOptions>,
 ): ModelMessageLike[] {
-  return turn.map((message) => {
-    if (message.role === 'assistant' && Array.isArray(message.content)) {
+  const withResults = (compact: (value: unknown, index: number) => unknown): ModelMessageLike[] => {
+    let index = 0;
+    return turn.map((message) => {
+      if (message.role === 'assistant' && Array.isArray(message.content)) {
+        return {
+          ...message,
+          content: (message.content as Array<{ type?: unknown }>)
+            .filter((part) => part.type !== 'reasoning'),
+        };
+      }
+      if (message.role !== 'tool' || !Array.isArray(message.content)) return message;
       return {
         ...message,
-        content: (message.content as Array<{ type?: unknown }>)
-          .filter((part) => part.type !== 'reasoning'),
+        content: (message.content as Array<Record<string, unknown>>).map((part) => (isCompactable(part)
+          ? { ...part, output: { ...part.output, value: compact(part.output.value, index++) } }
+          : part)),
       };
-    }
-    if (message.role !== 'tool' || !Array.isArray(message.content)) return message;
-    return {
-      ...message,
-      content: (message.content as Array<Record<string, unknown>>).map((part) => {
-        const output = part.output as { type?: unknown; value?: unknown } | undefined;
-        if (part.type !== 'tool-result' || !output) return part;
-        if (output.type === 'json' || output.type === 'text' || output.type === 'error-text' || output.type === 'error-json') {
-          return { ...part, output: { ...output, value: compactToolOutput(output.value, limits) } };
-        }
-        return part;
-      }),
-    };
+    });
+  };
+  const options = { maxItems: limits.maxItems, maxStringLength: limits.maxStringLength, keepIdentity: limits.keepIdentity };
+  const compacted: unknown[] = [];
+  const first = withResults((value) => {
+    const result = compactHistoryResult(value, options);
+    compacted.push(result);
+    return result;
   });
+  const room = limits.maxTokens * CHARS_PER_TOKEN;
+  if (compacted.length === 0 || estimateChars(first) <= room) return first;
+
+  // Each result within its share of what the rest of the turn leaves (`null` in its place).
+  let left = room - estimateChars(withResults(() => null));
+  const sizes = compacted.map((result) => (JSON.stringify(result)?.length ?? 4) - 4);
+  const shares: Array<number | undefined> = sizes.map(() => undefined);
+  let open = sizes.map((_, index) => index);
+  for (;;) {
+    const share = Math.floor(left / Math.max(1, open.length));
+    const small = open.filter((index) => sizes[index]! <= share);
+    if (small.length === 0) {
+      for (const index of open) shares[index] = Math.max(0, share);
+      break;
+    }
+    for (const index of small) left -= sizes[index]!;
+    open = open.filter((index) => sizes[index]! > share);
+  }
+  return withResults((value, index) => (shares[index] === undefined
+    ? compacted[index]
+    : compactHistoryResult(value, { ...options, maxChars: shares[index]! + 4 })));
 }
 
 /** Cuts text longer than its share of `maxChars` to head and tail. */
@@ -229,7 +301,8 @@ function withTruncatedTexts(turn: ModelMessageLike[], maxChars: number): ModelMe
  * The current turn stays complete. The previous turn is always sent: with
  * compacted tool results, as text when that does not fit, oversized text cut
  * to head and tail. Older turns go as text, at most `maxTurns`, within what
- * `maxTokens` and `maxCtx` leave.
+ * `maxTokens` and `maxCtx` leave. The newest text-only turn whose tool
+ * results were left out ends with a note that no ids from them are known.
  */
 function turnAwareHistory(
   messages: ModelMessageLike[],
@@ -238,61 +311,42 @@ function turnAwareHistory(
 ): ModelMessageLike[] {
   const turns = splitTurns(messages);
   const current = turns.pop() ?? [];
-  const earlier = turns.slice(-Math.max(0, limits.maxTurns)).map((turn, index, all) =>
-    index >= all.length - limits.toolTurns
-      ? withCompactedResults(turn, limits)
-      : textOnly(turn));
+  const kept = turns.slice(-Math.max(0, limits.maxTurns));
+  const isToolTurn = (index: number) => index >= kept.length - limits.toolTurns;
+  const earlier = kept.map((turn, index) => (isToolTurn(index) ? withCompactedResults(turn, limits) : textOnly(turn)));
+  // Per earlier turn: sent as text with its tool calls and results left out.
+  const dropped = kept.map((turn, index) => !isToolTurn(index) && hasToolContent(turn));
+  const previousSource = kept.at(-1);
+  let previousDropped = dropped.pop() ?? false;
   let previous = earlier.pop();
-  if (!previous) return current;
+  if (!previous || !previousSource) return current;
 
   const tooLarge = (turn: ModelMessageLike[]) =>
     estimateTokens(turn) > limits.maxTokens || turn.length + current.length > maxCtx;
-  if (tooLarge(previous)) previous = textOnly(previous);
+  if (tooLarge(previous)) {
+    previous = textOnly(previous);
+    previousDropped = hasToolContent(previousSource);
+  }
+  // The newest turn whose tool results were left out says so, once.
+  if (previousDropped) previous = withTextOnlyNote(previous);
   if (estimateTokens(previous) > limits.maxTokens) {
     previous = withTruncatedTexts(previous, limits.maxTokens * CHARS_PER_TOKEN);
   }
 
   const tokenRoom = limits.maxTokens - estimateTokens(previous);
   const messageRoom = maxCtx - current.length - previous.length;
+  const sent = () => {
+    const newest = previousDropped ? -1 : dropped.lastIndexOf(true);
+    return earlier.flatMap((turn, index) => (index === newest ? withTextOnlyNote(turn) : turn));
+  };
   while (
     earlier.length > 0
-    && (estimateTokens(earlier.flat()) > tokenRoom || earlier.flat().length > messageRoom)
+    && (estimateTokens(sent()) > tokenRoom || sent().length > messageRoom)
   ) {
     earlier.shift();
+    dropped.shift();
   }
-  return [...earlier.flat(), ...previous, ...current];
-}
-
-/**
- * Deterministic size bound for a tool result re-sent in a later turn: arrays
- * keep their first `maxItems` entries plus a count, strings are cut at
- * `maxStringLength`, nesting is cut below a fixed depth. Kept items keep all
- * their (short) fields, ids included.
- */
-export function compactToolOutput(
-  value: unknown,
-  limits: Pick<HistoryOptions, 'maxItems' | 'maxStringLength'> = {},
-): unknown {
-  const maxItems = limits.maxItems ?? HISTORY_DEFAULTS.maxItems;
-  const maxStringLength = limits.maxStringLength ?? HISTORY_DEFAULTS.maxStringLength;
-  const compact = (current: unknown, depth: number): unknown => {
-    if (typeof current === 'string') {
-      return current.length > maxStringLength
-        ? `${current.slice(0, maxStringLength)}… [${current.length - maxStringLength} more characters]`
-        : current;
-    }
-    if (current === null || typeof current !== 'object') return current;
-    if (depth >= MAX_COMPACT_DEPTH) return Array.isArray(current) ? '[…]' : '{…}';
-    if (Array.isArray(current)) {
-      const kept = current.slice(0, maxItems).map((item) => compact(item, depth + 1));
-      return current.length > maxItems
-        ? [...kept, `[${current.length - maxItems} more items, ${current.length} total]`]
-        : kept;
-    }
-    return Object.fromEntries(Object.entries(current)
-      .map(([key, item]) => [key, compact(item, depth + 1)]));
-  };
-  return compact(value, 0);
+  return [...sent(), ...previous, ...current];
 }
 
 // ---------------------------------------------------------------------------
