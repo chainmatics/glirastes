@@ -13,6 +13,7 @@ personal data in every model call of a chat turn. All names below come from
 - Tools, approvals and idempotency
 - Conversation history and context loss
 - Model calls outside the chat handler
+- Platform-governed policy
 - Errors and diagnostics
 - Limits
 
@@ -298,6 +299,91 @@ job of tests.
 `PrivacySession` (from `shield.open`, backed by a `PrivacyMappingStore`) exposes `pseudonymizeText`, `pseudonymizeJson`,
 `rehydrateText` and `rehydrateJson`. `PrivacyBoundary.wrapModel` refuses a
 model id string or a model of another boundary.
+
+## Platform-governed policy
+
+A connected app can let the Glirastes Platform decide the profile. The
+signed policy revision then carries a `privacy` block (`PrivacyPolicyBlock`;
+`isProtectedPolicy` tells the protected form, `ProtectedTextPolicyBlock`,
+from an explicit `off`): screenshot mode, approved providers, mapping
+lifetimes and speech limits. A turn pins it with its snapshot. Local
+configuration may only tighten it: `mergePrivacyPolicy` takes the stricter
+screenshot mode, intersects image types and providers and keeps the shorter
+lifetimes (`EffectivePrivacyPolicy`, its `localRestrictions` name what the
+app tightened as `PrivacyLocalRestrictionCode`).
+
+```ts
+const glirastes = createGlirastes({
+  generated,
+  // GlirastesPrivacyOptions: lets the runner enforce and report a signed block.
+  privacy: { shield, providers: registry, local: { mapping: { idleTtlSeconds: 1800 } } },
+});
+
+export const POST = createAiChatHandler({
+  ...(await glirastes.chatTurn(principalFor)),
+  privacy: {
+    shield, scope, knownIdentities,
+    providers: { registry },
+    policy: { mapping: { idleTtlSeconds: 1800 } }, // LocalPrivacyPolicy
+    onDecision: (code) => counters.increment(code),  // PrivacyDecisionCode
+  },
+});
+```
+
+- `policy` (`LocalPrivacyPolicy`) is the app's own floor. `required`
+  defaults to true, so the profile stays on when the Platform publishes
+  `off` or nothing. Without a signed block the local values apply
+  (`PRIVACY_LOCAL_DEFAULTS`: 1 h idle, 24 h absolute, 60 s speech) and
+  `attachments` and the registry decide as before. Pass `required: false`
+  only where an unprotected turn is acceptable without a Platform decision.
+- Approvals name an entry id and the digest of its non-secret binding
+  (`ProviderBinding`: adapter, protocol, endpoint, model, routing, image
+  capability; `normalizeProviderEndpoint`). Re-pointing an entry at another
+  endpoint, model or routing changes the digest, so the old approval no
+  longer applies and the turn is refused with `provider_not_allowed`;
+  rotating a key does not. An adapter without a binding is never approved.
+- Report the entries the Platform may approve in `.glirastes/tools.json`:
+  `"privacyProviders": [{ "id": "standard", "label": "Standard", "binding": <registry.bindingOf('standard')> }]`.
+  Setup writes only id, label, adapter and binding digest into the setup
+  artifact (`PrivacyProviderReport`), never a URL, model id or key name.
+  `createGlirastes` names every entry whose registry binding differs from
+  the artifact through `onError`; run setup again after such a change.
+- The runner reports a content-free `PrivacyRuntimeStatus` in its heartbeat
+  (`enforced`, `refused`, `downgrade-rejected`) and the block versions it
+  supports. A protected block it cannot enforce (no `privacy`, no matching
+  binding, unusable default) is reported as `privacy_refused` and rejected
+  (`PrivacyRefusedError` in `glirastes/sync`). Every turn then answers 503
+  `privacy_not_configured` instead of running unprotected on the previous
+  revision, and the verified requirement raises the privacy floor:
+  withdrawing or revoking it does not lead back to an unprotected revision.
+  Traffic resumes only with a protected revision this runtime can enforce,
+  or a newer, explicitly signed `off`. A candidate with an invalid signature
+  never refuses or raises anything.
+- Once a protected block was accepted or refused, a later revision without
+  one is refused (`privacy_policy_downgrade`); only a newer, explicitly
+  signed `off` lowers the floor. A connected runtime with `privacy` answers
+  503 `privacy_policy_unavailable` until its first verified deployment. The
+  gate runs again before every model call and tool call, also the one an
+  approval resumes: a refusal or a revocation of the pinned revision
+  (`privacy_policy_revoked`) arriving during a turn stops the next call.
+- The floor lives in the sync state. Pass `stateStore: (environmentId) =>
+  new FileRuntimeStateStore(path)` (`glirastes/sync`, one file per
+  environment) to `createGlirastes` so it survives a restart; without it,
+  a restarted runner knows a refused requirement again only while the
+  Platform still offers it. An unreadable state file keeps a runtime with
+  `privacy` at `privacy_policy_unavailable`.
+- With `metrics` on the handler, decisions under a policy are also counted
+  as content-free `privacy.decisions` events (codes from
+  `PRIVACY_DECISION_CODES`, windows of at most 60 s, a bounded buffer that
+  drops and counts the oldest windows). A rejected batch never changes
+  enforcement. The counts show protected calls that were reported, not that
+  no other path sent content.
+- Speech: pass `policy: () => glirastes.privacyPolicy()?.speech ?? null` to
+  `createRecordingTranscriptionHandler` (`SpeechPrivacyPolicy`). It is read
+  per request; a protected policy forces a private service address and caps
+  the duration, and a missing, revoked or malformed policy answers 503.
+  `glirastes.privacyPolicy()` throws the same `PrivacyError` a chat turn
+  would.
 
 ## Errors and diagnostics
 
