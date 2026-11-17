@@ -114,6 +114,11 @@ export interface ReadResultGuard {
    * answers that the turn's budget is used up instead.
    */
   failedRead?: () => Promise<'budget_exhausted' | void>;
+  /**
+   * The hint of a `budget_exhausted` answer: the reached limits and their
+   * use. Without it (or for undefined) the answer keeps a fixed hint.
+   */
+  budgetExhaustedHint?: () => string | undefined;
 }
 
 const DESCRIPTION = 'Read more of a large tool result that was shown as an overview with a "_result" marker: '
@@ -578,6 +583,7 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
         }
       : {}),
     execute: async (input) => {
+      const budgetExhausted = () => ({ ...BUDGET_EXHAUSTED, hint: guard.budgetExhaustedHint?.() ?? BUDGET_EXHAUSTED.hint });
       let paths: ParsedPath[] | undefined;
       if (input.fields && input.fields.length > 0) {
         paths = [];
@@ -589,7 +595,7 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
           else invalid.push(index + 1);
         });
         if (invalid.length > 0) {
-          if (await guard.failedRead?.() === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };
+          if (await guard.failedRead?.() === 'budget_exhausted') return budgetExhausted();
           return {
             error: 'invalid_fields',
             hint: `Field path(s) number ${listedPositions(invalid)} are not valid. ${INVALID_FIELDS_FORMS}`,
@@ -597,7 +603,7 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
         }
         const mixed = mixedArraySelections(paths);
         if (mixed.length > 0) {
-          if (await guard.failedRead?.() === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };
+          if (await guard.failedRead?.() === 'budget_exhausted') return budgetExhausted();
           return {
             error: 'invalid_fields',
             hint: `Field paths number ${listedPositions(mixed)} select both every entry ("[]") and single entries ("[2]") `
@@ -608,12 +614,12 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
       }
       const handle = store.get(input.resultId);
       if (!handle) {
-        if (await guard.failedRead?.() === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };
+        if (await guard.failedRead?.() === 'budget_exhausted') return budgetExhausted();
         return expired(input.resultId);
       }
       const decision = await guard.beforeRead?.({ handle, input });
       if (decision === 'denied') return { ...DENIED };
-      if (decision === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };
+      if (decision === 'budget_exhausted') return budgetExhausted();
       const startedAt = Date.now();
       // A private copy: nothing of the stored result leaves by reference.
       const result = JSON.parse(JSON.stringify(readResultHandle(handle, input, paths))) as Record<string, unknown>;

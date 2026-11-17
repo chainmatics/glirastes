@@ -5,7 +5,7 @@
  */
 import type { Principal } from '../../../contracts/index.js';
 import type { ManagedTurnGuard } from '../../../runtime/index.js';
-import { isRecoverableToolDenial, ToolExecutionDeniedError } from '../../../runtime/tool-denial.js';
+import { isRecoverableToolDenial, readBudgetExhaustedHint, ToolExecutionDeniedError } from '../../../runtime/tool-denial.js';
 import {
   createReadResultTool,
   createResultStore,
@@ -92,6 +92,10 @@ export function createTurnResults(options: {
   const guard: ReadResultGuard = managedTurn && resolvePrincipal
     ? {
         failedRead: countFailedRead,
+        budgetExhaustedHint: () => {
+          const { state, reasons } = managedTurn.tracker.evaluate();
+          return state === 'hard-limit' ? readBudgetExhaustedHint(managedTurn.tracker.limitStates(reasons)) : undefined;
+        },
         // Like a domain tool's approval check: the conditions that end the
         // turn throw here. A handle of another principal is answered with
         // result_denied by execute instead.

@@ -104,8 +104,32 @@ const LIMIT_LABELS: Readonly<Record<BudgetReason, (limit: number) => string>> = 
  * tool arguments or principal data.
  */
 export function budgetDenialMessage(budget: ReadonlyArray<BudgetLimitState>): string {
-  const limits = budget.map((state) => LIMIT_PHRASES[state.dimension](state)).join('; ');
-  return `Tool call not executed: ${limits}. Do not retry in this turn; tell the user which requests are still open.`;
+  return `Tool call not executed: ${limitPhrases(budget)}. Do not retry in this turn; tell the user which requests are still open.`;
+}
+
+function limitPhrases(budget: ReadonlyArray<BudgetLimitState>): string {
+  return budget.map((state) => LIMIT_PHRASES[state.dimension](state)).join('; ');
+}
+
+/**
+ * `read_result`'s hint when the turn budget is used up: the same limit and
+ * use as `budgetDenialMessage`, and that the answer is incomplete.
+ */
+export function readBudgetExhaustedHint(budget: ReadonlyArray<BudgetLimitState>): string {
+  return `Not read: ${limitPhrases(budget)}. Do not read further in this turn; answer with what you have `
+    + 'and tell the user that the answer is incomplete.';
+}
+
+/**
+ * The model's instruction for the one tool-free final call at the budget:
+ * say plainly that it had to stop, what it finished, what is still open, and
+ * that an answer read in parts is incomplete.
+ */
+export function finalSummaryInstruction(budget: ReadonlyArray<BudgetLimitState>): string {
+  return `This turn has to end now: ${limitPhrases(budget)}. No more tools can be called. `
+    + 'Write your final answer to the user now: say plainly that you had to stop at a limit, summarize what you finished, '
+    + 'and list what is still open. If you were reading a result in parts, say that your answer is incomplete. '
+    + 'Do not announce further steps; the user can ask you to continue in a new message.';
 }
 
 /** Short texts the chat shows for a denied tool call, per reason. */

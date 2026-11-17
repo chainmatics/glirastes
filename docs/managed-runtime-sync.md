@@ -632,8 +632,100 @@ Several reached limits are joined (`; ` for the model, a space in the chat).
 The texts carry numbers only, no tool arguments or principal data. The
 error keeps `reason: 'budget_exhausted'` and adds `budget`, one
 `{ dimension, limit, used }` per reached limit; the metric event and
-`onBudgetSignal` are unchanged. After the refused calls the turn gets one
-final step without tools and ends with `safety-stop` / `budget_exhausted`.
+`onBudgetSignal` are unchanged. The turn ends with `safety-stop` /
+`budget_exhausted`; how it closes its answer is described next.
+
+`read_result` answers a read at the used-up budget with
+`{ error: 'budget_exhausted', hint }`, the hint in the same words:
+`Not read: the limit of 8 tool calls per turn is reached (8 used). Do not read
+further in this turn; answer with what you have and tell the user that the
+answer is incomplete.`
+
+#### What the user sees when a turn stops at a limit
+
+The handler checks the budget after every model step. When a limit is
+reached (or the handler's step cap, `maxSteps`), no further tool runs and the
+turn ends in one of two ways:
+
+| Reached limit | How the turn ends |
+| --- | --- |
+| `maxToolCalls`, `maxRepeatedFingerprint`, `maxConsecutiveErrors` (tool limits) | one final model call without tools, with an instruction for this call only: say plainly that it had to stop at a limit, summarize what is finished, list what is still open, and say that an answer read in parts is incomplete |
+| `maxInputTokens`, `maxOutputTokens`, `maxEstimatedCostUsd`, `totalTimeoutMs`, `maxModelSteps`, the step cap `maxSteps` | no further model call (it would exceed the limit itself); the handler closes the answer with the stop notice |
+
+The handler also adds the stop notice when the final summary call fails or
+says nothing, and when the turn's time limit aborts a running model call.
+When several limits are reached at once and one of them is not a tool limit,
+the turn gets no summary call. A turn that answers within its limits, a
+clarification and a turn the user cancels get no notice. The notice is
+written once, as its own text part of the assistant message (before
+`finish`, the `error` part or the `abort` part), so the browser keeps it with
+the message and the next turn's model sees that the earlier answer was cut
+short. It names the reached limit and its value, never usage of other
+dimensions, tool data or principal data:
+
+```text
+I had to stop here: the limit for this request was reached (input tokens: 40,000). The answer above may be incomplete.
+```
+
+A turn that showed no text of the model before the stop (only tool calls) gets
+the other form, since there is no answer above to speak of:
+
+```text
+I could not finish this request: the limit for this request was reached (input tokens: 40,000).
+```
+
+Neither form invites the user to "continue": a result handle of the stopped
+turn has expired by then, so the next turn would load the data again and may
+reach the same limit.
+
+The texts come from one table keyed by reason. `closing` and
+`closingWithoutAnswer` are the whole notice with `{reason}`; each reason has a text with `{limit}` (the number formatted
+for `locale`, a duration as `150 ms` or `60 s`). Several reached limits are
+joined with `; `. The handler ships English and German defaults (German for a
+`locale` starting with `de`), exported as `DEFAULT_BUDGET_STOP_TEXTS` from
+`glirastes/server/nextjs`; `budgetStopTexts` on `createAiChatHandler`
+replaces single keys:
+
+| Key | English default |
+| --- | --- |
+| `closing` | `I had to stop here: {reason}. The answer above may be incomplete.` |
+| `closingWithoutAnswer` | `I could not finish this request: {reason}.` |
+| `maxSteps`, `maxModelSteps` | `the step limit for this request was reached ({limit} steps)` |
+| `maxToolCalls` | `the limit for this request was reached (tool calls: {limit})` |
+| `totalTimeoutMs` | `the time limit for this request was reached ({limit})` |
+| `maxInputTokens` | `the limit for this request was reached (input tokens: {limit})` |
+| `maxOutputTokens` | `the limit for this request was reached (output tokens: {limit})` |
+| `maxEstimatedCostUsd` | `the cost limit for this request was reached ({limit} USD)` |
+| `maxRepeatedFingerprint` | `the same tool call kept returning the same result (limit: {limit})` |
+| `maxConsecutiveErrors` | `too many tool calls failed in a row (limit: {limit})` |
+
+```ts
+createAiChatHandler({
+  locale: 'en-US',
+  budgetStopTexts: { closing: 'Stopped early: {reason}.' },
+  // ...
+});
+```
+
+An unknown key or an empty text throws when the handler is created. The
+status (`safety-stop`), the pipeline message (`Stopped at runtime budget:
+<dimension>.`; a turn aborted by `totalTimeoutMs` now says so instead of
+`Stopped by user.`), `onFinish` and the metric event are unchanged. A browser
+that wants its own hint can read the `data-pipeline-state` part: `status:
+'safety-stop'` and the dimension codes in `message`; there is no separate
+machine-readable reason field.
+
+Every tool result of a turn is sent again with every later model step, so
+`maxInputTokens` counts it once per remaining step. Paging through a large
+result with `read_result` (pages of up to `maxResultChars`, default 16,000
+characters, roughly 4,000 tokens) therefore grows the turn's input tokens
+quadratically. In a test with 45 entries of about 3,000 characters read in
+pages of 10 (each page cut to 16,000 characters), the model calls cost about
+0.1k, 0.7k, 4.7k, 8.7k, 12.6k and 16.6k input tokens (estimated at four
+characters per token, without a real system prompt and tool definitions):
+each page adds about 4k to every later call, and the sixth call passes the
+default `maxInputTokens` of 40,000. The page fetched by the last call is
+never seen by the model.
 
 To allow more tool calls per turn, raise the local limit:
 `createGlirastes({ localLimits: { maxToolCalls: 16 } })` (the runtime
