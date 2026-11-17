@@ -49,8 +49,8 @@ Choose the backend host and browser UI independently:
 The public image needs no registry login and no customer-written Node server:
 
 ```sh
-docker pull ghcr.io/chainmatics/glirastes-runtime:0.14.0
-docker run --rm ghcr.io/chainmatics/glirastes-runtime:0.14.0 --help
+docker pull ghcr.io/chainmatics/glirastes-runtime:0.15.0
+docker run --rm ghcr.io/chainmatics/glirastes-runtime:0.15.0 --help
 ```
 
 Run **one active service per app/environment**, independently of backend replica
