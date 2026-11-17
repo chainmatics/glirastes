@@ -59,16 +59,18 @@ export function createInMemoryMemoryStore(): MemoryStore {
  * Checks a store against the contract the chat handler relies on and throws
  * on the first violation. Run it in a test against the real database; it
  * writes into two throwaway scopes and removes what it wrote. Pass `authorId`
- * when the store only accepts real ids there, e.g. a foreign key to users.
+ * when the store only accepts real ids there, e.g. a foreign key to users,
+ * and `keys` when it only accepts the keys of a real user and workspace
+ * (use ones without notes).
  */
 export async function verifyMemoryStore(
   store: MemoryStore,
-  options: { authorId?: string } = {},
+  options: { authorId?: string; keys?: { user: string; shared: string } } = {},
 ): Promise<void> {
   const authorId = options.authorId ?? 'author-1';
   const run = globalThis.crypto.randomUUID();
-  const user: MemoryScope = { kind: 'user', key: `verify-${run}` };
-  const shared: MemoryScope = { kind: 'shared', key: `verify-${run}` };
+  const user: MemoryScope = { kind: 'user', key: options.keys?.user ?? `verify-${run}` };
+  const shared: MemoryScope = { kind: 'shared', key: options.keys?.shared ?? `verify-${run}` };
   const fail = (message: string): never => {
     throw new Error(`verifyMemoryStore: ${message}`);
   };

@@ -126,8 +126,9 @@ const DEFAULT_COMPACT_SHARE = 0.3;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const CHARS_PER_TOKEN = 4;
 const SUMMARY_TIMEOUT_MS = 20_000;
-const MAX_TRANSCRIPT_CHARS = 40_000;
-const MAX_MESSAGE_CHARS = 2_000;
+// One summary call reads at most a chunk; one turn folds at most MAX_FOLD_CHARS.
+const SUMMARY_CHUNK_CHARS = 12_000;
+const MAX_FOLD_CHARS = 48_000;
 const MAX_TOOL_CHARS = 400;
 const MESSAGE_OVERHEAD_CHARS = 64;
 
@@ -254,33 +255,69 @@ function splitTurns(messages: UiMessageLike[]): UiMessageLike[][] {
 const clip = (text: string, max: number) =>
   (text.length > max ? `${text.slice(0, max)} […]` : text);
 
-function transcriptOf(messages: UiMessageLike[]): string {
+function transcriptOf(message: UiMessageLike): string {
   const lines: string[] = [];
-  for (const message of messages) {
-    const speaker = message.role === 'user' ? 'User' : 'Assistant';
-    const text = textOf(message).trim();
-    if (text) lines.push(`${speaker}: ${clip(text, MAX_MESSAGE_CHARS)}`);
-    for (const part of partsOf(message)) {
-      const name = toolNameOf(part);
-      if (name === null || part.state !== 'output-available') continue;
-      const compact = (value: unknown) => clip(
-        JSON.stringify(compactToolOutput(value, { maxItems: 5, maxStringLength: 120 })) ?? '',
-        MAX_TOOL_CHARS,
-      );
-      lines.push(`Tool ${name}: ${compact(part.input)} -> ${compact(part.output)}`);
-    }
+  const speaker = message.role === 'user' ? 'User' : 'Assistant';
+  const text = textOf(message).trim();
+  if (text) lines.push(`${speaker}: ${text}`);
+  for (const part of partsOf(message)) {
+    const name = toolNameOf(part);
+    if (name === null || part.state !== 'output-available') continue;
+    // Tool data can be looked up again, so it is the only thing cut short.
+    const compact = (value: unknown) => clip(
+      JSON.stringify(compactToolOutput(value, { maxItems: 5, maxStringLength: 120 })) ?? '',
+      MAX_TOOL_CHARS,
+    );
+    lines.push(`Tool ${name}: ${compact(part.input)} -> ${compact(part.output)}`);
   }
+  return lines.join('\n');
+}
+
+interface FoldStep {
+  /** Id of the last message the step covers. */
+  upTo: string;
+  /** Transcript pieces, each within one summary call. */
+  pieces: string[];
+}
+
+/**
+ * Cuts the messages to fold into steps of whole messages. A summary only
+ * ever claims what a step read in full: messages beyond the budget of one
+ * turn are left out and stay verbatim until a later turn folds them.
+ */
+function foldSteps(messages: UiMessageLike[]): FoldStep[] {
+  const steps: FoldStep[] = [];
+  let open: { text: string; upTo?: string } = { text: '' };
   let total = 0;
-  const kept: string[] = [];
-  for (let index = lines.length - 1; index >= 0; index--) {
-    total += lines[index]!.length + 1;
-    if (total > MAX_TRANSCRIPT_CHARS) {
-      kept.unshift('[older part omitted]');
-      break;
+  const close = () => {
+    if (open.upTo && open.text) steps.push({ upTo: open.upTo, pieces: [open.text] });
+    else if (open.upTo && steps.length > 0) steps.at(-1)!.upTo = open.upTo;
+    if (open.upTo) open = { text: '' };
+  };
+  for (const message of messages) {
+    let block = transcriptOf(message);
+    if (total > 0 && total + block.length > MAX_FOLD_CHARS) break;
+    if (block.length > MAX_FOLD_CHARS) {
+      // A single message beyond the budget of a turn keeps its start and its end.
+      const half = Math.floor(MAX_FOLD_CHARS / 2);
+      block = `${block.slice(0, half)}\n[…]\n${block.slice(-half)}`;
     }
-    kept.unshift(lines[index]!);
+    total += block.length;
+    const id = typeof message.id === 'string' ? message.id : undefined;
+    if (block.length > SUMMARY_CHUNK_CHARS) {
+      close();
+      const pieces: string[] = [];
+      for (let at = 0; at < block.length; at += SUMMARY_CHUNK_CHARS) pieces.push(block.slice(at, at + SUMMARY_CHUNK_CHARS));
+      if (id) steps.push({ upTo: id, pieces });
+      else open = { text: pieces.join('') };
+      continue;
+    }
+    if (open.text.length + block.length > SUMMARY_CHUNK_CHARS) close();
+    open.text = open.text ? `${open.text}\n${block}` : block;
+    if (id) open.upTo = id;
   }
-  return kept.join('\n');
+  close();
+  return steps;
 }
 
 const summaryPrompt = (maxWords: number) => [
@@ -388,9 +425,8 @@ function createNoteTools(
       if (set.entries.some((entry) => entry.content.toLowerCase() === input.note.toLowerCase())) {
         return { success: true, alreadyKnown: true };
       }
-      if (set.entries.length >= set.max) {
-        return { success: false, error: `Memory is full (${set.max} notes). Remove a note that is no longer needed first.` };
-      }
+      const full = `Memory is full (${set.max} notes). Remove a note that is no longer needed first.`;
+      if (set.entries.length >= set.max) return { success: false, error: full };
       try {
         const entry = set.store && set.scope
           ? await set.store.add(set.scope, {
@@ -398,6 +434,14 @@ function createNoteTools(
               ...(options.authorId ? { authorId: options.authorId } : {}),
             })
           : { id: globalThis.crypto.randomUUID(), content: input.note, createdAt: new Date().toISOString() };
+        if (set.store && set.scope) {
+          // Another request may have filled the scope meanwhile: the note that landed beyond the limit goes.
+          const stored = await set.store.list(set.scope);
+          if (stored.findIndex((candidate) => candidate.id === entry.id) >= set.max) {
+            await set.store.remove(set.scope, entry.id);
+            return { success: false, error: full };
+          }
+        }
         set.entries.push(entry);
         options.changed(set);
         return { success: true, scope: set.kind };
@@ -550,31 +594,38 @@ export function createChatMemory(
             historyTokens = threshold * 2;
             const turns = splitTurns(live);
             const fold = turns.slice(0, Math.max(0, turns.length - 1 - (compaction.options.keepTurns ?? 1))).flat();
-            const upTo = fold.at(-1)?.id;
-            if (fold.length > 0 && typeof upTo === 'string' && estimateTokens(live) >= threshold) {
+            const steps = fold.length > 0 && estimateTokens(live) >= threshold ? foldSteps(fold) : [];
+            if (steps.length > 0) {
               const maxTokens = compaction.options.maxSummaryTokens ?? 350;
+              const signal = AbortSignal.timeout(SUMMARY_TIMEOUT_MS);
+              // What the finished steps cover; a failure keeps it and loses only the rest.
+              let done: MemorySummary | undefined;
               compacting = (async () => {
-                const input = [
-                  `Summary so far:\n${found?.summary.summary || '(none)'}`,
-                  `Next part of the conversation:\n${transcriptOf(fold)}`,
-                ].join('\n\n');
-                const signal = AbortSignal.timeout(SUMMARY_TIMEOUT_MS);
-                const result = await generateText({
-                  model: (config.model ?? model) as Parameters<typeof generateText>[0]['model'],
-                  system: summaryPrompt(Math.floor(maxTokens * 0.7)),
-                  prompt: anonymize ? await anonymize(input) : input,
-                  maxOutputTokens: maxTokens,
-                  temperature: 0,
-                  abortSignal: abortSignal ? AbortSignal.any([abortSignal, signal]) : signal,
-                });
-                const text = (restore ? await restore(result.text) : result.text).trim();
-                if (!text) return;
-                emit({
-                  type: MEMORY_SUMMARY_PART,
-                  data: { summary: text.slice(0, MEMORY_MAX_SUMMARY_LENGTH), upTo } satisfies MemorySummary,
-                });
+                let summary = found?.summary.summary ?? '';
+                for (const step of steps) {
+                  for (const piece of step.pieces) {
+                    const input = [
+                      `Summary so far:\n${summary || '(none)'}`,
+                      `Next part of the conversation:\n${piece}`,
+                    ].join('\n\n');
+                    const result = await generateText({
+                      model: (config.model ?? model) as Parameters<typeof generateText>[0]['model'],
+                      system: summaryPrompt(Math.floor(maxTokens * 0.7)),
+                      prompt: anonymize ? await anonymize(input) : input,
+                      maxOutputTokens: maxTokens,
+                      temperature: 0,
+                      abortSignal: abortSignal ? AbortSignal.any([abortSignal, signal]) : signal,
+                    });
+                    const text = (restore ? await restore(result.text) : result.text).trim();
+                    if (!text) return;
+                    summary = text.slice(0, MEMORY_MAX_SUMMARY_LENGTH);
+                  }
+                  done = { summary, upTo: step.upTo };
+                }
               })().catch((error: unknown) => {
                 if (!abortSignal?.aborted) onError?.(error);
+              }).then(() => {
+                if (done && !abortSignal?.aborted) emit({ type: MEMORY_SUMMARY_PART, data: done });
               });
             }
           }

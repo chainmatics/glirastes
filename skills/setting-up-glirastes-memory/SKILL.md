@@ -66,7 +66,9 @@ is extracted silently.
 4. Add the store test from [references/store-test.md](references/store-test.md)
    and run it against the development database. `verifyMemoryStore(store)`
    must pass; pass `{ authorId }` with a real user id when the author column
-   is a foreign key.
+   is a foreign key, and `{ keys: { user, shared } }` with a test user and
+   tenant that have no notes when the store binds its keys to the session
+   and refuses any other key.
 5. Configure the handler (see Configuration). `scope` returns the user id and
    the tenant id of the verified session.
 6. Browser notes chosen: pass a `createLocalMemoryStore` to the chat

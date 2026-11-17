@@ -195,6 +195,80 @@ describe('chat memory: auto-compact', () => {
     expect(onError).toHaveBeenCalledOnce();
   });
 
+  it('reads a long message to its end, in several summary calls', async () => {
+    const chat = chatModel();
+    const summary = summaryModel();
+    const handler = createAiChatHandler({
+      tools: registry, model: chat.model, systemPrompt: 'App prompt.',
+      memory: { model: summary.model, chat: { autoCompact: 120 } },
+    });
+    const long = `${'Background of the project. '.repeat(600)}The budget limit is 4711 euros.`;
+
+    const parts = await streamParts(await handler(request([user('u1', long), ...conversation.slice(1)])));
+
+    expect(summary.prompts.length).toBeGreaterThan(1);
+    expect(summary.prompts.join('')).toContain('4711 euros');
+    expect(parts.find((part) => part.type === 'data-memory-summary')).toMatchObject({ data: { upTo: 'a2' } });
+  });
+
+  it('covers only what one turn can read and leaves the rest verbatim', async () => {
+    const chat = chatModel();
+    const summary = summaryModel();
+    const handler = createAiChatHandler({
+      tools: registry, model: chat.model, systemPrompt: 'App prompt.',
+      memory: { model: summary.model, chat: { autoCompact: 120 } },
+    });
+    const block = (marker: string) => `${marker} ${'x'.repeat(20_000)}`;
+    const messages = [
+      user('u1', block('first-block')), assistant('a1', 'Ok.'),
+      user('u2', block('second-block')), assistant('a2', 'Ok.'),
+      user('u3', block('third-block')), assistant('a3', 'Ok.'),
+      user('u4', 'And now?'), assistant('a4', 'Ok.'),
+      user('u5', 'Go on.'),
+    ];
+
+    const parts = await streamParts(await handler(request(messages)));
+
+    expect(summary.prompts.join('')).toContain('second-block');
+    expect(summary.prompts.join('')).not.toContain('third-block');
+    expect(parts.find((part) => part.type === 'data-memory-summary')).toMatchObject({ data: { upTo: 'a2' } });
+  });
+
+  it('keeps the steps that were summarized when a later one fails', async () => {
+    const chat = chatModel();
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        if (++calls > 1) throw new Error('summary model down');
+        return {
+          content: [{ type: 'text', text: 'First part.' }],
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage,
+          warnings: [],
+        } as never;
+      },
+    });
+    const onError = vi.fn();
+    const handler = createAiChatHandler({
+      tools: registry, model: chat.model, systemPrompt: 'App prompt.',
+      memory: { model, chat: { autoCompact: 120 }, onError },
+    });
+    const block = (marker: string) => `${marker} ${'x'.repeat(10_000)}`;
+    const messages = [
+      user('u1', block('one')), assistant('a1', 'Ok.'),
+      user('u2', block('two')), assistant('a2', 'Ok.'),
+      user('u3', 'And now?'), assistant('a3', 'Ok.'),
+      user('u4', 'Go on.'),
+    ];
+
+    const parts = await streamParts(await handler(request(messages)));
+
+    expect(parts.find((part) => part.type === 'data-memory-summary')).toMatchObject({
+      data: { summary: 'First part.', upTo: 'a1' },
+    });
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
   it('reads the threshold from GLIRASTES_AUTOCOMPACT', () => {
     expect(parseAutoCompact('0.3')).toEqual({ kind: 'share', value: 0.3 });
     expect(parseAutoCompact('8000')).toEqual({ kind: 'tokens', value: 8000 });
@@ -309,6 +383,21 @@ describe('chat memory: notes', () => {
 
     expect(await remember.execute({ note: 'Second note.', scope: 'user' }, { currentDate: new Date(), locale: 'en-US' }))
       .toMatchObject({ success: false });
+  });
+
+  it('takes back a note that another request pushed beyond the limit', async () => {
+    const store = createInMemoryMemoryStore();
+    const scope = { kind: 'user', key: 'user-1' } as const;
+    const memory = createChatMemory({
+      chat: false, user: { store, maxNotes: 1 }, scope: () => ({ user: 'user-1' }),
+    }, {})!;
+    const turn = await memory.begin(new Request('https://app.example'), {});
+    await store.add(scope, { content: 'Written by a parallel request.' });
+    const remember = turn.tools.find((tool) => tool.id === 'memory_remember')!;
+
+    expect(await remember.execute({ note: 'Second note.', scope: 'user' }, { currentDate: new Date(), locale: 'en-US' }))
+      .toMatchObject({ success: false });
+    expect((await store.list(scope)).map((entry) => entry.content)).toEqual(['Written by a parallel request.']);
   });
 
   it('needs a scope callback for a store', () => {
