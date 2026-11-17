@@ -1267,3 +1267,57 @@ describe('review round: details no other test pins', () => {
     expect(Object.keys(overview._result.arrays!)).toEqual(['B', 'b']);
   });
 });
+
+describe('final check: an entry the answer does not show is never counted as returned', () => {
+  const handleOf = (value: Record<string, unknown>) => (
+    { id: 'ro_abcdefgh', toolName: 't', readOnly: true, maxChars: 1_000, value } as ResultHandle
+  );
+  const read = (value: Record<string, unknown>, fields: string[], offset = 0) => readResultHandle(
+    handleOf(value),
+    { resultId: 'ro_abcdefgh', offset } as ReadResultInput,
+    fields.map((field) => parseResultPath(field)!),
+  ) as { _result: ReadResultMarker; data?: unknown; _truncated?: unknown };
+
+  it('does not claim an item of an indexed entry that the cut removed', () => {
+    const entry = {
+      status: 'open',
+      s0: 'y'.repeat(400),
+      items: Array.from({ length: 25 }, (_, j) => ({ j, t: 'q'.repeat(600) })),
+      more: Array.from({ length: 10 }, (_, j) => ({ j })),
+    };
+    const answer = read({ data: [entry, entry] }, ['data[0]']);
+    expect(JSON.stringify(answer).length).toBeLessThanOrEqual(1_000);
+    const items = (answer.data as { 0?: { items?: unknown[] } } | undefined)?.[0]?.items;
+    // Either the item is there, or the answer says that nothing was returned.
+    if (answer._result.returned === 1) expect(items).toHaveLength(1);
+    else {
+      expect(answer._result.returned).toBe(0);
+      expect(answer._result.hint).toContain('does not fit');
+    }
+    expect(answer._result.hint).toMatch(/^Incomplete/);
+    expect(answer._result.nextOffset).toBe(1);
+  });
+
+  it('does not count an entry of which only a placeholder is left', () => {
+    const sub = {
+      ...Object.fromEntries(Array.from({ length: 6 }, (_, k) => [`f${k}`, 'z'.repeat(100)])),
+      list: Array.from({ length: 30 }, (_, j) => ({ j, t: 'w'.repeat(40) })),
+    };
+    const answer = read({ data: [{ sub: { a: 1 } }, { sub }, { sub: { a: 2 } }] }, ['data'], 1);
+    expect(JSON.stringify(answer)).not.toContain('[omitted: object');
+    expect(answer._result).toMatchObject({ returned: 0, total: 3, nextOffset: 2 });
+    expect(answer._result.hint).toContain('does not fit');
+  });
+
+  it('shows the entries of a page that all lack the selected field', () => {
+    const data = Array.from({ length: 6 }, (_, i) => ({ id: i, ...(i >= 3 ? { published: { label: `p${i}` } } : {}) }));
+    const answer = readResultHandle(
+      { ...handleOf({ data }), maxChars: 16_000 },
+      { resultId: 'ro_abcdefgh', limit: 3 } as ReadResultInput,
+      [parseResultPath('data[].published.label')!],
+    );
+    expect(answer.data).toEqual([{}, {}, {}]);
+    expect(answer._result).toMatchObject({ returned: 3, total: 6, nextOffset: 3 });
+    expect((answer._result as ReadResultMarker).unknownFields).toBeUndefined();
+  });
+});

@@ -207,13 +207,14 @@ function readHint(state: {
 }
 
 /** Leaf values in `value`, counted up to `stop`. */
-function countLeaves(value: unknown, stop: number): number {
+function countLeaves(value: unknown, stop: number, skipPlaceholders = false): number {
   let count = 0;
   const visit = (node: unknown): void => {
     if (count >= stop) return;
     if (Array.isArray(node)) node.forEach(visit);
     else if (typeof node === 'object' && node !== null) Object.values(node).forEach(visit);
-    else count += 1;
+    // What a cut puts in place of an object or array is not a value of the entry.
+    else if (!(skipPlaceholders && typeof node === 'string' && node.startsWith('[omitted: '))) count += 1;
   };
   visit(value);
   return count;
@@ -422,12 +423,14 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
     const output: Record<string, unknown> = { ...cut };
     const marker = output._truncated as { field?: string; showing?: number; total?: number; hint?: string } | undefined;
     if (!marker) return { freed: 0 };
-    const paged = single.primary !== undefined && marker.field === single.primary.path;
+    // The cut names its array with dots ("data.0.items"), the page with brackets ("data[0].items").
+    const paged = single.primary !== undefined
+      && marker.field === single.primary.path.replace(/\[(\d+)\]/g, '.$1');
     const { hint: _hint, field, showing, total, ...rest } = marker;
     const kept = paged ? rest : { ...(field !== undefined ? { field, showing, total } : {}), ...rest };
     const freed = JSON.stringify(marker).length - JSON.stringify(kept).length;
     delete output._truncated;
-    if ((paged && showing === 0) || (pageLeaves > 0 && countLeaves(output, 1) === 0)) return { freed };
+    if ((paged && showing === 0) || (pageLeaves > 0 && countLeaves(output, 1, true) === 0)) return { freed };
     output._truncated = kept;
     setOwn(output, '_result', single.marker);
     return { output: fits(output) ? output : undefined, freed };

@@ -327,7 +327,9 @@ export function projectResult(
       const entries = sliced ? value : windowed(value, route);
       const nextSliced = true;
       const projected = entries.map((entry) => visit(entry, child, childRoute, nextSliced));
-      if (projected.every((entry) => entry === undefined) && entries.length > 0) return undefined;
+      // Entries of the paged array that lack the field stay visible as "{}": a page
+      // without any is not an empty answer. Inside an entry such an array is left out.
+      if (sliced && projected.every((entry) => entry === undefined) && entries.length > 0) return undefined;
       return projected.map((entry) => (entry === undefined ? {} : entry));
     }
     if (isPlainObject(value)) {
