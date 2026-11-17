@@ -135,6 +135,40 @@ compiled into the app. App, environment and runner come from the Platform
 container (`glirastes-runtime`) is different: it reads its JSON configuration
 and the mounted artifact directory (see `docs/runtime-container.md`).
 
+**Commit `.glirastes/platform-connection.json`.** It holds no secret: the
+Platform URL, the app id and `runnerKey`, a random label `connect` writes once
+(`local-…`). The label is not a credential and not tied to a machine: the
+file must contain it, but no command uses its value, and the running app gets
+its runner from the Platform for its key. The file mode 0600 comes from the way `connect` writes files, not from
+the content. One developer connects and commits the file; every other
+developer and CI then run `glirastes sync` and `glirastes doctor` with their
+own `GLIRASTES_API_KEY`. Without the file both treat the project as not
+connected. The secret is only the key, which stays out of the repository.
+
+### What `doctor` checks about sign-in
+
+Two checks read `package.json` in the project root and nothing else; neither
+looks at framework code, so they behave the same for Next.js and for a NestJS
+or other embed:
+
+- **Signed-in user verification** (`E-SCOPE-003`, fails): passes when
+  `package.json` declares `"glirastes": { "principal": "server-verified" }`.
+  The declaration is the app's statement that the principal of every turn is
+  resolved on the server from the verified session (for example a NestJS guard
+  that authenticates the request before `chatTurn()` receives the principal).
+  Set it only once that is implemented and tested; `doctor` does not verify
+  the code, and the declaration never replaces the endpoint's own
+  authorization.
+- **Sign-in integration** (`E-SCOPE-101`, warning): passes when a known sign-in
+  package is a dependency (`@azure/msal-node`, `@auth0/nextjs-auth0`,
+  `@clerk/nextjs`, `@supabase/ssr`, `@auth/core`, `next-auth`, `better-auth`).
+  An app with its own guard (Passport, a JWT guard) keeps the warning; it is
+  informational.
+
+Both are local checks: neither result is sent to the Platform, and
+`glirastes sync` does not look at them. `doctor` itself reports `fail` and
+exits non-zero while a check fails.
+
 Every deployment uses the same secret, `GLIRASTES_API_KEY`, and names itself
 with `GLIRASTES_ENVIRONMENT=<environment key>`. The name is not a secret and
 must match `^[a-z0-9][a-z0-9-]{0,63}$`. `GLIRASTES_CONTROL_PLANE_URL` is only
