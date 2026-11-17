@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Privacy integration
 
+- Memory operations on a permitted off turn recheck its live privacy gate
+  before provider dispatch (including automatic retries), note mutations,
+  and summary publication. Revoking the pinned off policy also stops memory.
+
 - Protected chat explicitly refuses enabled chat memory with HTTP 503,
   `privacy_unsupported_content`, feature `chat-memory`, before note stores,
   note tools or the summary provider run. Use `memory: false` for protected

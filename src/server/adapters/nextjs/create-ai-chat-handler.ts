@@ -1513,7 +1513,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           error: 'Chat memory is unavailable in protected-text/v1. Disable memory for protected requests.'}, {status: 503});
       }
       const memoryTurn: ChatMemoryTurn | undefined = chatMemory && !directCommand
-        ? await chatMemory.begin(req, body.value)
+        ? await chatMemory.begin(req, body.value, {beforeOperation: beforeModelStep})
         : undefined;
       const withMemoryTools = (registry: ToolRegistry): ToolRegistry => {
         let next = registry;
@@ -2342,7 +2342,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
       onError?.(error, req);
-      if (privacy && isPrivacyError(error)) return privacyRefusal(error);
+      if (isPrivacyError(error)) return privacyRefusal(error);
       if (error instanceof ApprovalSecretMissingError) {
         return new Response(
           JSON.stringify({ error: error.code, message: error.message }),

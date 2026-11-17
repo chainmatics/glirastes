@@ -1,3 +1,5 @@
+import { createAiChatHandler } from '../../server/adapters/nextjs/create-ai-chat-handler.js';
+import { providerAdapters } from '../../server/pii-shield/__tests__/privacy-fixtures.js';
 import {
   createHash,
   generateKeyPairSync,
@@ -858,6 +860,37 @@ describe('createGlirastes with a privacy policy', () => {
       request: new Request('https://app.example/api/chat'),
       snapshot: { policyRevision: { revisionId: id('3908') } } as never,
     }))).toBe('privacy_policy_unavailable');
+  });
+
+  it.each(['openrouter','anthropic'] as const)('%s: signed off revocation blocks memory before provider HTTP', async (kind) => {
+    const {privateKey,publicKey} = generateKeyPairSync('ed25519');
+    const revocations: SecurityRevocation[] = [];
+    const http = platform({deployments:[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})],publicKey,revocations});
+    const runtime = track(createGlirastes({generated:generated(),localLimits:limits,env,fetchImpl:http.fetchImpl,push:false,
+      pollIntervalMs:10,onError:vi.fn(),stateStore:()=>new SharedDurableTestStore()}));
+    await runtime.ready();
+    const pinned = runtime.accepted()!.policyRevision;
+    const turn = await runtime.chatTurn(principal);
+    const provider = providerAdapters()[kind];
+    const handler = createAiChatHandler({tools:{},model:provider.model,systemPrompt:'Assistant',onError:()=>{},managedRuntime:turn.managedRuntime,
+      memory:{model:provider.model,chat:{autoCompact:10,keepTurns:0},scope:async()=>{
+        const unsigned={revocationId:id('3997'),environmentId:ENVIRONMENT_ID,effectiveAt:'2026-07-29T00:02:00.000Z',
+          reasonCode:'privacy-off-revoked',toolIds:[],agentRevisionIds:[],policyRevisionIds:[pinned.revisionId]};
+        revocations.push({...unsigned,signature:{algorithm:'Ed25519',keyId:'runtime-key',
+          value:sign(null,Buffer.from(canonicalRuntimeJson(unsigned)),privateKey).toString('base64url')}});
+        await vi.waitFor(()=>expect(runtime.revocations()).toHaveLength(1));
+        return {};
+      }},
+    });
+    const response=await handler(new Request('https://app.example/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:[
+      {id:'u1',role:'user',parts:[{type:'text',text:'private-memory-canary@example.invalid '.repeat(30)}]},
+      {id:'a1',role:'assistant',parts:[{type:'text',text:'Previous answer'}]},
+      {id:'u2',role:'user',parts:[{type:'text',text:'Continue'}]},
+    ]})}));
+    expect(response.status).toBe(503);
+    expect(await response.text()).toContain('privacy_policy_revoked');
+    expect(provider.requests).toEqual([]);
+    expect(JSON.stringify(http.calls)).not.toContain('private-memory-canary');
   });
 
   it.each([[false, false], [false, true], [true, false], [true, true]])('blocks revoked off (local infrastructure: %s, deployment withdrawn: %s)', async (configured, withdrawn) => {
