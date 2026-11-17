@@ -342,14 +342,16 @@ describe('pipeline mode', () => {
     });
     const pipeline = createLocalAiPipeline({ modules, classifier: { modules, model: classifierModel }, generateText: generateText as never });
     const handler = createAiChatHandler({ tools, model, pipeline, systemPrompt: SYSTEM, privacy: privacyConfig() });
-    const history = [
-      user(`Kennst du ${CANARY.colleague}?`, 'u0'),
-      { id: 'a0', role: 'assistant', parts: [{ type: 'text', text: `Ja, ${CANARY.colleague} (${CANARY.colleagueEmail}).` }] },
-    ];
-    const response = await handler(post([...history, user(`Schreib eine Mail an ${CANARY.colleagueEmail} wegen ${CANARY.name}`)]));
+    // A real first turn, so its history is bound and reaches the classifier.
+    const first = user(`Kennst du ${CANARY.colleague} (${CANARY.colleagueEmail})?`, 'u0');
+    const answer = await clientMessage(await streamChunks(await handler(post([first]))));
+    expect(JSON.stringify(answer)).toContain(CANARY.colleague);
+    classifierCalls.length = 0;
+    const response = await handler(post([first, answer, user(`Schreib eine Mail an ${CANARY.colleagueEmail} wegen ${CANARY.name}`)]));
     expect(response.status).toBe(200);
     await streamChunks(response);
     expect(classifierCalls).toHaveLength(1);
+    expect(JSON.stringify(classifierCalls[0]!.prompt)).toContain('Kennst du');
     expect(JSON.stringify(classifierCalls)).not.toMatch(CANARY_PATTERN);
     expect(JSON.stringify(calls)).not.toMatch(CANARY_PATTERN);
   });

@@ -719,7 +719,6 @@
   "runSchemaConsistencyTest": "Legacy pipeline test helper without LLM calls; not part of the Foundation workflow.",
   "runSmokeTest": "Legacy pipeline test helper without LLM calls; not part of the Foundation workflow.",
   "sanitizeModelMessages": "Lower-level Next.js adapter helper or type that createAiChatHandler uses internally.",
-  "sanitizeStoredMessages": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "scanNextAppRoutes": "Codegen internals behind glirastes tools refresh.",
   "searchTermVariants": "Runtime building block behind createGlirastes().chatTurn(); a standard integration never touches it (see its JSDoc).",
   "searchTokens": "Runtime building block behind createGlirastes().chatTurn(); a standard integration never touches it (see its JSDoc).",

@@ -1214,6 +1214,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
 
   async function handler(req: Request): Promise<Response> {
+    const turn: { privacy?: ChatPrivacyTurn } = {};
+    const response = await handleRequest(req, turn);
+    // A protected answer is bound as released, so the next turn may send it to a model again.
+    return turn.privacy ? turn.privacy.sealResponse(response) : response;
+  }
+
+  async function handleRequest(req: Request, turn: { privacy?: ChatPrivacyTurn }): Promise<Response> {
     const refused = checkRequestHeaders(req, { allowedOrigins, crossOriginProtection });
     if (refused) return refused;
     reportDefaultsOnce();
@@ -1221,17 +1228,18 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     try {
       const body = await readJsonBody(req, maxBodyBytes);
       if (!body.ok) return body.response;
-      const { messages: requestMessages, glirastesClientActions } = body.value as {
+      const { messages: sentMessages, glirastesClientActions } = body.value as {
         messages?: unknown;
         glirastesClientActions?: unknown;
       };
 
-      if (!Array.isArray(requestMessages)) {
+      if (!Array.isArray(sentMessages)) {
         return new Response(
           JSON.stringify({ error: 'messages must be an array' }),
           { status: 400, headers: { 'Content-Type': 'application/json' } },
         );
       }
+      let requestMessages: unknown[] = sentMessages;
       const attachmentRefusal = validateAttachments(requestMessages, attachments);
       if (attachmentRefusal) return attachmentRefusal;
       // Protected turn: scope, mapping and screenshot rule first. Nothing
@@ -1250,7 +1258,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           // Detector and mapping run once up front, so an outage is a clean
           // refusal before the stream starts, not an error inside it.
           await opened.session.pseudonymizeText(extractLastUserText(requestMessages));
+          // Only history this generation bound goes on; the new message is bound now.
+          requestMessages = await opened.admitHistory(requestMessages);
           privacyTurn = opened;
+          turn.privacy = opened;
         } catch (error) {
           onError(error, req);
           return privacyRefusal(error);
@@ -1259,6 +1270,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // A history the AI SDK could read in two ways (a tool call id in two
       // parts, a non-boolean approval answer) is refused before anything else.
       try {
+        // In a protected turn: the admitted history, which is all the AI SDK reads.
         assertUnambiguousToolHistory(requestMessages);
       } catch (error) {
         if (error instanceof ApprovalHistoryError) return approvalHistoryRefusal(error);
@@ -1643,6 +1655,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           conversationHistory = protectedHistory;
           const classifierBoundary = createPrivacyBoundary({
             session,
+            // userText and history were protected just above, with the collision check.
+            protectedPrompt: true,
             ...(privacy?.providerOptions ? { providerOptions: privacy.providerOptions } : {}),
             ...(privacy?.onBlocked ? { onBlocked: privacy.onBlocked } : {}),
           });
@@ -1838,7 +1852,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           const bound = privacyTurn.bind(model, latestUserMessage(processedMessages));
           model = bound.model;
           privacyContext = { boundary: bound.boundary, status: bound.status };
-          aiTools = wrapToolsForPrivacy(aiTools, bound.boundary, privacy?.receipts ? { receipts: privacy.receipts } : {});
+          aiTools = wrapToolsForPrivacy(aiTools, bound.boundary, {
+            ...(privacy?.receipts ? { receipts: privacy.receipts } : {}),
+            approvals: pipelineApprovals.verified,
+          });
         }
 
         // Lancer Approvals: delegate approval decisions to Glirastes
@@ -2042,7 +2059,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         const bound = privacyTurn.bind(model, latestUserMessage(processedMessages));
         model = bound.model as typeof model;
         legacyPrivacy = { boundary: bound.boundary, status: bound.status };
-        aiTools = wrapToolsForPrivacy(aiTools, bound.boundary, privacy?.receipts ? { receipts: privacy.receipts } : {});
+        aiTools = wrapToolsForPrivacy(aiTools, bound.boundary, {
+          ...(privacy?.receipts ? { receipts: privacy.receipts } : {}),
+          approvals: legacyApprovals.verified,
+        });
       }
 
       // Lancer Approvals: delegate approval decisions to Glirastes (legacy mode)

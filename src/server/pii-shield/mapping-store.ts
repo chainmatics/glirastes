@@ -42,12 +42,30 @@ export interface MappingEntry {
   category: string;
 }
 
+/**
+ * How a load found the mapping. `created`: no mapping existed (a new
+ * conversation, or one whose mapping was purged or lost: the two cannot be
+ * told apart). `renewed`: the previous generation expired and a new, empty
+ * one started. `continued`: the live generation was loaded.
+ */
+export type MappingOrigin = 'created' | 'renewed' | 'continued';
+
 export interface MappingSnapshot {
-  /** Bumped when an expired mapping restarts; entries of older generations are gone. */
-  generation: number;
+  /**
+   * Random id of the live generation, new whenever a mapping starts: on the
+   * first load, after expiry and after a purge or loss. Never reused, so
+   * bindings and tool receipts of an earlier generation cannot apply again.
+   */
+  generation: string;
   /** Bumped by every successful append (compare-and-set token). */
   version: number;
   entries: MappingEntry[];
+  origin: MappingOrigin;
+  /**
+   * Keyed digests of the chat content this generation produced or accepted
+   * (see `bind`). History outside this set is not sent to a model.
+   */
+  bindings: ReadonlySet<string>;
 }
 
 export interface AppendResult {
@@ -62,7 +80,8 @@ export interface PrivacyMappingStore {
   /**
    * Opens the mapping of a scope, creating it when absent. A deleted mapping
    * throws `privacy_mapping_deleted`; an expired one restarts as a new
-   * generation without entries (the next turn re-pseudonymizes its history).
+   * generation without entries or bindings, so history from before is no
+   * longer sent to a model (see `origin` and `bindings`).
    */
   load(scope: PrivacyScope): Promise<MappingSnapshot>;
   /**
@@ -72,10 +91,23 @@ export interface PrivacyMappingStore {
    */
   append(
     scope: PrivacyScope,
-    generation: number,
+    generation: string,
     entries: MappingEntry[],
     options?: { expectedVersion?: number },
   ): Promise<AppendResult>;
+  /**
+   * Keyed digest of one canonical history part, bound to the scope and
+   * generation. Not derivable without the store's key, so a client cannot
+   * produce a binding for content of its own.
+   */
+  bindingDigest(scope: PrivacyScope, generation: string, canonical: string): string;
+  /**
+   * Records content of this generation as known: what the protected path
+   * accepted from the principal and what the turn sent back. Throws
+   * `privacy_mapping_deleted`, or `privacy_mapping_conflict` when the
+   * generation is no longer live.
+   */
+  bind(scope: PrivacyScope, generation: string, digests: ReadonlyArray<string>): Promise<void>;
   /** Tombstones the mapping: later loads and appends throw `privacy_mapping_deleted`. */
   delete(scope: PrivacyScope): Promise<void>;
   /** Removes expired mappings and old tombstones. Returns the number of scopes removed. */
@@ -142,6 +174,21 @@ export function parsePrivacyKeyring(serialized: string | undefined): PrivacyKeyr
   return { activeKeyId: record.active, keys, indexKey };
 }
 
+/** A new generation id: 128 random bits, never derived from an earlier one. */
+export function newGeneration(): string {
+  return randomBytes(16).toString('hex');
+}
+
+/** Keyed digest of a canonical history part, bound to scope and generation. */
+export function bindingDigestWith(key: Uint8Array, scopeKey: string, generation: string, canonical: string): string {
+  return createHmac('sha256', key)
+    .update('glirastes-privacy-binding/v1\u0000')
+    .update(scopeKey)
+    .update(`\u0000${generation}\u0000`)
+    .update(canonical)
+    .digest('hex');
+}
+
 export function valueDigest(keyring: PrivacyKeyring, scopeKey: string, value: string): string {
   return createHmac('sha256', keyring.indexKey)
     .update(scopeKey)
@@ -156,11 +203,11 @@ export interface SealedEntry {
   sealed: string;
 }
 
-function aadOf(scopeKey: string, generation: number): Buffer {
+function aadOf(scopeKey: string, generation: string): Buffer {
   return Buffer.from(`glirastes-privacy-mapping/v1\u0000${scopeKey}\u0000${generation}`);
 }
 
-export function sealEntry(keyring: PrivacyKeyring, scopeKey: string, generation: number, entry: MappingEntry): SealedEntry {
+export function sealEntry(keyring: PrivacyKeyring, scopeKey: string, generation: string, entry: MappingEntry): SealedEntry {
   const key = keyring.keys[keyring.activeKeyId];
   if (!key) throw new PrivacyError('privacy_key_unavailable');
   const nonce = randomBytes(12);
@@ -175,7 +222,7 @@ export function sealEntry(keyring: PrivacyKeyring, scopeKey: string, generation:
 }
 
 /** Throws `privacy_key_unavailable` for an unknown key id or a failed authentication. */
-export function openEntry(keyring: PrivacyKeyring, scopeKey: string, generation: number, sealed: SealedEntry): MappingEntry {
+export function openEntry(keyring: PrivacyKeyring, scopeKey: string, generation: string, sealed: SealedEntry): MappingEntry {
   const key = keyring.keys[sealed.keyId];
   if (!key) throw new PrivacyError('privacy_key_unavailable');
   try {
@@ -202,12 +249,13 @@ export function openEntry(keyring: PrivacyKeyring, scopeKey: string, generation:
 // ---------------------------------------------------------------------------
 
 interface MemoryScope {
-  generation: number;
+  generation: string;
   version: number;
   idleExpiresAt: number;
   absoluteExpiresAt: number;
   deletedAt: number | null;
   entries: MappingEntry[];
+  bindings: Set<string>;
 }
 
 /**
@@ -223,6 +271,7 @@ export function createMemoryPrivacyMappingStore(lifetime: MappingLifetime = {}):
   const tombstoneTtl = lifetime.tombstoneTtlMs ?? DEFAULT_ABSOLUTE_TTL_MS;
   const now = () => (lifetime.now?.() ?? new Date()).getTime();
   const scopes = new Map<string, MemoryScope>();
+  const bindingKey = randomBytes(32);
 
   function live(record: MemoryScope, at: number): boolean {
     return record.idleExpiresAt > at && record.absoluteExpiresAt > at;
@@ -237,20 +286,29 @@ export function createMemoryPrivacyMappingStore(lifetime: MappingLifetime = {}):
       const at = now();
       let record = scopes.get(key);
       if (record?.deletedAt != null) throw new PrivacyError('privacy_mapping_deleted');
+      let origin: MappingOrigin = 'continued';
       if (!record || !live(record, at)) {
+        origin = record ? 'renewed' : 'created';
         record = {
-          generation: (record?.generation ?? 0) + 1,
+          generation: newGeneration(),
           version: 0,
           idleExpiresAt: Math.min(at + idleTtl, at + absoluteTtl),
           absoluteExpiresAt: at + absoluteTtl,
           deletedAt: null,
           entries: [],
+          bindings: new Set(),
         };
         scopes.set(key, record);
       } else {
         record.idleExpiresAt = Math.min(at + idleTtl, record.absoluteExpiresAt);
       }
-      return { generation: record.generation, version: record.version, entries: record.entries.map((e) => ({ ...e })) };
+      return {
+        generation: record.generation,
+        version: record.version,
+        entries: record.entries.map((e) => ({ ...e })),
+        origin,
+        bindings: new Set(record.bindings),
+      };
     },
     async append(scope, generation, entries, options) {
       assertPrivacyScope(scope);
@@ -279,18 +337,30 @@ export function createMemoryPrivacyMappingStore(lifetime: MappingLifetime = {}):
       record.idleExpiresAt = Math.min(at + idleTtl, record.absoluteExpiresAt);
       return { version: record.version, notInserted };
     },
+    bindingDigest(scope, generation, canonical) {
+      return bindingDigestWith(bindingKey, scopeKeyOf(scope), generation, canonical);
+    },
+    async bind(scope, generation, digests) {
+      assertPrivacyScope(scope);
+      const record = scopes.get(scopeKeyOf(scope));
+      const at = now();
+      if (record?.deletedAt != null) throw new PrivacyError('privacy_mapping_deleted');
+      if (!record || record.generation !== generation || !live(record, at)) throw new PrivacyError('privacy_mapping_conflict');
+      for (const digest of digests) record.bindings.add(digest);
+    },
     async delete(scope) {
       assertPrivacyScope(scope);
       const key = scopeKeyOf(scope);
       const at = now();
       const record = scopes.get(key);
       scopes.set(key, {
-        generation: record?.generation ?? 1,
+        generation: record?.generation ?? newGeneration(),
         version: (record?.version ?? 0) + 1,
         idleExpiresAt: at + tombstoneTtl,
         absoluteExpiresAt: at + tombstoneTtl,
         deletedAt: at,
         entries: [],
+        bindings: new Set(),
       });
     },
     async purgeExpired(date) {

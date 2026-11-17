@@ -19,6 +19,13 @@ import type {
 } from '../../types.js';
 import { defineTool } from '../../types.js';
 import { zodToCompactDescription } from './zod-compact.js';
+import {
+  AMBIGUOUS_HTTP_STATUS,
+  errorLeavesOutcomeUnknown,
+  isOutcomeUnknown,
+  markOutcomeUnknown,
+  ResponseUnreadableError,
+} from './tool-outcome.js';
 import type { ToolFailureClassifier } from '../../runtime/tool-failure.js';
 export { createLocalGuardrails } from './local-guardrails.js';
 export {
@@ -157,6 +164,7 @@ const MAX_TOOL_ERROR_BODY_CHARS = 4_000;
  * fields instead of silently losing them.
  */
 const ENDPOINT_FAILURE = Symbol.for('glirastes.endpointFailure');
+const OUTCOME_UNKNOWN_HINT = 'The outcome is unknown. Do not repeat the call before checking whether it took effect.';
 
 /** How far a cut may move back to end on a whole token. */
 const MAX_TOOL_ERROR_BACKTRACK_CHARS = 256;
@@ -218,6 +226,15 @@ function boundedToolFailure(
   const error = cutError.trim().length > 0 ? cutError : 'Tool execution failed.';
 
   const fromEndpoint = (result as { [ENDPOINT_FAILURE]?: unknown })[ENDPOINT_FAILURE] === true;
+  if (fromEndpoint && isOutcomeUnknown(result)) {
+    return markOutcomeUnknown({
+      success: false,
+      error,
+      outcome: 'unknown',
+      hint: OUTCOME_UNKNOWN_HINT,
+      ...(Number.isInteger(result.status) ? { status: result.status } : {}),
+    });
+  }
   return {
     success: false,
     error,
@@ -738,6 +755,11 @@ export function endpointToolToTool<TInput extends SchemaLike>(
           ...(expected ? { expectedFailure: true } : {}),
         };
         Object.defineProperty(failure, ENDPOINT_FAILURE, { value: true });
+        // A gateway error or timeout answer after a write was sent: the
+        // backend may have acted.
+        if (fromBackend && AMBIGUOUS_HTTP_STATUS.has(response.status) && endpointTool.method !== 'GET') {
+          markOutcomeUnknown(failure);
+        }
         return failure;
       }
 
@@ -1127,6 +1149,16 @@ export function toolToAiTool(
         const errorMessage = options?.contentFreeErrors
           ? 'tool_failed'
           : error instanceof Error ? error.message : 'Unknown error';
+        // A timeout, abort, lost connection or unreadable answer after the
+        // request may have reached the backend: the call may have taken
+        // effect, so it is not reported as failed.
+        if (errorLeavesOutcomeUnknown(error)) {
+          return markOutcomeUnknown({
+            error: `Error in ${tool.id}: ${options?.contentFreeErrors ? 'tool_outcome_unknown' : errorMessage}`,
+            outcome: 'unknown',
+            hint: OUTCOME_UNKNOWN_HINT,
+          });
+        }
         return normalizeResultUiAction(
           {
             error: `Error in ${tool.id}: ${errorMessage}`,
@@ -1338,7 +1370,14 @@ export function createFetchInternalApiCaller(
       }
 
       const response = await fetchImpl(url, init);
-      const data = await parseResponseBody(response, options.maxResponseBytes);
+      let data: unknown;
+      try {
+        data = await parseResponseBody(response, options.maxResponseBytes);
+      } catch (error) {
+        // The backend answered, so a write may have committed: not a plain failure.
+        if (errorLeavesOutcomeUnknown(error) || request.method === 'GET' || request.method === 'HEAD') throw error;
+        throw new ResponseUnreadableError(error instanceof Error ? error.message : undefined);
+      }
 
       if (!response.ok) {
         return {

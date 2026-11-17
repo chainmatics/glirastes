@@ -72,6 +72,47 @@ describe('model egress inventory', () => {
     expect(scanFixture(source)).toEqual([]);
   });
 
+  it.each([
+    ['literal null', `import { protectedStreamText } from '../pii-shield/model-calls.js';\nprotectedStreamText({ model }, null);`, 'protectedStreamText(null)'],
+    ['undefined', `import { protectedGenerateText } from './model-calls.js';\nprotectedGenerateText({ model }, undefined);`, 'protectedGenerateText(null)'],
+    ['missing argument', `import { protectedGenerateObject } from './model-calls.js';\nprotectedGenerateObject({ model } as never);`, 'protectedGenerateObject(null)'],
+    ['aliased import', `import { protectedStreamText as run } from 'glirastes/server';\nrun({ model }, null);`, 'protectedStreamText(null)'],
+    ['namespace member', `import * as calls from './model-calls.js';\ncalls.protectedStreamText({ model }, null);`, 'protectedStreamText(null)'],
+    ['nullable expression', `import { protectedStreamText } from './model-calls.js';\nprotectedStreamText({ model }, ctx.privacy?.boundary ?? null);`, 'protectedStreamText(nullable)'],
+    ['boundary argument', `import { protectedStreamText } from './model-calls.js';\nprotectedStreamText({ model }, boundary);`, 'protectedStreamText(boundary)'],
+    ['escaped facade', `import { protectedStreamText } from './model-calls.js';\nrun(protectedStreamText);`, 'protectedStreamText(escaped)'],
+  ])('inventories every facade call site with its protection: %s', (_label, source, symbol) => {
+    expect(scanFixture(source)).toContainEqual(expect.objectContaining({ code: 'unapproved_facade_call', symbol }));
+  });
+
+  it('a new unlabelled null facade call is a violation, a reviewed one passes', () => {
+    const source = `import { protectedStreamText } from './model-calls.js';\nexport const a = () => protectedStreamText({ model }, null);`;
+    const findings = scanSourceForEgress('src/new-route.ts', source);
+    expect(checkEgressInventory(findings, EMPTY)).toEqual([
+      { code: 'unapproved_facade_call', file: 'src/new-route.ts', symbol: 'protectedStreamText(null)', line: 2 },
+    ]);
+    const reviewed: EgressInventory = { schemaVersion: 1, entries: [{
+      file: 'src/new-route.ts', symbol: 'protectedStreamText(null)', kind: 'facade_call', decision: 'exception',
+      reason: 'Privacy is refused before this route runs.',
+    }] };
+    expect(checkEgressInventory(findings, reviewed)).toEqual([]);
+  });
+
+  it('does not treat the facade definitions or unrelated functions as call sites', () => {
+    expect(scanFixture(`function protectedStreamText(a: unknown, b: unknown) {}\nprotectedStreamText(1, null);`)).toEqual([]);
+  });
+
+  it.each([
+    ['video generation', `import { experimental_generateVideo } from 'ai';`, 'unapproved_model_call', 'experimental_generateVideo'],
+    ['ollama', `import ollama from 'ollama';`, 'unapproved_provider_import', 'ollama'],
+    ['ollama provider', `import { createOllama } from 'ollama-ai-provider';`, 'unapproved_provider_import', 'ollama-ai-provider'],
+    ['langchain scope', `import { ChatOpenAI } from '@langchain/openai';`, 'unapproved_provider_import', '@langchain/openai'],
+    ['langchain dynamic', `const m = await import('@langchain/core/messages');`, 'unapproved_provider_import', '@langchain/core/messages'],
+    ['langchain core package', `import { x } from 'langchain';`, 'unapproved_provider_import', 'langchain'],
+  ])('treats %s as egress', (_label, source, code, symbol) => {
+    expect(scanFixture(source)).toContainEqual(expect.objectContaining({ code, symbol }));
+  });
+
   it('a second call in a file with a reviewed one fails until the count is raised', () => {
     const source = `import { generateText } from 'ai';\nexport const a = () => fetch(x);\nexport const b = () => fetch(y);`;
     const findings = scanSourceForEgress('src/f.ts', source);

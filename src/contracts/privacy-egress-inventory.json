@@ -153,11 +153,25 @@
       "reason": "Content-free turn metrics to the configured sink; no prompt, tool or business content."
     },
     {
+      "file": "src/server/adapters/nestjs/chat/ai-chat.service.ts",
+      "symbol": "protectedStreamText(null)",
+      "kind": "facade_call",
+      "decision": "exception",
+      "reason": "NestJS chat service has no privacy profile: it refuses any 'privacy' or 'piiShield' option with privacy_profile_unsupported before streaming, so no protected-text promise is made on this path. Logs are class-only and onError is content-free."
+    },
+    {
       "file": "src/server/adapters/nestjs/chat/ws-loader.ts",
       "symbol": "ws",
       "kind": "network",
       "decision": "exception",
       "reason": "NestJS speech gateway (not exported) relays to cloud Deepgram; outside the protected profile, which uses local recorded transcription only."
+    },
+    {
+      "file": "src/server/adapters/nextjs/create-ai-chat-handler.ts",
+      "symbol": "protectedStreamText(nullable)",
+      "kind": "facade_call",
+      "decision": "protected",
+      "reason": "Passes ctx.privacy?.boundary ?? null: the boundary of the turn whenever the handler is configured with 'privacy'. null only when the handler was created without 'privacy' (a handler-level choice, not per request)."
     },
     {
       "file": "src/server/adapters/nextjs/recording-transcription-handler.ts",

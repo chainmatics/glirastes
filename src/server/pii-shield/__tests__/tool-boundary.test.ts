@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPostgresRuntimeStore, type PostgresQueryClient } from '../../../runtime/postgres-store.js';
 import { createPrivacyBoundary } from '../model-boundary.js';
 import { wrapToolsForPrivacy, type ToolReceiptStore } from '../tool-boundary.js';
+import { markOutcomeUnknown } from '../../core/tool-outcome.js';
 import { CANARY, CANARY_PATTERN, memoryShield, testScope } from './privacy-fixtures.js';
 
 type Receipt = { status: 'pending' | 'completed' | 'failed'; toolUuid: string; inputFingerprint: string; resultFingerprint: string | null };
@@ -151,6 +152,75 @@ describe('idempotent writes with receipts', () => {
     expect(dump).not.toMatch(CANARY_PATTERN);
     expect(dump).not.toContain(originalDigest);
     expect([...receipts.rows.values()][0]!.resultFingerprint).toBe('not-recorded');
+  });
+});
+
+describe('receipts after the independent re-review', () => {
+  it('M1: an approval opens one execution only; a later call reusing its id runs as a new call', async () => {
+    const { boundary } = await setup();
+    const receipts = memoryReceipts();
+    const execute = vi.fn(async (_input: unknown, _options?: unknown) => ({ sent: true }));
+    const tools = wrapToolsForPrivacy({ send: { execute } }, boundary, {
+      receipts, approvals: [{ toolCallId: 'call_0', toolName: 'send', approvalId: 'approval-1' }],
+    });
+    expect(await tools.send.execute!({ n: 1 }, { toolCallId: 'call_0' })).toEqual({ sent: true });
+    // The next model step names its new call call_0 again (same tool, same input).
+    expect(await tools.send.execute!({ n: 1 }, { toolCallId: 'call_0' })).toEqual({ sent: true });
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('M1: an approval of another tool does not key a call under the same id', async () => {
+    const { boundary } = await setup();
+    const receipts = memoryReceipts();
+    const execute = vi.fn(async (_input: unknown, _options?: unknown) => ({ ok: true }));
+    const tools = wrapToolsForPrivacy({ send: { execute }, archive: { execute } }, boundary, {
+      receipts, approvals: [{ toolCallId: 'call_0', toolName: 'send', approvalId: 'approval-1' }],
+    });
+    await tools.archive.execute!({ n: 1 }, { toolCallId: 'call_0' });
+    await tools.send.execute!({ n: 1 }, { toolCallId: 'call_0' });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect([...receipts.rows.keys()].some((k) => k.endsWith('|approval:approval-1'))).toBe(true);
+  });
+
+  it('M3: only the core marker means "outcome unknown"; a backend payload cannot claim it', async () => {
+    const { boundary } = await setup();
+    const receipts = memoryReceipts();
+    const plain = wrapToolsForPrivacy({ send: { execute: async (_i: unknown, _o?: unknown) => ({ outcome: 'unknown', id: 7 }) } }, boundary, { receipts });
+    expect(await plain.send.execute!({ n: 1 }, { toolCallId: 'p1' })).toEqual({ outcome: 'unknown', id: 7 });
+    expect([...receipts.rows.values()].map((r) => r.status)).toEqual(['completed']);
+    const marked = wrapToolsForPrivacy({ send: { execute: async (_i: unknown, _o?: unknown) => markOutcomeUnknown({ error: 'x' }) } }, boundary, { receipts });
+    await expect(marked.send.execute!({ n: 2 }, { toolCallId: 'p2' })).rejects.toMatchObject({ code: 'privacy_tool_outcome_unknown' });
+    expect([...receipts.rows.values()].map((r) => r.status)).toEqual(['completed', 'pending']);
+  });
+
+  it('M3: a connection lost after sending leaves the outcome unknown; a refused connection is a failure', async () => {
+    const { boundary } = await setup();
+    const receipts = memoryReceipts();
+    const reset = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    const refused = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    const tools = wrapToolsForPrivacy({
+      a: { execute: async (_i: unknown, _o?: unknown) => { throw reset; } },
+      b: { execute: async (_i: unknown, _o?: unknown) => { throw refused; } },
+    }, boundary, { receipts });
+    await expect(tools.a.execute!({}, { toolCallId: 'r1' })).rejects.toMatchObject({ code: 'privacy_tool_outcome_unknown' });
+    await expect(tools.b.execute!({}, { toolCallId: 'r2' })).rejects.toMatchObject({ code: 'privacy_tool_failed' });
+    expect([...receipts.rows.values()].map((r) => r.status)).toEqual(['pending', 'failed']);
+  });
+
+  it('L1: the input fingerprint is keyed by the scope, not a plain digest of the input', async () => {
+    const { boundary, fakeEmail } = await setup();
+    const receipts = memoryReceipts();
+    const tools = wrapToolsForPrivacy({ send: { execute: async (_i: unknown, _o?: unknown) => ({ ok: true }) } }, boundary, { receipts });
+    await tools.send.execute!({ to: fakeEmail }, { toolCallId: 'k1' });
+    const { createHash } = await import('node:crypto');
+    const plain = createHash('sha256').update(`{"to":${JSON.stringify(fakeEmail)}}`).digest('hex');
+    const dump = JSON.stringify([...receipts.rows.entries()]);
+    expect(dump).not.toContain(plain);
+    const other = createPrivacyBoundary({ session: await memoryShield().open(testScope()) });
+    const otherReceipts = memoryReceipts();
+    await wrapToolsForPrivacy({ send: { execute: async (_i: unknown, _o?: unknown) => ({ ok: true }) } }, other, { receipts: otherReceipts })
+      .send.execute!({ to: fakeEmail }, { toolCallId: 'k1' });
+    expect([...otherReceipts.rows.values()][0]!.inputFingerprint).not.toBe([...receipts.rows.values()][0]!.inputFingerprint);
   });
 });
 

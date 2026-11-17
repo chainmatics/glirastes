@@ -11,6 +11,7 @@ personal data in every model call of a chat turn. All names below come from
 - Screenshots
 - Model providers
 - Tools, approvals and idempotency
+- Conversation history and context loss
 - Model calls outside the chat handler
 - Errors and diagnostics
 - Limits
@@ -75,16 +76,22 @@ export const POST = createAiChatHandler({
   `{"active":"k2","keys":{"k1":"<base64>","k2":"<base64>"},"index":"<base64>"}`)
   is a deployment secret outside the database. To rotate, add a key, make it
   active, run `rewrapEntries()` until it returns 0, then remove the old key.
-  Defaults: 1 h idle, 24 h absolute. An expired mapping starts a new
-  generation; a deleted one (`deleteMapping`) stays deleted.
+  Defaults: 1 h idle, 24 h absolute. An expired or lost mapping starts a new
+  generation, a fresh random id that is never reused; a deleted one
+  (`deleteMapping`) stays deleted. After either, the model no longer gets the
+  older messages (see "Conversation history and context loss").
 - `knownIdentities` (`KnownIdentity`) registers the signed-in user and
   people the principal may see. Full names, "Last, First", name parts of
   four or more letters (any case), e-mails and ids are then protected
   deterministically. People in JSON tool results are registered
-  automatically (`extractIdentitiesFromJson`).
+  automatically (`extractIdentitiesFromJson`); a result the walk cannot
+  finish stops the turn. `identitiesFromToolResults` takes a function
+  `(toolName, output) => KnownIdentity[]` for result shapes the walk does not
+  know, or `false` to turn it off.
 - The local pipeline's classifier gets the boundary through
   `PipelineCallOptions.wrapModel`; a protected call never learns or stores
-  the turn's text.
+  the turn's text. It sees the admitted history only, and its prompt is
+  built from text this turn already protected (`protectedPrompt`).
 - `privacy` replaces `piiShield`. It cannot be combined with `lancer` or
   `telemetry`, and a `pipeline` must be the local one, not the remote Pro pipeline.
 - The client must send the chat id (`body.id`; `useChat` does). A request
@@ -169,10 +176,78 @@ privacy: { /* ... */ providers: { registry, selection: (req, scope) => loadUserC
 - The approval shown to the user, and bound by the handler, carries the
   originals the user saw.
 - A thrown tool error reaches the model as `tool_failed` only.
-- `receipts` (`ToolReceiptStore`, e.g. the Postgres runtime store) makes a
-  tool call id execute once. A timeout leaves the outcome unknown
-  (`privacy_tool_outcome_unknown`) and is not retried blindly. Receipts hold
-  no originals and no digest of them.
+- `receipts` (`ToolReceiptStore`, e.g. the Postgres runtime store) records
+  every write of a protected turn:
+  - A call resumed from an approval is keyed by the signed approval id. One
+    approval runs at most once in its mapping generation, also when the
+    request is replayed. Only the first call of the approved tool under that
+    call id uses the approval; a later call reusing the id is a new call.
+  - A call the model makes is keyed by request, call id and input. Within one
+    request the same call runs once. A new request is a new call, also a
+    network retry or `regenerate`: receipts do not deduplicate those.
+  - A provider that reuses call ids (`call_0`) across turns still runs each
+    new call.
+  - A new generation is a new key namespace.
+- A write whose effect the answer does not tell leaves the outcome unknown:
+  timeout, abort, a connection lost after sending, an answer that cannot be
+  read, and a 408, 502 or 504 answer to a write. The receipt stays pending and
+  the call fails as `privacy_tool_outcome_unknown` (not `tool_failed`), with a
+  hint not to repeat it. A replay of the same approval gets the same answer
+  instead of a second run. Check the backend before asking the user to repeat
+  it. Only the core sets this state (a marker no backend payload can carry).
+- Receipts hold no originals and no plain digest of them; the input
+  fingerprint is keyed with the scope's secret.
+- An approval that belongs to an expired or deleted generation cannot be
+  resumed (409); the user asks again and approves the new request.
+
+## Conversation history and context loss
+
+The browser sends the whole chat history with every request, so the
+handler cannot take it at face value. It admits to the model only history
+this server released in the current mapping generation:
+
+- When a user message is accepted and when an answer stream ends (or is
+  cancelled), the handler binds each message to its role, its parts (text,
+  tool call with id, input and outcome, approval id) and its predecessor with
+  a keyed HMAC over scope and generation (`history-binding.ts`). Message ids
+  from the client are not trusted. A swapped role, a spliced part, a tool
+  result moved to another call, a reordered, duplicated or edited message
+  and a client-made summary all break the chain.
+- The model gets the last unbroken run of bound messages plus the new user
+  message; every text part of it passes the full protection path before it
+  is bound. Everything before the break is withheld. Model and classifier get
+  each message as id, role and the bound fields of its parts only: fields
+  the client adds or changes outside the binding (`content`, `metadata`,
+  extra part fields) never reach a model. Reloads (`useChat`, also with an open approval that
+  `sanitizeStoredMessages` removed), renamed message ids, concurrent tabs and
+  a server restart over the same store keep working.
+- The binding attests what the server released into the response stream, not
+  what the browser received. A cancelled or cut-off stream binds the part
+  that was released; a later request may continue from it. An answer longer
+  than 4 MiB of stream text is not bound (the next turn withholds it).
+- Bindings are stored per mapping generation and end with it; a long
+  conversation adds one or two rows per turn.
+- A continuation (approval response, tool result) of a message that is not
+  bound in this generation is refused with 409 `privacy_mapping_expired`,
+  without a model call, on every later attempt. Fresh requests and new
+  approvals work.
+- The binding protects against manipulated history. It does not replace
+  detection or the egress check: admitted history is still pseudonymized
+  like new input.
+
+**Context loss is visible product behaviour.** After the mapping expires
+(defaults 1 h idle, 24 h absolute), is lost or is deleted, the chat window
+still shows the whole history, but the model no longer gets the older
+messages. The turn's `data-privacy-status` part then carries
+`historyWithheld` (count) and `historyNotice` ("Frühere Nachrichten dieses
+Chats werden vom Assistenten nicht mehr verwendet. Bitte relevante Angaben
+erneut nennen."). Show that notice next to the answer. The model gets a
+matching note and asks for details again instead of guessing. Old answers
+are never re-read as new input: their pseudonyms would map to nothing.
+
+The defaults fit a working session: an hour of inactivity or a day of use
+ends the model's memory of the chat, not the chat. A longer TTL would keep
+originals and pseudonyms linked longer and is not recommended.
 
 ## Model calls outside the chat handler
 
@@ -227,8 +302,9 @@ model id string or a model of another boundary.
 ## Errors and diagnostics
 
 - HTTP refusals carry `{ error: <code> }` only: 400 invalid scope, 401 no
-  scope, 403 blocked attachment, 409 deleted mapping, 422 missing
-  capability, 503 for detector, store or key outages.
+  scope, 403 blocked attachment, 409 deleted or expired mapping and
+  pseudonym conflict, 422 missing capability, 503 for detector, store or key
+  outages.
 - `onError` and `onToolError` receive `privacySafeError(error)`: name, code
   and a numeric provider status, never a message. Use `toSafeError` for
   your own logs.
@@ -236,7 +312,9 @@ model id string or a model of another boundary.
   does not release the held text; it ends with `privacy_output_incomplete`.
 - A custom `streamHandler` gets the wrapped model and `ctx.privacy`; it must
   pipe its UI stream through `projectUiMessageStream` before
-  `bindApprovalRequests`.
+  `bindApprovalRequests`. Only an SSE UI message stream
+  (`text/event-stream`) is bound as history; any other response is not, so
+  the model will not see that answer in the next turn.
 
 ## Limits
 
@@ -247,5 +325,25 @@ model id string or a model of another boundary.
   the turn (`privacy_mapping_conflict`), also when two turns race. The
   conversation recovers by starting a new chat (new chat id) or after the
   mapping is deleted; there is no silent remapping.
+- Dates: only a date of birth is protected. It is recognised by a birth
+  field (`birthDate`, `geburtsdatum`, `dob`, also inside longer names such as
+  `patientBirthDate` or `birth_date_iso`) or by a birth word up to three
+  words before it ("geboren am Montag,", "Geburtsdatum des Kunden:",
+  "geb.-Dat.:", "born"). Once known, the same date is protected wherever it
+  appears again. Formats: `DD.MM.YYYY`, `D.M.YYYY`, ISO and
+  "12. Dezember 1976" / "12 December 1976"; a pseudonym is written back in the
+  format the model used.
+- A date after a birth word in another form ("15.01.80", "01/15/1980",
+  "Dec 12, 1976") stops the turn with `privacy_unsupported_content` instead
+  of being sent; so does such a birth field. A tool input that mentions a
+  protected date in such a form is refused too.
+- Appointments, deadlines and other dates go to the model as plain text. A
+  date of birth without a birth word or field ("* 01.01.1980", a bare date in
+  a table) is not detected. A date near a birth word, such as a birthday
+  party, is pseudonymized like a date of birth and mapped back.
+- OpenAI replay references (`itemId`, encrypted reasoning) are stripped from
+  history. Anthropic thinking signatures in history are refused
+  (`privacy_provider_option_blocked`), so extended thinking with tools is
+  not supported in the profile.
 - Screenshots in `allow-original` mode are not pseudonymized.
 - Speech must be transcribed locally before it enters the chat.

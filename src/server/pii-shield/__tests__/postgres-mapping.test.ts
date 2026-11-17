@@ -38,8 +38,9 @@ function storeContract(name: string, make: (lifetime: MappingLifetime) => Promis
       const store = await make({});
       const scope = testScope();
       const first = await store.load(scope);
-      expect(first).toMatchObject({ generation: 1, version: 0, entries: [] });
-      const result = await store.append(scope, 1, [entry(CANARY.email, 'lena@example.invalid')]);
+      expect(first).toMatchObject({ version: 0, entries: [] });
+      expect(first.generation).toMatch(/^[0-9a-f]{32}$/);
+      const result = await store.append(scope, first.generation, [entry(CANARY.email, 'lena@example.invalid')]);
       expect(result.notInserted).toEqual([]);
       const again = await store.load(scope);
       expect(again.entries).toEqual([entry(CANARY.email, 'lena@example.invalid')]);
@@ -49,9 +50,9 @@ function storeContract(name: string, make: (lifetime: MappingLifetime) => Promis
     it('never overwrites an existing original or pseudonym', async () => {
       const store = await make({});
       const scope = testScope();
-      await store.load(scope);
-      await store.append(scope, 1, [entry('a@example.invalid', 'p1@example.invalid')]);
-      const result = await store.append(scope, 1, [
+      const g = (await store.load(scope)).generation;
+      await store.append(scope, g, [entry('a@example.invalid', 'p1@example.invalid')]);
+      const result = await store.append(scope, g, [
         entry('a@example.invalid', 'p2@example.invalid'),
         entry('b@example.invalid', 'p1@example.invalid'),
         entry('c@example.invalid', 'p3@example.invalid'),
@@ -65,8 +66,8 @@ function storeContract(name: string, make: (lifetime: MappingLifetime) => Promis
     it('keeps scopes apart: another principal or conversation sees nothing', async () => {
       const store = await make({});
       const scope = testScope();
-      await store.load(scope);
-      await store.append(scope, 1, [entry(CANARY.email, 'lena@example.invalid')]);
+      const g = (await store.load(scope)).generation;
+      await store.append(scope, g, [entry(CANARY.email, 'lena@example.invalid')]);
       expect((await store.load({ ...scope, principalId: 'principal-2' })).entries).toEqual([]);
       expect((await store.load({ ...scope, conversationId: 'conv-other' })).entries).toEqual([]);
       expect((await store.load({ ...scope, tenantId: 'tenant-b' })).entries).toEqual([]);
@@ -75,10 +76,10 @@ function storeContract(name: string, make: (lifetime: MappingLifetime) => Promis
     it('compare-and-set rejects a stale version', async () => {
       const store = await make({});
       const scope = testScope();
-      const { version } = await store.load(scope);
-      await store.append(scope, 1, [entry('a@example.invalid', 'p1@example.invalid')], { expectedVersion: version });
+      const { version, generation: g } = await store.load(scope);
+      await store.append(scope, g, [entry('a@example.invalid', 'p1@example.invalid')], { expectedVersion: version });
       await expect(
-        store.append(scope, 1, [entry('b@example.invalid', 'p2@example.invalid')], { expectedVersion: version }),
+        store.append(scope, g, [entry('b@example.invalid', 'p2@example.invalid')], { expectedVersion: version }),
       ).rejects.toMatchObject({ code: 'privacy_mapping_conflict' });
     });
 
@@ -86,46 +87,84 @@ function storeContract(name: string, make: (lifetime: MappingLifetime) => Promis
       const c = clock();
       const store = await make({ idleTtlMs: 1_000, absoluteTtlMs: 10_000, now: c.now });
       const scope = testScope();
-      await store.load(scope);
-      await store.append(scope, 1, [entry('a@example.invalid', 'p1@example.invalid')]);
+      const g = (await store.load(scope)).generation;
+      await store.append(scope, g, [entry('a@example.invalid', 'p1@example.invalid')]);
       c.advance(1_001);
       const restarted = await store.load(scope);
-      expect(restarted).toMatchObject({ generation: 2, entries: [] });
-      await expect(store.append(scope, 1, [entry('x@example.invalid', 'p9@example.invalid')])).rejects.toMatchObject({ code: 'privacy_mapping_conflict' });
+      expect(restarted).toMatchObject({ entries: [] });
+      expect(restarted.generation).not.toBe(g);
+      await expect(store.append(scope, g, [entry('x@example.invalid', 'p9@example.invalid')])).rejects.toMatchObject({ code: 'privacy_mapping_conflict' });
     });
 
     it('expires at the absolute TTL even while active', async () => {
       const c = clock();
       const store = await make({ idleTtlMs: 1_000, absoluteTtlMs: 2_500, now: c.now });
       const scope = testScope();
-      await store.load(scope);
-      await store.append(scope, 1, [entry('a@example.invalid', 'p1@example.invalid')]);
+      const g = (await store.load(scope)).generation;
+      await store.append(scope, g, [entry('a@example.invalid', 'p1@example.invalid')]);
       for (let i = 0; i < 3; i++) {
         c.advance(900);
         await store.load(scope);
       }
-      expect((await store.load(scope)).generation).toBe(2);
+      expect((await store.load(scope)).generation).not.toBe(g);
     });
 
     it('a deleted mapping stays deleted: no resurrection by a late append or load', async () => {
       const store = await make({});
       const scope = testScope();
-      await store.load(scope);
-      await store.append(scope, 1, [entry('a@example.invalid', 'p1@example.invalid')]);
+      const g = (await store.load(scope)).generation;
+      await store.append(scope, g, [entry('a@example.invalid', 'p1@example.invalid')]);
       await store.delete(scope);
       await expect(store.load(scope)).rejects.toMatchObject({ code: 'privacy_mapping_deleted' });
-      await expect(store.append(scope, 1, [entry('b@example.invalid', 'p2@example.invalid')])).rejects.toMatchObject({ code: 'privacy_mapping_deleted' });
+      await expect(store.append(scope, g, [entry('b@example.invalid', 'p2@example.invalid')])).rejects.toMatchObject({ code: 'privacy_mapping_deleted' });
     });
 
     it('delete versus a concurrent save: either the save lands before or fails, never after', async () => {
       const store = await make({});
       const scope = testScope();
-      await store.load(scope);
-      const save = store.append(scope, 1, [entry('a@example.invalid', 'p1@example.invalid')]).then(() => 'saved', (e) => e.code);
+      const g = (await store.load(scope)).generation;
+      const save = store.append(scope, g, [entry('a@example.invalid', 'p1@example.invalid')]).then(() => 'saved', (e) => e.code);
       const del = store.delete(scope);
       const [saved] = await Promise.all([save, del]);
       expect(['saved', 'privacy_mapping_deleted']).toContain(saved);
       await expect(store.load(scope)).rejects.toMatchObject({ code: 'privacy_mapping_deleted' });
+    });
+
+    it('reports how a load found the mapping: created, continued, renewed; purged looks created', async () => {
+      const c = clock();
+      const store = await make({ idleTtlMs: 1_000, absoluteTtlMs: 10_000, now: c.now });
+      const scope = testScope();
+      expect((await store.load(scope)).origin).toBe('created');
+      expect((await store.load(scope)).origin).toBe('continued');
+      c.advance(1_001);
+      expect((await store.load(scope)).origin).toBe('renewed');
+      expect((await store.load(scope)).origin).toBe('continued');
+      const before = (await store.load(scope)).generation;
+      c.advance(20_000);
+      await store.purgeExpired(c.now());
+      const recreated = await store.load(scope);
+      expect(recreated.origin).toBe('created');
+      // A mapping created again after a purge or loss never reuses a generation id.
+      expect(recreated.generation).not.toBe(before);
+    });
+
+    it('binds content per scope and generation; a renewed generation starts without bindings', async () => {
+      const c = clock();
+      const store = await make({ idleTtlMs: 1_000, absoluteTtlMs: 10_000, now: c.now });
+      const scope = testScope();
+      const g = (await store.load(scope)).generation;
+      const digest = store.bindingDigest(scope, g, '["text","Hallo"]');
+      expect(digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(store.bindingDigest(scope, 'other-generation', '["text","Hallo"]')).not.toBe(digest);
+      expect(store.bindingDigest(testScope({ conversationId: 'conv-other' }), g, '["text","Hallo"]')).not.toBe(digest);
+      await store.bind(scope, g, [digest]);
+      expect((await store.load(scope)).bindings.has(digest)).toBe(true);
+      c.advance(1_001);
+      const renewed = await store.load(scope);
+      expect(renewed.bindings.size).toBe(0);
+      await expect(store.bind(scope, g, [digest])).rejects.toMatchObject({ code: 'privacy_mapping_conflict' });
+      await store.delete(scope);
+      await expect(store.bind(scope, renewed.generation, [digest])).rejects.toMatchObject({ code: 'privacy_mapping_deleted' });
     });
 
     it('purges expired scopes', async () => {
@@ -161,11 +200,11 @@ describe('keyring', () => {
     const ring = testKeyring();
     const a = scopeKeyOf(testScope());
     const b = scopeKeyOf(testScope());
-    const sealed = sealEntry(ring, a, 1, entry(CANARY.email, 'lena@example.invalid'));
+    const sealed = sealEntry(ring, a, 'g1', entry(CANARY.email, 'lena@example.invalid'));
     expect(sealed.sealed).not.toContain(CANARY.email);
-    expect(openEntry(ring, a, 1, sealed).original).toBe(CANARY.email);
-    expect(() => openEntry(ring, b, 1, sealed)).toThrow(expect.objectContaining({ code: 'privacy_key_unavailable' }));
-    expect(() => openEntry(ring, a, 2, sealed)).toThrow(expect.objectContaining({ code: 'privacy_key_unavailable' }));
+    expect(openEntry(ring, a, 'g1', sealed).original).toBe(CANARY.email);
+    expect(() => openEntry(ring, b, 'g1', sealed)).toThrow(expect.objectContaining({ code: 'privacy_key_unavailable' }));
+    expect(() => openEntry(ring, a, 'g2', sealed)).toThrow(expect.objectContaining({ code: 'privacy_key_unavailable' }));
   });
 });
 
@@ -203,8 +242,8 @@ describe.skipIf(!url)('postgres mapping store (isolated test database)', () => {
   it('stores no plaintext originals or pseudonyms', async () => {
     const store = pg();
     const scope = testScope();
-    await store.load(scope);
-    await store.append(scope, 1, [entry(CANARY.email, 'lena.unique@example.invalid')]);
+    const g = (await store.load(scope)).generation;
+    await store.append(scope, g, [entry(CANARY.email, 'lena.unique@example.invalid')]);
     const rows = await client.unsafe<Record<string, unknown>>(
       'SELECT * FROM glirastes_privacy_mapping_entries e JOIN glirastes_privacy_mapping_scopes s USING (scope_key) WHERE scope_key = $1',
       [scopeKeyOf(scope)],
@@ -236,11 +275,11 @@ describe.skipIf(!url)('postgres mapping store (isolated test database)', () => {
   it('concurrent appends never store an original that equals another entry\'s pseudonym', async () => {
     for (let round = 0; round < 40; round += 1) {
       const scope = testScope({ conversationId: `cross-${randomBytes(6).toString('hex')}` });
-      await pg().load(scope);
+      const g = (await pg().load(scope)).generation;
       // Writer A maps X → P while writer B maps P → Q: only one may win.
       await Promise.allSettled([
-        pg().append(scope, 1, [entry('x@example.invalid', 'p@example.invalid')]),
-        pg().append(scope, 1, [entry('p@example.invalid', 'q@example.invalid')]),
+        pg().append(scope, g, [entry('x@example.invalid', 'p@example.invalid')]),
+        pg().append(scope, g, [entry('p@example.invalid', 'q@example.invalid')]),
       ]);
       const { entries } = await pg().load(scope);
       const originals = new Set(entries.map((e) => e.original));
@@ -251,11 +290,11 @@ describe.skipIf(!url)('postgres mapping store (isolated test database)', () => {
   it('a delete racing appends leaves no entry of the scope behind', async () => {
     for (let round = 0; round < 20; round += 1) {
       const scope = testScope({ conversationId: `del-${randomBytes(6).toString('hex')}` });
-      await pg().load(scope);
+      const g = (await pg().load(scope)).generation;
       await Promise.allSettled([
-        ...Array.from({ length: 6 }, (_, i) => pg().append(scope, 1, [entry(`d${i}@example.invalid`, `pd${i}@example.invalid`)])),
+        ...Array.from({ length: 6 }, (_, i) => pg().append(scope, g, [entry(`d${i}@example.invalid`, `pd${i}@example.invalid`)])),
         pg().delete(scope),
-        ...Array.from({ length: 6 }, (_, i) => pg().append(scope, 1, [entry(`e${i}@example.invalid`, `pe${i}@example.invalid`)])),
+        ...Array.from({ length: 6 }, (_, i) => pg().append(scope, g, [entry(`e${i}@example.invalid`, `pe${i}@example.invalid`)])),
       ]);
       const left = await client.unsafe<{ n: string }>(
         'SELECT count(*) AS n FROM glirastes_privacy_mapping_entries WHERE scope_key = $1',
@@ -264,6 +303,40 @@ describe.skipIf(!url)('postgres mapping store (isolated test database)', () => {
       expect(Number(left[0]!.n)).toBe(0);
       await expect(pg().load(scope)).rejects.toMatchObject({ code: 'privacy_mapping_deleted' });
     }
+  });
+
+  it('a delete between reading the header and the entries is seen as deleted, not as an empty mapping', async () => {
+    const scope = testScope({ conversationId: `load-race-${randomBytes(6).toString('hex')}` });
+    const g = (await pg().load(scope)).generation;
+    await pg().append(scope, g, [entry(CANARY.email, 'p-race@example.invalid')]);
+    let deleted = false;
+    const racing: PostgresQueryClient = {
+      unsafe: async (sql, params) => {
+        if (!deleted && sql.includes('glirastes:privacy-mapping-entries')) {
+          deleted = true;
+          await pg().delete(scope);
+        }
+        return client.unsafe(sql, params);
+      },
+    };
+    await expect(createPostgresPrivacyMappingStore(racing, { keyring: ring }).load(scope))
+      .rejects.toMatchObject({ code: 'privacy_mapping_deleted' });
+    expect(deleted).toBe(true);
+  });
+
+  it('bindings hold keyed digests only', async () => {
+    const store = pg();
+    const scope = testScope();
+    const g = (await store.load(scope)).generation;
+    await store.bind(scope, g, [store.bindingDigest(scope, g, JSON.stringify(['text', `Hallo ${CANARY.name}`]))]);
+    const rows = await client.unsafe<Record<string, unknown>>(
+      'SELECT * FROM glirastes_privacy_mapping_bindings WHERE scope_key = $1',
+      [scopeKeyOf(scope)],
+    );
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows)).not.toMatch(CANARY_PATTERN);
+    // Another keyring cannot reproduce the digest.
+    expect(pg({}, testKeyring()).bindingDigest(scope, g, JSON.stringify(['text', `Hallo ${CANARY.name}`]))).not.toBe(rows[0]!.digest);
   });
 
   it('survives a restart: a new store and shield reproduce the same pseudonyms', async () => {
@@ -281,8 +354,8 @@ describe.skipIf(!url)('postgres mapping store (isolated test database)', () => {
     const newId = `new-${randomBytes(4).toString('hex')}`;
     const oldRing: PrivacyKeyring = { activeKeyId: oldId, keys: { [oldId]: randomBytes(32) }, indexKey: randomBytes(32) };
     const store = pg({}, oldRing);
-    await store.load(scope);
-    await store.append(scope, 1, [entry('rot@example.invalid', 'p-rot@example.invalid')]);
+    const g = (await store.load(scope)).generation;
+    await store.append(scope, g, [entry('rot@example.invalid', 'p-rot@example.invalid')]);
     const newKey = randomBytes(32);
     const rotated: PrivacyKeyring = { activeKeyId: newId, keys: { ...oldRing.keys, [newId]: newKey }, indexKey: oldRing.indexKey };
     const rotatedStore = pg({}, rotated);

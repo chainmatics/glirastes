@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { createRecordingTranscriptionHandler, isPrivateServiceUrl, wavDurationSeconds } from '../recording-transcription-handler.js';
 
 /** A 16 kHz mono 16-bit PCM WAV of the given length. */
-function wav(seconds = 0.25): Uint8Array {
+function wav(seconds = 0.25, header: { byteRate?: number; blockAlign?: number; format?: number; sampleRate?: number } = {}): Uint8Array {
   const dataBytes = Math.round(seconds * 16_000) * 2;
   const bytes = new Uint8Array(44 + dataBytes);
   const view = new DataView(bytes.buffer);
   const tag = (offset: number, text: string) => { for (let i = 0; i < 4; i++) bytes[offset + i] = text.charCodeAt(i); };
   tag(0, 'RIFF'); view.setUint32(4, 36 + dataBytes, true); tag(8, 'WAVE');
-  tag(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-  view.setUint32(24, 16_000, true); view.setUint32(28, 32_000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  tag(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, header.format ?? 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, header.sampleRate ?? 16_000, true); view.setUint32(28, header.byteRate ?? 32_000, true); view.setUint16(32, header.blockAlign ?? 2, true); view.setUint16(34, 16, true);
   tag(36, 'data'); view.setUint32(40, dataBytes, true);
   return bytes;
 }
@@ -118,6 +118,73 @@ describe('createRecordingTranscriptionHandler', () => {
     const response = await handler(new Request('http://app.test/api/ai/speech-recognize', { method: 'POST', headers: { 'content-type': 'audio/wav' }, body, duplex: 'half' } as RequestInit));
     expect(response.status).toBe(413);
     expect(pulled).toBeLessThan(10);
+  });
+
+  it('measures the duration from sample rate, channels and bits, not from a claimed byte rate', async () => {
+    // 150 s of 16 kHz mono 16-bit audio whose header claims 4,000,000 bytes per second.
+    const lying = wav(150, { byteRate: 4_000_000 });
+    expect(wavDurationSeconds(lying)).toBeUndefined();
+    const fetch = service();
+    const handler = createRecordingTranscriptionHandler({ authorize: allow, url: 'http://stt', fetch, maxDurationSeconds: 60 });
+    expect((await handler(request({ body: lying }))).status).toBe(415);
+    // The same audio with an honest header is a plain too-long recording.
+    expect(wavDurationSeconds(wav(150))).toBe(150);
+    expect((await handler(request({ body: wav(150) }))).status).toBe(413);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses a header whose fields disagree and a format it cannot measure', async () => {
+    expect(wavDurationSeconds(wav(2, { blockAlign: 4 }))).toBeUndefined();
+    expect(wavDurationSeconds(wav(2, { byteRate: 16_000 }))).toBeUndefined();
+    expect(wavDurationSeconds(wav(2, { format: 3 }))).toBeUndefined(); // IEEE float
+    expect(wavDurationSeconds(wav(2, { format: 0x55 }))).toBeUndefined(); // MP3 in WAV
+    expect(wavDurationSeconds(wav(2, { sampleRate: 0, byteRate: 0 }))).toBeUndefined();
+    expect(wavDurationSeconds(wav(2))).toBe(2);
+    const fetch = service();
+    const handler = createRecordingTranscriptionHandler({ authorize: allow, url: 'http://stt', fetch });
+    expect((await handler(request({ body: wav(2, { format: 3 }) }))).status).toBe(415);
+    expect((await handler(request({ body: wav(2) }))).status).toBe(200);
+  });
+
+  it('counts audio after the data chunk against the duration', () => {
+    const base = wav(1);
+    const padded = new Uint8Array(base.byteLength + 64_000); // 2 s more bytes after a 1 s data chunk
+    padded.set(base);
+    expect(wavDurationSeconds(padded)).toBe(3);
+  });
+
+  it('reads the body under the concurrency cap: a waiting upload is not read at all', async () => {
+    let release!: () => void;
+    const slow = new ReadableStream<Uint8Array>({
+      start(controller) { release = () => { controller.enqueue(wav()); controller.close(); }; },
+    });
+    let secondPulled = 0;
+    const second = new ReadableStream<Uint8Array>({ pull(controller) { secondPulled += 1; controller.enqueue(wav()); controller.close(); } }, { highWaterMark: 0 });
+    const handler = createRecordingTranscriptionHandler({ authorize: allow, url: 'http://stt', fetch: service(), maxConcurrent: 1, maxQueued: 0 });
+    const init = (body: ReadableStream<Uint8Array>) => ({ method: 'POST', headers: { 'content-type': 'audio/wav' }, body, duplex: 'half' } as RequestInit);
+    const first = handler(new Request('http://app.test/api/ai/speech-recognize', init(slow)));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const rejected = await handler(new Request('http://app.test/api/ai/speech-recognize', init(second)));
+    expect(rejected.status).toBe(429);
+    expect(secondPulled).toBe(0);
+    release();
+    expect((await first).status).toBe(200);
+  });
+
+  it('cuts off an upload that is too slow, within the timeout', async () => {
+    const onError = vi.fn();
+    let cancelled = false;
+    const stalled = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array(1024)); },
+      cancel() { cancelled = true; },
+    });
+    const fetch = service();
+    const handler = createRecordingTranscriptionHandler({ authorize: allow, url: 'http://stt', fetch, timeoutMs: 50, onError });
+    const response = await handler(new Request('http://app.test/api/ai/speech-recognize', { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: stalled, duplex: 'half' } as RequestInit));
+    expect(response.status).toBe(408);
+    expect(cancelled).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'upload_timeout' }));
   });
 
   it('treats a missing or invalid transcript as a failure, not as silence', async () => {

@@ -1,4 +1,5 @@
 import { randomInt, randomUUID } from 'node:crypto';
+import { fakeBirthDate, formatDate, parseDate } from './dates.js';
 import { createFakeDataGenerator } from './fake-data.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -30,10 +31,19 @@ function seed(): number {
   return randomInt(1, 2 ** 31 - 1);
 }
 
-const FIRST_DE = ['Lena', 'Jonas', 'Mia', 'Felix', 'Clara', 'Paul', 'Emma', 'Lukas', 'Hanna', 'Tim', 'Sophie', 'Ben', 'Lea', 'Noah', 'Ida', 'Jan', 'Marie', 'Tom', 'Greta', 'Erik'];
-const LAST_DE = ['Albers', 'Brandt', 'Conrad', 'Dietz', 'Engel', 'Fuchs', 'Graf', 'Hahn', 'Ilg', 'Jung', 'Kraus', 'Lorenz', 'Mertens', 'Nolte', 'Ott', 'Pohl', 'Roth', 'Seidel', 'Thiel', 'Vogt'];
-const FIRST_EN = ['Alex', 'Sam', 'Jordan', 'Taylor', 'Casey', 'Morgan', 'Riley', 'Jamie', 'Avery', 'Quinn'];
-const LAST_EN = ['Archer', 'Baker', 'Carter', 'Dawson', 'Ellis', 'Foster', 'Grant', 'Hayes', 'Irving', 'Keller'];
+// Invented names that are not common real names. A pseudonym that equals
+// a real name in new text would be mapped back to the wrong person; the
+// shield refuses such text (`privacy_mapping_conflict`), and these pools
+// keep that case rare. They are not a guarantee.
+const FIRST_DE = ['Talvo', 'Mirvel', 'Quenda', 'Selvara', 'Orvik', 'Lunetta', 'Kestrin', 'Varnis', 'Eldrun', 'Brisko', 'Delvin', 'Ferrik', 'Gindra', 'Hesprin', 'Ilvana', 'Jalvo', 'Kalenda', 'Lorvan', 'Mendris', 'Norvella'];
+const LAST_DE = ['Albrecker', 'Brunsfeld', 'Corwald', 'Dornhagel', 'Emmelried', 'Falkenstrup', 'Grimmersen', 'Hollweger', 'Ingeltrup', 'Jasperding', 'Kolvenrath', 'Lindtmaier', 'Morgwald', 'Nettelbach', 'Orvenkamp', 'Pradelholz', 'Quernstedt', 'Rabenschild', 'Selkenbrock', 'Tribenhoff'];
+const FIRST_EN = ['Talvo', 'Mirvel', 'Quenda', 'Selvara', 'Orvik', 'Lunetta', 'Kestrin', 'Varnis', 'Eldrun', 'Brisko'];
+const LAST_EN = ['Ashcombe', 'Brackwater', 'Corringdale', 'Dunmoorley', 'Elsworthing', 'Fernhollow', 'Grimsbury', 'Hollowmere', 'Ivesworth', 'Kestlemoor'];
+
+/** A fresh first name from the pool, e.g. to stand in for a short name part. */
+export function fillerFirstName(locale: string): string {
+  return pick(locale.toLowerCase().startsWith('de') ? FIRST_DE : FIRST_EN);
+}
 
 function pick<T>(list: readonly T[]): T {
   return list[randomInt(0, list.length)]!;
@@ -65,11 +75,14 @@ export function generatePseudonym(category: string, original: string, locale: st
       return formatPreservingId(original);
     case 'url':
       return `https://example.invalid/r/${randomUUID().slice(0, 8)}`;
+    case 'date_of_birth': {
+      const parsed = parseDate(original);
+      return formatDate(fakeBirthDate(parsed?.iso), parsed?.format ?? 'dotted');
+    }
     case 'phone':
     case 'iban':
     case 'credit_card':
     case 'ip_address':
-    case 'date_of_birth':
     case 'address':
     case 'tax_id':
     case 'ssn':

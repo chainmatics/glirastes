@@ -2,6 +2,7 @@ import type { UIMessageChunk } from 'ai';
 import { isPrivacyError } from './detection-result.js';
 import type { AttachmentPolicySnapshot } from './attachment-policy.js';
 import { screenshotStatusText } from './attachment-policy.js';
+import { historyWithheldNotice } from './history-binding.js';
 import type { PrivacySession } from './strict-shield.js';
 
 /** Content-free status the UI shows before and during a protected turn. */
@@ -13,12 +14,19 @@ export interface PrivacyStatusData {
   label: string;
   /** Display label of the selected provider/model, never an endpoint or key. */
   provider?: string;
+  /**
+   * Earlier messages the model no longer receives in this turn (their privacy
+   * mapping expired or they are not bound); the chat still shows them.
+   */
+  historyWithheld?: number;
+  /** Notice for the user when `historyWithheld` is set. */
+  historyNotice?: string;
 }
 
 export function privacyStatusData(
   session: PrivacySession,
   attachments: AttachmentPolicySnapshot,
-  options: { locale?: string; providerLabel?: string } = {},
+  options: { locale?: string; providerLabel?: string; historyWithheld?: number } = {},
 ): PrivacyStatusData {
   return {
     profile: session.profile,
@@ -26,6 +34,9 @@ export function privacyStatusData(
     screenshots: attachments.screenshots,
     label: screenshotStatusText(attachments, options.locale),
     ...(options.providerLabel ? { provider: options.providerLabel } : {}),
+    ...(options.historyWithheld
+      ? { historyWithheld: options.historyWithheld, historyNotice: historyWithheldNotice(options.locale) }
+      : {}),
   };
 }
 

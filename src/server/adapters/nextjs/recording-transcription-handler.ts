@@ -70,45 +70,85 @@ export function isPrivateServiceUrl(value: string): boolean {
 }
 
 /**
- * Duration of a PCM WAV recording from its `fmt ` and `data` chunks, or
- * `undefined` when the bytes are not a well-formed RIFF/WAVE file.
+ * Duration of a PCM WAV recording, measured from the `fmt ` fields (sample
+ * rate, channels, bits per sample) and the bytes that follow the `data`
+ * header. The header's own `byteRate` is never trusted: it must agree with
+ * those fields, as must `blockAlign`. Returns `undefined` for anything else
+ * (not RIFF/WAVE, non-PCM, inconsistent or zero fields, no `data`), so the
+ * handler fails closed.
  */
 export function wavDurationSeconds(bytes: Uint8Array): number | undefined {
   if (bytes.byteLength < 44) return undefined;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const tag = (offset: number) => String.fromCharCode(bytes[offset]!, bytes[offset + 1]!, bytes[offset + 2]!, bytes[offset + 3]!);
   if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') return undefined;
-  let byteRate: number | undefined;
+  let bytesPerSecond: number | undefined;
   let dataBytes: number | undefined;
   for (let offset = 12; offset + 8 <= bytes.byteLength;) {
     const id = tag(offset);
     const size = view.getUint32(offset + 4, true);
-    if (id === 'fmt ' && size >= 16 && offset + 24 <= bytes.byteLength) byteRate = view.getUint32(offset + 16, true);
+    if (id === 'fmt ' && bytesPerSecond === undefined) {
+      if (size < 16 || offset + 8 + 16 > bytes.byteLength) return undefined;
+      const body = offset + 8;
+      let format = view.getUint16(body, true);
+      const channels = view.getUint16(body + 2, true);
+      const sampleRate = view.getUint32(body + 4, true);
+      const byteRate = view.getUint32(body + 8, true);
+      const blockAlign = view.getUint16(body + 12, true);
+      const bits = view.getUint16(body + 14, true);
+      // WAVE_FORMAT_EXTENSIBLE carries the real format in its sub-format GUID.
+      if (format === 0xfffe) {
+        if (size < 40 || body + 26 > bytes.byteLength) return undefined;
+        format = view.getUint16(body + 24, true);
+      }
+      if (format !== 1) return undefined; // only integer PCM can be measured
+      if (channels < 1 || sampleRate < 1 || bits < 8 || bits % 8 !== 0 || bits > 32) return undefined;
+      if (blockAlign !== channels * (bits / 8)) return undefined;
+      if (byteRate !== sampleRate * blockAlign) return undefined;
+      bytesPerSecond = byteRate;
+    }
     if (id === 'data') {
-      dataBytes = Math.min(size, bytes.byteLength - offset - 8);
+      // Everything after the data header counts, whatever the chunk size claims:
+      // the whole file is what gets transcribed.
+      dataBytes = bytes.byteLength - offset - 8;
       break;
     }
     offset += 8 + size + (size % 2);
   }
-  if (!byteRate || dataBytes === undefined) return undefined;
-  return dataBytes / byteRate;
+  if (!bytesPerSecond || dataBytes === undefined) return undefined;
+  return dataBytes / bytesPerSecond;
 }
 
-/** Reads at most `limit` bytes; `undefined` when the body is longer. */
-async function readCapped(request: Request, limit: number): Promise<Uint8Array | undefined> {
+/**
+ * Reads at most `limit` bytes. `undefined` when the body is longer; throws
+ * `upload_timeout` / `aborted` when the signal fires first, cancelling the
+ * stream so a slow upload is cut off.
+ */
+async function readCapped(request: Request, limit: number, signal: AbortSignal, timedOut: () => boolean): Promise<Uint8Array | undefined> {
   if (!request.body) return new Uint8Array(0);
   const reader = request.body.getReader();
+  const stop = new Promise<never>((_resolve, reject) => {
+    const fire = () => reject(new TranscriptionFailure(timedOut() ? 'upload_timeout' : 'aborted'));
+    if (signal.aborted) fire();
+    else signal.addEventListener('abort', fire, { once: true });
+  });
+  stop.catch(() => {});
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      await reader.cancel().catch(() => {});
-      return undefined;
+  try {
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), stop]);
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => {});
+        return undefined;
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -189,18 +229,22 @@ export function createRecordingTranscriptionHandler(config: RecordingTranscripti
     const declared = Number(request.headers.get('content-length'));
     if (Number.isFinite(declared) && declared > maxBytes) return failed(413, 'Recording too long');
 
-    const audio = await readCapped(request, maxBytes);
-    if (!audio) return failed(413, 'Recording too long');
-    if (audio.byteLength === 0) return failed(400, 'Empty recording');
-    const duration = wavDurationSeconds(audio);
-    if (duration === undefined) return failed(415, 'Unsupported audio format');
-    if (duration > maxDuration) return failed(413, 'Recording too long');
-
-    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]);
+    // One deadline for the wait for a slot, the upload and the service call.
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = AbortSignal.any([request.signal, timeout]);
     let release: (() => void) | undefined;
     try {
       release = await gate.acquire(signal);
       if (!release) return failed(429, 'Speech service busy', { 'retry-after': '5' });
+
+      // Only a request that holds a slot has its body read, and the read is
+      // bounded by size and by the deadline.
+      const audio = await readCapped(request, maxBytes, signal, () => timeout.aborted);
+      if (!audio) return failed(413, 'Recording too long');
+      if (audio.byteLength === 0) return failed(400, 'Empty recording');
+      const duration = wavDurationSeconds(audio);
+      if (duration === undefined) return failed(415, 'Unsupported audio format');
+      if (duration > maxDuration) return failed(413, 'Recording too long');
 
       const form = new FormData();
       form.set('file', new File([audio as BlobPart], 'recording.wav', { type: 'audio/wav' }));
@@ -221,6 +265,10 @@ export function createRecordingTranscriptionHandler(config: RecordingTranscripti
       return Response.json({ text: result.text.trim() }, { headers: { 'cache-control': 'no-store' } });
     } catch (error) {
       if (request.signal.aborted) return failed(499, 'Recording cancelled');
+      if (error instanceof TranscriptionFailure && error.code === 'upload_timeout') {
+        onError(error);
+        return failed(408, 'Upload timed out');
+      }
       onError(error instanceof TranscriptionFailure ? error : new TranscriptionFailure(contentFreeError(error)));
       return failed(502, 'Transcription failed');
     } finally {

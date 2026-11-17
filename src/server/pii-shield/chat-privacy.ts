@@ -6,6 +6,7 @@ import {
 } from './attachment-policy.js';
 import { isPrivacyError, PrivacyError, toSafeError, type PrivacyErrorCode } from './detection-result.js';
 import { privacyStatusData, type PrivacyStatusData } from './display-projection.js';
+import { bindNewInput, newInputTexts, protectedHistory, sealProtectedResponse, type ProtectedHistory } from './history-binding.js';
 import type { KnownIdentity } from './known-identities.js';
 import type { PrivacyScope } from './mapping-store.js';
 import {
@@ -77,6 +78,15 @@ export interface ChatPrivacyTurn {
   readonly provider: ResolvedProvider | undefined;
   /** Refuses a file in the latest user message that the screenshot rule blocks, before any model call. */
   checkLatestMessage(message: unknown): void;
+  /**
+   * Selects the history the model may receive (see `history-binding.ts`) and
+   * binds the new user message, which must already have passed the
+   * protection path. Throws `privacy_mapping_expired` for a continuation of
+   * a message that is not bound in this generation.
+   */
+  admitHistory(messages: ReadonlyArray<unknown>): Promise<unknown[]>;
+  /** Binds this turn's answer as released to the response stream; other responses pass unchanged. */
+  sealResponse(response: Response): Response;
   /** Builds the boundary for the model resolved for this turn and checks the latest message's files against it. */
   bind(model: unknown, latestMessage: unknown): { boundary: PrivacyBoundary; model: unknown; status: PrivacyStatusData };
 }
@@ -85,6 +95,8 @@ const STATUS: Partial<Record<PrivacyErrorCode, number>> = {
   privacy_scope_invalid: 400,
   privacy_attachment_blocked: 403,
   privacy_mapping_deleted: 409,
+  privacy_mapping_expired: 409,
+  privacy_mapping_conflict: 409,
   provider_capability_missing: 422,
   provider_not_allowed: 403,
   provider_unavailable: 503,
@@ -161,12 +173,30 @@ export async function openChatPrivacyTurn(
     }
   };
 
+  let admitted: (ProtectedHistory & { answerAnchor: string | null }) | undefined;
+
   return {
     session,
     attachments,
     config,
     provider,
     checkLatestMessage: (message) => checkFiles(message, true),
+    async admitHistory(messages) {
+      const history = protectedHistory(messages, session);
+      // Every text of the new message passes detection, pseudonymization and
+      // the pseudonym-collision check before it is bound as history.
+      for (const text of newInputTexts(history)) await session.pseudonymizeText(text);
+      admitted = { ...history, answerAnchor: await bindNewInput(session, history) };
+      return history.messages;
+    },
+    sealResponse(response) {
+      if (!admitted) return response;
+      return sealProtectedResponse(response, session, {
+        anchor: admitted.answerAnchor,
+        ...(admitted.continued ? { continued: admitted.continued } : {}),
+        ...(config.onBlocked ? { onBindFailed: () => config.onBlocked!('privacy_history_not_bound') } : {}),
+      });
+    },
     bind(handlerModel, latestMessage) {
       // A resolved provider replaces the handler's model for the whole turn.
       const model = provider ? provider.model : handlerModel;
@@ -191,7 +221,10 @@ export async function openChatPrivacyTurn(
       return {
         boundary,
         model: wrapped,
-        status: privacyStatusData(session, attachments, label ? { providerLabel: label } : {}),
+        status: privacyStatusData(session, attachments, {
+          ...(label ? { providerLabel: label } : {}),
+          ...(admitted?.withheldMessages ? { historyWithheld: admitted.withheldMessages } : {}),
+        }),
       };
     },
   };

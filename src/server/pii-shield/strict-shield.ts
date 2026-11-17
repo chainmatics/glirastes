@@ -1,4 +1,5 @@
 import type { PiiDetector, PiiEntity } from '../../types.js';
+import { BIRTH_DATE_KEY, BIRTH_DATE_LIKE, DATE_TOKEN, formatDate, mentionsDateLoosely, parseDate } from './dates.js';
 import { detectOrThrow, isRemoteDetector, PrivacyError } from './detection-result.js';
 import {
   identityIdString,
@@ -10,11 +11,12 @@ import {
   assertPrivacyScope,
   normalizeMappingValue,
   type MappingEntry,
+  type MappingOrigin,
   type MappingSnapshot,
   type PrivacyMappingStore,
   type PrivacyScope,
 } from './mapping-store.js';
-import { emailFromName, generatePseudonym } from './pseudonyms.js';
+import { emailFromName, fillerFirstName, generatePseudonym } from './pseudonyms.js';
 import { createRegexPiiDetector } from './regex-detector.js';
 
 /** Version of the protected-text contract this shield implements. */
@@ -41,19 +43,48 @@ export interface StrictPiiShieldConfig {
   onAudit?: (event: PrivacyAuditEvent) => void;
 }
 
+/**
+ * Where a text comes from. `raw` (default): the principal, the application,
+ * a tool or the browser's history; it holds originals, so a pseudonym in it
+ * is a collision and stops the call. `model`: output this turn's boundary
+ * itself received from the model (server-side provenance, never a client
+ * claim); it legitimately holds pseudonyms.
+ */
+export type ProtectedTextOrigin = 'raw' | 'model';
+
 /** One conversation's protected view, loaded once per turn and never shared. */
 export interface PrivacySession {
   readonly scope: PrivacyScope;
   readonly profile: typeof PROTECTED_TEXT_PROFILE;
+  /** Random id of the mapping generation this session is bound to (never reused). */
+  readonly generation: string;
+  /** How the mapping was found when the session opened. */
+  readonly origin: MappingOrigin;
   /** Registers identities known from the authenticated context or authorized tool results. */
   registerIdentities(identities: ReadonlyArray<KnownIdentity>): Promise<void>;
-  /** Replaces detected and already-mapped originals with their pseudonyms. */
-  pseudonymizeText(text: string): Promise<string>;
+  /**
+   * Replaces detected and already-mapped originals with their pseudonyms. A
+   * `raw` text that contains a pseudonym of this scope is refused with
+   * `privacy_mapping_conflict`: it could not be told apart on the way back.
+   */
+  pseudonymizeText(text: string, options?: { origin?: ProtectedTextOrigin }): Promise<string>;
   /** Same for JSON: string values, object keys and numbers that are mapped ids. */
-  pseudonymizeJson<T>(value: T): Promise<T>;
-  /** Pseudonyms → originals, only within this scope. */
+  pseudonymizeJson<T>(value: T, options?: { origin?: ProtectedTextOrigin }): Promise<T>;
+  /** Pseudonyms → originals, only within this scope (also a date, phone or IBAN pseudonym in another format). */
   rehydrateText(text: string): string;
   rehydrateJson<T>(value: T): T;
+  /**
+   * Rehydration for a tool that executes: like `rehydrateJson`, but refuses
+   * (`privacy_mapping_conflict`) when a fake date of birth remains in a
+   * form that cannot be mapped back, so no invented value reaches the tool.
+   */
+  rehydrateToolInput<T>(value: T): T;
+  /** Keyed digest of one canonical history part, bound to this scope and generation. */
+  bindingDigest(canonical: string): string;
+  /** True when this generation produced or accepted the canonical part. */
+  isBound(canonical: string): boolean;
+  /** Records canonical parts as content of this generation. */
+  bind(canonicals: ReadonlyArray<string>): Promise<void>;
   /** Number of protected originals (not single name parts) present in `text`. */
   countLeaks(text: string): number;
   /** Number of mapping entries currently known. */
@@ -104,6 +135,24 @@ interface Index {
   originalMatcher: RegExp | null;
   originalMatcherCi: RegExp | null;
   pseudonymMatcher: RegExp | null;
+  /** Fake birth date (iso) → original birth date (iso); `null` when two originals share it. */
+  birthByFakeIso: Map<string, string | null>;
+  /** Original birth date (iso) → fake birth date (iso). */
+  birthByOriginalIso: Map<string, string>;
+  /** Normalized phone/IBAN pseudonym → entry. */
+  byNumberPseudonym: Map<string, MappingEntry>;
+}
+
+const NUMBER_CATEGORIES = new Set(['phone', 'iban']);
+
+/** Digits of a phone number in international form; letters and digits of an IBAN. */
+function normalizeNumber(category: string, value: string, de: boolean): string {
+  if (category === 'iban') return `iban:${value.replace(/[^A-Za-z0-9]/g, '').toUpperCase()}`;
+  let digits = value.replace(/\D/g, '');
+  if (value.trim().startsWith('+')) return `phone:${digits}`;
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  else if (digits.startsWith('0') && de) digits = `49${digits.slice(1)}`;
+  return `phone:${digits}`;
 }
 
 function buildMatcher(values: string[], flags: string): RegExp | null {
@@ -112,13 +161,28 @@ function buildMatcher(values: string[], flags: string): RegExp | null {
   return new RegExp(`${BOUNDARY_BEFORE}(?:${unique.map(escapeRegex).join('|')})${BOUNDARY_AFTER}`, flags);
 }
 
-function buildIndex(entries: MappingEntry[]): Index {
+function buildIndex(entries: MappingEntry[], de: boolean): Index {
   const byOriginal = new Map<string, MappingEntry>();
   const byOriginalLower = new Map<string, MappingEntry>();
   const byPseudonym = new Map<string, MappingEntry>();
+  const birthByFakeIso = new Map<string, string | null>();
+  const birthByOriginalIso = new Map<string, string>();
+  const byNumberPseudonym = new Map<string, MappingEntry>();
   const exact: string[] = [];
   const ci: string[] = [];
   for (const entry of entries) {
+    if (entry.category === 'date_of_birth') {
+      const original = parseDate(entry.original);
+      const fake = parseDate(entry.pseudonym);
+      if (original && fake) {
+        const known = birthByFakeIso.get(fake.iso);
+        birthByFakeIso.set(fake.iso, known === undefined || known === original.iso ? original.iso : null);
+        birthByOriginalIso.set(original.iso, fake.iso);
+      }
+    }
+    if (NUMBER_CATEGORIES.has(entry.category)) {
+      byNumberPseudonym.set(normalizeNumber(entry.category, entry.pseudonym, de), entry);
+    }
     const original = normalizeMappingValue(entry.original);
     byOriginal.set(original, entry);
     byPseudonym.set(normalizeMappingValue(entry.pseudonym), entry);
@@ -138,7 +202,23 @@ function buildIndex(entries: MappingEntry[]): Index {
     originalMatcher: buildMatcher(exact, 'gu'),
     originalMatcherCi: buildMatcher(ci, 'giu'),
     pseudonymMatcher: buildMatcher([...byPseudonym.keys()], 'gu'),
+    birthByFakeIso,
+    birthByOriginalIso,
+    byNumberPseudonym,
   };
+}
+
+const NAME_PART_CATEGORIES = new Set(['name-first', 'name-last']);
+
+/**
+ * Case-insensitive matches of a single name part count only when they are
+ * written like a name (capitalized or all caps): "Klein" and "KLEIN" match
+ * the family name Klein, the adjective "klein" does not.
+ */
+function nameLikeMatch(entry: MappingEntry | undefined, text: string): boolean {
+  if (!entry || !NAME_PART_CATEGORIES.has(entry.category)) return true;
+  const first = text.charAt(0);
+  return first === first.toUpperCase() && first !== first.toLowerCase();
 }
 
 interface Span {
@@ -177,7 +257,9 @@ function matchAll(matcher: RegExp | null, text: string, category: string): Span[
  * `createPiiShield` does not give these guarantees.
  */
 export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiShield {
-  const detectors = config.detectors ?? [createRegexPiiDetector()];
+  const detectors = config.detectors ?? [createRegexPiiDetector({ dateOfBirth: 'context' })];
+  const numberScanner = createRegexPiiDetector({ categories: ['phone', 'iban'] });
+  const de = config.locale.toLowerCase().startsWith('de');
   for (const detector of detectors) {
     if (isRemoteDetector(detector)) throw new PrivacyError('privacy_remote_detector_rejected');
   }
@@ -190,7 +272,10 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
     assertPrivacyScope(scope);
     const frozenScope = Object.freeze({ ...scope });
     let snapshot: MappingSnapshot = await config.store.load(frozenScope);
-    let index = buildIndex(snapshot.entries);
+    const generation = snapshot.generation;
+    const origin = snapshot.origin;
+    const bindings = new Set(snapshot.bindings);
+    let index = buildIndex(snapshot.entries, de);
     const audit = (type: PrivacyAuditEvent['type'], categories: Record<string, number>) => {
       if (!config.onAudit) return;
       try {
@@ -201,8 +286,11 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
     };
 
     async function reload() {
-      snapshot = await config.store.load(frozenScope);
-      index = buildIndex(snapshot.entries);
+      const next = await config.store.load(frozenScope);
+      // A turn stays on the generation it opened with.
+      if (next.generation !== generation) throw new PrivacyError('privacy_mapping_conflict');
+      snapshot = next;
+      index = buildIndex(snapshot.entries, de);
     }
 
     function lookupOriginal(value: string): MappingEntry | undefined {
@@ -246,10 +334,10 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
           taken.add(lowerKey(pseudonym));
           batch.push({ original: key, pseudonym, category: request.category });
         }
-        const result = await config.store.append(frozenScope, snapshot.generation, batch);
+        const result = await config.store.append(frozenScope, generation, batch);
         if (result.notInserted.length === 0) {
           snapshot = { ...snapshot, version: result.version, entries: [...snapshot.entries, ...batch] };
-          index = buildIndex(snapshot.entries);
+          index = buildIndex(snapshot.entries, de);
           pending = [];
           break;
         }
@@ -259,6 +347,11 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
     }
 
     async function detect(text: string): Promise<Span[]> {
+      // A date of birth in a form this profile cannot read and map back
+      // ("15.01.80", "01/15/1980", "Dec 12, 1976") is refused, never sent.
+      for (const match of text.matchAll(BIRTH_DATE_LIKE)) {
+        if (!parseDate(match[0])) throw new PrivacyError('privacy_unsupported_content');
+      }
       const spans: Span[] = [];
       for (const detector of detectors) {
         const entities: PiiEntity[] = await detectOrThrow(detector, text, locales, {
@@ -268,16 +361,76 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
         for (const e of entities) spans.push({ start: e.start, end: e.end, text: e.text, category: String(e.type) });
       }
       spans.push(...matchAll(index.originalMatcher, text, 'known'));
-      spans.push(...matchAll(index.originalMatcherCi, text, 'known'));
+      spans.push(...matchAll(index.originalMatcherCi, text, 'known').filter((span) => nameLikeMatch(lookupOriginal(span.text), span.text)));
+      // A known date of birth in another format (ISO, "15. Januar 1980")
+      // is protected too, with the same fake date in that format.
+      if (index.birthByOriginalIso.size > 0) {
+        for (const match of text.matchAll(DATE_TOKEN)) {
+          const parsed = parseDate(match[0]);
+          if (parsed && index.birthByOriginalIso.has(parsed.iso) && !lookupOriginal(match[0])) {
+            spans.push({ start: match.index!, end: match.index! + match[0].length, text: match[0], category: 'date_of_birth' });
+          }
+        }
+      }
       return resolveOverlaps(spans).filter((span) => !index.byPseudonym.has(normalizeMappingValue(span.text)));
     }
 
-    async function pseudonymizeText(text: string): Promise<string> {
+    /** Throws when a raw text holds a pseudonym of this scope (in any format we map back). */
+    function assertNoPseudonym(text: string): void {
+      if (index.pseudonymMatcher) {
+        index.pseudonymMatcher.lastIndex = 0;
+        if (index.pseudonymMatcher.test(text)) throw new PrivacyError('privacy_mapping_conflict');
+      }
+      if (index.birthByFakeIso.size > 0) {
+        for (const match of text.matchAll(DATE_TOKEN)) {
+          const parsed = parseDate(match[0]);
+          if (parsed && index.birthByFakeIso.has(parsed.iso)) throw new PrivacyError('privacy_mapping_conflict');
+        }
+      }
+      if (index.byNumberPseudonym.size > 0) {
+        for (const found of numberScanner.detect(text, [config.locale]) as PiiEntity[]) {
+          if (index.byNumberPseudonym.has(normalizeNumber(String(found.type), found.text, de))) throw new PrivacyError('privacy_mapping_conflict');
+        }
+      }
+    }
+
+    /** Pseudonym of a date of birth: one fake date per original, in the format of each occurrence. */
+    function birthPseudonymFor(original: string): (() => string | undefined) | undefined {
+      const parsed = parseDate(original);
+      if (!parsed) return undefined;
+      return () => {
+        const fakeIso = index.birthByOriginalIso.get(parsed.iso);
+        return fakeIso ? formatDate(fakeIso, parsed.format) : undefined;
+      };
+    }
+
+    /** After a date of birth is mapped, map its dotted and ISO forms to the same fake date. */
+    async function ensureBirthVariants(originals: string[]): Promise<void> {
+      const variants: Array<{ original: string; category: string; pseudonymFor?: () => string | undefined }> = [];
+      for (const original of originals) {
+        const parsed = parseDate(original);
+        if (!parsed) continue;
+        for (const format of ['dotted', 'iso'] as const) {
+          const variant = formatDate(parsed.iso, format);
+          if (!lookupOriginal(variant)) variants.push({ original: variant, category: 'date_of_birth', pseudonymFor: birthPseudonymFor(variant) });
+        }
+      }
+      if (variants.length > 0) await ensure(variants);
+    }
+
+    async function pseudonymizeText(text: string, options: { origin?: ProtectedTextOrigin } = {}): Promise<string> {
       if (typeof text !== 'string' || text.length === 0) return text;
       const normalized = foldProtectedText(text);
+      if ((options.origin ?? 'raw') === 'raw') assertNoPseudonym(normalized);
       const spans = await detect(normalized);
       if (spans.length === 0) return normalized;
-      await ensure(spans.filter((s) => s.category !== 'known').map((s) => ({ original: s.text, category: s.category })));
+      await ensure(spans.filter((s) => s.category !== 'known').map((s) => ({
+        original: s.text,
+        category: s.category,
+        ...(s.category === 'date_of_birth' ? { pseudonymFor: birthPseudonymFor(s.text) } : {}),
+      })));
+      const births = spans.filter((s) => s.category === 'date_of_birth').map((s) => s.text);
+      if (births.length > 0) await ensureBirthVariants(births);
       const categories: Record<string, number> = {};
       let out = '';
       let cursor = 0;
@@ -292,9 +445,31 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
       return out + normalized.slice(cursor);
     }
 
-    async function pseudonymizeJson(value: unknown, depth = 0): Promise<unknown> {
+    async function pseudonymizeBirthValue(value: string, textOptions: { origin?: ProtectedTextOrigin }): Promise<string> {
+      const folded = foldProtectedText(value).trim();
+      // An ISO timestamp keeps its time part; the date part is the birth date.
+      const datePart = /^\d{4}-\d{2}-\d{2}(?=T|$)/.exec(folded)?.[0] ?? folded;
+      if (!parseDate(datePart)) {
+        // A birth date we cannot read could not be mapped back: refuse.
+        throw new PrivacyError('privacy_unsupported_content');
+      }
+      if ((textOptions.origin ?? 'raw') === 'raw') assertNoPseudonym(folded);
+      if (!lookupOriginal(datePart)) {
+        await ensure([{ original: datePart, category: 'date_of_birth', pseudonymFor: birthPseudonymFor(datePart) }]);
+      }
+      await ensureBirthVariants([datePart]);
+      const entry = lookupOriginal(datePart);
+      if (!entry) throw new PrivacyError('privacy_mapping_conflict');
+      audit('pseudonymized', { date_of_birth: 1 });
+      return entry.pseudonym + folded.slice(datePart.length);
+    }
+
+    async function pseudonymizeJson(value: unknown, depth = 0, textOptions: { origin?: ProtectedTextOrigin } = {}, key?: string): Promise<unknown> {
       if (depth > 64) throw new PrivacyError('privacy_unsupported_content');
-      if (typeof value === 'string') return pseudonymizeText(value);
+      if (typeof value === 'string' && key !== undefined && BIRTH_DATE_KEY.test(key) && value.trim().length > 0) {
+        return pseudonymizeBirthValue(value, textOptions);
+      }
+      if (typeof value === 'string') return pseudonymizeText(value, textOptions);
       if (typeof value === 'number' || typeof value === 'bigint') {
         // Only a registered id maps a number; quantities and other numbers
         // never match, since short numeric ids are not registered.
@@ -305,7 +480,7 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
       }
       if (Array.isArray(value)) {
         const out: unknown[] = [];
-        for (const item of value) out.push(await pseudonymizeJson(item, depth + 1));
+        for (const item of value) out.push(await pseudonymizeJson(item, depth + 1, textOptions, key));
         return out;
       }
       if (value instanceof Uint8Array || value instanceof ArrayBuffer) {
@@ -313,8 +488,8 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
       }
       if (value !== null && typeof value === 'object') {
         const out: Record<string, unknown> = {};
-        for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-          out[await pseudonymizeText(key)] = await pseudonymizeJson(child, depth + 1);
+        for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) {
+          out[await pseudonymizeText(childKey, textOptions)] = await pseudonymizeJson(child, depth + 1, textOptions, childKey);
         }
         return out;
       }
@@ -322,16 +497,61 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
     }
 
     function rehydrateText(text: string): string {
-      if (typeof text !== 'string' || !index.pseudonymMatcher) return text;
+      if (typeof text !== 'string' || text.length === 0) return text;
+      const spans: Array<Span & { replacement: string }> = [];
+      if (index.pseudonymMatcher) {
+        for (const span of matchAll(index.pseudonymMatcher, text, 'pseudonym')) {
+          const entry = index.byPseudonym.get(normalizeMappingValue(span.text));
+          if (entry) spans.push({ ...span, replacement: entry.original });
+        }
+      }
+      // A fake birth date the model wrote in another format maps back by value.
+      if (index.birthByFakeIso.size > 0) {
+        for (const match of text.matchAll(DATE_TOKEN)) {
+          const parsed = parseDate(match[0]);
+          if (!parsed || !index.birthByFakeIso.has(parsed.iso)) continue;
+          const originalIso = index.birthByFakeIso.get(parsed.iso);
+          if (originalIso === null || originalIso === undefined) throw new PrivacyError('privacy_mapping_conflict');
+          spans.push({ start: match.index!, end: match.index! + match[0].length, text: match[0], category: 'date', replacement: formatDate(originalIso, parsed.format) });
+        }
+      }
+      // A phone number or IBAN pseudonym with other spacing or prefix maps back too.
+      if (index.byNumberPseudonym.size > 0) {
+        for (const found of numberScanner.detect(text, [config.locale]) as PiiEntity[]) {
+          const entry = index.byNumberPseudonym.get(normalizeNumber(String(found.type), found.text, de));
+          if (entry) spans.push({ start: found.start, end: found.end, text: found.text, category: 'number', replacement: entry.original });
+        }
+      }
+      if (spans.length === 0) return text;
+      let out = '';
+      let cursor = 0;
       let count = 0;
-      const out = text.replace(index.pseudonymMatcher, (match) => {
-        const entry = index.byPseudonym.get(normalizeMappingValue(match));
-        if (!entry) return match;
+      for (const span of resolveOverlaps(spans) as Array<Span & { replacement: string }>) {
+        out += text.slice(cursor, span.start) + span.replacement;
+        cursor = span.end;
         count += 1;
-        return entry.original;
-      });
-      if (count > 0) audit('rehydrated', { total: count });
-      return out;
+      }
+      audit('rehydrated', { total: count });
+      return out + text.slice(cursor);
+    }
+
+    function assertNoUnmappedBirthDate(value: unknown, depth = 0): void {
+      if (depth > 64 || index.birthByFakeIso.size === 0) return;
+      if (typeof value === 'string') {
+        // Readable dates were mapped back already (or are real dates); what
+        // is left is checked for a fake date in a form we cannot read.
+        const rest = value.replace(DATE_TOKEN, ' ');
+        for (const fakeIso of index.birthByFakeIso.keys()) {
+          if (mentionsDateLoosely(rest, fakeIso)) throw new PrivacyError('privacy_mapping_conflict');
+        }
+      } else if (Array.isArray(value)) {
+        for (const item of value) assertNoUnmappedBirthDate(item, depth + 1);
+      } else if (value !== null && typeof value === 'object') {
+        for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+          assertNoUnmappedBirthDate(key, depth + 1);
+          assertNoUnmappedBirthDate(child, depth + 1);
+        }
+      }
     }
 
     function rehydrateJson(value: unknown, depth = 0): unknown {
@@ -365,7 +585,9 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
         }
       }
       await ensure(parts, { rejectPseudonymCollision: true });
-      const pseudoOf = (token: string) => lookupOriginal(token)?.pseudonym ?? token;
+      // Every token of the fake full name is a pseudonym: a short token
+      // without its own mapping (e.g. "Li") gets a filler, never itself.
+      const pseudoOf = (token: string) => lookupOriginal(token)?.pseudonym ?? fillerFirstName(config.locale);
       const derived: Array<{ original: string; category: string; pseudonymFor?: () => string | undefined }> = [];
       for (const { identity, plan } of plans) {
         let fakeFull: string | undefined;
@@ -408,14 +630,30 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
       return leaks;
     }
 
+    const bindingDigest = (canonical: string) => config.store.bindingDigest(frozenScope, generation, canonical);
+
     return {
       scope: frozenScope,
       profile: PROTECTED_TEXT_PROFILE,
+      generation,
+      origin,
       registerIdentities,
       pseudonymizeText,
-      pseudonymizeJson: pseudonymizeJson as PrivacySession['pseudonymizeJson'],
+      pseudonymizeJson: ((value: unknown, options?: { origin?: ProtectedTextOrigin }) => pseudonymizeJson(value, 0, options ?? {})) as PrivacySession['pseudonymizeJson'],
       rehydrateText,
       rehydrateJson: rehydrateJson as PrivacySession['rehydrateJson'],
+      rehydrateToolInput: ((value: unknown) => {
+        const out = rehydrateJson(value);
+        assertNoUnmappedBirthDate(out);
+        return out;
+      }) as PrivacySession['rehydrateToolInput'],
+      bindingDigest,
+      isBound: (canonical) => bindings.has(bindingDigest(canonical)),
+      async bind(canonicals) {
+        const digests = canonicals.map(bindingDigest);
+        await config.store.bind(frozenScope, generation, digests);
+        for (const digest of digests) bindings.add(digest);
+      },
       countLeaks,
       size: () => snapshot.entries.length,
     };

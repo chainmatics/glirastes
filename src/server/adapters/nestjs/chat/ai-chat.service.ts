@@ -27,6 +27,7 @@ import {
   type AiChatModuleOptions,
 } from './ai-chat-module-options.interface.js';
 import { protectedStreamText } from '../../../pii-shield/model-calls.js';
+import { toSafeError } from '../../../pii-shield/detection-result.js';
 
 /** Error class without message or stack: both can carry prompt or tool content. */
 export function errorName(error: unknown): string {
@@ -144,6 +145,12 @@ export class AiChatService {
           >,
           tools: vercelTools as Parameters<typeof streamText>[0]['tools'],
           stopWhen: stepCountIs(maxSteps),
+          // The AI SDK default logs the whole provider error with console.error,
+          // including the request body. Log name and code only.
+          onError: ({ error }: { error: unknown }) => {
+            const safe = toSafeError(error);
+            this.logger.error(`Model stream error: ${safe.name} (${safe.code})`);
+          },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           onStepFinish: (step: any) => {
             // Counts only: tool arguments and results are business data.

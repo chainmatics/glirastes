@@ -12,7 +12,7 @@ import type {
   SharedV3ProviderOptions,
 } from '@ai-sdk/provider';
 import { isPrivacyError, PrivacyError } from './detection-result.js';
-import { extractIdentitiesFromJson, type KnownIdentity } from './known-identities.js';
+import { extractIdentities as extractPeople, type KnownIdentity } from './known-identities.js';
 import {
   attachmentDecision,
   BLOCKED_ATTACHMENTS,
@@ -56,6 +56,13 @@ export interface PrivacyBoundaryOptions {
   identitiesFromToolResults?: boolean | ((toolName: string, output: unknown) => KnownIdentity[]);
   /** Content-free notice of each stop, e.g. for metrics. */
   onBlocked?: (code: string) => void;
+  /**
+   * The caller builds the system and user messages from text this session
+   * already protected, with the pseudonym-collision check of new input done
+   * there (the intent classifier). The boundary still masks anything left
+   * unprotected, but does not take those pseudonyms for raw input.
+   */
+  protectedPrompt?: boolean;
 }
 
 /** One turn's privacy boundary around the model, tools and display. */
@@ -73,6 +80,24 @@ export interface PrivacyBoundary {
 }
 
 const WRAPPED = Symbol.for('glirastes.privacy.wrappedModel');
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function canonicalToolInput(input: unknown): string {
+  if (typeof input !== 'string') return canonicalJson(input);
+  try {
+    return canonicalJson(JSON.parse(input));
+  } catch {
+    return JSON.stringify(input);
+  }
+}
 const WITHHELD_ATTACHMENT = '[Anhang nicht übertragen: Datenschutzregel / attachment withheld by privacy policy]';
 const TOOL_FAILED = JSON.stringify({ success: false, error: 'tool_failed' });
 
@@ -91,6 +116,37 @@ function checkProviderOptions(options: SharedV3ProviderOptions | undefined, allo
       if (!isOptionValue(value, 0)) throw new PrivacyError('privacy_provider_option_blocked');
     }
   }
+}
+
+/**
+ * Provider references to an earlier response that the AI SDK copies from a
+ * response into the next prompt: OpenAI item ids (they point to items the
+ * provider stored) and encrypted reasoning (content the boundary cannot
+ * read). Removed from history parts, so the provider receives the checked
+ * content itself; any other unknown option still stops the call.
+ */
+const REPLAY_REFERENCES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  openai: ['itemId', 'reasoningEncryptedContent'],
+});
+
+function withoutReplayReferences<T extends { providerOptions?: SharedV3ProviderOptions }>(part: T): T {
+  const options = part.providerOptions;
+  if (!options) return part;
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [namespace, values] of Object.entries(options)) {
+    const drop = REPLAY_REFERENCES[namespace];
+    if (!drop || !isPlainObject(values)) {
+      next[namespace] = values;
+      continue;
+    }
+    const kept = Object.fromEntries(Object.entries(values).filter(([key]) => !drop.includes(key)));
+    if (Object.keys(kept).length !== Object.keys(values).length) changed = true;
+    if (Object.keys(kept).length > 0) next[namespace] = kept;
+  }
+  if (!changed) return part;
+  const { providerOptions: _removed, ...rest } = part;
+  return (Object.keys(next).length > 0 ? { ...rest, providerOptions: next } : rest) as T;
 }
 
 /** Allowed options are flags, numbers and short enum tokens (`low`, `ephemeral`, `1h`), never free text. */
@@ -162,7 +218,12 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
     ? undefined
     : typeof options.identitiesFromToolResults === 'function'
       ? options.identitiesFromToolResults
-      : (_tool: string, output: unknown) => extractIdentitiesFromJson(output);
+      : (_tool: string, output: unknown) => {
+        const extraction = extractPeople(output);
+        // A walk that stopped early would leave people unprotected: refuse.
+        if (!extraction.complete) throw new PrivacyError('privacy_unsupported_content');
+        return extraction.identities;
+      };
 
   const blocked = (code: string) => {
     try {
@@ -171,6 +232,17 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
       // Never let a metrics sink change the decision.
     }
   };
+
+  // Server-side provenance: what this boundary itself received from the
+  // model in this turn. Only such parts may hold pseudonyms when the next
+  // step sends them back; everything else is raw text and a pseudonym in it
+  // is a collision. A client cannot add to this record.
+  const emittedTexts = new Set<string>();
+  const emittedToolCalls = new Map<string, string>();
+  const promptOrigin = options.protectedPrompt === true ? 'model' as const : 'raw' as const;
+  const originOfText = (text: string) => (emittedTexts.has(text) ? 'model' as const : 'raw' as const);
+  const originOfToolCall = (toolCallId: string, input: unknown) =>
+    (emittedToolCalls.get(toolCallId) === canonicalToolInput(input) ? 'model' as const : 'raw' as const);
 
   async function protectFile(part: LanguageModelV3FilePart): Promise<LanguageModelV3FilePart | { type: 'text'; text: string }> {
     const decision = attachmentDecision(part, attachments, capabilities.images === true);
@@ -232,12 +304,12 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
     checkProviderOptions(message.providerOptions, allowlist);
     switch (message.role) {
       case 'system':
-        return { ...message, content: await session.pseudonymizeText(message.content) };
+        return { ...message, content: await session.pseudonymizeText(message.content, { origin: promptOrigin }) };
       case 'user': {
         const content: Array<(typeof message.content)[number]> = [];
         for (const part of message.content) {
           checkProviderOptions(part.providerOptions, allowlist);
-          if (part.type === 'text') content.push({ ...part, text: await session.pseudonymizeText(part.text) });
+          if (part.type === 'text') content.push({ ...part, text: await session.pseudonymizeText(part.text, { origin: promptOrigin }) });
           else if (part.type === 'file') content.push(await protectFile(part));
           else throw new PrivacyError('privacy_unsupported_content');
         }
@@ -245,18 +317,19 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
       }
       case 'assistant': {
         const content: Array<(typeof message.content)[number]> = [];
-        for (const part of message.content) {
+        for (const raw of message.content) {
+          const part = withoutReplayReferences(raw);
           checkProviderOptions(part.providerOptions, allowlist);
           switch (part.type) {
             case 'text':
             case 'reasoning':
-              content.push({ ...part, text: await session.pseudonymizeText(part.text) });
+              content.push({ ...part, text: await session.pseudonymizeText(part.text, { origin: originOfText(part.text) }) });
               break;
             case 'file':
               content.push(await protectFile(part));
               break;
             case 'tool-call':
-              content.push({ ...part, input: await session.pseudonymizeJson(part.input) });
+              content.push({ ...part, input: await session.pseudonymizeJson(part.input, { origin: originOfToolCall(part.toolCallId, part.input) }) });
               break;
             case 'tool-result':
               content.push({ ...part, output: await protectToolOutput(part.toolName, part.output) });
@@ -273,7 +346,8 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
         for (const part of message.content) {
           if (part.type === 'tool-result' && part.output.type === 'json') await registerFromToolOutput(part.toolName, part.output.value);
         }
-        for (const part of message.content) {
+        for (const raw of message.content) {
+          const part = withoutReplayReferences(raw);
           checkProviderOptions(part.providerOptions, allowlist);
           if (part.type === 'tool-result') content.push({ ...part, output: await protectToolOutput(part.toolName, part.output) });
           else if (part.type === 'tool-approval-response') {
@@ -368,8 +442,13 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
     wrapGenerate: async ({ doGenerate }) => {
       const result = await doGenerate();
       for (const part of result.content as LanguageModelV3Content[]) {
-        if (part.type === 'text' || part.type === 'reasoning') assertNoLeak(part.text);
-        else if (part.type === 'tool-call') assertNoLeak(part.input);
+        if (part.type === 'text' || part.type === 'reasoning') {
+          assertNoLeak(part.text);
+          emittedTexts.add(part.text);
+        } else if (part.type === 'tool-call') {
+          assertNoLeak(part.input);
+          emittedToolCalls.set(part.toolCallId, canonicalToolInput(part.input));
+        }
       }
       return result;
     },
@@ -385,6 +464,7 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
       };
       const release = (key: string, controller: TransformStreamDefaultController<LanguageModelV3StreamPart>) => {
         assertNoLeak(texts.get(key) ?? '');
+        if (!key.startsWith('tool:')) emittedTexts.add(texts.get(key) ?? '');
         for (const part of held.get(key) ?? []) controller.enqueue(part);
         held.delete(key);
         texts.delete(key);
@@ -413,6 +493,7 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
                 break;
               case 'tool-call':
                 assertNoLeak(part.input);
+                emittedToolCalls.set(part.toolCallId, canonicalToolInput(part.input));
                 break;
               default:
                 break;
@@ -454,7 +535,7 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
       Object.defineProperty(wrapped, WRAPPED, { value: boundary, enumerable: false });
       return wrapped as unknown as M;
     },
-    rehydrateToolInput: (input) => session.rehydrateJson(input),
+    rehydrateToolInput: (input) => session.rehydrateToolInput(input),
     projectText: (text) => session.rehydrateText(text),
   };
   return boundary;

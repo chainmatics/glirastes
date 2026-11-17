@@ -21,6 +21,7 @@ export const MODEL_CALL_SYMBOLS: ReadonlySet<string> = new Set([
   'transcribe', 'experimental_transcribe',
   'generateSpeech', 'experimental_generateSpeech',
   'generateImage', 'experimental_generateImage',
+  'generateVideo', 'experimental_generateVideo',
   // AI SDK 6 agents call the model themselves.
   'ToolLoopAgent', 'Experimental_Agent', 'Agent',
 ]);
@@ -37,7 +38,12 @@ const CONTENT_FREE_PACKAGES: ReadonlySet<string> = new Set([
   '@ai-sdk/react', '@ai-sdk/provider', '@ai-sdk/provider-utils', '@ai-sdk/ui-utils',
 ]);
 
-export type EgressKind = 'model_call' | 'provider_import' | 'dynamic_import' | 'network' | 'raw_model_call';
+/** The privacy facades (`model-calls.ts`); every call site is inventoried with its protection argument. */
+export const FACADE_SYMBOLS: ReadonlySet<string> = new Set([
+  'protectedStreamText', 'protectedGenerateText', 'protectedGenerateObject',
+]);
+
+export type EgressKind = 'model_call' | 'provider_import' | 'dynamic_import' | 'network' | 'raw_model_call' | 'facade_call';
 
 export interface EgressFinding {
   kind: EgressKind;
@@ -51,12 +57,16 @@ export interface EgressFinding {
 export const EgressInventoryEntrySchema = z.object({
   file: z.string().min(1),
   symbol: z.string().min(1),
-  kind: z.enum(['model_call', 'provider_import', 'dynamic_import', 'network', 'raw_model_call']),
+  kind: z.enum(['model_call', 'provider_import', 'dynamic_import', 'network', 'raw_model_call', 'facade_call']),
   /**
    * `facade`: the guarded model-call facade itself. `protected`: the call
    * passes the privacy boundary. `exception`: reviewed and outside the
    * protection promise (named, with a reason). `content-free`: carries no
-   * prompt, tool or business content.
+   * prompt, tool or business content. A `facade_call` symbol is
+   * `<facade>(<protection>)` with protection `boundary`, `null` (literal
+   * null, undefined or missing), `nullable` (an expression that can be null)
+   * or `escaped` (the facade is passed on as a value). `null`, `nullable` and
+   * `escaped` need a reason that says why no privacy boundary is acceptable.
    */
   decision: z.enum(['facade', 'protected', 'exception', 'content-free']),
   reason: z.string().min(10),
@@ -73,7 +83,7 @@ export type EgressInventory = z.infer<typeof EgressInventorySchema>;
 export type EgressInventoryEntry = z.infer<typeof EgressInventoryEntrySchema>;
 
 export interface EgressViolation {
-  code: 'unapproved_model_call' | 'unapproved_provider_import' | 'unapproved_dynamic_import' | 'unapproved_network_call' | 'stale_inventory_entry' | 'duplicate_inventory_entry' | 'inventory_count_mismatch';
+  code: 'unapproved_model_call' | 'unapproved_provider_import' | 'unapproved_dynamic_import' | 'unapproved_network_call' | 'unapproved_facade_call' | 'stale_inventory_entry' | 'duplicate_inventory_entry' | 'inventory_count_mismatch';
   file: string;
   symbol: string;
   line?: number;
@@ -85,16 +95,43 @@ const VIOLATION_CODE: Record<EgressKind, EgressViolation['code']> = {
   provider_import: 'unapproved_provider_import',
   dynamic_import: 'unapproved_dynamic_import',
   network: 'unapproved_network_call',
+  facade_call: 'unapproved_facade_call',
 };
 
 function isProviderPackage(specifier: string): boolean {
   if (CONTENT_FREE_PACKAGES.has(specifier)) return false;
   return /^@ai-sdk\//.test(specifier) || /^@openrouter\//.test(specifier)
+    || /^@langchain\//.test(specifier)
+    || ['ollama', 'ollama-ai-provider', 'ollama-ai-provider-v2', 'langchain', '@llamaindex/core', 'llamaindex', '@aws-sdk/client-bedrock-runtime',
+      '@azure/openai', 'together-ai', 'replicate', '@huggingface/inference'].includes(specifier)
     || ['openai', '@anthropic-ai/sdk', '@google/generative-ai', '@google/genai', '@deepgram/sdk', '@mistralai/mistralai', 'groq-sdk', 'cohere-ai'].includes(specifier);
 }
 
 function stringLiteral(node: ts.Node | undefined): string | undefined {
   return node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : undefined;
+}
+
+function unwrapExpression(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isNonNullExpression(current)
+    || ts.isSatisfiesExpression(current) || ts.isTypeAssertionExpression(current)) current = current.expression;
+  return current;
+}
+
+/** `null`, `nullable` or `boundary`: what a facade call passes as protection. */
+function classifyProtection(argument: ts.Expression | undefined): 'null' | 'nullable' | 'boundary' {
+  if (!argument) return 'null';
+  const node = unwrapExpression(argument);
+  if (node.kind === ts.SyntaxKind.NullKeyword) return 'null';
+  if (ts.isIdentifier(node) && node.text === 'undefined') return 'null';
+  if (ts.isVoidExpression(node)) return 'null';
+  if (ts.isConditionalExpression(node)) {
+    return classifyProtection(node.whenTrue) !== 'boundary' || classifyProtection(node.whenFalse) !== 'boundary' ? 'nullable' : 'boundary';
+  }
+  if (ts.isBinaryExpression(node) && [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(node.operatorToken.kind)) {
+    return classifyProtection(node.left) !== 'boundary' || classifyProtection(node.right) !== 'boundary' ? 'nullable' : 'boundary';
+  }
+  return 'boundary';
 }
 
 /** Scans one source text. `file` is only used to label findings. */
@@ -112,6 +149,9 @@ export function scanSourceForEgress(file: string, text: string): EgressFinding[]
   };
   /** Local names bound to the whole `ai` module. */
   const aiNamespaces = new Set<string>();
+  /** Local names bound to a facade, and namespaces of the module that exports them. */
+  const facadeLocals = new Map<string, string>();
+  const facadeNamespaces = new Set<string>();
 
   const bindingFromModule = (binding: ts.BindingName, specifier: string, node: ts.Node) => {
     if (NETWORK_MODULES.has(specifier)) { add('network', specifier, node); return; }
@@ -145,6 +185,17 @@ export function scanSourceForEgress(file: string, text: string): EgressFinding[]
     if (ts.isImportDeclaration(node)) {
       const specifier = stringLiteral(node.moduleSpecifier);
       const clause = node.importClause;
+      if (specifier && clause && !clause.isTypeOnly && specifier !== 'ai') {
+        const bindings = clause.namedBindings;
+        if (bindings && ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements) {
+            const imported = (element.propertyName ?? element.name).text;
+            if (!element.isTypeOnly && FACADE_SYMBOLS.has(imported)) facadeLocals.set(element.name.text, imported);
+          }
+        } else if (bindings && ts.isNamespaceImport(bindings) && /model-calls|pii-shield|glirastes/.test(specifier)) {
+          facadeNamespaces.add(bindings.name.text);
+        }
+      }
       if (specifier && clause && !clause.isTypeOnly) {
         if (NETWORK_MODULES.has(specifier)) {
           add('network', specifier, node);
@@ -192,6 +243,23 @@ export function scanSourceForEgress(file: string, text: string): EgressFinding[]
       const specifier = moduleLoad(node.initializer);
       if (specifier === '<computed>') add('dynamic_import', '<computed>', node);
       else if (specifier) bindingFromModule(node.name, specifier, node);
+    }
+
+    if (ts.isCallExpression(node)) {
+      const callee = unwrapExpression(node.expression);
+      const facade = ts.isIdentifier(callee) ? facadeLocals.get(callee.text)
+        : ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && facadeNamespaces.has(callee.expression.text)
+          && FACADE_SYMBOLS.has(callee.name.text) ? callee.name.text : undefined;
+      if (facade) add('facade_call', `${facade}(${classifyProtection(node.arguments[1])})`, node);
+    }
+    // A facade used as a value (`run(protectedStreamText)`): its protection cannot be read.
+    if (ts.isIdentifier(node) && facadeLocals.has(node.text) && !isFacadeCallee(node)
+      && !ts.isImportSpecifier(node.parent) && !ts.isExportSpecifier(node.parent)) {
+      add('facade_call', `${facadeLocals.get(node.text)}(escaped)`, node);
+    }
+    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && facadeNamespaces.has(node.expression.text)
+      && FACADE_SYMBOLS.has(node.name.text) && !(ts.isCallExpression(node.parent) && node.parent.expression === node)) {
+      add('facade_call', `${node.name.text}(escaped)`, node);
     }
 
     if (ts.isCallExpression(node)) {
@@ -275,6 +343,13 @@ function isGlobalValueReference(node: ts.Identifier): boolean {
     if (ts.isStatement(current) || ts.isSourceFile(current)) break;
   }
   return true;
+}
+
+function isFacadeCallee(node: ts.Identifier): boolean {
+  let child: ts.Node = node;
+  let parent = node.parent;
+  while (ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) || ts.isNonNullExpression(parent)) { child = parent; parent = parent.parent; }
+  return ts.isCallExpression(parent) && parent.expression === child;
 }
 
 function isDeclarationName(node: ts.Identifier): boolean {

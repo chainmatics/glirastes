@@ -11,6 +11,7 @@ export type PrivacyErrorCode =
   | 'privacy_scope_invalid'
   | 'privacy_mapping_unavailable'
   | 'privacy_mapping_deleted'
+  | 'privacy_mapping_expired'
   | 'privacy_mapping_conflict'
   | 'privacy_key_unavailable'
   | 'privacy_store_not_persistent'
@@ -34,6 +35,7 @@ const MESSAGES: Record<PrivacyErrorCode, string> = {
   privacy_scope_invalid: 'The privacy scope is incomplete or invalid.',
   privacy_mapping_unavailable: 'The privacy mapping store is unavailable.',
   privacy_mapping_deleted: 'The privacy mapping of this conversation was deleted.',
+  privacy_mapping_expired: 'This step belongs to an expired privacy mapping and cannot be continued.',
   privacy_mapping_conflict: 'The privacy mapping changed concurrently.',
   privacy_key_unavailable: 'A privacy mapping key is unavailable.',
   privacy_store_not_persistent: 'The protected profile requires a persistent mapping store.',

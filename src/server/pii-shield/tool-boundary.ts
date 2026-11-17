@@ -1,23 +1,31 @@
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { DurableRuntimeStore } from '../../runtime/postgres-store.js';
 import { PrivacyError, toSafeError, type SafeErrorSummary } from './detection-result.js';
 import type { PrivacyBoundary } from './model-boundary.js';
 import { scopeKeyOf } from './mapping-store.js';
+import { errorLeavesOutcomeUnknown, isOutcomeUnknown } from '../core/tool-outcome.js';
 
 /** The tool-execution part of the runtime store, used as write receipts. */
 export type ToolReceiptStore = Pick<DurableRuntimeStore, 'claimToolExecution' | 'completeToolExecution'>;
 
 export interface PrivacyToolOptions {
   /**
-   * Persistent receipts keyed by the tool call id. A call that already
-   * completed is not executed again (for example after the turn failed while
-   * protecting its result); a call whose outcome is unknown (timeout after a
-   * possible commit) is not retried but answered `privacy_tool_outcome_unknown`
-   * for a business reconciliation.
+   * Persistent receipts of tool writes. A resumed approval is keyed by its
+   * approval id: it runs at most once, and a replay whose outcome is unknown
+   * (timeout after a possible commit) is answered `privacy_tool_outcome_unknown`
+   * for a business reconciliation. A call the model makes is recorded per
+   * request (id and input); a new request (also a retry) is a new call.
    */
   receipts?: ToolReceiptStore;
   /** Environment id for the receipts. */
   environmentId?: string;
+  /**
+   * Approved calls this request resumes. The first call of that tool under
+   * that tool call id is keyed by the verified approval id, so one approval
+   * runs at most once in its generation; every other call (also a later one
+   * reusing the id) is new in this request.
+   */
+  approvals?: ReadonlyArray<{ toolCallId: string; toolName: string; approvalId: string }>;
   /** Content-free diagnostics of a failed tool. */
   onToolError?: (toolName: string, error: SafeErrorSummary) => void;
 }
@@ -36,14 +44,7 @@ function canonical(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-function fingerprint(value: unknown): string {
-  return createHash('sha256').update(canonical(value)).digest('hex');
-}
-
-function outcomeMayBeCommitted(error: unknown): boolean {
-  const name = typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
-  return name === 'TimeoutError' || name === 'AbortError';
-}
+const outcomeMayBeCommitted = errorLeavesOutcomeUnknown;
 
 /**
  * Wraps AI SDK tools of a protected turn:
@@ -59,7 +60,17 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
   boundary: PrivacyBoundary,
   options: PrivacyToolOptions = {},
 ): T {
-  const runId = `privacy:${scopeKeyOf(boundary.session.scope)}`;
+  // The generation id is random and never reused: a receipt of an earlier
+  // generation (expired, purged, lost) never applies again.
+  const runId = `privacy:${scopeKeyOf(boundary.session.scope)}:${boundary.session.generation}`;
+  // A provider may reuse call ids such as `call_0` in every request: a call
+  // the model made in this request is keyed per request, so it is never
+  // taken for a replay of an earlier, different call.
+  const requestNonce = randomUUID();
+  const approvalOf = new Map((options.approvals ?? []).map((approval) => [approval.toolCallId, approval]));
+  // Keyed with the scope's secret: a receipt cannot be used to confirm a
+  // guessed input, also where detection missed a value.
+  const fingerprint = (value: unknown) => boundary.session.bindingDigest(canonical(['glirastes-tool-input/v1', value]));
   const environmentId = options.environmentId ?? boundary.session.scope.environment;
   const wrapped: Record<string, unknown> = {};
   for (const [name, raw] of Object.entries(tools)) {
@@ -81,18 +92,23 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
       execute: async (input: unknown, executeOptions?: { toolCallId?: string }) => {
         const original = boundary.rehydrateToolInput(input);
         const toolCallId = executeOptions?.toolCallId;
+        const approval = toolCallId ? approvalOf.get(toolCallId) : undefined;
+        const resumed = approval !== undefined && approval.toolName === name;
+        // An approval opens one execution only; a later call reusing the id is a new call.
+        if (resumed) approvalOf.delete(toolCallId!);
         const claim = options.receipts && toolCallId
           ? {
               environmentId,
               runId,
-              // A provider may reuse ids such as `call_0` across turns: the
-              // key also binds the (pseudonymized) input, so a different call
-              // under a reused id is not taken for a replay.
-              idempotencyKey: `${toolCallId}:${fingerprint(input)}`,
+              idempotencyKey: resumed
+                ? `approval:${approval.approvalId}`
+                : `call:${requestNonce}:${toolCallId}:${fingerprint(input)}`,
               toolUuid: name,
-              // The model's input holds scope-local pseudonyms only; a digest of
-              // the originals could be checked against guessed values.
-              inputFingerprint: fingerprint(input),
+              // A model's call holds scope-local pseudonyms only. A resumed
+              // approval runs with the originals the principal saw: no digest
+              // of them is stored (it could be checked against guessed
+              // values); the signed approval id already binds the input.
+              inputFingerprint: resumed ? 'approval-bound' : fingerprint(input),
             }
           : undefined;
         if (claim) {
@@ -118,6 +134,12 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
           }
           throw new PrivacyError(outcomeMayBeCommitted(error) ? 'privacy_tool_outcome_unknown' : 'privacy_tool_failed');
         }
+        if (isOutcomeUnknown(result)) {
+          // Timed out or aborted after the request may have reached the
+          // backend: the receipt stays pending for a business reconciliation.
+          options.onToolError?.(name, { name: 'TimeoutError', code: 'tool_outcome_unknown' });
+          throw new PrivacyError('privacy_tool_outcome_unknown');
+        }
         if (claim) {
           // The receipt records the outcome only, never the result or a digest of it.
           // An SDK tool reports a caught failure as a returned `{ error }` or
@@ -142,3 +164,4 @@ function isFailureResult(result: unknown): boolean {
   const record = result as Record<string, unknown>;
   return record.success === false || (typeof record.error === 'string' && record.error.length > 0);
 }
+

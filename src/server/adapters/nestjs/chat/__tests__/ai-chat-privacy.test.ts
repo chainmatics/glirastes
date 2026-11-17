@@ -75,6 +75,37 @@ describe('NestJS chat adapter and the protected-text profile', () => {
     }
   });
 
+  it('does not print a provider error, which carries the request body, through the AI SDK default', async () => {
+    const lines: string[] = [];
+    const capture = (...args: unknown[]) => { lines.push(args.map((a) => (a instanceof Error ? `${a.name}: ${a.message} ${JSON.stringify(a)}` : typeof a === 'string' ? a : JSON.stringify(a))).join(' ')); };
+    const consoleSpies = (['error', 'warn', 'log', 'debug'] as const).map((level) => vi.spyOn(console, level).mockImplementation(capture));
+    const loggerSpies = (['log', 'debug', 'error', 'warn', 'verbose'] as const)
+      .map((level) => vi.spyOn(Logger.prototype, level).mockImplementation(capture));
+    try {
+      const model = new MockLanguageModelV3({
+        doStream: async () => {
+          const error = Object.assign(new Error(`Provider rejected ${CANARY.email}`), {
+            name: 'AI_APICallError',
+            statusCode: 400,
+            requestBodyValues: { prompt: `Schreib ${CANARY.name}` },
+            responseBody: `{"echo":"${CANARY.email}"}`,
+          });
+          throw error;
+        },
+      });
+      const response = await service({ model, systemPrompt: 's' }).streamChat(
+        [{ id: 'm1', role: 'user', parts: [{ type: 'text', text: `Schreib ${CANARY.name}` }] }] as never,
+        'Bearer x',
+      );
+      await drain(response).catch(() => '');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(lines.join('\n')).not.toMatch(CANARY_PATTERN);
+      expect(lines.join('\n')).not.toContain('requestBodyValues');
+    } finally {
+      for (const spy of [...consoleSpies, ...loggerSpies]) spy.mockRestore();
+    }
+  });
+
   it('reduces errors to their class', () => {
     expect(errorName(new TypeError(CANARY.email))).toBe('TypeError');
     expect(errorName(CANARY.email)).toBe('string');
