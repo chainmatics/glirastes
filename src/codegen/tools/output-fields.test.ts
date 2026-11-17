@@ -180,3 +180,22 @@ describe('review round 4: an allow-list keeps an allOf contract satisfiable', ()
     expect(either.oneOf[0]).toMatchObject({ additionalProperties: false });
   });
 });
+
+describe('review round 5: joined deny-lists stay within the limit of one tool', () => {
+  const app = Array.from({ length: 200 }, (_, index) => `**.k${index}`);
+  const declared = (fields: Partial<DeclaredOutputFields>): DeclaredOutputFields => ({ where: 'api.json GET /x', form: 'openapi', ...fields });
+
+  it('fails closed instead of writing a contract with more than 200 paths', () => {
+    const result = resolveOutputFields('GET /x', declared({ appDenied: app, denied: ['data[].name'] }), DESIGN);
+    expect(result.findings).toContainEqual(expect.objectContaining({ code: 'output-denied-fields-invalid', severity: 'needs_attention' }));
+    // Nothing is cut off: the tool shows nothing and stays disabled.
+    expect(result.allowed).toEqual([]);
+    expect(result.denied).toBeUndefined();
+  });
+
+  it('accepts exactly 200 joined paths', () => {
+    const result = resolveOutputFields('GET /x', declared({ appDenied: app.slice(0, 199), denied: ['data[].name'] }), DESIGN);
+    expect(result.findings.map((finding) => finding.code)).not.toContain('output-denied-fields-invalid');
+    expect(result.denied).toHaveLength(200);
+  });
+});

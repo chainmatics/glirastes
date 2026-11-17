@@ -12,6 +12,7 @@ import {
   anyDepthKeys,
   intersectOutputFields,
   MAX_ANY_DEPTH,
+  MAX_OUTPUT_FIELDS,
   outputFieldCovers,
   parseAnyDepthKey,
   outputFieldsOutside,
@@ -473,12 +474,22 @@ export function resolveOutputFields(
   const findings: ToolFinding[] = [];
   const names = NAMES[declared.form];
   // Fail closed: with an upper bound that cannot be read nothing is allowed (the tool is disabled as well).
-  const broken = declared.allowed === 'invalid' || declared.denied === 'invalid';
-  const allowed = broken ? [] : declared.allowed as string[] | undefined;
-  const own = broken ? undefined : declared.denied as string[] | undefined;
+  const declaredBroken = declared.allowed === 'invalid' || declared.denied === 'invalid';
+  const declaredOwn = declaredBroken ? undefined : declared.denied as string[] | undefined;
   // Effective deny-list: the tool's own paths and the app-wide patterns, de-duplicated and sorted.
-  const denied = broken ? undefined
-    : app ? [...new Set([...(own ?? []), ...app])].sort(compareCodeUnits) : own;
+  const joined = declaredBroken ? undefined
+    : app ? [...new Set([...(declaredOwn ?? []), ...app])].sort(compareCodeUnits) : declaredOwn;
+  // Each list is within the limit on its own, but together they may not be: a
+  // contract with more paths cannot be loaded, and a rule must never be cut off.
+  const tooMany = joined !== undefined && joined.length > MAX_OUTPUT_FIELDS;
+  if (tooMany) {
+    findings.push(toolFinding('output-denied-fields-invalid', 'needs_attention', subject,
+      `${declared.where} declares ${names.denied} that, joined with output.deniedFields of .glirastes/tools.json, has ${joined.length} paths; at most ${MAX_OUTPUT_FIELDS} apply to one tool. The tool is disabled until one of the lists is shortened.`));
+  }
+  const broken = declaredBroken || tooMany;
+  const allowed = broken ? [] : declared.allowed as string[] | undefined;
+  const own = broken ? undefined : declaredOwn;
+  const denied = broken ? undefined : joined;
   let defaults = declared.default === 'invalid' ? undefined : declared.default;
   // Only the tool's own paths are checked against its schema; app-wide patterns are checked across all tools.
   for (const [which, paths] of [['allowed', allowed], ['denied', own], ['default', defaults]] as const) {
