@@ -145,6 +145,29 @@ developer and CI then run `glirastes sync` and `glirastes doctor` with their
 own `GLIRASTES_API_KEY`. Without the file both treat the project as not
 connected. The secret is only the key, which stays out of the repository.
 
+### What you see in Citadel after connect and sync
+
+- **After `connect`:** the app exists in Citadel with one app connection key
+  and no environment.
+- **`sync`** uploads the content-free setup report of the tools (names,
+  descriptions, usage hints, roles, risk classes, schema digests, warnings) to
+  the app, not to an environment. It creates no environment and activates
+  nothing. The printed status is `ready` (nothing needs attention) or `review`
+  (at least one operation needs attention before it can be published).
+- **Without an environment** the overview and the tools page of Citadel stay
+  empty ("No app connected yet"), also after a successful `sync`: both show an
+  environment. Owners and admins see the app connection keys, development
+  connections and pending environment requests there.
+- **An environment** comes from Citadel (add it in the environment picker and
+  give it a place) or from a deployment that starts with
+  `GLIRASTES_ENVIRONMENT=<environment key>` and is then approved in Citadel.
+  The tools appear once a runner of that environment has reported the same
+  tool set.
+- **An app without `GLIRASTES_ENVIRONMENT`** is a development connection. It
+  is listed with its key prefix and last contact, follows the first
+  environment that holds a place read-only, and logs "No reference environment
+  yet; running on local code and checking again." until one exists.
+
 ### What `doctor` checks about sign-in
 
 Two checks read `package.json` in the project root and nothing else; neither
@@ -161,9 +184,11 @@ or other embed:
   authorization.
 - **Sign-in integration** (`E-SCOPE-101`, warning): passes when a known sign-in
   package is a dependency (`@azure/msal-node`, `@auth0/nextjs-auth0`,
-  `@clerk/nextjs`, `@supabase/ssr`, `@auth/core`, `next-auth`, `better-auth`).
-  An app with its own guard (Passport, a JWT guard) keeps the warning; it is
-  informational.
+  `@clerk/nextjs`, `@supabase/ssr`, `@auth/core`, `next-auth`, `better-auth`,
+  `@nestjs/passport`, `passport-jwt`, `passport`), or when the principal is
+  declared `server-verified`: that declaration covers an own guard without
+  one of these packages. The warning therefore only appears while the
+  principal is not declared either.
 
 Both are local checks: neither result is sent to the Platform, and
 `glirastes sync` does not look at them. `doctor` itself reports `fail` and

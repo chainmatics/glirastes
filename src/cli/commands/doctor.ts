@@ -185,7 +185,9 @@ export async function createDoctorReport(
   checks.push(profile.framework
     ? check('framework', 'pass', 'E-SETUP-101')
     : check('framework', 'warn', 'E-SETUP-102', 'declare-supported-framework'));
-  checks.push(profile.authProviders.length > 0
+  // A declared server-verified principal covers an own sign-in integration
+  // (a guard without a known package): nothing is left to review here.
+  checks.push(profile.authProviders.length > 0 || profile.principal === 'server-verified'
     ? check('auth-provider', 'pass', 'E-SCOPE-100')
     : check('auth-provider', 'warn', 'E-SCOPE-101', 'review-host-auth-integration'));
   checks.push(profile.principal === 'server-verified'

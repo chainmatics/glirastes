@@ -34,6 +34,9 @@ const AUTH_MARKERS = [
   ['@auth/core', 'authjs'],
   ['next-auth', 'authjs'],
   ['better-auth', 'better-auth'],
+  ['@nestjs/passport', 'passport'],
+  ['passport-jwt', 'passport'],
+  ['passport', 'passport'],
 ] as const;
 
 export interface SetupProfile {

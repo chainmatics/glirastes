@@ -357,6 +357,21 @@ describe('createDoctorReport', () => {
       .toBe(before);
   });
 
+  it.each([
+    ['an own guard with a declared principal', { '@nestjs/core': '11.0.0' }, true, 'pass', 'E-SCOPE-100'],
+    ['Passport without a declared principal', { '@nestjs/core': '11.0.0', '@nestjs/passport': '11.0.0' }, false, 'pass', 'E-SCOPE-100'],
+    ['no known package and no declaration', { '@nestjs/core': '11.0.0' }, false, 'warn', 'E-SCOPE-101'],
+  ] as const)('sign-in integration: %s', async (_label, dependencies, principal, status, code) => {
+    const rootDir = await fixture(principal);
+    const path = join(rootDir, 'package.json');
+    const manifest = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    await writeFile(path, JSON.stringify({ ...manifest, dependencies }));
+
+    const report = await createDoctorReport({ rootDir });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({ name: 'auth-provider', status, code }));
+  });
+
   it('fails when server-verified principal wiring is not declared', async () => {
     const rootDir = await fixture(false);
 
