@@ -89,7 +89,7 @@ describe('schema probe', () => {
       'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
         + "  GET: { input: z.object({}), outputAllowedFields: ['meta', 'data[].name', 'meta'], outputDeniedFields: ['**.fileUrl'] },\n"
         + "  POST: { input: z.object({}), outputAllowedFields: ['data[7].SECRETNAME'], outputDeniedFields: ['**.a.SECRETNAME'], outputDefaultFields: 3 },\n"
-        + "  PUT: { input: z.object({}), outputDefaultFields: ['**.fileUrl'] },\n"
+        + "  PUT: { input: z.object({}), outputDefaultFields: ['**.fileUrl'], outputAllowedFields: null, outputDeniedFields: ['**.fileUrl '] },\n"
         + '  DELETE: { input: z.object({}) },\n};\n',
     });
     const entry = (method: string): SchemaProbeItem => ({
@@ -102,7 +102,8 @@ describe('schema probe', () => {
     expect(get).toMatchObject({ outputAllowedFields: ['data[].name', 'meta'], outputDeniedFields: ['**.fileUrl'] });
     expect(get).not.toHaveProperty('invalidFields');
     expect(post).toMatchObject({ invalidFields: ['outputAllowedFields', 'outputDeniedFields', 'outputDefaultFields'] });
-    expect(put).toMatchObject({ invalidFields: ['outputDefaultFields'] });
+    // null is no declaration but an invalid one (fail closed); so is whitespace in a path.
+    expect(put).toMatchObject({ invalidFields: ['outputAllowedFields', 'outputDeniedFields', 'outputDefaultFields'] });
     expect(del).not.toHaveProperty('outputAllowedFields');
     expect(JSON.stringify(results)).not.toContain('SECRETNAME');
     // They shape results, not the contract module: the digest ignores them.

@@ -24,8 +24,43 @@ export function zodToCompactDescription(
 ): string {
   const keys = bound?.deniedKeys && bound.deniedKeys.size > 0 ? bound.deniedKeys : undefined;
   if (!bound || (!bound.allowed && !bound.denied && !keys)) return describeSchema(schema, 0, maxDepth);
-  return describeProjected(schema, 0, maxDepth, bound.allowed, bound.denied, keys) ?? '{}';
+  return describeRoot(schema, maxDepth, bound.allowed, bound.denied, keys) ?? '{}';
 }
+
+/**
+ * The root of a bounded description. A result that is not a record (a list,
+ * a tuple, a scalar) travels under `data` at runtime, so the declared paths
+ * reach it through `data`; a union is described option by option.
+ */
+function describeRoot(
+  schema: SchemaLike,
+  maxDepth: number,
+  allow: OutputFieldNode | undefined,
+  deny: OutputFieldNode | undefined,
+  keys: ReadonlySet<string> | undefined,
+): string | undefined {
+  const inner = unwrap(schema);
+  const type = getDef(inner)?.type as string | undefined;
+  if (type === 'object' || type === 'record') return describeProjected(schema, 0, maxDepth, allow, deny, keys);
+  if (type === 'union') {
+    const def = getDef(inner);
+    const options = (def.options instanceof Map ? [...def.options.values()] : def.options) as SchemaLike[];
+    const described = options.map((option) => describeRoot(option, maxDepth, allow, deny, keys))
+      .filter((desc): desc is string => desc !== undefined);
+    return described.length > 0 ? [...new Set(described)].join(' | ') : undefined;
+  }
+  // Under `data`: the wrapper key itself may be removed or not allowed.
+  if (keys?.has('data')) return undefined;
+  const allowData = allow && !allow.end ? allow.keys.get('data') : undefined;
+  if (allow && !allow.end && !allowData) return undefined;
+  return describeProjected(schema, 0, maxDepth, allowData, deny?.keys.get('data'), keys);
+}
+
+/** Zod types that hold no field names: described as they are. */
+const SCALAR_TYPES: ReadonlySet<string> = new Set([
+  'string', 'number', 'bigint', 'boolean', 'date', 'literal', 'null', 'undefined', 'void', 'enum', 'nan',
+  'symbol', 'any', 'unknown', 'never', 'template_literal',
+]);
 
 /**
  * Like `describeSchema`, reduced to a tool's upper bound: the fields of
@@ -64,7 +99,16 @@ function describeProjected(
       });
       return fields.length > 0 ? `{ ${fields.join(', ')} }` : '{}';
     }
+    case 'tuple': {
+      if (!all && !allow!.each) return undefined;
+      const items = (def.items as SchemaLike[]).map((item) => (
+        describeProjected(item, depth + 1, maxDepth, all ? undefined : allow!.each, deny?.each, keys) ?? '{}'
+      ));
+      return `[${items.join(', ')}]`;
+    }
     case 'record': {
+      // Paths below single keys of a record cannot be followed in its value type: fail closed.
+      if (all && deny && (deny.keys.size > 0 || deny.each)) return 'Record<string, unknown>';
       if (all) return `Record<string, ${describeProjected(def.valueType, depth + 1, maxDepth, undefined, undefined, keys) ?? '{}'}>`;
       if (allow!.keys.size === 0) return undefined;
       const fields = [...allow!.keys].flatMap(([key, child]) => {
@@ -96,8 +140,10 @@ function describeProjected(
     case 'lazy':
       return describeProjected(def.getter(), depth, maxDepth, allow, deny, keys);
     default:
-      // A scalar (or an unknown type): kept whole unless the allow-list needs an object or array here.
-      return all ? describeSchema(schema, depth, maxDepth) : undefined;
+      // A scalar is kept whole unless the allow-list needs an object or array here. A type
+      // the projection cannot follow (intersection, map, set, …) is not described: fail closed.
+      if (!all) return undefined;
+      return SCALAR_TYPES.has(def?.type as string) ? describeSchema(schema, depth, maxDepth) : 'unknown';
   }
 }
 

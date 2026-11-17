@@ -108,7 +108,7 @@ describe('x-glirastes-output-* extensions', () => {
     ['x-glirastes-output-denied-fields', 'output-denied-fields-invalid', 'needs_attention'],
     ['x-glirastes-output-default-fields', 'output-default-fields-invalid', 'warning'],
   ] as const)('reports an invalid %s without repeating it', async (extension, code, severity) => {
-    for (const value of [['data[0].SECRETNAME'], 'data', [3], ['**.SECRETNAME.x']]) {
+    for (const value of [['data[0].SECRETNAME'], 'data', [3], ['**.SECRETNAME.x'], [' SECRETNAME'], ['SECRETNAME '], null]) {
       const tool = await observe({ [extension]: value });
       expect(codes(tool)).toEqual([[code, severity]]);
       const finding = tool.findings[0]!;

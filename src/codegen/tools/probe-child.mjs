@@ -102,8 +102,9 @@ async function main() {
     };
   };
 
+  // Only an absent field is undeclared: null is an invalid declaration (fail closed), as in OpenAPI and defineTool.
   const fieldList = (value) => {
-    if (value === undefined || value === null) return null;
+    if (value === undefined) return null;
     return Array.isArray(value) && value.length <= 200
       && value.every((path) => typeof path === 'string' && path.length <= 200)
       ? [...value]
@@ -137,7 +138,7 @@ async function main() {
         : typeof entry.maxResultChars === 'number' && Number.isFinite(entry.maxResultChars)
           ? entry.maxResultChars
           : 'invalid',
-      // A list of at most 200 strings goes on to the path check; any other declared value is invalid.
+      // A list of at most 200 strings goes on to the path check; any other declared value (null too) is invalid.
       outputAllowedFields: fieldList(entry.outputAllowedFields),
       outputDeniedFields: fieldList(entry.outputDeniedFields),
       outputDefaultFields: fieldList(entry.outputDefaultFields),

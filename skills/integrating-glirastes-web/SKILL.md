@@ -121,7 +121,10 @@ removes the key at any depth, the way to hide signed URLs) and
 `x-glirastes-output-default-fields` (the first answer; the rest via
 `read_result`). The first two are an upper bound applied before PII sealing,
 handles, overview and the size limit, on every channel (model and browser);
-`success`, `uiAction` and failures stay. NestJS: `@ApiExtension(name, [...])`.
+`uiAction` (built from the full answer, seen by the model in the same turn)
+is reduced only by `**.key`; a failure body is withheld under an allow-list or
+when not JSON, else reduced. Error texts are not filtered. Matching is exact
+and case-sensitive. NestJS: `@ApiExtension(name, [...])`.
 An invalid allow- or deny-list disables the tool (`output-allowed-fields-invalid`,
 `output-denied-fields-invalid`); see `docs/concepts.md`.
 `x-glirastes-tool: false` keeps an operation out in either mode. Existing

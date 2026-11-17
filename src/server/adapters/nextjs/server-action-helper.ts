@@ -1,5 +1,6 @@
 import { normalizeResultUiAction } from '../../core/index.js';
 import { applyOutputBound, outputBoundOf } from '../../core/output-fields.js';
+import { boundedToolFailure } from '../../core/tool-failure-result.js';
 import type { ExecuteToolOptions, ExecuteToolResult } from './types.js';
 
 /**
@@ -32,10 +33,13 @@ export async function executeTool(
     const executed = await tool.execute(input, context);
     // The upper bound of the tool's result holds here too: the caller is a client.
     const failed = typeof executed === 'object' && executed !== null && (executed as Record<string, unknown>).success === false;
+    // Under a bound a failure is reduced exactly as for the model (toolToAiTool).
     const bound = outputBoundOf(tool);
-    const rawResult = bound && !failed
-      ? applyOutputBound(executed, bound) ?? { success: true, outputWithheld: true }
-      : executed;
+    const rawResult = !bound
+      ? executed
+      : failed
+        ? boundedToolFailure(executed as Record<string, unknown>, bound)
+        : applyOutputBound(executed, bound) ?? { success: true, outputWithheld: true };
     const result = uiActionSchema
       ? normalizeResultUiAction(rawResult, uiActionSchema)
       : rawResult;

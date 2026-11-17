@@ -89,7 +89,8 @@ describe('unknownOutputFields', () => {
       '**.fileUrl', '**.fileUlr', '**.size',
     ], )).toEqual(['data[].nme', 'data.name', 'meta.pgae', '**.fileUlr']);
     expect(unknownOutputFields({}, ['x', '**.y'])).toEqual([]);
-    expect(unknownOutputFields({ type: 'object', properties: { a: {} } }, ['**.b'])).toEqual([]);
+    // An any-depth key named nowhere in the declared parts is reported even next to open parts.
+    expect(unknownOutputFields({ type: 'object', properties: { a: {}, meta: { type: 'object' } } }, ['**.b', '**.a'])).toEqual(['**.b']);
     expect(unknownOutputFields({ type: 'array', items: { type: 'object', properties: { id: { type: 'string' } } } }, ['data[].id', 'data[].x', 'id']))
       .toEqual(['data[].x', 'id']);
   });
@@ -134,5 +135,26 @@ describe('resolveOutputFields', () => {
   it('warns when a part of the schema cannot be reduced', () => {
     const result = resolveOutputFields('GET /x', declared({ allowed: ['a.b'] }), { type: 'object', properties: { a: { $ref: '#/$defs/A' } } });
     expect(codes(result)).toEqual([['output-schema-unprojected', 'warning']]);
+  });
+});
+
+describe('review fixes', () => {
+  const declared = (fields: Partial<DeclaredOutputFields>): DeclaredOutputFields => ({ where: 'api.json GET /x', form: 'openapi', ...fields });
+
+  it('a denied path ending in [] empties the entries in the schema too', () => {
+    const list: JsonSchemaLike = { type: 'object', properties: { tokens: { type: 'array', items: { type: 'string', examples: ['TOK'] } } } };
+    expect(projectOutputSchema(list, undefined, ['tokens[]']).schema).toEqual({
+      type: 'object', properties: { tokens: { type: 'array', items: { type: 'object', properties: {}, additionalProperties: false } } },
+    });
+  });
+
+  it('warns about an any-depth key the declared schema does not name, next to open objects, with a case near-miss', () => {
+    const result = resolveOutputFields('GET /x', declared({ denied: ['**.fileurl', 'data[].draftVersion.fileurl', '**.extra'] }), DESIGN);
+    const messages = result.findings.map((finding) => finding.message);
+    expect(result.findings.map((finding) => finding.code)).toEqual(['output-field-unknown', 'output-field-unknown']);
+    expect(messages[0]).toContain('data[].draftVersion.fileurl (the schema has fileUrl; names match exactly, case included)');
+    expect(messages[1]).toContain('not found in the declared response schema: **.fileurl (the schema has fileUrl');
+    expect(messages[1]).toContain('if the field only occurs in undeclared parts, ignore this');
+    expect(messages[1]).toContain('NOT excluded');
   });
 });

@@ -28,10 +28,12 @@ const ANY_DEPTH_PREFIX = `${ANY_DEPTH}.`;
 /**
  * Steps of one declared path; undefined when it is not a string, does not
  * parse in the `read_result` grammar, starts with brackets (a result is
- * always a record), holds an index (`[2]`) or a field named `**`.
+ * always a record), holds an index (`[2]`), a field named `**` or any
+ * whitespace (field names are matched exactly and case-sensitively).
  */
 export function parseOutputFieldPath(text: unknown): OutputFieldStep[] | undefined {
-  if (typeof text !== 'string' || text.length > MAX_OUTPUT_FIELD_CHARS) return undefined;
+  // Whitespace anywhere protects nothing (no key is written so): invalid.
+  if (typeof text !== 'string' || text.length > MAX_OUTPUT_FIELD_CHARS || /\s/.test(text)) return undefined;
   const parsed = parseResultPath(text);
   if (!parsed || parsed.steps[0]?.kind !== 'key') return undefined;
   const steps: OutputFieldStep[] = [];
@@ -271,12 +273,16 @@ export function toJsonRecord(result: unknown): Record<string, unknown> | undefin
 
 /**
  * `value` without the subtrees `node` ends in, through objects and arrays;
- * any other value stays. An object whose keys were all removed stays as `{}`.
+ * any other value stays. An object whose keys were all removed stays as `{}`;
+ * an entry a path ending in `[]` removes stays as `{}`, whatever it was.
  */
 function withoutDenied(value: unknown, node: OutputFieldNode): unknown {
   if (Array.isArray(value)) {
     const each = node.each;
-    return each ? value.map((entry) => withoutDenied(entry, each)) : value;
+    if (!each) return value;
+    // A path ending in `[]` removes the content of every entry; each entry stays as `{}`,
+    // so the array keeps its length (a count is part of the array, not of its entries).
+    return value.map((entry) => (each.end ? {} : withoutDenied(entry, each)));
   }
   if (!isPlainObject(value) || node.keys.size === 0) return value;
   const output: Record<string, unknown> = {};
@@ -392,7 +398,77 @@ export function applyOutputBound(result: unknown, bound: OutputBound): Record<st
   if (!record) return undefined;
   const allowed = bound.allowed ? projectOutputFields(record, bound.allowed) : record;
   const denied = bound.denied ? removeDeniedFields(allowed, bound.denied) : allowed;
-  return bound.deniedKeys && bound.deniedKeys.size > 0 ? removeDeniedKeys(denied, bound.deniedKeys) : denied;
+  const reduced = bound.deniedKeys && bound.deniedKeys.size > 0 ? removeDeniedKeys(denied, bound.deniedKeys) : denied;
+  return withinProtected(reduced, bound);
+}
+
+/**
+ * The protected keys under a bound: `success` only as a boolean (a backend
+ * cannot carry data in it), and `uiAction` without the any-depth denied keys
+ * (a JSON copy; one that cannot be serialized is dropped). Exact paths and the
+ * allow-list do not apply to `uiAction`: its shape is not the result's.
+ */
+function withinProtected(record: Record<string, unknown>, bound: OutputBound): Record<string, unknown> {
+  const keys = bound.deniedKeys;
+  const output: Record<string, unknown> = {};
+  for (const key of Object.keys(record)) {
+    const value = record[key];
+    if (key === 'success') {
+      if (typeof value === 'boolean') setOwn(output, key, value);
+    } else if (key === 'uiAction' && keys && keys.size > 0) {
+      let copy: unknown;
+      try {
+        const text = JSON.stringify(value);
+        copy = text === undefined ? undefined : JSON.parse(text);
+      } catch {
+        continue;
+      }
+      if (copy === undefined) continue;
+      const kept = withoutKeys(copy, keys, 1);
+      if (kept !== DROP) setOwn(output, key, kept);
+    } else {
+      setOwn(output, key, value);
+    }
+  }
+  return output;
+}
+
+/** Why a failure body is not shown under a bound (a fixed note for the model). */
+export const FAILURE_BODY_WITHHELD = Object.freeze({
+  allowed: 'The response body is not shown: this tool declares the only output fields it may show.',
+  unchecked: 'The response body is not shown: it is not JSON, so the declared output fields cannot be checked on it.',
+});
+
+/**
+ * The body of a failed backend call under a bound, before it is serialized
+ * and cut: with an allow-list it is withheld (a failure body is not a record
+ * of the declared shape); a body that is not a JSON object, array, number,
+ * boolean or null (a text, HTML, a JSON string) cannot be checked and is
+ * withheld; otherwise the denied paths are removed as far as they match (a
+ * list body counts as `data`, as for a result) and every any-depth denied key.
+ */
+export function reduceFailureBody(data: unknown, bound: OutputBound): { data?: unknown; withheld?: string } {
+  if (data === undefined) return {};
+  if (bound.allowed) return { withheld: FAILURE_BODY_WITHHELD.allowed };
+  if (data === null || typeof data === 'number' || typeof data === 'boolean') return { data };
+  if (typeof data !== 'object') return { withheld: FAILURE_BODY_WITHHELD.unchecked };
+  let copy: unknown;
+  try {
+    const text = JSON.stringify(data);
+    if (text === undefined) return { withheld: FAILURE_BODY_WITHHELD.unchecked };
+    copy = JSON.parse(text);
+  } catch {
+    return { withheld: FAILURE_BODY_WITHHELD.unchecked };
+  }
+  const list = Array.isArray(copy);
+  let record = (list ? { data: copy } : copy) as Record<string, unknown>;
+  if (bound.denied) record = withoutDenied(record, bound.denied) as Record<string, unknown>;
+  if (bound.deniedKeys && bound.deniedKeys.size > 0) {
+    const kept = withoutKeys(record, bound.deniedKeys, 0);
+    if (kept === DROP) return { withheld: FAILURE_BODY_WITHHELD.unchecked };
+    record = kept as Record<string, unknown>;
+  }
+  return { data: list ? record.data : record };
 }
 
 /** `applyOutputBound` with only `outputAllowedFields`. */

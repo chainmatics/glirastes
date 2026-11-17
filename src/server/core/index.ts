@@ -36,6 +36,12 @@ import {
   toJsonRecord,
 } from './output-fields.js';
 import { applyDefaultViewWithoutStore } from './default-view.js';
+import {
+  boundedToolFailure,
+  ENDPOINT_FAILURE,
+  ENDPOINT_FAILURE_DATA,
+  endpointFailureFields,
+} from './tool-failure-result.js';
 import type { ResultStore } from './result-store.js';
 import { isResultReader } from './read-result-tool.js';
 export {
@@ -195,91 +201,6 @@ export interface EndpointToolContext extends ToolContext {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-const MAX_TOOL_ERROR_MESSAGE_CHARS = 1_000;
-const MAX_TOOL_ERROR_BODY_CHARS = 4_000;
-
-/**
- * Marks a failure result `endpointToolToTool` built from a backend response.
- * A non-enumerable symbol key: a backend body (or a 2xx answer with
- * `success: false`) is JSON and cannot set it, so only such a result keeps
- * its status, body and classification through `boundedToolFailure`. It is a
- * registry symbol (`Symbol.for`) so the ESM and the CJS build of this module
- * share it: a tool built by one copy and wrapped by the other keeps its
- * fields instead of silently losing them.
- */
-const ENDPOINT_FAILURE = Symbol.for('glirastes.endpointFailure');
-
-/** How far a cut may move back to end on a whole token. */
-const MAX_TOOL_ERROR_BACKTRACK_CHARS = 256;
-const TOOL_ERROR_TOKEN_DELIMITER = /[\s",:{}[\]]/;
-
-/**
- * Cuts a failure text (the body, or the `error` message taken from it) to at
- * most `limit` characters. A configured PII shield reads the text after this
- * cut, and a value split by it (an email reduced to `max.mueller@exa`) no
- * longer matches a detector. So the cut moves back to the last whitespace or
- * JSON delimiter and drops the partial token. That keeps a single-token value
- * whole; a value written with spaces (a grouped IBAN, a phone number) can
- * still be split. A text without a delimiter in the last
- * `MAX_TOOL_ERROR_BACKTRACK_CHARS` characters is cut hard. The window is the
- * same for both limits: it is sized by the longest token worth keeping whole
- * (an email address has at most 254 characters), not by the limit.
- */
-function cutToolErrorText(text: string, limit: number): string {
-  if (text.length <= limit) return text;
-  const cut = text.slice(0, limit);
-  // The cut already ends on a whole token.
-  if (TOOL_ERROR_TOKEN_DELIMITER.test(text.charAt(limit))) return cut;
-  const floor = Math.max(0, limit - MAX_TOOL_ERROR_BACKTRACK_CHARS);
-  for (let index = cut.length - 1; index >= floor; index -= 1) {
-    if (!TOOL_ERROR_TOKEN_DELIMITER.test(cut.charAt(index))) continue;
-    // Never cut a text down to nothing but whitespace.
-    return cut.slice(0, index).trim().length > 0 ? cut.slice(0, index) : cut;
-  }
-  return cut;
-}
-
-function endpointFailureBody(data: unknown): { body?: unknown; bodyTruncated?: true } {
-  if (data === undefined) return {};
-  if (typeof data === 'string') {
-    return data.length > MAX_TOOL_ERROR_BODY_CHARS
-      ? { body: cutToolErrorText(data, MAX_TOOL_ERROR_BODY_CHARS), bodyTruncated: true }
-      : { body: data };
-  }
-  let serialized: string | undefined;
-  try {
-    serialized = JSON.stringify(data);
-  } catch {
-    return {};
-  }
-  if (serialized === undefined) return {};
-  return serialized.length > MAX_TOOL_ERROR_BODY_CHARS
-    ? { body: cutToolErrorText(serialized, MAX_TOOL_ERROR_BODY_CHARS), bodyTruncated: true }
-    : { body: data };
-}
-
-function boundedToolFailure(
-  result: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
-  const rawError = result.error;
-  const cutError = typeof rawError === 'string'
-    ? cutToolErrorText(rawError, MAX_TOOL_ERROR_MESSAGE_CHARS)
-    : '';
-  // Also when the cut leaves nothing but whitespace.
-  const error = cutError.trim().length > 0 ? cutError : 'Tool execution failed.';
-
-  const fromEndpoint = (result as { [ENDPOINT_FAILURE]?: unknown })[ENDPOINT_FAILURE] === true;
-  return {
-    success: false,
-    error,
-    retryable: result.retryable === true,
-    ...(fromEndpoint && Number.isInteger(result.status) ? { status: result.status } : {}),
-    ...(fromEndpoint && result.body !== undefined ? { body: result.body } : {}),
-    ...(fromEndpoint && result.bodyTruncated === true ? { bodyTruncated: true } : {}),
-    ...(fromEndpoint && result.expectedFailure === true ? { expectedFailure: true } : {}),
-  };
 }
 
 export function buildPath(
@@ -661,11 +582,11 @@ export function endpointToolToTool<TInput extends SchemaLike>(
   const outputDefaultFields = endpointTool.outputDefaultFields !== undefined
     ? normalizeOutputFields(endpointTool.outputDefaultFields, 'outputDefaultFields')!
     : undefined;
+  const ownBound = outputBoundOf({ outputAllowedFields, outputDeniedFields });
   let description = endpointTool.description;
   if (endpointTool.outputSchema) {
     // The model is told only about the fields it can get.
-    const bound = outputBoundOf({ outputAllowedFields, outputDeniedFields });
-    description += `\n\nReturns: ${zodToCompactDescription(endpointTool.outputSchema, 3, bound)}`;
+    description += `\n\nReturns: ${zodToCompactDescription(endpointTool.outputSchema, 3, ownBound)}`;
   }
 
   return defineTool({
@@ -744,10 +665,13 @@ export function endpointToolToTool<TInput extends SchemaLike>(
           success: false,
           error: response.error ?? `Endpoint failed (${response.status})`,
           ...(Number.isInteger(response.status) ? { status: response.status } : {}),
-          ...(fromBackend ? endpointFailureBody(response.data) : {}),
+          // Under the tool's bound the body is reduced before it is serialized and cut.
+          ...(fromBackend ? endpointFailureFields(response.data, ownBound) : {}),
           ...(expected ? { expectedFailure: true } : {}),
         };
         Object.defineProperty(failure, ENDPOINT_FAILURE, { value: true });
+        // Kept unserialized (non-enumerable) so the bound of the tool that shows it can reduce it.
+        if (fromBackend) Object.defineProperty(failure, ENDPOINT_FAILURE_DATA, { value: response.data });
         return failure;
       }
 
@@ -1108,7 +1032,7 @@ export function toolToAiTool(
         // A successful result of the declared shape (not a failure, not withheld): output fields apply to it.
         let successful = !(isRecord(result) && result.success === false);
         if (isRecord(result) && result.success === false) {
-          cleanResult = boundedToolFailure(result);
+          cleanResult = boundedToolFailure(result, bound);
         } else if (
           tool.outputSchema &&
           isRecord(result)

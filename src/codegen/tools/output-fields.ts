@@ -98,6 +98,8 @@ function typesOf(schema: JsonObject): string[] | undefined {
 }
 
 const COMPOSITES = ['allOf', 'anyOf', 'oneOf'] as const;
+/** The schema of an array entry a denied path ending in `[]` emptied. */
+const EMPTY_ENTRY: JsonObject = Object.freeze({ type: 'object', properties: {}, additionalProperties: false }) as JsonObject;
 const STRUCTURE = ['type', 'properties', 'additionalProperties', 'patternProperties', 'items', 'prefixItems', '$ref', ...COMPOSITES];
 
 function branchesOf(schema: JsonObject): JsonObject[] {
@@ -289,8 +291,11 @@ function denySchema(schema: unknown, node: OutputFieldNode, problems: { count: n
     }
   }
   if (node.each) {
-    if (schema.items !== undefined) output.items = denySchema(schema.items, node.each, problems);
-    if (Array.isArray(schema.prefixItems)) output.prefixItems = schema.prefixItems.map((item) => denySchema(item, node.each!, problems));
+    // A path ending in `[]` empties every entry: the entries stay as `{}`.
+    const each = node.each;
+    const entry = (item: unknown) => (each.end ? { ...EMPTY_ENTRY } : denySchema(item, each, problems));
+    if (schema.items !== undefined) output.items = entry(schema.items);
+    if (Array.isArray(schema.prefixItems)) output.prefixItems = schema.prefixItems.map(entry);
   }
   for (const keyword of COMPOSITES) {
     if (Array.isArray(schema[keyword])) output[keyword] = (schema[keyword] as unknown[]).map((branch) => denySchema(branch, node, problems));
@@ -345,35 +350,6 @@ function stripSchemaKeys(schema: unknown, keys: ReadonlySet<string>, depth = 0):
   return output;
 }
 
-/** Whether a property named `key` can occur in `schema`: `missing` only for a schema closed enough to tell. */
-function anyDepthStatus(schema: unknown, key: string, depth = 0): PathStatus {
-  if (schema === false || schema === true) return schema ? 'unknown' : 'missing';
-  if (!isObject(schema) || schema.$ref !== undefined || depth > 4 * MAX_ANY_DEPTH) return 'unknown';
-  if (!isStructured(schema)) return 'unknown';
-  const statuses: PathStatus[] = [];
-  const properties = isObject(schema.properties) ? schema.properties : undefined;
-  if (properties && Object.prototype.hasOwnProperty.call(properties, key)) return 'exists';
-  const types = typesOf(schema);
-  const objectLike = properties !== undefined || (types?.includes('object') ?? false);
-  if (objectLike) {
-    const additional = schema.additionalProperties;
-    if (schema.patternProperties !== undefined || additional === true || (additional === undefined && !properties)) {
-      statuses.push('unknown');
-    }
-    if (isObject(additional)) statuses.push(anyDepthStatus(additional, key, depth + 1));
-  }
-  for (const value of Object.values(properties ?? {})) statuses.push(anyDepthStatus(value, key, depth + 1));
-  const arrayLike = schema.items !== undefined || schema.prefixItems !== undefined || (types?.includes('array') ?? false);
-  if (arrayLike) {
-    if (schema.items === undefined && schema.prefixItems === undefined) statuses.push('unknown');
-    if (schema.items !== undefined) statuses.push(anyDepthStatus(schema.items, key, depth + 1));
-    if (Array.isArray(schema.prefixItems)) for (const item of schema.prefixItems) statuses.push(anyDepthStatus(item, key, depth + 1));
-  }
-  for (const branch of branchesOf(schema)) statuses.push(anyDepthStatus(branch, key, depth + 1));
-  if (statuses.includes('exists')) return 'exists';
-  return statuses.includes('unknown') ? 'unknown' : 'missing';
-}
-
 /**
  * The contract's output schema reduced to the upper bound (`allowed`, or
  * everything, minus `denied`), and how many parts could not be reduced.
@@ -411,14 +387,56 @@ export function projectOutputSchema(
 export function unknownOutputFields(output: JsonSchemaLike | undefined, paths: ReadonlyArray<string>): string[] {
   if (!output) return [];
   const { schema } = resultSchema(output);
+  const keys = declaredKeys(schema);
   return paths.filter((path) => {
     const anyDepth = parseAnyDepthKey(path);
-    if (anyDepth !== undefined) return anyDepthStatus(schema, anyDepth) === 'missing';
+    // A key named nowhere in the declared parts is reported even when open parts exist.
+    if (anyDepth !== undefined) return keys.size > 0 && !keys.has(anyDepth);
     const steps = parseOutputFieldPath(path);
     if (!steps) return false;
     if (steps[0]!.kind === 'key' && RESULT_KEYS.has(steps[0]!.key)) return false;
     return pathStatus(schema, steps) === 'missing';
   });
+}
+
+/** Every property name the schema declares anywhere (properties, items, composites, local `$defs`). */
+function declaredKeys(schema: unknown): Set<string> {
+  const keys = new Set<string>();
+  const visit = (node: unknown, depth: number): void => {
+    if (depth > 4 * MAX_ANY_DEPTH) return;
+    if (Array.isArray(node)) {
+      for (const entry of node) visit(entry, depth + 1);
+      return;
+    }
+    if (!isObject(node)) return;
+    for (const keyword of Object.keys(node)) {
+      const value = node[keyword];
+      if (keyword === 'properties' && isObject(value)) {
+        for (const key of Object.keys(value)) {
+          keys.add(key);
+          visit(value[key], depth + 1);
+        }
+      } else if (SUBSCHEMA_MAPS.includes(keyword) && isObject(value)) {
+        for (const child of Object.values(value)) visit(child, depth + 1);
+      } else if (SUBSCHEMA.includes(keyword) || SUBSCHEMA_LISTS.includes(keyword)) {
+        visit(value, depth + 1);
+      }
+    }
+  };
+  visit(schema, 0);
+  return keys;
+}
+
+/** A declared key that differs from the last key of `path` only by case, for the warning. */
+function caseNearMiss(output: JsonSchemaLike | undefined, path: string): string | undefined {
+  if (!output) return undefined;
+  const steps = parseOutputFieldPath(path);
+  const anyDepth = parseAnyDepthKey(path);
+  const last = anyDepth ?? [...(steps ?? [])].reverse().find((step) => step.kind === 'key')?.key;
+  if (last === undefined) return undefined;
+  const lower = last.toLowerCase();
+  return [...declaredKeys(resultSchema(output).schema)].sort(compareCodeUnits)
+    .find((key) => key !== last && key.toLowerCase() === lower);
 }
 
 function named(paths: ReadonlyArray<string>): string {
@@ -450,10 +468,21 @@ export function resolveOutputFields(
     if (!paths || (broken && which === 'allowed')) continue;
     const unknown = unknownOutputFields(output, paths);
     if (unknown.length === 0) continue;
-    const what = `${declared.where} declares ${names[which]} with ${unknown.length === 1 ? 'a path' : `${unknown.length} paths`} the response schema does not have: ${named(unknown)}`;
-    findings.push(toolFinding('output-field-unknown', 'warning', subject, which === 'denied'
-      ? `${what}. Such a path removes nothing: if it is misspelt, the field it means is NOT excluded.`
-      : `${what}.`));
+    const hints = unknown.flatMap((path) => {
+      const near = caseNearMiss(output, path);
+      return near ? [`${path} (the schema has ${near}; names match exactly, case included)`] : [path];
+    });
+    const exact = hints.filter((_hint, index) => parseAnyDepthKey(unknown[index]) === undefined);
+    const anyDepth = hints.filter((_hint, index) => parseAnyDepthKey(unknown[index]) !== undefined);
+    const removesNothing = which === 'denied' ? ' Such a path removes nothing: if it is misspelt, the field it means is NOT excluded.' : '';
+    if (exact.length > 0) {
+      findings.push(toolFinding('output-field-unknown', 'warning', subject,
+        `${declared.where} declares ${names[which]} with ${exact.length === 1 ? 'a path' : `${exact.length} paths`} the response schema does not have: ${named(exact)}.${removesNothing}`));
+    }
+    if (anyDepth.length > 0) {
+      findings.push(toolFinding('output-field-unknown', 'warning', subject,
+        `${declared.where} declares ${names[which]} with ${anyDepth.length === 1 ? 'a key' : `${anyDepth.length} keys`} not found in the declared response schema: ${named(anyDepth)}; if the field only occurs in undeclared parts, ignore this.${removesNothing}`));
+    }
   }
   if (defaults && allowed && !broken) {
     const outside = outputFieldsOutside(defaults, allowed);
