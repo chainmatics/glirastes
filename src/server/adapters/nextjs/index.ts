@@ -42,6 +42,8 @@ export {
 export {
   createRecordingTranscriptionHandler,
   DEFAULT_RECORDING_LANGUAGES,
+  isPrivateServiceUrl,
+  wavDurationSeconds,
   type RecordingTranscriptionHandlerConfig,
 } from './recording-transcription-handler.js';
 export type { ApprovalStore, ApprovalDenialCode } from './approval-binding.js';
