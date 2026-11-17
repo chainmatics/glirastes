@@ -215,3 +215,35 @@ describe('review round 6: a projected oneOf is no longer exclusive', () => {
     expect(JSON.stringify(schema)).not.toContain('kind');
   });
 });
+
+describe('review round 7: root unions and dependent constraints', () => {
+  const entry = { type: 'object', properties: { id: { type: 'string' }, secret: { type: 'string' } } };
+  const nullableList = { anyOf: [{ type: 'array', items: entry }, { type: 'null' }] } as JsonSchemaLike;
+
+  it('projects a nullable list under data, as the result travels', () => {
+    const allowed = projectOutputSchema(nullableList, ['data[].id']);
+    expect(allowed.unprojected).toBe(0);
+    expect(JSON.stringify(allowed.schema)).toContain('"id"');
+    expect(JSON.stringify(allowed.schema)).not.toContain('secret');
+    const denied = projectOutputSchema(nullableList, undefined, ['data[].secret']);
+    expect(JSON.stringify(denied.schema)).toContain('"id"');
+    expect(JSON.stringify(denied.schema)).not.toContain('secret');
+  });
+
+  it('reports a union of a record and a list instead of projecting one of the shapes', () => {
+    const mixed = { anyOf: [{ type: 'array', items: entry }, { type: 'object', properties: { data: { type: 'array', items: entry } } }] } as JsonSchemaLike;
+    expect(projectOutputSchema(mixed, ['data[].id'])).toEqual({ schema: mixed, unprojected: 1 });
+    // Without a declaration nothing is reported.
+    expect(projectOutputSchema(mixed, undefined)).toEqual({ schema: mixed, unprojected: 0 });
+  });
+
+  it.each([['an exact path', ['secret']], ['an any-depth key', ['**.secret']]])(
+    'drops a constraint that depended on a property removed by %s', (_label, denied) => {
+      const only = { type: 'object', properties: { secret: { type: 'string' } }, required: ['secret'], minProperties: 1, additionalProperties: false } as JsonSchemaLike;
+      expect(projectOutputSchema(only, undefined, denied).schema).toEqual({ type: 'object', properties: {}, additionalProperties: false });
+      // An object that loses nothing keeps its constraints.
+      const other = { type: 'object', properties: { id: { type: 'string' } }, minProperties: 1 } as JsonSchemaLike;
+      expect(projectOutputSchema(other, undefined, denied).schema).toMatchObject({ minProperties: 1 });
+    },
+  );
+});

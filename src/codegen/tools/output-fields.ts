@@ -127,12 +127,37 @@ function isStructured(schema: JsonObject): boolean {
  * The root of a result as the model sees it: an endpoint's list or scalar
  * response travels under `data`.
  */
-function resultSchema(output: JsonSchemaLike): { schema: JsonObject; wrapped: boolean } {
-  const types = typesOf(output);
-  if (types && types.length > 0 && !types.includes('object')) {
+function resultSchema(output: JsonSchemaLike): { schema: JsonObject; wrapped: boolean; mixed?: boolean } {
+  const kinds = rootKinds(output);
+  // Only lists or scalars (a nullable array, a union of them): all travel under `data`.
+  if (kinds.other && !kinds.object) {
     return { schema: { type: 'object', properties: { data: output }, additionalProperties: false }, wrapped: true };
   }
-  return { schema: output, wrapped: false };
+  // A union of a record and a list has two shapes at run time: it cannot be projected as one.
+  return { schema: output, wrapped: false, ...(kinds.other && kinds.object ? { mixed: true } : {}) };
+}
+
+/** Which shapes the root of `schema` can take, through its composites: a record, or a list or scalar. */
+function rootKinds(schema: unknown, depth = 0): { object: boolean; other: boolean } {
+  const kinds = { object: false, other: false };
+  if (!isObject(schema) || depth > MAX_ANY_DEPTH) return kinds;
+  const types = typesOf(schema);
+  if (types && types.length > 0) {
+    // `null` alone decides nothing: a nullable array is a list, a nullable object a record.
+    for (const type of types) {
+      if (type === 'object') kinds.object = true;
+      else if (type !== 'null') kinds.other = true;
+    }
+    return kinds;
+  }
+  if (isObject(schema.properties)) kinds.object = true;
+  if (schema.items !== undefined || Array.isArray(schema.prefixItems)) kinds.other = true;
+  for (const branch of branchesOf(schema)) {
+    const inner = rootKinds(branch, depth + 1);
+    kinds.object ||= inner.object;
+    kinds.other ||= inner.other;
+  }
+  return kinds;
 }
 
 type PathStatus = 'exists' | 'missing' | 'unknown';
@@ -290,6 +315,7 @@ function denySchema(schema: unknown, node: OutputFieldNode, problems: { count: n
         kept[key] = child ? denySchema(schema.properties[key], child, problems) : schema.properties[key];
       }
       output.properties = kept;
+      if (Object.keys(kept).length < Object.keys(schema.properties).length) dropDependent(output);
       if (Array.isArray(schema.required)) {
         const required = schema.required.filter((key) => typeof key !== 'string' || !node.keys.get(key)?.end);
         if (required.length > 0) output.required = required;
@@ -338,6 +364,18 @@ function relaxOneOf(output: JsonObject): JsonObject {
   return output;
 }
 
+/**
+ * Constraints of an object that may depend on a property that was removed
+ * (a minimum count, dependencies, conditions): kept, they could demand what
+ * the result no longer has, so they go with it.
+ */
+const DEPENDENT_KEYWORDS = [
+  'minProperties', 'dependentRequired', 'dependentSchemas', 'dependencies', 'propertyNames', 'if', 'then', 'else', 'not',
+];
+function dropDependent(output: JsonObject): void {
+  for (const keyword of DEPENDENT_KEYWORDS) delete output[keyword];
+}
+
 /** Whether `value` (an example or default) holds a property named in `keys` anywhere. */
 function holdsKey(value: unknown, keys: ReadonlySet<string>, depth = 0): boolean {
   if (typeof value !== 'object' || value === null || depth > MAX_ANY_DEPTH) return typeof value === 'object' && value !== null;
@@ -355,6 +393,7 @@ function stripSchemaKeys(schema: unknown, keys: ReadonlySet<string>, depth = 0):
   if (Array.isArray(schema)) return schema.map((entry) => stripSchemaKeys(entry, keys, depth + 1));
   if (!isObject(schema) || depth > 4 * MAX_ANY_DEPTH) return schema;
   const output: JsonObject = {};
+  let removed = false;
   for (const keyword of Object.keys(schema)) {
     const value = schema[keyword];
     if (VALUE_KEYWORDS.includes(keyword) && holdsKey(value, keys)) continue;
@@ -364,7 +403,10 @@ function stripSchemaKeys(schema: unknown, keys: ReadonlySet<string>, depth = 0):
     } else if (SUBSCHEMA_MAPS.includes(keyword) && isObject(value)) {
       const kept: JsonObject = {};
       for (const key of Object.keys(value)) {
-        if (keyword === 'properties' && keys.has(key)) continue;
+        if (keyword === 'properties' && keys.has(key)) {
+          removed = true;
+          continue;
+        }
         kept[key] = stripSchemaKeys(value[key], keys, depth + 1);
       }
       output[keyword] = kept;
@@ -374,6 +416,7 @@ function stripSchemaKeys(schema: unknown, keys: ReadonlySet<string>, depth = 0):
       output[keyword] = value;
     }
   }
+  if (removed) dropDependent(output);
   return relaxOneOf(output);
 }
 
@@ -387,7 +430,11 @@ export function projectOutputSchema(
   denied: ReadonlyArray<string> = [],
 ): { schema: JsonSchemaLike; unprojected: number } {
   const problems = { count: 0 };
-  const { schema: root, wrapped } = resultSchema(output);
+  const { schema: root, wrapped, mixed } = resultSchema(output);
+  if (mixed && (allowed !== undefined || denied.length > 0)) {
+    // Reported as unprojected; the contract keeps the declared shapes.
+    return { schema: output, unprojected: 1 };
+  }
   const allowedSchema = allowed ? projectSchema(root, outputFieldTree(allowed), problems) : root;
   const keys = anyDepthKeys(denied);
   const exactPaths = denied.filter((path) => parseOutputFieldPath(path) !== undefined);
