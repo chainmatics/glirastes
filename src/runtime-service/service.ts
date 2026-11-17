@@ -146,6 +146,9 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
           maxBodyBytes: config.server.maxBodyBytes,
           maxSteps: config.limits.maxModelSteps,
           maxOutputTokens: config.limits.maxOutputTokens,
+          ...(config.application.maxResultChars !== undefined
+            ? { maxResultChars: config.application.maxResultChars }
+            : {}),
           endpointCaller: (req) =>
             createHttpEndpointCaller({
               defaultHeaders: pinnedPrincipal

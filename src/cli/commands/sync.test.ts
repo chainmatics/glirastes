@@ -1,15 +1,20 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSetupArtifact } from '../../contracts/index.js';
 import { runCli } from '../index.js';
 import type { SetupPlan } from './setup-plan.js';
 import {
+  loadConnectionCredentials,
   runSync,
   type SyncCommandDependencies,
 } from './sync.js';
+
+const execFileAsync = promisify(execFile);
 
 const id = (suffix: string) => (
   `019fa9a9-d5f7-7ec3-a3c7-8899de60${suffix.padStart(4, '0')}`
@@ -85,6 +90,11 @@ async function fixture(overrides?: {
 }): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'glirastes-sync-'));
   await mkdir(join(root, '.glirastes'), { recursive: true });
+  // A Next.js app: its secret file is `.env.local`.
+  await writeFile(join(root, 'package.json'), JSON.stringify({
+    name: 'fixture-app',
+    dependencies: { next: '16.0.0' },
+  }));
   await writeFile(
     join(root, '.glirastes/setup-artifact.json'),
     artifactRaw,
@@ -482,6 +492,174 @@ describe('runSync', () => {
     expect(syncArtifact).toHaveBeenCalledWith(artifact, {
       signal: controller.signal,
       timeoutMs: 1_234,
+    });
+  });
+
+  it.each([
+    ['a missing temporary directory', '/nonexistent/glirastes-tmp'],
+    ['a temporary directory on another filesystem', '/dev'],
+  ])('reads .env.local with %s: reads never stage', async (_label, temporary) => {
+    const rootDir = await fixture();
+    vi.stubEnv('TMPDIR', temporary);
+    try {
+      const deps = dependencies({ env: {} });
+      await runSync({ rootDir }, deps.value);
+      expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({
+        setupApiKey: 'gl_abcdefghijklmnopqrstuvwxyz123456',
+      }));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('reads the key in a real Git repository without touching staging places', async () => {
+    const rootDir = await fixture();
+    try {
+      await execFileAsync('git', ['init', '--quiet'], { cwd: rootDir });
+      await execFileAsync('git', ['config', 'core.excludesFile', '/dev/null'], { cwd: rootDir });
+      await writeFile(join(rootDir, '.gitignore'), '.env*.local\n');
+      // A staging directory a killed connect left: only connect cleans it.
+      const stale = join(rootDir, '.git', 'glirastes-connect-staging-stale');
+      await mkdir(stale);
+      const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      await utimes(stale, old, old);
+
+      const credentials = await loadConnectionCredentials({ rootDir, env: {} });
+
+      expect(credentials.GLIRASTES_API_KEY).toBe('gl_abcdefghijklmnopqrstuvwxyz123456');
+      expect((await readdir(join(rootDir, '.git'))).filter((name) => name.startsWith('glirastes-connect-staging-')))
+        .toEqual(['glirastes-connect-staging-stale']);
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  describe('apps without Next.js', () => {
+    const fileKey = 'gl_filefilefilefilefilefilefilefile12';
+    const processKey = 'gl_processprocessprocessprocess1234';
+
+    async function backend(tools?: Record<string, unknown>) {
+      const rootDir = await fixture({ writeEnvironment: false });
+      await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+        name: 'backend', dependencies: { '@nestjs/core': '11.0.0' },
+      }));
+      if (tools) {
+        await writeFile(join(rootDir, '.glirastes/tools.json'), JSON.stringify({
+          schemaVersion: 1, appId, targetAppKey: 'backend', locale: 'en', sources: ['openapi'], ...tools,
+        }));
+      }
+      return rootDir;
+    }
+
+    it('uses the process environment only, never .env.local', async () => {
+      const rootDir = await backend({});
+      await writeFile(join(rootDir, '.env.local'), `GLIRASTES_API_KEY=${fileKey}\n`);
+      const isGitIgnored = vi.fn();
+      const deps = dependencies({
+        isGitIgnored,
+        env: { GLIRASTES_CONTROL_PLANE_URL: 'https://control.example', GLIRASTES_API_KEY: processKey },
+      });
+
+      await runSync({ rootDir }, deps.value);
+
+      expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ setupApiKey: processKey }));
+      expect(isGitIgnored).not.toHaveBeenCalled();
+    });
+
+    it('names GLIRASTES_API_KEY and --dotenv when the key is missing', async () => {
+      const rootDir = await backend({});
+      await writeFile(join(rootDir, '.env.local'), `GLIRASTES_API_KEY=${fileKey}\n`);
+      const isGitIgnored = vi.fn();
+      const deps = dependencies({ isGitIgnored, env: { GLIRASTES_CONTROL_PLANE_URL: 'https://control.example' } });
+
+      const error = await runSync({ rootDir }, deps.value).catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({
+        code: 'E-SYNC-CREDENTIAL-MISSING',
+        remediation: 'provide-connection-api-key',
+      });
+      expect((error as Error).message).toContain('GLIRASTES_API_KEY');
+      expect((error as Error).message).toContain('--dotenv <path>');
+      expect(JSON.stringify(error)).not.toContain(fileKey);
+      expect(isGitIgnored).not.toHaveBeenCalled();
+      expect(deps.clientFactory).not.toHaveBeenCalled();
+    });
+
+    it('reads the key from --dotenv after the Git check', async () => {
+      const rootDir = await backend();
+      await mkdir(join(rootDir, 'apps/backend'), { recursive: true });
+      await writeFile(join(rootDir, 'apps/backend/.env'), [
+        'DATABASE_URL=postgres://db',
+        'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+        `GLIRASTES_API_KEY=${fileKey}`,
+        '',
+      ].join('\n'));
+      const isGitIgnored = vi.fn().mockResolvedValue(true);
+      const deps = dependencies({ isGitIgnored, env: {} });
+
+      await runSync({ rootDir, envFile: 'apps/backend/.env' }, deps.value);
+
+      expect(isGitIgnored).toHaveBeenCalledWith(join(rootDir, 'apps/backend/.env'), rootDir);
+      expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ setupApiKey: fileKey }));
+    });
+
+    it('reads connection.envFile of tools.json, and --dotenv wins', async () => {
+      const rootDir = await backend({ connection: { envFile: 'config.env' } });
+      await writeFile(join(rootDir, 'config.env'), `GLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=${fileKey}\n`);
+      await writeFile(join(rootDir, 'flag.env'), `GLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=${processKey}\n`);
+
+      const fromConfig = dependencies({ env: {} });
+      await runSync({ rootDir }, fromConfig.value);
+      expect(fromConfig.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ setupApiKey: fileKey }));
+
+      const fromFlag = dependencies({ env: {} });
+      await runSync({ rootDir, envFile: 'flag.env' }, fromFlag.value);
+      expect(fromFlag.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ setupApiKey: processKey }));
+    });
+
+    it('passes --dotenv from the CLI', async () => {
+      const rootDir = await backend();
+      await writeFile(join(rootDir, 'flag.env'), `GLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=${fileKey}\n`);
+      const deps = dependencies({ env: {} });
+
+      await runCli(['sync', '--root', rootDir, '--dotenv', 'flag.env', '--quiet'], { sync: deps.value });
+
+      expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ setupApiKey: fileKey }));
+      await expect(runCli(['sync', '--root', rootDir, '--dotenv'], { sync: deps.value }))
+        .rejects.toMatchObject({ code: 'E-SETUP-031' });
+    });
+
+    it('passes --dotenv of setup sync on', async () => {
+      const rootDir = await backend();
+      await writeFile(join(rootDir, 'flag.env'), `GLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=${fileKey}\n`);
+      const deps = dependencies({ env: {} });
+
+      await runCli(['setup', 'sync', '--root', rootDir, '--dotenv=flag.env', '--quiet'], { sync: deps.value });
+
+      expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ setupApiKey: fileKey }));
+    });
+
+    it('takes --dotenv=<path> from the CLI and refuses a repeated flag', async () => {
+      const rootDir = await backend();
+      await writeFile(join(rootDir, 'flag.env'), `GLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=${fileKey}\n`);
+      const deps = dependencies({ env: {} });
+
+      await runCli(['sync', '--root', rootDir, '--dotenv=flag.env', '--quiet'], { sync: deps.value });
+
+      expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ setupApiKey: fileKey }));
+      await expect(runCli(['sync', '--root', rootDir, '--dotenv=flag.env', '--dotenv=other.env'], { sync: deps.value }))
+        .rejects.toMatchObject({ code: 'E-SETUP-032' });
+    });
+
+    it('reads .env.local of a Next.js app whose tools.json has no next-* source', async () => {
+      const rootDir = await backend({ sources: ['openapi', 'react-actions'] });
+      await writeFile(join(rootDir, 'package.json'), JSON.stringify({ name: 'web', dependencies: { next: '16.0.0' } }));
+      await writeFile(join(rootDir, '.env.local'), `GLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=${fileKey}\n`);
+      const deps = dependencies({ env: {} });
+
+      await runSync({ rootDir }, deps.value);
+
+      expect(deps.clientFactory).toHaveBeenCalledWith(expect.objectContaining({ setupApiKey: fileKey }));
     });
   });
 });

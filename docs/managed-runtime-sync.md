@@ -11,10 +11,129 @@ Most apps never call `glirastes/sync` directly. `createGlirastes` from
 ## Connect once, environments by name
 
 One developer runs `glirastes connect` once. It issues one app connection key
-and writes it to `.env.local` as `GLIRASTES_API_KEY`. In Citadel the approver
-chooses the key lifetime: 90 days (the default), 1 year or no expiry. No
-environment is chosen, and `.glirastes/platform-connection.json` holds no
-environment id.
+as `GLIRASTES_API_KEY`. In Citadel the approver chooses the key lifetime: 90
+days (the default), 1 year or no expiry. No environment is chosen, and
+`.glirastes/platform-connection.json` holds no environment id.
+
+`connect` works for every tool source (Next.js, NestJS, OpenAPI, ...). Where
+the key goes:
+
+- `--dotenv <path>` (or `--dotenv=<path>`; given once): written to that
+  file. The path is relative to the project root and must stay inside it; its
+  directory must exist and be writable (`E-CONNECT-PATH-NOT-WRITABLE`
+  otherwise, before pairing). `connection.envFile` in
+  `.glirastes/tools.json` sets the same default for `connect`, `sync` and
+  `doctor`; the flag wins.
+- Next.js without the flag: `.env.local`, as before (`connect` owns the
+  connection variables in it and removes the obsolete ones). An app counts as
+  Next.js when `tools.json` has a `next-*` source or `package.json` depends on
+  `next`.
+- Any other app without the flag: no file. On a terminal the key is shown
+  once, with the instruction to set it as `GLIRASTES_API_KEY` in the
+  environment of the server process (and `GLIRASTES_CONTROL_PLANE_URL` for a
+  self-hosted Platform). It is not stored and cannot be shown again. When
+  stdout is not a terminal, `connect` refuses before pairing
+  (`E-CONNECT-SECRET-OUTPUT-REFUSED`) so the key never lands in a CI log. The
+  guard checks stdout only: an agent or script running in a pseudo-terminal
+  passes it, so agents must always use `--dotenv <path>` (or `--json` when
+  they handle the key themselves). With `--json` the result carries
+  `secretTarget: "output"` and `apiKey` (and `controlPlaneUrl` when
+  self-hosted); with a file it carries `secretTarget: "file"` and `envFile`,
+  never the key.
+
+Why the flag is not called `--env-file`: Node.js 20 and later read
+`--env-file` themselves, even when it comes after the script name
+(`glirastes connect --env-file x`). With a missing file Node.js exits with
+code 9 and `node: <path>: not found` before glirastes runs, which glirastes
+cannot catch. With an existing file Node.js silently loads its variables into
+the process; glirastes then sees the flag and stops with `E-SETUP-033`
+before reading anything or pairing. Use `--dotenv <path>`.
+
+Checks of the secret file, all before pairing, so no key is issued that
+cannot be stored:
+
+- **Git.** The file must be ignored and not tracked. The checks use the real
+  on-disk name, so on macOS or Windows `backend.env` cannot slip past as an
+  alias of a tracked `Backend.env`, also when the tracked file is deleted on
+  disk (letter case is folded Unicode-aware, `café.env` = `CAFÉ.env`);
+  nested `.gitignore` files and negation patterns count. Git runs without
+  the repository-selecting variables of the environment (`GIT_DIR`,
+  `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CEILING_DIRECTORIES`, ...), so the
+  repository is always the one found from the file's directory. When the
+  environment sets `GIT_DIR` or `GIT_WORK_TREE` (a yadm or vcsh dotfile
+  repository, a bare `dot.git` with the home directory as work tree), Git is
+  asked once more with that unmodified environment from the current
+  directory, and a file tracked there is refused too. A `GIT_DIR` that Git
+  cannot open, or one without a work tree, stops connect with
+  `E-CONNECT-GIT-UNAVAILABLE` (remediation `fix-or-unset-git-dir`) instead of
+  passing as untracked. Outside any
+  Git repository the file is accepted (nothing can be committed). If the
+  project has a `.git` that Git cannot read (Git not installed, unsafe
+  ownership), connect stops with `E-CONNECT-GIT-UNAVAILABLE`.
+- **Content.** Duplicate connection variables, a `GLIRASTES_CONTROL_PLANE_URL`
+  line naming another Platform than the one being paired
+  (`E-CONNECT-ENV-PLANE-CONFLICT`), and a connection variable inside a
+  multi-line quoted value (`E-CONNECT-ENV-UNSUPPORTED`) stop connect.
+- **Writing.** Only the `GLIRASTES_API_KEY` line is replaced or appended (plus
+  `GLIRASTES_CONTROL_PLANE_URL` for a self-hosted Platform). Every other line,
+  comment, line ending and the final newline stay as they were; obsolete
+  variables of older connects stay too and `glirastes doctor` points at them.
+  The file is replaced atomically (a new file renamed over the old one), so
+  its owner, ACLs, extended attributes and hard links are not carried over.
+  An existing chosen file keeps its permission bits: a file at 0644 then holds
+  the key world-readable, so set it to 0600 (`chmod 600 <file>`). A new file
+  and `.env.local` are created 0600.
+- **Crash safety (connect only).** The new content and the backup of the old
+  file are staged in a private directory (mode 0700, staged copy 0600) and
+  renamed into place. The directory is, in this order: inside the git dir of
+  the repository that owns the file (never tracked or shown by `git status`;
+  worktrees and submodules use their own git dir), else under the temporary
+  directory when its real path is outside the project and it is in no Git
+  work tree, or Git ignores the staging directory there (a `TMPDIR` inside a
+  monorepo beside the project is skipped otherwise), else beside the file
+  when Git ignores the names `*.glirastes-stage-*` and `*.glirastes-backup-*`
+  (or there is no repository); otherwise connect stops before pairing
+  (`E-CONNECT-STAGING-NOT-IGNORED`). Each private place must pass a real
+  rename probe into the target directory, so a cross-filesystem rename
+  (EXDEV) can never fail after the key was issued. The secret file is
+  replaced before `.glirastes/platform-connection.json` is written. A kill
+  during the write can leave the staged key in that private directory (in the
+  git dir or the temporary directory, 0600), never in a path Git would add;
+  the next connect removes such directories after an hour. A failed write
+  restores the old file by renaming its backup over it, never a partial
+  copy. If storing fails after the Platform issued the key, connect reports
+  `E-CONNECT-SECRET-NOT-STORED` without the key: fix the cause, run connect
+  again and revoke the unused key on the Platform. `sync` and `doctor` only
+  read and never stage.
+- **Owning repository.** The Git checks run in the directory of the file, so
+  a nested repository or a submodule that tracks it answers.
+
+`glirastes sync`, `glirastes doctor`, `glirastes setup --managed` and
+`glirastes setup sync` take the same `--dotenv`; `glirastes init` runs
+`doctor` with `connection.envFile` of `tools.json`. A key in the process
+environment wins for `sync`; without a file and without Next.js `sync` and
+`doctor` read the process environment only.
+
+### What a deployed app needs
+
+The embedded runtime (`createGlirastes`) reads no file at run time: not
+`.glirastes/platform-connection.json`, not `.glirastes/tools.json`, nothing
+resolved from the working directory. The app id comes from the setup artifact
+that the generated module (`tools.generated.ts`) carries inline, so it is
+compiled into the app. App, environment and runner come from the Platform
+(`GET /v1/runtime/connection`) for the key. A container built without
+`.glirastes/` and started in another working directory therefore needs only:
+
+- `GLIRASTES_API_KEY` (secret),
+- `GLIRASTES_ENVIRONMENT=<environment key>` (per deployment; without it the
+  app runs as a read-only development connection),
+- `GLIRASTES_CONTROL_PLANE_URL` only for a self-hosted Platform,
+- optionally `GLIRASTES_BUILD_ID` as the reported version.
+
+`.glirastes/platform-connection.json` is read only by the CLI (`connect`,
+`sync`, `doctor`) on a developer machine or in CI. The configured runtime
+container (`glirastes-runtime`) is different: it reads its JSON configuration
+and the mounted artifact directory (see `docs/runtime-container.md`).
 
 Every deployment uses the same secret, `GLIRASTES_API_KEY`, and names itself
 with `GLIRASTES_ENVIRONMENT=<environment key>`. The name is not a secret and

@@ -202,7 +202,16 @@ The chat-react package provides `ApprovalCard` and `BulkApprovalCard` components
 
 ## Truncation
 
-LLMs have limited context. If a tool returns a huge response (e.g., 10,000 rows), the SDK truncates it to ~16K characters. It uses binary search to find the largest array in the response and progressively removes items until it fits. Adds a `_truncated` marker so the LLM knows data was cut.
+LLMs have limited context. A successful tool result whose JSON is longer than the limit (16,000 characters by default, roughly 4,000 tokens) is cut until it fits, so the limit is a true upper bound:
+
+1. Fields whose key alone is longer than 120 characters are left out at any depth (counted, never named).
+2. The array with the largest serialized size, at any depth (`data.items`), keeps as many leading entries as fit (binary search) when removing it could make the result fit or it is at least half of it. Sibling fields such as `meta` stay; if they alone are too large they are compacted first. If not even one entry fits, that entry is compacted (long strings clipped, nested objects and arrays replaced by short placeholders); if it still does not fit, no entry is kept.
+3. A result without such an array has its long strings clipped and its largest fields replaced by placeholders. If that is still too large (thousands of fields), the leading top-level fields that fit are kept and the rest left out.
+4. A `_truncated` marker is added: `field` (dot path), `showing` and `total` when an array was cut, `compacted` with up to five changed paths, `omittedKeys`, and a `hint` for the model. For a **read** tool (a GET or HEAD endpoint, or a tool without a method that needs no approval) the hint tells it to say "showing N of M" and offer filtering or the next page, naming the tool's paging parameters (`page`, `limit`, `offset`, `cursor`, `pageSize`, `per_page`, `skip`, `take`) when its input has them. For every other tool, which may already have written, the hint says not to call the tool again just to see more and to tell the user the result was shortened.
+
+`success` and `uiAction` are never changed, so the one remaining exception to the bound is a `uiAction` that, with `success` and the marker, is itself larger than the limit; the result then keeps it and exceeds the limit. Failure results (`success: false`) are bounded separately, and values JSON cannot serialize (a cycle, a BigInt) are passed on unchanged. A root array that has to be cut comes back as `{ data: [...], _truncated }`. The input object is never modified, and the cost is linear in the result size (an 8 MB result takes well under a second).
+
+Set the limit globally with `maxResultChars` on `createAiChatHandler` or `createGlirastes` (the runtime container: `application.maxResultChars`), or per tool with `maxResultChars` on the endpoint tool definition, `maxResultChars` in a sibling `contract.ts` entry, or the OpenAPI extension `x-glirastes-max-result-chars`. The tool value wins over the global one, the global one over the default. Values are integers from 1,000 to 200,000 (`MIN_MAX_RESULT_CHARS`, `MAX_MAX_RESULT_CHARS`); an invalid global value throws when the handler is created, an invalid extension is reported as `max-result-chars-invalid` (warning) and ignored. The per-tool value stays local in `.glirastes/tool-contracts.json` and the generated module; it is never sent to the Platform.
 
 ---
 

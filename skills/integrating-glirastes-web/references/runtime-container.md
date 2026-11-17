@@ -139,7 +139,8 @@ or generated artifact.
     "apiOrigin": "http://backend:8080",
     "allowedPathPrefixes": ["/api"],
     "timeoutMs": 15000,
-    "maxResponseBytes": 2097152
+    "maxResponseBytes": 2097152,
+    "maxResultChars": 16000
   },
   "identity": {
     "endpoint": "/api/me",
@@ -153,6 +154,10 @@ or generated artifact.
   "platform": { "enabled": false }
 }
 ```
+
+`application.maxResultChars` (optional, 1000 to 200000, default 16000) bounds
+each successful tool result the model sees; an operation's
+`x-glirastes-max-result-chars` wins for that tool.
 
 For bearer authentication use `"credential": {"type":"bearer"}`. For existing
 backend CSRF middleware set `identity.csrfHeader` to `x-csrf-token` or

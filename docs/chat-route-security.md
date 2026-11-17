@@ -26,6 +26,30 @@ approval id (`duplicate_tool_call_id`, `duplicate_approval_id`), to a
 malformed tool part or approval (`tool_part_malformed`, `approval_malformed`)
 and to more than 32 approved calls in one request (`too_many_approvals`).
 
+## Frontend and API on different origins
+
+When the chat UI runs on another origin than the handler, for example a Vite
+or Angular frontend on `https://app.example.com` and a NestJS API that mounts
+the handler on `https://api.example.com`, list the frontend's origin in
+`allowedOrigins`:
+
+```ts
+createAiChatHandler({
+  // ...
+  allowedOrigins: ['https://app.example.com'],
+});
+```
+
+This is mandatory, also when the frontend authenticates with a Bearer token
+instead of a cookie. The browser marks such a request as cross-site
+(`Sec-Fetch-Site`) and sends its `Origin`; an origin that is not listed is
+refused with `403` and `{"error":"cross_origin_request_refused"}` before the
+turn starts. Give exact origins (scheme, host and port, no path); the
+handler's own origin needs no entry. Your framework's CORS setup (for the
+preflight and the `Authorization` header) is separate and still required.
+Do not set `crossOriginProtection: false` instead: that turns the check off
+for every origin and is only acceptable when no cookie authenticates the route.
+
 ## Attachments
 
 File parts are refused (400 `attachments_disabled`) unless

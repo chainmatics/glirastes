@@ -3,6 +3,7 @@ import {
   createFollowupTool,
   createClarificationTool,
   createPlanTool,
+  assertMaxResultChars,
 } from '../../core/index.js';
 import { CLARIFICATION_TOOL_NAME } from '../../../contracts/clarification.js';
 import { PLAN_TOOL_NAME } from '../../../contracts/plan.js';
@@ -1007,6 +1008,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     onError: onErrorConfig,
     onToolError,
     classifyToolFailure,
+    maxResultChars,
     onPipelineResult,
     onStepReport,
     onFinish,
@@ -1029,6 +1031,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     attachments,
     memory: memoryConfig,
   } = config;
+  assertMaxResultChars(maxResultChars, 'createAiChatHandler');
   const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
   if (privacy) {
@@ -1696,11 +1699,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const toolOptions: ToolToAiToolOptions = {
         uiActionSchema,
         onError: reportToolError,
-        ...(privacy ? { contentFreeErrors: true } : {}),
+        ...(privacy ? { contentFreeErrors: true, protectedResults: true } : {}),
         onAudit,
         sessionId,
         traceId: sessionId || undefined,
         telemetry,
+        ...(maxResultChars !== undefined ? { maxResultChars } : {}),
       };
 
       // Emit session.started for audit + telemetry

@@ -123,6 +123,12 @@ async function main() {
       presentation: entry.presentation !== null && typeof entry.presentation === 'object'
         ? jsonObject(entry.presentation)
         : null,
+      // A finite number goes on to the range check; any other declared value is invalid.
+      maxResultChars: entry.maxResultChars === undefined || entry.maxResultChars === null
+        ? null
+        : typeof entry.maxResultChars === 'number' && Number.isFinite(entry.maxResultChars)
+          ? entry.maxResultChars
+          : 'invalid',
     };
   };
 

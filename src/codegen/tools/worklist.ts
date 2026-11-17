@@ -112,6 +112,7 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'opt-in-excluded',
   'tool-group-invalid',
   'tool-roles-invalid',
+  'max-result-chars-invalid',
   // A name (contract id or x-glirastes-name) taken from another tool, fixed where it is declared.
   'definition-id-reassigned',
 ]);

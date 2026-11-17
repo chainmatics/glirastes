@@ -18,7 +18,10 @@ import {
   type AppSetupRun,
 } from '../../sync/app-setup-client.js';
 import { connectionDescriptorPath } from './connection-descriptor.js';
-import { preflightConnectionEnvironment } from './connection-environment.js';
+import {
+  preflightConnectionEnvironment,
+  readConnectionSecretSelection,
+} from './connection-environment.js';
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 import {
   acceptsReceiptPlanDigest,
@@ -60,6 +63,8 @@ export type ConnectionCredentials = z.infer<
 
 export interface SyncCommandOptions {
   rootDir: string;
+  /** Project-relative, Git-ignored file holding `GLIRASTES_API_KEY`. */
+  envFile?: string;
   json?: boolean;
   quiet?: boolean;
   signal?: AbortSignal;
@@ -179,8 +184,17 @@ function parseEnvironment(
   return values;
 }
 
+/**
+ * The key and URL for `sync` and `doctor`. A key in the process environment
+ * wins. Otherwise the secret file is read: `envFile` (`--dotenv`), else
+ * `connection.envFile` of `tools.json`, else `.env.local` of a Next.js app.
+ * Other apps without a file use the process environment only.
+ * `requireLocalSecretFile` (doctor) checks the file even when the process
+ * environment has the key.
+ */
 export async function loadConnectionCredentials(options: {
   rootDir: string;
+  envFile?: string;
   env?: NodeJS.ProcessEnv;
   isGitIgnored?: (path: string, root: string) => Promise<boolean>;
   requireLocalSecretFile?: boolean;
@@ -203,11 +217,42 @@ export async function loadConnectionCredentials(options: {
     return parsed.data;
   }
 
+  const secret = await readConnectionSecretSelection({
+    projectRoot: rootDir,
+    envFile: options.envFile,
+  });
+  if (!secret.environmentPath && secret.framework !== 'nextjs') {
+    if (!hasCompleteProcessSet) {
+      throw syncError(
+        'E-SYNC-CREDENTIAL-MISSING',
+        'GLIRASTES_API_KEY is not set. Set it in the environment of this command, or pass --dotenv <path> to read it from a Git-ignored file.',
+        'provide-connection-api-key',
+      );
+    }
+    const parsed = connectionCredentialsSchema.safeParse(definedOnly(processValues));
+    if (!parsed.success) {
+      throw syncError(
+        'E-SYNC-CREDENTIAL-INVALID',
+        'The process Connected credential set is invalid.',
+        'repair-process-connection-environment',
+      );
+    }
+    return parsed.data;
+  }
+
   const targets = await preflightConnectionEnvironment({
     projectRoot: rootDir,
-    framework: 'nextjs',
+    ...(secret.framework ? { framework: secret.framework } : {}),
+    ...(secret.environmentPath ? { environmentPath: secret.environmentPath } : {}),
     isGitIgnored: options.isGitIgnored,
   });
+  if (!targets.environmentPath) {
+    throw syncError(
+      'E-SYNC-CREDENTIAL-MISSING',
+      'No local secret file is configured.',
+      'provide-connection-api-key',
+    );
+  }
   let fileValues: Partial<Record<ConnectionVariableName, string>>;
   try {
     fileValues = parseEnvironment(await readFile(
@@ -289,6 +334,7 @@ export async function runSync(
     readPlatformConnectionDescriptor(rootDir),
     loadConnectionCredentials({
       rootDir,
+      envFile: options.envFile,
       env: dependencies.env,
       isGitIgnored: dependencies.isGitIgnored,
     }),

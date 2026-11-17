@@ -752,7 +752,6 @@
   "tokenize": "Legacy server-core building block (pre-Foundation pipeline, callers, PII); the Foundation path uses createAiChatHandler.",
   "toolToAiTool": "Legacy server-core building block (pre-Foundation pipeline, callers, PII); the Foundation path uses createAiChatHandler.",
   "toolsToAiTools": "Legacy server-core building block (pre-Foundation pipeline, callers, PII); the Foundation path uses createAiChatHandler.",
-  "truncateToolResult": "Legacy server-core building block (pre-Foundation pipeline, callers, PII); the Foundation path uses createAiChatHandler.",
   "uiActionToolToTool": "Legacy server-core building block (pre-Foundation pipeline, callers, PII); the Foundation path uses createAiChatHandler.",
   "uiToolToTool": "Legacy server-core building block (pre-Foundation pipeline, callers, PII); the Foundation path uses createAiChatHandler.",
   "uiToolsToRegistry": "Legacy server-core building block (pre-Foundation pipeline, callers, PII); the Foundation path uses createAiChatHandler.",

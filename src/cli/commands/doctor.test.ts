@@ -156,6 +156,20 @@ describe('createDoctorReport', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it.each(['/nonexistent/glirastes-tmp', '/dev'])('reads the secret file with TMPDIR=%s: reads never stage', async (temporary) => {
+    const rootDir = await fixture();
+    vi.stubEnv('TMPDIR', temporary);
+    await writeJson(rootDir, '.glirastes/platform-connection.json', {
+      schemaVersion: 1, baseUrl: 'https://control.example', appId: id('1'), runnerKey: 'fixture-runner',
+    });
+    await writeFile(join(rootDir, '.env.local'), 'GLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=gl_abcdefghijklmnopqrstuvwxyz123456\n');
+
+    const report = await createDoctorReport({ rootDir, env: {}, isGitIgnored: vi.fn().mockResolvedValue(true) });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({ name: 'connection-secret-path', status: 'pass' }));
+    expect(report.checks).toContainEqual(expect.objectContaining({ name: 'connection-credential', status: 'pass' }));
+  });
+
   it('warns when the descriptor is environment-bound, not when it has no environmentId', async () => {
     const appId = id('1');
     const run = async (extra: Record<string, string>) => {
@@ -396,5 +410,127 @@ describe('createDoctorReport', () => {
     expect(JSON.parse(String(log.mock.calls[0]?.[0])).status).toBe('fail');
     expect(process.exitCode).toBe(1);
     log.mockRestore();
+  });
+
+  describe('apps without Next.js', () => {
+    const key = 'gl_abcdefghijklmnopqrstuvwxyz123456';
+
+    async function backend(): Promise<string> {
+      const rootDir = await fixture();
+      await writeJson(rootDir, 'package.json', {
+        name: 'fixture',
+        dependencies: { '@nestjs/core': '11.0.0', 'better-auth': '1.0.0' },
+        glirastes: { principal: 'server-verified' },
+      });
+      await writeJson(rootDir, '.glirastes/platform-connection.json', {
+        schemaVersion: 1,
+        baseUrl: 'https://control.example',
+        appId: id('1'),
+        runnerKey: 'fixture-runner',
+      });
+      return rootDir;
+    }
+
+    const connectionChecks = (report: Awaited<ReturnType<typeof createDoctorReport>>) => report.checks
+      .filter(({ name }) => name.startsWith('connection-'))
+      .map(({ name, status, remediation }) => ({ name, status, remediation }));
+
+    it('checks the process environment only, without a secret file check', async () => {
+      const rootDir = await backend();
+      await writeFile(join(rootDir, '.env.local'), 'GLIRASTES_APP_ID=old\n');
+      const isGitIgnored = vi.fn();
+
+      const report = await createDoctorReport({
+        rootDir,
+        env: { GLIRASTES_CONTROL_PLANE_URL: 'https://control.example', GLIRASTES_API_KEY: key },
+        isGitIgnored,
+      });
+
+      expect(connectionChecks(report)).toEqual([
+        { name: 'connection-descriptor', status: 'pass', remediation: 'none' },
+        { name: 'connection-credential', status: 'pass', remediation: 'none' },
+        { name: 'connection-scope', status: 'pass', remediation: 'none' },
+      ]);
+      expect(report.checks).toContainEqual(expect.objectContaining({ name: 'runtime-mode', status: 'pass' }));
+      expect(isGitIgnored).not.toHaveBeenCalled();
+      expect(JSON.stringify(report)).not.toContain(key);
+    });
+
+    it('asks for GLIRASTES_API_KEY or --dotenv when the key is missing', async () => {
+      const rootDir = await backend();
+
+      const report = await createDoctorReport({ rootDir, env: {}, isGitIgnored: vi.fn() });
+
+      expect(connectionChecks(report)).toContainEqual({
+        name: 'connection-credential', status: 'fail', remediation: 'provide-connection-api-key',
+      });
+      expect(report.checks.map(({ name }) => name)).not.toContain('connection-secret-path');
+      expect(formatDoctorReport(report)).toContain('or pass --dotenv <path>');
+    });
+
+    it('checks --dotenv and its obsolete variables', async () => {
+      const rootDir = await backend();
+      await mkdir(join(rootDir, 'apps/backend'), { recursive: true });
+      await writeFile(join(rootDir, 'apps/backend/.env'), [
+        'GLIRASTES_CONTROL_PLANE_URL=https://control.example',
+        `GLIRASTES_API_KEY=${key}`,
+        'GLIRASTES_RUNNER_KEY=old',
+        '',
+      ].join('\n'));
+      const isGitIgnored = vi.fn().mockResolvedValue(true);
+
+      const report = await createDoctorReport({ rootDir, env: {}, envFile: 'apps/backend/.env', isGitIgnored });
+
+      expect(connectionChecks(report)).toEqual([
+        { name: 'connection-descriptor', status: 'pass', remediation: 'none' },
+        { name: 'connection-secret-path', status: 'pass', remediation: 'none' },
+        { name: 'connection-credential', status: 'pass', remediation: 'none' },
+        { name: 'connection-scope', status: 'pass', remediation: 'none' },
+        { name: 'connection-obsolete-variables', status: 'warn', remediation: 'remove-obsolete-connection-variables' },
+      ]);
+      expect(isGitIgnored).toHaveBeenCalledWith(join(rootDir, 'apps/backend/.env'), rootDir);
+      expect(JSON.stringify(report)).not.toContain(key);
+    });
+
+    it('takes --dotenv=<path> from the CLI and refuses a repeated flag', async () => {
+      const rootDir = await backend();
+      await writeFile(join(rootDir, 'backend.env'), `GLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=${key}\n`);
+      vi.stubEnv('GLIRASTES_API_KEY', '');
+      vi.stubEnv('GLIRASTES_CONTROL_PLANE_URL', '');
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+      await runCli(['doctor', `--root=${rootDir}`, '--dotenv=backend.env', '--json']);
+
+      // The temporary project is outside any Git repository: nothing can be committed.
+      const report = JSON.parse(String(log.mock.calls.at(-1)?.[0])) as Awaited<ReturnType<typeof createDoctorReport>>;
+      expect(connectionChecks(report)).toContainEqual({ name: 'connection-secret-path', status: 'pass', remediation: 'none' });
+      expect(connectionChecks(report)).toContainEqual({ name: 'connection-credential', status: 'pass', remediation: 'none' });
+      await expect(runCli(['doctor', '--root', rootDir, '--dotenv', 'a.env', '--dotenv=b.env']))
+        .rejects.toMatchObject({ code: 'E-SETUP-032' });
+      log.mockRestore();
+    });
+
+    it('points an invalid tools.json at tools.json, not at the secret file', async () => {
+      const rootDir = await backend();
+      await writeFile(join(rootDir, '.glirastes/tools.json'), '{"schemaVersion":1}');
+
+      const report = await createDoctorReport({ rootDir, env: {}, isGitIgnored: vi.fn() });
+
+      const secretPath = report.checks.find(({ name }) => name === 'connection-secret-path');
+      expect(secretPath).toMatchObject({ status: 'fail', code: 'E-TOOLS-002', remediation: 'repair-tools-config' });
+    });
+
+    it('fails a --dotenv file that Git does not ignore', async () => {
+      const rootDir = await backend();
+      await writeFile(join(rootDir, '.env'), `GLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=${key}\n`);
+
+      const report = await createDoctorReport({
+        rootDir, env: {}, envFile: '.env', isGitIgnored: vi.fn().mockResolvedValue(false),
+      });
+
+      expect(report.checks).toContainEqual(expect.objectContaining({
+        name: 'connection-secret-path', status: 'fail', code: 'E-CONNECT-SECRET-TRACKED',
+      }));
+    });
   });
 });

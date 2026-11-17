@@ -519,6 +519,36 @@ describe('OpenAPI selection and x-glirastes-* extensions', () => {
     expect(byKey.get('GET /api/i')!.codeRoles).toHaveLength(50);
     expect(own('GET /api/i')).toEqual([]);
   });
+
+  it('reads x-glirastes-max-result-chars and ignores an invalid value with a warning', async () => {
+    const operation = (value: unknown) => ({
+      get: { security: SECURED, 'x-glirastes-max-result-chars': value, responses: { '200': { description: 'ok' } } },
+    });
+    const observed = await observeWith({
+      '/api/a': operation(40_000),
+      '/api/b': operation(1_000),
+      '/api/c': operation(200_000),
+      '/api/d': operation(999),
+      '/api/e': operation(200_001),
+      '/api/f': operation(5_000.5),
+      '/api/g': operation('40000'),
+      '/api/h': { get: { security: SECURED, responses: { '200': { description: 'ok' } } } },
+    });
+    const byKey = new Map(observed.observations.map((tool) => [tool.execution.stableKey, tool]));
+    const own = (key: string) => codes(byKey.get(key)!.findings).filter(([code]) => code !== 'output-contract-opaque');
+    expect(byKey.get('GET /api/a')!.maxResultChars).toBe(40_000);
+    expect(byKey.get('GET /api/b')!.maxResultChars).toBe(1_000);
+    expect(byKey.get('GET /api/c')!.maxResultChars).toBe(200_000);
+    for (const key of ['GET /api/a', 'GET /api/b', 'GET /api/c', 'GET /api/h']) expect(own(key)).toEqual([]);
+    expect(byKey.get('GET /api/h')).not.toHaveProperty('maxResultChars');
+    for (const [key, value] of [['GET /api/d', '999'], ['GET /api/e', '200001'], ['GET /api/f', '5000.5'], ['GET /api/g', '40000']] as const) {
+      expect(own(key)).toEqual([['max-result-chars-invalid', 'warning', key]]);
+      expect(byKey.get(key)).not.toHaveProperty('maxResultChars');
+      const finding = byKey.get(key)!.findings.find((candidate) => candidate.code === 'max-result-chars-invalid')!;
+      expect(finding.message).not.toContain(value);
+      expect(finding.nextAction).toContain('x-glirastes-max-result-chars');
+    }
+  });
 });
 
 describe('FastAPI route count', () => {

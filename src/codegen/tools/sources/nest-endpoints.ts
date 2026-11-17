@@ -488,6 +488,7 @@ function toObserved(piece: NestPiece, definitionId: string): ObservedTool {
     evidence: piece.evidence,
     findings: piece.findings,
     ...(resolved && Object.keys(resolved.prose).length > 0 ? { prose: resolved.prose } : {}),
+    ...(resolved?.maxResultChars !== undefined ? { maxResultChars: resolved.maxResultChars } : {}),
   };
 }
 

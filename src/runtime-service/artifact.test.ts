@@ -8,6 +8,7 @@ import {
   removeAppFixtures,
 } from "../codegen/tools/__tests__/app-fixture.js";
 import { createContractBindings } from "../runtime/contract-bindings.js";
+import { ToolContractsFileSchema } from "../codegen/tools/files.js";
 import { buildRuntimeArtifact, loadRuntimeArtifact } from "./artifact.js";
 
 const response = {
@@ -89,6 +90,39 @@ describe("runtime container artifact", () => {
     expect(
       JSON.parse(await app.read("artifact/runtime.json")),
     ).not.toHaveProperty("code");
+  });
+
+  it("carries x-glirastes-max-result-chars through tool-contracts.json, the generated module and the container", async () => {
+    const app = await fixture({ "x-glirastes-max-result-chars": 40_000 });
+    await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    const written = ToolContractsFileSchema.parse(
+      JSON.parse(await app.read(".glirastes/tool-contracts.json")),
+    );
+    expect(written.tools.map((tool) => tool.maxResultChars)).toEqual([40_000]);
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    expect(payload.contracts.tools[0].maxResultChars).toBe(40_000);
+    const module = renderGeneratedModule({
+      modulePath: "generated.ts",
+      artifact: payload.setupArtifact,
+      contracts: payload.contracts.tools,
+    });
+    expect(module).toContain("        maxResultChars: 40000,\n");
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    const [binding] = loaded.createToolBindings();
+    expect(binding!.tool.maxResultChars).toBe(40_000);
+
+    // Without the extension nothing is written: existing outputs stay byte-identical.
+    const plain = await fixture();
+    await buildRuntimeArtifact({
+      projectRoot: plain.root,
+      outputDirectory: plain.path("artifact"),
+    });
+    expect(await plain.read(".glirastes/tool-contracts.json")).not.toContain("maxResultChars");
+    const plainLoaded = await loadRuntimeArtifact(plain.path("artifact"));
+    expect(plainLoaded.createToolBindings()[0]!.tool).not.toHaveProperty("maxResultChars");
   });
 
   it("has the same tool bindings and schemas as the existing generated module", async () => {

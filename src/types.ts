@@ -109,6 +109,13 @@ export interface Tool {
     | boolean
     | ((input: unknown, context: ToolContext) => boolean | Promise<boolean>);
 
+  /**
+   * Upper bound of this tool's serialized successful result, in characters
+   * (integer from 1,000 to 200,000). Wins over the global `maxResultChars`;
+   * default 16,000. See `truncateToolResult` in `glirastes/server`.
+   */
+  maxResultChars?: number;
+
   /** The actual implementation */
   execute: (input: unknown, context: ToolContext) => Promise<unknown>;
 }
@@ -122,6 +129,8 @@ export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
   inputSchema: TInput;
   outputSchema?: SchemaLike<TOutput>;
   method?: string;
+  /** Upper bound of the serialized result in characters; see `Tool.maxResultChars`. */
+  maxResultChars?: number;
   /** @deprecated Use Glirastes approval flows via `lancer.approvals` instead. Kept for backward compatibility. */
   needsApproval?:
     | boolean
@@ -330,6 +339,12 @@ export interface AiEndpointToolDefinition<
   allowedRoles?: string[];
   /** @deprecated Use Glirastes approval flows via `lancer.approvals` instead. Kept for backward compatibility. */
   needsApproval?: boolean;
+  /**
+   * Upper bound of this tool's serialized successful result, in characters
+   * (integer from 1,000 to 200,000). Wins over the global `maxResultChars`
+   * of the handler; default 16,000. OpenAPI: `x-glirastes-max-result-chars`.
+   */
+  maxResultChars?: number;
   /**
    * Static uiAction template with $variable placeholders.
    * Use for simple cases where action is always the same.

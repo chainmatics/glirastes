@@ -27,6 +27,25 @@ import {
   ResponseUnreadableError,
 } from './tool-outcome.js';
 import type { ToolFailureClassifier } from '../../runtime/tool-failure.js';
+import {
+  assertMaxResultChars,
+  DEFAULT_MAX_RESULT_CHARS,
+  isValidMaxResultChars,
+} from '../../runtime/result-limit.js';
+import { truncateToolResult } from './truncate-tool-result.js';
+export {
+  assertMaxResultChars,
+  DEFAULT_MAX_RESULT_CHARS,
+  isValidMaxResultChars,
+  MAX_MAX_RESULT_CHARS,
+  MIN_MAX_RESULT_CHARS,
+} from '../../runtime/result-limit.js';
+export {
+  PAGINATION_PARAMETER_NAMES,
+  truncateToolResult,
+  type TruncatedMarker,
+  type TruncateToolResultOptions,
+} from './truncate-tool-result.js';
 export { createLocalGuardrails } from './local-guardrails.js';
 export {
   createAdaptiveFastPath,
@@ -243,69 +262,6 @@ function boundedToolFailure(
     ...(fromEndpoint && result.body !== undefined ? { body: result.body } : {}),
     ...(fromEndpoint && result.bodyTruncated === true ? { bodyTruncated: true } : {}),
     ...(fromEndpoint && result.expectedFailure === true ? { expectedFailure: true } : {}),
-  };
-}
-
-/**
- * Default max characters for a serialized tool result (~4000 tokens).
- * Arrays exceeding this are truncated with a `_truncated` marker.
- */
-const DEFAULT_MAX_RESULT_CHARS = 16_000;
-
-/**
- * Truncate large tool results to prevent LLM context overflow.
- *
- * Strategy: find the largest array in the top-level result and
- * progressively remove items from the end until the serialized
- * size is under the limit. A `_truncated` object is appended so the
- * LLM knows the data was cut.
- */
-export function truncateToolResult(
-  result: unknown,
-  maxChars: number = DEFAULT_MAX_RESULT_CHARS,
-): unknown {
-  if (!isRecord(result)) return result;
-
-  const serialized = JSON.stringify(result);
-  if (serialized.length <= maxChars) return result;
-
-  // Find the largest array at the top level
-  let largestKey: string | null = null;
-  let largestLen = 0;
-  const rec = result as Record<string, unknown>;
-  for (const [key, value] of Object.entries(rec)) {
-    if (Array.isArray(value) && value.length > largestLen) {
-      largestKey = key;
-      largestLen = value.length;
-    }
-  }
-
-  if (!largestKey || largestLen === 0) return result;
-
-  // Binary-search for the right array length
-  const arr = rec[largestKey] as unknown[];
-  let lo = 1;
-  let hi = arr.length;
-
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    const candidate = {
-      ...rec,
-      [largestKey]: arr.slice(0, mid),
-      _truncated: { field: largestKey, showing: mid, total: arr.length },
-    };
-    if (JSON.stringify(candidate).length <= maxChars) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-
-  const finalCount = Math.max(lo - 1, 1);
-  return {
-    ...rec,
-    [largestKey]: arr.slice(0, finalCount),
-    _truncated: { field: largestKey, showing: finalCount, total: arr.length },
   };
 }
 
@@ -674,6 +630,7 @@ function withoutReservedUiActions(
 export function endpointToolToTool<TInput extends SchemaLike>(
   endpointTool: AiEndpointToolDefinition<TInput>,
 ): Tool {
+  assertMaxResultChars(endpointTool.maxResultChars, `endpointToolToTool(${endpointTool.id})`);
   let description = endpointTool.description;
   if (endpointTool.outputSchema) {
     description += `\n\nReturns: ${zodToCompactDescription(endpointTool.outputSchema)}`;
@@ -685,6 +642,7 @@ export function endpointToolToTool<TInput extends SchemaLike>(
     inputSchema: endpointTool.inputSchema,
     outputSchema: endpointTool.outputSchema,
     method: endpointTool.method,
+    ...(endpointTool.maxResultChars !== undefined ? { maxResultChars: endpointTool.maxResultChars } : {}),
     needsApproval:
       endpointTool.needsApproval ??
       (endpointTool.method === 'GET' || endpointTool.method === 'HEAD' ? false : true),
@@ -984,6 +942,14 @@ export interface ToolToAiToolOptions {
    * without the error message (backend messages can carry request data).
    */
   contentFreeErrors?: boolean;
+  /** Withhold oversized raw results instead of creating unregistered identity fragments. */
+  protectedResults?: boolean;
+  /**
+   * Upper bound of a serialized successful tool result, in characters
+   * (integer from 1,000 to 200,000; default 16,000). A tool's own
+   * `maxResultChars` wins. See `truncateToolResult`.
+   */
+  maxResultChars?: number;
 }
 
 /**
@@ -1005,6 +971,19 @@ export function toolToAiTool(
 ) {
   const name = toolName ?? tool.id;
   const needsApproval = tool.needsApproval;
+  // Per tool, then global, then the default; an invalid value is never used.
+  const resultLimit = isValidMaxResultChars(tool.maxResultChars)
+    ? tool.maxResultChars
+    : isValidMaxResultChars(options?.maxResultChars)
+      ? options.maxResultChars
+      : DEFAULT_MAX_RESULT_CHARS;
+  // Only a read tool may be called again to page through a cut result:
+  // GET and HEAD endpoint tools, and tools without a method that need no
+  // approval (UI and custom read tools). Every other tool may have written.
+  const method = tool.method?.toUpperCase();
+  const readOnly = method !== undefined
+    ? method === 'GET' || method === 'HEAD'
+    : !tool.needsApproval;
   const requiresApproval = !!needsApproval;
 
   return {
@@ -1122,8 +1101,14 @@ export function toolToAiTool(
           }
         }
 
-        // Truncate large arrays to prevent context overflow
-        cleanResult = truncateToolResult(cleanResult);
+        // Bound the result so it cannot overflow the model context.
+        cleanResult = options?.protectedResults && (JSON.stringify(cleanResult)?.length ?? 0) > resultLimit
+          ? {
+              success: true,
+              outputWithheld: true,
+              message: 'The tool ran, but its result exceeds the protected result limit. Details were withheld. Do not repeat a write; narrow a read request instead.',
+            }
+          : truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
 
         return options?.uiActionSchema
           ? normalizeResultUiAction(cleanResult, options.uiActionSchema)

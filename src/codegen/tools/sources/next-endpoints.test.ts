@@ -135,6 +135,18 @@ describe('next-app endpoint source', () => {
     expect(notes.prose?.contractDescription).toBe('Create a note for the caller');
   }, 60_000);
 
+  it('carries maxResultChars of the sibling contract.ts to the observation', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  POST: { input: z.object({ title: z.string() }), id: 'notes.add', maxResultChars: 40000 },\n};\n",
+    });
+    const observed = await createNextEndpointSource().observe(context(app.root));
+    const tools = byKey(observed.observations);
+    expect(tools.get('POST /api/notes')!.maxResultChars).toBe(40_000);
+    expect(tools.get('GET /api/tasks')).not.toHaveProperty('maxResultChars');
+  }, 30_000);
+
   it('enumerates HEAD as a read tool and reports only OPTIONS as unsupported', async () => {
     const app = await createAppFixture({
       'src/app/api/tasks/route.ts': 'declare function getSession(): Promise<unknown>;\n'

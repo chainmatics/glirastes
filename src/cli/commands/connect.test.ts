@@ -1,8 +1,11 @@
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { promisify } from 'node:util';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { runCli } from '../index.js';
 import {
   openVerificationUrl,
   runConnect,
@@ -17,8 +20,21 @@ const artifactDigest = `sha256:${createHash('sha256')
 const deviceCode = `device_${'d'.repeat(43)}`;
 const apiKey = `gl_${'k'.repeat(40)}`;
 
+const execFileAsync = promisify(execFile);
+const createdRoots: string[] = [];
+afterAll(async () => {
+  await Promise.all(createdRoots.map((root) => rm(root, { recursive: true, force: true })));
+});
+
+async function gitInit(root: string, gitignore: string): Promise<void> {
+  await execFileAsync('git', ['init', '--quiet'], { cwd: root });
+  await execFileAsync('git', ['config', 'core.excludesFile', '/dev/null'], { cwd: root });
+  await writeFile(join(root, '.gitignore'), gitignore);
+}
+
 async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'glirastes-connect-command-'));
+  createdRoots.push(root);
   await mkdir(join(root, '.glirastes'));
   await writeFile(join(root, 'package.json'), JSON.stringify({
     name: '@example/fixture-app',
@@ -62,7 +78,10 @@ function plan() {
   };
 }
 
-function connectedClient(environment: string | null = environmentId) {
+function connectedClient(
+  environment: string | null = environmentId,
+  baseUrl = 'https://control.example',
+) {
   return {
     startPairing: vi.fn().mockResolvedValue({
       schemaVersion: 1 as const,
@@ -76,7 +95,7 @@ function connectedClient(environment: string | null = environmentId) {
       status: 'connected' as const,
       connection: {
         schemaVersion: 1 as const,
-        baseUrl: 'https://control.example',
+        baseUrl,
         appId,
         environmentId: environment,
         runnerKey: 'server-value-must-not-win',
@@ -201,6 +220,8 @@ describe('glirastes connect command', () => {
       status: 'connected',
       appId,
       environmentId,
+      secretTarget: 'file',
+      envFile: '.env.local',
     });
     expect(output).not.toContain(deviceCode);
     expect(output).not.toContain(apiKey);
@@ -226,7 +247,7 @@ describe('glirastes connect command', () => {
     });
 
     expect(JSON.parse(log.mock.calls.flat().join('\n'))).toEqual({
-      schemaVersion: 1, status: 'connected', appId, environmentId: null,
+      schemaVersion: 1, status: 'connected', appId, environmentId: null, secretTarget: 'file', envFile: '.env.local',
     });
     expect(materialize.mock.calls[0]?.[0].connection).not.toHaveProperty('environmentId');
   });
@@ -397,17 +418,6 @@ describe('glirastes connect command', () => {
       expect(client.startPairing).toHaveBeenCalledOnce();
     });
 
-    it('names the configured sources when the stack has no automatic connection', async () => {
-      const rootDir = await fixture();
-      await writeFile(join(rootDir, '.glirastes/tools.json'), tools({ sources: ['react-actions', 'url-filters'] }));
-      const client = connectedClient();
-      await expect(runConnect({ rootDir, baseUrl: 'https://control.example' }, deps(rootDir, client))).rejects.toMatchObject({
-        code: 'E-CONNECT-FRAMEWORK-UNSUPPORTED',
-        message: 'Automatic connection materialization currently requires Next.js; .glirastes/tools.json declares react-actions, url-filters.',
-      });
-      expect(client.startPairing).not.toHaveBeenCalled();
-    });
-
     it.each([
       ['tools.json names another app', '.glirastes/tools.json', () => tools({ appId: '019fa9a9-d5f7-7ec3-a3c7-8899de400009' })],
       ['the checkout is already connected as another app', '.glirastes/platform-connection.json', () => JSON.stringify({
@@ -421,5 +431,325 @@ describe('glirastes connect command', () => {
         .rejects.toMatchObject({ code: 'E-CONNECT-APP-ID-CHANGED' });
       expect(client.startPairing).not.toHaveBeenCalled();
     });
+  });
+
+  describe('apps without Next.js', () => {
+    const toolsConfig = (sources: unknown[], patch: Record<string, unknown> = {}) => JSON.stringify({
+      schemaVersion: 1, appId, targetAppKey: 'backend', locale: 'en', sources, ...patch,
+    });
+
+    async function backendFixture(sources: unknown[] = ['openapi'], patch: Record<string, unknown> = {}) {
+      const rootDir = await fixture();
+      await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+        name: '@example/backend',
+        dependencies: { '@nestjs/core': '11.0.0' },
+      }));
+      await writeFile(join(rootDir, '.glirastes/tools.json'), toolsConfig(sources, patch));
+      return rootDir;
+    }
+
+    function backendDeps(
+      client: ReturnType<typeof connectedClient>,
+      overrides: Partial<ConnectCommandDependencies> = {},
+    ) {
+      const log = vi.fn();
+      return {
+        log,
+        output: () => log.mock.calls.flat().join('\n'),
+        value: {
+          createPlan: vi.fn().mockResolvedValue(plan()),
+          clientFactory: vi.fn(() => client),
+          openBrowser: vi.fn(),
+          createRunnerKey: () => 'local-runner',
+          isGitIgnored: vi.fn().mockResolvedValue(true),
+          isTTY: () => true,
+          log,
+          ...overrides,
+        } satisfies ConnectCommandDependencies,
+      };
+    }
+
+    const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
+
+    it.each([
+      ['an openapi source', ['openapi']],
+      ['a nest source', ['nest']],
+    ])('pairs %s, writes the descriptor and shows the key once on a terminal', async (_label, sources) => {
+      const rootDir = await backendFixture(sources);
+      const client = connectedClient(null, 'https://api.glirastes.io');
+      const deps = backendDeps(client);
+
+      await runConnect({ rootDir, baseUrl: 'https://api.glirastes.io' }, deps.value);
+
+      expect(client.startPairing).toHaveBeenCalledOnce();
+      expect(JSON.parse(await readFile(join(rootDir, '.glirastes/platform-connection.json'), 'utf8')))
+        .toEqual({ schemaVersion: 1, baseUrl: 'https://api.glirastes.io', appId, runnerKey: 'local-runner' });
+      expect(await readdir(rootDir)).not.toContain('.env.local');
+      expect(await readdir(rootDir)).not.toContain('.env');
+      const output = deps.output();
+      expect(occurrences(output, apiKey)).toBe(1);
+      expect(output).toContain('Connected to the Glirastes Platform.');
+      expect(output).toContain('GLIRASTES_API_KEY in the environment of the server process');
+      expect(output).toContain('cannot be shown again');
+      expect(output).not.toContain('GLIRASTES_CONTROL_PLANE_URL');
+      expect(output).not.toContain(deviceCode);
+      expect(deps.value.isGitIgnored).not.toHaveBeenCalled();
+    });
+
+    it('names GLIRASTES_CONTROL_PLANE_URL for a self-hosted Platform', async () => {
+      const rootDir = await backendFixture();
+      const deps = backendDeps(connectedClient(null));
+
+      await runConnect({ rootDir, baseUrl: 'https://control.example' }, deps.value);
+
+      expect(deps.output()).toContain('GLIRASTES_CONTROL_PLANE_URL=https://control.example');
+      expect(occurrences(deps.output(), apiKey)).toBe(1);
+    });
+
+    it('returns the key exactly once in JSON, even without a terminal', async () => {
+      const rootDir = await backendFixture(['nest']);
+      const deps = backendDeps(connectedClient(null), { isTTY: () => false });
+
+      await runConnect({ rootDir, baseUrl: 'https://control.example', json: true }, deps.value);
+
+      const output = deps.output();
+      expect(JSON.parse(output)).toEqual({
+        schemaVersion: 1,
+        status: 'connected',
+        appId,
+        environmentId: null,
+        secretTarget: 'output',
+        apiKey,
+        controlPlaneUrl: 'https://control.example',
+      });
+      expect(occurrences(output, apiKey)).toBe(1);
+      expect(output).not.toContain(deviceCode);
+    });
+
+    it('refuses to print the key into a non-terminal before pairing', async () => {
+      const rootDir = await backendFixture();
+      const client = connectedClient(null);
+      const deps = backendDeps(client, { isTTY: () => false });
+
+      const error = await runConnect({ rootDir, baseUrl: 'https://control.example' }, deps.value)
+        .catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({
+        code: 'E-CONNECT-SECRET-OUTPUT-REFUSED',
+        remediation: 'choose-connection-secret-target',
+      });
+      expect((error as Error).message).toContain('--dotenv <path>');
+      expect((error as Error).message).toContain('--json');
+      expect(client.startPairing).not.toHaveBeenCalled();
+      expect(await readdir(join(rootDir, '.glirastes'))).not.toContain('platform-connection.json');
+    });
+
+    it('writes the key to --dotenv and reports the file, not the key', async () => {
+      const rootDir = await backendFixture();
+      await mkdir(join(rootDir, 'apps/backend'), { recursive: true });
+      await writeFile(join(rootDir, 'apps/backend/.env'), '# backend\nDATABASE_URL=postgres://db\n');
+      const deps = backendDeps(connectedClient(null), { isTTY: () => false });
+
+      await runConnect({
+        rootDir, baseUrl: 'https://control.example', json: true, envFile: 'apps/backend/.env',
+      }, deps.value);
+
+      expect(JSON.parse(deps.output())).toEqual({
+        schemaVersion: 1,
+        status: 'connected',
+        appId,
+        environmentId: null,
+        secretTarget: 'file',
+        envFile: join('apps', 'backend', '.env'),
+      });
+      expect(deps.output()).not.toContain(apiKey);
+      await expect(readFile(join(rootDir, 'apps/backend/.env'), 'utf8')).resolves.toBe(
+        `# backend\nDATABASE_URL=postgres://db\nGLIRASTES_CONTROL_PLANE_URL=https://control.example\nGLIRASTES_API_KEY=${apiKey}\n`,
+      );
+      expect(await readdir(rootDir)).not.toContain('.env.local');
+    });
+
+    it('names the written file in text mode without printing the key', async () => {
+      const rootDir = await backendFixture();
+      const deps = backendDeps(connectedClient(null, 'https://api.glirastes.io'), { isTTY: () => false });
+
+      await runConnect({ rootDir, baseUrl: 'https://api.glirastes.io', envFile: '.env' }, deps.value);
+
+      expect(deps.output()).toContain('GLIRASTES_API_KEY was written to .env.');
+      expect(deps.output()).not.toContain(apiKey);
+      await expect(readFile(join(rootDir, '.env'), 'utf8')).resolves.toBe(`GLIRASTES_API_KEY=${apiKey}\n`);
+    });
+
+    it.each([
+      ['not ignored by Git', 'apps/backend/.env', { isGitIgnored: vi.fn().mockResolvedValue(false) }, 'E-CONNECT-SECRET-TRACKED'],
+      ['outside the project', '../shared/.env', {}, 'E-CONNECT-PATH-OUTSIDE'],
+      ['in a missing directory', 'apps/missing/.env', {}, 'E-CONNECT-PATH-INVALID'],
+    ] as const)('aborts before pairing when --dotenv is %s', async (_label, envFile, overrides, code) => {
+      const rootDir = await backendFixture();
+      await mkdir(join(rootDir, 'apps/backend'), { recursive: true });
+      const client = connectedClient(null);
+      const deps = backendDeps(client, overrides);
+
+      const error = await runConnect({ rootDir, baseUrl: 'https://control.example', envFile }, deps.value)
+        .catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ code });
+      expect(client.startPairing).not.toHaveBeenCalled();
+      expect(JSON.stringify(error)).not.toContain(apiKey);
+      if (code === 'E-CONNECT-SECRET-TRACKED') {
+        expect(error).toMatchObject({ remediation: 'ignore-connection-env-file', path: join('apps', 'backend', '.env') });
+      }
+    });
+
+    it('aborts before pairing when the env file points at another Control Plane', async () => {
+      const rootDir = await backendFixture();
+      const original = 'GLIRASTES_CONTROL_PLANE_URL=https://other.example\nKEEP=1\n';
+      await writeFile(join(rootDir, '.env'), original);
+      const client = connectedClient(null, 'https://api.glirastes.io');
+
+      await expect(runConnect(
+        { rootDir, baseUrl: 'https://api.glirastes.io', envFile: '.env' },
+        backendDeps(client).value,
+      )).rejects.toMatchObject({ code: 'E-CONNECT-ENV-PLANE-CONFLICT' });
+
+      expect(client.startPairing).not.toHaveBeenCalled();
+      await expect(readFile(join(rootDir, '.env'), 'utf8')).resolves.toBe(original);
+    });
+
+    it('takes --dotenv from the CLI', async () => {
+      const rootDir = await backendFixture();
+      vi.stubEnv('GLIRASTES_CONTROL_PLANE_URL', 'https://control.example');
+      const deps = backendDeps(connectedClient(null), { isTTY: () => false });
+
+      await runCli(['connect', '--root', rootDir, '--dotenv', '.env', '--json'], { connect: deps.value });
+
+      expect(JSON.parse(deps.output())).toMatchObject({ secretTarget: 'file', envFile: '.env' });
+      await expect(runCli(['connect', '--root', rootDir, '--dotenv', '--json'], { connect: deps.value }))
+        .rejects.toMatchObject({ code: 'E-SETUP-031' });
+    });
+
+    it('takes --dotenv=<path> and refuses a repeated --dotenv before pairing', async () => {
+      const rootDir = await backendFixture();
+      await mkdir(join(rootDir, 'apps/backend'), { recursive: true });
+      const client = connectedClient(null);
+      const deps = backendDeps(client, { isTTY: () => false });
+
+      await runCli(['connect', `--root=${rootDir}`, '--base-url=https://control.example', '--dotenv=apps/backend/.env', '--json'], { connect: deps.value });
+
+      expect(JSON.parse(deps.output())).toMatchObject({ secretTarget: 'file', envFile: join('apps', 'backend', '.env') });
+      expect(deps.output()).not.toContain(apiKey);
+
+      const repeated = connectedClient(null);
+      await expect(runCli(
+        ['connect', '--root', rootDir, '--dotenv=a.env', '--dotenv', 'b.env', '--json'],
+        { connect: backendDeps(repeated).value },
+      )).rejects.toMatchObject({ code: 'E-SETUP-032' });
+      expect(repeated.startPairing).not.toHaveBeenCalled();
+    });
+
+    it('refuses before pairing when no staging place renames into the env file directory', async () => {
+      const rootDir = await backendFixture();
+      await gitInit(rootDir, '.env\n');
+      const client = connectedClient(null);
+      const deps = backendDeps(client, {
+        isGitIgnored: undefined,
+        staging: { canRenameInto: async () => false },
+      });
+
+      await expect(runConnect({ rootDir, baseUrl: 'https://control.example', envFile: '.env' }, deps.value))
+        .rejects.toMatchObject({ code: 'E-CONNECT-STAGING-NOT-IGNORED' });
+      expect(client.startPairing).not.toHaveBeenCalled();
+    });
+
+    it('says the issued key was not stored when staging fails after pairing', async () => {
+      const rootDir = await backendFixture();
+      await gitInit(rootDir, '.env\n');
+      const client = connectedClient(null);
+      let probes = 0;
+      // The private place renames into the directory at preflight, not later.
+      const deps = backendDeps(client, {
+        isGitIgnored: undefined,
+        staging: { canRenameInto: async () => (probes += 1) === 1 },
+      });
+
+      const error = await runConnect({ rootDir, baseUrl: 'https://control.example', envFile: '.env' }, deps.value)
+        .catch((caught: unknown) => caught);
+
+      expect(client.startPairing).toHaveBeenCalled();
+      expect(error).toMatchObject({
+        code: 'E-CONNECT-SECRET-NOT-STORED',
+        remediation: 'rerun-connect-and-revoke-unused-key',
+      });
+      expect((error as Error).message).toContain('issued a connection key');
+      expect((error as Error).message).toContain('revoke the unused key');
+      expect((error as Error).message).toContain('E-CONNECT-STAGING-NOT-IGNORED');
+      expect(JSON.stringify(error) + (error as Error).message + deps.output()).not.toContain(apiKey);
+      expect(await readdir(rootDir)).not.toContain('.env');
+    });
+
+    it('detects Next.js from package.json when tools.json has no next-* source', async () => {
+      const rootDir = await backendFixture(['openapi', 'react-actions']);
+      await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+        name: '@example/next-app', dependencies: { next: '16.0.0' },
+      }));
+      const deps = backendDeps(connectedClient(null), { isTTY: () => false });
+
+      await runConnect({ rootDir, baseUrl: 'https://control.example', json: true }, deps.value);
+
+      expect(JSON.parse(deps.output())).toMatchObject({ secretTarget: 'file', envFile: '.env.local' });
+      await expect(readFile(join(rootDir, '.env.local'), 'utf8')).resolves.toContain(`GLIRASTES_API_KEY=${apiKey}`);
+    });
+
+    it('uses connection.envFile of tools.json, and the flag wins over it', async () => {
+      const rootDir = await backendFixture(['openapi'], { connection: { envFile: 'config/.env' } });
+      await mkdir(join(rootDir, 'config'));
+      const fromConfig = backendDeps(connectedClient(null), { isTTY: () => false });
+      await runConnect({ rootDir, baseUrl: 'https://control.example', json: true }, fromConfig.value);
+      expect(JSON.parse(fromConfig.output())).toMatchObject({ secretTarget: 'file', envFile: join('config', '.env') });
+      await expect(readFile(join(rootDir, 'config/.env'), 'utf8')).resolves.toContain(`GLIRASTES_API_KEY=${apiKey}`);
+
+      const fromFlag = backendDeps(connectedClient(null), { isTTY: () => false });
+      await runConnect({ rootDir, baseUrl: 'https://control.example', json: true, envFile: '.env.backend' }, fromFlag.value);
+      expect(JSON.parse(fromFlag.output())).toMatchObject({ secretTarget: 'file', envFile: '.env.backend' });
+    });
+  });
+
+  it('connects a Next.js app whose temporary directory is on another filesystem', async () => {
+    const rootDir = await fixture();
+    await gitInit(rootDir, '.env*.local\n');
+    const elsewhere = await mkdtemp(join(tmpdir(), 'glirastes-other-device-'));
+    createdRoots.push(elsewhere);
+    const client = connectedClient();
+    await runConnect({ rootDir, baseUrl: 'https://control.example' }, {
+      createPlan: vi.fn().mockResolvedValue(plan()),
+      clientFactory: vi.fn(() => client),
+      openBrowser: vi.fn(),
+      // Only the git dir renames into the project; the temporary directory gives EXDEV.
+      staging: {
+        temporaryDirectory: elsewhere,
+        canRenameInto: async (from) => from.includes(`${join('.git', 'glirastes-connect-staging-')}`),
+      },
+      createRunnerKey: () => 'local-runner',
+      log: vi.fn(),
+    });
+    expect(client.startPairing).toHaveBeenCalledOnce();
+    await expect(readFile(join(rootDir, '.env.local'), 'utf8')).resolves.toContain(`GLIRASTES_API_KEY=${apiKey}`);
+  });
+
+  it('keeps writing .env.local for Next.js without a terminal', async () => {
+    const rootDir = await fixture();
+    const log = vi.fn();
+    await runConnect({ rootDir, baseUrl: 'https://control.example' }, {
+      createPlan: vi.fn().mockResolvedValue(plan()),
+      clientFactory: vi.fn(() => connectedClient()),
+      openBrowser: vi.fn(),
+      isGitIgnored: vi.fn().mockResolvedValue(true),
+      isTTY: () => false,
+      createRunnerKey: () => 'local-runner',
+      log,
+    });
+    await expect(readFile(join(rootDir, '.env.local'), 'utf8')).resolves.toContain(`GLIRASTES_API_KEY=${apiKey}`);
+    expect(log.mock.calls.flat().join('\n')).not.toContain(apiKey);
+    expect(log).toHaveBeenLastCalledWith('Connected to the Glirastes Platform. Restart the application.');
   });
 });

@@ -1,6 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import {
+  MAX_MAX_RESULT_CHARS,
+  MIN_MAX_RESULT_CHARS,
+} from "../runtime/result-limit.js";
 
 const origin = z.string().refine((value) => {
   try {
@@ -56,6 +60,13 @@ export const RuntimeConfigSchema = z
           .min(1024)
           .max(8 * 1024 * 1024)
           .default(2 * 1024 * 1024),
+        // Upper bound of a serialized tool result for the model; the SDK default (16,000) when absent.
+        maxResultChars: z
+          .number()
+          .int()
+          .min(MIN_MAX_RESULT_CHARS)
+          .max(MAX_MAX_RESULT_CHARS)
+          .optional(),
       })
       .strict(),
     identity: z
