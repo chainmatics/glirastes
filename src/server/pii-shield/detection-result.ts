@@ -24,7 +24,8 @@ export type PrivacyErrorCode =
   | 'privacy_tool_failed'
   | 'privacy_tool_outcome_unknown'
   | 'provider_not_allowed'
-  | 'provider_capability_missing';
+  | 'provider_capability_missing'
+  | 'provider_unavailable';
 
 const MESSAGES: Record<PrivacyErrorCode, string> = {
   privacy_detector_unavailable: 'The privacy detector is unavailable.',
@@ -46,6 +47,7 @@ const MESSAGES: Record<PrivacyErrorCode, string> = {
   privacy_tool_outcome_unknown: 'The tool outcome is unknown; reconcile before retrying.',
   provider_not_allowed: 'The selected model provider is not allowed.',
   provider_capability_missing: 'The selected model lacks a required capability.',
+  provider_unavailable: 'The selected model provider is not configured on the server.',
 };
 
 /** A privacy stop. Its message is fixed per code and never contains content. */

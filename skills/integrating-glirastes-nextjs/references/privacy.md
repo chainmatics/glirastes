@@ -9,6 +9,7 @@ personal data in every model call of a chat turn. All names below come from
 - What it guarantees
 - Setup
 - Screenshots
+- Model providers
 - Tools, approvals and idempotency
 - Model calls outside the chat handler
 - Errors and diagnostics
@@ -107,6 +108,53 @@ so a browser flag never widens the app or tenant rule. Default: `blocked`.
   SVG and remote URLs stay withheld. A text-only model answers 422
   `provider_capability_missing`.
 - Keep `attachments: { enabled: true }` on the handler for the format checks.
+
+## Model providers
+
+`providers` makes the model interchangeable without touching the shield.
+`createProviderRegistry` (`ProviderRegistryConfig`) returns a `ProviderRegistry` of server-side
+entries (`ProviderEntry`: adapter, model id, secret reference, endpoint,
+capabilities, who may select it):
+
+```ts
+import { createOpenAI } from '@ai-sdk/openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+
+const registry = createProviderRegistry({
+  adapters: [
+    openRouterAdapter({ createOpenAI, routing: { only: ['anthropic'] } }),
+    anthropicAdapter({ createAnthropic }),
+  ],
+  entries: [
+    { id: 'standard', label: 'Standard', adapter: 'openrouter', modelId: 'anthropic/claude-sonnet-4.5', secretRef: 'OPENROUTER_API_KEY' },
+    { id: 'direct', label: 'Anthropic direkt', adapter: 'anthropic', modelId: 'claude-sonnet-4-5', secretRef: 'ANTHROPIC_API_KEY', capabilities: { images: true } },
+  ],
+  defaultEntry: 'standard',
+  secrets: (ref) => process.env[ref],
+});
+
+privacy: { /* ... */ providers: { registry, selection: (req, scope) => loadUserChoice(scope) } }
+```
+
+- The browser lists `registry.options(scope)` (`ProviderOption`: id, label,
+  capabilities). The user's choice is that id. It is never a URL, key or
+  model string.
+- `registry.resolve` (`ResolvedProvider`) runs once at the turn's start.
+  The resolved model replaces the handler's `model` for the whole turn and
+  is wrapped by the same boundary. A change applies from the next turn.
+- An unknown or foreign choice, or an unqualified adapter, stops the turn
+  with 403 `provider_not_allowed`. A missing secret stops it with 503
+  `provider_unavailable`. There is no fallback provider.
+- `openRouterAdapter` merges `OpenRouterRoutingPolicy` into the `provider`
+  field of every request body (`withOpenRouterRouting`). The default
+  `STRICT_OPENROUTER_ROUTING` is no fallbacks, `data_collection: 'deny'`
+  and `zdr: true`, and a request cannot weaken it. `anthropicAdapter` and
+  `openAiCompatibleAdapter` send no OpenRouter fields.
+- Adapters take the provider factory (`CreateOpenAIProvider`,
+  `CreateAnthropicProvider`), so the SDK adds no provider dependency. A
+  custom `ProviderAdapter` builds a model from `ProviderModelInput`; it
+  needs `qualified: true`, which it may claim only after it passes the
+  provider conformance tests.
 
 ## Tools, approvals and idempotency
 

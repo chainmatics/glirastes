@@ -101,3 +101,21 @@ export {
   protectedGenerateObject,
   type ModelCallProtection,
 } from './model-calls.js';
+export {
+  createProviderRegistry,
+  openRouterAdapter,
+  anthropicAdapter,
+  openAiCompatibleAdapter,
+  withOpenRouterRouting,
+  STRICT_OPENROUTER_ROUTING,
+  type ProviderAdapter,
+  type ProviderEntry,
+  type ProviderOption,
+  type ProviderRegistry,
+  type ProviderRegistryConfig,
+  type ResolvedProvider,
+  type ProviderModelInput,
+  type OpenRouterRoutingPolicy,
+  type CreateOpenAIProvider,
+  type CreateAnthropicProvider,
+} from './provider-registry.js';

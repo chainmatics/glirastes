@@ -1752,6 +1752,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
               : modelConfig;
         } else if (pipelineResult.model.instance) {
           model = pipelineResult.model.instance;
+        } else if (privacyTurn?.provider) {
+          // Replaced by the turn's provider in privacyTurn.bind below.
+          model = privacyTurn.provider.model;
         } else {
           turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
           return new Response(
@@ -1995,7 +1998,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
 
       // Resolve model + system prompt (legacy mode — no pipeline fallback)
-      if (!modelConfig) {
+      if (!modelConfig && !privacyTurn?.provider) {
         turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
         return new Response(
           JSON.stringify({
@@ -2005,8 +2008,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           { status: 500, headers: { 'Content-Type': 'application/json' } },
         );
       }
-      let model =
-        typeof modelConfig === 'function'
+      let model = !modelConfig
+        ? privacyTurn?.provider?.model
+        : typeof modelConfig === 'function'
           ? modelConfig({ routing })
           : modelConfig;
 

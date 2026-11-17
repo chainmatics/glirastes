@@ -17,6 +17,7 @@ import {
 } from './model-boundary.js';
 import type { PrivacySession, StrictPiiShield } from './strict-shield.js';
 import type { ToolReceiptStore } from './tool-boundary.js';
+import type { ProviderRegistry, ResolvedProvider } from './provider-registry.js';
 
 /**
  * The protected-text profile of a chat handler. Every model call of a turn
@@ -53,12 +54,25 @@ export interface ChatPrivacyConfig {
   receipts?: ToolReceiptStore;
   /** Content-free stop notices, e.g. for metrics. */
   onBlocked?: (code: string) => void;
+  /**
+   * Interchangeable providers. The turn resolves the user's choice once at
+   * its start and uses that model instead of the handler's `model`; an
+   * invalid choice stops the turn with `provider_not_allowed` (403), a
+   * missing server secret with `provider_unavailable` (503).
+   */
+  providers?: {
+    registry: ProviderRegistry;
+    /** The entry id the user chose (e.g. from a server-side setting). Absent: the registry default. */
+    selection?(req: Request, scope: PrivacyScope): string | null | undefined | Promise<string | null | undefined>;
+  };
 }
 
 export interface ChatPrivacyTurn {
   readonly session: PrivacySession;
   readonly attachments: AttachmentPolicySnapshot;
   readonly config: ChatPrivacyConfig;
+  /** The provider resolved for this turn, when `providers` is configured. */
+  readonly provider: ResolvedProvider | undefined;
   /** Refuses a file in the latest user message that the screenshot rule blocks, before any model call. */
   checkLatestMessage(message: unknown): void;
   /** Builds the boundary for the model resolved for this turn and checks the latest message's files against it. */
@@ -71,6 +85,7 @@ const STATUS: Partial<Record<PrivacyErrorCode, number>> = {
   privacy_mapping_deleted: 409,
   provider_capability_missing: 422,
   provider_not_allowed: 403,
+  provider_unavailable: 503,
 };
 
 /** Content-free HTTP refusal of a protected turn. */
@@ -130,6 +145,9 @@ export async function openChatPrivacyTurn(
   const identities = await config.knownIdentities?.(req, session.scope) ?? [];
   if (identities.length > 0) await session.registerIdentities(identities);
   const attachments = resolveAttachmentPolicy(await config.attachments?.(req, session.scope) ?? {});
+  const provider = config.providers
+    ? config.providers.registry.resolve(session.scope, await config.providers.selection?.(req, session.scope))
+    : undefined;
 
   const checkFiles = (message: unknown, visionCapable: boolean) => {
     for (const part of filePartsOf(message)) {
@@ -143,11 +161,16 @@ export async function openChatPrivacyTurn(
     session,
     attachments,
     config,
+    provider,
     checkLatestMessage: (message) => checkFiles(message, true),
-    bind(model, latestMessage) {
-      const capabilities = typeof config.modelCapabilities === 'function'
-        ? config.modelCapabilities(model)
-        : config.modelCapabilities;
+    bind(handlerModel, latestMessage) {
+      // A resolved provider replaces the handler's model for the whole turn.
+      const model = provider ? provider.model : handlerModel;
+      const capabilities = provider
+        ? provider.capabilities
+        : typeof config.modelCapabilities === 'function'
+          ? config.modelCapabilities(model)
+          : config.modelCapabilities;
       const boundary = createPrivacyBoundary({
         session,
         attachments,
@@ -160,7 +183,7 @@ export async function openChatPrivacyTurn(
       // of being withheld silently; older files are withheld by the boundary.
       checkFiles(latestMessage, boundary.capabilities.images === true);
       const wrapped = boundary.wrapModel(model);
-      const label = config.providerLabel?.(model);
+      const label = provider ? provider.label : config.providerLabel?.(model);
       return {
         boundary,
         model: wrapped,

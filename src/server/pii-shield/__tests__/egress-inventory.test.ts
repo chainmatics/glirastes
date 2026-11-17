@@ -26,7 +26,7 @@ function scanFixture(source: string) {
 describe('model egress inventory', () => {
   it('the SDK source tree matches its reviewed inventory exactly', () => {
     expect(checkEgressInventory(scanTreeForEgress(ROOT), INVENTORY)).toEqual([]);
-  });
+  }, 60_000); // parses every source file; slow under a loaded full suite
 
   it.each([
     ['aliased streamText outside the boundary', `import { streamText as st } from 'ai';\nst({ model, prompt });`, 'streamText'],

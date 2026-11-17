@@ -191,6 +191,13 @@
       "reason": "The guarded model-call facade: every SDK model call passes it with an explicit privacy boundary or an explicit null."
     },
     {
+      "file": "src/server/pii-shield/provider-registry.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "OpenRouter routing wrapper: forwards the already protected provider request and adds the routing policy to its body."
+    },
+    {
       "file": "src/sync/app-setup-client.ts",
       "symbol": "fetch",
       "kind": "network",
