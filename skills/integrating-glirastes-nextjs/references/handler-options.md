@@ -61,7 +61,8 @@ it. The type's JSDoc carries the full detail.
 | `clarification` | `ClarificationConfig` enables `ask_clarification` |
 | `planning` | `PlanningConfig` enables `update_plan`; the chat shows it as a checklist |
 | `guardrails` | `GuardrailHook`, the app's own input check before routing; a refusal answers 400 |
-| `piiShield` | anonymize user messages before the model, re-hydrate tool arguments |
+| `privacy` | `ChatPrivacyConfig`: the protected-text profile, one privacy boundary around every model call of a turn; see [privacy.md](privacy.md) |
+| `piiShield` | legacy: anonymize user messages before the model, re-hydrate tool arguments; replaced by `privacy` |
 
 ## Approvals
 

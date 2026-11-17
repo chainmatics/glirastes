@@ -5,6 +5,7 @@ import type {
   ModuleDefinition,
   ToolContext,
   ConversationMessage,
+  PipelineCallOptions,
 } from '../../types.js';
 import { newStemmer, algorithms, type Stemmer } from 'snowball-stemmers';
 
@@ -362,6 +363,7 @@ export function createIntentClassifier(
       input: string,
       _context?: ToolContext,
       conversationHistory?: ConversationMessage[],
+      options?: PipelineCallOptions,
     ): Promise<IntentClassification> {
       // Short-circuit: not enough tokens to classify meaningfully
       const tokens = tokenize(input);
@@ -375,7 +377,7 @@ export function createIntentClassifier(
           const result = await classifyWithLlm(
             input,
             modules,
-            model,
+            options?.wrapModel ? options.wrapModel(model) : model,
             generateText,
             timeoutMs,
             conversationHistory,

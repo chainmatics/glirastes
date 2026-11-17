@@ -109,6 +109,8 @@ second, hand-maintained catalogue.
    `tool_contract_rejected`, without content.
    Every other `AiChatHandlerConfig` option (approvals, origins, limits,
    callbacks), one line each: [references/handler-options.md](references/handler-options.md).
+   For personal data, use `privacy` (protected-text profile), not
+   `piiShield`: [references/privacy.md](references/privacy.md).
    Image and PDF attachments stay off until the developer asks for them:
    then `attachments: { enabled: true }` here (body limit 50 MB; with
    `piiShield` also `allowWithPiiShield: true`, since files bypass the

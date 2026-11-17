@@ -957,6 +957,11 @@ export interface ToolToAiToolOptions {
    * tool execution. Enables monitoring dashboard for Free-tier users.
    */
   telemetry?: TelemetrySink;
+  /**
+   * Protected profile: a failed tool answers the model and the audit event
+   * without the error message (backend messages can carry request data).
+   */
+  contentFreeErrors?: boolean;
 }
 
 /**
@@ -1111,14 +1116,17 @@ export function toolToAiTool(
           details: {
             toolId: tool.id,
             toolName: name,
-            error: error instanceof Error ? error.message : String(error),
+            error: options?.contentFreeErrors
+              ? 'tool_failed'
+              : error instanceof Error ? error.message : String(error),
             latencyMs: Date.now() - startTime,
           },
         });
 
         options?.onError?.(tool.id, error);
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage = options?.contentFreeErrors
+          ? 'tool_failed'
+          : error instanceof Error ? error.message : 'Unknown error';
         return normalizeResultUiAction(
           {
             error: `Error in ${tool.id}: ${errorMessage}`,

@@ -372,6 +372,7 @@
     }
   },
   "devDependencies": {
+    "@ai-sdk/anthropic": "3.0.40",
     "@ai-sdk/openai": "^3",
     "@ai-sdk/react": "^3.0.0",
     "@nestjs/common": "^11.0.0",

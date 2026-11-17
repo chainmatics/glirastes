@@ -1,0 +1,300 @@
+import type { PostgresQueryClient } from '../../runtime/postgres-store.js';
+import { PrivacyError, isPrivacyError } from './detection-result.js';
+import {
+  assertPrivacyScope,
+  DEFAULT_ABSOLUTE_TTL_MS,
+  DEFAULT_IDLE_TTL_MS,
+  openEntry,
+  scopeKeyOf,
+  sealEntry,
+  valueDigest,
+  type MappingEntry,
+  type MappingLifetime,
+  type PrivacyKeyring,
+  type PrivacyMappingStore,
+} from './mapping-store.js';
+
+/**
+ * Schema of the scoped privacy mapping (also in `migrations/001_mapping.sql`).
+ * Values are AES-256-GCM sealed with the scope as associated data; only
+ * keyed digests are stored in clear for uniqueness. The database role needs
+ * SELECT, INSERT, UPDATE and DELETE on these two tables only.
+ */
+export const POSTGRES_PRIVACY_MAPPING_SCHEMA_SQL = `/* glirastes:privacy-mapping-schema */
+CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_scopes (
+  scope_key text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  app_id text NOT NULL,
+  environment text NOT NULL,
+  principal_id text NOT NULL,
+  conversation_id text NOT NULL,
+  generation integer NOT NULL,
+  version bigint NOT NULL,
+  idle_expires_at timestamptz NOT NULL,
+  absolute_expires_at timestamptz NOT NULL,
+  deleted_at timestamptz,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS glirastes_privacy_mapping_scopes_principal_idx
+  ON glirastes_privacy_mapping_scopes (tenant_id, principal_id);
+CREATE INDEX IF NOT EXISTS glirastes_privacy_mapping_scopes_expiry_idx
+  ON glirastes_privacy_mapping_scopes (idle_expires_at);
+CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_entries (
+  scope_key text NOT NULL REFERENCES glirastes_privacy_mapping_scopes (scope_key) ON DELETE CASCADE,
+  generation integer NOT NULL,
+  original_digest text NOT NULL,
+  pseudonym_digest text NOT NULL,
+  key_id text NOT NULL,
+  sealed text NOT NULL,
+  created_at timestamptz NOT NULL,
+  PRIMARY KEY (scope_key, generation, original_digest),
+  UNIQUE (scope_key, generation, pseudonym_digest)
+);
+`;
+
+export interface PostgresPrivacyMappingStoreOptions extends MappingLifetime {
+  keyring: PrivacyKeyring;
+}
+
+function at(date: Date, offsetMs: number): string {
+  return new Date(date.getTime() + offsetMs).toISOString();
+}
+
+/**
+ * Persistent scoped mapping in the consumer's own Postgres. Every operation is
+ * one atomic statement: the scope row is locked by its UPDATE, so concurrent
+ * appends and a delete of the same scope serialize, and a tombstone is never
+ * overwritten by a late append. Database errors surface as
+ * `privacy_mapping_unavailable` without their text.
+ */
+export function createPostgresPrivacyMappingStore(
+  client: PostgresQueryClient,
+  options: PostgresPrivacyMappingStoreOptions,
+): PrivacyMappingStore & {
+  initialize(): Promise<void>;
+  /**
+   * Re-encrypts entries sealed with an older key of this keyring under the
+   * active key. Returns the count; run until it returns 0 before removing the
+   * old key. Entries of key ids the keyring does not hold are left untouched.
+   */
+  rewrapEntries(limit?: number): Promise<number>;
+} {
+  const { keyring } = options;
+  const idleTtl = options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
+  const absoluteTtl = options.absoluteTtlMs ?? DEFAULT_ABSOLUTE_TTL_MS;
+  const tombstoneTtl = options.tombstoneTtlMs ?? DEFAULT_ABSOLUTE_TTL_MS;
+  const now = () => options.now?.() ?? new Date();
+
+  async function query<T extends Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {
+    try {
+      return params ? await client.unsafe<T>(sql, params) : await client.unsafe<T>(sql);
+    } catch (error) {
+      if (isPrivacyError(error)) throw error;
+      throw new PrivacyError('privacy_mapping_unavailable');
+    }
+  }
+
+  async function failureOf(scopeKey: string): Promise<PrivacyError> {
+    const rows = await query<{ deleted: boolean }>(
+      `/* glirastes:privacy-mapping-state */
+SELECT deleted_at IS NOT NULL AS deleted FROM glirastes_privacy_mapping_scopes WHERE scope_key = $1`,
+      [scopeKey],
+    );
+    return new PrivacyError(rows[0]?.deleted ? 'privacy_mapping_deleted' : 'privacy_mapping_conflict');
+  }
+
+  return {
+    persistent: true,
+
+    async initialize() {
+      await query(POSTGRES_PRIVACY_MAPPING_SCHEMA_SQL);
+    },
+
+    async load(scope) {
+      assertPrivacyScope(scope);
+      const scopeKey = scopeKeyOf(scope);
+      const date = now();
+      const nowIso = date.toISOString();
+      const rows = await query<{ generation: number; version: string | number; deleted: boolean; restarted: boolean }>(
+        `/* glirastes:privacy-mapping-load */
+INSERT INTO glirastes_privacy_mapping_scopes AS s
+  (scope_key, tenant_id, app_id, environment, principal_id, conversation_id,
+   generation, version, idle_expires_at, absolute_expires_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, 1, 0, LEAST($8::timestamptz, $9::timestamptz), $9::timestamptz, $7::timestamptz, $7::timestamptz)
+ON CONFLICT (scope_key) DO UPDATE SET
+  generation = CASE
+    WHEN s.deleted_at IS NULL AND (s.idle_expires_at <= $7::timestamptz OR s.absolute_expires_at <= $7::timestamptz)
+      THEN s.generation + 1 ELSE s.generation END,
+  version = CASE
+    WHEN s.deleted_at IS NULL AND (s.idle_expires_at <= $7::timestamptz OR s.absolute_expires_at <= $7::timestamptz)
+      THEN 0 ELSE s.version END,
+  absolute_expires_at = CASE
+    WHEN s.deleted_at IS NULL AND (s.idle_expires_at <= $7::timestamptz OR s.absolute_expires_at <= $7::timestamptz)
+      THEN $9::timestamptz ELSE s.absolute_expires_at END,
+  idle_expires_at = CASE
+    WHEN s.deleted_at IS NOT NULL THEN s.idle_expires_at
+    WHEN s.idle_expires_at <= $7::timestamptz OR s.absolute_expires_at <= $7::timestamptz
+      THEN LEAST($8::timestamptz, $9::timestamptz)
+    ELSE LEAST($8::timestamptz, s.absolute_expires_at) END,
+  updated_at = $7::timestamptz
+RETURNING generation, version, deleted_at IS NOT NULL AS deleted`,
+        [
+          scopeKey, scope.tenantId, scope.appId, scope.environment, scope.principalId, scope.conversationId,
+          nowIso, at(date, idleTtl), at(date, absoluteTtl),
+        ],
+      );
+      const header = rows[0];
+      if (!header) throw new PrivacyError('privacy_mapping_unavailable');
+      if (header.deleted) throw new PrivacyError('privacy_mapping_deleted');
+      const generation = Number(header.generation);
+      const entryRows = await query<{ key_id: string; sealed: string }>(
+        `/* glirastes:privacy-mapping-entries */
+SELECT key_id, sealed FROM glirastes_privacy_mapping_entries
+WHERE scope_key = $1 AND generation = $2
+ORDER BY created_at, original_digest`,
+        [scopeKey, generation],
+      );
+      const entries = entryRows.map((row) => openEntry(keyring, scopeKey, generation, { keyId: row.key_id, sealed: row.sealed }));
+      // Entries of an expired generation are not readable any more; remove them.
+      await query(
+        `/* glirastes:privacy-mapping-old-generations */
+DELETE FROM glirastes_privacy_mapping_entries WHERE scope_key = $1 AND generation < $2`,
+        [scopeKey, generation],
+      );
+      return { generation, version: Number(header.version), entries };
+    },
+
+    async append(scope, generation, entries, appendOptions) {
+      assertPrivacyScope(scope);
+      const scopeKey = scopeKeyOf(scope);
+      const date = now();
+      const nowIso = date.toISOString();
+      const unique: MappingEntry[] = [];
+      const seenOriginal = new Set<string>();
+      const seenPseudonym = new Set<string>();
+      const notInserted: MappingEntry[] = [];
+      for (const entry of entries) {
+        const o = valueDigest(keyring, scopeKey, entry.original);
+        const p = valueDigest(keyring, scopeKey, entry.pseudonym);
+        if (seenOriginal.has(o) || seenPseudonym.has(p) || seenOriginal.has(p) || seenPseudonym.has(o)) {
+          notInserted.push(entry);
+          continue;
+        }
+        seenOriginal.add(o);
+        seenPseudonym.add(p);
+        unique.push(entry);
+      }
+      const originalDigests = unique.map((e) => valueDigest(keyring, scopeKey, e.original));
+      const pseudonymDigests = unique.map((e) => valueDigest(keyring, scopeKey, e.pseudonym));
+      const sealed = unique.map((e) => sealEntry(keyring, scopeKey, generation, e));
+      const rows = await query<{ version: string | number | null; inserted: string[] | null }>(
+        `/* glirastes:privacy-mapping-append */
+WITH header AS (
+  UPDATE glirastes_privacy_mapping_scopes
+  SET version = version + 1,
+      idle_expires_at = LEAST($3::timestamptz, absolute_expires_at),
+      updated_at = $4::timestamptz
+  WHERE scope_key = $1
+    AND generation = $2
+    AND deleted_at IS NULL
+    AND idle_expires_at > $4::timestamptz
+    AND absolute_expires_at > $4::timestamptz
+    AND ($5::bigint IS NULL OR version = $5::bigint)
+  RETURNING scope_key, generation, version
+), candidate AS (
+  SELECT e.original_digest, e.pseudonym_digest, e.key_id, e.sealed
+  FROM unnest($6::text[], $7::text[], $8::text[], $9::text[]) AS e(original_digest, pseudonym_digest, key_id, sealed)
+  WHERE NOT EXISTS (
+    SELECT 1 FROM glirastes_privacy_mapping_entries x
+    WHERE x.scope_key = $1 AND x.generation = $2
+      AND (x.original_digest = e.pseudonym_digest OR x.pseudonym_digest = e.original_digest)
+  )
+), inserted AS (
+  INSERT INTO glirastes_privacy_mapping_entries
+    (scope_key, generation, original_digest, pseudonym_digest, key_id, sealed, created_at)
+  SELECT h.scope_key, h.generation, c.original_digest, c.pseudonym_digest, c.key_id, c.sealed, $4::timestamptz
+  FROM header h CROSS JOIN candidate c
+  ON CONFLICT DO NOTHING
+  RETURNING original_digest
+)
+SELECT (SELECT version FROM header) AS version,
+       (SELECT array_agg(original_digest) FROM inserted) AS inserted`,
+        [
+          scopeKey, generation, at(date, idleTtl), nowIso,
+          appendOptions?.expectedVersion ?? null,
+          originalDigests, pseudonymDigests, sealed.map((s) => s.keyId), sealed.map((s) => s.sealed),
+        ],
+      );
+      const result = rows[0];
+      if (!result || result.version === null || result.version === undefined) throw await failureOf(scopeKey);
+      const inserted = new Set(result.inserted ?? []);
+      unique.forEach((entry, index) => {
+        if (!inserted.has(originalDigests[index]!)) notInserted.push(entry);
+      });
+      return { version: Number(result.version), notInserted };
+    },
+
+    async delete(scope) {
+      assertPrivacyScope(scope);
+      const scopeKey = scopeKeyOf(scope);
+      const date = now();
+      const nowIso = date.toISOString();
+      const until = at(date, tombstoneTtl);
+      await query(
+        `/* glirastes:privacy-mapping-delete */
+WITH tombstone AS (
+  INSERT INTO glirastes_privacy_mapping_scopes AS s
+    (scope_key, tenant_id, app_id, environment, principal_id, conversation_id,
+     generation, version, idle_expires_at, absolute_expires_at, deleted_at, created_at, updated_at)
+  VALUES ($1, $2, $3, $4, $5, $6, 1, 1, $8::timestamptz, $8::timestamptz, $7::timestamptz, $7::timestamptz, $7::timestamptz)
+  ON CONFLICT (scope_key) DO UPDATE SET
+    version = s.version + 1,
+    deleted_at = COALESCE(s.deleted_at, $7::timestamptz),
+    idle_expires_at = $8::timestamptz,
+    absolute_expires_at = $8::timestamptz,
+    updated_at = $7::timestamptz
+  RETURNING scope_key
+)
+DELETE FROM glirastes_privacy_mapping_entries WHERE scope_key IN (SELECT scope_key FROM tombstone)`,
+        [scopeKey, scope.tenantId, scope.appId, scope.environment, scope.principalId, scope.conversationId, nowIso, until],
+      );
+    },
+
+    async purgeExpired(date) {
+      const nowIso = (date ?? now()).toISOString();
+      const rows = await query<{ scope_key: string }>(
+        `/* glirastes:privacy-mapping-purge */
+DELETE FROM glirastes_privacy_mapping_scopes
+WHERE idle_expires_at <= $1::timestamptz OR absolute_expires_at <= $1::timestamptz
+RETURNING scope_key`,
+        [nowIso],
+      );
+      return rows.length;
+    },
+
+    async rewrapEntries(limit = 500) {
+      const rows = await query<{ scope_key: string; generation: number; original_digest: string; key_id: string; sealed: string }>(
+        `/* glirastes:privacy-mapping-rewrap-select */
+SELECT scope_key, generation, original_digest, key_id, sealed FROM glirastes_privacy_mapping_entries
+WHERE key_id <> $1 AND key_id = ANY($3::text[]) LIMIT $2`,
+        [keyring.activeKeyId, limit, Object.keys(keyring.keys)],
+      );
+      let count = 0;
+      for (const row of rows) {
+        const generation = Number(row.generation);
+        const entry = openEntry(keyring, row.scope_key, generation, { keyId: row.key_id, sealed: row.sealed });
+        const resealed = sealEntry(keyring, row.scope_key, generation, entry);
+        const updated = await query(
+          `/* glirastes:privacy-mapping-rewrap */
+UPDATE glirastes_privacy_mapping_entries SET key_id = $4, sealed = $5
+WHERE scope_key = $1 AND generation = $2 AND original_digest = $3 AND key_id = $6
+RETURNING 1`,
+          [row.scope_key, generation, row.original_digest, resealed.keyId, resealed.sealed, row.key_id],
+        );
+        count += updated.length;
+      }
+      return count;
+    },
+  };
+}

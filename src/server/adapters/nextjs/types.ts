@@ -15,6 +15,7 @@ import type {
   SchemaLike,
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
+import type { ChatPrivacyConfig } from '../../pii-shield/chat-privacy.js';
 import type { ApprovalStore } from './approval-binding.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions } from './prepare-model-messages.js';
@@ -367,6 +368,17 @@ export interface AiChatHandlerConfig {
    */
   piiShield?: PiiShield;
 
+  /**
+   * Protected-text profile (`protected-text/v1`): one privacy boundary per
+   * turn around every model call (answer, tool steps, retries, classifier),
+   * a persistent scoped mapping, rehydrated tool input and a display
+   * projection for the principal only. Every failure stops the turn with a
+   * content-free code; nothing is sent unprotected. Replaces `piiShield`
+   * (both together are refused) and cannot be combined with `lancer` or
+   * `telemetry`, which send content to Platform services.
+   */
+  privacy?: ChatPrivacyConfig;
+
   wrapHandler?: <T>(callback: () => T | Promise<T>, req: Request) => Promise<T>;
   onError?: (error: unknown, req: Request) => void;
   onToolError?: (toolId: string, error: unknown) => void;
@@ -602,7 +614,9 @@ export interface AiChatHandlerConfig {
    * File and image attachments in user messages; off by default, and a file
    * part is then refused with 400. Attachments bypass the PII shield, so
    * with `piiShield` set the handler refuses to start unless
-   * `allowWithPiiShield` is true.
+   * `allowWithPiiShield` is true. With `privacy`, the screenshot rule of
+   * the privacy config decides instead: blocked by default, and images
+   * are never pseudonymized when allowed.
    */
   attachments?: ChatAttachmentsConfig;
 

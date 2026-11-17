@@ -13,7 +13,7 @@ import type { ToolContext, PromptOverride } from '../../../../types.js';
 import { applyPromptOverride } from '../../../../types.js';
 import { ConfigService } from '@nestjs/config';
 import {
-  streamText,
+  type streamText,
   stepCountIs,
   tool,
   zodSchema,
@@ -26,6 +26,12 @@ import {
   AI_CHAT_MODULE_OPTIONS,
   type AiChatModuleOptions,
 } from './ai-chat-module-options.interface.js';
+import { protectedStreamText } from '../../../pii-shield/model-calls.js';
+
+/** Error class without message or stack: both can carry prompt or tool content. */
+export function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
 
 function wrapToolsForVercelAi(
   sdkTools: Record<string, unknown>,
@@ -64,6 +70,11 @@ export class AiChatService {
       throw new ServiceUnavailableException('AI chat is not configured');
     }
     const options = this.options;
+    // The protected-text profile exists only in the Next.js handler. Refuse a
+    // privacy configuration here instead of running unprotected.
+    if ('privacy' in options || 'piiShield' in options) {
+      throw new ServiceUnavailableException('privacy_profile_unsupported');
+    }
 
     const toolContext: ToolContext & {
       callEndpoint: ReturnType<typeof createFetchInternalApiCaller>;
@@ -79,10 +90,9 @@ export class AiChatService {
     const registry = this.aiToolsService.buildToolRegistry();
     const sdkTools = await toolsToAiTools(registry, toolContext, {
       onError: (toolId, error) => {
-        this.logger.error(
-          `Tool "${toolId}" execution error: ${error}`,
-          error instanceof Error ? error.stack : undefined,
-        );
+        // Error messages can carry tool arguments or backend data: log the
+        // error class only.
+        this.logger.error(`Tool "${toolId}" execution error: ${errorName(error)}`);
       },
       onAudit: options.onAudit,
       sessionId: `nestjs-${Date.now()}`,
@@ -125,7 +135,8 @@ export class AiChatService {
 
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
-        const result = streamText({
+        // Outside the protected-text profile: privacy is refused above.
+        const result = protectedStreamText({
           model: options.model,
           system: systemPrompt,
           messages: modelMessages as NonNullable<
@@ -135,21 +146,19 @@ export class AiChatService {
           stopWhen: stepCountIs(maxSteps),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           onStepFinish: (step: any) => {
+            // Counts only: tool arguments and results are business data.
             this.logger.debug(
-              `Step finished: toolCalls=${JSON.stringify(step.toolCalls)}, toolResults=${JSON.stringify(step.toolResults)}, finishReason=${step.finishReason}`,
+              `Step finished: toolCalls=${step.toolCalls?.length ?? 0}, toolResults=${step.toolResults?.length ?? 0}, finishReason=${step.finishReason}`,
             );
           },
-        });
+        }, null);
 
         writer.merge(result.toUIMessageStream());
 
         try {
           await result.response;
         } catch (error) {
-          this.logger.error(
-            `Stream error: ${error}`,
-            error instanceof Error ? error.stack : undefined,
-          );
+          this.logger.error(`Stream error: ${errorName(error)}`);
           throw error;
         }
       },

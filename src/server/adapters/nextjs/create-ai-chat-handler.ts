@@ -47,11 +47,28 @@ import type { Tool, ToolRegistry, ConversationMessage, PiiShield, PromptOverride
 import { applyPromptOverride } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import {
-  streamText,
+  latestUserMessage,
+  openChatPrivacyTurn,
+  privacyRefusal,
+  privacySafeError,
+  type ChatPrivacyTurn,
+} from '../../pii-shield/chat-privacy.js';
+import { isPrivacyError } from '../../pii-shield/detection-result.js';
+import {
+  privacyStreamErrorText,
+  projectUiMessageStream,
+  type PrivacyStatusData,
+} from '../../pii-shield/display-projection.js';
+import { createPrivacyBoundary, type PrivacyBoundary } from '../../pii-shield/model-boundary.js';
+import { wrapToolsForPrivacy } from '../../pii-shield/tool-boundary.js';
+import { isLocalAiPipeline } from '../../local-pipeline.js';
+import {
   createUIMessageStream,
   createUIMessageStreamResponse,
+  type streamText,
   type UIMessage,
 } from 'ai';
+import { protectedStreamText } from '../../pii-shield/model-calls.js';
 import type {
   AiChatHandlerConfig,
   IntentRoutingResult,
@@ -165,6 +182,13 @@ export interface StreamHandlerContext {
   pipelineResult?: PipelineResult;
   /** PII shield context for response de-anonymization */
   piiShield?: { shield: PiiShield; sessionId: string };
+  /**
+   * Protected-text profile of this turn. `model` is already wrapped by the
+   * boundary and `tools` rehydrate their input; a custom stream handler
+   * must still pipe its UI stream through `projectUiMessageStream` (before
+   * `bindApprovalRequests`) for the principal to see the originals.
+   */
+  privacy?: { boundary: PrivacyBoundary; status: PrivacyStatusData };
   /** Pinned managed-local turn guard, present when managedRuntime is enabled. */
   managedTurn?: ManagedTurnGuard;
   /** Immutable turn-local controller for custom stream integrations. */
@@ -542,8 +566,17 @@ async function defaultStreamHandler(
   const systemPrompt = hideIds && ctx.systemPrompt
     ? `${ctx.systemPrompt}\n\n${HIDE_IDS_PROMPT}`
     : ctx.systemPrompt;
-  const idLabels: IdLabels = new Map();
+  let idLabels: IdLabels = new Map();
   if (hideIds) collectIdLabels(ctx.messages, idLabels);
+  if (hideIds && ctx.privacy) {
+    // The model answers with pseudonyms; its ids are matched as such.
+    const session = ctx.privacy.boundary.session;
+    const protectedLabels: IdLabels = new Map();
+    for (const [id, label] of idLabels) {
+      protectedLabels.set(await session.pseudonymizeText(id), label === undefined ? undefined : await session.pseudonymizeText(label));
+    }
+    idLabels = protectedLabels;
+  }
   const modelMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
     { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
@@ -623,7 +656,7 @@ async function defaultStreamHandler(
         true,
       );
 
-      const result = streamText({
+      const result = protectedStreamText({
         abortSignal: ctx.abortSignal,
         model: ctx.model as Parameters<typeof streamText>[0]['model'],
         messages: promptMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
@@ -818,14 +851,19 @@ async function defaultStreamHandler(
             ),
           });
         },
-      });
+      }, ctx.privacy?.boundary ?? null);
 
-      const uiStream = resumedApprovals
-        ? result.toUIMessageStream({ onError: () => 'AI request failed' })
+      const errorText = ctx.privacy ? privacyStreamErrorText : () => 'AI request failed';
+      const modelStream = resumedApprovals
+        ? result.toUIMessageStream({ onError: errorText })
         : withSilentTurnFallback(
-          result.toUIMessageStream({ onError: () => 'AI request failed' }),
+          result.toUIMessageStream({ onError: errorText }),
           silentTurnFallbackText(ctx.locale),
         );
+      // The principal sees the originals; approvals bind to what it sees.
+      const uiStream = ctx.privacy
+        ? projectUiMessageStream(modelStream, ctx.privacy.boundary.session, { status: ctx.privacy.status })
+        : modelStream;
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
@@ -883,6 +921,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
     // PII Shield
     piiShield,
+    privacy,
 
     // Audit & Telemetry
     onAudit,
@@ -937,6 +976,15 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     attachments,
   } = config;
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
+  if (privacy) {
+    if (piiShield) throw new Error('createAiChatHandler: privacy replaces piiShield; set only one');
+    if (lancer || telemetry) {
+      throw new Error('createAiChatHandler: privacy cannot be combined with lancer or telemetry, which send content to Platform services');
+    }
+    if (pipeline && !isLocalAiPipeline(pipeline)) {
+      throw new Error('createAiChatHandler: privacy needs a pipeline from createLocalAiPipeline');
+    }
+  }
   if (attachments?.enabled && piiShield && attachments.allowWithPiiShield !== true) {
     throw new Error(
       'createAiChatHandler: attachments bypass the PII shield; set '
@@ -948,10 +996,17 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   // Without a callback a failed turn would only say "AI request failed" to
   // the user and nothing to the developer. Name only: provider errors can
   // carry request and response content.
-  const onError = onErrorConfig ?? ((error: unknown) => {
+  const reportError = onErrorConfig ?? ((error: unknown) => {
     const name = error instanceof Error ? error.name : typeof error;
     console.error(`[glirastes] AI chat turn failed (${name}). Pass onError to createAiChatHandler to see the cause.`);
   });
+  // The protected profile hands callbacks a name and a code, never content.
+  const onError = privacy
+    ? (error: unknown, req: Request) => reportError(privacySafeError(error), req)
+    : reportError;
+  const reportToolError = privacy && onToolError
+    ? (toolId: string, error: unknown) => onToolError(toolId, privacySafeError(error))
+    : onToolError;
 
   // The Proctor endpoint behind Lancer telemetry is not served by the
   // Foundation control plane and its audit payloads are not content-free;
@@ -1179,6 +1234,28 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       const attachmentRefusal = validateAttachments(requestMessages, attachments);
       if (attachmentRefusal) return attachmentRefusal;
+      // Protected turn: scope, mapping and screenshot rule first. Nothing
+      // reaches a model, router or classifier before this succeeded.
+      let privacyTurn: ChatPrivacyTurn | undefined;
+      if (privacy) {
+        try {
+          const opened = await openChatPrivacyTurn(privacy, req, body.value as { id?: unknown });
+          if (!opened) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { 'Content-Type': 'application/json' } },
+            );
+          }
+          opened.checkLatestMessage(latestUserMessage(requestMessages));
+          // Detector and mapping run once up front, so an outage is a clean
+          // refusal before the stream starts, not an error inside it.
+          await opened.session.pseudonymizeText(extractLastUserText(requestMessages));
+          privacyTurn = opened;
+        } catch (error) {
+          onError(error, req);
+          return privacyRefusal(error);
+        }
+      }
       // A history the AI SDK could read in two ways (a tool call id in two
       // parts, a non-boolean approval answer) is refused before anything else.
       try {
@@ -1416,7 +1493,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       const toolOptions: ToolToAiToolOptions = {
         uiActionSchema,
-        onError: onToolError,
+        onError: reportToolError,
+        ...(privacy ? { contentFreeErrors: true } : {}),
         onAudit,
         sessionId,
         traceId: sessionId || undefined,
@@ -1550,13 +1628,33 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // Build lightweight conversation history for intent classification.
         // Include the last few user/assistant text exchanges (excluding the
         // current message) so the classifier can understand follow-ups.
-        const conversationHistory = extractConversationHistory(processedMessages, maxConversationHistoryPairs);
+        let conversationHistory = extractConversationHistory(processedMessages, maxConversationHistoryPairs);
+
+        // Protected turn: the classifier sees pseudonyms only, and its own
+        // model calls go through a boundary of the same scope.
+        let classifierOptions: Parameters<typeof pipeline.process>[3];
+        if (privacyTurn) {
+          const session = privacyTurn.session;
+          userText = await session.pseudonymizeText(userText);
+          const protectedHistory: typeof conversationHistory = [];
+          for (const message of conversationHistory) {
+            protectedHistory.push({ ...message, content: await session.pseudonymizeText(message.content) });
+          }
+          conversationHistory = protectedHistory;
+          const classifierBoundary = createPrivacyBoundary({
+            session,
+            ...(privacy?.providerOptions ? { providerOptions: privacy.providerOptions } : {}),
+            ...(privacy?.onBlocked ? { onBlocked: privacy.onBlocked } : {}),
+          });
+          classifierOptions = { wrapModel: (model) => classifierBoundary.wrapModel(model) };
+        }
 
         // Run pipeline: guardrails + classification + routing + model selection
         const pipelineResult = await pipeline.process(
           userText,
           toolContext,
           conversationHistory.length > 0 ? conversationHistory : undefined,
+          ...(classifierOptions ? [classifierOptions] : []),
         );
 
         // Notify consumer about pipeline decision
@@ -1730,6 +1828,15 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           recentMessages = await anonymizeMessages(recentMessages, piiShield, sessionId);
           aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId) as typeof aiTools;
         }
+        // Protected turn: the model is wrapped by the boundary (every call of
+        // the turn: steps, retries); tools get the authorized originals.
+        let privacyContext: StreamHandlerContext['privacy'];
+        if (privacyTurn) {
+          const bound = privacyTurn.bind(model, latestUserMessage(processedMessages));
+          model = bound.model;
+          privacyContext = { boundary: bound.boundary, status: bound.status };
+          aiTools = wrapToolsForPrivacy(aiTools, bound.boundary, privacy?.receipts ? { receipts: privacy.receipts } : {});
+        }
 
         // Lancer Approvals: delegate approval decisions to Glirastes
         if (lancer?.approvals) {
@@ -1764,6 +1871,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           modelTier: pipelineResult.model.modelId,
           pipelineResult,
           piiShield: piiShield ? { shield: piiShield, sessionId } : undefined,
+          ...(privacyContext ? { privacy: privacyContext } : {}),
           managedTurn,
           turnMetrics,
           modelPricing,
@@ -1833,7 +1941,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (intentRouter) {
         const text = clarificationResume?.routingText
           ?? extractLastUserText(processedMessages);
-        routing = await intentRouter(text, allToolNames);
+        // A consumer router may call a model of its own: pseudonyms only.
+        routing = await intentRouter(
+          privacyTurn ? await privacyTurn.session.pseudonymizeText(text) : text,
+          allToolNames,
+        );
       } else if (enableToolDiscovery && intentRouting !== false) {
         // Routing only picks the start set; discovery stays bounded by what
         // this principal may use and can always widen it.
@@ -1893,7 +2005,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           { status: 500, headers: { 'Content-Type': 'application/json' } },
         );
       }
-      const model =
+      let model =
         typeof modelConfig === 'function'
           ? modelConfig({ routing })
           : modelConfig;
@@ -1920,6 +2032,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (piiShield) {
         recentMessages = await anonymizeMessages(recentMessages, piiShield, legacySessionId);
         aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId) as typeof aiTools;
+      }
+      let legacyPrivacy: StreamHandlerContext['privacy'];
+      if (privacyTurn) {
+        const bound = privacyTurn.bind(model, latestUserMessage(processedMessages));
+        model = bound.model as typeof model;
+        legacyPrivacy = { boundary: bound.boundary, status: bound.status };
+        aiTools = wrapToolsForPrivacy(aiTools, bound.boundary, privacy?.receipts ? { receipts: privacy.receipts } : {});
       }
 
       // Lancer Approvals: delegate approval decisions to Glirastes (legacy mode)
@@ -1955,6 +2074,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         modelTier: routing?.modelTier,
         routing,
         piiShield: piiShield ? { shield: piiShield, sessionId: legacySessionId } : undefined,
+        ...(legacyPrivacy ? { privacy: legacyPrivacy } : {}),
         managedTurn,
         turnMetrics,
         modelPricing,
@@ -1979,6 +2099,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
       onError?.(error, req);
+      if (privacy && isPrivacyError(error)) return privacyRefusal(error);
       if (error instanceof ApprovalSecretMissingError) {
         return new Response(
           JSON.stringify({ error: error.code, message: error.message }),

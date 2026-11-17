@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
-import { AiChatService } from './ai-chat.service.js';
+import { AiChatService, errorName } from './ai-chat.service.js';
 import { AiChatRequestDto } from './dto/index.js';
 import {
   AI_CHAT_MODULE_OPTIONS,
@@ -52,7 +52,7 @@ export class AiChatController {
         authHeader,
       );
     } catch (error) {
-      this.logger.error(`streamChat() threw: ${error}`, (error as Error).stack);
+      this.logger.error(`streamChat() threw: ${errorName(error)}`);
       throw error;
     }
 
