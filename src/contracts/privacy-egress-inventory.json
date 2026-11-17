@@ -185,7 +185,7 @@
       "symbol": "protectedStreamText(nullable)",
       "kind": "facade_call",
       "decision": "protected",
-      "reason": "Passes ctx.privacy?.boundary ?? null: the boundary of every protected turn. null when the handler was created without 'privacy', or with 'privacy' and policy.required: false for a turn whose signed policy is absent or 'off' (the policy's decision, reported as state 'off'); a protected block never runs with null."
+      "reason": "Passes ctx.privacy?.boundary ?? null: the boundary of every protected turn. null when the handler was created without 'privacy', or with 'privacy' and policy.required: false for a turn whose signed policy is absent or 'off' (the policy's decision, reported as state 'off'); a protected block never runs with null. Upstream result-handle retrieval adds no new model/network call: effective protected turns never create the raw result store or builtin reader, and core bridges refuse externally registered SDK readers before execution; current, foreign/deleted/expired-generation and off-to-revoked HTTP transport regressions cover this boundary."
     },
     {
       "file": "src/server/adapters/nextjs/recording-transcription-handler.ts",

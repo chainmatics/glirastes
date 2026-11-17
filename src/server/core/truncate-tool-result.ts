@@ -32,6 +32,12 @@ export interface TruncateToolResultOptions {
   inputSchema?: unknown;
   /** Pagination parameter names for the hint of a read tool; wins over `inputSchema`. */
   paginationParams?: ReadonlyArray<string>;
+  /**
+   * Replaces what the hint tells the model to do next (after the sentence
+   * saying what is shown). `read_result` uses it to point to its own paging
+   * instead of the tool.
+   */
+  nextStep?: string;
 }
 
 /** The `_truncated` marker added to a cut result. */
@@ -409,7 +415,9 @@ export function truncateToolResult(
     const paging = params.length > 0
       ? `to fetch the next page with the parameters ${params.join(', ')}`
       : 'to fetch the rest in pages';
-    const next = readOnly
+    const next = options?.nextStep !== undefined
+      ? ` ${options.nextStep}`
+      : readOnly
       ? array
         ? ` Tell the user you are showing ${array.showing} of ${array.total}, and offer to filter the request or ${paging}.`
         : ` Tell the user the result is incomplete, and offer to filter the request or ${paging}.`

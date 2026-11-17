@@ -67,6 +67,8 @@ export const RuntimeConfigSchema = z
           .min(MIN_MAX_RESULT_CHARS)
           .max(MAX_MAX_RESULT_CHARS)
           .optional(),
+        // Turn-scoped result handles and read_result (createAiChatHandler resultHandles); on when absent.
+        resultHandles: z.boolean().optional(),
       })
       .strict(),
     identity: z

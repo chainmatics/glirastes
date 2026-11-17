@@ -50,7 +50,7 @@ const MODULE_MIN_SCORE = 0.15;
 const SECOND_MODULE_RATIO = 0.75;
 const DEFAULT_ALWAYS_AVAILABLE = ['ui_navigate'];
 const SDK_TOOL_NAMES = new Set([
-  'find_tools', 'suggest_followups', 'ask_clarification', 'update_plan',
+  'find_tools', 'suggest_followups', 'ask_clarification', 'update_plan', 'read_result',
 ]);
 const READ_METHODS = new Set(['GET', 'HEAD']);
 

@@ -48,6 +48,7 @@ describe('createAiChatHandler managed runtime', () => {
       expect(Object.keys(context.tools).sort()).toEqual([
         'find_tools',
         'list_tasks',
+        'read_result',
       ]);
       const findTools = context.tools.find_tools as {
         execute(input: unknown): Promise<{ tools: Array<{ name: string }> }>;
@@ -57,6 +58,7 @@ describe('createAiChatHandler managed runtime', () => {
       expect(context.toolDiscovery?.activeToolNames()).toEqual([
         'find_tools',
         'list_tasks',
+        'read_result',
       ]);
       return new Response('ok');
     });
@@ -151,10 +153,10 @@ describe('createAiChatHandler managed runtime', () => {
 
     it('offers and finds only the tools the current roles allow', async () => {
       expect(await offered({ roles: ['viewer'] })).toEqual({
-        roles: ['viewer'], promptRoles: ['viewer'], active: ['find_tools'], found: [],
+        roles: ['viewer'], promptRoles: ['viewer'], active: ['find_tools', 'read_result'], found: [],
       });
       expect(await offered({ roles: ['admin'] })).toEqual({
-        roles: ['admin'], promptRoles: ['admin'], active: ['find_tools', 'list_tasks'], found: ['list_tasks'],
+        roles: ['admin'], promptRoles: ['admin'], active: ['find_tools', 'list_tasks', 'read_result'], found: ['list_tasks'],
       });
     });
 
@@ -164,13 +166,13 @@ describe('createAiChatHandler managed runtime', () => {
         principal: { ...principal, roles: ['viewer'] }, localLimits,
       });
       expect(await offered({ roles: ['viewer', 'admin'], pinned: viewerPinned })).toEqual({
-        roles: ['viewer', 'admin'], promptRoles: ['viewer', 'admin'], active: ['find_tools', 'list_tasks'], found: ['list_tasks'],
+        roles: ['viewer', 'admin'], promptRoles: ['viewer', 'admin'], active: ['find_tools', 'list_tasks', 'read_result'], found: ['list_tasks'],
       });
     });
 
     it('neither offers nor finds a revoked tool', async () => {
       expect(await offered({ roles: ['admin'], revokedToolIds: [agentRevision.toolAllowlist[0]!] })).toEqual({
-        roles: ['admin'], promptRoles: ['admin'], active: ['find_tools'], found: [],
+        roles: ['admin'], promptRoles: ['admin'], active: ['find_tools', 'read_result'], found: [],
       });
     });
   });

@@ -1,5 +1,6 @@
 import { CLARIFICATION_TOOL_NAME } from '../../contracts/clarification.js';
 import { PLAN_TOOL_NAME, readPlanItems, type PlanItem } from '../../contracts/plan.js';
+import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 
 export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting';
 
@@ -11,12 +12,13 @@ export interface ActivityStep {
   detail?: string;
 }
 
-/** SDK built-ins render elsewhere (plan, clarification card, suggestions). */
+/** SDK built-ins render elsewhere (plan, clarification card, suggestions) or are internal (find_tools, read_result). */
 const BUILTIN_TOOL_NAMES = new Set<string>([
   'find_tools',
   'suggest_followups',
   CLARIFICATION_TOOL_NAME,
   PLAN_TOOL_NAME,
+  READ_RESULT_TOOL_NAME,
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {

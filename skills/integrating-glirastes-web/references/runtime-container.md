@@ -157,7 +157,10 @@ or generated artifact.
 
 `application.maxResultChars` (optional, 1000 to 200000, default 16000) bounds
 each successful tool result the model sees; an operation's
-`x-glirastes-max-result-chars` wins for that tool.
+`x-glirastes-max-result-chars` wins for that tool. A larger result gets a
+turn-scoped handle and an overview, and the model reads more with the built-in
+`read_result`; `application.resultHandles: false` (optional, default on) cuts
+it instead.
 
 For bearer authentication use `"credential": {"type":"bearer"}`. For existing
 backend CSRF middleware set `identity.csrfHeader` to `x-csrf-token` or

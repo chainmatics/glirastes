@@ -47,14 +47,14 @@ describe('find_tools without a runtime source (registry mode)', () => {
     });
 
     expect((await handler(request('Bitte eine Aufgabe anlegen'))).status).toBe(200);
-    expect(context?.toolDiscovery?.activeToolNames()).toEqual(['find_tools', 'list_tasks']);
+    expect(context?.toolDiscovery?.activeToolNames()).toEqual(['find_tools', 'list_tasks', 'read_result']);
     const findTools = context!.tools.find_tools as {
       execute(input: unknown): Promise<{ tools: Array<{ name: string }> }>;
     };
     const found = await findTools.execute({ query: 'Aufgabe anlegen' });
     expect(found.tools.map((tool) => tool.name)).toEqual(['create_task']);
     expect(context?.toolDiscovery?.activeToolNames())
-      .toEqual(['create_task', 'find_tools', 'list_tasks']);
+      .toEqual(['create_task', 'find_tools', 'list_tasks', 'read_result']);
   });
 
   it('never indexes SDK built-in tool names as domain capabilities', async () => {
@@ -98,7 +98,7 @@ describe('find_tools without a runtime source (registry mode)', () => {
       },
     });
     await handler(request('Liste'));
-    expect(names).toEqual(['list_tasks']);
+    expect(names).toEqual(['list_tasks', 'read_result']);
   });
 });
 
@@ -168,6 +168,6 @@ describe('default intent routing with discovery and no intentRouter', () => {
     const { active } = await activeFor(request('Hallo'), {
       intentRouting: { maxStartTools: 2, alwaysAvailable: ['dashboard_get'] },
     });
-    expect(active).toEqual(['dashboard_get', 'find_tools']);
+    expect(active).toEqual(['dashboard_get', 'find_tools', 'read_result']);
   });
 });

@@ -131,7 +131,7 @@ describe('structured clarification in the chat handler', () => {
     const wire = await response.text();
 
     expect(model.doStreamCalls).toHaveLength(1);
-    expect(model.doStreamCalls[0]!.tools?.map((tool) => tool.name)).toEqual(['ask_clarification']);
+    expect(model.doStreamCalls[0]!.tools?.map((tool) => tool.name)).toEqual(['ask_clarification', 'read_result']);
     expect(wire).toContain('"toolName":"ask_clarification"');
     expect(wire).toContain('tool-output-available');
     expect(wire).toContain('Welche Aufgabe soll ich löschen?');
@@ -151,7 +151,7 @@ describe('structured clarification in the chat handler', () => {
       },
     });
     await handler(request([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Hm' }] }]));
-    expect(active).toEqual(['ask_clarification', 'find_tools']);
+    expect(active).toEqual(['ask_clarification', 'find_tools', 'read_result']);
   });
 
   it('resumes the original request with the answer for routing and the model', async () => {
@@ -229,7 +229,7 @@ describe('structured clarification in the chat handler', () => {
     const wire = await response.text();
 
     expect(model.doStreamCalls[0]!.tools?.map((tool) => tool.name).sort())
-      .toEqual(['find_tools', 'suggest_followups']);
+      .toEqual(['find_tools', 'read_result', 'suggest_followups']);
     expect(wire).toContain('"toolName":"suggest_followups"');
     expect(wire).toContain('tool-output-available');
     expect(wire).not.toContain('manifest_tool_unavailable');
@@ -274,8 +274,8 @@ describe('manifest-bound tools named like an SDK built-in', () => {
   };
 
   it.each([
-    { toolDiscovery: false, offered: ['suggest_followups'] },
-    { toolDiscovery: true, offered: ['find_tools'] },
+    { toolDiscovery: false, offered: ['suggest_followups', 'read_result'] },
+    { toolDiscovery: true, offered: ['find_tools', 'read_result'] },
   ])(
     'denies a revoked manifest-bound suggest_followups in the guard when every registry tool is handed over (toolDiscovery: $toolDiscovery)',
     async ({ toolDiscovery, offered }) => {
@@ -284,8 +284,8 @@ describe('manifest-bound tools named like an SDK built-in', () => {
   );
 
   it.each([
-    { toolDiscovery: false, offered: undefined },
-    { toolDiscovery: true, offered: ['find_tools'] },
+    { toolDiscovery: false, offered: ['read_result'] },
+    { toolDiscovery: true, offered: ['find_tools', 'read_result'] },
   ])(
     'does not hand a revoked manifest-bound suggest_followups to the model (toolDiscovery: $toolDiscovery)',
     async ({ toolDiscovery, offered }) => {

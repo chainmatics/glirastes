@@ -8,7 +8,10 @@ import {
 import { CLARIFICATION_TOOL_NAME } from '../../../contracts/clarification.js';
 import { PLAN_TOOL_NAME } from '../../../contracts/plan.js';
 import { MEMORY_FORGET_TOOL_NAME, MEMORY_REMEMBER_TOOL_NAME } from '../../../contracts/memory.js';
+import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import { createChatMemory, type ChatMemoryTurn, type PreparedChatMemory } from './chat-memory.js';
+import { clearWhenDone, createTurnResults, resolveResultHandles, type TurnResults } from './result-handles.js';
+import type { ResultStore } from '../../core/index.js';
 
 /** Handler-created built-ins that stay callable for every tool selection. */
 const ALWAYS_ON_BUILTINS: ReadonlyArray<string> = [
@@ -16,6 +19,7 @@ const ALWAYS_ON_BUILTINS: ReadonlyArray<string> = [
   PLAN_TOOL_NAME,
   MEMORY_REMEMBER_TOOL_NAME,
   MEMORY_FORGET_TOOL_NAME,
+  READ_RESULT_TOOL_NAME,
 ];
 import {
   applyClarificationResume,
@@ -1009,6 +1013,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     onToolError,
     classifyToolFailure,
     maxResultChars,
+    resultHandles,
     onPipelineResult,
     onStepReport,
     onFinish,
@@ -1032,6 +1037,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     memory: memoryConfig,
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
+  const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
   const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
   if (privacy) {
@@ -1283,6 +1289,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     if (refused) return refused;
     reportDefaultsOnce();
     let turnMetrics: TurnMetricsRecorder | undefined;
+    // The result handles of this turn; dropped when the turn ends.
+    let turnResultStore: ResultStore | undefined;
     try {
       const body = await readJsonBody(req, maxBodyBytes);
       if (!body.ok) return body.response;
@@ -1307,6 +1315,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       let managedTurn: ManagedTurnGuard | undefined;
       let managedPrincipal: Principal | undefined;
+      /** The principal of this request, resolved again at every call (managed turns). */
+      let resolveTurnPrincipal: (() => Promise<Principal | undefined>) | undefined;
       /** The manifest tool ids the guard would allow right now; empty when that cannot be decided. */
       let currentToolIds: () => Promise<ReadonlySet<string>> = async () => new Set();
       let beforeModelStep: (() => Promise<void>) | undefined;
@@ -1347,6 +1357,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           );
           return current.success ? current.data : undefined;
         };
+        resolveTurnPrincipal = resolveCurrentPrincipal;
         // The privacy gate is asked again before every tool call: a refusal,
         // a raised floor or a revocation that arrives during the turn stops
         // the next call, also the one an approval resumes.
@@ -1707,6 +1718,33 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         telemetry,
         ...(maxResultChars !== undefined ? { maxResultChars } : {}),
       };
+      /**
+       * The result handles and `read_result` of a model turn (not of a direct
+       * command), sealed with the PII shield of `shieldSessionId()`. A
+       * registry tool named `read_result` stays the app's tool, and the turn
+       * then keeps no handles (an overview would point to a tool it cannot use).
+       */
+      const beginTurnResults = (registry: ToolRegistry, shieldSessionId: () => string): TurnResults | undefined => {
+        // Protected results cannot be sliced from a raw or stale mapping generation.
+        if (privacyTurn || !resultHandleLimits || registry[READ_RESULT_TOOL_NAME]) return undefined;
+        const results = createTurnResults({
+          limits: resultHandleLimits,
+          ...(piiShield ? { seal: (value: unknown) => piiShield.anonymizeResult(value, shieldSessionId()) } : {}),
+          ...(managedTurn && resolveTurnPrincipal ? { managedTurn, resolvePrincipal: resolveTurnPrincipal } : {}),
+        });
+        turnResultStore = results.store;
+        return results;
+      };
+      /**
+       * The registry name of the handler's own `read_result` instance (by
+       * identity): its arguments are paths and ids and are never rehydrated.
+       */
+      const ownReadResult = (registry: ToolRegistry, results: TurnResults | undefined): string | undefined => (
+        results && registry[READ_RESULT_TOOL_NAME] === results.tool ? READ_RESULT_TOOL_NAME : undefined
+      );
+      const withResultTool = (registry: ToolRegistry, results: TurnResults | undefined): ToolRegistry => (
+        results ? { ...registry, [results.tool.id]: results.tool } : registry
+      );
 
       // Emit session.started for audit + telemetry
       if (sessionId && (onAudit || telemetry)) {
@@ -1817,10 +1855,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (followupTool && !registry[followupTool.id]) {
           registry = { ...registry, [followupTool.id]: followupTool };
         }
-        registry = withMemoryTools(withAlwaysOnBuiltins(registry));
+        const turnResults = beginTurnResults(registry, () => sessionId);
+        const pipelineToolOptions: ToolToAiToolOptions = turnResults
+          ? { ...toolOptions, resultStore: turnResults.store }
+          : toolOptions;
+        registry = withResultTool(withMemoryTools(withAlwaysOnBuiltins(registry)), turnResults);
         const handlerBuiltinNames = findHandlerBuiltins(
           registry,
-          [followupTool, clarificationTool, planTool, ...(memoryTurn?.tools ?? [])],
+          [followupTool, clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
         );
         const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
         processedMessages = pipelineApprovals.messages;
@@ -1942,7 +1984,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
         // Convert all tools to AI tools
         let aiTools = await offeredTools(
-          await toolsToAiTools(registry, endpointToolContext, toolOptions),
+          await toolsToAiTools(registry, endpointToolContext, pipelineToolOptions),
           handlerBuiltinNames,
           pipelineApprovals.verified,
         );
@@ -2057,7 +2099,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
           recentMessages = await anonymizeMessages(recentMessages, piiShield, sessionId);
-          aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId) as typeof aiTools;
+          aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
         }
         // Protected turn: the model is wrapped by the boundary (every call of
         // the turn: steps, retries); tools get the authorized originals.
@@ -2085,7 +2127,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           modelId: resolvedModelId,
         } : undefined);
 
-        return await pipelineStreamHandler({
+        return clearWhenDone(await pipelineStreamHandler({
           tools: discoveryController
             ? { ...aiTools, find_tools: discoveryController.tool }
             : aiTools as Record<string, unknown>,
@@ -2125,7 +2167,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             : handlerBuiltinNames,
           ...(beforeModelStep ? { beforeModelStep } : {}),
           bindApprovalRequests: (stream) => bindApprovalRequests(stream, pipelineApprovals.binder),
-        });
+        }), turnResults?.store);
       }
 
       // ================================================================
@@ -2151,10 +2193,15 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       } else {
         registry = await loadTools!(endpointToolContext);
       }
-      registry = withMemoryTools(withAlwaysOnBuiltins(registry));
+      // The shield session of the legacy path is derived below; results are sealed only once tools run.
+      const turnResults = beginTurnResults(registry, () => legacySessionId);
+      const legacyToolOptions: ToolToAiToolOptions = turnResults
+        ? { ...toolOptions, resultStore: turnResults.store }
+        : toolOptions;
+      registry = withResultTool(withMemoryTools(withAlwaysOnBuiltins(registry)), turnResults);
       const handlerBuiltinNames = findHandlerBuiltins(
         registry,
-        [clarificationTool, planTool, ...(memoryTurn?.tools ?? [])],
+        [clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
       );
       const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
       processedMessages = legacyApprovals.messages;
@@ -2203,7 +2250,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       // Convert to AI tools
       const convertTools = async () => offeredTools(
-        await toolsToAiTools(registry, endpointToolContext, toolOptions),
+        await toolsToAiTools(registry, endpointToolContext, legacyToolOptions),
         handlerBuiltinNames,
         legacyApprovals.verified,
       );
@@ -2273,7 +2320,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // PII Shield: anonymize message history + wrap tools (legacy mode)
       if (piiShield) {
         recentMessages = await anonymizeMessages(recentMessages, piiShield, legacySessionId);
-        aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId) as typeof aiTools;
+        aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
       }
       let legacyPrivacy: StreamHandlerContext['privacy'];
       if (privacyTurn) {
@@ -2299,7 +2346,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       } : undefined);
 
       // Delegate streaming to consumer's handler
-      return await legacyStreamHandler({
+      return clearWhenDone(await legacyStreamHandler({
         tools: discoveryController
           ? { ...aiTools, find_tools: discoveryController.tool }
           : aiTools as Record<string, unknown>,
@@ -2339,8 +2386,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           : handlerBuiltinNames,
         ...(beforeModelStep ? { beforeModelStep } : {}),
         bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder),
-      });
+      }), turnResults?.store);
     } catch (error) {
+      turnResultStore?.clear();
       if (error instanceof ApprovalHistoryError) {
         turnMetrics?.finish({ status: 'error', errorCode: 'pipeline_error' });
         return approvalHistoryRefusal(error);
@@ -2500,10 +2548,23 @@ interface SdkAiToolForShield {
   execute: (...args: unknown[]) => unknown;
 }
 
+/**
+ * Rehydrates tool arguments and pseudonymizes tool results. The arguments of
+ * the handler's own `read_result` (`plainArgsTool`) are not rehydrated: its
+ * answers are not shielded again, so a pseudonym passed as a path or id must
+ * never be turned into the original there. A result the
+ * turn's result store issued (an overview or a `read_result` answer) was cut
+ * from the copy the store sealed once with this shield and is not shielded
+ * again: detection depends on the surrounding text, so shielding excerpts
+ * separately could leave a value raw in one of them, and a pseudonym that
+ * looks like PII itself would be mapped again.
+ */
 function wrapToolsWithShield(
   aiTools: Record<string, unknown>,
   shield: PiiShield,
   sessionId: string,
+  resultStore?: ResultStore,
+  plainArgsTool?: string,
 ): Record<string, unknown> {
   const wrapped: Record<string, unknown> = {};
 
@@ -2518,7 +2579,7 @@ function wrapToolsWithShield(
         // Uses the async path for Lancer Aegis rehydration.
         // The sync rehydrateArgs is a legacy no-op kept for backward compat.
         let args = executeArgs[0];
-        if (args && typeof args === 'object' && !Array.isArray(args)) {
+        if (name !== plainArgsTool && args && typeof args === 'object' && !Array.isArray(args)) {
           if (shield.rehydrateArgsAsync) {
             args = await shield.rehydrateArgsAsync(
               args as Record<string, unknown>,
@@ -2535,6 +2596,7 @@ function wrapToolsWithShield(
         // Execute with real args
         const result = await (originalExecute as Function)(args, ...executeArgs.slice(1));
 
+        if (resultStore?.isIssued(result)) return result;
         // Anonymize result before LLM sees it
         return shield.anonymizeResult(result, sessionId);
       },

@@ -149,6 +149,7 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
           ...(config.application.maxResultChars !== undefined
             ? { maxResultChars: config.application.maxResultChars }
             : {}),
+          ...(config.application.resultHandles === false ? { resultHandles: false } : {}),
           endpointCaller: (req) =>
             createHttpEndpointCaller({
               defaultHeaders: pinnedPrincipal
