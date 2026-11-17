@@ -833,6 +833,17 @@ describe('createGlirastes with a privacy policy', () => {
     expect(glirastes.privacyPolicy()).toMatchObject({ source: 'local', profile: 'protected-text/v1' });
   });
 
+  it('blocks managed bootstrap without infrastructure when live sync has no active deployment', async () => {
+    const http = platform();
+    const instance = track(createGlirastes({ generated: generated(), env, fetchImpl: http.fetchImpl,
+      push: false, pollIntervalMs: 60_000, onError: vi.fn(), stateStore: () => new SharedDurableTestStore() }));
+    await instance.ready();
+    expect(codeOf(() => instance.speechPolicy())).toBe('privacy_policy_unavailable');
+    const turn = await instance.chatTurn(principal);
+    expect(codeOf(() => turn.managedRuntime.privacyGate({ request: new Request('https://app.example/chat'),
+      snapshot: { policyRevision: { revisionId: id('3908') } } as never }))).toBe('privacy_policy_unavailable');
+  });
+
   it('blocks a connected runtime with privacy until a verified deployment arrived', async () => {
     const http = platform();
     const glirastes = track(createGlirastes({
@@ -977,8 +988,9 @@ describe('createGlirastes with a privacy policy', () => {
       expect(glirastes.accepted()).toBeUndefined();
       expect((await stateStore.load())?.privacyFloor ?? null).toBeNull();
       expect((await stateStore.load())?.privacyRefusedDeploymentIds ?? []).toEqual([]);
-      // Without privacy configured, nothing verified keeps the local code running.
-      expect(codeOf(() => glirastes.privacyPolicy())).toBeUndefined();
+      // No attacker-controlled floor was persisted. A managed runner still
+      // awaits a verified active policy; missing infrastructure is no bypass.
+      expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_policy_unavailable');
     });
   });
 
