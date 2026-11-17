@@ -70,13 +70,68 @@ export interface CliDependencies {
   tools?: ToolsCommandDependencies;
 }
 
+/** `--flag value` or `--flag=value`. */
 function getFlagValue(args: string[], flag: string): string | undefined {
-  const index = args.indexOf(flag);
-  return index >= 0 ? args[index + 1] : undefined;
+  for (const [index, arg] of args.entries()) {
+    if (arg === flag) return args[index + 1];
+    if (arg.startsWith(`${flag}=`)) return arg.slice(flag.length + 1);
+  }
+  return undefined;
 }
 
 function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
+}
+
+/**
+ * The value of a flag that needs one, as `--flag value` or `--flag=value`. A
+ * missing value or a repeated flag is an error, never silently ignored.
+ */
+function flagWithValue(args: string[], flag: string): string | undefined {
+  const occurrences = args.filter((arg) => arg === flag || arg.startsWith(`${flag}=`)).length;
+  if (occurrences === 0) return undefined;
+  if (occurrences > 1) {
+    throw new FoundationDiagnosticError({
+      code: 'E-SETUP-032',
+      operation: 'cli',
+      message: `${flag} may be given only once.`,
+      remediation: 'Run glirastes --help to see the usage.',
+    });
+  }
+  const value = getFlagValue(args, flag);
+  if (value === undefined || value.startsWith('--') || value.trim() === '') {
+    throw new FoundationDiagnosticError({
+      code: 'E-SETUP-031',
+      operation: 'cli',
+      message: `${flag} needs a value.`,
+      remediation: 'Run glirastes --help to see the usage.',
+    });
+  }
+  return value;
+}
+
+/**
+ * The secret file flag of `connect`, `sync`, `doctor` and `setup`. Not
+ * `--env-file`: Node.js 20+ claims that name even after the script name.
+ */
+const DOTENV_FLAG = '--dotenv';
+const COMMANDS_WITH_DOTENV = new Set<string>(['connect', 'sync', 'doctor', 'setup']);
+
+/**
+ * Node.js (20 and later) reads `--env-file <path>` itself, even after the
+ * script name: a missing file ends the process with exit code 9 before the
+ * CLI runs, an existing one is loaded into `process.env`. When the flag still
+ * reaches the CLI, stop before anything else; never echo the file.
+ */
+function refuseNodeEnvFileFlag(command: string, args: string[]): void {
+  if (!COMMANDS_WITH_DOTENV.has(command)) return;
+  if (!args.some((arg) => arg === '--env-file' || arg.startsWith('--env-file='))) return;
+  throw new FoundationDiagnosticError({
+    code: 'E-SETUP-033',
+    operation: 'cli',
+    message: '--env-file is taken by Node.js itself: Node.js may already have loaded the variables of that file into this process. glirastes takes the secret file as --dotenv <path>.',
+    remediation: `Run glirastes ${command} again with --dotenv <path> instead of --env-file.`,
+  });
 }
 
 /** The command overview printed by `glirastes --help`. */
@@ -85,11 +140,12 @@ export const CLI_USAGE =
   + '         start integration with your existing coding agent\n'
   + '       glirastes init --ci github [--enrich-on <branch,...>] [--enrich-on-main] [--ci-environment <name>] [--force] [--root] [--json]\n'
   + '         write the GitHub workflow: model-free tool check, Pro managed tool job\n'
-  + '       glirastes setup [--dry-run] [--managed] [--json]\n'
+  + '       glirastes setup [--dry-run] [--managed] [--dotenv <path>] [--json]\n'
   + '         detect, validate and atomically install local artifacts\n'
-  + '       glirastes connect [--base-url <url>] [--json]\n'
+  + '       glirastes connect [--base-url <url>] [--dotenv <path>] [--json]\n'
   + '         pair an existing local setup with the Platform (--base-url or GLIRASTES_CONTROL_PLANE_URL only for self-hosted)\n'
-  + '       glirastes sync [--json]\n'
+  + '         the key goes to --dotenv (Git-ignored, inside the project), else .env.local for Next.js, else it is shown once\n'
+  + '       glirastes sync [--dotenv <path>] [--json]\n'
   + '         upload the current local setup without reassessment\n'
   + '       glirastes setup guided [options]\n'
   + '         run the legacy interactive setup interview\n'
@@ -101,7 +157,7 @@ export const CLI_USAGE =
   + '       glirastes install [--host a,b] [--symlink] [--force] '
   + '[--dry-run]\n'
   + '       glirastes validate [--root] [--app-id]\n'
-  + '       glirastes doctor [--root] [--managed] [--json] [--verbose]\n'
+  + '       glirastes doctor [--root] [--managed] [--dotenv <path>] [--json] [--verbose]\n'
   + '       glirastes build [--root] [--app-id] [--output]\n'
   + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify|enrich> [options]\n'
   + '         derive chat tools from the code, check them, show them and print agent work lists\n';
@@ -436,6 +492,7 @@ async function runSetup(
   }
   if (rest[0] === undefined || rest[0]?.startsWith('--')) {
     const rootDir = resolve(getFlagValue(rest, '--root') ?? process.cwd());
+    const envFile = flagWithValue(rest, DOTENV_FLAG);
     const plan = await createSetupPlan({
       rootDir,
       artifactPath: getFlagValue(rest, '--artifact'),
@@ -457,7 +514,7 @@ async function runSetup(
       promptBundlePath: getFlagValue(rest, '--prompt-bundle'),
     });
     if (applied.mode === 'managed') {
-      await runSync({ rootDir, quiet: true }, dependencies.sync);
+      await runSync({ rootDir, quiet: true, envFile }, dependencies.sync);
     }
     if (hasFlag(rest, '--json')) {
       console.log(JSON.stringify({ schemaVersion: 1, ...applied }));
@@ -511,6 +568,7 @@ async function runSetup(
   if (subcommand === 'sync') {
     await runSync({
       rootDir,
+      envFile: flagWithValue(options, DOTENV_FLAG),
       json: hasFlag(options, '--json'),
       quiet,
     }, dependencies.sync);
@@ -706,6 +764,7 @@ export async function runCli(
     console.log(packageVersion());
     return;
   }
+  refuseNodeEnvFileFlag(command, rest);
   if (rest.some((arg) => arg === '--help' || arg === '-h')) {
     // Every command answers --help/-h before it parses or writes anything.
     console.log(commandUsage(command));
@@ -742,6 +801,7 @@ export async function runCli(
     await runConnect({
       rootDir: resolve(getFlagValue(rest, '--root') ?? process.cwd()),
       baseUrl: getFlagValue(rest, '--base-url'),
+      envFile: flagWithValue(rest, DOTENV_FLAG),
       json: hasFlag(rest, '--json'),
     }, dependencies.connect);
     return;
@@ -749,6 +809,7 @@ export async function runCli(
   if (command === 'sync') {
     await runSync({
       rootDir: resolve(getFlagValue(rest, '--root') ?? process.cwd()),
+      envFile: flagWithValue(rest, DOTENV_FLAG),
       json: hasFlag(rest, '--json'),
       quiet: hasFlag(rest, '--quiet'),
     }, dependencies.sync);
@@ -758,6 +819,7 @@ export async function runCli(
     const report = await createDoctorReport({
       rootDir: resolve(getFlagValue(rest, '--root') ?? process.cwd()),
       managed: hasFlag(rest, '--managed'),
+      envFile: flagWithValue(rest, DOTENV_FLAG),
     });
     console.log(hasFlag(rest, '--json')
       ? JSON.stringify(report)

@@ -169,7 +169,27 @@ for setup and Doctor.
 
 Connect once: one run issues one app connection key. In Citadel the approver
 chooses its lifetime (90 days by default, 1 year or no expiry); no environment
-is chosen. The key lands in `.env.local` as `GLIRASTES_API_KEY`.
+is chosen. Where the key `GLIRASTES_API_KEY` lands:
+
+- `--dotenv <path>` (or `connection.envFile` in `.glirastes/tools.json`): a
+  file inside the project that Git ignores, e.g. `apps/backend/.env`. Only the
+  key line changes; the file keeps its mode, so suggest 0600. Confirm the path
+  with the developer first.
+- Next.js without the flag: `.env.local`.
+- Any other app without the flag: no file; the key is shown once on the
+  developer's terminal. As an agent, never run `connect` so that the key ends
+  up in your output: always pass `--dotenv`, or let the developer run it.
+  The terminal guard (`E-CONNECT-SECRET-OUTPUT-REFUSED`) checks stdout only
+  and does not protect a pseudo-terminal. Never add `--json` without
+  `--dotenv`: it prints the key. Never write `--env-file`: Node.js consumes
+  that flag itself (a missing file exits 9 with `node: <path>: not found`
+  before glirastes runs; an existing one is loaded into the process and
+  glirastes stops with `E-SETUP-033`).
+
+`glirastes sync` and `glirastes doctor` take the same `--dotenv`; otherwise
+they read `GLIRASTES_API_KEY` from the process environment (Next.js:
+`.env.local`). A deployed app needs only the environment variables below, not
+`.glirastes/platform-connection.json`.
 
 Every deployment (production, staging, CI) sets the same secret
 `GLIRASTES_API_KEY`, plus `GLIRASTES_ENVIRONMENT=<environment key>`, which is
