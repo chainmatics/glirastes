@@ -54,11 +54,13 @@ export function toolResultFailure(result: unknown): ToolFailureClassification | 
  * trace id into every error body, which would make each repetition of the
  * same failing call look new. A failure without a numeric `status` (a
  * tool's own failure) keeps its `error` and its other fields. Any other
- * result is fingerprinted whole.
+ * result is fingerprinted whole, except the random `id` of a result handle
+ * (`_result.id` of an overview), so calling the same tool again with the
+ * same result still looks like a repetition.
  */
 export function toolResultForFingerprint(result: unknown): unknown {
   if (typeof result !== 'object' || result === null || Array.isArray(result)) return result;
-  if ((result as { success?: unknown }).success !== false) return result;
+  if ((result as { success?: unknown }).success !== false) return withoutResultHandleId(result as Record<string, unknown>);
   const {
     body: _body, bodyTruncated: _bodyTruncated, error, ...stable
   } = result as Record<string, unknown>;
@@ -71,4 +73,11 @@ export function toolResultForFingerprint(result: unknown): unknown {
     };
   }
   return error === undefined ? stable : { ...stable, error };
+}
+
+function withoutResultHandleId(result: Record<string, unknown>): Record<string, unknown> {
+  const marker = result._result;
+  if (typeof marker !== 'object' || marker === null || Array.isArray(marker) || !('id' in marker)) return result;
+  const { id: _id, ...rest } = marker as Record<string, unknown>;
+  return { ...result, _result: rest };
 }

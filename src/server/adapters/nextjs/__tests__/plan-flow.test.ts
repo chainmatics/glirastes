@@ -109,7 +109,7 @@ describe('built-in plan tool in the chat handler', () => {
     }]));
     const wire = await response.text();
 
-    expect(model.doStreamCalls[0]!.tools?.map((tool) => tool.name)).toEqual(['update_plan']);
+    expect(model.doStreamCalls[0]!.tools?.map((tool) => tool.name)).toEqual(['update_plan', 'read_result']);
     expect(model.doStreamCalls).toHaveLength(2);
     expect(wire).toContain('"toolName":"update_plan"');
     expect(wire).toContain('tool-output-available');
@@ -130,6 +130,6 @@ describe('built-in plan tool in the chat handler', () => {
       },
     });
     await handler(request([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Hm' }] }]));
-    expect(active).toEqual(['ask_clarification', 'find_tools', 'update_plan']);
+    expect(active).toEqual(['ask_clarification', 'find_tools', 'read_result', 'update_plan']);
   });
 });

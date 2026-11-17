@@ -163,6 +163,9 @@ characters by default (the largest array is cut, then long fields, with a
 1000 to 200000) to change the bound for every tool; an invalid value fails
 config parsing. An operation's `x-glirastes-max-result-chars` in the export
 wins for that tool and travels in the artifact's local tool contracts.
+A result over the bound keeps a turn-scoped handle that the model reads with
+the built-in `read_result` (see `docs/concepts.md`); `application.resultHandles:
+false` turns that off, so large results are only cut.
 
 ## State, cancellation and lifecycle
 

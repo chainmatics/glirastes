@@ -19,7 +19,7 @@ import type { ApprovalStore } from './approval-binding.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions } from './prepare-model-messages.js';
 import type { ChatMemoryConfig } from './chat-memory.js';
-import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ToolFailureClassifier } from '../../core/index.js';
+import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ResultHandleLimits, ToolFailureClassifier } from '../../core/index.js';
 import type {
   Principal,
   SecurityRevocation,
@@ -413,6 +413,25 @@ export interface AiChatHandlerConfig {
    * handler is created.
    */
   maxResultChars?: number;
+  /**
+   * Turn-scoped result handles (on by default). A successful record result
+   * of a model turn that exceeds its limit (`maxResultChars`) is kept in
+   * full for the running turn, after the PII shield when `piiShield` is set,
+   * and the model gets an overview instead: every entry of the largest
+   * array with its small fields, the largest fields left out (named in
+   * `_result.omitted`), plus a `_result` handle. The built-in tool
+   * `read_result` reads omitted fields or further entries from it without
+   * calling the backend again. The handle lives only in this request: an
+   * approval continuation or a later turn answers `result_expired`.
+   * Direct commands never get handles.
+   *
+   * `true` (default): 8 handles per turn, 2 MiB per result, 16 MiB per
+   * turn; an object sets `maxResults`, `maxResultBytes`, `maxTotalBytes`
+   * (positive integers). A result beyond them is cut as with `false`, which
+   * turns the feature off: every large result is cut (`_truncated`). An
+   * invalid value throws when the handler is created.
+   */
+  resultHandles?: boolean | ResultHandleLimits;
   /**
    * Called after pipeline classification and tool scoping, before streaming.
    * Use this to log which intent, module, model, and tools were selected.

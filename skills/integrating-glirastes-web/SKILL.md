@@ -111,7 +111,9 @@ the module and `x-glirastes-roles` the roles any of which may call the tool
 `x-glirastes-max-result-chars` (integer, 1000 to 200000) raises or lowers the
 16,000-character bound of that tool's result for the model above the handler's
 `maxResultChars`; an invalid value is reported as `max-result-chars-invalid`
-and ignored.
+and ignored. A larger result reaches the model as an overview with a
+turn-scoped handle that the built-in `read_result` reads from (no second
+backend call); renderers only see the overview's fields.
 `x-glirastes-tool: false` keeps an operation out in either mode. Existing
 exclusions win over the marker and are reported as `opt-in-excluded`. Policy
 entries stay keyed on `METHOD /path` and survive a rename; tool-semantics.json

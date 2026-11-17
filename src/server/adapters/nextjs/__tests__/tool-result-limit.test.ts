@@ -155,6 +155,8 @@ describe('maxResultChars on createAiChatHandler', () => {
       model: textModel(),
       systemPrompt: 'Assistant',
       maxResultChars: 5_000,
+      // PR F behaviour: without result handles a large result is cut.
+      resultHandles: false,
       endpointCaller: () => async () => playlists,
       ...(withPipeline ? { pipeline: { process: async () => { processed += 1; return pipelineResult; } } } : {}),
       streamHandler: async (ctx) => {

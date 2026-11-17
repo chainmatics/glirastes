@@ -157,7 +157,7 @@ describe.each([
   }
 
   describe.each([[false], [true]])('with toolDiscovery %s', (toolDiscovery) => {
-    const builtins = toolDiscovery ? ['find_tools'] : [];
+    const builtins = toolDiscovery ? ['find_tools', 'read_result'] : ['read_result'];
 
     it('leaves out a tool the pinned policy restricts to a role the principal does not have', async () => {
       const seen = await offer({ toolDiscovery, managedRuntime: runtime() });
@@ -190,14 +190,14 @@ describe.each([
       const seen = await offer({ toolDiscovery, authorizedToolsOnly: false, managedRuntime: runtime() });
       expect(seen.handed).toEqual([...builtins, 'tasks_archive', 'tasks_list']);
       // Discovery activates only what the principal may use, as before.
-      expect(seen.model).toEqual(toolDiscovery ? ['find_tools', 'tasks_archive'] : ['tasks_archive', 'tasks_list']);
+      expect(seen.model).toEqual(toolDiscovery ? ['find_tools', 'read_result', 'tasks_archive'] : ['read_result', 'tasks_archive', 'tasks_list']);
     });
   });
 
   it('leaves a turn without managedRuntime as it was', async () => {
     const seen = await offer({});
-    expect(seen.model).toEqual(['tasks_archive', 'tasks_list']);
-    expect(seen.handed).toEqual(['tasks_archive', 'tasks_list']);
+    expect(seen.model).toEqual(['read_result', 'tasks_archive', 'tasks_list']);
+    expect(seen.handed).toEqual(['read_result', 'tasks_archive', 'tasks_list']);
   });
 
   describe('a turn without managedRuntime with toolDiscovery', () => {
@@ -210,8 +210,8 @@ describe.each([
       const found = chunks.find((chunk) => chunk.type === 'tool-output-available' && chunk.toolCallId === 'call-2');
       expect(JSON.stringify(found)).toContain('tasks_archive');
       expect(offered(model)).toEqual([
-        ['find_tools', 'tasks_list'],
-        ['find_tools', 'tasks_archive', 'tasks_list'],
+        ['find_tools', 'read_result', 'tasks_list'],
+        ['find_tools', 'read_result', 'tasks_archive', 'tasks_list'],
       ]);
     });
 
@@ -351,7 +351,7 @@ describe.each([
 
   describe('when the principal or the revocations change during a multi-step request', () => {
     describe.each([[false], [true]])('with toolDiscovery %s', (toolDiscovery) => {
-      const builtins = toolDiscovery ? ['find_tools'] : [];
+      const builtins = toolDiscovery ? ['find_tools', 'read_result'] : ['read_result'];
 
       it('no longer offers a tool in the step after its role was lost', async () => {
         let roles = ['member'];
@@ -407,9 +407,9 @@ describe.each([
       expect(JSON.stringify(found)).toContain('"tools":');
       expect(JSON.stringify(found)).not.toContain('tasks_archive');
       expect(offered(model)).toEqual([
-        ['find_tools', 'tasks_list'],
-        ['find_tools', 'tasks_list'],
-        ['find_tools', 'tasks_list'],
+        ['find_tools', 'read_result', 'tasks_list'],
+        ['find_tools', 'read_result', 'tasks_list'],
+        ['find_tools', 'read_result', 'tasks_list'],
       ]);
     });
 
@@ -420,8 +420,8 @@ describe.each([
         tools: registry, model, toolDiscovery: true, managedRuntime: runtime({ roles: () => ['member'] }),
       }, ['tasks_list']))(post([user])));
       expect(offered(model)).toEqual([
-        ['find_tools', 'tasks_list'],
-        ['find_tools', 'tasks_archive', 'tasks_list'],
+        ['find_tools', 'read_result', 'tasks_list'],
+        ['find_tools', 'read_result', 'tasks_archive', 'tasks_list'],
       ]);
     });
   });

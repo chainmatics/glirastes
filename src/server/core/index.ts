@@ -26,6 +26,7 @@ import {
   isValidMaxResultChars,
 } from '../../runtime/result-limit.js';
 import { truncateToolResult } from './truncate-tool-result.js';
+import type { ResultStore } from './result-store.js';
 export {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
@@ -39,6 +40,16 @@ export {
   type TruncatedMarker,
   type TruncateToolResultOptions,
 } from './truncate-tool-result.js';
+export {
+  createResultStore,
+  DEFAULT_RESULT_HANDLE_LIMITS,
+  type ResultHandle,
+  type ResultHandleLimits,
+  type ResultStore,
+  type ResultStoreOptions,
+} from './result-store.js';
+export { createReadResultTool, type ReadResultGuard } from './read-result-tool.js';
+export { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 export { createLocalGuardrails } from './local-guardrails.js';
 export {
   createAdaptiveFastPath,
@@ -921,6 +932,24 @@ export interface ToolToAiToolOptions {
    * `maxResultChars` wins. See `truncateToolResult`.
    */
   maxResultChars?: number;
+  /**
+   * The result store of the running turn (`createResultStore`). With it, a
+   * successful record result larger than the tool's limit is kept in the
+   * store and the model gets an overview with a `_result` handle that
+   * `read_result` (`createReadResultTool`) reads from; when the store
+   * refuses it, the result is cut as without a store. `createAiChatHandler`
+   * creates one per turn (`resultHandles`); without it nothing changes.
+   */
+  resultStore?: ResultStore;
+}
+
+/** Whether `value` serializes to more than `limit` characters (false when it cannot be serialized). */
+function exceedsLimit(value: unknown, limit: number): boolean {
+  try {
+    return (JSON.stringify(value)?.length ?? 0) > limit;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1072,12 +1101,25 @@ export function toolToAiTool(
           }
         }
 
-        // Bound the result so it cannot overflow the model context.
-        cleanResult = truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
+        // Bound the result so it cannot overflow the model context: with a
+        // result store an oversized record result keeps its handle and the
+        // model gets an overview, otherwise (or when the store refuses) it is cut.
+        const store = options?.resultStore;
+        const fromStore = store?.isIssued(result) === true;
+        const overview = store && !fromStore
+          && isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success !== false
+          && exceedsLimit(cleanResult, resultLimit)
+          ? await store.put({ toolName: name, readOnly, maxChars: resultLimit, value: cleanResult })
+          : undefined;
+        cleanResult = overview
+          ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
 
-        return options?.uiActionSchema
+        const output = options?.uiActionSchema
           ? normalizeResultUiAction(cleanResult, options.uiActionSchema)
           : cleanResult;
+        // Cut from the sealed copy in the store: the PII shield must not seal it again.
+        if (overview || fromStore) store!.markIssued(output);
+        return output;
       } catch (error) {
         // Audit: tool execution failed
         options?.onAudit?.({
