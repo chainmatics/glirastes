@@ -52,11 +52,12 @@ describe('release workflows', () => {
     expect(config.compilerOptions.paths).toEqual(sourceOfEveryExport());
   });
 
-  it('runs the test type check in CI', () => {
+  it('runs the test type check and the model egress inventory in CI', () => {
     expect(jobRuns(read('.github/workflows/ci.yml'), 'typecheck')).toEqual([
       'bun install --frozen-lockfile',
       'bun run typecheck',
       'bun run typecheck:tests',
+      'bun run check:egress',
     ]);
   });
 
