@@ -38,6 +38,10 @@ jobs:
       - name: Typecheck tests
         run: bun run typecheck:tests
 
+      # Every model, provider and network call must be in the reviewed inventory.
+      - name: Model egress inventory
+        run: bun run check:egress
+
   test:
     name: Test
     runs-on: ubuntu-latest
