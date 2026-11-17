@@ -1,0 +1,4115 @@
+{
+  "schemaVersion": 1,
+  "description": "Golden vectors of the Platform-managed privacy policy (protected-text/v1). The Platform copies this file byte for byte and pins its sha256.",
+  "providerBindings": [
+    {
+      "name": "openrouter-strict",
+      "binding": {
+        "v": 1,
+        "adapter": "openrouter",
+        "adapterProtocol": "openai-chat",
+        "endpoint": "https://openrouter.ai/api/v1",
+        "modelId": "example/model-a",
+        "routing": {
+          "allowFallbacks": false,
+          "dataCollection": "deny",
+          "zdr": true
+        },
+        "capabilities": {
+          "images": false
+        }
+      },
+      "digest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+    },
+    {
+      "name": "anthropic-direct",
+      "binding": {
+        "v": 1,
+        "adapter": "anthropic",
+        "adapterProtocol": "anthropic-messages",
+        "endpoint": "https://api.anthropic.com/v1",
+        "modelId": "example-model-b",
+        "routing": {},
+        "capabilities": {
+          "images": true
+        }
+      },
+      "digest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+    },
+    {
+      "name": "other-endpoint",
+      "binding": {
+        "v": 1,
+        "adapter": "openrouter",
+        "adapterProtocol": "openai-chat",
+        "endpoint": "https://proxy.example.com/v1",
+        "modelId": "example/model-a",
+        "routing": {
+          "allowFallbacks": false,
+          "dataCollection": "deny",
+          "zdr": true
+        },
+        "capabilities": {
+          "images": false
+        }
+      },
+      "digest": "sha256:v1hN-u6ajht27Q-vbEfFNpOlPinhvvqX7ar3NfxrPg0"
+    },
+    {
+      "name": "other-model",
+      "binding": {
+        "v": 1,
+        "adapter": "openrouter",
+        "adapterProtocol": "openai-chat",
+        "endpoint": "https://openrouter.ai/api/v1",
+        "modelId": "example/model-c",
+        "routing": {
+          "allowFallbacks": false,
+          "dataCollection": "deny",
+          "zdr": true
+        },
+        "capabilities": {
+          "images": false
+        }
+      },
+      "digest": "sha256:sPhouEbx-5OSEW2Fp0Dmh4tzQXkAx70FfT16ns-CThE"
+    },
+    {
+      "name": "permissive-routing",
+      "binding": {
+        "v": 1,
+        "adapter": "openrouter",
+        "adapterProtocol": "openai-chat",
+        "endpoint": "https://openrouter.ai/api/v1",
+        "modelId": "example/model-a",
+        "routing": {
+          "allowFallbacks": true,
+          "dataCollection": "allow",
+          "zdr": false
+        },
+        "capabilities": {
+          "images": false
+        }
+      },
+      "digest": "sha256:ltx4MG7EExnU0R9JiSXXXsJ7hcoFhnt8DAjuSRGF2yU"
+    },
+    {
+      "name": "only-added",
+      "binding": {
+        "v": 1,
+        "adapter": "openrouter",
+        "adapterProtocol": "openai-chat",
+        "endpoint": "https://openrouter.ai/api/v1",
+        "modelId": "example/model-a",
+        "routing": {
+          "allowFallbacks": false,
+          "dataCollection": "deny",
+          "zdr": true,
+          "only": [
+            "example-upstream"
+          ]
+        },
+        "capabilities": {
+          "images": false
+        }
+      },
+      "digest": "sha256:gOMlY9UT2bvIWmgiDdA-kYPf8k8ooiMEzWESdPMAilI"
+    }
+  ],
+  "endpoints": [
+    {
+      "input": "https://OpenRouter.AI/api/v1/",
+      "expected": "https://openrouter.ai/api/v1"
+    },
+    {
+      "input": "https://user:pass@api.example.com/v1?x=1#frag",
+      "expected": "https://api.example.com/v1"
+    },
+    {
+      "input": "http://localhost:11434/v1///",
+      "expected": "http://localhost:11434/v1"
+    },
+    {
+      "input": "https://api.example.com",
+      "expected": "https://api.example.com"
+    }
+  ],
+  "blocks": [
+    {
+      "name": "valid/protected",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "valid/off",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "off"
+      },
+      "valid": true
+    },
+    {
+      "name": "valid/image-types",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "allow-original",
+          "imageTypes": [
+            "image/png",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "valid/openrouter-only",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "example-upstream"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "valid/user-choice",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": true
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "invalid/missing-version",
+      "block": {
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/unknown-version",
+      "block": {
+        "schemaVersion": 2,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/unknown-profile",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v2",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/unknown-field",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "extra": true
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/unknown-nested-field",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked",
+          "maxBytes": 1000
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/off-with-field",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "off",
+        "screenshots": {
+          "mode": "blocked"
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/default-outside-allowed",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "other-entry",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/duplicate-entry",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/no-provider",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/entry-id-uppercase",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "OpenRouter",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/binding-digest-format",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:short"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/entry-without-binding",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/idle-above-absolute",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 7200,
+          "absoluteTtlSeconds": 3600
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/ttl-too-long",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 604801
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/openrouter-only-empty",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": []
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/openrouter-only-slug",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "Example Upstream"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/image-types-empty",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": []
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/image-type-unknown",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/gif"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/image-type-duplicate",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/png"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/cloud-speech",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": false,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/speech-too-long",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 601
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/forbidden-key-name",
+      "block": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "apiKey": "x"
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/not-an-object",
+      "block": "protected-text/v1",
+      "valid": false
+    }
+  ],
+  "merges": [
+    {
+      "name": "platform-only",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {},
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
+      "name": "nothing-applies",
+      "platform": null,
+      "local": {},
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": null
+    },
+    {
+      "name": "platform-off-local-not-required",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "off"
+      },
+      "local": {
+        "required": false
+      },
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": null
+    },
+    {
+      "name": "platform-off-local-required",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "off"
+      },
+      "local": {
+        "required": true
+      },
+      "providers": {
+        "bindings": {
+          "local-entry": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "local-entry"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "local",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": null,
+          "defaultEntryId": "local-entry",
+          "userChoice": true
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [
+          "local_profile_required"
+        ],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
+      "name": "binding-mismatch-blocks-entry-and-default",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {},
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:v1hN-u6ajht27Q-vbEfFNpOlPinhvvqX7ar3NfxrPg0",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": null,
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [],
+        "unmatchedEntryIds": [
+          "openrouter-strict"
+        ]
+      }
+    },
+    {
+      "name": "unknown-local-entry",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {},
+      "providers": {
+        "bindings": {
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "anthropic-direct"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": null,
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [],
+        "unmatchedEntryIds": [
+          "openrouter-strict"
+        ]
+      }
+    },
+    {
+      "name": "no-binding-left",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {},
+      "providers": {
+        "bindings": {}
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [],
+          "defaultEntryId": null,
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [],
+        "unmatchedEntryIds": [
+          "openrouter-strict",
+          "anthropic-direct"
+        ]
+      }
+    },
+    {
+      "name": "local-tightens-everything",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "allow-original"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": true
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providerEntryIds": [
+          "anthropic-direct"
+        ],
+        "mapping": {
+          "idleTtlSeconds": 600
+        },
+        "speech": {
+          "maxDurationSeconds": 30
+        }
+      },
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": null,
+          "userChoice": true
+        },
+        "mapping": {
+          "idleTtlSeconds": 600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 30
+        },
+        "localRestrictions": [
+          "local_screenshots_stricter",
+          "local_providers_narrower",
+          "local_ttl_shorter",
+          "local_speech_shorter"
+        ],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
+      "name": "local-cannot-loosen",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {
+        "screenshots": {
+          "mode": "allow-original",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 86400,
+          "absoluteTtlSeconds": 604800
+        },
+        "speech": {
+          "maxDurationSeconds": 600
+        }
+      },
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
+      "name": "image-types-intersect",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "allow-original",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {
+        "screenshots": {
+          "imageTypes": [
+            "image/jpeg",
+            "image/webp"
+          ]
+        }
+      },
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "allow-original",
+          "imageTypes": [
+            "image/jpeg"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [
+          "local_image_types_narrower"
+        ],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
+      "name": "image-types-empty-blocks",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "allow-original",
+          "imageTypes": [
+            "image/png"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {
+        "screenshots": {
+          "imageTypes": [
+            "image/webp"
+          ]
+        }
+      },
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": []
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [
+          "local_screenshots_stricter",
+          "local_image_types_narrower"
+        ],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
+      "name": "openrouter-only-intersect",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "upstream-a",
+            "upstream-b"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {
+        "openRouterOnly": [
+          "upstream-b",
+          "upstream-c"
+        ]
+      },
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "upstream-b"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [
+          "local_openrouter_narrower"
+        ],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
+      "name": "openrouter-only-empty-blocks",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "upstream-a"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {
+        "openRouterOnly": [
+          "upstream-c"
+        ]
+      },
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": []
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [
+          "local_openrouter_narrower"
+        ],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
+      "name": "openrouter-only-local-adds-restriction",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {
+        "openRouterOnly": [
+          "upstream-c"
+        ]
+      },
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "upstream-c"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [
+          "local_openrouter_narrower"
+        ],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
+      "name": "idle-capped-by-absolute",
+      "platform": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 7200
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "local": {
+        "mapping": {
+          "absoluteTtlSeconds": 1800
+        }
+      },
+      "providers": {
+        "bindings": {
+          "openrouter-strict": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY",
+          "anthropic-direct": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "openrouter-strict"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "platform",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 1800,
+          "absoluteTtlSeconds": 1800
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [
+          "local_ttl_shorter"
+        ],
+        "unmatchedEntryIds": []
+      }
+    }
+  ],
+  "loosening": [
+    {
+      "name": "first-protected-block",
+      "previous": null,
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "off-to-protected",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "off"
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "unchanged",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "block-removed",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": null,
+      "expected": [
+        "block_removed"
+      ]
+    },
+    {
+      "name": "profile-off",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "off"
+      },
+      "expected": [
+        "profile_off"
+      ]
+    },
+    {
+      "name": "off-stays-off",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "off"
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "off"
+      },
+      "expected": []
+    },
+    {
+      "name": "screenshots-allow-original",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "allow-original"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": [
+        "screenshots_allow_original"
+      ]
+    },
+    {
+      "name": "screenshots-blocked-again",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "allow-original"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "image-types-narrowed",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "image-types-default-widens",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked",
+          "imageTypes": [
+            "image/png"
+          ]
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": [
+        "image_types_added"
+      ]
+    },
+    {
+      "name": "provider-added",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": [
+        "provider_binding_added"
+      ]
+    },
+    {
+      "name": "provider-removed",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "binding-changed",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:ltx4MG7EExnU0R9JiSXXXsJ7hcoFhnt8DAjuSRGF2yU"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": [
+        "provider_binding_added"
+      ]
+    },
+    {
+      "name": "default-changed",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "anthropic-direct",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": [
+        "default_provider_changed"
+      ]
+    },
+    {
+      "name": "user-choice-enabled",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": true
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": [
+        "user_choice_enabled"
+      ]
+    },
+    {
+      "name": "user-choice-disabled",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": true
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "openrouter-only-added",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "upstream-a"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "openrouter-only-removed",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "upstream-a"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": [
+        "openrouter_only_removed"
+      ]
+    },
+    {
+      "name": "openrouter-only-widened",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "upstream-a"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false,
+          "openRouterOnly": [
+            "upstream-a",
+            "upstream-b"
+          ]
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": [
+        "openrouter_only_widened"
+      ]
+    },
+    {
+      "name": "ttl-extended",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 7200,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": [
+        "mapping_ttl_extended"
+      ]
+    },
+    {
+      "name": "ttl-shortened",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 7200
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "speech-extended",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 120
+        }
+      },
+      "expected": [
+        "speech_duration_extended"
+      ]
+    },
+    {
+      "name": "several-at-once",
+      "previous": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "next": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "allow-original"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": true
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 90
+        }
+      },
+      "expected": [
+        "screenshots_allow_original",
+        "user_choice_enabled",
+        "speech_duration_extended"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "valid/hour",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 12
+          },
+          {
+            "code": "model_call_protected",
+            "count": 31
+          },
+          {
+            "code": "tool_call_rehydrated",
+            "count": 4
+          },
+          {
+            "code": "privacy_attachment_blocked",
+            "count": 1
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "valid/local-only-profile",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": null,
+        "privacyDigest": null,
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 12
+          },
+          {
+            "code": "model_call_protected",
+            "count": 31
+          },
+          {
+            "code": "tool_call_rehydrated",
+            "count": 4
+          },
+          {
+            "code": "privacy_attachment_blocked",
+            "count": 1
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "valid/dropped-windows",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 12
+          },
+          {
+            "code": "model_call_protected",
+            "count": 31
+          },
+          {
+            "code": "tool_call_rehydrated",
+            "count": 4
+          },
+          {
+            "code": "privacy_attachment_blocked",
+            "count": 1
+          }
+        ],
+        "droppedWindows": 5
+      },
+      "valid": true
+    },
+    {
+      "name": "invalid/unknown-code",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "privacy_everything_fine",
+            "count": 1
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/zero-count",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 0
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/count-above-bound",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 1000001
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/duplicate-code",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 1
+          },
+          {
+            "code": "turn_protected",
+            "count": 2
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/no-decisions",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [],
+        "droppedWindows": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/window-longer-than-hour",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T08:59:59.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 12
+          },
+          {
+            "code": "model_call_protected",
+            "count": 31
+          },
+          {
+            "code": "tool_call_rehydrated",
+            "count": 4
+          },
+          {
+            "code": "privacy_attachment_blocked",
+            "count": 1
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/window-ends-before-start",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T09:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 12
+          },
+          {
+            "code": "model_call_protected",
+            "count": 31
+          },
+          {
+            "code": "tool_call_rehydrated",
+            "count": 4
+          },
+          {
+            "code": "privacy_attachment_blocked",
+            "count": 1
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/digest-without-revision",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": null,
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 12
+          },
+          {
+            "code": "model_call_protected",
+            "count": 31
+          },
+          {
+            "code": "tool_call_rehydrated",
+            "count": 4
+          },
+          {
+            "code": "privacy_attachment_blocked",
+            "count": 1
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/runner-key-in-event",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 12
+          },
+          {
+            "code": "model_call_protected",
+            "count": 31
+          },
+          {
+            "code": "tool_call_rehydrated",
+            "count": 4
+          },
+          {
+            "code": "privacy_attachment_blocked",
+            "count": 1
+          }
+        ],
+        "droppedWindows": 0,
+        "runnerKey": "runner-a"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/content-field",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "7d0f8f5e-1c1a-4c43-9a4f-1f0b2b9a7c01",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 1,
+            "message": "Anna"
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/event-id",
+      "event": {
+        "schemaVersion": 2,
+        "eventId": "not-a-uuid",
+        "eventType": "privacy.decisions",
+        "occurredAt": "2026-11-17T10:00:05.000Z",
+        "appId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+        "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+        "buildId": "build-42",
+        "instanceId": "runner-a",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "window": {
+          "startedAt": "2026-11-17T09:00:00.000Z",
+          "endedAt": "2026-11-17T10:00:00.000Z",
+          "sequence": 3
+        },
+        "decisions": [
+          {
+            "code": "turn_protected",
+            "count": 12
+          },
+          {
+            "code": "model_call_protected",
+            "count": 31
+          },
+          {
+            "code": "tool_call_rehydrated",
+            "count": 4
+          },
+          {
+            "code": "privacy_attachment_blocked",
+            "count": 1
+          }
+        ],
+        "droppedWindows": 0
+      },
+      "valid": false
+    }
+  ],
+  "statuses": [
+    {
+      "name": "valid/enforced",
+      "status": {
+        "schemaVersion": 1,
+        "state": "enforced",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "publishedPolicyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": "sha256:UEG_H3E98gR4Q1PoL2pKU1kxy2Tx9LSlrq_8tyCRiyI",
+        "localRestrictions": [
+          "local_ttl_shorter"
+        ],
+        "reasons": []
+      },
+      "valid": true
+    },
+    {
+      "name": "valid/refused",
+      "status": {
+        "schemaVersion": 1,
+        "state": "refused",
+        "policyRevisionId": "9e8d7c6b-5a49-4382-9716-0a1b2c3d4e5f",
+        "publishedPolicyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo",
+        "effectivePolicyDigest": null,
+        "localRestrictions": [],
+        "reasons": [
+          "provider_binding_missing"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "invalid/unknown-state",
+      "status": {
+        "schemaVersion": 1,
+        "state": "partially",
+        "policyRevisionId": null,
+        "publishedPolicyDigest": null,
+        "effectivePolicyDigest": null,
+        "localRestrictions": [],
+        "reasons": []
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid/extra-field",
+      "status": {
+        "schemaVersion": 1,
+        "state": "off",
+        "policyRevisionId": null,
+        "publishedPolicyDigest": null,
+        "effectivePolicyDigest": null,
+        "localRestrictions": [],
+        "reasons": [],
+        "detail": "x"
+      },
+      "valid": false
+    }
+  ],
+  "canonical": [
+    {
+      "name": "mixed-case-keys",
+      "value": {
+        "b": 1,
+        "B": 2,
+        "a": {
+          "Z": true,
+          "y": false
+        },
+        "A": "x"
+      },
+      "canonical": "{\"a\":{\"y\":false,\"Z\":true},\"A\":\"x\",\"b\":1,\"B\":2}",
+      "digest": "sha256:r92ddI7ipMiMW2zEfQrkOefMnDYwArBqI_L44J2gZVc"
+    },
+    {
+      "name": "nested-arrays",
+      "value": {
+        "list": [
+          {
+            "z": 1,
+            "a": 2
+          },
+          [
+            3,
+            {
+              "Y": 1,
+              "x": 2
+            }
+          ]
+        ],
+        "empty": {}
+      },
+      "canonical": "{\"empty\":{},\"list\":[{\"a\":2,\"z\":1},[3,{\"x\":2,\"Y\":1}]]}",
+      "digest": "sha256:z2i5UbS96XfxK91Oc5xsyzP_iR_7O-kPCh0YUB4pqOY"
+    },
+    {
+      "name": "undefined-dropped",
+      "value": {
+        "keep": 1,
+        "drop": "removed",
+        "list": [
+          1,
+          "becomes-null",
+          3
+        ]
+      },
+      "undefinedPaths": [
+        [
+          "drop"
+        ],
+        [
+          "list",
+          1
+        ]
+      ],
+      "canonical": "{\"keep\":1,\"list\":[1,null,3]}",
+      "digest": "sha256:cLTGUT-1NMZY8M4jTkSTKY4P0HuRdw0XMpjz6ifaX0k"
+    },
+    {
+      "name": "unicode",
+      "value": {
+        "é": "ü",
+        "e": "z",
+        "É": 1
+      },
+      "canonical": "{\"e\":\"z\",\"é\":\"ü\",\"É\":1}",
+      "digest": "sha256:_-dFmg1HZlFKgQlht6Kq6kWc8pz4U_2HpfooKNBT6XE"
+    },
+    {
+      "name": "privacy-block",
+      "value": {
+        "schemaVersion": 1,
+        "profile": "protected-text/v1",
+        "screenshots": {
+          "mode": "blocked"
+        },
+        "providers": {
+          "allowed": [
+            {
+              "entryId": "openrouter-strict",
+              "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+            },
+            {
+              "entryId": "anthropic-direct",
+              "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+            }
+          ],
+          "defaultEntryId": "openrouter-strict",
+          "userChoice": false
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        }
+      },
+      "canonical": "{\"mapping\":{\"absoluteTtlSeconds\":86400,\"idleTtlSeconds\":3600},\"profile\":\"protected-text/v1\",\"providers\":{\"allowed\":[{\"bindingDigest\":\"sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY\",\"entryId\":\"openrouter-strict\"},{\"bindingDigest\":\"sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8\",\"entryId\":\"anthropic-direct\"}],\"defaultEntryId\":\"openrouter-strict\",\"userChoice\":false},\"schemaVersion\":1,\"screenshots\":{\"mode\":\"blocked\"},\"speech\":{\"localOnly\":true,\"maxDurationSeconds\":60}}",
+      "digest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo"
+    }
+  ],
+  "signedRevision": {
+    "description": "A policy revision envelope carrying the privacy block. The private key was discarded after signing; only the public key is published, for tests.",
+    "keyId": "privacy-vectors-test-key",
+    "publicJwk": {
+      "crv": "Ed25519",
+      "x": "BW52mHwXkO3CY3Sgc2MBKS423DTD31pCVR0NRtXKb2A",
+      "kty": "OKP",
+      "kid": "privacy-vectors-test-key",
+      "alg": "EdDSA",
+      "use": "sig"
+    },
+    "envelope": {
+      "schemaVersion": 1,
+      "revisionId": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+      "revisionType": "policy",
+      "revision": 7,
+      "tenantId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "targetAppId": "0b9a0c39-6a3f-4c87-8d6e-0d1f6c1a2b3c",
+      "environmentId": "4c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f",
+      "contentHash": "sha256:300P42-LFcsTRSJEngB5Yr0miqhZXrxhi7GtgEibkr0",
+      "payload": {
+        "budget": {
+          "maxModelSteps": 8,
+          "maxToolCalls": 16,
+          "totalTimeoutMs": 120000,
+          "toolTimeoutMs": 30000,
+          "maxInputTokens": 200000,
+          "maxOutputTokens": 8000,
+          "maxEstimatedCostUsd": 1,
+          "maxRepeatedFingerprint": 3,
+          "maxConsecutiveErrors": 3,
+          "delegation": {
+            "maxDepth": 0,
+            "maxBreadth": 0,
+            "sharedBudget": true
+          }
+        },
+        "toolPolicies": [],
+        "privacy": {
+          "schemaVersion": 1,
+          "profile": "protected-text/v1",
+          "screenshots": {
+            "mode": "blocked"
+          },
+          "providers": {
+            "allowed": [
+              {
+                "entryId": "openrouter-strict",
+                "bindingDigest": "sha256:7rK37cfE4AAUWyKrAA59FczOsXAP2AhrTB0eGDa0YkY"
+              },
+              {
+                "entryId": "anthropic-direct",
+                "bindingDigest": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+              }
+            ],
+            "defaultEntryId": "openrouter-strict",
+            "userChoice": false
+          },
+          "mapping": {
+            "idleTtlSeconds": 3600,
+            "absoluteTtlSeconds": 86400
+          },
+          "speech": {
+            "localOnly": true,
+            "maxDurationSeconds": 60
+          }
+        }
+      },
+      "publishedAt": "2026-11-17T09:30:00.000Z",
+      "signature": {
+        "algorithm": "Ed25519",
+        "keyId": "privacy-vectors-test-key",
+        "value": "In9AjnGjYeJaNqbVjt78liayoiP1pzsxxwP2USaem_2BVa2n-7Q14nWikZLHsk6KQLhZPiYUVJHnPPBBUdCnDg"
+      }
+    },
+    "payloadDigest": "sha256:300P42-LFcsTRSJEngB5Yr0miqhZXrxhi7GtgEibkr0",
+    "privacyDigest": "sha256:ACCkrXPfyjM2RyP4wqv1u4xcXnemOnCdmElWz02Lnqo"
+  }
+}

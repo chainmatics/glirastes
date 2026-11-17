@@ -308,3 +308,23 @@ describe('curated tool semantics', () => {
     )).toThrow('semantic parity');
   });
 });
+
+describe('AppSetupArtifactSchema privacyProviders', () => {
+  const provider = { id: 'openrouter-strict', label: 'OpenRouter (strict)', adapter: 'openrouter', bindingDigest: digest('J') };
+
+  it('keeps an artifact without privacy providers valid', () => {
+    expect(AppSetupArtifactSchema.parse(artifact)).not.toHaveProperty('privacyProviders');
+  });
+
+  it('accepts provider ids, labels, adapters and binding digests', () => {
+    const parsed = AppSetupArtifactSchema.parse({ ...artifact, privacyProviders: [provider] });
+    expect(parsed.privacyProviders).toEqual([provider]);
+  });
+
+  it('refuses duplicate ids, endpoints, model ids and secret names', () => {
+    expect(AppSetupArtifactSchema.safeParse({ ...artifact, privacyProviders: [provider, provider] }).success).toBe(false);
+    for (const extra of [{ baseURL: 'https://openrouter.ai/api/v1' }, { modelId: 'example/model-a' }, { secretRef: 'OPENROUTER_API_KEY' }]) {
+      expect(AppSetupArtifactSchema.safeParse({ ...artifact, privacyProviders: [{ ...provider, ...extra }] }).success).toBe(false);
+    }
+  });
+});
