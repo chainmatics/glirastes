@@ -491,6 +491,7 @@ describe('review fixes', () => {
     ] as const)('never returns an original for pseudonyms as fields or id (%s)', async (_label, isManaged, withPipeline) => {
       const shield = createPiiShield({ locale: 'en-US', detector });
       const rehydrate = vi.spyOn(shield, 'rehydrateArgs');
+      const anonymize = vi.spyOn(shield, 'anonymizeResult');
       const lookup = vi.fn(async (input: { name: string }) => ({ ok: input.name === NAME }));
       const registry: ToolRegistry = {
         tasks_list: defineTool({
@@ -523,20 +524,33 @@ describe('review fixes', () => {
         const mailAlias = overview.tasks[0]!.mail;
         expect(alias).not.toBe(NAME);
         const answers = [
-          await call('read_result', { resultId: overview._result.id, fields: [alias, mailAlias, `tasks[].${alias}`, `${mailAlias}[]`] }),
+          await call('read_result', {
+            resultId: overview._result.id,
+            fields: [alias, mailAlias, `tasks[].${alias}`, `${mailAlias}[]`, 'tasks[].nope'],
+          }),
           await call('read_result', { resultId: overview._result.id, fields: ['tasks[].owner', alias] }),
+          await call('read_result', { resultId: overview._result.id, fields: [`tasks[0].${alias}`, `tasks[0].${alias.split(' ')[0]}`] }),
           await call('read_result', { resultId: alias }),
           await call('read_result', { resultId: mailAlias.slice(0, 64) }),
           await call('read_result', { resultId: overview._result.id, fields: [`[${alias}]`] }),
         ];
+        const sessionId = anonymize.mock.calls[0]![1];
         answers.forEach((answer, index) => {
           const text = JSON.stringify(answer);
           expect(text).not.toContain(NAME);
           expect(text).not.toContain(MAIL);
-          // Only selected data may carry the pseudonym; nothing the model wrote is echoed.
-          if (index !== 1) expect(text).not.toContain(alias);
+          // Only selected data may carry the pseudonym; no pseudonym the model wrote is echoed.
+          if (index !== 1) {
+            expect(text).not.toContain(alias);
+            expect(text).not.toContain(mailAlias);
+            // So even rehydrating the answer for display (inbound) finds nothing to turn into an original.
+            expect(shield.inbound(text, sessionId)).toBe(text);
+          }
         });
-        expect((answers[0]!._result as { unknownFields: number[] }).unknownFields).toEqual([1, 2, 3, 4]);
+        // Echoed only as identifier-like normalized paths; a name alone is no pseudonym (the mapping is the whole string).
+        // Nothing requested exists: an error that still lists the fields.
+        expect(answers[0]).toMatchObject({ error: 'unknown_fields', unknownFields: [1, 2, 3, 4, 'tasks[].nope'] });
+        expect(answers[2]).toMatchObject({ error: 'unknown_fields', unknownFields: [1, `tasks[0].${alias.split(' ')[0]}`] });
         // The handler's own read_result never has its arguments rehydrated.
         expect(rehydrate.mock.calls.length).toBe(rehydratedBefore);
         // A normal domain tool in the same turn still gets the original.
@@ -567,6 +581,31 @@ describe('review fixes', () => {
         }
         expect(await call('read_result', input(overview._result.id))).toMatchObject({ error: 'budget_exhausted' });
         expect(tracker.usage.toolCalls).toBe(3);
+      });
+    });
+
+    it.each([
+      ['an index out of range', (id: string) => ({ resultId: id, fields: ['tasks[99].title'] }), 'index_out_of_range'],
+      ['every entry and one entry of one array', (id: string) => ({ resultId: id, fields: ['tasks[].id', 'tasks[0].title'] }), 'invalid_fields'],
+      ['only unknown fields', (id: string) => ({ resultId: id, fields: ['tasks[].nope', 'nope'] }), 'unknown_fields'],
+    ] as const)('counts a read of %s as a call and an error', async (_label, input, code) => {
+      const runtime = managed({ limits: { maxToolCalls: 10, maxConsecutiveErrors: 10, maxRepeatedFingerprint: 10 } });
+      const { registry } = taskTools();
+      const turn = harness({ tools: registry, ...runtime.config });
+      await turn.run(async (call, ctx) => {
+        const overview = await call('tasks_list', {}) as Overview;
+        const tracker = ctx.managedTurn!.tracker;
+        for (let index = 1; index <= 2; index += 1) {
+          expect(await call('read_result', input(overview._result.id))).toMatchObject({ error: code });
+          expect(tracker.usage.toolCalls).toBe(index);
+          expect(tracker.usage.consecutiveErrors).toBe(index);
+        }
+        // A read where only some fields are unknown reads data: a success.
+        const partial = await call('read_result', { resultId: overview._result.id, fields: ['tasks[].id', 'tasks[].nope'] });
+        expect(partial).not.toHaveProperty('error');
+        expect((partial._result as { unknownFields: unknown[] }).unknownFields).toEqual(['tasks[].nope']);
+        expect(tracker.usage.toolCalls).toBe(3);
+        expect(tracker.usage.consecutiveErrors).toBe(0);
       });
     });
 
