@@ -292,3 +292,34 @@ describe('bypass property test: uiAction, failures, executeTool, [] paths and th
     }
   });
 });
+
+describe('review round 2: a withheld result keeps no denied value in its uiAction', () => {
+  const custom = (result: unknown, extra: Record<string, unknown> = {}): Tool => defineTool({
+    id: 'custom.act', description: 'Act.', inputSchema: z.object({}).strict(),
+    outputDeniedFields: ['**.fileUrl'],
+    execute: async () => result,
+    ...extra,
+  } as never);
+  const run = async (tool: Tool) => (
+    await toolToAiTool(tool, ctx({ ok: true, status: 200, data: {} } as never), 'custom_act').execute({}) as Record<string, unknown>
+  );
+
+  it('filters the uiAction when the result does not match the output schema', async () => {
+    const tool = custom(
+      { success: true, id: 42, uiAction: { type: 'open', payload: { id: 'd0', fileUrl: SIG } } },
+      { outputSchema: z.object({ id: z.string() }) },
+    );
+    const answer = await run(tool);
+    expect(answer.outputWithheld).toBe(true);
+    expect(JSON.stringify(answer)).not.toContain('SECRETSIG');
+    expect(answer.uiAction).toEqual({ type: 'open', payload: { id: 'd0' } });
+  });
+
+  it('drops the uiAction when the result cannot be serialized', async () => {
+    const cyclic: Record<string, unknown> = { success: true, uiAction: { type: 'open', payload: { fileUrl: SIG } } };
+    cyclic.self = cyclic;
+    const answer = await run(custom(cyclic));
+    expect(answer.outputWithheld).toBe(true);
+    expect(JSON.stringify(answer)).not.toContain('SECRETSIG');
+  });
+});

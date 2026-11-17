@@ -28,6 +28,7 @@ import {
 import { truncateToolResult } from './truncate-tool-result.js';
 import {
   applyOutputBound,
+  type OutputBound,
   assertOutputFields,
   leftOutFields,
   normalizeOutputFields,
@@ -909,6 +910,16 @@ export interface ToolToAiToolOptions {
 }
 
 /** What the model gets for a successful result whose details may not be shown. */
+/**
+ * The `uiAction` of a withheld result under an output bound: the any-depth
+ * deny keys are removed as in every other result, and an action that cannot
+ * be serialized (so cannot be checked) is left out.
+ */
+function boundedUiAction(uiAction: unknown, bound: OutputBound | undefined): unknown {
+  if (!bound || !uiAction) return uiAction;
+  return applyOutputBound({ success: true, uiAction }, bound)?.uiAction;
+}
+
 function withheldResult(uiAction: unknown): Record<string, unknown> {
   return {
     success: true,
@@ -1079,7 +1090,7 @@ export function toolToAiTool(
             console.warn(`[glirastes] Output schema mismatch for tool "${name}": ${parsed.error.issues.length} issue(s).`);
             // The tool ran, and a write may already have happened: report it
             // as done, so the model neither claims a failure nor calls again.
-            cleanResult = withheldResult(rec.uiAction);
+            cleanResult = withheldResult(boundedUiAction(rec.uiAction, bound));
             successful = false;
           }
         }
@@ -1092,7 +1103,7 @@ export function toolToAiTool(
           if (bounded) cleanResult = bounded;
           else {
             // Not serializable, so it cannot be bounded: withheld.
-            cleanResult = withheldResult(isRecord(cleanResult) ? cleanResult.uiAction : undefined);
+            cleanResult = withheldResult(boundedUiAction(isRecord(cleanResult) ? cleanResult.uiAction : undefined, bound));
             successful = false;
           }
         }
