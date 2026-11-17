@@ -28,6 +28,7 @@ import { assignDefinitionIds } from '../identity.js';
 import type { InputRole } from '../input-roles.js';
 import {
   declaredGroup,
+  declaredMaxResultChars,
   declaredName,
   declaredRoles,
   selectionExclusion,
@@ -93,6 +94,8 @@ interface OpenapiEntry {
   group?: string;
   /** `x-glirastes-roles`: the code default of `allowedRoles`; empty means no restriction. */
   roles?: string[];
+  /** `x-glirastes-max-result-chars`: the tool's result bound, above the handler's global value. */
+  maxResultChars?: number;
 }
 
 interface OpenapiPiece {
@@ -239,6 +242,11 @@ function readEntry(
     findings.push(toolFinding('tool-roles-invalid', 'needs_attention', stableKey,
       `${where} declares x-glirastes-roles that are not a list of at most 50 role names (non-empty strings of at most 200 characters); the tool stays disabled.`));
   }
+  const maxResultChars = declaredMaxResultChars(operation.operation);
+  if (maxResultChars && 'invalid' in maxResultChars) {
+    findings.push(toolFinding('max-result-chars-invalid', 'warning', stableKey,
+      `${where} declares an x-glirastes-max-result-chars that is not an integer from 1000 to 200000; the declaration is ignored and the handler's limit applies.`));
+  }
   const description = typeof operation.operation.description === 'string' && operation.operation.description.trim()
     ? operation.operation.description.trim()
     : typeof operation.operation.summary === 'string' && operation.operation.summary.trim()
@@ -263,6 +271,7 @@ function readEntry(
     ...(name && 'value' in name ? { explicitName: name.value } : {}),
     ...(group && 'value' in group ? { group: group.value } : {}),
     ...(roles && 'value' in roles && roles.value.length > 0 ? { roles: roles.value } : {}),
+    ...(maxResultChars && 'value' in maxResultChars ? { maxResultChars: maxResultChars.value } : {}),
   };
 }
 
@@ -355,6 +364,7 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
     findings,
     prose,
     ...(entry.roles ? { codeRoles: [...entry.roles] } : {}),
+    ...(entry.maxResultChars !== undefined ? { maxResultChars: entry.maxResultChars } : {}),
   };
 }
 

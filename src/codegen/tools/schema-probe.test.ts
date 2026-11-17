@@ -84,6 +84,33 @@ describe('schema probe', () => {
     expect(post?.moduleDigest).toBe(del?.moduleDigest);
   }, 30_000);
 
+  it('reads maxResultChars of a contract entry and flags an invalid one without its value', async () => {
+    const app = await createAppFixture({
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + '  GET: { input: z.object({}), maxResultChars: 40000 },\n'
+        + '  POST: { input: z.object({}), maxResultChars: 123 },\n'
+        + "  PUT: { input: z.object({}), maxResultChars: '40000' },\n"
+        + '  DELETE: { input: z.object({}) },\n};\n',
+    });
+    const entry = (method: string): SchemaProbeItem => ({
+      kind: 'contract-entry', io: 'input', module: 'src/app/api/notes/contract.ts', export: 'contract', property: [method],
+    });
+    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'PUT', 'DELETE'].map(entry));
+    const [get, post, put, del] = results.map((result) => (
+      result.ok && result.kind === 'contract-entry' ? result : undefined
+    ));
+    expect(get).toMatchObject({ maxResultChars: 40_000 });
+    expect(get).not.toHaveProperty('invalidFields');
+    expect(del).not.toHaveProperty('maxResultChars');
+    for (const invalid of [post, put]) {
+      expect(invalid).not.toHaveProperty('maxResultChars');
+      expect(invalid).toMatchObject({ invalidFields: ['maxResultChars'] });
+    }
+    expect(JSON.stringify(results)).not.toContain('123');
+    // It bounds results, not the contract: the module digest ignores it.
+    expect(get?.moduleDigest).toBe(del?.moduleDigest);
+  }, 30_000);
+
   it('fails closed per module and never hands app secrets to the child', async () => {
     vi.stubEnv('GLIRASTES_PROBE_SECRET', 'super-secret');
     const app = await createAppFixture({

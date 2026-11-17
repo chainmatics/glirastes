@@ -675,6 +675,7 @@ async function generate(
         }
         : {}),
       ...(title ? { title } : {}),
+      ...(tool.maxResultChars !== undefined ? { maxResultChars: tool.maxResultChars } : {}),
     });
     const requiresApproval = confirmationFloor(effective.riskClass, effective.requiresApproval);
     toolViews.push({

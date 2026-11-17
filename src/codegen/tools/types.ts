@@ -106,6 +106,13 @@ export interface ObservedTool {
    * Platform only narrow it. Absent or empty: no additional restriction.
    */
   codeRoles?: string[];
+  /**
+   * Upper bound of the tool's serialized result the code declares (OpenAPI
+   * `x-glirastes-max-result-chars`, contract.ts `maxResultChars`); already
+   * validated. Local only: written to tool-contracts.json, never sent to the
+   * Platform.
+   */
+  maxResultChars?: number;
 }
 
 export interface ExcludedTool {
@@ -147,6 +154,8 @@ export interface ToolContractsEntry {
   search?: ToolSearchFacts;
   title?: ToolTitle;
   mcp?: McpToolName[];
+  /** Upper bound of the serialized result the code declares; the generated module passes it on. */
+  maxResultChars?: number;
 }
 
 export interface ToolSourceContext {

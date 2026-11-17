@@ -157,6 +157,13 @@ response body, as in the SDK. The SDK's `classifyToolFailure` is a function
 and cannot be configured in the JSON yet: in the container every failed
 backend call counts as a tool error for `maxConsecutiveErrors` and the metrics.
 
+Successful tool results are bounded for the model to 16,000 serialized
+characters by default (the largest array is cut, then long fields, with a
+`_truncated` marker and a hint). Set `application.maxResultChars` (integer,
+1000 to 200000) to change the bound for every tool; an invalid value fails
+config parsing. An operation's `x-glirastes-max-result-chars` in the export
+wins for that tool and travels in the artifact's local tool contracts.
+
 ## State, cancellation and lifecycle
 
 PostgreSQL stores only hashed consumed approval IDs, scope and expiration. The

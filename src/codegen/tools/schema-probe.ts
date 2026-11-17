@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ToolPresentationSchema, type ToolPresentation } from '../../contracts/index.js';
 import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
 import type { DeclaredEffect } from '../../contracts/tool-policy.js';
+import { isValidMaxResultChars } from '../../runtime/result-limit.js';
 import { sha256Digest, sortKeysDeep } from './canonical.js';
 import type { JsonSchemaLike } from './types.js';
 
@@ -27,7 +28,7 @@ export interface ProbedSchema {
 }
 
 /** Contract metadata fields that were declared but are unusable, so they read as `null`. */
-export type InvalidContractField = 'effect' | 'presentation';
+export type InvalidContractField = 'effect' | 'presentation' | 'maxResultChars';
 
 export interface ProbedContractEntry {
   ok: true;
@@ -41,9 +42,15 @@ export interface ProbedContractEntry {
   usageHints: string[] | null;
   presentation: ToolPresentation | null;
   /**
-   * Set only when the entry declares an `effect` outside the known set or a
-   * `presentation` that fails its schema; names the fields, never their
-   * values, so a typo can be told apart from an absent field.
+   * `maxResultChars` of the entry, when it is an integer from 1,000 to
+   * 200,000. Not part of `moduleDigest`: it bounds results, not the contract.
+   */
+  maxResultChars?: number;
+  /**
+   * Set only when the entry declares an `effect` outside the known set, a
+   * `presentation` that fails its schema or a `maxResultChars` out of range;
+   * names the fields, never their values, so a typo can be told apart from an
+   * absent field.
    */
   invalidFields?: InvalidContractField[];
   moduleDigest: string;
@@ -91,6 +98,7 @@ const WireEntry = z.object({
   module: z.string().nullable(),
   usageHints: z.array(z.string()).nullable(),
   presentation: z.record(z.string(), z.unknown()).nullable(),
+  maxResultChars: z.union([z.number(), z.literal('invalid')]).nullable().optional(),
 });
 const WireFailure = z.object({
   ok: z.literal(false),
@@ -163,12 +171,16 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
   const invalidFields: InvalidContractField[] = [];
   if (wire.effect !== null && metadata.effect === null) invalidFields.push('effect');
   if (presentation && !presentation.success) invalidFields.push('presentation');
+  const declaredLimit = wire.maxResultChars ?? null;
+  const maxResultChars = isValidMaxResultChars(declaredLimit) ? declaredLimit : undefined;
+  if (declaredLimit !== null && maxResultChars === undefined) invalidFields.push('maxResultChars');
   return {
     ok: true,
     kind: 'contract-entry',
     input,
     output,
     ...metadata,
+    ...(maxResultChars !== undefined ? { maxResultChars } : {}),
     ...(invalidFields.length > 0 ? { invalidFields } : {}),
     moduleDigest: sha256Digest(JSON.stringify(sortKeysDeep({
       input: input.digest,

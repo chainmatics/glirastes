@@ -41,6 +41,7 @@ it. The type's JSDoc carries the full detail.
 | `maxSteps` | hard step cap; without it `safetyMaxSteps` (default 24) is the soft cap |
 | `safetyMaxSteps` | guard against runaway loops when no `maxSteps` is set |
 | `maxBodyBytes` | request body limit (1 MB, 50 MB with attachments) |
+| `maxResultChars` | upper bound of a serialized successful tool result for the model, integer from `MIN_MAX_RESULT_CHARS` (1,000) to `MAX_MAX_RESULT_CHARS` (200,000), default `DEFAULT_MAX_RESULT_CHARS` (16,000); larger results are cut by `truncateToolResult(result, maxChars, TruncateToolResultOptions)` (largest array first, then long fields) with a `_truncated` marker (`TruncatedMarker`: `field`, `showing`, `total`, `compacted`, `omittedKeys`, `hint`; for GET/HEAD and approval-free method-less tools the hint offers filtering or the next page with the tool's `PAGINATION_PARAMETER_NAMES`, for other tools it says not to call again just to see more); a tool's own `maxResultChars` (endpoint tool definition, `contract.ts`, OpenAPI `x-glirastes-max-result-chars`) wins; an invalid value throws at creation (`assertMaxResultChars`, `isValidMaxResultChars`); also on `createGlirastes` and as `application.maxResultChars` in the runtime container |
 | `attachments` | `ChatAttachmentsConfig`; off by default |
 
 ## History and answers

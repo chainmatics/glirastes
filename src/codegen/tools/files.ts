@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isSafeAppHref } from '../../browser/navigation.js';
+import { MAX_MAX_RESULT_CHARS, MIN_MAX_RESULT_CHARS } from '../../runtime/result-limit.js';
 import { ToolRiskClassSchema } from '../../contracts/index.js';
 import { TOOL_POLICY_RULES_VERSION } from '../../contracts/tool-policy.js';
 import { ExecutionGenerationStateSchema } from '../inventory-generation.js';
@@ -137,6 +138,7 @@ export const ToolContractsFileSchema = z.object({
     search: ToolSearchFactsSchema.optional(),
     title: ToolTitleSchema.optional(),
     mcp: z.array(McpToolNameSchema).min(1).max(10).optional(),
+    maxResultChars: z.number().int().min(MIN_MAX_RESULT_CHARS).max(MAX_MAX_RESULT_CHARS).optional(),
   }).strict()).max(5_000),
 }).strict();
 

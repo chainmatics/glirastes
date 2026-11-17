@@ -347,6 +347,22 @@ describe('resolveEndpointContract', () => {
       ]);
     });
 
+    it('hands on a valid maxResultChars and warns about an invalid one', () => {
+      const valid = resolve({
+        evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),
+        contractModule: withModule({ maxResultChars: 40_000 }),
+      });
+      expect(valid.maxResultChars).toBe(40_000);
+      expect(valid.findings).toEqual([]);
+      const invalid = resolve({
+        evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),
+        contractModule: withModule({ invalidFields: ['maxResultChars'] }),
+      });
+      expect(invalid.maxResultChars).toBeUndefined();
+      expect(codes(invalid)).toEqual([['max-result-chars-invalid', 'warning']]);
+      expect(invalid.findings[0]?.message).toContain(CONTRACT_MODULE);
+    });
+
     it('reports nothing for a contract module whose metadata is valid', () => {
       const result = resolve({
         evidence: evidence({ readsBody: true, bodyKeys: 'opaque' }),

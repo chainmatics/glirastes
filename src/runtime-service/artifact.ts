@@ -414,6 +414,7 @@ function materialize(
     .sort((a, b) => a.toolId.localeCompare(b.toolId));
   const bindings: GeneratedToolBinding[] = tools.map((tool) => {
     const contract = byId.get(tool.toolId)?.contract;
+    const maxResultChars = byId.get(tool.toolId)?.maxResultChars;
     if (
       !contract ||
       contract.runtime.input.kind !== "json" ||
@@ -456,6 +457,7 @@ function materialize(
           ...definition,
           method: tool.method,
           path: tool.path,
+          ...(maxResultChars !== undefined ? { maxResultChars } : {}),
         }),
       };
     }

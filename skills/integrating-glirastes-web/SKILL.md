@@ -108,6 +108,10 @@ and have the backend mark them in its export with `x-glirastes-tool: true`
 (operation level). `x-glirastes-name` sets the tool name, `x-glirastes-group`
 the module and `x-glirastes-roles` the roles any of which may call the tool
 (the code default; tool-policy.json and the Platform only narrow it).
+`x-glirastes-max-result-chars` (integer, 1000 to 200000) raises or lowers the
+16,000-character bound of that tool's result for the model above the handler's
+`maxResultChars`; an invalid value is reported as `max-result-chars-invalid`
+and ignored.
 `x-glirastes-tool: false` keeps an operation out in either mode. Existing
 exclusions win over the marker and are reported as `opt-in-excluded`. Policy
 entries stay keyed on `METHOD /path` and survive a rename; tool-semantics.json
@@ -165,7 +169,13 @@ is in the package's `docs/tool-policy.md`.
    characters, the same on every instance) in production: the handler signs the
    approvals it asks for with it and refuses to serve approvals without it. A
    front end on another origin than the handler must be listed in
-   `allowedOrigins`.
+   `allowedOrigins`. This is mandatory for the separate-origin setup (for
+   example a Vite frontend calling a NestJS app that mounts the handler),
+   also when the frontend sends a Bearer token instead of a cookie: an
+   unlisted origin gets `403` with `cross_origin_request_refused` before the
+   turn starts. List exact origins (`allowedOrigins: ['https://app.example.com']`),
+   keep the NestJS CORS setup for the preflight and `Authorization` header,
+   and do not set `crossOriginProtection: false` instead.
    In NestJS, validate input with a Zod pipe (`@Body(new ZodValidationPipe(schema))`,
    `@Query(...)`) or with `createZodDto` and a global `ZodValidationPipe`,
    guard with `@UseGuards` or a global guard, and keep `@Controller` paths and
