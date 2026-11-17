@@ -110,6 +110,7 @@ second, hand-maintained catalogue.
    the backend again (`resultHandles: false` cuts it instead). With metrics, an endpoint that
    refuses a call its schema accepted (400 or 422) is reported as
    `tool_contract_rejected`, without content.
+   Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.
    Every other `AiChatHandlerConfig` option (approvals, origins, limits,
    callbacks), one line each: [references/handler-options.md](references/handler-options.md).
    For personal data, use `privacy` (protected-text profile), not

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Privacy integration
 
+- Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.
+
 - Protected turns withhold tool results exceeding `maxResultChars` with a visible
   `outputWithheld` notice. Clipping raw strings before identity registration can
   create identifying fragments; narrow read requests instead. Writes are not

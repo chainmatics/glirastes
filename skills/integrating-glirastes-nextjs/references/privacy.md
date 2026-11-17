@@ -468,3 +468,5 @@ export const POST = createAiChatHandler({
   not supported in the profile.
 - Screenshots in `allow-original` mode are not pseudonymized.
 - Speech must be transcribed locally before it enters the chat.
+
+Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.
