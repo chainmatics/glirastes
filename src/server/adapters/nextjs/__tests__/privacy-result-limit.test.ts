@@ -95,7 +95,7 @@ describe('result retrieval transport and live privacy gate', () => {
 });
 
 describe('externally supplied result readers under protection',()=>{
-  it.each(['current','foreign-scope','expired-generation','deleted'] as const)('withholds %s retrieval before a serialized provider follow-up',async(state)=>{
+  for(const copied of [false,true]) it.each(['current','foreign-scope','expired-generation','deleted'] as const)(`withholds %s retrieval copied=${copied} before a serialized provider follow-up`,async(state)=>{
     let ownerSubject='alice';
     const store=createResultStore({owner:async()=>({subjectId:ownerSubject,tenantId:'fixture'})});
     const overview=await store.put({toolName:'list_tasks',readOnly:true,maxChars:1000,value:{success:true,description:sensitive},owner:{subjectId:'alice',tenantId:'fixture'}}) as {_result:{id:string}};
@@ -120,7 +120,7 @@ describe('externally supplied result readers under protection',()=>{
       const chunk=(value:unknown,finish:string|null)=>({id:'fixture',object:'chat.completion.chunk',created:1,model:'fixture',choices:[{index:0,delta:value,finish_reason:finish}]});
       return new Response([chunk(delta,null),chunk({},first?'tool_calls':'stop')].map(value=>`data: ${JSON.stringify(value)}\n\n`).join('')+'data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
     };
-    const handler=createAiChatHandler({model:createOpenAI({apiKey:'fixture',fetch:fetch as typeof globalThis.fetch}).chat('fixture'),systemPrompt:'Help',tools:{read_result:reader},privacy:{shield,scope:()=>scope,knownIdentities:()=>[{name:sensitive}]}});
+    const handler=createAiChatHandler({model:createOpenAI({apiKey:'fixture',fetch:fetch as typeof globalThis.fetch}).chat('fixture'),systemPrompt:'Help',tools:{read_result:copied?{...reader,id:'renamed_reader'}:reader},privacy:{shield,scope:()=>scope,knownIdentities:()=>[{name:sensitive}]}});
     const response=await handler(new Request('http://fixture/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:'reader',messages:[{id:'u',role:'user',parts:[{type:'text',text:'Read stored result'}]}]})}));
     await streamChunks(response);
     expect(requests).toHaveLength(2);

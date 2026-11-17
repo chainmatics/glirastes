@@ -34,7 +34,7 @@ import {
 } from '../../runtime/result-limit.js';
 import { truncateToolResult } from './truncate-tool-result.js';
 import type { ResultStore } from './result-store.js';
-import { isResultReader } from './read-result-tool.js';
+import { isResultReader, markResultReader, unsupportedPrivateResultRead } from './result-reader.js';
 export {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
@@ -1017,7 +1017,7 @@ export function toolToAiTool(
     : !tool.needsApproval;
   const requiresApproval = !!needsApproval;
 
-  return {
+  const converted = {
     _toolId: tool.id,
     description: tool.description,
     parameters: tool.inputSchema,
@@ -1047,10 +1047,7 @@ export function toolToAiTool(
       const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
       signal?.throwIfAborted();
       if (options?.protectedResults && isResultReader(tool)) {
-        return {
-          success: false,
-          error: { code: 'privacy_result_handles_unsupported', message: 'Stored result retrieval is unavailable while privacy protection is active.' },
-        };
+        return unsupportedPrivateResultRead();
       }
       const endpoint = context as Partial<EndpointToolContext>;
       const executionContext = signal ? {
@@ -1211,6 +1208,7 @@ export function toolToAiTool(
       }
     },
   };
+  return isResultReader(tool) ? markResultReader(converted) : converted;
 }
 
 /**

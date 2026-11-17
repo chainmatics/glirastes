@@ -1,3 +1,4 @@
+import { isResultReader, unsupportedPrivateResultRead } from '../core/result-reader.js';
 import { randomUUID } from 'node:crypto';
 import type { DurableRuntimeStore } from '../../runtime/postgres-store.js';
 import { PrivacyError, toSafeError, type SafeErrorSummary } from './detection-result.js';
@@ -91,7 +92,7 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
     const needsApproval = tool.needsApproval;
     wrapped[name] = {
       ...tool,
-      ...(typeof needsApproval === 'function'
+      ...(isResultReader(tool) ? { needsApproval: false } : typeof needsApproval === 'function'
         ? {
             needsApproval: (input: unknown, ...rest: unknown[]) =>
               (needsApproval as (...args: unknown[]) => unknown)(boundary.rehydrateToolInput(input), ...rest),
@@ -99,6 +100,7 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
         : {}),
       execute: async (input: unknown, executeOptions?: { toolCallId?: string }) => {
         await options.beforeExecute?.();
+        if (isResultReader(tool)) return unsupportedPrivateResultRead();
         const original = boundary.rehydrateToolInput(input);
         try {
           options.onRehydrated?.();
