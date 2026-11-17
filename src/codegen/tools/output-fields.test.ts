@@ -173,11 +173,11 @@ describe('review round 4: an allow-list keeps an allOf contract satisfiable', ()
         { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
       ],
     });
-    // A plain object and the branches of a oneOf stay closed.
+    // A plain object and the variants of a oneOf (now an anyOf) stay closed.
     const plain = projectOutputSchema({ type: 'object', properties: { id: { type: 'string' }, secret: {} } } as JsonSchemaLike, ['id']).schema;
     expect(plain).toMatchObject({ additionalProperties: false });
-    const either = projectOutputSchema({ oneOf: [{ type: 'object', properties: { id: { type: 'string' }, secret: {} } }] } as JsonSchemaLike, ['id']).schema as { oneOf: unknown[] };
-    expect(either.oneOf[0]).toMatchObject({ additionalProperties: false });
+    const either = projectOutputSchema({ oneOf: [{ type: 'object', properties: { id: { type: 'string' }, secret: {} } }] } as JsonSchemaLike, ['id']).schema as { anyOf: unknown[] };
+    expect(either.anyOf[0]).toMatchObject({ additionalProperties: false });
   });
 });
 
@@ -197,5 +197,21 @@ describe('review round 5: joined deny-lists stay within the limit of one tool', 
     const result = resolveOutputFields('GET /x', declared({ appDenied: app.slice(0, 199), denied: ['data[].name'] }), DESIGN);
     expect(result.findings.map((finding) => finding.code)).not.toContain('output-denied-fields-invalid');
     expect(result.denied).toHaveLength(200);
+  });
+});
+
+describe('review round 6: a projected oneOf is no longer exclusive', () => {
+  const variant = (kind: string) => ({ type: 'object', properties: { kind: { const: kind }, name: { type: 'string' } }, required: ['kind', 'name'] });
+  const union = { oneOf: [variant('a'), variant('b')] } as JsonSchemaLike;
+
+  it.each([
+    ['an exact deny path', undefined, ['kind']],
+    ['an any-depth key', undefined, ['**.kind']],
+    ['an allow-list', ['name'], undefined],
+  ] as const)('with %s the variants become an anyOf', (_label, allowed, denied) => {
+    const schema = projectOutputSchema(union, allowed as string[] | undefined, denied as string[] | undefined).schema as { oneOf?: unknown; anyOf?: unknown[] };
+    expect(schema.oneOf).toBeUndefined();
+    expect(schema.anyOf).toHaveLength(2);
+    expect(JSON.stringify(schema)).not.toContain('kind');
   });
 });

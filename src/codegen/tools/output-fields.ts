@@ -265,7 +265,7 @@ function projectSchema(schema: unknown, node: OutputFieldNode, problems: { count
       composite = true;
     }
   }
-  return objectKept || arrayKept || composite ? output : undefined;
+  return objectKept || arrayKept || composite ? relaxOneOf(output) : undefined;
 }
 
 /**
@@ -315,7 +315,7 @@ function denySchema(schema: unknown, node: OutputFieldNode, problems: { count: n
   }
   // Examples and defaults of a changed object or array may show a denied value.
   for (const keyword of ['examples', 'example', 'default', 'const', 'enum']) delete output[keyword];
-  return output;
+  return relaxOneOf(output);
 }
 
 /** Keywords whose value is one subschema, a list of subschemas, or a map of subschemas. */
@@ -323,6 +323,20 @@ const SUBSCHEMA = ['items', 'additionalProperties', 'not', 'if', 'then', 'else',
 const SUBSCHEMA_LISTS = ['allOf', 'anyOf', 'oneOf', 'prefixItems'];
 const SUBSCHEMA_MAPS = ['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas'];
 const VALUE_KEYWORDS = ['examples', 'example', 'default', 'const', 'enum'];
+
+/**
+ * A projected `oneOf` becomes an `anyOf`: once the field that told the
+ * variants apart is gone, a correct result may match several of them, and an
+ * exclusive choice would reject it.
+ */
+function relaxOneOf(output: JsonObject): JsonObject {
+  if (!Array.isArray(output.oneOf)) return output;
+  const variants = output.oneOf;
+  delete output.oneOf;
+  if (output.anyOf === undefined) output.anyOf = variants;
+  else output.allOf = [...(Array.isArray(output.allOf) ? output.allOf : []), { anyOf: variants }];
+  return output;
+}
 
 /** Whether `value` (an example or default) holds a property named in `keys` anywhere. */
 function holdsKey(value: unknown, keys: ReadonlySet<string>, depth = 0): boolean {
@@ -360,7 +374,7 @@ function stripSchemaKeys(schema: unknown, keys: ReadonlySet<string>, depth = 0):
       output[keyword] = value;
     }
   }
-  return output;
+  return relaxOneOf(output);
 }
 
 /**
