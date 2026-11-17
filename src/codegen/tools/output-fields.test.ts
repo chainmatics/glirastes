@@ -158,3 +158,25 @@ describe('review fixes', () => {
     expect(messages[1]).toContain('NOT excluded');
   });
 });
+
+describe('review round 4: an allow-list keeps an allOf contract satisfiable', () => {
+  it('does not close the branches of an allOf against each other', () => {
+    const inherited = {
+      allOf: [
+        { type: 'object', properties: { id: { type: 'string' }, secret: { type: 'string' } }, required: ['id'] },
+        { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+      ],
+    } as JsonSchemaLike;
+    expect(projectOutputSchema(inherited, ['id', 'name']).schema).toEqual({
+      allOf: [
+        { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+        { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+      ],
+    });
+    // A plain object and the branches of a oneOf stay closed.
+    const plain = projectOutputSchema({ type: 'object', properties: { id: { type: 'string' }, secret: {} } } as JsonSchemaLike, ['id']).schema;
+    expect(plain).toMatchObject({ additionalProperties: false });
+    const either = projectOutputSchema({ oneOf: [{ type: 'object', properties: { id: { type: 'string' }, secret: {} } }] } as JsonSchemaLike, ['id']).schema as { oneOf: unknown[] };
+    expect(either.oneOf[0]).toMatchObject({ additionalProperties: false });
+  });
+});

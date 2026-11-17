@@ -175,7 +175,7 @@ function ownStatus(schema: JsonObject, steps: ReadonlyArray<OutputFieldStep>, in
 }
 
 /** Reduces `schema` to the fields of `node`; undefined when nothing of it can be selected. */
-function projectSchema(schema: unknown, node: OutputFieldNode, problems: { count: number }): unknown {
+function projectSchema(schema: unknown, node: OutputFieldNode, problems: { count: number }, closed = true): unknown {
   if (node.end || !isObject(schema) || !isStructured(schema)) return schema;
   if (schema.$ref !== undefined) {
     // Not resolved here: kept as it is (the results are reduced all the same).
@@ -223,7 +223,9 @@ function projectSchema(schema: unknown, node: OutputFieldNode, problems: { count
       ? schema.required.filter((key): key is string => typeof key === 'string' && terminal.includes(key))
       : [];
     if (required.length > 0) output.required = required;
-    output.additionalProperties = false;
+    // The branches of an `allOf` hold together: closing each one would forbid
+    // the fields of the others, so no value could satisfy the contract.
+    if (closed) output.additionalProperties = false;
     objectKept = true;
   }
   if (arrayLike && node.each) {
@@ -245,7 +247,7 @@ function projectSchema(schema: unknown, node: OutputFieldNode, problems: { count
   for (const keyword of COMPOSITES) {
     if (!Array.isArray(schema[keyword])) continue;
     const branches = (schema[keyword] as unknown[])
-      .map((branch) => projectSchema(branch, node, problems))
+      .map((branch) => projectSchema(branch, node, problems, keyword !== 'allOf'))
       .filter((branch) => branch !== undefined);
     if (branches.length > 0) {
       output[keyword] = branches;
