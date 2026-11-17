@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-18
+
 ### Added
 
 - The approval card (`ApprovalCard`, `BulkApprovalCard`; React chat, `VercelAiChat`, `<glirastes-chat>` from `glirastes/embed`) names the entity behind every id of the call, on by default: an argument keyed `id`/`ids`/`_id`/`ID` or ending in `Id`, `_id` or `ID` (also plural; a string of at most 200 characters or an integer), or a UUID-shaped value under any key, arrays element by element, nested four levels, at most 100 per call. It shows the name this conversation showed for the id ("Playlist: Abend-Promos", label from the key, the type of an `@` mention or `approvalTargetLabel`) instead of the id. Names come from the browser's message history: finished tool results (entries of `data[]`, overview entries next to `_result`, `read_result` answers with their identity fields and indexed reads, nested records; ids under `id`, `_id` or `uuid`, now also non-UUID strings and integers) and `@` mentions in the user's own messages, never the model's arguments or text; the most recent name wins. An id without a known name gets a warning with the id shown (`role="alert"`, icon and text, danger colours, referenced by the approve button's `aria-describedby`); a non-UUID id shown with different names is flagged as ambiguous with the most recent name. Client-side convenience, not a trust boundary: nothing is fetched, the model is not called, and the approved arguments are unchanged. New: `approvalSubjects` provider option (default `true`), `PendingApproval.subjects` and the type `ApprovalSubject`, locale keys `approvalTargetLabel`, `approvalUnknownIdWarning`, `approvalUnknownIdsWarning`, `approvalAmbiguousIdWarning` (English and German). `collectEntityNames` now also reads non-UUID ids, which the `nameLabels` of `createApprovalDescriptionGenerator` then resolve too. The embedded chat styles are regenerated.
@@ -840,3 +842,4 @@ No code changes — patch-level docs release.
 [0.14.0]: https://github.com/chainmatics/glirastes/compare/v0.13.1...v0.14.0
 [0.15.0]: https://github.com/chainmatics/glirastes/compare/v0.14.0...v0.15.0
 [0.16.0]: https://github.com/chainmatics/glirastes/compare/v0.15.0...v0.16.0
+[0.17.0]: https://github.com/chainmatics/glirastes/compare/v0.16.0...v0.17.0
