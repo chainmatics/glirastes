@@ -17,6 +17,8 @@ export const NON_DOMAIN_TOOL_NAMES = Object.freeze([
   'suggest_followups',
   'ask_clarification',
   'update_plan',
+  'memory_remember',
+  'memory_forget',
 ] as const);
 
 export interface HybridToolDiscovery {

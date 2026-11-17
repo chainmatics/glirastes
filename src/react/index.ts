@@ -370,6 +370,12 @@ export type { PlanItem, PlanItemStatus } from '../contracts/plan.js';
 export { sanitizeStoredMessages } from './utils/sanitize-stored-messages.js';
 export { createLocalSessionStore, type LocalSessionStoreOptions } from './utils/local-session-store.js';
 export {
+  createLocalMemoryStore,
+  type BrowserMemoryStore,
+  type LocalMemoryStoreOptions,
+} from './utils/local-memory-store.js';
+export type { MemoryEntry } from '../contracts/memory.js';
+export {
   stripContextBlocks,
   parseMentionSegments,
   serializeMentionsForSend,

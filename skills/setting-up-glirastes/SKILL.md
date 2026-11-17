@@ -113,6 +113,9 @@ customer runtime are separate results; report which was actually verified.
    `integrating-glirastes-web`) and the UI with `building-glirastes-chat-ui`:
    a server-side `resolvePrincipal` from the real session, the generated
    module, the navigation bridge, the app's model access.
+   Ask once whether the chat should remember beyond the last messages
+   (summary of long chats, notes across chats, notes shared in a tenant) and
+   carry the answer out with `setting-up-glirastes-memory`.
 6. Set `"glirastes": { "principal": "server-verified" }` in `package.json` only
    after the resolver is implemented and tested; it is a declaration Doctor
    checks, not authorization.

@@ -4,7 +4,7 @@ For the guided integration path and searchable SDK reference, visit the
 [developer documentation](https://glirastes.io/docs). Check each guide's release
 status before using preview APIs with an installed SDK version.
 
-The package ships eight skills for the app's existing coding agent. Glirastes
+The package ships nine skills for the app's existing coding agent. Glirastes
 does not need a separate coding-agent service: the CLI generator derives
 tools and prints work lists, and these skills guide the app's agent. Chat
 model calls run in the customer's embedded or configured SDK runtime.
@@ -12,6 +12,7 @@ model calls run in the customer's embedded or configured SDK runtime.
 | Skill | Use when |
 |---|---|
 | [`setting-up-glirastes`](./setting-up-glirastes/SKILL.md) | Starting or resuming an integration after `glirastes init` |
+| [`setting-up-glirastes-memory`](./setting-up-glirastes-memory/SKILL.md) | The chat should keep a summary of long chats, notes about a user across chats or notes shared in a tenant; browser or database storage |
 | [`integrating-glirastes-nextjs`](./integrating-glirastes-nextjs/SKILL.md) | Wiring chat, tools, navigation, filters and metrics in a Next.js App Router app |
 | [`integrating-glirastes-web`](./integrating-glirastes-web/SKILL.md) | A separate backend, Rust/PHP/Java runtime container, Angular/SvelteKit/Nuxt web component or a framework without a dedicated adapter |
 | [`maintaining-glirastes-tools`](./maintaining-glirastes-tools/SKILL.md) | Resolving `glirastes tools resolve --print` findings and policy proposals |
