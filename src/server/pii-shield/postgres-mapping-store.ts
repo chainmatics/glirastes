@@ -5,6 +5,7 @@ import {
   bindingDigestWith,
   DEFAULT_ABSOLUTE_TTL_MS,
   DEFAULT_IDLE_TTL_MS,
+  effectiveTtl,
   newGeneration,
   openEntry,
   scopeKeyOf,
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_scopes (
   principal_id text NOT NULL,
   conversation_id text NOT NULL,
   generation text NOT NULL,
+  generation_started_at timestamptz,
   version bigint NOT NULL,
   idle_expires_at timestamptz NOT NULL,
   absolute_expires_at timestamptz NOT NULL,
@@ -43,6 +45,8 @@ CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_scopes (
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL
 );
+-- Tables created before per-turn lifetimes; NULL reads as created_at (never later).
+ALTER TABLE glirastes_privacy_mapping_scopes ADD COLUMN IF NOT EXISTS generation_started_at timestamptz;
 CREATE INDEX IF NOT EXISTS glirastes_privacy_mapping_scopes_principal_idx
   ON glirastes_privacy_mapping_scopes (tenant_id, principal_id);
 CREATE INDEX IF NOT EXISTS glirastes_privacy_mapping_scopes_expiry_idx
@@ -139,39 +143,45 @@ SELECT deleted_at IS NOT NULL AS deleted FROM glirastes_privacy_mapping_scopes W
       await query(POSTGRES_PRIVACY_MAPPING_SCHEMA_SQL);
     },
 
-    async load(scope) {
+    async load(scope, requested) {
       assertPrivacyScope(scope);
+      const idle = effectiveTtl(idleTtl, requested?.idleTtlMs);
+      const absolute = effectiveTtl(absoluteTtl, requested?.absoluteTtlMs);
       const scopeKey = scopeKeyOf(scope);
       const date = now();
       const nowIso = date.toISOString();
+      // cap: the running generation's absolute expiry under this turn's
+      // policy. A shorter absolute lifetime counts from the generation's
+      // start; a longer one never extends the stored expiry.
+      const cap = `LEAST(s.absolute_expires_at,
+    COALESCE(s.generation_started_at, s.created_at) + ($11::bigint * interval '1 millisecond'))`;
+      const expired = `(s.idle_expires_at <= $7::timestamptz OR ${cap} <= $7::timestamptz)`;
       const rows = await query<{ generation: string; version: string | number; deleted: boolean; created: boolean; fresh: boolean }>(
         `/* glirastes:privacy-mapping-load */
 INSERT INTO glirastes_privacy_mapping_scopes AS s
   (scope_key, tenant_id, app_id, environment, principal_id, conversation_id,
-   generation, version, idle_expires_at, absolute_expires_at, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $10, 0, LEAST($8::timestamptz, $9::timestamptz), $9::timestamptz, $7::timestamptz, $7::timestamptz)
+   generation, generation_started_at, version, idle_expires_at, absolute_expires_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $10, $7::timestamptz, 0, LEAST($8::timestamptz, $9::timestamptz), $9::timestamptz, $7::timestamptz, $7::timestamptz)
 ON CONFLICT (scope_key) DO UPDATE SET
-  generation = CASE
-    WHEN s.deleted_at IS NULL AND (s.idle_expires_at <= $7::timestamptz OR s.absolute_expires_at <= $7::timestamptz)
-      THEN $10 ELSE s.generation END,
-  version = CASE
-    WHEN s.deleted_at IS NULL AND (s.idle_expires_at <= $7::timestamptz OR s.absolute_expires_at <= $7::timestamptz)
-      THEN 0 ELSE s.version END,
+  generation = CASE WHEN s.deleted_at IS NULL AND ${expired} THEN $10 ELSE s.generation END,
+  generation_started_at = CASE
+    WHEN s.deleted_at IS NULL AND ${expired} THEN $7::timestamptz ELSE s.generation_started_at END,
+  version = CASE WHEN s.deleted_at IS NULL AND ${expired} THEN 0 ELSE s.version END,
   absolute_expires_at = CASE
-    WHEN s.deleted_at IS NULL AND (s.idle_expires_at <= $7::timestamptz OR s.absolute_expires_at <= $7::timestamptz)
-      THEN $9::timestamptz ELSE s.absolute_expires_at END,
+    WHEN s.deleted_at IS NOT NULL THEN s.absolute_expires_at
+    WHEN ${expired} THEN $9::timestamptz
+    ELSE ${cap} END,
   idle_expires_at = CASE
     WHEN s.deleted_at IS NOT NULL THEN s.idle_expires_at
-    WHEN s.idle_expires_at <= $7::timestamptz OR s.absolute_expires_at <= $7::timestamptz
-      THEN LEAST($8::timestamptz, $9::timestamptz)
-    ELSE LEAST($8::timestamptz, s.absolute_expires_at) END,
+    WHEN ${expired} THEN LEAST($8::timestamptz, $9::timestamptz)
+    ELSE LEAST($8::timestamptz, ${cap}) END,
   updated_at = $7::timestamptz
 RETURNING generation, version, deleted_at IS NOT NULL AS deleted, (xmax = 0) AS created,
   -- The subquery reads the row as it was before this statement.
   generation <> COALESCE((SELECT o.generation FROM glirastes_privacy_mapping_scopes o WHERE o.scope_key = $1), generation) AS fresh`,
         [
           scopeKey, scope.tenantId, scope.appId, scope.environment, scope.principalId, scope.conversationId,
-          nowIso, at(date, idleTtl), at(date, absoluteTtl), newGeneration(),
+          nowIso, at(date, idle), at(date, absolute), newGeneration(), absolute,
         ],
       );
       const header = rows[0];
@@ -234,7 +244,7 @@ DELETE FROM glirastes_privacy_mapping_entries WHERE scope_key = $1 AND generatio
       const pseudonymDigests = unique.map((e) => valueDigest(keyring, scopeKey, e.pseudonym));
       const sealed = unique.map((e) => sealEntry(keyring, scopeKey, generation, e));
       const params = [
-        scopeKey, generation, at(date, idleTtl), nowIso,
+        scopeKey, generation, at(date, effectiveTtl(idleTtl, appendOptions?.idleTtlMs)), nowIso,
         appendOptions?.expectedVersion ?? null,
         originalDigests, pseudonymDigests, sealed.map((s) => s.keyId), sealed.map((s) => s.sealed),
       ];

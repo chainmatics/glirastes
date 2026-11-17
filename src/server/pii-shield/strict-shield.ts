@@ -13,6 +13,7 @@ import {
   type MappingEntry,
   type MappingOrigin,
   type MappingSnapshot,
+  type OpenLifetime,
   type PrivacyMappingStore,
   type PrivacyScope,
 } from './mapping-store.js';
@@ -93,7 +94,12 @@ export interface PrivacySession {
 
 export interface StrictPiiShield {
   readonly profile: typeof PROTECTED_TEXT_PROFILE;
-  open(scope: PrivacyScope, options?: { signal?: AbortSignal }): Promise<PrivacySession>;
+  /**
+   * `lifetime` is the mapping lifetime of the turn's effective policy. It
+   * only shortens the store's lifetime and holds for every load and append
+   * of this session.
+   */
+  open(scope: PrivacyScope, options?: { signal?: AbortSignal; lifetime?: OpenLifetime }): Promise<PrivacySession>;
   /** Convenience: pseudonymize one text in a scope. */
   outbound(text: string, scope: PrivacyScope): Promise<string>;
   /** Tombstones the scope's mapping. */
@@ -268,10 +274,11 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
   }
   const locales = [config.locale];
 
-  async function open(scope: PrivacyScope, options: { signal?: AbortSignal } = {}): Promise<PrivacySession> {
+  async function open(scope: PrivacyScope, options: { signal?: AbortSignal; lifetime?: OpenLifetime } = {}): Promise<PrivacySession> {
     assertPrivacyScope(scope);
     const frozenScope = Object.freeze({ ...scope });
-    let snapshot: MappingSnapshot = await config.store.load(frozenScope);
+    const lifetime: OpenLifetime | undefined = options.lifetime ? Object.freeze({ ...options.lifetime }) : undefined;
+    let snapshot: MappingSnapshot = await config.store.load(frozenScope, lifetime);
     const generation = snapshot.generation;
     const origin = snapshot.origin;
     const bindings = new Set(snapshot.bindings);
@@ -286,7 +293,7 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
     };
 
     async function reload() {
-      const next = await config.store.load(frozenScope);
+      const next = await config.store.load(frozenScope, lifetime);
       // A turn stays on the generation it opened with.
       if (next.generation !== generation) throw new PrivacyError('privacy_mapping_conflict');
       snapshot = next;
@@ -334,7 +341,12 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
           taken.add(lowerKey(pseudonym));
           batch.push({ original: key, pseudonym, category: request.category });
         }
-        const result = await config.store.append(frozenScope, generation, batch);
+        const result = await config.store.append(
+          frozenScope,
+          generation,
+          batch,
+          lifetime?.idleTtlMs === undefined ? undefined : { idleTtlMs: lifetime.idleTtlMs },
+        );
         if (result.notInserted.length === 0) {
           snapshot = { ...snapshot, version: result.version, entries: [...snapshot.entries, ...batch] };
           index = buildIndex(snapshot.entries, de);

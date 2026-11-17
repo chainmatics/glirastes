@@ -25,6 +25,10 @@ export type PrivacyErrorCode =
   | 'privacy_unsupported_content'
   | 'privacy_tool_failed'
   | 'privacy_tool_outcome_unknown'
+  | 'privacy_not_configured'
+  | 'privacy_policy_unavailable'
+  | 'privacy_policy_revoked'
+  | 'privacy_policy_downgrade'
   | 'provider_not_allowed'
   | 'provider_capability_missing'
   | 'provider_unavailable';
@@ -49,6 +53,10 @@ const MESSAGES: Record<PrivacyErrorCode, string> = {
   privacy_unsupported_content: 'The request contains content the privacy boundary cannot check.',
   privacy_tool_failed: 'The tool failed.',
   privacy_tool_outcome_unknown: 'The tool outcome is unknown; reconcile before retrying.',
+  privacy_not_configured: 'The privacy policy requires protection this server is not configured for.',
+  privacy_policy_unavailable: 'No verified privacy policy is available yet.',
+  privacy_policy_revoked: 'The privacy policy of this turn was revoked.',
+  privacy_policy_downgrade: 'A weaker privacy policy than the accepted one was refused.',
   provider_not_allowed: 'The selected model provider is not allowed.',
   provider_capability_missing: 'The selected model lacks a required capability.',
   provider_unavailable: 'The selected model provider is not configured on the server.',

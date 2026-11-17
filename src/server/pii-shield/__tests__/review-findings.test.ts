@@ -135,6 +135,20 @@ describe('R3: a pseudonym in new raw text is a collision', () => {
     expect(await other.pseudonymizeText(`Hallo ${fake}`)).toBe(`Hallo ${fake}`);
   });
 
+  it('a lifetime shortened by the policy ends the generation; its pseudonyms stay pseudonyms', async () => {
+    let now = Date.parse('2026-11-17T09:00:00Z');
+    const store = createMemoryPrivacyMappingStore({ now: () => new Date(now) });
+    const scope = testScope();
+    const first = await memoryShield({ store }).open(scope);
+    await first.registerIdentities([{ name: 'Max Mustermann' }]);
+    const fake = await first.pseudonymizeText('Max Mustermann');
+    now += 10 * 60 * 1000;
+    // Inside the store's 24 h, outside the 5 min the policy now allows.
+    const renewed = await memoryShield({ store }).open(scope, { lifetime: { absoluteTtlMs: 5 * 60 * 1000 } });
+    expect(renewed.origin).toBe('renewed');
+    expect(renewed.rehydrateText(fake)).toBe(fake);
+  });
+
   it('a session refuses to continue on a generation that changed under it', async () => {
     let now = Date.parse('2026-11-17T09:00:00Z');
     const store = createMemoryPrivacyMappingStore({ now: () => new Date(now) });

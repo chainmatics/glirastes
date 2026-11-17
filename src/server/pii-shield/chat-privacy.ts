@@ -1,5 +1,12 @@
 import {
+  PRIVACY_DECISION_CODES,
+  type EffectivePrivacyPolicy,
+  type LocalPrivacyPolicy,
+  type PrivacyDecisionCode,
+} from '../../contracts/privacy-policy.js';
+import {
   attachmentDecision,
+  constrainAttachmentPolicy,
   resolveAttachmentPolicy,
   type AttachmentPolicyInput,
   type AttachmentPolicySnapshot,
@@ -17,7 +24,7 @@ import {
   type ProviderOptionsAllowlist,
 } from './model-boundary.js';
 import type { PrivacySession, StrictPiiShield } from './strict-shield.js';
-import type { ToolReceiptStore } from './tool-boundary.js';
+import type { PrivacyToolOptions, ToolReceiptStore } from './tool-boundary.js';
 import type { ProviderRegistry, ResolvedProvider } from './provider-registry.js';
 
 /**
@@ -58,6 +65,20 @@ export interface ChatPrivacyConfig {
   /** Content-free stop notices, e.g. for metrics. */
   onBlocked?: (code: string) => void;
   /**
+   * The local privacy policy. It may only tighten a signed Platform block.
+   * `required` defaults to true: configuring privacy protects every turn,
+   * also without a Platform block. `required: false` leaves the decision to
+   * the signed policy of the turn (no block or `off`: unprotected). Its
+   * screenshot, provider and OpenRouter fields narrow a signed block; without
+   * one, `attachments` and the provider registry decide as configured.
+   */
+  policy?: LocalPrivacyPolicy;
+  /**
+   * Content-free decision counter for the `privacy.decisions` event: one
+   * code per protected turn, model call, rehydrated tool call and stop.
+   */
+  onDecision?: (code: PrivacyDecisionCode) => void;
+  /**
    * Interchangeable providers. The turn resolves the user's choice once at
    * its start and uses that model instead of the handler's `model`; an
    * invalid choice stops the turn with `provider_not_allowed` (403), a
@@ -70,8 +91,30 @@ export interface ChatPrivacyConfig {
   };
 }
 
+/**
+ * The privacy policy of one turn, pinned at its start with the managed
+ * snapshot. Without it the turn follows the local configuration alone.
+ */
+export interface ChatPrivacyTurnPolicy {
+  /** `mergePrivacyPolicy` of the signed block and the local configuration. */
+  effective: EffectivePrivacyPolicy;
+  /**
+   * Re-checks the pinned policy before every model call and tool execution;
+   * throws a `PrivacyError` such as `privacy_policy_revoked`.
+   */
+  check?: () => void | Promise<void>;
+  /** Content-free decision counter (`privacy.decisions`). */
+  onDecision?: (code: PrivacyDecisionCode) => void;
+}
+
 export interface ChatPrivacyTurn {
   readonly session: PrivacySession;
+  /** The effective policy of this turn, when one was given. */
+  readonly policy: EffectivePrivacyPolicy | undefined;
+  /** Options for `wrapToolsForPrivacy`: the policy check and the rehydration counter. */
+  toolHooks(): Pick<PrivacyToolOptions, 'beforeExecute' | 'onRehydrated'>;
+  /** Options for another boundary of this turn (the classifier): stops, policy check, counter. */
+  boundaryHooks(): Pick<PrivacyBoundaryOptions, 'onBlocked' | 'beforeModelCall' | 'onProtected'>;
   readonly attachments: AttachmentPolicySnapshot;
   readonly config: ChatPrivacyConfig;
   /** The provider resolved for this turn, when `providers` is configured. */
@@ -100,6 +143,10 @@ const STATUS: Partial<Record<PrivacyErrorCode, number>> = {
   provider_capability_missing: 422,
   provider_not_allowed: 403,
   provider_unavailable: 503,
+  privacy_not_configured: 503,
+  privacy_policy_unavailable: 503,
+  privacy_policy_revoked: 503,
+  privacy_policy_downgrade: 503,
 };
 
 /** Content-free HTTP refusal of a protected turn. */
@@ -151,20 +198,76 @@ export async function openChatPrivacyTurn(
   config: ChatPrivacyConfig,
   req: Request,
   body: { id?: unknown },
+  policy?: ChatPrivacyTurnPolicy,
+): Promise<ChatPrivacyTurn | null> {
+  const decide = (code: string) => {
+    if (!policy?.onDecision || !DECISION_CODES.has(code)) return;
+    try {
+      policy.onDecision(code as PrivacyDecisionCode);
+    } catch {
+      // A metrics sink never changes the decision.
+    }
+  };
+  const onBlocked = (code: string) => {
+    decide(code);
+    config.onBlocked?.(code);
+  };
+  try {
+    const turn = await openTurn(config, req, body, policy, decide, onBlocked);
+    if (turn) decide('turn_protected');
+    return turn;
+  } catch (error) {
+    decide(isPrivacyError(error) ? error.code : 'privacy_unsupported_content');
+    throw error;
+  }
+}
+
+const DECISION_CODES: ReadonlySet<string> = new Set(PRIVACY_DECISION_CODES);
+
+async function openTurn(
+  config: ChatPrivacyConfig,
+  req: Request,
+  body: { id?: unknown },
+  policy: ChatPrivacyTurnPolicy | undefined,
+  decide: (code: string) => void,
+  onBlocked: (code: string) => void,
 ): Promise<ChatPrivacyTurn | null> {
   // Without a chat id every conversation would share one mapping: refuse.
   if (typeof body.id !== 'string' || body.id.length === 0) throw new PrivacyError('privacy_scope_invalid');
+  const effective = policy?.effective;
+  // Only a signed block narrows attachments and providers. Without one the
+  // local configuration (the `attachments` rule, the registry) governs as
+  // before; the policy's lifetimes still apply.
+  const signed = effective?.source === 'platform' ? effective : undefined;
+  // A signed approval list needs the registry's bindings: without a registry
+  // nothing can show that the handler's model is an approved one.
+  if (effective?.providers.allowed && !config.providers) throw new PrivacyError('privacy_not_configured');
   const conversationId = body.id;
   const scope = await config.scope(req, { conversationId });
   if (!scope) return null;
-  const session = await config.shield.open(scope, { signal: req.signal });
+  await policy?.check?.();
+  const session = await config.shield.open(scope, {
+    signal: req.signal,
+    ...(effective
+      ? {
+          lifetime: {
+            idleTtlMs: effective.mapping.idleTtlSeconds * 1000,
+            absoluteTtlMs: effective.mapping.absoluteTtlSeconds * 1000,
+          },
+        }
+      : {}),
+  });
   const identities = await config.knownIdentities?.(req, session.scope) ?? [];
   if (identities.length > 0) await session.registerIdentities(identities);
-  const attachments = resolveAttachmentPolicy(await config.attachments?.(req, session.scope) ?? {});
+  const local = resolveAttachmentPolicy(await config.attachments?.(req, session.scope) ?? {});
+  const attachments = signed ? constrainAttachmentPolicy(local, signed.screenshots) : local;
   const provider = config.providers
-    ? config.providers.registry.resolve(session.scope, await config.providers.selection?.(req, session.scope))
+    ? config.providers.registry.resolve(
+        session.scope,
+        await config.providers.selection?.(req, session.scope),
+        signed?.providers,
+      )
     : undefined;
-
   const checkFiles = (message: unknown, visionCapable: boolean) => {
     for (const part of filePartsOf(message)) {
       const mediaType = typeof part.mediaType === 'string' ? part.mediaType : undefined;
@@ -174,9 +277,20 @@ export async function openChatPrivacyTurn(
   };
 
   let admitted: (ProtectedHistory & { answerAnchor: string | null }) | undefined;
+  const boundaryHooks = (): Pick<PrivacyBoundaryOptions, 'onBlocked' | 'beforeModelCall' | 'onProtected'> => ({
+    onBlocked,
+    ...(policy?.check ? { beforeModelCall: policy.check } : {}),
+    onProtected: () => decide('model_call_protected'),
+  });
 
   return {
     session,
+    policy: effective,
+    toolHooks: () => ({
+      ...(policy?.check ? { beforeExecute: policy.check } : {}),
+      onRehydrated: () => decide('tool_call_rehydrated'),
+    }),
+    boundaryHooks,
     attachments,
     config,
     provider,
@@ -194,7 +308,7 @@ export async function openChatPrivacyTurn(
       return sealProtectedResponse(response, session, {
         anchor: admitted.answerAnchor,
         ...(admitted.continued ? { continued: admitted.continued } : {}),
-        ...(config.onBlocked ? { onBindFailed: () => config.onBlocked!('privacy_history_not_bound') } : {}),
+        onBindFailed: () => onBlocked('privacy_history_not_bound'),
       });
     },
     bind(handlerModel, latestMessage) {
@@ -211,7 +325,7 @@ export async function openChatPrivacyTurn(
         ...(capabilities ? { capabilities } : {}),
         ...(config.providerOptions ? { providerOptions: config.providerOptions } : {}),
         ...(config.identitiesFromToolResults !== undefined ? { identitiesFromToolResults: config.identitiesFromToolResults } : {}),
-        ...(config.onBlocked ? { onBlocked: config.onBlocked } : {}),
+        ...boundaryHooks(),
       });
       // A file in the message the user just sent is refused visibly instead
       // of being withheld silently; older files are withheld by the boundary.

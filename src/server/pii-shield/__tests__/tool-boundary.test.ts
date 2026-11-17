@@ -86,6 +86,42 @@ describe('authorized tool rehydration', () => {
   });
 });
 
+describe('policy hooks of the tool boundary', () => {
+  it('a revoked policy stops the call before the input is rehydrated or the tool runs', async () => {
+    const { boundary, fakeEmail } = await setup();
+    const { PrivacyError } = await import('../detection-result.js');
+    const execute = vi.fn(async (_input: unknown, _options: unknown) => ({ ok: true }));
+    const rehydrate = vi.spyOn(boundary, 'rehydrateToolInput');
+    const onRehydrated = vi.fn();
+    const tools = wrapToolsForPrivacy({ send: { execute } }, boundary, {
+      beforeExecute: () => { throw new PrivacyError('privacy_policy_revoked'); },
+      onRehydrated,
+    });
+    await expect(tools.send.execute!({ to: fakeEmail }, { toolCallId: 'c1' })).rejects.toMatchObject({ code: 'privacy_policy_revoked' });
+    expect(execute).not.toHaveBeenCalled();
+    expect(rehydrate).not.toHaveBeenCalled();
+    expect(onRehydrated).not.toHaveBeenCalled();
+  });
+
+  it('also guards a resumed approval and counts each rehydrated call', async () => {
+    const { boundary, fakeEmail } = await setup();
+    let revoked = false;
+    const { PrivacyError } = await import('../detection-result.js');
+    const execute = vi.fn(async (_input: unknown, _options: unknown) => ({ ok: true }));
+    const onRehydrated = vi.fn();
+    const tools = wrapToolsForPrivacy({ send: { execute } }, boundary, {
+      approvals: [{ toolCallId: 'c1', toolName: 'send', approvalId: 'a1' }],
+      beforeExecute: () => { if (revoked) throw new PrivacyError('privacy_policy_revoked'); },
+      onRehydrated,
+    });
+    await tools.send.execute!({ to: fakeEmail }, { toolCallId: 'c0' });
+    expect(onRehydrated).toHaveBeenCalledTimes(1);
+    revoked = true;
+    await expect(tools.send.execute!({ to: fakeEmail }, { toolCallId: 'c1' })).rejects.toMatchObject({ code: 'privacy_policy_revoked' });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('idempotent writes with receipts', () => {
   it('executes a tool call once; a replay of the same call id does not run it again', async () => {
     const { boundary, fakeEmail } = await setup();

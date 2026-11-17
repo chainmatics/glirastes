@@ -32,7 +32,7 @@ export interface AttachmentPolicySnapshot {
   readonly screenshots: ScreenshotMode;
   readonly allowedImageTypes: readonly string[];
   /** Content-free provenance for audits: which rule decided. */
-  readonly decidedBy: 'app' | 'tenant' | 'user' | 'default';
+  readonly decidedBy: 'app' | 'tenant' | 'user' | 'default' | 'policy';
 }
 
 const RANK: Record<ScreenshotMode, number> = { blocked: 0, 'allow-original': 1 };
@@ -63,6 +63,26 @@ export function resolveAttachmentPolicy(input: AttachmentPolicyInput = {}): Atta
 }
 
 export const BLOCKED_ATTACHMENTS: AttachmentPolicySnapshot = resolveAttachmentPolicy();
+
+/**
+ * Narrows a turn's attachment rule to the effective privacy policy: the
+ * stricter mode and only image types both allow. The policy never widens
+ * the local rule.
+ */
+export function constrainAttachmentPolicy(
+  snapshot: AttachmentPolicySnapshot,
+  policy: { mode: ScreenshotMode; imageTypes: readonly string[] },
+): AttachmentPolicySnapshot {
+  const policyMode: ScreenshotMode = valid(policy.mode) ? policy.mode : 'blocked';
+  const types = snapshot.allowedImageTypes.filter((type) => policy.imageTypes.includes(type.toLowerCase()));
+  const stricter = RANK[policyMode] < RANK[snapshot.screenshots];
+  const screenshots: ScreenshotMode = stricter || types.length === 0 ? 'blocked' : snapshot.screenshots;
+  return Object.freeze({
+    screenshots,
+    allowedImageTypes: Object.freeze(types),
+    decidedBy: screenshots !== snapshot.screenshots ? 'policy' : snapshot.decidedBy,
+  });
+}
 
 export interface FilePartLike {
   mediaType?: string;

@@ -32,9 +32,25 @@ export interface RecordingTranscriptionHandlerConfig {
    * fallback. Default false.
    */
   localOnly?: boolean;
+  /**
+   * The speech part of the effective privacy policy, read per request, e.g.
+   * `() => glirastes.privacyPolicy()?.speech ?? null`. A protected policy
+   * forces `localOnly` and caps the duration at the shorter of both limits.
+   * `null`/`undefined` means the profile is off and the options above apply.
+   * When it throws (managed runtime without a verified, unrevoked policy) or
+   * returns anything malformed, the handler answers 503: there is no
+   * fallback to local or cloud defaults.
+   */
+  policy?: () => SpeechPrivacyPolicy | null | undefined;
   /** Receives a content-free failure for the server log; the browser only learns that it failed. */
   onError?: (error: unknown) => void;
   fetch?: typeof globalThis.fetch;
+}
+
+/** The speech limits of a protected privacy policy (`EffectivePrivacyPolicy['speech']`). */
+export interface SpeechPrivacyPolicy {
+  localOnly: true;
+  maxDurationSeconds: number;
 }
 
 const failed = (status: number, error: string, headers?: Record<string, string>) =>
@@ -45,6 +61,28 @@ class TranscriptionFailure extends Error {
     super(code);
     this.name = 'TranscriptionFailure';
   }
+}
+
+/** The policy for one request: `null` when off; throws `policy_unavailable` otherwise. */
+function speechPolicy(read: (() => SpeechPrivacyPolicy | null | undefined) | undefined): SpeechPrivacyPolicy | null {
+  if (!read) return null;
+  let policy: unknown;
+  try {
+    policy = read();
+  } catch {
+    throw new TranscriptionFailure('policy_unavailable');
+  }
+  if (policy === null || policy === undefined) return null;
+  const candidate = policy as Partial<SpeechPrivacyPolicy>;
+  if (
+    typeof policy !== 'object'
+    || candidate.localOnly !== true
+    || !Number.isSafeInteger(candidate.maxDurationSeconds)
+    || candidate.maxDurationSeconds! <= 0
+  ) {
+    throw new TranscriptionFailure('policy_unavailable');
+  }
+  return { localOnly: true, maxDurationSeconds: candidate.maxDurationSeconds! };
 }
 
 /** True for an address that stays inside the consumer's own network. */
@@ -210,7 +248,7 @@ function contentFreeError(error: unknown): string {
 export function createRecordingTranscriptionHandler(config: RecordingTranscriptionHandlerConfig) {
   const languages = config.languages ?? DEFAULT_RECORDING_LANGUAGES;
   const maxBytes = config.maxBytes ?? 5 * 1024 * 1024;
-  const maxDuration = config.maxDurationSeconds ?? 60;
+  const configuredMaxDuration = config.maxDurationSeconds ?? 60;
   const timeoutMs = config.timeoutMs ?? 45_000;
   const gate = createGate(Math.max(1, config.maxConcurrent ?? 2), Math.max(0, config.maxQueued ?? 8));
   const onError = config.onError
@@ -218,8 +256,17 @@ export function createRecordingTranscriptionHandler(config: RecordingTranscripti
 
   return async function POST(request: Request): Promise<Response> {
     if (!(await config.authorize(request))) return failed(401, 'Authentication required');
+    let policy: SpeechPrivacyPolicy | null;
+    try {
+      policy = speechPolicy(config.policy);
+    } catch (error) {
+      onError(error);
+      return failed(503, 'Speech service not available');
+    }
+    const localOnly = policy ? true : config.localOnly;
+    const maxDuration = Math.min(configuredMaxDuration, policy?.maxDurationSeconds ?? Infinity);
     if (!config.url) return failed(503, 'Speech service not configured');
-    if (config.localOnly && !isPrivateServiceUrl(config.url)) {
+    if (localOnly && !isPrivateServiceUrl(config.url)) {
       onError(new TranscriptionFailure('service_not_local'));
       return failed(503, 'Speech service not configured');
     }

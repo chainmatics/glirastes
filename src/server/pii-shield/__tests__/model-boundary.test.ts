@@ -29,6 +29,47 @@ function serializedCalls(calls: unknown[]): string {
 
 const SYSTEM = `Du hilfst ${CANARY.name} (Nutzer-ID ${CANARY.userId}, ${CANARY.email}).`;
 
+describe('policy hooks', () => {
+  it('a revocation between model steps stops the next step before anything is sent', async () => {
+    let revoked = false;
+    const onBlocked = vi.fn();
+    const onProtected = vi.fn();
+    const boundary = await boundaryFor({
+      beforeModelCall: () => {
+        if (revoked) throw new Error('revocation store unreachable');
+      },
+      onBlocked,
+      onProtected,
+    });
+    const { model, calls } = captureModel([{ toolCall: { name: 'lookup', input: { q: 'x' } } }, { text: 'never' }]);
+    const tools = { lookup: tool({ inputSchema: z.object({ q: z.string() }), execute: async () => { revoked = true; return { ok: true }; } }) };
+    await expect(generateText({ model: boundary.wrapModel(model), prompt: 'Hallo', tools, stopWhen: stepCountIs(3) }))
+      .rejects.toBeDefined();
+    // Step 1 went out; step 2 was stopped by the hook, not sent.
+    expect(calls).toHaveLength(1);
+    expect(onProtected).toHaveBeenCalledTimes(1);
+    // A non-privacy error from the hook is reported as unsupported content, never passed through.
+    expect(onBlocked).toHaveBeenCalledWith('privacy_unsupported_content');
+  });
+
+  it('a PrivacyError from the hook keeps its code', async () => {
+    const { PrivacyError } = await import('../detection-result.js');
+    const onBlocked = vi.fn();
+    const boundary = await boundaryFor({ beforeModelCall: async () => { throw new PrivacyError('privacy_policy_revoked'); }, onBlocked });
+    const { model, calls } = captureModel();
+    await expect(generateText({ model: boundary.wrapModel(model), prompt: 'Hallo' })).rejects.toMatchObject({ code: 'privacy_policy_revoked' });
+    expect(calls).toHaveLength(0);
+    expect(onBlocked).toHaveBeenCalledWith('privacy_policy_revoked');
+  });
+
+  it('a throwing metrics sink never changes the decision', async () => {
+    const boundary = await boundaryFor({ onProtected: () => { throw new Error('sink down'); } });
+    const { model, calls } = captureModel([{ text: 'Gern.' }]);
+    await expect(generateText({ model: boundary.wrapModel(model), prompt: 'Hallo' })).resolves.toMatchObject({ text: 'Gern.' });
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe('full model context', () => {
   it('protects a string system prompt, history, assistant turns and the new user message', async () => {
     const boundary = await boundaryFor();

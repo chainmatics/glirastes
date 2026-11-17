@@ -52,8 +52,15 @@ import {
   privacyRefusal,
   privacySafeError,
   type ChatPrivacyTurn,
+  type ChatPrivacyTurnPolicy,
 } from '../../pii-shield/chat-privacy.js';
-import { isPrivacyError } from '../../pii-shield/detection-result.js';
+import { isPrivacyError, PrivacyError } from '../../pii-shield/detection-result.js';
+import {
+  isProtectedPolicy,
+  mergePrivacyPolicy,
+  PRIVACY_DECISION_CODES,
+  type PrivacyDecisionCode,
+} from '../../../contracts/privacy-policy.js';
 import {
   privacyStreamErrorText,
   projectUiMessageStream,
@@ -113,10 +120,13 @@ import {
   RuntimePriceTableSchema,
   type BudgetEvaluation,
   type ManagedTurnGuard,
+  type RuntimeMetricsSink,
   type RuntimePriceTable,
   type TurnMetricsRecorder,
 } from '../../../runtime/index.js';
 import { toolResultFailure } from '../../../runtime/tool-failure.js';
+import { privacyDecisionRecorderFor, type PrivacyDecisionPolicy } from '../../../runtime/metrics/privacy-decisions.js';
+import { effectivePrivacyPolicyDigest, privacyPolicyDigest } from '../../../sync/privacy-digest.js';
 import {
   createHybridToolDiscovery,
   NON_DOMAIN_TOOL_NAMES,
@@ -1242,12 +1252,162 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       let requestMessages: unknown[] = sentMessages;
       const attachmentRefusal = validateAttachments(requestMessages, attachments);
       if (attachmentRefusal) return attachmentRefusal;
-      // Protected turn: scope, mapping and screenshot rule first. Nothing
-      // reaches a model, router or classifier before this succeeded.
+      // The last user message's id, which every later projection of the
+      // messages keeps (privacy history, clarification, command strip).
+      const turnId = deriveSessionId(requestMessages);
+
+      let managedTurn: ManagedTurnGuard | undefined;
+      let managedPrincipal: Principal | undefined;
+      /** The manifest tool ids the guard would allow right now; empty when that cannot be decided. */
+      let currentToolIds: () => Promise<ReadonlySet<string>> = async () => new Set();
+      if (managedRuntime) {
+        const principalResult = PrincipalSchema.safeParse(
+          await managedRuntime.resolvePrincipal(req),
+        );
+        if (!principalResult.success) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized' }),
+            { status: 401, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        const resolvedSnapshot = await managedRuntime.resolveTurnSnapshot({
+          request: req,
+          turnId,
+          principal: principalResult.data,
+        });
+        if (
+          resolvedSnapshot.turnId !== turnId
+          || resolvedSnapshot.principal.subjectId !== principalResult.data.subjectId
+          || resolvedSnapshot.principal.tenantId !== principalResult.data.tenantId
+        ) {
+          return new Response(
+            JSON.stringify({ error: 'Turn snapshot identity mismatch' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        // The revisions stay pinned; what the turn offers and names follows
+        // the principal of this request.
+        const snapshot = withTurnPrincipal(resolvedSnapshot, principalResult.data);
+        managedPrincipal = principalResult.data;
+
+        const resolveCurrentPrincipal = async () => {
+          const current = PrincipalSchema.safeParse(
+            await managedRuntime.resolvePrincipal(req),
+          );
+          return current.success ? current.data : undefined;
+        };
+        // The privacy gate is asked again before every tool call: a refusal,
+        // a raised floor or a revocation that arrives during the turn stops
+        // the next call, also the one an approval resumes.
+        const loadCurrentRevocations = managedRuntime.loadRevocations || managedRuntime.privacyGate
+          ? async () => {
+              await managedRuntime.privacyGate?.({ request: req, snapshot });
+              return await managedRuntime.loadRevocations?.({ request: req, snapshot }) ?? [];
+            }
+          : undefined;
+        managedTurn = createManagedTurnGuard({
+          snapshot,
+          resolvePrincipal: resolveCurrentPrincipal,
+          loadRevocations: loadCurrentRevocations,
+          onBudgetSignal: managedRuntime.onBudgetSignal,
+        });
+        // The same sources as the guard, asked again; fails closed.
+        currentToolIds = async () => {
+          try {
+            return authorizedTurnToolIds({
+              snapshot,
+              principal: await resolveCurrentPrincipal(),
+              revocations: await loadCurrentRevocations?.() ?? [],
+            });
+          } catch {
+            return new Set();
+          }
+        };
+      }
+
+      // Protected turn: policy, scope, mapping and screenshot rule first.
+      // Nothing reaches a model, router or classifier before this succeeded.
+      // The policy is the signed block of the snapshot pinned above, merged
+      // with the local configuration (which may only tighten it).
       let privacyTurn: ChatPrivacyTurn | undefined;
-      if (privacy) {
+      let privacyPolicy: ChatPrivacyTurnPolicy | undefined;
+      try {
+        const pinnedSnapshot = managedTurn?.snapshot;
+        if (pinnedSnapshot && managedRuntime?.privacyGate) {
+          await managedRuntime.privacyGate({ request: req, snapshot: pinnedSnapshot });
+        }
+        const signedBlock = pinnedSnapshot?.policyRevision.privacy;
+        const reportedDigest = pinnedSnapshot && managedRuntime?.privacyEffectiveDigest
+          ? managedRuntime.privacyEffectiveDigest({ request: req, snapshot: pinnedSnapshot })
+          : undefined;
+        const assertReported = (effectiveDigest: string | null) => {
+          if (reportedDigest === undefined || reportedDigest === effectiveDigest) return;
+          // The name survives the content-free error summary of the protected profile.
+          onError(Object.assign(
+            new Error('[glirastes] The privacy configuration of the chat handler differs from the one of createGlirastes; pass the same registry and policy to both.'),
+            { name: 'PrivacyConfigMismatch' },
+          ), req);
+          throw new PrivacyError('privacy_not_configured');
+        };
+        if (!privacy) {
+          if (isProtectedPolicy(signedBlock)) throw new PrivacyError('privacy_not_configured');
+          assertReported(null);
+        } else {
+          const registry = privacy.providers?.registry;
+          const effective = mergePrivacyPolicy(
+            signedBlock ?? null,
+            { required: true, ...privacy.policy },
+            { bindings: registry?.bindings() ?? {}, ...(registry ? { defaultEntryId: registry.defaultEntryId } : {}) },
+          );
+          assertReported(effective ? effectivePrivacyPolicyDigest(effective) : null);
+          if (effective) {
+            const policyRevisionId = pinnedSnapshot?.policyRevision.revisionId;
+            const loadPinnedRevocations = pinnedSnapshot && managedRuntime?.loadRevocations
+              ? () => managedRuntime.loadRevocations!({ request: req, snapshot: pinnedSnapshot })
+              : undefined;
+            const gateNow = pinnedSnapshot && managedRuntime?.privacyGate
+              ? () => managedRuntime.privacyGate!({ request: req, snapshot: pinnedSnapshot })
+              : undefined;
+            privacyPolicy = {
+              effective,
+              ...(policyRevisionId && (loadPinnedRevocations || gateNow)
+                ? {
+                    // The live gate (refusal, floor) and a revocation of the
+                    // pinned policy revision stop the next model call or
+                    // tool execution of this turn.
+                    check: async () => {
+                      await gateNow?.();
+                      if (!loadPinnedRevocations) return;
+                      let revocations: ReadonlyArray<SecurityRevocation>;
+                      try {
+                        revocations = await loadPinnedRevocations();
+                      } catch {
+                        throw new PrivacyError('privacy_policy_unavailable');
+                      }
+                      if (revocations.some((revocation) => revocation.policyRevisionIds.includes(policyRevisionId))) {
+                        throw new PrivacyError('privacy_policy_revoked');
+                      }
+                    },
+                  }
+                : {}),
+              ...decisionCounter(privacy.onDecision, metrics, {
+                // Counted under the policy this turn enforces (`privacy.decisions`).
+                policyRevisionId: effective.source === 'platform' && policyRevisionId ? policyRevisionId : null,
+                privacyDigest: effective.source === 'platform' && signedBlock ? privacyPolicyDigest(signedBlock) : null,
+                effectivePolicyDigest: effectivePrivacyPolicyDigest(effective),
+              }),
+            };
+          }
+        }
+      } catch (error) {
+        onError(error, req);
+        if (isPrivacyError(error)) countPrivacyDecision(privacy?.onDecision, error.code);
+        return privacyRefusal(error);
+      }
+      if (privacy && privacyPolicy) {
         try {
-          const opened = await openChatPrivacyTurn(privacy, req, body.value as { id?: unknown });
+          const opened = await openChatPrivacyTurn(privacy, req, body.value as { id?: unknown }, privacyPolicy);
           if (!opened) {
             return new Response(
               JSON.stringify({ error: 'Unauthorized' }),
@@ -1296,71 +1456,6 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const clientActions = readClientActions(glirastesClientActions);
       if (clientActions) toolContext.runtime = { ...toolContext.runtime, clientActions };
       const requestStart = Date.now();
-      const turnId = deriveSessionId(messages);
-
-      let managedTurn: ManagedTurnGuard | undefined;
-      let managedPrincipal: Principal | undefined;
-      /** The manifest tool ids the guard would allow right now; empty when that cannot be decided. */
-      let currentToolIds: () => Promise<ReadonlySet<string>> = async () => new Set();
-      if (managedRuntime) {
-        const principalResult = PrincipalSchema.safeParse(
-          await managedRuntime.resolvePrincipal(req),
-        );
-        if (!principalResult.success) {
-          return new Response(
-            JSON.stringify({ error: 'Unauthorized' }),
-            { status: 401, headers: { 'Content-Type': 'application/json' } },
-          );
-        }
-
-        const resolvedSnapshot = await managedRuntime.resolveTurnSnapshot({
-          request: req,
-          turnId,
-          principal: principalResult.data,
-        });
-        if (
-          resolvedSnapshot.turnId !== turnId
-          || resolvedSnapshot.principal.subjectId !== principalResult.data.subjectId
-          || resolvedSnapshot.principal.tenantId !== principalResult.data.tenantId
-        ) {
-          return new Response(
-            JSON.stringify({ error: 'Turn snapshot identity mismatch' }),
-            { status: 403, headers: { 'Content-Type': 'application/json' } },
-          );
-        }
-        // The revisions stay pinned; what the turn offers and names follows
-        // the principal of this request.
-        const snapshot = withTurnPrincipal(resolvedSnapshot, principalResult.data);
-        managedPrincipal = principalResult.data;
-
-        const resolveCurrentPrincipal = async () => {
-          const current = PrincipalSchema.safeParse(
-            await managedRuntime.resolvePrincipal(req),
-          );
-          return current.success ? current.data : undefined;
-        };
-        const loadCurrentRevocations = managedRuntime.loadRevocations
-          ? () => managedRuntime.loadRevocations!({ request: req, snapshot })
-          : undefined;
-        managedTurn = createManagedTurnGuard({
-          snapshot,
-          resolvePrincipal: resolveCurrentPrincipal,
-          loadRevocations: loadCurrentRevocations,
-          onBudgetSignal: managedRuntime.onBudgetSignal,
-        });
-        // The same sources as the guard, asked again; fails closed.
-        currentToolIds = async () => {
-          try {
-            return authorizedTurnToolIds({
-              snapshot,
-              principal: await resolveCurrentPrincipal(),
-              revocations: await loadCurrentRevocations?.() ?? [],
-            });
-          } catch {
-            return new Set();
-          }
-        };
-      }
 
       turnMetrics = metrics
         ? createTurnMetricsRecorder({
@@ -1658,7 +1753,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             // userText and history were protected just above, with the collision check.
             protectedPrompt: true,
             ...(privacy?.providerOptions ? { providerOptions: privacy.providerOptions } : {}),
-            ...(privacy?.onBlocked ? { onBlocked: privacy.onBlocked } : {}),
+            ...privacyTurn.boundaryHooks(),
           });
           classifierOptions = { wrapModel: (model) => classifierBoundary.wrapModel(model) };
         }
@@ -1855,6 +1950,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           aiTools = wrapToolsForPrivacy(aiTools, bound.boundary, {
             ...(privacy?.receipts ? { receipts: privacy.receipts } : {}),
             approvals: pipelineApprovals.verified,
+            ...privacyTurn.toolHooks(),
           });
         }
 
@@ -2062,6 +2158,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         aiTools = wrapToolsForPrivacy(aiTools, bound.boundary, {
           ...(privacy?.receipts ? { receipts: privacy.receipts } : {}),
           approvals: legacyApprovals.verified,
+          ...privacyTurn.toolHooks(),
         });
       }
 
@@ -2160,6 +2257,39 @@ function findHandlerBuiltins(
 // ============================================================================
 // PII Shield Helpers
 // ============================================================================
+
+const PRIVACY_DECISION_CODE_SET: ReadonlySet<string> = new Set(PRIVACY_DECISION_CODES);
+
+/** Counts a refusal before the privacy turn opened; a sink never changes the answer. */
+/**
+ * The decision callback of a protected turn: the app's own `onDecision` and,
+ * with a metrics sink, the content-free `privacy.decisions` counter. A
+ * refusal before a policy applied has no effective policy to count under; the
+ * runner's heartbeat state (`refused`, `awaiting-policy`) covers it.
+ */
+function decisionCounter(
+  onDecision: ((code: PrivacyDecisionCode) => void) | undefined,
+  metrics: RuntimeMetricsSink | undefined,
+  policy: PrivacyDecisionPolicy,
+): { onDecision?: (code: PrivacyDecisionCode) => void } {
+  const recorder = metrics ? privacyDecisionRecorderFor(metrics) : undefined;
+  if (!onDecision && !recorder) return {};
+  return {
+    onDecision: (code) => {
+      recorder?.count(code, policy);
+      onDecision?.(code);
+    },
+  };
+}
+
+function countPrivacyDecision(onDecision: ((code: PrivacyDecisionCode) => void) | undefined, code: string): void {
+  if (!onDecision || !PRIVACY_DECISION_CODE_SET.has(code)) return;
+  try {
+    onDecision(code as PrivacyDecisionCode);
+  } catch {
+    // Metrics never break the protected path.
+  }
+}
 
 function deriveSessionId(messages: unknown[]): string {
   // Use the last user message's ID — groups approval continuations (same

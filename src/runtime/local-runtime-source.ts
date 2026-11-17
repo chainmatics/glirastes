@@ -356,6 +356,7 @@ export function createLocalRuntimeSource(
         environmentId: identity.environmentId,
         budget: overlay.budget ?? localLimits,
         toolPolicies: applied.policies,
+        ...(overlay.privacy ? { privacy: overlay.privacy } : {}),
         publishedAt: artifact.generatedAt,
       }),
     );

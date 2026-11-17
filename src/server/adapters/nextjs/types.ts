@@ -138,6 +138,27 @@ export interface ManagedLocalRuntimeConfig {
   onBudgetSignal?: (
     signal: ManagedTurnBudgetSignal,
   ) => void | Promise<void>;
+
+  /**
+   * Runs after the snapshot is pinned and before the privacy turn opens,
+   * and again before every model call and tool call of the turn. Throws a
+   * `PrivacyError` when the runtime cannot serve a turn under its privacy
+   * policy (no verified deployment yet, a refused or revoked policy, an
+   * unmet privacy floor); the handler answers with the code, content-free.
+   */
+  privacyGate?: (
+    context: { request: Request; snapshot: TurnSnapshot },
+  ) => void | Promise<void>;
+
+  /**
+   * The digest of the effective privacy policy the runtime reports for this
+   * snapshot (`null` when off). A turn whose own merged policy differs (another
+   * registry or local policy than the runtime's) is refused with
+   * `privacy_not_configured`: what runs is what the heartbeat reports.
+   */
+  privacyEffectiveDigest?: (
+    context: { request: Request; snapshot: TurnSnapshot },
+  ) => string | null;
 }
 
 export interface StepUsage {

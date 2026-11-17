@@ -28,6 +28,14 @@ export interface PrivacyToolOptions {
   approvals?: ReadonlyArray<{ toolCallId: string; toolName: string; approvalId: string }>;
   /** Content-free diagnostics of a failed tool. */
   onToolError?: (toolName: string, error: SafeErrorSummary) => void;
+  /**
+   * Runs before a tool input is rehydrated and the tool executes, also for a
+   * resumed approval. Throwing a `PrivacyError` (e.g. `privacy_policy_revoked`)
+   * stops the call before any original leaves the boundary.
+   */
+  beforeExecute?: () => void | Promise<void>;
+  /** Content-free notice of each tool call whose input was rehydrated. */
+  onRehydrated?: () => void;
 }
 
 interface ExecutableTool {
@@ -90,7 +98,13 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
           }
         : {}),
       execute: async (input: unknown, executeOptions?: { toolCallId?: string }) => {
+        await options.beforeExecute?.();
         const original = boundary.rehydrateToolInput(input);
+        try {
+          options.onRehydrated?.();
+        } catch {
+          // A metrics sink never changes the decision.
+        }
         const toolCallId = executeOptions?.toolCallId;
         const approval = toolCallId ? approvalOf.get(toolCallId) : undefined;
         const resumed = approval !== undefined && approval.toolName === name;

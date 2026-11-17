@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_scopes (
   principal_id text NOT NULL,
   conversation_id text NOT NULL,
   generation text NOT NULL,
+  generation_started_at timestamptz,
   version bigint NOT NULL,
   idle_expires_at timestamptz NOT NULL,
   absolute_expires_at timestamptz NOT NULL,
@@ -14,6 +15,8 @@ CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_scopes (
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL
 );
+-- Tables created before per-turn lifetimes; NULL reads as created_at (never later).
+ALTER TABLE glirastes_privacy_mapping_scopes ADD COLUMN IF NOT EXISTS generation_started_at timestamptz;
 CREATE INDEX IF NOT EXISTS glirastes_privacy_mapping_scopes_principal_idx
   ON glirastes_privacy_mapping_scopes (tenant_id, principal_id);
 CREATE INDEX IF NOT EXISTS glirastes_privacy_mapping_scopes_expiry_idx

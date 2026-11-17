@@ -82,8 +82,13 @@ export interface PrivacyMappingStore {
    * throws `privacy_mapping_deleted`; an expired one restarts as a new
    * generation without entries or bindings, so history from before is no
    * longer sent to a model (see `origin` and `bindings`).
+   *
+   * `lifetime` is the effective policy of this turn. It can only shorten the
+   * store's own lifetime, and it applies to the existing generation too: a
+   * shorter absolute lifetime caps it from the start of the generation, a
+   * longer one never extends it.
    */
-  load(scope: PrivacyScope): Promise<MappingSnapshot>;
+  load(scope: PrivacyScope, lifetime?: OpenLifetime): Promise<MappingSnapshot>;
   /**
    * Adds entries atomically. An original or pseudonym that already exists is
    * not overwritten. With `expectedVersion` the append is a compare-and-set
@@ -93,7 +98,7 @@ export interface PrivacyMappingStore {
     scope: PrivacyScope,
     generation: string,
     entries: MappingEntry[],
-    options?: { expectedVersion?: number },
+    options?: { expectedVersion?: number; idleTtlMs?: number },
   ): Promise<AppendResult>;
   /**
    * Keyed digest of one canonical history part, bound to the scope and
@@ -122,6 +127,19 @@ export interface MappingLifetime {
   /** How long a tombstone blocks resurrection after deletion. Default 24 h. */
   tombstoneTtlMs?: number;
   now?: () => Date;
+}
+
+/** The lifetime one turn's effective policy asks for; see `load`. */
+export interface OpenLifetime {
+  idleTtlMs?: number;
+  absoluteTtlMs?: number;
+}
+
+/** The shorter of the store lifetime and the turn's; never longer than the store's. */
+export function effectiveTtl(storeTtl: number, requested: number | undefined): number {
+  if (requested === undefined) return storeTtl;
+  if (!Number.isSafeInteger(requested) || requested <= 0) throw new RangeError('A mapping lifetime is a positive whole number of milliseconds');
+  return Math.min(storeTtl, requested);
 }
 
 export const DEFAULT_IDLE_TTL_MS = 60 * 60 * 1000;
@@ -250,6 +268,7 @@ export function openEntry(keyring: PrivacyKeyring, scopeKey: string, generation:
 
 interface MemoryScope {
   generation: string;
+  generationStartedAt: number;
   version: number;
   idleExpiresAt: number;
   absoluteExpiresAt: number;
@@ -280,27 +299,34 @@ export function createMemoryPrivacyMappingStore(lifetime: MappingLifetime = {}):
   return {
     persistent: false,
     size: () => scopes.size,
-    async load(scope) {
+    async load(scope, requested) {
       assertPrivacyScope(scope);
+      const idle = effectiveTtl(idleTtl, requested?.idleTtlMs);
+      const absolute = effectiveTtl(absoluteTtl, requested?.absoluteTtlMs);
       const key = scopeKeyOf(scope);
       const at = now();
       let record = scopes.get(key);
       if (record?.deletedAt != null) throw new PrivacyError('privacy_mapping_deleted');
       let origin: MappingOrigin = 'continued';
+      if (record) {
+        // A shorter policy caps the running generation from its start.
+        record.absoluteExpiresAt = Math.min(record.absoluteExpiresAt, record.generationStartedAt + absolute);
+      }
       if (!record || !live(record, at)) {
         origin = record ? 'renewed' : 'created';
         record = {
           generation: newGeneration(),
+          generationStartedAt: at,
           version: 0,
-          idleExpiresAt: Math.min(at + idleTtl, at + absoluteTtl),
-          absoluteExpiresAt: at + absoluteTtl,
+          idleExpiresAt: Math.min(at + idle, at + absolute),
+          absoluteExpiresAt: at + absolute,
           deletedAt: null,
           entries: [],
           bindings: new Set(),
         };
         scopes.set(key, record);
       } else {
-        record.idleExpiresAt = Math.min(at + idleTtl, record.absoluteExpiresAt);
+        record.idleExpiresAt = Math.min(at + idle, record.absoluteExpiresAt);
       }
       return {
         generation: record.generation,
@@ -334,7 +360,7 @@ export function createMemoryPrivacyMappingStore(lifetime: MappingLifetime = {}):
         record.entries.push({ ...entry });
       }
       record.version += 1;
-      record.idleExpiresAt = Math.min(at + idleTtl, record.absoluteExpiresAt);
+      record.idleExpiresAt = Math.min(at + effectiveTtl(idleTtl, options?.idleTtlMs), record.absoluteExpiresAt);
       return { version: record.version, notInserted };
     },
     bindingDigest(scope, generation, canonical) {
@@ -355,6 +381,7 @@ export function createMemoryPrivacyMappingStore(lifetime: MappingLifetime = {}):
       const record = scopes.get(key);
       scopes.set(key, {
         generation: record?.generation ?? newGeneration(),
+        generationStartedAt: record?.generationStartedAt ?? at,
         version: (record?.version ?? 0) + 1,
         idleExpiresAt: at + tombstoneTtl,
         absoluteExpiresAt: at + tombstoneTtl,

@@ -268,4 +268,76 @@ describe('createRecordingTranscriptionHandler', () => {
     expect(seen?.aborted).toBe(true);
     expect(onError).not.toHaveBeenCalled();
   });
+
+  describe('privacy policy per request', () => {
+    it('forces localOnly for a protected policy although the option is off', async () => {
+      const fetch = service();
+      const onError = vi.fn();
+      const handler = createRecordingTranscriptionHandler({
+        authorize: allow, url: 'https://api.deepgram.com', fetch, onError,
+        policy: () => ({ localOnly: true, maxDurationSeconds: 60 }),
+      });
+      expect((await handler(request())).status).toBe(503);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'service_not_local' }));
+    });
+
+    it('caps the duration at the shorter limit', async () => {
+      const fetch = service();
+      const handler = createRecordingTranscriptionHandler({
+        authorize: allow, url: 'http://stt', fetch, maxDurationSeconds: 60,
+        policy: () => ({ localOnly: true, maxDurationSeconds: 1 }),
+      });
+      expect((await handler(request({ body: wav(2) }))).status).toBe(413);
+      expect((await handler(request({ body: wav(0.5) }))).status).toBe(200);
+      expect(fetch).toHaveBeenCalledOnce();
+    });
+
+    it('reads the policy per request', async () => {
+      let limit = 5;
+      const handler = createRecordingTranscriptionHandler({
+        authorize: allow, url: 'http://stt', fetch: service(),
+        policy: () => ({ localOnly: true, maxDurationSeconds: limit }),
+      });
+      expect((await handler(request({ body: wav(2) }))).status).toBe(200);
+      limit = 1;
+      expect((await handler(request({ body: wav(2) }))).status).toBe(413);
+    });
+
+    it('answers 503 without reading the audio when the policy is unavailable or malformed', async () => {
+      for (const policy of [
+        () => { throw new Error('privacy_policy_unavailable'); },
+        () => ({ localOnly: false, maxDurationSeconds: 60 }) as never,
+        () => ({ localOnly: true, maxDurationSeconds: 0 }),
+        () => ({ localOnly: true }) as never,
+        () => 'protected' as never,
+      ]) {
+        const fetch = service();
+        const onError = vi.fn();
+        const handler = createRecordingTranscriptionHandler({ authorize: allow, url: 'http://stt', fetch, onError, policy: policy as never });
+        const body = request();
+        const response = await handler(body);
+        expect(response.status).toBe(503);
+        expect(body.bodyUsed).toBe(false);
+        expect(fetch).not.toHaveBeenCalled();
+        expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'policy_unavailable' }));
+        expect(JSON.stringify(onError.mock.calls)).not.toContain('privacy_policy_unavailable');
+      }
+    });
+
+    it('keeps the configured behaviour while the profile is off', async () => {
+      const fetch = service();
+      const handler = createRecordingTranscriptionHandler({
+        authorize: allow, url: 'https://stt.example.com', fetch, policy: () => null,
+      });
+      expect((await handler(request())).status).toBe(200);
+    });
+
+    it('checks the session before the policy', async () => {
+      const policy = vi.fn(() => ({ localOnly: true as const, maxDurationSeconds: 60 }));
+      const handler = createRecordingTranscriptionHandler({ authorize: async () => false, url: 'http://stt', fetch: service(), policy });
+      expect((await handler(request())).status).toBe(401);
+      expect(policy).not.toHaveBeenCalled();
+    });
+  });
 });

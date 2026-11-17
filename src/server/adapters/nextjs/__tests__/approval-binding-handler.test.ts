@@ -824,7 +824,7 @@ describe('an approved call followed by a silent model step', () => {
           buildId: 'git:4f2c9e1',
           instanceId: 'web-1',
         },
-        record: (event) => { if (event.eventType !== 'tool_contract_rejected') events.push(event); },
+        record: (event) => { if (event.eventType === 'turn.finished') events.push(event); },
         flush: async () => undefined,
         close: async () => undefined,
       },

@@ -11,6 +11,13 @@
  * shield.
  */
 import type { LanguageModelV3 } from '@ai-sdk/provider';
+import {
+  normalizeProviderEndpoint,
+  ProviderBindingSchema,
+  type EffectivePrivacyPolicy,
+  type ProviderBinding,
+} from '../../contracts/privacy-policy.js';
+import { providerBindingDigest } from '../../sync/privacy-digest.js';
 import { PrivacyError } from './detection-result.js';
 import type { PrivacyScope } from './mapping-store.js';
 import type { ModelCapabilities } from './model-boundary.js';
@@ -21,6 +28,30 @@ export interface ProviderModelInput {
   apiKey: string;
   /** Server-configured endpoint override, never from the browser. */
   baseURL?: string;
+  /**
+   * Upstream providers the effective privacy policy allows for this turn
+   * (`openRouterOnly`). Only passed to adapters whose binding protocol is
+   * `OPENROUTER_PROTOCOL`; such an adapter must send exactly this list (never
+   * empty, never wider).
+   */
+  upstreamOnly?: readonly string[];
+}
+
+/** Protocol of an adapter that routes through OpenRouter and honors `upstreamOnly`. */
+export const OPENROUTER_PROTOCOL = 'openrouter-chat';
+
+/**
+ * The security-relevant, non-secret description of what an adapter sends
+ * where. Without it an adapter's entries have no binding digest and are
+ * never approved by a privacy policy.
+ */
+export interface ProviderAdapterBinding {
+  /** Wire protocol, e.g. `openai-chat`, `anthropic-messages`, `openrouter-chat`. */
+  protocol: string;
+  /** Endpoint used when the entry sets no `baseURL`. */
+  defaultEndpoint: string;
+  /** Routing the adapter always applies; part of the digest. */
+  routing?: ProviderBinding['routing'];
 }
 
 /** Builds models of one provider family. Factories are injected, so the SDK has no provider dependency. */
@@ -33,6 +64,8 @@ export interface ProviderAdapter {
    * refused in the protected profile.
    */
   readonly qualified: boolean;
+  /** Binding description; required for an entry to be approvable. */
+  readonly binding?: ProviderAdapterBinding;
   createModel(input: ProviderModelInput): LanguageModelV3;
 }
 
@@ -72,16 +105,35 @@ export interface ProviderRegistryConfig {
   allowUnqualified?: boolean;
 }
 
+/** The provider part of the effective privacy policy of a turn. */
+export type ProviderPolicyConstraint = EffectivePrivacyPolicy['providers'];
+
 export interface ProviderRegistry {
-  /** The entries this scope may select, without secrets or endpoints. */
-  options(scope: PrivacyScope): ProviderOption[];
+  /**
+   * The entries this scope may select, without secrets or endpoints. With a
+   * policy constraint only the entries the policy allows (with
+   * `userChoice: false`, only the policy default).
+   */
+  options(scope: PrivacyScope, constraint?: ProviderPolicyConstraint): ProviderOption[];
   /**
    * The model for this turn. `selection` is the entry id the user chose
    * (absent: the default). Throws `provider_not_allowed` for an unknown,
    * foreign or unqualified choice and `provider_unavailable` for a missing
    * secret. Never substitutes another provider.
+   *
+   * With a policy constraint (protected profile) the default is the policy's,
+   * a choice counts only with `userChoice`, and an entry must have a binding
+   * whose digest matches its approval at this moment; an approval for the
+   * same id with another endpoint, model or routing does not apply. An empty
+   * `openRouterOnly` makes OpenRouter entries `provider_unavailable`.
    */
-  resolve(scope: PrivacyScope, selection?: string | null): ResolvedProvider;
+  resolve(scope: PrivacyScope, selection?: string | null, constraint?: ProviderPolicyConstraint): ResolvedProvider;
+  /** The registry's own default entry id. */
+  readonly defaultEntryId: string;
+  /** Entry id → `providerBindingDigest` of every entry whose adapter describes its binding. */
+  bindings(): Record<string, string>;
+  /** The binding of an entry, or undefined without one. Content-free: no secret, no secret name. */
+  bindingOf(entryId: string): ProviderBinding | undefined;
   /** For `ChatPrivacyConfig.modelCapabilities`: capabilities of a model this registry built. */
   capabilitiesOf(model: unknown): ModelCapabilities | undefined;
   /** For `ChatPrivacyConfig.providerLabel`: label of a model this registry built. */
@@ -106,6 +158,22 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
   }
   if (!entries.has(config.defaultEntry)) throw new Error('The default provider entry is not configured');
 
+  const bindingsById = new Map<string, { binding: ProviderBinding; digest: string }>();
+  for (const entry of entries.values()) {
+    const adapter = adapters.get(entry.adapter)!;
+    if (!adapter.binding) continue;
+    const binding = ProviderBindingSchema.parse({
+      v: 1,
+      adapter: adapter.id,
+      adapterProtocol: adapter.binding.protocol,
+      endpoint: normalizeProviderEndpoint(entry.baseURL ?? adapter.binding.defaultEndpoint),
+      modelId: entry.modelId,
+      routing: adapter.binding.routing ?? {},
+      capabilities: { images: entry.capabilities?.images === true },
+    });
+    bindingsById.set(entry.id, Object.freeze({ binding, digest: providerBindingDigest(binding) }));
+  }
+
   const built = new WeakMap<object, ProviderOption>();
   const option = (entry: ProviderEntry): ProviderOption => ({
     id: entry.id,
@@ -122,20 +190,59 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
     }
   };
 
+  /** Whether a constraint lets this entry run at all (binding present and approved). */
+  const approved = (entry: ProviderEntry, constraint: ProviderPolicyConstraint): boolean => {
+    const bound = bindingsById.get(entry.id);
+    if (!bound) return false;
+    if (constraint.allowed === null) return true;
+    return constraint.allowed.some((a) => a.entryId === entry.id && a.bindingDigest === bound.digest);
+  };
+  const isUpstreamRouted = (entry: ProviderEntry) => adapters.get(entry.adapter)!.binding?.protocol === OPENROUTER_PROTOCOL;
+
   return {
-    options(scope) {
-      return [...entries.values()].filter((entry) => permitted(entry, scope)).map(option);
+    defaultEntryId: config.defaultEntry,
+    bindings() {
+      return Object.fromEntries([...bindingsById].map(([id, bound]) => [id, bound.digest]));
     },
-    resolve(scope, selection) {
-      const id = selection === undefined || selection === null || selection === '' ? config.defaultEntry : selection;
+    bindingOf(entryId) {
+      const bound = bindingsById.get(entryId);
+      return bound ? structuredClone(bound.binding) : undefined;
+    },
+    options(scope, constraint) {
+      return [...entries.values()]
+        .filter((entry) => permitted(entry, scope))
+        .filter((entry) => !constraint || (
+          approved(entry, constraint)
+          && (constraint.userChoice || entry.id === constraint.defaultEntryId)
+          && !(isUpstreamRouted(entry) && constraint.openRouterOnly?.length === 0)
+        ))
+        .map(option);
+    },
+    resolve(scope, selection, constraint) {
+      const chosen = selection === undefined || selection === null || selection === '' ? undefined : selection;
+      let id: unknown;
+      if (constraint) {
+        // No substitute: an unusable policy default or a choice the policy
+        // does not open to the user stops the turn.
+        if (chosen !== undefined && !constraint.userChoice && chosen !== constraint.defaultEntryId) {
+          throw new PrivacyError('provider_not_allowed');
+        }
+        id = chosen ?? constraint.defaultEntryId;
+      } else {
+        id = chosen ?? config.defaultEntry;
+      }
       const entry = typeof id === 'string' ? entries.get(id) : undefined;
       if (!entry || !permitted(entry, scope)) throw new PrivacyError('provider_not_allowed');
+      if (constraint && !approved(entry, constraint)) throw new PrivacyError('provider_not_allowed');
+      const upstreamOnly = constraint && isUpstreamRouted(entry) ? constraint.openRouterOnly : undefined;
+      if (upstreamOnly && upstreamOnly.length === 0) throw new PrivacyError('provider_unavailable');
       const apiKey = config.secrets(entry.secretRef);
       if (typeof apiKey !== 'string' || apiKey.length === 0) throw new PrivacyError('provider_unavailable');
       const model = adapters.get(entry.adapter)!.createModel({
         modelId: entry.modelId,
         apiKey,
         ...(entry.baseURL ? { baseURL: entry.baseURL } : {}),
+        ...(upstreamOnly ? { upstreamOnly: [...upstreamOnly] } : {}),
       });
       const resolved = option(entry);
       built.set(model, resolved);
@@ -223,6 +330,11 @@ function asV3(model: unknown): LanguageModelV3 {
   return model as LanguageModelV3;
 }
 
+const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1';
+/** The defaults of `@ai-sdk/anthropic` and `@ai-sdk/openai` when no `baseURL` is set. */
+const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1';
+const OPENAI_ENDPOINT = 'https://api.openai.com/v1';
+
 /** OpenRouter through the OpenAI-compatible chat API, with the routing policy in every request body. */
 export function openRouterAdapter(options: {
   createOpenAI: CreateOpenAIProvider;
@@ -231,15 +343,31 @@ export function openRouterAdapter(options: {
   fetch?: typeof globalThis.fetch;
   id?: string;
 }): ProviderAdapter {
+  const configuredOnly = options.routing?.only;
   return {
     id: options.id ?? 'openrouter',
     qualified: true,
-    createModel({ modelId, apiKey, baseURL }) {
+    binding: {
+      protocol: OPENROUTER_PROTOCOL,
+      defaultEndpoint: OPENROUTER_ENDPOINT,
+      routing: {
+        allowFallbacks: false,
+        dataCollection: 'deny',
+        zdr: true,
+        ...(configuredOnly ? { only: [...configuredOnly] } : {}),
+      },
+    },
+    createModel({ modelId, apiKey, baseURL, upstreamOnly }) {
+      // The policy can only narrow the configured upstream list, never widen it.
+      const only = upstreamOnly
+        ? (configuredOnly ? configuredOnly.filter((slug) => upstreamOnly.includes(slug)) : [...upstreamOnly])
+        : configuredOnly;
+      if (only && only.length === 0) throw new PrivacyError('provider_unavailable');
       const provider = options.createOpenAI({
-        baseURL: baseURL ?? 'https://openrouter.ai/api/v1',
+        baseURL: baseURL ?? OPENROUTER_ENDPOINT,
         apiKey,
         name: 'openrouter',
-        fetch: withOpenRouterRouting(options.routing ?? {}, options.fetch),
+        fetch: withOpenRouterRouting({ ...options.routing, ...(only ? { only: [...only] } : {}) }, options.fetch),
       });
       return asV3(provider.chat(modelId));
     },
@@ -255,6 +383,7 @@ export function anthropicAdapter(options: {
   return {
     id: options.id ?? 'anthropic',
     qualified: true,
+    binding: { protocol: 'anthropic-messages', defaultEndpoint: ANTHROPIC_ENDPOINT },
     createModel({ modelId, apiKey, baseURL }) {
       const provider = options.createAnthropic({
         apiKey,
@@ -266,7 +395,10 @@ export function anthropicAdapter(options: {
   };
 }
 
-/** Any OpenAI-compatible chat endpoint (OpenAI, Azure OpenAI proxies, local servers). */
+/**
+ * Any OpenAI-compatible chat endpoint (OpenAI, Azure OpenAI proxies, local
+ * servers). Entries without `baseURL` go to OpenAI's API.
+ */
 export function openAiCompatibleAdapter(options: {
   id: string;
   createOpenAI: CreateOpenAIProvider;
@@ -275,6 +407,7 @@ export function openAiCompatibleAdapter(options: {
   return {
     id: options.id,
     qualified: true,
+    binding: { protocol: 'openai-chat', defaultEndpoint: OPENAI_ENDPOINT },
     createModel({ modelId, apiKey, baseURL }) {
       const provider = options.createOpenAI({
         apiKey,

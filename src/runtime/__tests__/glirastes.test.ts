@@ -22,7 +22,11 @@ import type {
 } from '../contract-bindings.js';
 import type { AiChatHandlerConfig } from '../../server/adapters/nextjs/types.js';
 import { createGlirastes, type Glirastes, type GlirastesChatTurn } from '../glirastes.js';
+import type { PrivacyPolicyBlock } from '../../contracts/privacy-policy.js';
+import { isPrivacyError } from '../../server/pii-shield/detection-result.js';
+import type { GlirastesPrivacyOptions } from '../privacy-runtime.js';
 import { SDK_VERSION } from '../sdk-version.js';
+import { MemoryRuntimeStateStore } from '../../sync/state-store.js';
 import { createLocalSchemaDigest } from '../local-tool-bindings.js';
 
 const id = (suffix: string) => `019fa9a9-d5f7-7ec3-a3c7-8899de1d${suffix.padStart(4, '0')}`;
@@ -107,6 +111,7 @@ function revision(
 function activeDeployment(
   privateKey: KeyObject,
   toolOverrides: Array<Record<string, unknown>> = [],
+  privacy?: PrivacyPolicyBlock,
 ): RuntimeDeploymentBundle {
   const common = {
     schemaVersion: 1 as const, revision: 1, tenantId: TENANT_ID, targetAppId: APP_ID,
@@ -128,7 +133,11 @@ function activeDeployment(
     }),
     policyRevision: revision(privateKey, {
       ...common, revisionId: id('3908'), revisionType: 'policy', environmentId: ENVIRONMENT_ID,
-      payload: { budget: limits, toolPolicies: [], ...(toolOverrides.length ? { toolOverrides } : {}) },
+      payload: {
+        budget: limits, toolPolicies: [],
+        ...(toolOverrides.length ? { toolOverrides } : {}),
+        ...(privacy ? { privacy } : {}),
+      },
     }),
     updatedAt: '2026-07-29T00:01:00.000Z',
   };
@@ -738,5 +747,199 @@ describe('createGlirastes connected', () => {
 
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(glirastes.currentSource().mode).toBe('standalone');
+  });
+});
+
+describe('createGlirastes with a privacy policy', () => {
+  const env = { GLIRASTES_API_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: BASE_URL };
+  const block: PrivacyPolicyBlock = {
+    schemaVersion: 1,
+    profile: 'protected-text/v1',
+    screenshots: { mode: 'blocked' },
+    providers: { allowed: [{ entryId: 'main', bindingDigest: digest('A') }], defaultEntryId: 'main', userChoice: false },
+    mapping: { idleTtlSeconds: 1800, absoluteTtlSeconds: 7200 },
+    speech: { localOnly: true, maxDurationSeconds: 45 },
+  };
+  const privacy = (bindingDigest = digest('A')): GlirastesPrivacyOptions => ({
+    shield: { profile: 'protected-text/v1' } as GlirastesPrivacyOptions['shield'],
+    providers: { bindings: () => ({ main: bindingDigest }), defaultEntryId: 'main' } as GlirastesPrivacyOptions['providers'],
+  });
+  const codeOf = (run: () => unknown) => {
+    try {
+      run();
+      return undefined;
+    } catch (error) {
+      return isPrivacyError(error) ? error.code : `not-privacy:${String(error)}`;
+    }
+  };
+
+  it('names provider entries whose binding drifted from the setup artifact, content-free', () => {
+    const module = generated();
+    (module.setupArtifact as Record<string, unknown>).privacyProviders = [
+      { id: 'main', label: 'Main', adapter: 'openrouter', bindingDigest: digest('A') },
+      { id: 'gone', label: 'Gone', adapter: 'openrouter', bindingDigest: digest('A') },
+    ];
+    const onError = vi.fn();
+    track(createGlirastes({
+      generated: module, env: {}, onError,
+      privacy: {
+        shield: { profile: 'protected-text/v1' } as GlirastesPrivacyOptions['shield'],
+        providers: { bindings: () => ({ main: digest('B'), extra: digest('C') }), defaultEntryId: 'main' } as GlirastesPrivacyOptions['providers'],
+      },
+    }));
+    expect(onError.mock.calls.map(([error]) => (error as Error).message)).toEqual([
+      '[glirastes] Privacy provider "main" differs from the setup artifact; run setup again so the Platform can approve it.',
+      '[glirastes] Privacy provider "gone" is in the setup artifact but not in the provider registry.',
+      '[glirastes] Privacy provider "extra" is not in the setup artifact; the Platform cannot approve it.',
+    ]);
+  });
+
+  it('is off in standalone without a local requirement', () => {
+    const glirastes = track(createGlirastes({ generated: generated(), env: {} }));
+    expect(glirastes.privacyPolicy()).toBeNull();
+  });
+
+  it('enforces the local profile in standalone when required', () => {
+    const glirastes = track(createGlirastes({ generated: generated(), env: {}, privacy: { ...privacy(), local: { required: true } } }));
+    expect(glirastes.privacyPolicy()).toMatchObject({ source: 'local', profile: 'protected-text/v1' });
+  });
+
+  it('blocks a connected runtime with privacy until a verified deployment arrived', async () => {
+    const http = platform();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError: vi.fn(), privacy: privacy(),
+    }));
+    await glirastes.ready();
+    expect(glirastes.accepted()).toBeUndefined();
+    expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_policy_unavailable');
+    const turn = await glirastes.chatTurn(principal);
+    expect(codeOf(() => turn.managedRuntime.privacyGate({
+      request: new Request('https://app.example/api/chat'),
+      snapshot: { policyRevision: { revisionId: id('3908') } } as never,
+    }))).toBe('privacy_policy_unavailable');
+  });
+
+  it('enforces the signed block of the accepted deployment and reports it', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({ deployments: [activeDeployment(privateKey, [], block)], publicKey });
+    const onError = vi.fn();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError, privacy: privacy(),
+    }));
+    await glirastes.ready();
+    expect(onError).not.toHaveBeenCalled();
+    expect(glirastes.privacyPolicy()).toMatchObject({
+      source: 'platform', mapping: { idleTtlSeconds: 1800, absoluteTtlSeconds: 7200 }, speech: { maxDurationSeconds: 45 },
+    });
+    const beat = http.calls.find(({ url }) => url.includes('/heartbeat'));
+    const reported = JSON.parse(String(beat?.init.body));
+    expect(reported).toMatchObject({
+      health: 'healthy', lastAppliedDeploymentId: id('3904'),
+      technicalMetadata: { privacy: { state: 'enforced', policyRevisionId: id('3908'), reasons: [] } },
+    });
+    // The handler is held to the effective policy the heartbeat reports.
+    const turn = await glirastes.chatTurn(principal);
+    expect(turn.managedRuntime.privacyEffectiveDigest({
+      request: new Request('https://app.example/api/chat'),
+      snapshot: { policyRevision: glirastes.accepted()!.policyRevision } as never,
+    })).toBe(reported.technicalMetadata.privacy.effectivePolicyDigest);
+  });
+
+  it('refuses and reports a signed block whose approved binding does not match', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({ deployments: [activeDeployment(privateKey, [], block)], publicKey });
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError: vi.fn(), privacy: privacy(digest('B')),
+    }));
+    await glirastes.ready();
+    expect(glirastes.accepted()).toBeUndefined();
+    expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_not_configured');
+    const beat = http.calls.find(({ url }) => url.includes('/heartbeat'));
+    expect(JSON.parse(String(beat?.init.body))).toMatchObject({
+      health: 'unhealthy',
+      technicalMetadata: { validationStage: 'privacy_refused', privacy: { state: 'refused', reasons: ['provider_binding_missing', 'provider_default_unusable'] } },
+    });
+  });
+
+  describe('after a refused protected revision (K2/K3: no silent way out)', () => {
+    const request = new Request('https://app.example/api/chat');
+    /** Starts a runner on a shared persistent state, as a restart of the same process would. */
+    async function runner(stateStore: MemoryRuntimeStateStore, deployments: RuntimeDeploymentBundle[], publicKey: KeyObject, options: { privacy?: GlirastesPrivacyOptions } = {}) {
+      const http = platform({ deployments, publicKey });
+      const glirastes = track(createGlirastes({
+        generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+        pollIntervalMs: 60_000, onError: vi.fn(), stateStore: () => stateStore,
+        ...(options.privacy ? { privacy: options.privacy } : {}),
+      }));
+      await glirastes.ready();
+      return glirastes;
+    }
+
+    it('stays blocked after a restart when the Platform withdraws the refused revision and offers an unprotected one', async () => {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+      const stateStore = new MemoryRuntimeStateStore();
+      const before = await runner(stateStore, [activeDeployment(privateKey, [], block)], publicKey);
+      expect(codeOf(() => before.privacyPolicy())).toBe('privacy_not_configured');
+      expect((await stateStore.load())?.privacyFloor).toMatchObject({ profile: 'protected-text/v1', policyRevision: 1 });
+      await before.stop();
+
+      const after = await runner(stateStore, [activeDeployment(privateKey)], publicKey);
+      // The unprotected revision is a downgrade below the persisted floor.
+      expect(after.accepted()).toBeUndefined();
+      expect(codeOf(() => after.privacyPolicy())).toBe('privacy_not_configured');
+      const turn = await after.chatTurn(principal);
+      expect(codeOf(() => turn.managedRuntime.privacyGate({
+        request, snapshot: { policyRevision: { revisionId: id('3908') } } as never,
+      }))).toBe('privacy_not_configured');
+    });
+
+    it('resumes only once a protected revision it can enforce is accepted', async () => {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+      const stateStore = new MemoryRuntimeStateStore();
+      const before = await runner(stateStore, [activeDeployment(privateKey, [], block)], publicKey, { privacy: privacy(digest('B')) });
+      expect(codeOf(() => before.privacyPolicy())).toBe('privacy_not_configured');
+      await before.stop();
+
+      const after = await runner(stateStore, [activeDeployment(privateKey, [], block)], publicKey, { privacy: privacy(digest('A')) });
+      expect(after.accepted()?.policyRevision.privacy).toEqual(block);
+      expect(after.privacyPolicy()).toMatchObject({ source: 'platform', profile: 'protected-text/v1' });
+    });
+
+    it('a candidate with an invalid signature does not lock the runner', async () => {
+      const { publicKey } = generateKeyPairSync('ed25519');
+      const attacker = generateKeyPairSync('ed25519');
+      const stateStore = new MemoryRuntimeStateStore();
+      const glirastes = await runner(stateStore, [activeDeployment(attacker.privateKey, [], block)], publicKey);
+      expect(glirastes.accepted()).toBeUndefined();
+      expect((await stateStore.load())?.privacyFloor ?? null).toBeNull();
+      expect((await stateStore.load())?.privacyRefusedDeploymentIds ?? []).toEqual([]);
+      // Without privacy configured, nothing verified keeps the local code running.
+      expect(codeOf(() => glirastes.privacyPolicy())).toBeUndefined();
+    });
+  });
+
+  it('refuses a protected block on a connected runtime without privacy', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const http = platform({ deployments: [activeDeployment(privateKey, [], block)], publicKey });
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError: vi.fn(),
+    }));
+    await glirastes.ready();
+    expect(glirastes.accepted()).toBeUndefined();
+    // The refused revision blocks traffic; nothing runs unprotected on the local code.
+    expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_not_configured');
+    const turn = await glirastes.chatTurn(principal);
+    expect(codeOf(() => turn.managedRuntime.privacyGate({
+      request: new Request('https://app.example/api/chat'),
+      snapshot: { policyRevision: { revisionId: id('3908') } } as never,
+    }))).toBe('privacy_not_configured');
+    const beat = http.calls.find(({ url }) => url.includes('/heartbeat'));
+    expect(JSON.parse(String(beat?.init.body))).toMatchObject({
+      technicalMetadata: { privacy: { state: 'refused', reasons: ['store_missing'] } },
+    });
   });
 });

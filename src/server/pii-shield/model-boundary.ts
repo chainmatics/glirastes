@@ -57,6 +57,15 @@ export interface PrivacyBoundaryOptions {
   /** Content-free notice of each stop, e.g. for metrics. */
   onBlocked?: (code: string) => void;
   /**
+   * Runs before every model call of the turn (each step, retry and the
+   * classifier), before anything is protected or sent. Throwing a
+   * `PrivacyError` stops the call, e.g. `privacy_policy_revoked` once the
+   * turn's policy revision was revoked between steps.
+   */
+  beforeModelCall?: () => void | Promise<void>;
+  /** Content-free notice of each model call that passed the boundary. */
+  onProtected?: () => void;
+  /**
    * The caller builds the system and user messages from text this session
    * already protected, with the pseudonym-collision check of new input done
    * there (the intent classifier). The boundary still masks anything left
@@ -363,6 +372,7 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
 
   async function transformParams(params: LanguageModelV3CallOptions): Promise<LanguageModelV3CallOptions> {
     try {
+      await options.beforeModelCall?.();
       checkProviderOptions(params.providerOptions, allowlist);
       // Tool results of the whole prompt register their identities before any
       // message is masked, so a name from a later result is masked everywhere.
@@ -415,6 +425,11 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
       const stopSequences = params.stopSequences
         ? await Promise.all(params.stopSequences.map((s) => session.pseudonymizeText(s)))
         : undefined;
+      try {
+        options.onProtected?.();
+      } catch {
+        // A metrics sink never changes the decision.
+      }
       return {
         ...params,
         prompt,

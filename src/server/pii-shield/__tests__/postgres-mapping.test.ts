@@ -174,6 +174,77 @@ function storeContract(name: string, make: (lifetime: MappingLifetime) => Promis
       c.advance(5_000);
       expect(await store.purgeExpired(c.now())).toBeGreaterThanOrEqual(1);
     });
+
+    describe('lifetime per open (effective policy of the turn)', () => {
+      it('a shorter absolute lifetime caps the running generation from its start', async () => {
+        const c = clock();
+        const store = await make({ idleTtlMs: 60_000, absoluteTtlMs: 100_000, now: c.now });
+        const scope = testScope();
+        const g = (await store.load(scope)).generation;
+        await store.append(scope, g, [entry('a@example.invalid', 'p1@example.invalid')]);
+        c.advance(30_000);
+        // The policy now allows 20 s in total: the generation started 30 s ago.
+        const renewed = await store.load(scope, { absoluteTtlMs: 20_000 });
+        expect(renewed.origin).toBe('renewed');
+        expect(renewed.generation).not.toBe(g);
+        expect(renewed.entries).toEqual([]);
+        await expect(store.append(scope, g, [entry('x@example.invalid', 'p9@example.invalid')]))
+          .rejects.toMatchObject({ code: 'privacy_mapping_conflict' });
+      });
+
+      it('a shortened cap stays when a later turn asks for more', async () => {
+        const c = clock();
+        const store = await make({ idleTtlMs: 60_000, absoluteTtlMs: 100_000, now: c.now });
+        const scope = testScope();
+        const g = (await store.load(scope)).generation;
+        c.advance(5_000);
+        expect((await store.load(scope, { absoluteTtlMs: 20_000 })).generation).toBe(g);
+        c.advance(5_000);
+        // Back to the store default: the stored expiry (start + 20 s) is not extended.
+        expect((await store.load(scope)).generation).toBe(g);
+        c.advance(10_001);
+        expect((await store.load(scope)).origin).toBe('renewed');
+      });
+
+      it('a longer lifetime than the store allows is never applied', async () => {
+        const c = clock();
+        const store = await make({ idleTtlMs: 1_000, absoluteTtlMs: 10_000, now: c.now });
+        const scope = testScope();
+        const g = (await store.load(scope, { idleTtlMs: 50_000, absoluteTtlMs: 500_000 })).generation;
+        c.advance(1_001);
+        expect((await store.load(scope, { idleTtlMs: 50_000 })).generation).not.toBe(g);
+      });
+
+      it('a shorter idle lifetime applies to load and append', async () => {
+        const c = clock();
+        const store = await make({ idleTtlMs: 60_000, absoluteTtlMs: 100_000, now: c.now });
+        const scope = testScope();
+        const g = (await store.load(scope, { idleTtlMs: 2_000 })).generation;
+        c.advance(1_500);
+        await store.append(scope, g, [entry('a@example.invalid', 'p1@example.invalid')], { idleTtlMs: 2_000 });
+        c.advance(1_500);
+        // Idle is sliding: the append 1.5 s ago kept it alive.
+        expect((await store.load(scope, { idleTtlMs: 2_000 })).generation).toBe(g);
+        c.advance(2_001);
+        expect((await store.load(scope, { idleTtlMs: 2_000 })).origin).toBe('renewed');
+      });
+
+      it('a shortened generation is purged at its capped expiry', async () => {
+        const c = clock();
+        const store = await make({ idleTtlMs: 60_000, absoluteTtlMs: 100_000, now: c.now });
+        const scope = testScope();
+        await store.load(scope, { absoluteTtlMs: 3_000 });
+        c.advance(3_001);
+        expect(await store.purgeExpired(c.now())).toBeGreaterThanOrEqual(1);
+        expect((await store.load(scope)).origin).toBe('created');
+      });
+
+      it('refuses a lifetime that is not a positive whole number of milliseconds', async () => {
+        const store = await make({});
+        await expect(store.load(testScope(), { idleTtlMs: 0 })).rejects.toBeInstanceOf(RangeError);
+        await expect(store.load(testScope(), { absoluteTtlMs: Number.NaN })).rejects.toBeInstanceOf(RangeError);
+      });
+    });
   });
 }
 
@@ -237,6 +308,18 @@ describe.skipIf(!url)('postgres mapping store (isolated test database)', () => {
   it('initialize is idempotent', async () => {
     await pg().initialize();
     await pg().initialize();
+  });
+
+  it('a row from before per-turn lifetimes caps from its creation time', async () => {
+    const c = clock();
+    const store = pg({ idleTtlMs: 60_000, absoluteTtlMs: 100_000, now: c.now });
+    const scope = testScope();
+    const g = (await store.load(scope)).generation;
+    await client.unsafe('UPDATE glirastes_privacy_mapping_scopes SET generation_started_at = NULL WHERE scope_key = $1', [scopeKeyOf(scope)]);
+    c.advance(5_000);
+    expect((await store.load(scope, { absoluteTtlMs: 20_000 })).generation).toBe(g);
+    c.advance(15_001);
+    expect((await store.load(scope, { absoluteTtlMs: 20_000 })).origin).toBe('renewed');
   });
 
   it('stores no plaintext originals or pseudonyms', async () => {

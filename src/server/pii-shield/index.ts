@@ -43,6 +43,7 @@ export {
   type MappingEntry as PrivacyMappingEntry,
   type MappingSnapshot,
   type MappingLifetime,
+  type OpenLifetime,
   type PrivacyKeyring,
   type PrivacyMappingStore,
 } from './mapping-store.js';
