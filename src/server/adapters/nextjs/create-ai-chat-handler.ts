@@ -1699,7 +1699,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const toolOptions: ToolToAiToolOptions = {
         uiActionSchema,
         onError: reportToolError,
-        ...(privacy ? { contentFreeErrors: true, protectedResults: true } : {}),
+        ...(privacy ? { contentFreeErrors: true } : {}),
+        ...(privacyTurn ? { protectedResults: true } : {}),
         onAudit,
         sessionId,
         traceId: sessionId || undefined,
