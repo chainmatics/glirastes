@@ -30,6 +30,29 @@ function serializedCalls(calls: unknown[]): string {
 const SYSTEM = `Du hilfst ${CANARY.name} (Nutzer-ID ${CANARY.userId}, ${CANARY.email}).`;
 
 describe('policy hooks', () => {
+  it.each(['generate', 'stream'] as const)('checks revocation immediately before %s dispatch after async protection', async (mode) => {
+    const { PrivacyError } = await import('../detection-result.js');
+    const session = await memoryShield().open(testScope());
+    let revoked = false;
+    const protect = session.pseudonymizeText.bind(session);
+    vi.spyOn(session, 'pseudonymizeText').mockImplementation(async (...args) => {
+      const value = await protect(...args);
+      revoked = true;
+      return value;
+    });
+    const onBlocked = vi.fn();
+    const boundary = createPrivacyBoundary({ session, onBlocked, beforeModelCall: () => {
+      if (revoked) throw new PrivacyError('privacy_policy_revoked');
+    } });
+    const { model, calls } = captureModel();
+    const wrapped = boundary.wrapModel(model);
+    const params = { prompt: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello' }] }] };
+    await expect(mode === 'generate' ? wrapped.doGenerate(params) : wrapped.doStream(params))
+      .rejects.toMatchObject({ code: 'privacy_policy_revoked' });
+    expect(calls).toHaveLength(0);
+    expect(onBlocked).toHaveBeenCalledExactlyOnceWith('privacy_policy_revoked');
+  });
+
   it('a revocation between model steps stops the next step before anything is sent', async () => {
     let revoked = false;
     const onBlocked = vi.fn();

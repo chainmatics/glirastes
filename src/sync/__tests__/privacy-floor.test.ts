@@ -112,6 +112,14 @@ describe('privacy floor (K2)', () => {
     expect(after.state.stable?.deploymentId).toBe(id(103));
   });
 
+  it('refuses a revoked off even after the floor was already lowered', async () => {
+    const sync = manager();
+    await sync.apply(bundle([deployment(1, 5, PROTECTED)]));
+    await sync.apply(bundle([deployment(2, 6, OFF)]));
+    const result = await sync.apply(bundle([deployment(2, 6, OFF)], [revocationOf(id(202))]));
+    expect(result.privacyDowngradeDeploymentIds).toEqual([id(102)]);
+  });
+
   it('refuses a replayed older off after protection was enabled again', async () => {
     const sync = manager();
     await sync.apply(bundle([deployment(1, 5, OFF)]));

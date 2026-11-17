@@ -63,13 +63,14 @@ function lowersPrivacyFloor(
   revisions: MaterializedDeploymentRevisions,
   revocations: ReadonlyArray<SecurityRevocation>,
 ): boolean {
-  if (floor?.profile !== 'protected-text/v1') return false;
   const policy = revisions.policyRevision;
   const block = policy.privacy;
+  const revoked = revocations.some((revocation) => revocation.policyRevisionIds.includes(policy.revisionId));
+  if (block?.profile === 'off' && revoked) return true;
+  if (floor?.profile !== 'protected-text/v1') return false;
   if (!block) return true;
   if (block.profile !== 'off') return false;
-  const revoked = revocations.some((revocation) => revocation.policyRevisionIds.includes(policy.revisionId));
-  return revoked || policy.revision <= floor.policyRevision;
+  return policy.revision <= floor.policyRevision;
 }
 
 /**

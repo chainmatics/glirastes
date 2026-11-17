@@ -793,11 +793,6 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     // keep running unprotected (K3).
     if (store.privacyRefused()) throw new PrivacyError('privacy_not_configured');
     if (store.privacyFloorUnmet(pinned)) throw new PrivacyError('privacy_not_configured');
-    if (!options.privacy) {
-      // The handler refuses a protected block without privacy configured.
-      if (isProtectedPolicy(pinned?.privacy)) throw new PrivacyError('privacy_not_configured');
-      return;
-    }
     assertPrivacyTurn({
       pinned,
       privacy: options.privacy,

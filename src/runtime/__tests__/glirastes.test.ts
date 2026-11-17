@@ -11,6 +11,7 @@ import type {
   Principal,
   RuntimeDeploymentBundle,
   RuntimeRevisionEnvelope,
+  SecurityRevocation,
 } from '../../contracts/index.js';
 import { endpointToolToTool } from '../../server/core/index.js';
 import { canonicalRuntimeJson } from '../../sync/signature-verifier.js';
@@ -179,6 +180,7 @@ function platform(options: {
   lookup?: Array<() => Response>;
   deployments?: RuntimeDeploymentBundle[];
   publicKey?: KeyObject;
+  revocations?: SecurityRevocation[];
 } = {}) {
   const lookups = [...options.lookup ?? []];
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -201,7 +203,7 @@ function platform(options: {
         cursor: '2026-07-29T00:02:00.000Z',
         activeSnapshotComplete: true,
         deployments: options.deployments ?? [],
-        revocations: [],
+        revocations: options.revocations ?? [],
       });
     }
     if (url.includes('/metrics/events')) return new Response(null, { status: 202 });
@@ -845,6 +847,32 @@ describe('createGlirastes with a privacy policy', () => {
       request: new Request('https://app.example/api/chat'),
       snapshot: { policyRevision: { revisionId: id('3908') } } as never,
     }))).toBe('privacy_policy_unavailable');
+  });
+
+  it.each([false, true])('blocks chat and speech when accepted off is revoked (local infrastructure: %s)', async (configured) => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const revocations: SecurityRevocation[] = [];
+    const http = platform({ deployments: [activeDeployment(privateKey, [], { schemaVersion: 1, profile: 'off' })], publicKey, revocations });
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 10, onError: vi.fn(), stateStore: () => new SharedDurableTestStore(),
+      ...(configured ? { privacy: { ...privacy(), local: { required: false } } } : {}),
+    }));
+    await glirastes.ready();
+    expect(glirastes.speechPolicy()).toBe('off');
+    const pinned = glirastes.accepted()!.policyRevision;
+    const turn = await glirastes.chatTurn(principal);
+    const unsigned = {
+      revocationId: id('3998'), environmentId: ENVIRONMENT_ID, effectiveAt: '2026-07-29T00:02:00.000Z',
+      reasonCode: 'privacy-off-revoked', toolIds: [], agentRevisionIds: [], policyRevisionIds: [pinned.revisionId],
+    };
+    revocations.push({ ...unsigned, signature: { algorithm: 'Ed25519', keyId: 'runtime-key',
+      value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url') } });
+    await vi.waitFor(() => expect(glirastes.revocations()).toHaveLength(1));
+    expect(codeOf(() => glirastes.speechPolicy())).toBe('privacy_policy_revoked');
+    expect(codeOf(() => turn.managedRuntime.privacyGate({
+      request: new Request('https://app.example/api/chat'), snapshot: { policyRevision: pinned } as never,
+    }))).toBe('privacy_policy_revoked');
   });
 
   it('enforces the signed block of the accepted deployment and reports it', async () => {

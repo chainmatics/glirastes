@@ -66,6 +66,11 @@ export function privacyRuntimeStatus(
     policyRevisionId: signed ? pinned!.revisionId : null,
     publishedPolicyDigest: block ? privacyPolicyDigest(block) : null,
   };
+  // Revocation invalidates permission to run unprotected too. Check before
+  // any off/no-infrastructure early return.
+  if (pinned && revocations.some((revocation) => revocation.policyRevisionIds.includes(pinned.revisionId))) {
+    return { ...base, state: 'refused', effectivePolicyDigest: null, localRestrictions: [], reasons: ['policy_revoked'] };
+  }
   if (!privacy) {
     return isProtectedPolicy(block)
       ? { ...base, state: 'refused', effectivePolicyDigest: null, localRestrictions: [], reasons: ['store_missing'] }
@@ -77,9 +82,6 @@ export function privacyRuntimeStatus(
   if (effective.source === 'platform') {
     if (!privacy.providers || (effective.providers.allowed?.length ?? 0) === 0) reasons.push('provider_binding_missing');
     if (effective.providers.defaultEntryId === null) reasons.push('provider_default_unusable');
-  }
-  if (pinned && revocations.some((revocation) => revocation.policyRevisionIds.includes(pinned.revisionId))) {
-    reasons.push('policy_revoked');
   }
   if (acceptedStateDurable === false && isProtectedPolicy(block)) reasons.push('accepted_state_missing');
   return {

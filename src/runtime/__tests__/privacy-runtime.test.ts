@@ -81,6 +81,13 @@ describe('privacyRuntimeStatus', () => {
     expect(status).toMatchObject({ state: 'refused', reasons: ['provider_default_unusable'], localRestrictions: ['local_providers_narrower'] });
   });
 
+  it.each([undefined, privacy(undefined, { required: false })])('refuses revoked off even without local protection (%s)', (local) => {
+    const pinned = { revisionId: REVISION, privacy: { schemaVersion: 1, profile: 'off' } as PrivacyPolicyBlock };
+    expect(privacyRuntimeStatus(pinned, local, revoked)).toMatchObject({ state: 'refused', reasons: ['policy_revoked'] });
+    expect(codeOf(() => assertPrivacyTurn({ pinned, privacy: local, revocations: revoked, awaitingPolicy: false })))
+      .toBe('privacy_policy_revoked');
+  });
+
   it('refuses a revoked pinned revision', () => {
     expect(privacyRuntimeStatus({ revisionId: REVISION, privacy: block }, privacy(), revoked))
       .toMatchObject({ state: 'refused', reasons: ['policy_revoked'] });

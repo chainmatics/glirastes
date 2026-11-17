@@ -457,10 +457,23 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
     }
   }
 
+  async function assertDispatchAllowed(): Promise<void> {
+    try {
+      // Protection awaits stores/detectors. A loaded revocation during that
+      // work must stop this dispatch, not only the next model step.
+      await options.beforeModelCall?.();
+    } catch (error) {
+      const code = isPrivacyError(error) ? error.code : 'privacy_unsupported_content';
+      blocked(code);
+      throw isPrivacyError(error) ? error : new PrivacyError(code);
+    }
+  }
+
   const middleware: LanguageModelV3Middleware = {
     specificationVersion: 'v3',
     transformParams: async ({ params }) => transformParams(params),
     wrapGenerate: async ({ doGenerate }) => {
+      await assertDispatchAllowed();
       const result = await doGenerate();
       for (const part of result.content as LanguageModelV3Content[]) {
         if (part.type === 'text' || part.type === 'reasoning') {
@@ -474,6 +487,7 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
       return result;
     },
     wrapStream: async ({ doStream }) => {
+      await assertDispatchAllowed();
       const result = await doStream();
       // Deltas are held per part and released only after the whole part
       // passed the leak check, so no consumer ever sees a leaking fragment.
