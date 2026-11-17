@@ -29,6 +29,20 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pii
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: pii_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pii"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -78,7 +92,13 @@ jobs:
       - name: Install the NestJS fixture API
         run: bun install --frozen-lockfile --cwd examples/react-nest-separate/api
 
+      - name: Model egress inventory
+        run: bun run check:egress
+
       - name: Test
+        env:
+          GLIRASTES_TEST_POSTGRES_URL: postgres://pii@127.0.0.1:5432/pii_test
+          GLIRASTES_REQUIRE_POSTGRES: '1'
         run: bun run test
 
       # Auth is via GitHub OIDC (Trusted Publishing) — no token needed.
