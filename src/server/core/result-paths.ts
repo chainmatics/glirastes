@@ -119,7 +119,8 @@ export interface Projection {
 
 /**
  * Projects `root` onto `paths`. The window (`offset`, `limit`) applies to the
- * outermost array of each selected path; arrays below it are kept whole.
+ * outermost arrays of each selected path (also those inside a selected
+ * object); arrays inside a paged array's entries are kept whole.
  * Elements an inner path does not reach stay as `{}` so positions line up.
  */
 export function projectResult(
@@ -155,11 +156,20 @@ export function projectResult(
     return entries;
   };
 
+  /** A selected subtree not yet inside a paged array: its outermost arrays are paged. */
+  const paged = (value: unknown, route: PathStep[]): unknown => {
+    if (Array.isArray(value)) return windowed(value, route);
+    if (!isPlainObject(value)) return value;
+    const output: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) setOwn(output, key, paged(value[key], [...route, { kind: 'key', key }]));
+    return output;
+  };
+
   const visit = (value: unknown, node: TrieNode, route: PathStep[], sliced: boolean): unknown => {
     if (node.ends.length > 0) {
       for (const index of node.ends) matched.add(index);
-      // A path that selects an array pages through it.
-      return Array.isArray(value) && !sliced ? windowed(value, route) : value;
+      // A path that selects an array, or an object holding arrays, pages through them.
+      return sliced ? value : paged(value, route);
     }
     if (Array.isArray(value)) {
       if (!node.each) return undefined;

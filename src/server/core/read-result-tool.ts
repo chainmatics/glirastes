@@ -39,21 +39,25 @@ export type ReadResultInput = z.infer<typeof ReadResultInputSchema>;
 export interface ReadResultMarker {
   id: string;
   offset: number;
-  /** Entries of the paged array in this answer. */
+  /**
+   * Entries of the paged array with the most entries in this answer. One
+   * window (`offset`, `limit`) applies to every paged array, so this array
+   * decides whether more pages follow.
+   */
   returned?: number;
-  /** Entries the paged array has. */
+  /** Entries the paged array with the most entries has. */
   total?: number;
-  /** The `offset` of the next page, when there are further entries. */
+  /** The `offset` of the next page, while any paged array has further entries. */
   nextOffset?: number;
-  /** Every paged array with its length (at most five, paths shortened), when more than one was paged. */
-  arrays?: Record<string, number>;
+  /** Every paged array (at most five, paths shortened), when more than one was paged. */
+  arrays?: Record<string, { returned: number; total: number }>;
   /**
    * Positions (1-based, at most ten) of requested paths that select nothing.
    * Never the paths themselves: the answer is not shielded again, so nothing
    * the model wrote comes back verbatim.
    */
   unknownFields?: number[];
-  /** How many requested paths select nothing, when more than ten. */
+  /** How many requested paths select nothing, when more than ten or when `unknownFields` had to be left out. */
   unknownCount?: number;
 }
 
@@ -161,7 +165,10 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
   /** `detailed`: with the optional marker parts (`arrays`, `unknownFields`); they go first when space runs out. */
   const answer = (limit: number | undefined, detailed: boolean) => {
     const projection = projectResult(source, known, { offset, ...(limit !== undefined ? { limit } : {}) });
-    const primary = projection.slices[0];
+    // The array with the most entries decides the paging: with one window for all, it has more iff any has.
+    const primary = projection.slices.reduce<typeof projection.slices[number] | undefined>(
+      (best, slice) => (!best || slice.total > best.total ? slice : best), undefined,
+    );
     const marker: ReadResultMarker = {
       id: handle.id,
       offset,
@@ -170,11 +177,12 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
       ...(detailed && projection.slices.length > 1
         ? {
             arrays: Object.fromEntries(projection.slices.slice(0, MAX_LISTED_ARRAYS)
-              .map((slice) => [listedPath(slice.path), slice.total])),
+              .map((slice) => [listedPath(slice.path), { returned: slice.returned, total: slice.total }])),
           }
         : {}),
       ...(detailed && unknown.length > 0 ? { unknownFields: unknown.slice(0, MAX_LISTED_UNKNOWN) } : {}),
-      ...(detailed && unknown.length > MAX_LISTED_UNKNOWN ? { unknownCount: unknown.length } : {}),
+      // Without the positions, the count still says that some paths matched nothing.
+      ...(unknown.length > 0 && (!detailed || unknown.length > MAX_LISTED_UNKNOWN) ? { unknownCount: unknown.length } : {}),
     };
     const output: Record<string, unknown> = { ...projection.value };
     setOwn(output, '_result', marker);
@@ -208,11 +216,28 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
     nextStep: `Select fewer fields with ${READ_RESULT_TOOL_NAME} (fields), or read the next entries with a higher offset.`,
   }) as Record<string, unknown>;
   const output: Record<string, unknown> = { ...cut };
+  // The cut saw a one-entry page; it must not read as the whole array.
+  const marker = output._truncated as { field?: string; showing?: number; total?: number; hint?: string } | undefined;
+  if (marker && single.primary && typeof marker.total === 'number' && marker.field === single.primary.path) {
+    const { returned, total } = single.primary;
+    output._truncated = {
+      ...marker,
+      showing: returned,
+      total,
+      ...(typeof marker.hint === 'string'
+        ? { hint: marker.hint.replace(/showing \d+ of \d+ entries/, `showing ${returned} of ${total} entries`) }
+        : {}),
+    };
+  }
   setOwn(output, '_result', single.marker);
   if (fits(output)) return output;
   // The last resort always fits the smallest limit: the marker and a short instruction.
   return {
-    _result: { id: handle.id, offset, ...(single.primary ? { total: single.primary.total } : {}) },
+    _result: {
+      id: handle.id, offset,
+      ...(single.primary ? { total: single.primary.total } : {}),
+      ...(unknown.length > 0 ? { unknownCount: unknown.length } : {}),
+    },
     hint: 'The selection does not fit the size limit. Select fewer fields or deeper paths.',
   };
 }

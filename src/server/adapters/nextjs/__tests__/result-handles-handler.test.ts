@@ -483,8 +483,14 @@ describe('review fixes', () => {
       },
     };
 
-    it.each([['legacy', false], ['managed', true]] as const)('never returns an original for pseudonyms as fields or id (%s)', async (_label, isManaged) => {
+    it.each([
+      ['legacy', false, false],
+      ['pipeline', false, true],
+      ['managed legacy', true, false],
+      ['managed pipeline', true, true],
+    ] as const)('never returns an original for pseudonyms as fields or id (%s)', async (_label, isManaged, withPipeline) => {
       const shield = createPiiShield({ locale: 'en-US', detector });
+      const rehydrate = vi.spyOn(shield, 'rehydrateArgs');
       const lookup = vi.fn(async (input: { name: string }) => ({ ok: input.name === NAME }));
       const registry: ToolRegistry = {
         tasks_list: defineTool({
@@ -496,9 +502,23 @@ describe('review fixes', () => {
         }),
         customer_lookup: defineTool({ id: 'customers.lookup', description: 'Look up.', inputSchema: z.object({ name: z.string() }), execute: lookup }),
       };
-      const turn = harness({ tools: registry, piiShield: shield, ...(isManaged ? managed().config : {}), ...(isManaged ? { authorizedToolsOnly: false } : {}) });
+      const turn = harness({
+        tools: registry, piiShield: shield,
+        ...(isManaged ? { ...managed().config, authorizedToolsOnly: false } : {}),
+        ...(withPipeline
+          ? {
+              pipeline: {
+                process: async (input: string) => ({
+                  model: { modelId: 'm' }, tools: [], sanitizedInput: input, intent: { intent: 'x', confidence: 1 },
+                  module: null, followupsEnabled: false,
+                }),
+              },
+            }
+          : {}),
+      });
       await turn.run(async (call) => {
         const overview = await call('tasks_list', {}) as Overview & { tasks: Array<{ owner: string; mail: string }> };
+        const rehydratedBefore = rehydrate.mock.calls.length;
         const alias = overview.tasks[0]!.owner;
         const mailAlias = overview.tasks[0]!.mail;
         expect(alias).not.toBe(NAME);
@@ -517,9 +537,12 @@ describe('review fixes', () => {
           if (index !== 1) expect(text).not.toContain(alias);
         });
         expect((answers[0]!._result as { unknownFields: number[] }).unknownFields).toEqual([1, 2, 3, 4]);
+        // The handler's own read_result never has its arguments rehydrated.
+        expect(rehydrate.mock.calls.length).toBe(rehydratedBefore);
         // A normal domain tool in the same turn still gets the original.
         expect(await call('customer_lookup', { name: alias })).toEqual({ ok: true });
         expect(lookup).toHaveBeenCalledWith({ name: NAME }, expect.anything());
+        expect(rehydrate.mock.calls.length).toBe(rehydratedBefore + 1);
       });
     });
   });
@@ -646,5 +669,24 @@ describe('review fixes', () => {
     expect(model.doStreamCalls).toHaveLength(3);
     expect(model.doStreamCalls[2]!.tools ?? []).toHaveLength(0);
     expect(wire).toContain('Stopped at runtime budget: maxToolCalls.');
+  });
+});
+
+describe('read_result arguments and the async rehydration path', () => {
+  it('never calls rehydrateArgsAsync for the handler\'s own read_result', async () => {
+    const shield = createPiiShield({ locale: 'en-US', detector: { detect: () => [] } });
+    const rehydrateAsync = vi.fn(async (args: Record<string, unknown>) => args);
+    shield.rehydrateArgsAsync = rehydrateAsync;
+    const { registry } = taskTools();
+    const turn = harness({ tools: registry, piiShield: shield });
+    await turn.run(async (call) => {
+      const overview = await call('tasks_list', {}) as Overview;
+      const before = rehydrateAsync.mock.calls.length;
+      await call('read_result', { resultId: overview._result.id, fields: ['tasks[].id'] });
+      await call('read_result', { resultId: 'ro_00000000' });
+      expect(rehydrateAsync.mock.calls.length).toBe(before);
+      await call('tasks_list', {});
+      expect(rehydrateAsync.mock.calls.length).toBe(before + 1);
+    });
   });
 });

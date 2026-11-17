@@ -527,3 +527,79 @@ describe('edge cases of stored results', () => {
     expect(store.isIssued(result)).toBe(false);
   });
 });
+
+describe('read_result paging across several arrays', () => {
+  const stored = () => ({
+    warnings: ['note'],
+    data: Array.from({ length: 20 }, (_, index) => ({ id: `d${index}`, text: 'x'.repeat(1_200) })),
+    meta: { tags: Array.from({ length: 7 }, (_, index) => `tag${index}`) },
+  });
+
+  async function walk(fields: string[] | undefined, limit: number | undefined, maxChars = 16_000) {
+    const store = createResultStore();
+    const overview = await store.put({ toolName: 't', readOnly: true, maxChars, value: stored() }) as Overview;
+    const tool = createReadResultTool(store);
+    const seen = { warnings: [] as unknown[], data: [] as string[], tags: [] as unknown[] };
+    let offset: number | undefined = 0;
+    let pages = 0;
+    while (offset !== undefined) {
+      const answer = await tool.execute({
+        resultId: overview._result.id, offset, ...(fields ? { fields } : {}), ...(limit !== undefined ? { limit } : {}),
+      }, {} as ToolContext) as Record<string, unknown> & { _result: { total: number; nextOffset?: number; returned: number } };
+      expect(JSON.stringify(answer).length).toBeLessThanOrEqual(maxChars);
+      expect(answer._result.total).toBe(20);
+      seen.warnings.push(...((answer.warnings as unknown[] | undefined) ?? []));
+      seen.data.push(...((answer.data as Array<{ id: string }> | undefined) ?? []).map((entry) => entry.id));
+      seen.tags.push(...(((answer.meta as { tags?: unknown[] } | undefined)?.tags) ?? []));
+      offset = answer._result.nextOffset;
+      pages += 1;
+      expect(pages).toBeLessThan(50);
+    }
+    return { seen, pages };
+  }
+
+  it.each([
+    ['without fields, limit 1', undefined, 1],
+    ['without fields, limit 3', undefined, 3],
+    ['without fields or limit (bounded by size)', undefined, undefined],
+    ['with fields, limit 1', ['warnings', 'data[].id', 'meta.tags'], 1],
+    ['with fields, limit 4', ['data[].id', 'warnings', 'meta.tags'], 4],
+  ] as const)('delivers every entry of every array exactly once (%s)', async (_label, fields, limit) => {
+    const { seen } = await walk(fields as string[] | undefined, limit);
+    expect(seen.data).toEqual(Array.from({ length: 20 }, (_, index) => `d${index}`));
+    expect(seen.warnings).toEqual(['note']);
+    expect(seen.tags).toEqual(Array.from({ length: 7 }, (_, index) => `tag${index}`));
+  });
+
+  it('reports the array with the most entries and every paged array', async () => {
+    const store = createResultStore();
+    const overview = await store.put({ toolName: 't', readOnly: true, maxChars: 16_000, value: stored() }) as Overview;
+    const answer = await createReadResultTool(store).execute({ resultId: overview._result.id, limit: 1 }, {} as ToolContext) as Record<string, unknown>;
+    expect(answer._result).toMatchObject({
+      returned: 1, total: 20, nextOffset: 1,
+      arrays: { warnings: { returned: 1, total: 1 }, data: { returned: 1, total: 20 }, 'meta.tags': { returned: 1, total: 7 } },
+    });
+  });
+
+  it('does not let a cut single entry read as the whole array', async () => {
+    const store = createResultStore();
+    const value = { data: Array.from({ length: 2 }, (_, index) => ({ id: index, body: 'b'.repeat(30_000) })) };
+    const overview = await store.put({ toolName: 't', readOnly: true, maxChars: 16_000, value }) as Overview;
+    const answer = await createReadResultTool(store).execute({ resultId: overview._result.id, fields: ['data[].body'] }, {} as ToolContext) as Record<string, unknown>;
+    expect(JSON.stringify(answer).length).toBeLessThanOrEqual(16_000);
+    expect(answer._result).toMatchObject({ returned: 1, total: 2, nextOffset: 1 });
+    expect(answer._truncated).toMatchObject({ showing: 1, total: 2 });
+    expect(String((answer._truncated as { hint: string }).hint)).toContain('showing 1 of 2 entries');
+  });
+
+  it('keeps unknownCount when the positions do not fit', async () => {
+    const store = createResultStore();
+    const value = { data: Array.from({ length: 2 }, (_, index) => ({ id: index, body: 'b'.repeat(30_000) })) };
+    const overview = await store.put({ toolName: 't', readOnly: true, maxChars: 1_000, value }) as Overview;
+    const answer = await createReadResultTool(store).execute({
+      resultId: overview._result.id, fields: ['data[].body', 'nope1', 'nope2'],
+    }, {} as ToolContext) as Record<string, unknown>;
+    expect(JSON.stringify(answer).length).toBeLessThanOrEqual(1_000);
+    expect((answer._result as { unknownCount?: number }).unknownCount).toBe(2);
+  });
+});
