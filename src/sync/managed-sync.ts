@@ -78,6 +78,11 @@ export function createManagedRuntimeSync(options: {
    */
   privacyStatus?: (revisions: MaterializedDeploymentRevisions) => PrivacyRuntimeStatus;
   /**
+   * This runner enforces a protected policy and keeps its accepted state in
+   * a durable store; registration then claims `privacyPolicyVersions`.
+   */
+  privacyCapable?: boolean;
+  /**
    * The committed setup artifact of the running code, e.g. the generated
    * module's `setupArtifact`. Its discovery digest goes into every runner
    * registration, and `reportCapabilities()` uploads it as the capability
@@ -183,6 +188,7 @@ export function createManagedRuntimeSync(options: {
     ...(options.readOnly ? { readOnly: true } : {}),
     ...(report ? { discoveryDigest: report.discoveryDigest, setupRunId: report.artifact.runId } : {}),
     policyRelaxations: report !== undefined,
+    ...(options.privacyCapable ? { privacyCapable: true } : {}),
     manager,
     fetchImpl: options.fetchImpl,
     push: options.push === false

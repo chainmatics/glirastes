@@ -48,12 +48,16 @@ export function effectivePrivacyPolicyFor(
  * The content-free status a runner reports for one pinned policy revision.
  * A protected block is `refused` when this runtime has no privacy
  * infrastructure, no approved provider binding matches, the approved
- * default is unusable, or the revision is revoked.
+ * default is unusable, the revision is revoked, or (managed, with
+ * `acceptedStateDurable: false`) the accepted state and its privacy floor
+ * would not survive a restart.
  */
 export function privacyRuntimeStatus(
   pinned: PinnedPrivacyPolicy | undefined,
   privacy: GlirastesPrivacyOptions | undefined,
   revocations: ReadonlyArray<SecurityRevocation> = [],
+  /** Managed runtime: whether a durable state store holds the accepted state. Unset outside the managed path. */
+  acceptedStateDurable?: boolean,
 ): PrivacyRuntimeStatus {
   const block = pinned?.privacy;
   const signed = Boolean(block && pinned);
@@ -77,6 +81,7 @@ export function privacyRuntimeStatus(
   if (pinned && revocations.some((revocation) => revocation.policyRevisionIds.includes(pinned.revisionId))) {
     reasons.push('policy_revoked');
   }
+  if (acceptedStateDurable === false && isProtectedPolicy(block)) reasons.push('accepted_state_missing');
   return {
     ...base,
     state: reasons.length > 0 ? 'refused' : 'enforced',
@@ -100,9 +105,11 @@ export function assertPrivacyTurn(input: {
   revocations: ReadonlyArray<SecurityRevocation>;
   /** Connected to an environment whose policy decides, but nothing verified yet. */
   awaitingPolicy: boolean;
+  /** Managed runtime: whether a durable state store holds the accepted state. */
+  acceptedStateDurable?: boolean;
 }): void {
   if (input.privacy && input.awaitingPolicy) throw new PrivacyError('privacy_policy_unavailable');
-  const status = privacyRuntimeStatus(input.pinned, input.privacy, input.revocations);
+  const status = privacyRuntimeStatus(input.pinned, input.privacy, input.revocations, input.acceptedStateDurable);
   if (status.reasons.includes('policy_revoked')) throw new PrivacyError('privacy_policy_revoked');
   if (status.state === 'refused') throw new PrivacyError('privacy_not_configured');
 }

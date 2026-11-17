@@ -33,15 +33,16 @@ export interface RecordingTranscriptionHandlerConfig {
    */
   localOnly?: boolean;
   /**
-   * The speech part of the effective privacy policy, read per request, e.g.
-   * `() => glirastes.privacyPolicy()?.speech ?? null`. A protected policy
+   * The speech part of the effective privacy policy, read per request:
+   * `() => glirastes.speechPolicy()` on the managed path. A protected policy
    * forces `localOnly` and caps the duration at the shorter of both limits.
-   * `null`/`undefined` means the profile is off and the options above apply.
-   * When it throws (managed runtime without a verified, unrevoked policy) or
-   * returns anything malformed, the handler answers 503: there is no
-   * fallback to local or cloud defaults.
+   * Only an explicit `'off'` means no protected policy applies, and the
+   * options above apply. `null`, `undefined`, anything malformed or a throw
+   * (managed runtime without a verified, unrevoked policy) answer 503:
+   * there is no fallback to local or cloud defaults. Leave `policy` unset
+   * only for a route outside any privacy integration.
    */
-  policy?: () => SpeechPrivacyPolicy | null | undefined;
+  policy?: () => SpeechPrivacyPolicy | 'off' | null | undefined;
   /** Receives a content-free failure for the server log; the browser only learns that it failed. */
   onError?: (error: unknown) => void;
   fetch?: typeof globalThis.fetch;
@@ -63,8 +64,12 @@ class TranscriptionFailure extends Error {
   }
 }
 
-/** The policy for one request: `null` when off; throws `policy_unavailable` otherwise. */
-function speechPolicy(read: (() => SpeechPrivacyPolicy | null | undefined) | undefined): SpeechPrivacyPolicy | null {
+/**
+ * The policy for one request: `null` without a resolver or for an explicit
+ * `'off'`; throws `policy_unavailable` for anything else that is not a
+ * protected policy, `null` and `undefined` included.
+ */
+function speechPolicy(read: (() => SpeechPrivacyPolicy | 'off' | null | undefined) | undefined): SpeechPrivacyPolicy | null {
   if (!read) return null;
   let policy: unknown;
   try {
@@ -72,7 +77,8 @@ function speechPolicy(read: (() => SpeechPrivacyPolicy | null | undefined) | und
   } catch {
     throw new TranscriptionFailure('policy_unavailable');
   }
-  if (policy === null || policy === undefined) return null;
+  if (policy === 'off') return null;
+  if (policy === null || policy === undefined) throw new TranscriptionFailure('policy_unavailable');
   const candidate = policy as Partial<SpeechPrivacyPolicy>;
   if (
     typeof policy !== 'object'

@@ -26,8 +26,35 @@ import type { PrivacyPolicyBlock } from '../../contracts/privacy-policy.js';
 import { isPrivacyError } from '../../server/pii-shield/detection-result.js';
 import type { GlirastesPrivacyOptions } from '../privacy-runtime.js';
 import { SDK_VERSION } from '../sdk-version.js';
-import { MemoryRuntimeStateStore } from '../../sync/state-store.js';
+import {
+  MemoryRuntimeStateStore,
+  type RuntimeStateStore,
+  type RuntimeSyncState,
+} from '../../sync/state-store.js';
 import { createLocalSchemaDigest } from '../local-tool-bindings.js';
+
+/**
+ * A test stand-in, declared durable on purpose: process memory shared by two
+ * instances, with switchable load and save failures. It proves the rules in
+ * one process; the restart proof runs in separate processes
+ * (privacy-restart.process.test.ts) on a FileRuntimeStateStore.
+ */
+class SharedDurableTestStore implements RuntimeStateStore {
+  readonly durable = true;
+  readonly inner = new MemoryRuntimeStateStore();
+  failLoad = false;
+  failSave = false;
+  saves = 0;
+  async load(): Promise<RuntimeSyncState | null> {
+    if (this.failLoad) throw new Error('EIO: state unreadable');
+    return this.inner.load();
+  }
+  async saveAtomic(state: RuntimeSyncState): Promise<void> {
+    if (this.failSave) throw new Error('ENOSPC: disk full');
+    this.saves += 1;
+    await this.inner.saveAtomic(state);
+  }
+}
 
 const id = (suffix: string) => `019fa9a9-d5f7-7ec3-a3c7-8899de1d${suffix.padStart(4, '0')}`;
 const digest = (character: string) => `sha256:${character.repeat(43)}`;
@@ -824,12 +851,17 @@ describe('createGlirastes with a privacy policy', () => {
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
     const http = platform({ deployments: [activeDeployment(privateKey, [], block)], publicKey });
     const onError = vi.fn();
+    const stateStore = new SharedDurableTestStore();
     const glirastes = track(createGlirastes({
       generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
-      pollIntervalMs: 60_000, onError, privacy: privacy(),
+      pollIntervalMs: 60_000, onError, privacy: privacy(), stateStore: () => stateStore,
     }));
     await glirastes.ready();
     expect(onError).not.toHaveBeenCalled();
+    // Privacy and a durable store: the runner claims the capability.
+    const registration = http.calls.find(({ url }) => url.endsWith('/register'));
+    expect(JSON.parse(String(registration?.init.body)).capabilities).toMatchObject({ privacyPolicyVersions: [1] });
+    expect((await stateStore.inner.load())?.privacyFloor).toMatchObject({ profile: 'protected-text/v1' });
     expect(glirastes.privacyPolicy()).toMatchObject({
       source: 'platform', mapping: { idleTtlSeconds: 1800, absoluteTtlSeconds: 7200 }, speech: { maxDurationSeconds: 45 },
     });
@@ -853,6 +885,7 @@ describe('createGlirastes with a privacy policy', () => {
     const glirastes = track(createGlirastes({
       generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
       pollIntervalMs: 60_000, onError: vi.fn(), privacy: privacy(digest('B')),
+      stateStore: () => new SharedDurableTestStore(),
     }));
     await glirastes.ready();
     expect(glirastes.accepted()).toBeUndefined();
@@ -867,7 +900,7 @@ describe('createGlirastes with a privacy policy', () => {
   describe('after a refused protected revision (K2/K3: no silent way out)', () => {
     const request = new Request('https://app.example/api/chat');
     /** Starts a runner on a shared persistent state, as a restart of the same process would. */
-    async function runner(stateStore: MemoryRuntimeStateStore, deployments: RuntimeDeploymentBundle[], publicKey: KeyObject, options: { privacy?: GlirastesPrivacyOptions } = {}) {
+    async function runner(stateStore: RuntimeStateStore, deployments: RuntimeDeploymentBundle[], publicKey: KeyObject, options: { privacy?: GlirastesPrivacyOptions } = {}) {
       const http = platform({ deployments, publicKey });
       const glirastes = track(createGlirastes({
         generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
@@ -880,7 +913,7 @@ describe('createGlirastes with a privacy policy', () => {
 
     it('stays blocked after a restart when the Platform withdraws the refused revision and offers an unprotected one', async () => {
       const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-      const stateStore = new MemoryRuntimeStateStore();
+      const stateStore = new SharedDurableTestStore();
       const before = await runner(stateStore, [activeDeployment(privateKey, [], block)], publicKey);
       expect(codeOf(() => before.privacyPolicy())).toBe('privacy_not_configured');
       expect((await stateStore.load())?.privacyFloor).toMatchObject({ profile: 'protected-text/v1', policyRevision: 1 });
@@ -898,7 +931,7 @@ describe('createGlirastes with a privacy policy', () => {
 
     it('resumes only once a protected revision it can enforce is accepted', async () => {
       const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-      const stateStore = new MemoryRuntimeStateStore();
+      const stateStore = new SharedDurableTestStore();
       const before = await runner(stateStore, [activeDeployment(privateKey, [], block)], publicKey, { privacy: privacy(digest('B')) });
       expect(codeOf(() => before.privacyPolicy())).toBe('privacy_not_configured');
       await before.stop();
@@ -911,13 +944,199 @@ describe('createGlirastes with a privacy policy', () => {
     it('a candidate with an invalid signature does not lock the runner', async () => {
       const { publicKey } = generateKeyPairSync('ed25519');
       const attacker = generateKeyPairSync('ed25519');
-      const stateStore = new MemoryRuntimeStateStore();
+      const stateStore = new SharedDurableTestStore();
       const glirastes = await runner(stateStore, [activeDeployment(attacker.privateKey, [], block)], publicKey);
       expect(glirastes.accepted()).toBeUndefined();
       expect((await stateStore.load())?.privacyFloor ?? null).toBeNull();
       expect((await stateStore.load())?.privacyRefusedDeploymentIds ?? []).toEqual([]);
       // Without privacy configured, nothing verified keeps the local code running.
       expect(codeOf(() => glirastes.privacyPolicy())).toBeUndefined();
+    });
+  });
+
+  describe('managed privacy needs a durable, reconciled state', () => {
+    const request = new Request('https://app.example/api/chat');
+    const anySnapshot = { policyRevision: { revisionId: id('3908') } } as never;
+    const gateCode = async (glirastes: Glirastes) => {
+      const turn = await glirastes.chatTurn(principal);
+      return codeOf(() => turn.managedRuntime.privacyGate({ request, snapshot: anySnapshot }));
+    };
+    const heartbeats = (http: ReturnType<typeof platform>) => http.calls
+      .filter(({ url }) => url.includes('/heartbeat'))
+      .map(({ init }) => JSON.parse(String(init.body)));
+    const capabilities = (http: ReturnType<typeof platform>) => JSON.parse(String(
+      http.calls.find(({ url }) => url.endsWith('/register'))?.init.body,
+    )).capabilities;
+
+    it('refuses a protected policy without a durable store, confirms nothing and claims no capability', async () => {
+      for (const stateStore of [undefined, () => new MemoryRuntimeStateStore()]) {
+        const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+        const http = platform({ deployments: [activeDeployment(privateKey, [], block)], publicKey });
+        const onError = vi.fn();
+        const glirastes = createGlirastes({
+          generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+          pollIntervalMs: 60_000, onError, privacy: privacy(), ...(stateStore ? { stateStore } : {}),
+        });
+        await glirastes.ready();
+        expect(onError.mock.calls.map(([error]) => (error as Error).message).join()).toContain('accepted_state_missing');
+        expect(capabilities(http)).not.toHaveProperty('privacyPolicyVersions');
+        expect(heartbeats(http)).toEqual([expect.objectContaining({
+          health: 'unhealthy',
+          technicalMetadata: expect.objectContaining({ privacy: expect.objectContaining({ state: 'refused', reasons: ['accepted_state_missing'] }) }),
+        })]);
+        expect(heartbeats(http).some((beat) => 'lastAppliedDeploymentId' in beat)).toBe(false);
+        expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_not_configured');
+        expect(await gateCode(glirastes)).toBe('privacy_not_configured');
+        await glirastes.stop();
+      }
+    });
+
+    it('leaves legacy operation unchanged: no capability, and a protected policy is refused, never applied', async () => {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+      const unprotected = platform({ deployments: [activeDeployment(privateKey)], publicKey });
+      const legacy = createGlirastes({
+        generated: generated(), localLimits: limits, env, fetchImpl: unprotected.fetchImpl, push: false,
+        pollIntervalMs: 60_000, onError: vi.fn(),
+      });
+      await legacy.ready();
+      expect(capabilities(unprotected)).not.toHaveProperty('privacyPolicyVersions');
+      expect(legacy.privacyPolicy()).toBeNull();
+      expect(await gateCode(legacy)).toBeUndefined();
+      await legacy.stop();
+
+      const protectedHttp = platform({ deployments: [activeDeployment(privateKey, [], block)], publicKey });
+      const refusing = track(createGlirastes({
+        generated: generated(), localLimits: limits, env, fetchImpl: protectedHttp.fetchImpl, push: false,
+        pollIntervalMs: 60_000, onError: vi.fn(),
+      }));
+      await refusing.ready();
+      expect(capabilities(protectedHttp)).not.toHaveProperty('privacyPolicyVersions');
+      expect(heartbeats(protectedHttp).some((beat) => 'lastAppliedDeploymentId' in beat)).toBe(false);
+      expect(heartbeats(protectedHttp)[0]).toMatchObject({ health: 'unhealthy', technicalMetadata: { validationStage: 'privacy_refused' } });
+    });
+
+    it('blocks a lost state while the Platform is unreachable; the ready() timeout releases nothing', async () => {
+      const providers = generated();
+      (providers.setupArtifact as Record<string, unknown>).privacyProviders = [
+        { id: 'main', label: 'Main', adapter: 'openrouter', bindingDigest: digest('A') },
+      ];
+      const variants: Array<Parameters<typeof createGlirastes>[0]> = [
+        { generated: generated(), privacy: privacy(), stateStore: () => new SharedDurableTestStore() },
+        // Without `privacy`: a store or privacy providers in the artifact mark the deployment as managed.
+        { generated: generated(), stateStore: () => new SharedDurableTestStore() },
+        { generated: providers },
+      ];
+      for (const variant of variants) {
+        const fetchImpl = vi.fn(async () => { throw new TypeError('fetch failed'); }) as unknown as typeof fetch;
+        const glirastes = createGlirastes({
+          ...variant, localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 60_000,
+          firstSyncTimeoutMs: 10, onError: vi.fn(),
+        });
+        await glirastes.ready();
+        expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_policy_unavailable');
+        expect(codeOf(() => glirastes.speechPolicy())).toBe('privacy_policy_unavailable');
+        expect(await gateCode(glirastes)).toBe('privacy_policy_unavailable');
+        await glirastes.stop();
+      }
+    });
+
+    it('never overwrites an unreadable state and stays blocked until it can be read', async () => {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+      const http = platform({ deployments: [activeDeployment(privateKey, [], block)], publicKey });
+      const stateStore = new SharedDurableTestStore();
+      stateStore.failLoad = true;
+      const onError = vi.fn();
+      const glirastes = track(createGlirastes({
+        generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+        pollIntervalMs: 20, firstSyncTimeoutMs: 10, onError, privacy: privacy(), stateStore: () => stateStore,
+      }));
+      await glirastes.ready();
+      await vi.waitFor(() => expect(onError.mock.calls.filter(([error]) => (error as Error).name === 'RuntimeStateUnreadable').length).toBeGreaterThanOrEqual(2));
+      expect(await gateCode(glirastes)).toBe('privacy_policy_unavailable');
+      expect(http.calls.some(({ url }) => url.includes('/sync?') || url.endsWith('/register'))).toBe(false);
+      expect(stateStore.saves).toBe(0);
+      // The cause stays out of the report.
+      expect(JSON.stringify(onError.mock.calls.map(([error]) => (error as Error).message))).not.toContain('EIO');
+
+      stateStore.failLoad = false;
+      await vi.waitFor(() => expect(glirastes.accepted()).toBeDefined());
+      expect(glirastes.privacyPolicy()).toMatchObject({ source: 'platform' });
+    });
+
+    it('confirms nothing after a failed save and resumes only once a verified state was saved', async () => {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+      const http = platform({ deployments: [activeDeployment(privateKey, [], block)], publicKey });
+      const stateStore = new SharedDurableTestStore();
+      stateStore.failSave = true;
+      const glirastes = track(createGlirastes({
+        generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+        pollIntervalMs: 20, firstSyncTimeoutMs: 10, onError: vi.fn(), privacy: privacy(), stateStore: () => stateStore,
+      }));
+      await glirastes.ready();
+      await vi.waitFor(() => expect(http.calls.filter(({ url }) => url.includes('/sync?')).length).toBeGreaterThanOrEqual(2));
+      expect(glirastes.accepted()).toBeUndefined();
+      expect(await gateCode(glirastes)).toBe('privacy_policy_unavailable');
+      expect(heartbeats(http).some((beat) => 'lastAppliedDeploymentId' in beat)).toBe(false);
+
+      stateStore.failSave = false;
+      await vi.waitFor(() => expect(glirastes.accepted()).toBeDefined());
+      expect(glirastes.privacyPolicy()).toMatchObject({ source: 'platform' });
+      expect(heartbeats(http).some((beat) => beat.lastAppliedDeploymentId === id('3904'))).toBe(true);
+    });
+
+    it('keeps a floor whose save failed when a later save of an unprotected snapshot succeeds', async () => {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+      const unprotected = activeDeployment(privateKey);
+      const deployments = [unprotected];
+      const http = platform({ deployments, publicKey });
+      const stateStore = new SharedDurableTestStore();
+      const glirastes = track(createGlirastes({
+        generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+        pollIntervalMs: 20, onError: vi.fn(), stateStore: () => stateStore,
+      }));
+      await glirastes.ready();
+      expect(await gateCode(glirastes)).toBeUndefined();
+
+      // A protected requirement this runner cannot enforce, whose save fails.
+      const syncs = () => http.calls.filter(({ url }) => url.includes('/sync?')).length;
+      stateStore.failSave = true;
+      deployments.splice(0, 1, { ...activeDeployment(privateKey, [], block), deploymentId: id('3910') });
+      const failedAt = syncs();
+      await vi.waitFor(() => expect(syncs()).toBeGreaterThan(failedAt + 1));
+      expect(await gateCode(glirastes)).toBe('privacy_policy_unavailable');
+
+      // Withdrawn, and the next save succeeds: still no way back to unprotected.
+      deployments.splice(0, 1, unprotected);
+      stateStore.failSave = false;
+      const savedAt = stateStore.saves;
+      await vi.waitFor(() => expect(stateStore.saves).toBeGreaterThan(savedAt));
+      expect(await gateCode(glirastes)).toBe('privacy_not_configured');
+      expect((await stateStore.inner.load())?.privacyFloor).toMatchObject({ profile: 'protected-text/v1' });
+    });
+
+    it('keeps the floor when an unsigned signal drops the connection and no environment follows (M1)', async () => {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+      const base = platform({
+        deployments: [activeDeployment(privateKey, [], block)], publicKey,
+        lookup: [
+          () => json({ schemaVersion: 1, appId: APP_ID, environmentId: ENVIRONMENT_ID, runnerKey: 'runner-1' }),
+          () => json({ schemaVersion: 1, mode: 'development', appId: APP_ID, environmentId: null, runnerKey: 'dev-abcdefghijklm' }),
+        ],
+      });
+      let syncs = 0;
+      const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).includes('/sync?') && ++syncs > 1) return json({ code: 'environment_place_required' }, 409);
+        return (base.fetchImpl as typeof fetch)(input, init);
+      }) as unknown as typeof fetch;
+      // A legacy runner: no privacy, no store.
+      const glirastes = track(createGlirastes({
+        generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError: vi.fn(),
+      }));
+      await glirastes.ready();
+      expect(await gateCode(glirastes)).toBe('privacy_not_configured');
+      await vi.waitFor(() => expect(glirastes.connection()?.environmentId).toBeNull());
+      expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_not_configured');
+      expect(await gateCode(glirastes)).toBe('privacy_not_configured');
     });
   });
 

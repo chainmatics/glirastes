@@ -72,7 +72,12 @@ function lowersPrivacyFloor(
   return revoked || policy.revision <= floor.policyRevision;
 }
 
-/** The floor after the given deployments became the accepted active state. */
+/**
+ * The floor after the given deployments became the accepted active state.
+ * Its revision number is a high-water mark: protection re-enabled by a
+ * rollback to an older protected revision keeps the highest number seen, so
+ * only an `off` signed after everything accepted before lowers it again.
+ */
 function nextPrivacyFloor(
   floor: RuntimePrivacyFloor | null | undefined,
   active: ReadonlyArray<{ deploymentId: string; revisions: MaterializedDeploymentRevisions }>,
@@ -87,7 +92,7 @@ function nextPrivacyFloor(
     if (profile === 'protected-text/v1') {
       next = next?.profile === 'protected-text/v1' && next.policyRevision >= policy.revision
         ? next
-        : { profile, policyRevision: policy.revision, ...record };
+        : { profile, policyRevision: Math.max(policy.revision, next?.policyRevision ?? 0), ...record };
     } else if (!next || policy.revision > next.policyRevision) {
       next = { profile, policyRevision: policy.revision, ...record };
     }
@@ -95,16 +100,25 @@ function nextPrivacyFloor(
   return next;
 }
 
-/** The floor after a verified protected revision was refused; unchanged for an older one. */
-function raisedByRefusal(
+/**
+ * The floor after a verified, in-scope protected revision was rejected (not
+ * enforceable here, or failing local validation): protected, at the
+ * high-water mark. A protected floor at a higher revision stays.
+ */
+function raisedByRejection(
   floor: RuntimePrivacyFloor | null | undefined,
   deploymentId: string,
   revisions: MaterializedDeploymentRevisions,
 ): RuntimePrivacyFloor | null {
   const policy = revisions.policyRevision;
   if (policy.privacy?.profile !== 'protected-text/v1') return floor ?? null;
-  if (floor && policy.revision <= floor.policyRevision) return floor;
-  return { profile: 'protected-text/v1', policyRevision: policy.revision, deploymentId, revisionId: policy.revisionId };
+  if (floor?.profile === 'protected-text/v1' && policy.revision <= floor.policyRevision) return floor;
+  return {
+    profile: 'protected-text/v1',
+    policyRevision: Math.max(policy.revision, floor?.policyRevision ?? 0),
+    deploymentId,
+    revisionId: policy.revisionId,
+  };
 }
 
 export class RuntimeSyncManager {
@@ -227,14 +241,14 @@ export class RuntimeSyncManager {
         materializedById.set(parsed.data.deploymentId, materialized);
       } catch (error) {
         if (error instanceof PrivacyDowngradeError) privacyDowngradeDeploymentIds.push(parsed.data.deploymentId);
-        if (error instanceof PrivacyRefusedError) {
-          privacyRefusedDeploymentIds.push(parsed.data.deploymentId);
-          // A verified protected requirement this runner cannot meet raises
-          // the floor: withdrawing it later never leads back to an
-          // unprotected revision; only a newer satisfiable protected policy
-          // or a newer signed `off` lifts it. Only signature-checked
-          // revisions get here, and an older one (replay) never moves it.
-          if (verified) state = { ...state, privacyFloor: raisedByRefusal(state.privacyFloor, parsed.data.deploymentId, verified) };
+        if (error instanceof PrivacyRefusedError) privacyRefusedDeploymentIds.push(parsed.data.deploymentId);
+        // A verified, in-scope protected requirement that is rejected, for
+        // whatever reason, raises the floor: withdrawing it later never leads
+        // back to an unprotected revision; only a newer protected policy this
+        // runner accepts or a newer signed `off` lifts it. Material with a bad
+        // signature or another scope never gets here (`verified` is unset).
+        if (verified && !(error instanceof PrivacyDowngradeError)) {
+          state = { ...state, privacyFloor: raisedByRejection(state.privacyFloor, parsed.data.deploymentId, verified) };
         }
         rejectedDeploymentIds.push(parsed.data.deploymentId);
         if (parsed.data.status === 'active') rejectedActive = true;

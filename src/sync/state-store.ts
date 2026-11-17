@@ -58,12 +58,30 @@ const RuntimeSyncStateSchema: z.ZodType<RuntimeSyncState> = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
 }).strict();
 
+/** Validates a state read from any store; throws for an invalid one. */
+export function parseRuntimeSyncState(value: unknown): RuntimeSyncState {
+  return RuntimeSyncStateSchema.parse(value);
+}
+
 export interface RuntimeStateStore {
+  /**
+   * `true` only when a saved state survives a process restart (a file on a
+   * persistent volume, a database row). Managed privacy accepts and confirms
+   * a protected policy only with a durable store; a store without this flag
+   * counts as volatile.
+   */
+  readonly durable?: boolean;
+  /** `null` when nothing was saved yet; throws when the state cannot be read or is invalid. */
   load(): Promise<RuntimeSyncState | null>;
   saveAtomic(state: RuntimeSyncState): Promise<void>;
 }
 
+/**
+ * Keeps the state in the process. Volatile: it never satisfies managed
+ * privacy, which needs a store that survives a restart.
+ */
 export class MemoryRuntimeStateStore implements RuntimeStateStore {
+  readonly durable = false;
   private state: RuntimeSyncState | null = null;
 
   async load(): Promise<RuntimeSyncState | null> {
@@ -75,7 +93,14 @@ export class MemoryRuntimeStateStore implements RuntimeStateStore {
   }
 }
 
+/**
+ * Keeps the state in a JSON file, replaced atomically. Durable only when the
+ * path lies on a volume that survives a restart and a redeploy of the
+ * process (not a container's writable layer or a tmpfs); the SDK cannot
+ * check that, the deployment must guarantee it.
+ */
 export class FileRuntimeStateStore implements RuntimeStateStore {
+  readonly durable = true;
   constructor(private readonly path: string) {}
 
   async load(): Promise<RuntimeSyncState | null> {

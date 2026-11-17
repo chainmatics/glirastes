@@ -158,6 +158,36 @@ describe('privacy floor (K2)', () => {
     expect(off.privacyDowngradeDeploymentIds).toEqual([id(103)]);
   });
 
+  it('keeps the high-water mark when protection returns by a rollback to an older revision after an off (H1)', async () => {
+    const sync = manager();
+    await sync.apply(bundle([deployment(1, 5, PROTECTED)]));
+    await sync.apply(bundle([deployment(2, 10, OFF)]));
+    const rollback = await sync.apply(bundle([deployment(3, 5, PROTECTED)]));
+    expect(rollback.state.stable?.deploymentId).toBe(id(103));
+    expect(rollback.state.privacyFloor).toMatchObject({ profile: 'protected-text/v1', policyRevision: 10 });
+    // The off signed before protection returned is a replay now.
+    const replay = await sync.apply(bundle([deployment(2, 10, OFF)]));
+    expect(replay.privacyDowngradeDeploymentIds).toEqual([id(102)]);
+    expect(replay.state.stable?.deploymentId).toBe(id(103));
+    expect(replay.state.privacyFloor).toMatchObject({ profile: 'protected-text/v1', policyRevision: 10 });
+    // Only an off signed after everything accepted before lowers it.
+    const off = await sync.apply(bundle([deployment(4, 11, OFF)]));
+    expect(off.state.stable?.deploymentId).toBe(id(104));
+    expect(off.state.privacyFloor).toMatchObject({ profile: 'off', policyRevision: 11 });
+  });
+
+  it('refuses the replayed off after a restart on the persisted high-water mark (H1)', async () => {
+    const store = new MemoryRuntimeStateStore();
+    const before = manager(store);
+    await before.apply(bundle([deployment(1, 5, PROTECTED)]));
+    await before.apply(bundle([deployment(2, 10, OFF)]));
+    await before.apply(bundle([deployment(3, 5, PROTECTED)]));
+    const after = manager(store);
+    const replay = await after.apply(bundle([deployment(2, 10, OFF)]));
+    expect(replay.privacyDowngradeDeploymentIds).toEqual([id(102)]);
+    expect(replay.state.stable?.deploymentId).toBe(id(103));
+  });
+
   it('refuses a pending downgrade too, without touching the active state', async () => {
     const sync = manager();
     await sync.apply(bundle([deployment(1, 5, PROTECTED)]));
@@ -330,6 +360,46 @@ describe('privacy refusal is no silent way out (K2/K3)', () => {
     const off = await sync.apply(bundle([deployment(4, 7, OFF)]));
     expect(off.state.stable?.deploymentId).toBe(id(104));
     expect(off.state.privacyFloor).toMatchObject({ profile: 'off', policyRevision: 7 });
+  });
+
+  it('a refused older protected revision after an off raises the floor to the high-water mark (H1)', async () => {
+    const sync = manager(new MemoryRuntimeStateStore(), { validateDeployment: refusesProtected as never });
+    await sync.apply(bundle([deployment(1, 10, OFF)]));
+    const refused = await sync.apply(bundle([deployment(2, 5, PROTECTED)]));
+    expect(refused.privacyRefusedDeploymentIds).toEqual([id(102)]);
+    expect(refused.state.privacyFloor).toMatchObject({ profile: 'protected-text/v1', policyRevision: 10 });
+    const replay = await sync.apply(bundle([deployment(1, 10, OFF)]));
+    expect(replay.privacyDowngradeDeploymentIds).toEqual([id(101)]);
+  });
+
+  it('a verified protected revision rejected by local validation raises the floor too (M3)', async () => {
+    const validateDeployment = vi.fn(async (_deployment: RuntimeDeploymentBundle, revisions: { policyRevision: { privacy?: PrivacyPolicyBlock } }) => {
+      if (revisions.policyRevision.privacy?.profile === 'protected-text/v1') throw new Error('Unavailable manifest tool');
+    });
+    const sync = manager(new MemoryRuntimeStateStore(), { validateDeployment: validateDeployment as never });
+    await sync.apply(bundle([deployment(1, 5, undefined)]));
+    const rejected = await sync.apply(bundle([deployment(2, 6, PROTECTED)]));
+    expect(rejected.rejectedDeploymentIds).toEqual([id(102)]);
+    expect(rejected.privacyRefusedDeploymentIds).toEqual([]);
+    expect(rejected.state.privacyFloor).toEqual(PROTECTED_FLOOR_6);
+    // Withdrawn: the unprotected revision is a downgrade now.
+    const withdrawn = await sync.apply(bundle([deployment(1, 5, undefined)]));
+    expect(withdrawn.privacyDowngradeDeploymentIds).toEqual([id(101)]);
+  });
+
+  it('a protected revision rejected for a bad signature or another scope never raises the floor (M3)', async () => {
+    const failing = verifier();
+    failing.verifyRevision.mockRejectedValue(new Error('bad signature'));
+    const unsigned = manager(new MemoryRuntimeStateStore(), { verifier: failing as never });
+    const forged = await unsigned.apply(bundle([deployment(2, 6, PROTECTED)]));
+    expect(forged.rejectedDeploymentIds).toEqual([id(102)]);
+    expect(forged.state.privacyFloor ?? null).toBeNull();
+
+    const foreign = manager();
+    const other = { ...deployment(3, 7, PROTECTED), environmentId: id(999) };
+    const result = await foreign.apply(bundle([other]));
+    expect(result.rejectedDeploymentIds).toEqual([id(103)]);
+    expect(result.state.privacyFloor ?? null).toBeNull();
   });
 
   it('a newer protected revision this runner can enforce lifts the refusal and keeps the floor protected', async () => {

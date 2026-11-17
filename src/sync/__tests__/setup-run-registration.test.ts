@@ -41,7 +41,7 @@ const artifact = {
 const bodies = (fetchImpl: ReturnType<typeof vi.fn>) => fetchImpl.mock.calls
   .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as { capabilities: Record<string, unknown> });
 
-function client(options: { discoveryDigest?: string; setupRunId?: string }, fetchImpl = vi.fn()) {
+function client(options: { discoveryDigest?: string; setupRunId?: string; privacyCapable?: boolean }, fetchImpl = vi.fn()) {
   return new RuntimeControlPlaneClient({
     baseUrl: 'https://control.example',
     apiKey: 'runtime-key',
@@ -77,7 +77,6 @@ describe('runner registration with the setup run (P10)', () => {
       discoveryDigest: digest('A'),
       setupRunId: RUN_ID,
       policyRelaxations: 1,
-      privacyPolicyVersions: [1],
     });
   });
 
@@ -95,7 +94,7 @@ describe('runner registration with the setup run (P10)', () => {
 
   it('never lets a caller claim privacy policy versions the runtime does not enforce', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ runnerId: id('7') })));
-    const runtime = client({ discoveryDigest: digest('A') }, fetchImpl);
+    const runtime = client({ discoveryDigest: digest('A'), privacyCapable: true }, fetchImpl);
     for (const claim of [[1, 2], [2], [], 1]) {
       await expect(runtime.register({ capabilities: { privacyPolicyVersions: claim } }))
         .rejects.toThrow(/privacyPolicyVersions/);
@@ -103,6 +102,14 @@ describe('runner registration with the setup run (P10)', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     await runtime.register({ capabilities: { privacyPolicyVersions: [1] } });
     expect(bodies(fetchImpl)[0]?.capabilities).toMatchObject({ privacyPolicyVersions: [1] });
+  });
+
+  it('claims no privacy capability for a runner that cannot enforce and durably keep a protected policy', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ runnerId: id('7') })));
+    const legacy = client({ discoveryDigest: digest('A') }, fetchImpl);
+    await expect(legacy.register({ capabilities: { privacyPolicyVersions: [1] } })).rejects.toThrow(/privacyPolicyVersions/);
+    await legacy.register();
+    expect(bodies(fetchImpl)[0]?.capabilities).not.toHaveProperty('privacyPolicyVersions');
   });
 
   it('refuses a setup run without a discovery digest or outside the uuid form', () => {

@@ -304,9 +304,13 @@ describe('createRecordingTranscriptionHandler', () => {
       expect((await handler(request({ body: wav(2) }))).status).toBe(413);
     });
 
-    it('answers 503 without reading the audio when the policy is unavailable or malformed', async () => {
+    it('answers 503 without reading the audio when the policy is unavailable, missing or malformed', async () => {
       for (const policy of [
         () => { throw new Error('privacy_policy_unavailable'); },
+        // A wired resolver that answers nothing is no explicit `off`.
+        () => null,
+        () => undefined,
+        () => 'OFF' as never,
         () => ({ localOnly: false, maxDurationSeconds: 60 }) as never,
         () => ({ localOnly: true, maxDurationSeconds: 0 }),
         () => ({ localOnly: true }) as never,
@@ -325,11 +329,18 @@ describe('createRecordingTranscriptionHandler', () => {
       }
     });
 
-    it('keeps the configured behaviour while the profile is off', async () => {
+    it('keeps the configured behaviour only for an explicit off', async () => {
       const fetch = service();
       const handler = createRecordingTranscriptionHandler({
-        authorize: allow, url: 'https://stt.example.com', fetch, policy: () => null,
+        authorize: allow, url: 'https://stt.example.com', fetch, policy: () => 'off',
       });
+      expect((await handler(request())).status).toBe(200);
+      expect(fetch).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the configured behaviour without any privacy integration', async () => {
+      const fetch = service();
+      const handler = createRecordingTranscriptionHandler({ authorize: allow, url: 'https://stt.example.com', fetch });
       expect((await handler(request())).status).toBe(200);
     });
 
