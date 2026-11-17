@@ -135,6 +135,7 @@ export function createManagedTurnGuard(
           'budget_exhausted',
           call.toolName,
           currentBudget.reasons.join(','),
+          tracker.limitStates(currentBudget.reasons),
         );
       }
 

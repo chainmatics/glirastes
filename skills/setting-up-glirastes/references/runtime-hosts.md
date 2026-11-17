@@ -95,7 +95,11 @@ to it anyway never executes: the AI SDK answers it as an unavailable tool and
 the turn continues, bounded by `maxModelSteps`. A tool that becomes denied
 after the request started (a role lost) gets
 `Tool execution denied: <reason> (<tool>)` as a tool error instead, counted
-toward `maxConsecutiveErrors`.
+toward `maxConsecutiveErrors`. At the turn budget (`limits.maxToolCalls`,
+default 8, `read_result` included; capped by agent revision and policy) the
+remaining calls get `Tool call not executed: the limit of 8 tool calls per
+turn is reached (8 used). ...`, the chat shows `Tool call limit for this turn
+reached (8).` and the turn ends with one final answer.
 
 The identity endpoint validates the selected cookie/bearer credential and returns
 exactly `{"userId":"42","tenantId":"business-a","roles":["editor"]}`.

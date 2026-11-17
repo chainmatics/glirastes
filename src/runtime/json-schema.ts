@@ -50,9 +50,13 @@ export function createJsonSchemaLike(
       return {
         success: false,
         error: {
+          // `keyword` and `params` name the schema's expectation (allowed
+          // values, format, limit, missing property); they never carry the value.
           issues: (validate.errors ?? []).map((error) => ({
             path: issuePath(error),
             message: error.message ?? error.keyword,
+            keyword: error.keyword,
+            params: error.params,
           })),
         },
       };

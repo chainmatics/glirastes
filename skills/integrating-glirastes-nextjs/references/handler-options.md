@@ -87,7 +87,7 @@ it. The type's JSDoc carries the full detail.
 
 | Key | What it does |
 | --- | --- |
-| `onError` | request failed |
+| `onError` | `(error, req, info?: AiChatErrorInfo)`: the request or turn failed (no `info`), or one tool call of a running turn failed (`info.source === 'tool-call'`, `info.kind`: `'denied'` budget or terminal guard denial, `'invalid-input'` a `ToolInputValidationError` with `issues: ToolInputIssue[]` (field path and expectation, never the value), `'failed'` timeout or thrown error); once per failure, a throw is ignored during streaming. The chat sees `AI request failed`, or a fixed text for a guard denial such as `Tool call limit for this turn reached (8).`; a budget denial is a `ToolExecutionDeniedError` with `budget: BudgetLimitState[]` (`{ dimension, limit, used }`) |
 | `onToolError` | a tool threw |
 | `classifyToolFailure` | `ToolFailureClassifier`: gets `ToolFailureInfo` (`toolName`, HTTP `status`, full parsed `body`) of a failed backend call and returns a `ToolFailureClassification`, `'expected'` or `'error'`; expected failures skip `maxConsecutiveErrors` and metric errors, counted locally only; never applies to managed-guard denials, which always count as errors; also on `createGlirastes`; not in the runtime container |
 | `onFinish` | steps, finish reason, token usage, truncation, `StepLimitSource` and the local `expectedToolFailureCount` |

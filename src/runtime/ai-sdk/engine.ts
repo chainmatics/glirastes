@@ -1,5 +1,27 @@
-import { jsonSchema, tool, zodSchema } from 'ai';
+import { jsonSchema, tool, TypeValidationError, zodSchema } from 'ai';
 import { isRecoverableToolDenial } from '../tool-denial.js';
+import { describeToolInputIssues, toolInputIssues, type ToolInputIssue } from '../tool-input-error.js';
+
+/**
+ * The validation error the AI SDK puts into its `InvalidToolInputError` for a
+ * model-written call: its message is what the model reads after
+ * `Invalid input for tool <name>: ` (fields and the schema's expectations
+ * plus an instruction, not the AI SDK's dump of the whole input value).
+ * Returned from `validate` with the validated value, so the AI SDK passes
+ * it on unchanged instead of wrapping it again.
+ */
+export class ModelFacingInputError extends TypeValidationError {
+  readonly inputIssues: ReadonlyArray<ToolInputIssue>;
+  readonly omittedIssues: number;
+
+  constructor(value: unknown, cause: unknown) {
+    super({ value, cause });
+    const { issues, omitted } = toolInputIssues(cause);
+    this.inputIssues = issues;
+    this.omittedIssues = omitted;
+    this.message = describeToolInputIssues(issues, omitted);
+  }
+}
 
 export interface AiSdkSourceTool {
   description: string;
@@ -121,9 +143,12 @@ function toAiSdkInputSchema(parameters: unknown): InputSchema {
             return `${path}${path ? ': ' : ''}${issue.message ?? 'invalid value'}`;
           })
           .join('; ');
+        // The issues stay on the error for the model's message (see ModelFacingInputError).
         return {
           success: false,
-          error: new Error(detail || 'Input does not match local JSON schema'),
+          error: Object.assign(new Error(detail || 'Input does not match local JSON schema'), {
+            issues: parsed.error.issues,
+          }),
         };
       },
     },
@@ -194,7 +219,7 @@ export function createAiSdkTools(
     if (validateInput) {
       (inputSchema as { validate: typeof validateInput }).validate = async (value) => {
         const result = await validateInput(value);
-        if (!result.success) return result;
+        if (!result.success) return { success: false, error: new ModelFacingInputError(value, result.error) };
         remember(value, result.value);
         return { success: true, value };
       };

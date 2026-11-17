@@ -51,7 +51,8 @@ second, hand-maintained catalogue.
 
    // One instance per app and process, also when routes are bundled apart.
    const glirastes = createGlirastes({ generated });
-   // Budgets default to safe values; override with `localLimits: { maxToolCalls: 4 }`.
+   // Budgets default to safe values (8 tool calls per turn, `read_result` included);
+   // override with `localLimits: { maxToolCalls: 16 }`, capped by agent revision and policy.
    const openrouter = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY });
    const systemPrompt = 'Use the tools of this app. Ask one short question when the target is unclear.';
 
