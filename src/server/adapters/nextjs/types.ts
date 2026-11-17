@@ -175,6 +175,20 @@ export interface PipelineStreamState {
   message?: string;
 }
 
+/** Where a failure passed to `AiChatHandlerConfig.onError` happened. */
+export interface AiChatErrorInfo {
+  /** One tool call failed inside a running turn; the turn may go on. */
+  source: 'tool-call';
+  /**
+   * `denied`: the managed turn guard refused the call and the turn ends (a
+   * `ToolExecutionDeniedError`, e.g. `budget_exhausted`). `invalid-input`:
+   * the model's arguments do not match the tool's input schema; the error is
+   * a `ToolInputValidationError` with field paths and expectations, never the
+   * arguments. `failed`: anything else (a timeout, a thrown error).
+   */
+  kind: 'denied' | 'invalid-input' | 'failed';
+}
+
 export interface AiChatHandlerConfig {
   /**
    * Static tools (ToolRegistry). Used when pipeline mode is active.
@@ -382,7 +396,20 @@ export interface AiChatHandlerConfig {
   piiShield?: PiiShield;
 
   wrapHandler?: <T>(callback: () => T | Promise<T>, req: Request) => Promise<T>;
-  onError?: (error: unknown, req: Request) => void;
+  /**
+   * Server-side diagnostics for a failure the chat only sees as a fixed text.
+   * Without `info` (as before): the request or the whole turn failed (the
+   * chat gets `AI request failed`, or a 500 before streaming). With
+   * `info.source === 'tool-call'`: one tool call failed inside a running turn
+   * and the chat got a fixed text in a `tool-output-error` /
+   * `tool-input-error`; `info.kind` tells a guard denial, invalid input and
+   * any other failure apart. Not reported: a recoverable denial and a call of
+   * a tool the model was not offered (the model gets them back). Called once
+   * per failure; a throw from it during streaming does not break the stream.
+   * A denial of the managed turn guard is a `ToolExecutionDeniedError`
+   * (`glirastes/runtime`) with `reason` and, for the budget, `budget`.
+   */
+  onError?: (error: unknown, req: Request, info?: AiChatErrorInfo) => void;
   onToolError?: (toolId: string, error: unknown) => void;
   /**
    * Classifies a failed backend call of an endpoint tool (non-2xx response)

@@ -127,7 +127,13 @@ describe('createManagedTurnGuard', () => {
     await expect(guard.beforeToolCall({
       toolName: 'list_tasks',
       input: {},
-    })).rejects.toThrow(/maxToolCalls/);
+    })).rejects.toMatchObject({
+      reason: 'budget_exhausted',
+      recoverable: false,
+      budget: [{ dimension: 'maxToolCalls', limit: 1, used: 1 }],
+      message: 'Tool call not executed: the limit of 1 tool call per turn is reached (1 used). '
+        + 'Do not retry in this turn; tell the user which requests are still open.',
+    });
     expect(guard.tracker.usage.toolCalls).toBe(1);
   });
 

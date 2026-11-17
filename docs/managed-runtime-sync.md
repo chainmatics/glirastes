@@ -522,7 +522,7 @@ without the tool:
 | --- | --- |
 | `principal_role_denied`, `policy_tool_denied`, `agent_tool_denied`, `manifest_tool_unavailable` | tool error `Tool execution denied: <reason> (<tool>)` to the model; the turn continues |
 | `revoked`, `missing_principal`, `tenant_mismatch` | the turn ends with an error, as before |
-| `budget_exhausted` | the call fails and the turn stops at the runtime budget, as before |
+| `budget_exhausted` | tool error naming the reached limit and its use to the model (see below); the turn stops at the runtime budget, as before |
 
 The terminal conditions are checked first and independently of the tool: a
 missing principal, then a tenant mismatch, then a current revocation of the
@@ -541,3 +541,76 @@ a tool error; the reason is not sent. The guard throws a
 `glirastes/runtime`; a terminal denial reaches the handler's `onError` with it.
 Direct commands keep answering a denial with a `tool-output-error` whose
 `errorText` is the reason code.
+
+In a model turn the chat never sees the error message. A
+`tool-output-error` (or the stream's `error` part) of a guard denial carries a
+fixed text per reason; every other failed tool call keeps `AI request failed`,
+except invalid input and an unavailable tool (see below):
+
+| Reason | `errorText` in the chat |
+| --- | --- |
+| `principal_role_denied` | `You are not permitted to use this tool.` |
+| `policy_tool_denied`, `agent_tool_denied`, `manifest_tool_unavailable` | `This tool is not available in this chat.` |
+| `missing_principal` | `The user could not be identified; tool call refused.` |
+| `tenant_mismatch` | `Tool call refused for this account.` |
+| `revoked` | `This tool has been disabled.` |
+| `budget_exhausted` | the reached limit, see below |
+
+The handler's `onError` gets every failed tool call of a running turn once,
+with a third argument `{ source: 'tool-call', kind }` (a failure of the request
+or the whole turn keeps the two arguments): `kind: 'denied'` for a terminal or
+budget denial (the `ToolExecutionDeniedError`), `'invalid-input'` for
+arguments that do not match the schema (a `ToolInputValidationError` with
+`toolName` and `issues`, never the arguments), `'failed'` for anything else (a
+timeout, a thrown error). Not reported are a recoverable denial and a call of
+a tool the model was not offered: the model gets them back as a normal part
+of the turn. A throwing `onError` does not break the stream.
+
+#### Invalid tool input
+
+The AI SDK validates a model's tool call against the tool's input schema
+before anything runs; no approval is asked, the guard does not see the call
+(it counts toward no budget but `maxModelSteps`; the metric event counts a
+call and an error) and the turn continues. The model gets the fields and what
+the schema expects there, at most five issues (the rest counted), never the
+value it wrote, and what to do:
+
+```text
+Invalid input for tool playlists_get: playlistId: expected format uuid; kind: required. Correct the arguments and call the tool again; look up missing ids with a read tool instead of asking the user.
+```
+
+The chat shows `The assistant sent invalid input for this tool; it was told
+what to correct.` for the call (a call of a tool that was not offered: `This
+tool is not available in this chat.`).
+
+#### Budget denials
+
+The effective budget of a turn is the minimum of the local limits, the
+pinned agent revision and the policy revision. When it is reached, the guard
+refuses every further tool call of the turn, also the rest of one step's
+parallel calls; `read_result` counts as a tool call like any other. The
+refused call is a tool error to the model that names each reached limit and
+its use, and the chat shows the limit:
+
+| Dimension | Model (`Tool call not executed: <limit>. Do not retry in this turn; tell the user which requests are still open.`) | Chat |
+| --- | --- | --- |
+| `maxToolCalls` | `the limit of 8 tool calls per turn is reached (8 used)` | `Tool call limit for this turn reached (8).` |
+| `maxModelSteps` | `the limit of 6 model steps per turn is reached (6 used)` | `Step limit for this turn reached (6).` |
+| `totalTimeoutMs` | `the time limit of 60 s per turn is reached (61.2 s elapsed)` | `Time limit for this turn reached (60 s).` |
+| `maxInputTokens` | `the limit of 40000 input tokens per turn is reached (41002 used)` | `Input token limit for this turn reached (40000).` |
+| `maxOutputTokens` | `the limit of 4000 output tokens per turn is reached (4100 used)` | `Output token limit for this turn reached (4000).` |
+| `maxEstimatedCostUsd` | `the cost limit of 0.5 USD per turn is reached (0.5123 USD used)` | `Cost limit for this turn reached (0.5 USD).` |
+| `maxRepeatedFingerprint` | `the limit of 3 identical tool calls with the same result per turn is reached (3 repeats)` | `Limit for repeated identical tool calls reached (3).` |
+| `maxConsecutiveErrors` | `the limit of 3 consecutive tool errors per turn is reached (3 in a row)` | `Limit for consecutive tool errors reached (3).` |
+
+Several reached limits are joined (`; ` for the model, a space in the chat).
+The texts carry numbers only, no tool arguments or principal data. The
+error keeps `reason: 'budget_exhausted'` and adds `budget`, one
+`{ dimension, limit, used }` per reached limit; the metric event and
+`onBudgetSignal` are unchanged. After the refused calls the turn gets one
+final step without tools and ends with `safety-stop` / `budget_exhausted`.
+
+To allow more tool calls per turn, raise the local limit:
+`createGlirastes({ localLimits: { maxToolCalls: 16 } })` (the runtime
+container: `limits.maxToolCalls` in its JSON configuration, 1 to 100). The
+agent revision and the policy revision still cap it: the lowest value wins.

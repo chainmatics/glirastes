@@ -54,6 +54,7 @@ import {
   stripChatCommandMessages,
 } from './direct-command.js';
 import { collectIdLabels, createHideIdsTransform, HIDE_IDS_PROMPT, type IdLabels } from './hide-ids.js';
+import { createToolStreamErrorMask, streamErrorText } from './stream-error-text.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
 import type { Tool, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
@@ -65,6 +66,7 @@ import {
   type UIMessage,
 } from 'ai';
 import type {
+  AiChatErrorInfo,
   AiChatHandlerConfig,
   IntentRoutingResult,
   PipelineStepReport,
@@ -528,7 +530,7 @@ function orderToolsForCaching(
 async function defaultStreamHandler(
   ctx: StreamHandlerContext,
   onFinish?: AiChatHandlerConfig['onFinish'],
-  onStreamError?: (error: unknown) => void,
+  onStreamError?: (error: unknown, info?: AiChatErrorInfo) => void,
 ): Promise<Response> {
   // SDK built-ins the handler created itself are not manifest tools, so the
   // managed guard would deny them. Everything else stays guarded.
@@ -609,6 +611,28 @@ async function defaultStreamHandler(
   };
 
   let providerErrorReported = false;
+  // Each failure reaches the app's callback once, even when the AI SDK hands
+  // the same error to several of its error hooks. A throwing callback must
+  // not break the stream.
+  const reportedErrors = new Set<unknown>();
+  // `failure` is the error as a hook received it; `error` what the app gets for it.
+  const reportError = (failure: unknown, info?: AiChatErrorInfo, error: unknown = failure) => {
+    if (reportedErrors.has(failure)) return;
+    reportedErrors.add(failure);
+    try {
+      onStreamError?.(error, info);
+    } catch {
+      // The app's diagnostics failed; the turn goes on.
+    }
+  };
+  // Failed tool calls pass the UI stream's error mask: the chat gets a fixed
+  // text, the app's callback the cause (see createToolStreamErrorMask).
+  const toolErrorMask = createToolStreamErrorMask();
+  const maskToolStreamError = (error: unknown) => {
+    const masked = toolErrorMask(error);
+    if (masked.report) reportError(error, masked.report.info, masked.report.error);
+    return masked.text;
+  };
   const stream = createUIMessageStream({
     // Approval responses continue the last assistant message instead of appending
     // another snapshot with the same tool call IDs.
@@ -619,9 +643,9 @@ async function defaultStreamHandler(
     onError: (error) => {
       if (!providerErrorReported) {
         providerErrorReported = true;
-        onStreamError?.(error);
+        reportError(error);
       }
-      return 'AI request failed';
+      return streamErrorText(error);
     },
     execute: async ({ writer }) => {
       let totalSteps = 0;
@@ -703,7 +727,7 @@ async function defaultStreamHandler(
         // request/response content. Only the local consumer owns diagnostics.
         onError: ({ error }) => {
           providerErrorReported = true;
-          onStreamError?.(error);
+          reportError(error);
         },
         onStepFinish: async (event) => {
           const inputTokens = event.usage.inputTokens ?? 0;
@@ -858,9 +882,9 @@ async function defaultStreamHandler(
       });
 
       const uiStream = resumedApprovals
-        ? result.toUIMessageStream({ onError: () => 'AI request failed' })
+        ? result.toUIMessageStream({ onError: maskToolStreamError })
         : withSilentTurnFallback(
-          result.toUIMessageStream({ onError: () => 'AI request failed' }),
+          result.toUIMessageStream({ onError: maskToolStreamError }),
           silentTurnFallbackText(ctx.locale),
         );
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
@@ -992,9 +1016,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   // Without a callback a failed turn would only say "AI request failed" to
   // the user and nothing to the developer. Name only: provider errors can
   // carry request and response content.
-  const onError = onErrorConfig ?? ((error: unknown) => {
+  const onError = onErrorConfig ?? ((error: unknown, _req: Request, info?: AiChatErrorInfo) => {
     const name = error instanceof Error ? error.name : typeof error;
-    console.error(`[glirastes] AI chat turn failed (${name}). Pass onError to createAiChatHandler to see the cause.`);
+    const what = info?.source === 'tool-call' ? 'tool call' : 'turn';
+    console.error(`[glirastes] AI chat ${what} failed (${name}). Pass onError to createAiChatHandler to see the cause.`);
   });
 
   // The Proctor endpoint behind Lancer telemetry is not served by the
@@ -1063,7 +1088,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     return (ctx: StreamHandlerContext) => {
       const context = { ...ctx, abortSignal: req.signal };
       return customStreamHandler ? customStreamHandler(context) : defaultStreamHandler(
-        context, wrappedOnFinish, (error) => onError?.(error, req),
+        context, wrappedOnFinish, (error, info) => (info ? onError?.(error, req, info) : onError?.(error, req)),
       );
     };
   }

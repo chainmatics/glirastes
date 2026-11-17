@@ -90,6 +90,7 @@ export { createNextInternalApiCaller } from '../../core/index.js';
 export type {
   WithAiToolOptions,
   AiToolRouteHandler,
+  AiChatErrorInfo,
   AiChatHandlerConfig,
   ChatAttachmentsConfig,
   LoadTools,

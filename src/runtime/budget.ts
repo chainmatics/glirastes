@@ -21,6 +21,25 @@ export type BudgetReason =
   | 'maxRepeatedFingerprint'
   | 'maxConsecutiveErrors';
 
+/** The usage counter each budget dimension is measured by. */
+export const BUDGET_USAGE_KEYS: Readonly<Record<BudgetReason, keyof ExecutionUsage>> = Object.freeze({
+  maxModelSteps: 'modelSteps',
+  maxToolCalls: 'toolCalls',
+  totalTimeoutMs: 'elapsedMs',
+  maxInputTokens: 'inputTokens',
+  maxOutputTokens: 'outputTokens',
+  maxEstimatedCostUsd: 'estimatedCostUsd',
+  maxRepeatedFingerprint: 'maxFingerprintRepeats',
+  maxConsecutiveErrors: 'consecutiveErrors',
+});
+
+/** One budget dimension with its limit and what the turn has used of it. */
+export interface BudgetLimitState {
+  dimension: BudgetReason;
+  limit: number;
+  used: number;
+}
+
 export interface BudgetEvaluation {
   state: 'within-budget' | 'soft-limit' | 'hard-limit';
   reasons: BudgetReason[];
@@ -93,26 +112,25 @@ export class ExecutionBudgetTracker {
     );
   }
 
+  /** Limit and current use of the given dimensions, in their order. */
+  limitStates(dimensions: ReadonlyArray<BudgetReason>): BudgetLimitState[] {
+    const usage = this.usage;
+    return dimensions.map((dimension) => ({
+      dimension,
+      limit: this.budget[dimension],
+      used: usage[BUDGET_USAGE_KEYS[dimension]],
+    }));
+  }
+
   evaluate(): BudgetEvaluation {
     const usage = this.usage;
-    const dimensions: Array<[BudgetReason, number, number]> = [
-      ['maxModelSteps', usage.modelSteps, this.budget.maxModelSteps],
-      ['maxToolCalls', usage.toolCalls, this.budget.maxToolCalls],
-      ['totalTimeoutMs', usage.elapsedMs, this.budget.totalTimeoutMs],
-      ['maxInputTokens', usage.inputTokens, this.budget.maxInputTokens],
-      ['maxOutputTokens', usage.outputTokens, this.budget.maxOutputTokens],
-      ['maxEstimatedCostUsd', usage.estimatedCostUsd, this.budget.maxEstimatedCostUsd],
-      [
-        'maxRepeatedFingerprint',
-        usage.maxFingerprintRepeats,
-        this.budget.maxRepeatedFingerprint,
+    const dimensions = (Object.keys(BUDGET_USAGE_KEYS) as BudgetReason[]).map(
+      (reason): [BudgetReason, number, number] => [
+        reason,
+        usage[BUDGET_USAGE_KEYS[reason]],
+        this.budget[reason],
       ],
-      [
-        'maxConsecutiveErrors',
-        usage.consecutiveErrors,
-        this.budget.maxConsecutiveErrors,
-      ],
-    ];
+    );
 
     const hard = dimensions
       .filter(([, value, limit]) => limit === 0 ? value > 0 : value >= limit)

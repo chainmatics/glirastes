@@ -22,8 +22,13 @@ export {
   type ToolDenialReason,
 } from './tool-denial.js';
 export {
+  ToolInputValidationError,
+  type ToolInputIssue,
+} from './tool-input-error.js';
+export {
   ExecutionBudgetTracker,
   type BudgetEvaluation,
+  type BudgetLimitState,
   type BudgetReason,
   type ExecutionUsage,
 } from './budget.js';
