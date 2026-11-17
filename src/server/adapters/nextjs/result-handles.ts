@@ -16,6 +16,7 @@ import {
 } from '../../core/index.js';
 import { assertResultHandleLimits } from '../../core/result-store.js';
 import type { Tool } from '../../../types.js';
+import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 
 const LIMIT_KEYS: ReadonlySet<string> = new Set(['maxResults', 'maxResultBytes', 'maxTotalBytes']);
 
@@ -75,8 +76,22 @@ export function createTurnResults(options: {
       && principal.subjectId === handle.owner.subjectId
       && principal.tenantId === handle.owner.tenantId);
   };
+  /**
+   * A read that reads nothing counts like a denied domain tool call: a call
+   * and an error on the turn's budget, so `maxToolCalls` and
+   * `maxConsecutiveErrors` bound a model that keeps asking. At the budget it
+   * is answered with budget_exhausted and not counted again.
+   */
+  const countFailedRead = async (): Promise<'budget_exhausted' | void> => {
+    if (!managedTurn) return undefined;
+    if (managedTurn.tracker.evaluate().state === 'hard-limit') return 'budget_exhausted';
+    managedTurn.tracker.recordToolCall();
+    await managedTurn.onToolError({ toolName: READ_RESULT_TOOL_NAME, input: undefined, error: new Error('result_unreadable'), durationMs: 0 });
+    return undefined;
+  };
   const guard: ReadResultGuard = managedTurn && resolvePrincipal
     ? {
+        failedRead: countFailedRead,
         // Like a domain tool's approval check: the conditions that end the
         // turn throw here. A handle of another principal is answered with
         // result_denied by execute instead.
@@ -89,10 +104,7 @@ export function createTurnResults(options: {
           }
         },
         beforeRead: async ({ handle, input }) => {
-          if (!await ownerMatches(handle)) {
-            await managedTurn.onToolError({ toolName: handle.toolName, input, error: new Error('result_denied'), durationMs: 0 });
-            return 'denied';
-          }
+          if (!await ownerMatches(handle)) return await countFailedRead() ?? 'denied';
           try {
             await managedTurn.beforeToolCall({ toolName: handle.toolName, input });
           } catch (error) {

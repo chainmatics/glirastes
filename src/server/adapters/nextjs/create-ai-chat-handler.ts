@@ -1522,6 +1522,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         turnResultStore = results.store;
         return results;
       };
+      /**
+       * The registry name of the handler's own `read_result` instance (by
+       * identity): its arguments are paths and ids and are never rehydrated.
+       */
+      const ownReadResult = (registry: ToolRegistry, results: TurnResults | undefined): string | undefined => (
+        results && registry[READ_RESULT_TOOL_NAME] === results.tool ? READ_RESULT_TOOL_NAME : undefined
+      );
       const withResultTool = (registry: ToolRegistry, results: TurnResults | undefined): ToolRegistry => (
         results ? { ...registry, [results.tool.id]: results.tool } : registry
       );
@@ -1836,7 +1843,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
           recentMessages = await anonymizeMessages(recentMessages, piiShield, sessionId);
-          aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId, turnResults?.store) as typeof aiTools;
+          aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
         }
 
         // Lancer Approvals: delegate approval decisions to Glirastes
@@ -2037,7 +2044,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // PII Shield: anonymize message history + wrap tools (legacy mode)
       if (piiShield) {
         recentMessages = await anonymizeMessages(recentMessages, piiShield, legacySessionId);
-        aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId, turnResults?.store) as typeof aiTools;
+        aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
       }
 
       // Lancer Approvals: delegate approval decisions to Glirastes (legacy mode)
@@ -2219,7 +2226,10 @@ interface SdkAiToolForShield {
 }
 
 /**
- * Rehydrates tool arguments and pseudonymizes tool results. A result the
+ * Rehydrates tool arguments and pseudonymizes tool results. The arguments of
+ * the handler's own `read_result` (`plainArgsTool`) are not rehydrated: its
+ * answers are not shielded again, so a pseudonym passed as a path or id must
+ * never be turned into the original there. A result the
  * turn's result store issued (an overview or a `read_result` answer) was cut
  * from the copy the store sealed once with this shield and is not shielded
  * again: detection depends on the surrounding text, so shielding excerpts
@@ -2231,6 +2241,7 @@ function wrapToolsWithShield(
   shield: PiiShield,
   sessionId: string,
   resultStore?: ResultStore,
+  plainArgsTool?: string,
 ): Record<string, unknown> {
   const wrapped: Record<string, unknown> = {};
 
@@ -2245,7 +2256,7 @@ function wrapToolsWithShield(
         // Uses the async path for Lancer Aegis rehydration.
         // The sync rehydrateArgs is a legacy no-op kept for backward compat.
         let args = executeArgs[0];
-        if (args && typeof args === 'object' && !Array.isArray(args)) {
+        if (name !== plainArgsTool && args && typeof args === 'object' && !Array.isArray(args)) {
           if (shield.rehydrateArgsAsync) {
             args = await shield.rehydrateArgsAsync(
               args as Record<string, unknown>,

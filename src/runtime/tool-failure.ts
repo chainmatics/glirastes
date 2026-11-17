@@ -75,9 +75,14 @@ export function toolResultForFingerprint(result: unknown): unknown {
   return error === undefined ? stable : { ...stable, error };
 }
 
+/** The form of a result handle id the SDK issues (`ro_`/`rw_` and 8 base36 characters). */
+const RESULT_HANDLE_ID = /^r[ow]_[0-9a-z]{8}$/;
+
 function withoutResultHandleId(result: Record<string, unknown>): Record<string, unknown> {
   const marker = result._result;
-  if (typeof marker !== 'object' || marker === null || Array.isArray(marker) || !('id' in marker)) return result;
+  if (typeof marker !== 'object' || marker === null || Array.isArray(marker)) return result;
+  // Only a handle id this SDK issued; an app's own `_result.id` stays part of the fingerprint.
+  if (typeof (marker as { id?: unknown }).id !== 'string' || !RESULT_HANDLE_ID.test((marker as { id: string }).id)) return result;
   const { id: _id, ...rest } = marker as Record<string, unknown>;
   return { ...result, _result: rest };
 }

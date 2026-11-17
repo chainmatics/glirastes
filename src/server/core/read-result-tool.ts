@@ -45,10 +45,16 @@ export interface ReadResultMarker {
   total?: number;
   /** The `offset` of the next page, when there are further entries. */
   nextOffset?: number;
-  /** Every paged array with its length, when more than one was paged. */
+  /** Every paged array with its length (at most five, paths shortened), when more than one was paged. */
   arrays?: Record<string, number>;
-  /** Requested paths that select nothing (at most ten, shortened). */
-  unknownFields?: string[];
+  /**
+   * Positions (1-based, at most ten) of requested paths that select nothing.
+   * Never the paths themselves: the answer is not shielded again, so nothing
+   * the model wrote comes back verbatim.
+   */
+  unknownFields?: number[];
+  /** How many requested paths select nothing, when more than ten. */
+  unknownCount?: number;
 }
 
 /**
@@ -71,6 +77,12 @@ export interface ReadResultGuard {
   beforeRead?: (read: { handle: ResultHandle; input: ReadResultInput }) => Promise<'denied' | 'budget_exhausted' | void>;
   /** After reading, with the answer (loop detection). */
   afterRead?: (read: { handle: ResultHandle; input: ReadResultInput; result: unknown; durationMs: number }) => Promise<void>;
+  /**
+   * A call that reads nothing (unknown or expired id, invalid fields):
+   * counted as a tool call and an error of the turn. `'budget_exhausted'`
+   * answers that the turn's budget is used up instead.
+   */
+  failedRead?: () => Promise<'budget_exhausted' | void>;
 }
 
 const DESCRIPTION = 'Read more of a large tool result that was shown as an overview with a "_result" marker: '
@@ -79,8 +91,14 @@ const DESCRIPTION = 'Read more of a large tool result that was shown as an overv
   + 'Works only within the current turn and never calls the original tool again.';
 
 const MAX_LISTED_UNKNOWN = 10;
-const MAX_UNKNOWN_CHARS = 100;
+const MAX_LISTED_ARRAYS = 5;
+const MAX_LISTED_PATH_CHARS = 120;
 
+function listedPath(text: string): string {
+  return text.length > MAX_LISTED_PATH_CHARS ? `${text.slice(0, MAX_LISTED_PATH_CHARS - 1)}…` : text;
+}
+
+/** Only the prefix of the id decides the instruction; the id itself is never echoed. */
 function expired(resultId: string): Record<string, unknown> {
   const hint = resultId.startsWith(READ_RESULT_ID_PREFIX)
     ? 'This result is no longer available: results can only be read during the turn that produced them. '
@@ -131,11 +149,17 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
     if (key !== 'uiAction') setOwn(source, key, handle.value[key]);
   }
   const requested = paths ?? defaultPaths(source);
-  const known = requested.filter((path) => resultPathExists(source, path.steps));
-  const unknown = paths ? requested.filter((path) => !known.includes(path)) : [];
+  const unknown: number[] = [];
+  const known = requested.filter((path, index) => {
+    const exists = resultPathExists(source, path.steps);
+    if (!exists && paths) unknown.push(index + 1);
+    return exists;
+  });
   const offset = input.offset ?? 0;
+  const fits = (output: unknown) => (JSON.stringify(output)?.length ?? 0) <= handle.maxChars;
 
-  const answer = (limit: number | undefined) => {
+  /** `detailed`: with the optional marker parts (`arrays`, `unknownFields`); they go first when space runs out. */
+  const answer = (limit: number | undefined, detailed: boolean) => {
     const projection = projectResult(source, known, { offset, ...(limit !== undefined ? { limit } : {}) });
     const primary = projection.slices[0];
     const marker: ReadResultMarker = {
@@ -143,42 +167,41 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
       offset,
       ...(primary ? { returned: primary.returned, total: primary.total } : {}),
       ...(primary && offset + primary.returned < primary.total ? { nextOffset: offset + primary.returned } : {}),
-      ...(projection.slices.length > 1
-        ? { arrays: Object.fromEntries(projection.slices.slice(0, 5).map((slice) => [slice.path, slice.total])) }
-        : {}),
-      ...(unknown.length > 0
+      ...(detailed && projection.slices.length > 1
         ? {
-            unknownFields: unknown.slice(0, MAX_LISTED_UNKNOWN).map((path) => (
-              path.text.length > MAX_UNKNOWN_CHARS ? `${path.text.slice(0, MAX_UNKNOWN_CHARS - 1)}…` : path.text
-            )),
+            arrays: Object.fromEntries(projection.slices.slice(0, MAX_LISTED_ARRAYS)
+              .map((slice) => [listedPath(slice.path), slice.total])),
           }
         : {}),
+      ...(detailed && unknown.length > 0 ? { unknownFields: unknown.slice(0, MAX_LISTED_UNKNOWN) } : {}),
+      ...(detailed && unknown.length > MAX_LISTED_UNKNOWN ? { unknownCount: unknown.length } : {}),
     };
     const output: Record<string, unknown> = { ...projection.value };
     setOwn(output, '_result', marker);
     return { output, primary, value: projection.value, marker };
   };
-  const fits = (output: unknown) => (JSON.stringify(output)?.length ?? 0) <= handle.maxChars;
 
-  const full = answer(input.limit);
-  if (fits(full.output)) return full.output;
-  // Fewer entries per page until the answer fits.
-  if (full.primary && full.primary.returned > 1) {
-    let low = 1;
-    let high = full.primary.returned - 1;
-    let best: ReturnType<typeof answer> | undefined;
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      const candidate = answer(mid);
-      if (fits(candidate.output)) {
-        best = candidate;
-        low = mid + 1;
-      } else high = mid - 1;
+  for (const detailed of [true, false]) {
+    const full = answer(input.limit, detailed);
+    if (fits(full.output)) return full.output;
+    // Fewer entries per page until the answer fits.
+    if (full.primary && full.primary.returned > 1) {
+      let low = 1;
+      let high = full.primary.returned - 1;
+      let best: ReturnType<typeof answer> | undefined;
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        const candidate = answer(mid, detailed);
+        if (fits(candidate.output)) {
+          best = candidate;
+          low = mid + 1;
+        } else high = mid - 1;
+      }
+      if (best) return best.output;
     }
-    if (best) return best.output;
   }
   // Not even one entry fits: cut that one entry like any large result.
-  const single = full.primary ? answer(1) : full;
+  const single = answer(1, false);
   const markerChars = JSON.stringify(single.marker).length + 12;
   const cut = truncateToolResult(single.value, Math.max(1, handle.maxChars - markerChars), {
     readOnly: true,
@@ -186,7 +209,12 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
   }) as Record<string, unknown>;
   const output: Record<string, unknown> = { ...cut };
   setOwn(output, '_result', single.marker);
-  return output;
+  if (fits(output)) return output;
+  // The last resort always fits the smallest limit: the marker and a short instruction.
+  return {
+    _result: { id: handle.id, offset, ...(single.primary ? { total: single.primary.total } : {}) },
+    hint: 'The selection does not fit the size limit. Select fewer fields or deeper paths.',
+  };
 }
 
 /**
@@ -221,6 +249,7 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
           else invalid.push(index + 1);
         });
         if (invalid.length > 0) {
+          if (await guard.failedRead?.() === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };
           return {
             error: 'invalid_fields',
             hint: `Field path(s) number ${invalid.slice(0, 5).join(', ')}${invalid.length > 5 ? ', …' : ''} are not valid. `
@@ -229,7 +258,10 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
         }
       }
       const handle = store.get(input.resultId);
-      if (!handle) return expired(input.resultId);
+      if (!handle) {
+        if (await guard.failedRead?.() === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };
+        return expired(input.resultId);
+      }
       const decision = await guard.beforeRead?.({ handle, input });
       if (decision === 'denied') return { ...DENIED };
       if (decision === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };

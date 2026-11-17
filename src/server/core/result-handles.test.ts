@@ -283,7 +283,10 @@ describe('read_result', () => {
   it('lists unknown paths and rejects invalid ones without echoing them', async () => {
     const { read } = await setup();
     const unknown = await read({ fields: ['data[].name', 'data[].nope', 'missing'] });
-    expect((unknown._result as { unknownFields: string[] }).unknownFields).toEqual(['data[].nope', 'missing']);
+    // By position only: the answer is not shielded again, so no path the model wrote comes back.
+    expect((unknown._result as { unknownFields: number[] }).unknownFields).toEqual([2, 3]);
+    expect(JSON.stringify(unknown)).not.toContain('nope');
+    expect(JSON.stringify(unknown)).not.toContain('missing');
     const invalid = await read({ fields: ['data[].name', `bad[0]${'z'.repeat(150)}`] });
     expect(invalid.error).toBe('invalid_fields');
     expect(String(invalid.hint)).toContain('number 2');
@@ -392,5 +395,135 @@ describe('loop detection of a tool whose result has a handle', () => {
     expect(fingerprint(first)).toBe(fingerprint(second));
     const other = await store.put({ toolName: 'playlists_list', readOnly: true, maxChars: 16_000, value: playlists(19) });
     expect(fingerprint(other)).not.toBe(fingerprint(first));
+  });
+});
+
+describe('read_result stays within the origin tool\'s limit', () => {
+  it('bounds every answer, marker included (property-style)', async () => {
+    let seed = 11;
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31;
+      return seed / 2 ** 31;
+    };
+    let checked = 0;
+    const longKey = (index: number) => `k${index}${'K'.repeat(Math.floor(random() * 5_000))}`;
+    for (let round = 0; round < 40; round += 1) {
+      const value: Record<string, unknown> = { success: true };
+      const arrays = 1 + Math.floor(random() * 6);
+      const keys: string[] = [];
+      for (let index = 0; index < arrays; index += 1) {
+        const key = random() < 0.5 ? longKey(index) : `list${index}`;
+        keys.push(key);
+        value[key] = Array.from({ length: 1 + Math.floor(random() * 40) }, (_, entry) => ({
+          id: entry, [longKey(entry)]: 'v'.repeat(Math.floor(random() * 3_000)),
+        }));
+      }
+      const maxChars = 1_000 + Math.floor(random() * 20_000);
+      if (JSON.stringify(value).length <= maxChars) continue;
+      const store = createResultStore();
+      const overview = await store.put({ toolName: 't', readOnly: true, maxChars, value }) as Overview | undefined;
+      if (!overview) continue;
+      const tool = createReadResultTool(store);
+      const fieldLists: Array<string[] | undefined> = [
+        undefined,
+        keys.map((key) => `${key}[]`),
+        Array.from({ length: 50 }, (_, index) => `${'u'.repeat(190)}${index}`),
+        [...keys, ...Array.from({ length: 20 }, (_, index) => `missing${'m'.repeat(180)}${index}`)].slice(0, 50),
+      ];
+      for (const fields of fieldLists) {
+        for (const window of [{}, { offset: 3 }, { limit: 1 }, { offset: 1, limit: 1_000 }]) {
+          const answer = await tool.execute({ resultId: overview._result.id, ...(fields ? { fields } : {}), ...window }, {} as ToolContext);
+          expect(JSON.stringify(answer).length).toBeLessThanOrEqual(maxChars);
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
+  });
+
+  it('stays within the smallest limit with ten long unknown paths (regression)', async () => {
+    const store = createResultStore();
+    const value = { success: true, data: Array.from({ length: 30 }, (_, index) => ({ id: index, text: 't'.repeat(100) })) };
+    const overview = await store.put({ toolName: 't', readOnly: true, maxChars: 1_000, value }) as Overview;
+    const answer = await createReadResultTool(store).execute({
+      resultId: overview._result.id,
+      fields: Array.from({ length: 10 }, (_, index) => `${'p'.repeat(190)}${index}`),
+    }, {} as ToolContext);
+    expect(JSON.stringify(answer).length).toBeLessThanOrEqual(1_000);
+  });
+
+  it('bounds five arrays with 5,000-character keys at the default limit (regression)', async () => {
+    const store = createResultStore();
+    const value: Record<string, unknown> = {};
+    for (let index = 0; index < 5; index += 1) {
+      value[`${index}${'a'.repeat(5_000)}`] = Array.from({ length: 10 }, (_, entry) => ({ entry, text: 'x'.repeat(200) }));
+    }
+    const overview = await store.put({ toolName: 't', readOnly: true, maxChars: 16_000, value }) as Overview;
+    const answer = await createReadResultTool(store).execute({ resultId: overview._result.id }, {} as ToolContext);
+    expect(JSON.stringify(answer).length).toBeLessThanOrEqual(16_000);
+  });
+});
+
+describe('edge cases of stored results', () => {
+  it('reads prototype-like keys as plain data and never touches prototypes', async () => {
+    const store = createResultStore();
+    const value = JSON.parse(`{"__proto__":{"polluted":true},"constructor":"c","data":${JSON.stringify(playlists().data)}}`) as Record<string, unknown>;
+    const overview = await store.put({ toolName: 't', readOnly: true, maxChars: 16_000, value }) as Overview;
+    expect(Object.prototype.hasOwnProperty.call(overview, '__proto__')).toBe(true);
+    const answer = await createReadResultTool(store).execute({
+      resultId: overview._result.id, fields: ['__proto__', 'constructor', 'toString', 'data[].__proto__', '__proto__.polluted'],
+    }, {} as ToolContext) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(answer, '__proto__')).toBe(true);
+    expect(answer.constructor).toBe('c');
+    expect((answer._result as { unknownFields: number[] }).unknownFields).toEqual([3, 4]);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('creates no handle for a payload with its own _result', async () => {
+    const store = createResultStore();
+    const tool = defineTool({
+      id: 'own', description: 'Own marker.', inputSchema: z.object({}),
+      execute: async () => ({ ...playlists(), _result: { id: 'app-1', state: 'final' } }),
+    });
+    const result = await toolToAiTool(tool, {} as ToolContext, 'own', { resultStore: store }).execute({}) as Record<string, unknown>;
+    expect(result._result).toEqual({ id: 'app-1', state: 'final' });
+    expect(result).toHaveProperty('_truncated');
+    expect(store.size).toBe(0);
+  });
+
+  it('strips only an SDK handle id from a fingerprint', () => {
+    expect(toolResultForFingerprint({ a: 1, _result: { id: 'ro_abc12345', showing: 2 } })).toEqual({ a: 1, _result: { showing: 2 } });
+    for (const id of ['app-1', 'ro_ABC12345', 'rw_abc', 'xx_abc12345']) {
+      expect(toolResultForFingerprint({ a: 1, _result: { id } })).toEqual({ a: 1, _result: { id } });
+    }
+  });
+
+  it('returns a result within the limit as the same object', async () => {
+    const small = { ok: true, items: [1, 2, 3] };
+    const tool = defineTool({ id: 'small', description: 'Small.', inputSchema: z.object({}), execute: async () => small });
+    const store = createResultStore();
+    expect(await toolToAiTool(tool, {} as ToolContext, 'small', { resultStore: store }).execute({})).toBe(small);
+  });
+
+  it.each([
+    ['throws', () => { throw new Error('detector down'); }],
+    ['rejects', async () => { throw new Error('detector down'); }],
+  ])('keeps nothing when the seal %s; the result is cut as without a store', async (_label, seal) => {
+    const store = createResultStore({ seal });
+    const { tool, context } = (() => {
+      const response: InternalApiResponse = { ok: true, status: 200, data: playlists() };
+      return {
+        tool: endpointToolToTool(defineEndpointTool({
+          id: 'p.list', toolName: 'p_list', description: 'P.', method: 'GET', path: '/p', inputSchema: z.object({}).strict(),
+        })),
+        context: { currentDate: '2026-11-17', locale: 'en-US', callEndpoint: async () => response } as never as ToolContext,
+      };
+    })();
+    const result = await toolToAiTool(tool, context, 'p_list', { resultStore: store }).execute({}) as Record<string, unknown>;
+    expect(store.size).toBe(0);
+    expect(result).toHaveProperty('_truncated');
+    expect(result).not.toHaveProperty('_result');
+    // Not issued: the PII shield wrapper shields it as any other result.
+    expect(store.isIssued(result)).toBe(false);
   });
 });

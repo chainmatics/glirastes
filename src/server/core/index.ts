@@ -1108,6 +1108,8 @@ export function toolToAiTool(
         const fromStore = store?.isIssued(result) === true;
         const overview = store && !fromStore
           && isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success !== false
+          // A payload with its own `_result` keeps it: no overview would replace it.
+          && !Object.prototype.hasOwnProperty.call(cleanResult, '_result')
           && exceedsLimit(cleanResult, resultLimit)
           ? await store.put({ toolName: name, readOnly, maxChars: resultLimit, value: cleanResult })
           : undefined;

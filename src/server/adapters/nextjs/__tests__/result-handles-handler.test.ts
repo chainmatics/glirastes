@@ -466,3 +466,185 @@ describe('result handles end to end with the built-in stream handler', () => {
     expect(String(onError.mock.calls[0]?.[0])).toContain('Tool execution denied: revoked (tasks_list)');
   });
 });
+
+describe('review fixes', () => {
+  describe('PII: read_result is no pseudonym oracle', () => {
+    const NAME = 'Alice Doe';
+    const MAIL = 'alice.doe@corp.example';
+    const detector: PiiDetector = {
+      detect(text) {
+        const found: PiiEntity[] = [];
+        for (const [pattern, type] of [[/Alice Doe/g, 'person'], [/alice\.doe@corp\.example/g, 'email']] as const) {
+          for (const match of text.matchAll(pattern)) {
+            found.push({ type, start: match.index!, end: match.index! + match[0].length, score: 0.9, text: match[0] });
+          }
+        }
+        return found;
+      },
+    };
+
+    it.each([['legacy', false], ['managed', true]] as const)('never returns an original for pseudonyms as fields or id (%s)', async (_label, isManaged) => {
+      const shield = createPiiShield({ locale: 'en-US', detector });
+      const lookup = vi.fn(async (input: { name: string }) => ({ ok: input.name === NAME }));
+      const registry: ToolRegistry = {
+        tasks_list: defineTool({
+          id: LIST_TASKS_ID, description: 'List.', inputSchema: z.object({}).strict(),
+          execute: async () => ({
+            success: true,
+            tasks: Array.from({ length: 20 }, (_, index) => ({ id: `t${index}`, owner: NAME, mail: MAIL, body: 'x'.repeat(8_000) })),
+          }),
+        }),
+        customer_lookup: defineTool({ id: 'customers.lookup', description: 'Look up.', inputSchema: z.object({ name: z.string() }), execute: lookup }),
+      };
+      const turn = harness({ tools: registry, piiShield: shield, ...(isManaged ? managed().config : {}), ...(isManaged ? { authorizedToolsOnly: false } : {}) });
+      await turn.run(async (call) => {
+        const overview = await call('tasks_list', {}) as Overview & { tasks: Array<{ owner: string; mail: string }> };
+        const alias = overview.tasks[0]!.owner;
+        const mailAlias = overview.tasks[0]!.mail;
+        expect(alias).not.toBe(NAME);
+        const answers = [
+          await call('read_result', { resultId: overview._result.id, fields: [alias, mailAlias, `tasks[].${alias}`, `${mailAlias}[]`] }),
+          await call('read_result', { resultId: overview._result.id, fields: ['tasks[].owner', alias] }),
+          await call('read_result', { resultId: alias }),
+          await call('read_result', { resultId: mailAlias.slice(0, 64) }),
+          await call('read_result', { resultId: overview._result.id, fields: [`[${alias}]`] }),
+        ];
+        answers.forEach((answer, index) => {
+          const text = JSON.stringify(answer);
+          expect(text).not.toContain(NAME);
+          expect(text).not.toContain(MAIL);
+          // Only selected data may carry the pseudonym; nothing the model wrote is echoed.
+          if (index !== 1) expect(text).not.toContain(alias);
+        });
+        expect((answers[0]!._result as { unknownFields: number[] }).unknownFields).toEqual([1, 2, 3, 4]);
+        // A normal domain tool in the same turn still gets the original.
+        expect(await call('customer_lookup', { name: alias })).toEqual({ ok: true });
+        expect(lookup).toHaveBeenCalledWith({ name: NAME }, expect.anything());
+      });
+    });
+  });
+
+  describe('reads that read nothing count on the managed budget', () => {
+    const limits = { maxToolCalls: 3, maxConsecutiveErrors: 10 };
+
+    it.each([
+      ['an unknown id', () => ({ resultId: 'ro_00000000' }), 'result_expired'],
+      ['invalid fields', (id: string) => ({ resultId: id, fields: ['a..b'] }), 'invalid_fields'],
+    ] as const)('counts %s as a call and an error, then answers budget_exhausted', async (_label, input, code) => {
+      const runtime = managed({ limits });
+      const { registry } = taskTools();
+      const turn = harness({ tools: registry, ...runtime.config });
+      await turn.run(async (call, ctx) => {
+        const overview = await call('tasks_list', {}) as Overview;
+        const tracker = ctx.managedTurn!.tracker;
+        for (let index = 1; index <= 3; index += 1) {
+          expect(await call('read_result', input(overview._result.id))).toMatchObject({ error: code });
+          expect(tracker.usage.toolCalls).toBe(index);
+          expect(tracker.usage.consecutiveErrors).toBe(index);
+        }
+        expect(await call('read_result', input(overview._result.id))).toMatchObject({ error: 'budget_exhausted' });
+        expect(tracker.usage.toolCalls).toBe(3);
+      });
+    });
+
+    it('counts a read of another principal\'s handle as a call and an error', async () => {
+      let current: Principal = principal();
+      const runtime = managed({ current: () => current, limits });
+      const { registry } = taskTools();
+      const turn = harness({ tools: registry, ...runtime.config });
+      await turn.run(async (call, ctx) => {
+        const overview = await call('tasks_list', {}) as Overview;
+        current = { ...principal(), subjectId: 'bob' };
+        const tracker = ctx.managedTurn!.tracker;
+        for (let index = 1; index <= 3; index += 1) {
+          expect(await call('read_result', { resultId: overview._result.id })).toMatchObject({ error: 'result_denied' });
+          expect(tracker.usage.toolCalls).toBe(index);
+          expect(tracker.usage.consecutiveErrors).toBe(index);
+        }
+        expect(await call('read_result', { resultId: overview._result.id })).toMatchObject({ error: 'budget_exhausted' });
+      });
+    });
+
+    it('bounds parallel calls in one step', async () => {
+      const runtime = managed({ limits });
+      const { registry } = taskTools();
+      const turn = harness({ tools: registry, ...runtime.config });
+      await turn.run(async (call, ctx) => {
+        const answers = await Promise.all(Array.from({ length: 6 }, () => call('read_result', { resultId: 'rw_00000000' })));
+        const codes = answers.map((answer) => answer.error).sort();
+        expect(codes).toEqual(['budget_exhausted', 'budget_exhausted', 'budget_exhausted', 'result_expired', 'result_expired', 'result_expired']);
+        expect(ctx.managedTurn!.tracker.usage.toolCalls).toBe(3);
+      });
+    });
+  });
+
+  describe('cleanup', () => {
+    async function turnWithBody(body: ReadableStream<Uint8Array>) {
+      const { registry } = taskTools();
+      let read: (input: unknown) => Promise<unknown> = async () => undefined;
+      let id = '';
+      const handler = createAiChatHandler({
+        tools: registry, model: {}, systemPrompt: 'A',
+        streamHandler: async (ctx) => {
+          const overview = await (ctx.tools.tasks_list as { execute: (input: unknown, options: unknown) => Promise<Overview> })
+            .execute({}, { toolCallId: 'c1', messages: [] });
+          id = overview._result.id;
+          const tool = ctx.tools.read_result as { execute: (input: unknown, options: unknown) => Promise<unknown> };
+          read = (input) => tool.execute(input, { toolCallId: 'c2', messages: [] });
+          return new Response(body);
+        },
+      });
+      const response = await handler(post());
+      expect(await read({ resultId: id })).toHaveProperty('_result');
+      return { response, readAgain: () => read({ resultId: id }) };
+    }
+
+    it('clears the store when the client cancels the stream', async () => {
+      const { response, readAgain } = await turnWithBody(new ReadableStream({ pull() { /* never ends */ } }));
+      await response.body!.cancel();
+      expect(await readAgain()).toMatchObject({ error: 'result_expired' });
+    });
+
+    it('clears the store when the stream fails', async () => {
+      const { response, readAgain } = await turnWithBody(new ReadableStream({ pull(controller) { controller.error(new Error('boom')); } }));
+      await expect(response.text()).rejects.toThrow('boom');
+      expect(await readAgain()).toMatchObject({ error: 'result_expired' });
+    });
+  });
+
+  it('counts the domain tool and the read through the real guarded wrapper (managed, built-in stream handler)', async () => {
+    let step = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async (options) => {
+        step += 1;
+        const id = /r[ow]_[0-9a-z]{8}/.exec(JSON.stringify(options.prompt))?.[0];
+        const read = (callId: string, fields: string[]) => ({
+          type: 'tool-call', toolCallId: callId, toolName: 'read_result', input: JSON.stringify({ resultId: id, fields }),
+        });
+        const chunks = step === 1
+          ? [{ type: 'tool-call', toolCallId: 'call-1', toolName: 'tasks_list', input: '{}' }]
+          : step === 2
+            ? [read('call-2', ['tasks[].id'])]
+            : [{ type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: 'Done.' }, { type: 'text-end', id: 't' }];
+        return {
+          stream: convertArrayToReadableStream([
+            { type: 'stream-start', warnings: [] },
+            ...chunks,
+            { type: 'finish', finishReason: { unified: step < 3 ? 'tool-calls' : 'stop', raw: undefined }, usage },
+          ] as never),
+        };
+      },
+    });
+    const { registry, list } = taskTools();
+    const handler = createAiChatHandler({
+      tools: registry, model, systemPrompt: 'A', ...managed({ limits: { maxToolCalls: 2 } }).config,
+    });
+    const wire = await (await handler(post())).text();
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(wire).toContain('"_result"');
+    // tasks_list (guarded wrapper) and the read both counted: maxToolCalls 2 is reached, the last step gets no tools.
+    expect(model.doStreamCalls).toHaveLength(3);
+    expect(model.doStreamCalls[2]!.tools ?? []).toHaveLength(0);
+    expect(wire).toContain('Stopped at runtime budget: maxToolCalls.');
+  });
+});
