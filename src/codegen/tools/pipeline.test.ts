@@ -17,6 +17,7 @@ import { createNextEndpointSource } from './sources/next-endpoints.js';
 import { uiObservation } from './sources/ui-tools.js';
 import type { ToolSource } from './types.js';
 import { buildDescribeWorklist, buildResolveWorklist } from './worklist.js';
+import { providerBindingDigest } from '../../sync/privacy-digest.js';
 
 const outsideDirs: string[] = [];
 afterEach(async () => {
@@ -932,3 +933,47 @@ describe('a contract id without a dot outside the openapi source', () => {
   }, 180_000);
 });
 
+
+describe('runToolsPipeline (privacy providers)', () => {
+  it('reports the configured provider entries with their binding digest only, and checks again in frozen mode', async () => {
+    const fixture = await app();
+    const binding = {
+      v: 1 as const,
+      adapter: 'openrouter',
+      adapterProtocol: 'openrouter-chat',
+      endpoint: 'https://openrouter.ai/api/v1',
+      modelId: 'mistralai/mistral-medium-3',
+      routing: { allowFallbacks: false, dataCollection: 'deny' as const, zdr: true },
+      capabilities: { images: false },
+    };
+    const config = JSON.parse(await fixture.read(TOOLS_PATHS.config)) as Record<string, unknown>;
+    await fixture.write(TOOLS_PATHS.config, JSON.stringify({
+      ...config,
+      privacyProviders: [
+        { id: 'zeta', label: 'Zeta', binding: { ...binding, modelId: 'other/model' } },
+        { id: 'main', label: 'Mistral (EU)', binding },
+      ],
+    }));
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const artifact = await artifactOf(fixture);
+    expect(artifact.privacyProviders).toEqual([
+      { id: 'main', label: 'Mistral (EU)', adapter: 'openrouter', bindingDigest: providerBindingDigest(binding) },
+      { id: 'zeta', label: 'Zeta', adapter: 'openrouter', bindingDigest: providerBindingDigest({ ...binding, modelId: 'other/model' }) },
+    ]);
+    const raw = await fixture.read(TOOLS_PATHS.setupArtifact);
+    expect(raw).not.toContain('openrouter.ai');
+    expect(raw).not.toContain('mistral-medium');
+    await runToolsPipeline({ root: fixture.root, mode: 'frozen' });
+  }, 120_000);
+
+  it('refuses duplicate provider ids in tools.json', async () => {
+    const fixture = await app();
+    const config = JSON.parse(await fixture.read(TOOLS_PATHS.config)) as Record<string, unknown>;
+    const entry = {
+      id: 'main', label: 'Main',
+      binding: { v: 1, adapter: 'anthropic', adapterProtocol: 'anthropic-messages', endpoint: 'https://api.anthropic.com/v1', modelId: 'claude', routing: {}, capabilities: { images: true } },
+    };
+    await fixture.write(TOOLS_PATHS.config, JSON.stringify({ ...config, privacyProviders: [entry, entry] }));
+    await expect(runToolsPipeline({ root: fixture.root, mode: 'write' })).rejects.toMatchObject({ code: 'E-TOOLS-002' });
+  }, 120_000);
+});

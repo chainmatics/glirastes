@@ -79,7 +79,7 @@ describe('non-finite numbers (p20)', () => {
   });
 
   it('the execution gate refuses a non-finite input', () => {
-    const gate = createApprovalExecutionGate([{ toolCallId: 'c', toolName: 't', input: { limit: null } }]);
+    const gate = createApprovalExecutionGate([{ toolCallId: 'c', toolName: 't', input: { limit: null }, approvalId: 'a' }]);
     expect(() => gate.authorize({ toolName: 't', toolCallId: 'c', input: { limit: Infinity } })).toThrow(/approval_not_verified/);
   });
 });
@@ -328,7 +328,7 @@ describe('enforceApprovalBindings', () => {
     const result = await enforceApprovalBindings(messages, { binder });
     expect(result.messages).toEqual(messages);
     expect(result.denied).toEqual([]);
-    expect(result.verified).toEqual([{ toolCallId: 'call-1', toolName: 'tasks_archive', input: call.input }]);
+    expect(result.verified).toEqual([{ toolCallId: 'call-1', toolName: 'tasks_archive', input: call.input, approvalId: expect.stringMatching(/^glirastes-approval\.v1\./) }]);
   });
 
   it('hands no settled, denied or provider-executed part to the execution gate', async () => {
@@ -826,7 +826,7 @@ describe('single use across handlers with different maximum ages (p26)', () => {
 });
 
 describe('createApprovalExecutionGate', () => {
-  const verified = [{ toolCallId: 'call-1', toolName: 'tasks_archive', input: { id: 't1', flags: { a: 1, b: 2 } } }];
+  const verified = [{ toolCallId: 'call-1', toolName: 'tasks_archive', input: { id: 't1', flags: { a: 1, b: 2 } }, approvalId: 'a1' }];
   const refusal = (code: string) => expect.objectContaining({ code });
 
   it('allows a verified approval once, with its input in any key order', () => {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { findForbiddenPlatformContentPath } from './content-boundary.js';
+import { PrivacyProviderReportSchema } from './privacy-policy.js';
 import {
   ToolPresentationSchema,
   ToolRiskClassSchema,
@@ -162,8 +163,23 @@ export const AppSetupArtifactSchema = z.object({
   exclusions: z.array(AppSetupExclusionSchema)
     .max(APP_SETUP_EXCLUSION_LIMITS.maxEntries)
     .optional(),
+  /**
+   * Provider entries the runner can offer under the privacy profile, with
+   * the digest of their non-secret target (adapter, endpoint, model,
+   * routing). The Platform approves only these ids and digests. No model
+   * id, URL or secret name.
+   */
+  privacyProviders: z.array(PrivacyProviderReportSchema).max(32).optional(),
   generatedAt: timestamp,
 }).strict().superRefine((artifact, context) => {
+  const providerIds = (artifact.privacyProviders ?? []).map((provider) => provider.id);
+  if (new Set(providerIds).size !== providerIds.length) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Privacy provider ids are unique',
+      path: ['privacyProviders'],
+    });
+  }
   const toolIds = new Set(artifact.tools.map((tool) => tool.toolId));
   for (const [index, toolId] of artifact.planner.toolIds.entries()) {
     if (!toolIds.has(toolId)) {

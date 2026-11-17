@@ -1,8 +1,11 @@
 import {
   AppSetupArtifactSchema,
+  isProtectedPolicy,
+  type EffectivePrivacyPolicy,
   type Principal,
   type SecurityRevocation,
 } from '../contracts/index.js';
+import { PrivacyError } from '../server/pii-shield/detection-result.js';
 import type { ToolRegistry } from '../types.js';
 import {
   lookupRuntimeConnection,
@@ -14,11 +17,17 @@ import {
 } from '../sync/control-plane-client.js';
 import { validateLocalDeploymentBindings } from '../sync/local-deployment-validator.js';
 import { createManagedRuntimeSync } from '../sync/managed-sync.js';
+import { effectivePrivacyPolicyDigest } from '../sync/privacy-digest.js';
 import {
   materializeDeploymentRevisions,
   type MaterializedDeploymentRevisions,
 } from '../sync/materialize-deployment.js';
-import type { RuntimeStateStore, RuntimeSyncState } from '../sync/state-store.js';
+import {
+  parseRuntimeSyncState,
+  type RuntimePrivacyFloor,
+  type RuntimeStateStore,
+  type RuntimeSyncState,
+} from '../sync/state-store.js';
 import {
   createContractBindings,
   type ContractBindingsResult,
@@ -39,6 +48,13 @@ import {
 } from './metrics/sink.js';
 import type { RuntimeMetricsSink } from './metrics/turn-recorder.js';
 import { policyOverlayFromRevision } from './policy-overlay.js';
+import {
+  assertPrivacyTurn,
+  effectivePrivacyPolicyFor,
+  privacyRuntimeStatus,
+  type GlirastesPrivacyOptions,
+  type PinnedPrivacyPolicy,
+} from './privacy-runtime.js';
 import { resolveRuntimeConnectionConfig } from './runtime-mode.js';
 import { resolveLocalLimits, type LocalLimits } from './local-limits.js';
 import { SDK_VERSION } from './sdk-version.js';
@@ -94,6 +110,31 @@ export interface CreateGlirastesOptions {
    */
   classifyToolFailure?: ToolFailureClassifier;
   /**
+   * The protected-text profile of this runtime: the strict shield (persistent
+   * mapping store and keyring), the provider registry and the local policy.
+   * With it, a signed privacy block is enforced (and reported) and, when
+   * connected to an environment, chat stays refused until a verified
+   * deployment arrived. Without it, a deployment with a protected block is
+   * refused and reported (`privacy_refused`).
+   */
+  privacy?: GlirastesPrivacyOptions;
+  /**
+   * Keeps the accepted sync state of an environment, privacy floor included,
+   * across restarts, e.g. `(id) => new FileRuntimeStateStore(`/var/lib/app/glirastes-${id}.json`)`
+   * on a persistent volume, or a database-backed store with `durable: true`.
+   *
+   * Managed privacy requires it: connected with `privacy`, a protected
+   * policy is enforced, confirmed and claimed as a capability only with a
+   * durable store; without one it is refused (`accepted_state_missing`).
+   * Connected with `privacy`, a store, or privacy providers in the setup
+   * artifact, AI traffic stays blocked (`privacy_policy_unavailable`) until
+   * the store was read and the state came from a verified sync: a lost or
+   * new state needs a sync of this process, an unreadable one is never
+   * overwritten, and after a failed save until a verified state was saved.
+   * The `ready()` timeout releases none of this.
+   */
+  stateStore?: (environmentId: string) => RuntimeStateStore;
+  /**
    * Upper bound of a serialized successful tool result in characters
    * (integer from 1,000 to 200,000, default 16,000); `chatTurn()` hands it to
    * `createAiChatHandler` (see `AiChatHandlerConfig.maxResultChars`). A
@@ -119,6 +160,10 @@ export interface GlirastesChatTurn {
     resolvePrincipal: (request: Request) => Principal | undefined | Promise<Principal | undefined>;
     resolveTurnSnapshot: (context: { turnId: string; principal: Principal }) => TurnSnapshot;
     loadRevocations: (context: { request: Request; snapshot: TurnSnapshot }) => SecurityRevocation[];
+    /** Throws a `PrivacyError` when a turn cannot run under its privacy policy. */
+    privacyGate: (context: { request: Request; snapshot: TurnSnapshot }) => void;
+    /** The digest of the effective privacy policy this runtime reports for a snapshot. */
+    privacyEffectiveDigest: (context: { request: Request; snapshot: TurnSnapshot }) => string | null;
   };
   loadTools: (context: { turnSnapshot?: TurnSnapshot }) => ToolRegistry;
   toolSemantics?: ToolSearchSemanticsMap;
@@ -151,22 +196,143 @@ export interface Glirastes {
   accepted(): MaterializedDeploymentRevisions | undefined;
   /** The signed revocations the sync accepted, checked before every tool call. */
   revocations(): SecurityRevocation[];
+  /**
+   * The effective privacy policy of the accepted deployment (signed block
+   * merged with the local policy), or `null` when the profile is off. Throws
+   * `privacy_policy_unavailable` while a connected runtime waits for its
+   * first verified deployment, `privacy_policy_revoked` and
+   * `privacy_not_configured` like a chat turn would. For paths outside the
+   * chat handler, e.g. local speech.
+   */
+  privacyPolicy(): EffectivePrivacyPolicy | null;
+  /**
+   * The speech part of `privacyPolicy()` for a transcription route:
+   * `'off'` when no protected policy applies, otherwise its limits (local
+   * service only, maximum duration). Throws like `privacyPolicy()`, so a
+   * route answers 503 instead of falling back to a cloud service. Pass it
+   * as `policy` to `createRecordingTranscriptionHandler`.
+   */
+  speechPolicy(): EffectivePrivacyPolicy['speech'] | 'off';
   /** Waits for `ready()`, then returns what `createAiChatHandler` needs for one turn. */
   chatTurn(principal: GlirastesPrincipalFactory): Promise<GlirastesChatTurn>;
   /** Stops the sync, flushes the metrics and forgets this instance. */
   stop(): Promise<void>;
 }
 
-/** Keeps the sync state in memory and the accepted deployment materialized for the turns. */
+/** The stricter of two floors: protected beats unprotected, a higher protected revision beats a lower one. */
+function stricterFloor(
+  current: RuntimePrivacyFloor | null | undefined,
+  candidate: RuntimePrivacyFloor | null | undefined,
+): RuntimePrivacyFloor | null {
+  if (candidate?.profile !== 'protected-text/v1') return current ?? null;
+  if (current?.profile === 'protected-text/v1' && current.policyRevision >= candidate.policyRevision) return current;
+  return candidate;
+}
+
+/**
+ * Keeps the sync state in memory and the accepted deployment materialized
+ * for the turns, backed by the consumer's persistent store when one is
+ * attached. Memory never accepts more than the persistent store holds; it
+ * may only be stricter (a floor whose save failed).
+ */
 class AcceptedStateStore implements RuntimeStateStore {
   private state: RuntimeSyncState | null = null;
   private stable: MaterializedDeploymentRevisions | undefined;
+  private persistent: RuntimeStateStore | undefined;
+  /** The environment the state belongs to; undefined while no connection is bound. */
+  private environmentId: string | undefined;
+  /** The persistent state could not be read: nothing is synced over it. */
+  private unreadable = false;
+  /**
+   * The last save failed. Survives `clear()`: only a later verified state
+   * that was saved durably, derived under the floor rules from the state
+   * kept here, resumes traffic.
+   */
+  private saveFailed = false;
+  /**
+   * Protected floors known in this process that the persisted state may not
+   * hold (a save failed, or the connection was dropped), per environment.
+   * Neither a later load, an unsigned connection signal nor a rebinding
+   * lowers them; only a durably saved state derived from them does.
+   */
+  private readonly held = new Map<string, RuntimePrivacyFloor>();
+  /** The state came from a verified sync: a persisted one with a cursor, or one saved in this process. */
+  private reconciled = false;
 
+  /** Binds the store to an environment without a persistent store. */
+  bind(environmentId: string): void {
+    this.clear();
+    this.environmentId = environmentId;
+  }
+
+  /**
+   * Loads the persisted state of an environment. An unreadable or invalid
+   * state throws and stays unreadable: it is neither replaced by defaults
+   * nor overwritten by a sync until a later attach reads it.
+   */
+  async attach(environmentId: string, persistent: RuntimeStateStore): Promise<void> {
+    this.bind(environmentId);
+    this.persistent = persistent;
+    let loaded: RuntimeSyncState | null;
+    try {
+      const raw = await persistent.load();
+      loaded = raw === null ? null : parseRuntimeSyncState(raw);
+    } catch (error) {
+      this.unreadable = true;
+      throw error;
+    }
+    if (loaded) {
+      this.remember(loaded);
+      this.reconciled = loaded.cursor !== null;
+    }
+  }
+
+  /** The state the sync continues from; a floor held for this environment is part of it. */
   async load(): Promise<RuntimeSyncState | null> {
-    return this.state ? structuredClone(this.state) : null;
+    if (this.unreadable) throw new Error('[glirastes] The persisted runtime state is unreadable');
+    const held = this.environmentId ? this.held.get(this.environmentId) ?? null : null;
+    if (!this.state && !held) return null;
+    const state: RuntimeSyncState = this.state
+      ? structuredClone(this.state)
+      : { cursor: null, stable: null, canary: null, pending: [], revocations: [], updatedAt: new Date(0).toISOString() };
+    return { ...state, privacyFloor: stricterFloor(state.privacyFloor, held) };
+  }
+
+  private hold(floor: RuntimePrivacyFloor | null | undefined): void {
+    if (!this.environmentId || floor?.profile !== 'protected-text/v1') return;
+    this.held.set(this.environmentId, stricterFloor(this.held.get(this.environmentId), floor)!);
+  }
+
+  /** The held floor that applies now: the bound environment's, or without one every held floor. */
+  private heldFloor(): RuntimePrivacyFloor | null {
+    if (this.environmentId) return this.held.get(this.environmentId) ?? null;
+    let strictest: RuntimePrivacyFloor | null = null;
+    for (const floor of this.held.values()) strictest = stricterFloor(strictest, floor);
+    return strictest;
   }
 
   async saveAtomic(state: RuntimeSyncState): Promise<void> {
+    if (this.unreadable) throw new Error('[glirastes] The persisted runtime state is unreadable');
+    try {
+      // Persisted first: memory never accepts more than survives a restart.
+      await this.persistent?.saveAtomic(state);
+    } catch (error) {
+      this.saveFailed = true;
+      this.hold(state.privacyFloor);
+      throw error;
+    }
+    this.remember(state);
+    this.saveFailed = false;
+    // The saved state was derived from `load()`, which carries the held
+    // floor: it holds that floor, or a newer signed `off` lowered it.
+    const held = this.environmentId ? this.held.get(this.environmentId) : undefined;
+    if (held && (state.privacyFloor?.policyRevision ?? 0) >= held.policyRevision) {
+      this.held.delete(this.environmentId!);
+    }
+    if (state.cursor !== null) this.reconciled = true;
+  }
+
+  private remember(state: RuntimeSyncState): void {
     this.state = structuredClone(state);
     this.stable = state.stable ? materializeDeploymentRevisions(state.stable) : undefined;
   }
@@ -175,14 +341,81 @@ class AcceptedStateStore implements RuntimeStateStore {
     return this.stable;
   }
 
+  /**
+   * Forgets the environment's state, e.g. when the connection is dropped.
+   * Its protected floor is held, and a failed save stays failed.
+   */
   clear(): void {
+    this.hold(this.state?.privacyFloor);
+    this.environmentId = undefined;
     this.state = null;
     this.stable = undefined;
+    this.persistent = undefined;
+    this.unreadable = false;
+    this.reconciled = false;
+  }
+
+  /** A persistent store that survives a restart is attached and readable. */
+  persistsDurably(): boolean {
+    return this.persistent?.durable === true && !this.unreadable;
+  }
+
+  /**
+   * The state cannot back a managed privacy decision: unreadable, the last
+   * save failed, or no verified sync yet (lost or new state).
+   */
+  unavailable(): boolean {
+    return this.unreadable || this.saveFailed || !this.reconciled;
   }
 
   revocations(): SecurityRevocation[] {
     return this.state?.revocations ?? [];
   }
+
+  /** A verified deployment's protected block this runner cannot enforce is outstanding. */
+  privacyRefused(): boolean {
+    return (this.state?.privacyRefusedDeploymentIds?.length ?? 0) > 0;
+  }
+
+  /**
+   * The floor demands protection the pinned policy does not carry: a
+   * refused, withdrawn or revoked protected revision never leads back to an
+   * unprotected one. Only a newer signed `off` lowers the floor.
+   */
+  privacyFloorUnmet(pinned: PinnedPrivacyPolicy | undefined): boolean {
+    const floor = stricterFloor(this.state?.privacyFloor, this.heldFloor());
+    return floor?.profile === 'protected-text/v1' && !isProtectedPolicy(pinned?.privacy);
+  }
+}
+
+/**
+ * Content-free notices for provider entries whose binding differs between
+ * the registry and the setup artifact: the Platform approves the reported
+ * digest, so such an entry would be refused under a signed policy.
+ */
+function privacyProviderDrift(
+  reported: ReadonlyArray<{ id: string; bindingDigest: string }>,
+  bindings: Readonly<Record<string, string>>,
+): string[] {
+  const notices: string[] = [];
+  const reportedIds = new Set(reported.map((provider) => provider.id));
+  for (const provider of reported) {
+    if (!Object.hasOwn(bindings, provider.id)) {
+      notices.push(`[glirastes] Privacy provider "${provider.id}" is in the setup artifact but not in the provider registry.`);
+    } else if (bindings[provider.id] !== provider.bindingDigest) {
+      notices.push(`[glirastes] Privacy provider "${provider.id}" differs from the setup artifact; run setup again so the Platform can approve it.`);
+    }
+  }
+  for (const id of Object.keys(bindings)) {
+    if (reported.length > 0 && !reportedIds.has(id)) {
+      notices.push(`[glirastes] Privacy provider "${id}" is not in the setup artifact; the Platform cannot approve it.`);
+    }
+  }
+  return notices;
+}
+
+function pinnedOf(revision: { revisionId: string; privacy?: PinnedPrivacyPolicy['privacy'] }): PinnedPrivacyPolicy {
+  return { revisionId: revision.revisionId, ...(revision.privacy ? { privacy: revision.privacy } : {}) };
 }
 
 function logError(error: unknown): void {
@@ -281,6 +514,11 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       }
     : options.generated;
   const bound = createContractBindings(generated);
+  if (options.privacy?.providers) {
+    for (const message of privacyProviderDrift(bound.setupArtifact.privacyProviders ?? [], options.privacy.providers.bindings())) {
+      onError(new Error(message));
+    }
+  }
   const localSource = (identity?: { tenantId?: string; targetAppId?: string; environmentId?: string }, managed?: {
     accepted: () => MaterializedDeploymentRevisions | undefined;
   }) => createLocalRuntimeSource({
@@ -398,6 +636,38 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     }
     notedNoReference = false;
 
+    if (options.stateStore) {
+      // Nothing syncs before the persisted state was read. An unreadable one
+      // is retried, never replaced by defaults, and keeps managed privacy
+      // blocked (`privacy_policy_unavailable`).
+      let persistent: RuntimeStateStore;
+      try {
+        persistent = options.stateStore(environmentId);
+      } catch (error) {
+        onError(error);
+        return false;
+      }
+      if (options.privacy && persistent.durable !== true) {
+        onError(new Error('[glirastes] The state store does not declare itself durable; a protected privacy policy is refused (accepted_state_missing).'));
+      }
+      while (!abort.signal.aborted) {
+        try {
+          await store.attach(environmentId, persistent);
+          break;
+        } catch {
+          onError(Object.assign(
+            new Error('[glirastes] The persisted runtime state cannot be read; managed privacy stays blocked until it is readable or removed.'),
+            { name: 'RuntimeStateUnreadable' },
+          ));
+          settleFirstAttempt();
+          await delay(retryMs, abort.signal);
+        }
+      }
+      if (abort.signal.aborted) return false;
+    } else {
+      store.bind(environmentId);
+    }
+
     let placeLost = false;
     let sync: ReturnType<typeof createManagedRuntimeSync>;
     try {
@@ -411,6 +681,14 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         version: options.version?.trim() || env.GLIRASTES_BUILD_ID?.trim() || `glirastes@${SDK_VERSION}`,
         stateStore: store,
         setupArtifact: options.generated.setupArtifact,
+        privacyStatus: (revisions) => privacyRuntimeStatus(
+          pinnedOf(revisions.policyRevision),
+          options.privacy,
+          store.revocations(),
+          store.persistsDurably(),
+        ),
+        // Only a runner that can enforce and durably keep a protected policy claims the capability.
+        privacyCapable: Boolean(options.privacy) && store.persistsDurably(),
         // A deployment that names a tool this code lacks, or has changed, keeps running on the local tool.
         validateDeployment: (_deployment, revisions) => {
           validateLocalDeploymentBindings({ revisions, bindings: bound.bindings });
@@ -497,6 +775,44 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     }
   };
 
+  /**
+   * Connected with privacy: until a verified deployment arrived, the policy
+   * of the environment is unknown. A connection without a reference
+   * environment runs on the local code.
+   */
+  const withoutEnvironment = () => Boolean(resolved && resolved.environmentId === null);
+  const awaitingPolicy = () => Boolean(config) && !store.accepted() && !withoutEnvironment();
+  /**
+   * Managed privacy: the protection requirement does not follow from the
+   * optional `privacy` object alone. A state store or privacy providers in
+   * the committed setup artifact mark the deployment as managed too, so a
+   * missing `privacy` integration there is blocked, not treated as legacy.
+   * Standalone, and connected without any of the three, stays unchanged.
+   */
+  const managedPrivacy = Boolean(config)
+    && Boolean(options.privacy || options.stateStore || (bound.setupArtifact.privacyProviders?.length ?? 0) > 0);
+  if (config && options.privacy && !options.stateStore) {
+    onError(new Error('[glirastes] Managed privacy needs a durable stateStore; a protected privacy policy is refused (accepted_state_missing).'));
+  }
+  const privacyGate = (pinned: PinnedPrivacyPolicy | undefined) => {
+    // Lost, unreadable or unsaved state: no verified, durable decision yet.
+    if (managedPrivacy && !withoutEnvironment() && store.unavailable()) {
+      throw new PrivacyError('privacy_policy_unavailable');
+    }
+    // A refused protected revision blocks traffic; the old revision does not
+    // keep running unprotected (K3).
+    if (store.privacyRefused()) throw new PrivacyError('privacy_not_configured');
+    if (store.privacyFloorUnmet(pinned)) throw new PrivacyError('privacy_not_configured');
+    if (managedPrivacy && awaitingPolicy()) throw new PrivacyError('privacy_policy_unavailable');
+    assertPrivacyTurn({
+      pinned,
+      privacy: options.privacy,
+      revocations: store.revocations(),
+      awaitingPolicy: awaitingPolicy(),
+      ...(config ? { acceptedStateDurable: store.persistsDurably() } : {}),
+    });
+  };
+
   const instance: Glirastes = {
     mode: config ? 'connected' : 'standalone',
     bindings: bound.bindings,
@@ -542,6 +858,15 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     },
     accepted: () => store.accepted(),
     revocations: () => store.revocations(),
+    privacyPolicy() {
+      const accepted = store.accepted();
+      const pinned = accepted ? pinnedOf(accepted.policyRevision) : undefined;
+      privacyGate(pinned);
+      return options.privacy ? effectivePrivacyPolicyFor(pinned, options.privacy) : null;
+    },
+    speechPolicy() {
+      return instance.privacyPolicy()?.speech ?? 'off';
+    },
     async chatTurn(principal) {
       await instance.ready();
       const source = instance.currentSource();
@@ -552,6 +877,11 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           resolvePrincipal: (request) => principal(tenantId, request),
           resolveTurnSnapshot: (context) => source.resolveTurnSnapshot(context),
           loadRevocations: () => store.revocations(),
+          privacyGate: ({ snapshot }) => privacyGate(pinnedOf(snapshot.policyRevision)),
+          privacyEffectiveDigest: ({ snapshot }) => {
+            const effective = options.privacy ? effectivePrivacyPolicyFor(pinnedOf(snapshot.policyRevision), options.privacy) : null;
+            return effective ? effectivePrivacyPolicyDigest(effective) : null;
+          },
         },
         loadTools: ({ turnSnapshot }) => (turnSnapshot
           ? materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: bound.bindings })

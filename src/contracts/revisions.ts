@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ExecutionBudgetSchema } from './runtime.js';
 import { findForbiddenContentPath } from './content-boundary.js';
+import { PrivacyPolicyBlockSchema } from './privacy-policy.js';
 import { ToolOverrideDeltaSchema, ToolRiskClassSchema } from './tool-policy-entry.js';
 
 export { ToolRiskClassSchema } from './tool-policy-entry.js';
@@ -152,6 +153,12 @@ export const RuntimePolicyRevisionSchema = z.object({
         seen.add(delta.toolId);
       });
     }),
+  /**
+   * The signed privacy policy (protected-text profile). Absent on revisions
+   * without a Platform privacy setting, which therefore keep their bytes.
+   * A runner that knows no privacy block refuses the revision (strict).
+   */
+  privacy: PrivacyPolicyBlockSchema.optional(),
   publishedAt,
   signature: RevisionSignatureSchema,
 }).strict();

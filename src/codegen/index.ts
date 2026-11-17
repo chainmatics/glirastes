@@ -25,3 +25,18 @@ export {
 } from './inventory-generation.js';
 
 export { collectNextEndpointExecutions, type ResolvedEndpointContract } from './next-source-generation.js';
+
+export {
+  scanSourceForEgress,
+  scanTreeForEgress,
+  checkEgressInventory,
+  EgressInventorySchema,
+  EgressInventoryEntrySchema,
+  MODEL_CALL_SYMBOLS,
+  type EgressFinding,
+  type EgressInventory,
+  type EgressInventoryEntry,
+  type EgressKind,
+  type EgressViolation,
+  type ScanTreeOptions,
+} from './model-egress.js';

@@ -224,3 +224,5 @@ switching, stream cancellation, one frontend action and export drift. The SDK
 repository's `examples/php-runtime` and `examples/frontend-frameworks` are
 optional examples, not files required by this packaged reference. Record local
 build, image publication, deployment and real-provider acceptance separately.
+
+Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.

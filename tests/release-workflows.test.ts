@@ -52,11 +52,12 @@ describe('release workflows', () => {
     expect(config.compilerOptions.paths).toEqual(sourceOfEveryExport());
   });
 
-  it('runs the test type check in CI', () => {
+  it('runs the test type check and the model egress inventory in CI', () => {
     expect(jobRuns(read('.github/workflows/ci.yml'), 'typecheck')).toEqual([
       'bun install --frozen-lockfile',
       'bun run typecheck',
       'bun run typecheck:tests',
+      'bun run check:egress',
     ]);
   });
 
@@ -69,6 +70,7 @@ describe('release workflows', () => {
       'bun run typecheck:tests',
       'bun run build',
       'bun install --frozen-lockfile --cwd examples/react-nest-separate/api',
+      'bun run check:egress',
       'bun run test',
       `npm publish --access public --provenance --tag "$(node -p "['latest', 'next'][Number(require('./package.json').version.includes('-'))]")"`,
     ]);

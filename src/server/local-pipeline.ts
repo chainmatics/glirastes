@@ -4,6 +4,7 @@ import type {
   AiRouterConfig,
   IntentClassification,
   ModelConfig,
+  PipelineCallOptions,
   PipelineResult,
   ToolContext,
 } from '../types.js';
@@ -36,6 +37,13 @@ function continuationKeyOf(
     input,
     (conversationHistory ?? []).filter((message) => message.role === 'user').map((message) => message.content),
   ]);
+}
+
+const LOCAL_PIPELINE = Symbol.for('glirastes.pipeline.local');
+
+/** True for a pipeline from {@link createLocalAiPipeline}: no content leaves the host except to its own models. */
+export function isLocalAiPipeline(pipeline: unknown): boolean {
+  return typeof pipeline === 'object' && pipeline !== null && (pipeline as Record<symbol, unknown>)[LOCAL_PIPELINE] === true;
 }
 
 /**
@@ -100,8 +108,11 @@ export function createLocalAiPipeline(
     context: ToolContext,
   ) => modelSelector?.select(intent, context) ?? defaultModel;
 
-  return {
-    async process(input, context, conversationHistory): Promise<PipelineResult> {
+  const pipeline: AiPipeline = {
+    async process(input, context, conversationHistory, options?: PipelineCallOptions): Promise<PipelineResult> {
+      // Protected turns: the classifier model runs behind the turn's boundary
+      // and the request is not kept for later requests (no learned fast path).
+      const protectedCall = Boolean(options?.wrapModel);
       const validation = guardrails.validate(input);
       config.onAudit?.({
         type: validation.blocked ? 'guardrail.blocked' : 'guardrail.passed',
@@ -145,8 +156,9 @@ export function createLocalAiPipeline(
           validation.sanitized,
           context,
           conversationHistory,
+          options,
         );
-        if (!hasConversationHistory) {
+        if (!hasConversationHistory && !protectedCall) {
           fastPath.learn(validation.sanitized, intent);
         }
         if (intent.intent !== 'ambiguous') {
@@ -157,7 +169,7 @@ export function createLocalAiPipeline(
           }
         }
       }
-      void fastPath.saveToStorage();
+      if (!protectedCall) void fastPath.saveToStorage();
       config.onAudit?.({
         type: 'intent.classified',
         timestamp: new Date().toISOString(),
@@ -204,4 +216,6 @@ export function createLocalAiPipeline(
       };
     },
   };
+  Object.defineProperty(pipeline, LOCAL_PIPELINE, { value: true, enumerable: false });
+  return pipeline;
 }

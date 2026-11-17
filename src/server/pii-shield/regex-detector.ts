@@ -3,6 +3,7 @@ import type {
   PiiDetector,
   PiiEntity,
 } from '../../types.js';
+import { BIRTH_DATE_IN_TEXT } from './dates.js';
 
 interface RegexPattern {
   type: PiiCategory;
@@ -14,6 +15,13 @@ interface RegexPattern {
 export interface RegexPiiDetectorConfig {
   categories?: PiiCategory[];
   customPatterns?: RegexPattern[];
+  /**
+   * `any-date` (legacy default): every German `dd.mm.yyyy` counts as a date
+   * of birth. `context`: only a date after a birth word ("geboren", "Geb.",
+   * "Geburtsdatum", "DOB", "born") does; other dates stay. The
+   * protected-text profile uses `context`.
+   */
+  dateOfBirth?: 'any-date' | 'context';
 }
 
 const COMMON_PATTERNS: RegexPattern[] = [
@@ -97,9 +105,11 @@ export function createRegexPiiDetector(
   return {
     detect(text, locales = []) {
       const locale = locales[0]?.split('-')[0]?.toLowerCase();
+      const contextual = config.dateOfBirth === 'context';
       let patterns = [
         ...COMMON_PATTERNS,
-        ...(locale === 'de' ? GERMAN_PATTERNS : []),
+        ...(locale === 'de' ? GERMAN_PATTERNS.filter((p) => !contextual || p.type !== 'date_of_birth') : []),
+        ...(contextual ? [{ type: 'date_of_birth' as PiiCategory, pattern: BIRTH_DATE_IN_TEXT, score: 0.8 }] : []),
         ...(config.customPatterns ?? []),
       ];
       if (config.categories?.length) {

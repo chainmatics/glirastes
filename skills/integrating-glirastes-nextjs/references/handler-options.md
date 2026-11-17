@@ -58,13 +58,16 @@ it. The type's JSDoc carries the full detail.
 
 ## Built-in tools
 
+Effective protected privacy disables result handles even with explicit `resultHandles: true`: oversized protected output is withheld (`outputWithheld`) and SDK result readers are refused. The off profile retains retrieval. A standalone store configured with `owner` rechecks that owner on every read.
+
 | Key | What it does |
 | --- | --- |
 | `clarification` | `ClarificationConfig` enables `ask_clarification` |
 | `planning` | `PlanningConfig` enables `update_plan`; the chat shows it as a checklist |
 | `resultHandles` | on by default: a successful record result over its `maxResultChars` is kept in full for the running turn (after `piiShield`, sealed once) and the model gets an overview (every entry of the largest array with its small fields; nested arrays and objects, foreign keys, opaque ids, URLs and long texts are left out before dates and names, booleans, numbers and short status-like labels last, nested ones before an entry's own; left-out fields named in `_result.omitted`, fully emptied objects removed and listed once with up to eight child `keys` readable as `path.key`) plus a `_result.id` (`ro_…` read tool, `rw_…` other tool); the built-in `read_result` (`READ_RESULT_TOOL_NAME`; `resultId`, `fields` such as `data[].name` or `data[2].items` for one entry, `offset`, `limit`) reads more without calling the backend, and an incomplete answer says so in `_result.hint` with the `offset` to continue at. `ResultHandleLimits` `{ maxResults, maxResultBytes, maxTotalBytes }` (defaults `DEFAULT_RESULT_HANDLE_LIMITS`: 8, 2 MiB, 16 MiB); beyond them, or with `false`, results are cut (`_truncated`). Handles live only in the request: an approval continuation or a later turn answers `result_expired`. Managed turns run the origin tool's guard per read (budget, fresh principal, revocations, loop detection); without `managedRuntime` there is no principal check. Direct commands get no handles. The browser sees the overview and every `read_result` answer as the model does; renderers see only what the overview contains. Lower level: `createResultStore(ResultStoreOptions)` (`ResultStore`, `ResultHandle`) as `resultStore` of `toolsToAiTools` plus `createReadResultTool(store, ReadResultGuard)` |
 | `guardrails` | `GuardrailHook`, the app's own input check before routing; a refusal answers 400 |
-| `piiShield` | anonymize user messages before the model, re-hydrate tool arguments |
+| `privacy` | `ChatPrivacyConfig`: the protected-text profile, one privacy boundary around every model call of a turn; see [privacy.md](privacy.md) |
+| `piiShield` | legacy: anonymize user messages before the model, re-hydrate tool arguments; replaced by `privacy` |
 
 ## Approvals
 

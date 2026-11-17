@@ -1,0 +1,297 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "file": "src/agent/openrouter.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "CI agent OpenRouter routing wrapper; no end-user content.",
+      "count": 2
+    },
+    {
+      "file": "src/agent/platform-jobs.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "CI agent platform job API: job metadata and repository results, no end-user content."
+    },
+    {
+      "file": "src/agent/runner.ts",
+      "symbol": "generateText",
+      "kind": "model_call",
+      "decision": "exception",
+      "reason": "CI skill/source agent runner for repository jobs; outside the protected chat profile, never handles end-user chat content. Review required on change."
+    },
+    {
+      "file": "src/cli/commands/tools/enrich.ts",
+      "symbol": "<computed>",
+      "kind": "dynamic_import",
+      "decision": "exception",
+      "reason": "CI tool-enrichment job loads @ai-sdk/openai lazily; sends tool schemas and descriptions, no end-user content."
+    },
+    {
+      "file": "src/cli/commands/tools/enrich.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "CI tool-enrichment job: OpenRouter key check and platform job API; no end-user content."
+    },
+    {
+      "file": "src/cli/deferred-full.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "CLI download of the deferred full package build; no prompt or business content.",
+      "count": 4
+    },
+    {
+      "file": "src/codegen/asset-sync.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Build-time sync of generated tool metadata; tool contracts only, no runtime content."
+    },
+    {
+      "file": "src/codegen/tools/probe-child.mjs",
+      "symbol": "<computed>",
+      "kind": "dynamic_import",
+      "decision": "content-free",
+      "reason": "Codegen probe loads the developer's own route modules by path at build time; no network.",
+      "count": 5
+    },
+    {
+      "file": "src/codegen/tools/probe-loader.mjs",
+      "symbol": "<computed>",
+      "kind": "dynamic_import",
+      "decision": "content-free",
+      "reason": "Codegen loader hook resolves the developer's own modules at build time; no network."
+    },
+    {
+      "file": "src/embed/glirastes-chat-element.tsx",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "Browser embed posts to the consumer's own chat route, where the protected-text profile applies."
+    },
+    {
+      "file": "src/react/bridges/rest-session-bridge.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "Browser calls the consumer's own session API; stays in the consumer environment."
+    },
+    {
+      "file": "src/react/interactions/definitions.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "Browser loads interaction definitions from the consumer's own route."
+    },
+    {
+      "file": "src/react/interactions/use-chat-interactions-data.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "Browser loads interaction data from the consumer's own route."
+    },
+    {
+      "file": "src/react/stt/deepgram.ts",
+      "symbol": "WebSocket",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "Cloud Deepgram streaming adapter; the protected profile must not use it (local recorded transcription only). The consumer blocks its token route server-side.",
+      "count": 7
+    },
+    {
+      "file": "src/react/stt/recorded.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "Browser posts recorded audio to the consumer's own transcription route, which forwards to a local service only."
+    },
+    {
+      "file": "src/react/transports/langgraph.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "LangGraph transport (not exported); posts to a consumer-configured agent server, outside the protected profile."
+    },
+    {
+      "file": "src/runtime-service/bin.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Container health self-check against its own local port."
+    },
+    {
+      "file": "src/runtime-service/identity.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "Container verifies the forwarded user credentials against the consumer backend."
+    },
+    {
+      "file": "src/runtime-service/server.ts",
+      "symbol": "node:http",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "Inbound HTTP server of the configured runtime container; the container has no privacy profile in Stage 1 and is not part of the protected GID path."
+    },
+    {
+      "file": "src/runtime-service/service.ts",
+      "symbol": "@ai-sdk/openai",
+      "kind": "provider_import",
+      "decision": "exception",
+      "reason": "Configured runtime container builds its OpenAI-compatible model here; the container has no privacy profile in Stage 1 and is not part of the protected GID path."
+    },
+    {
+      "file": "src/runtime/metrics/sink.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Content-free turn metrics to the configured sink; no prompt, tool or business content."
+    },
+    {
+      "file": "src/server/adapters/nestjs/chat/ai-chat.service.ts",
+      "symbol": "protectedStreamText(null)",
+      "kind": "facade_call",
+      "decision": "exception",
+      "reason": "NestJS chat service has no privacy profile: it refuses any 'privacy' or 'piiShield' option with privacy_profile_unsupported before streaming, so no protected-text promise is made on this path. Logs are class-only and onError is content-free."
+    },
+    {
+      "file": "src/server/adapters/nestjs/chat/ws-loader.ts",
+      "symbol": "ws",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "NestJS speech gateway (not exported) relays to cloud Deepgram; outside the protected profile, which uses local recorded transcription only."
+    },
+    {
+      "file": "src/server/adapters/nextjs/chat-memory.ts",
+      "symbol": "generateText",
+      "kind": "model_call",
+      "decision": "exception",
+      "reason": "Existing optional chat memory summarization, outside protected-text/v1: the handler explicitly refuses enabled memory before store reads, note tools or summary calls. Protected handler and two-adapter HTTP capture regressions verify zero dispatch; memory:false ignores browser notes and withholds unbound summary replay."
+    },
+    {
+      "file": "src/server/adapters/nextjs/create-ai-chat-handler.ts",
+      "symbol": "protectedGenerateText(boundary)",
+      "kind": "facade_call",
+      "decision": "protected",
+      "reason": "The intent classifier of a protected turn with a resolved provider: the turn's registry-resolved model behind the classifier boundary of the same scope (pseudonymized prompt, policy check, provider approval). Replaces the configured classifier model and callback."
+    },
+    {
+      "file": "src/server/adapters/nextjs/create-ai-chat-handler.ts",
+      "symbol": "protectedStreamText(nullable)",
+      "kind": "facade_call",
+      "decision": "protected",
+      "reason": "Passes ctx.privacy?.boundary ?? null: the boundary of every protected turn. null when the handler was created without 'privacy', or with 'privacy' and policy.required: false for a turn whose signed policy is absent or 'off' (the policy's decision, reported as state 'off'); a protected block never runs with null. Upstream result-handle retrieval adds no new model/network call: effective protected turns never create the raw result store or builtin reader, and core bridges refuse externally registered SDK readers before execution; current, foreign/deleted/expired-generation and off-to-revoked HTTP transport regressions cover this boundary."
+    },
+    {
+      "file": "src/server/adapters/nextjs/recording-transcription-handler.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "Forwards recorded audio to the configured local OpenAI-compatible transcription service in the consumer infrastructure."
+    },
+    {
+      "file": "src/server/core/index.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "Endpoint tools call the consumer's own backend with the user's credentials and rehydrated arguments; final authorization stays there."
+    },
+    {
+      "file": "src/server/lancer/client.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "Internal Lancer client (not exported); refused together with the protected-text profile.",
+      "count": 2
+    },
+    {
+      "file": "src/server/lancer/telemetry-buffer.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "Internal Lancer telemetry (not exported); refused together with the protected-text profile."
+    },
+    {
+      "file": "src/server/pii-shield/model-calls.ts",
+      "symbol": "generateObject",
+      "kind": "model_call",
+      "decision": "facade",
+      "reason": "The guarded model-call facade: every SDK model call passes it with an explicit privacy boundary or an explicit null."
+    },
+    {
+      "file": "src/server/pii-shield/model-calls.ts",
+      "symbol": "generateText",
+      "kind": "model_call",
+      "decision": "facade",
+      "reason": "The guarded model-call facade: every SDK model call passes it with an explicit privacy boundary or an explicit null."
+    },
+    {
+      "file": "src/server/pii-shield/model-calls.ts",
+      "symbol": "streamText",
+      "kind": "model_call",
+      "decision": "facade",
+      "reason": "The guarded model-call facade: every SDK model call passes it with an explicit privacy boundary or an explicit null."
+    },
+    {
+      "file": "src/server/pii-shield/provider-registry.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "protected",
+      "reason": "OpenRouter routing wrapper: forwards the already protected provider request and adds the routing policy to its body."
+    },
+    {
+      "file": "src/sync/app-setup-client.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Control-plane sync: content-free technical metadata out, signed revisions and keys in."
+    },
+    {
+      "file": "src/sync/connection-lookup.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Control-plane sync: content-free technical metadata out, signed revisions and keys in."
+    },
+    {
+      "file": "src/sync/control-plane-client.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Control-plane sync: content-free technical metadata out, signed revisions and keys in."
+    },
+    {
+      "file": "src/sync/fetch-sse-push.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Control-plane sync: content-free technical metadata out, signed revisions and keys in."
+    },
+    {
+      "file": "src/sync/jwks-provider.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Control-plane sync: content-free technical metadata out, signed revisions and keys in."
+    },
+    {
+      "file": "src/sync/runtime-connect-client.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Control-plane sync: content-free technical metadata out, signed revisions and keys in."
+    },
+    {
+      "file": "src/sync/runtime-setup-client.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "content-free",
+      "reason": "Control-plane sync: content-free technical metadata out, signed revisions and keys in."
+    }
+  ]
+}

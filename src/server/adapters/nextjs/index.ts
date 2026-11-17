@@ -42,7 +42,10 @@ export {
 export {
   createRecordingTranscriptionHandler,
   DEFAULT_RECORDING_LANGUAGES,
+  isPrivateServiceUrl,
+  wavDurationSeconds,
   type RecordingTranscriptionHandlerConfig,
+  type SpeechPrivacyPolicy,
 } from './recording-transcription-handler.js';
 export type { ApprovalStore, ApprovalDenialCode } from './approval-binding.js';
 export type { DefaultIntentRoutingOptions } from './default-intent-routing.js';

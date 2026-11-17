@@ -342,3 +342,5 @@ repository, `examples/frontend-frameworks` contains integration examples;
 installed users can follow the packaged reference without that checkout.
 Verify browser mounting, one authenticated read, one action, logout and
 switching both user and business tenant in the real target app.
+
+Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.

@@ -19,6 +19,13 @@ import type {
 } from '../../types.js';
 import { defineTool } from '../../types.js';
 import { zodToCompactDescription } from './zod-compact.js';
+import {
+  AMBIGUOUS_HTTP_STATUS,
+  errorLeavesOutcomeUnknown,
+  isOutcomeUnknown,
+  markOutcomeUnknown,
+  ResponseUnreadableError,
+} from './tool-outcome.js';
 import type { ToolFailureClassifier } from '../../runtime/tool-failure.js';
 import {
   assertMaxResultChars,
@@ -27,7 +34,7 @@ import {
 } from '../../runtime/result-limit.js';
 import { truncateToolResult } from './truncate-tool-result.js';
 import type { ResultStore } from './result-store.js';
-import { isResultReader } from './read-result-tool.js';
+import { isResultReader, markResultReader, unsupportedPrivateResultRead } from './result-reader.js';
 export {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
@@ -188,6 +195,7 @@ const MAX_TOOL_ERROR_BODY_CHARS = 4_000;
  * fields instead of silently losing them.
  */
 const ENDPOINT_FAILURE = Symbol.for('glirastes.endpointFailure');
+const OUTCOME_UNKNOWN_HINT = 'The outcome is unknown. Do not repeat the call before checking whether it took effect.';
 
 /** How far a cut may move back to end on a whole token. */
 const MAX_TOOL_ERROR_BACKTRACK_CHARS = 256;
@@ -249,6 +257,15 @@ function boundedToolFailure(
   const error = cutError.trim().length > 0 ? cutError : 'Tool execution failed.';
 
   const fromEndpoint = (result as { [ENDPOINT_FAILURE]?: unknown })[ENDPOINT_FAILURE] === true;
+  if (fromEndpoint && isOutcomeUnknown(result)) {
+    return markOutcomeUnknown({
+      success: false,
+      error,
+      outcome: 'unknown',
+      hint: OUTCOME_UNKNOWN_HINT,
+      ...(Number.isInteger(result.status) ? { status: result.status } : {}),
+    });
+  }
   return {
     success: false,
     error,
@@ -708,6 +725,11 @@ export function endpointToolToTool<TInput extends SchemaLike>(
           ...(expected ? { expectedFailure: true } : {}),
         };
         Object.defineProperty(failure, ENDPOINT_FAILURE, { value: true });
+        // A gateway error or timeout answer after a write was sent: the
+        // backend may have acted.
+        if (fromBackend && AMBIGUOUS_HTTP_STATUS.has(response.status) && endpointTool.method !== 'GET') {
+          markOutcomeUnknown(failure);
+        }
         return failure;
       }
 
@@ -928,12 +950,20 @@ export interface ToolToAiToolOptions {
    */
   telemetry?: TelemetrySink;
   /**
+   * Protected profile: a failed tool answers the model and the audit event
+   * without the error message (backend messages can carry request data).
+   */
+  contentFreeErrors?: boolean;
+  /** Withhold oversized raw results and disable result stores/readers to prevent unregistered identity fragments. */
+  protectedResults?: boolean;
+  /**
    * Upper bound of a serialized successful tool result, in characters
    * (integer from 1,000 to 200,000; default 16,000). A tool's own
    * `maxResultChars` wins. See `truncateToolResult`.
    */
   maxResultChars?: number;
   /**
+   * Ignored when `protectedResults` is true; SDK readers are refused too.
    * The result store of the running turn (`createResultStore`). With it, a
    * successful record result larger than the tool's limit is kept in the
    * store and the model gets an overview with a `_result` handle that
@@ -987,7 +1017,7 @@ export function toolToAiTool(
     : !tool.needsApproval;
   const requiresApproval = !!needsApproval;
 
-  return {
+  const converted = {
     _toolId: tool.id,
     description: tool.description,
     parameters: tool.inputSchema,
@@ -1016,6 +1046,9 @@ export function toolToAiTool(
       const signals = [context.abortSignal, executionOptions?.abortSignal].filter((value): value is AbortSignal => Boolean(value));
       const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
       signal?.throwIfAborted();
+      if (options?.protectedResults && isResultReader(tool)) {
+        return unsupportedPrivateResultRead();
+      }
       const endpoint = context as Partial<EndpointToolContext>;
       const executionContext = signal ? {
         ...context, abortSignal: signal,
@@ -1026,7 +1059,7 @@ export function toolToAiTool(
       const startTime = Date.now();
       try {
         // A handle belongs to the principal the tool runs for: captured before it runs.
-        const store = options?.resultStore;
+        const store = options?.protectedResults ? undefined : options?.resultStore;
         const capturedOwner = store && !isResultReader(tool) ? await store.captureOwner() : undefined;
         const result = await tool.execute(input, executionContext);
 
@@ -1119,8 +1152,14 @@ export function toolToAiTool(
               ...(capturedOwner ? { owner: capturedOwner } : {}),
             })
           : undefined;
-        cleanResult = overview
-          ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
+        cleanResult = options?.protectedResults && (JSON.stringify(cleanResult)?.length ?? 0) > resultLimit
+          ? {
+              success: true,
+              outputWithheld: true,
+              message: 'The tool ran, but its result exceeds the protected result limit. Details were withheld. Do not repeat a write; narrow a read request instead.',
+            }
+          : overview ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
+
 
         const output = options?.uiActionSchema
           ? normalizeResultUiAction(cleanResult, options.uiActionSchema)
@@ -1138,14 +1177,27 @@ export function toolToAiTool(
           details: {
             toolId: tool.id,
             toolName: name,
-            error: error instanceof Error ? error.message : String(error),
+            error: options?.contentFreeErrors
+              ? 'tool_failed'
+              : error instanceof Error ? error.message : String(error),
             latencyMs: Date.now() - startTime,
           },
         });
 
         options?.onError?.(tool.id, error);
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage = options?.contentFreeErrors
+          ? 'tool_failed'
+          : error instanceof Error ? error.message : 'Unknown error';
+        // A timeout, abort, lost connection or unreadable answer after the
+        // request may have reached the backend: the call may have taken
+        // effect, so it is not reported as failed.
+        if (errorLeavesOutcomeUnknown(error)) {
+          return markOutcomeUnknown({
+            error: `Error in ${tool.id}: ${options?.contentFreeErrors ? 'tool_outcome_unknown' : errorMessage}`,
+            outcome: 'unknown',
+            hint: OUTCOME_UNKNOWN_HINT,
+          });
+        }
         return normalizeResultUiAction(
           {
             error: `Error in ${tool.id}: ${errorMessage}`,
@@ -1156,6 +1208,7 @@ export function toolToAiTool(
       }
     },
   };
+  return isResultReader(tool) ? markResultReader(converted) : converted;
 }
 
 /**
@@ -1357,7 +1410,14 @@ export function createFetchInternalApiCaller(
       }
 
       const response = await fetchImpl(url, init);
-      const data = await parseResponseBody(response, options.maxResponseBytes);
+      let data: unknown;
+      try {
+        data = await parseResponseBody(response, options.maxResponseBytes);
+      } catch (error) {
+        // The backend answered, so a write may have committed: not a plain failure.
+        if (errorLeavesOutcomeUnknown(error) || request.method === 'GET' || request.method === 'HEAD') throw error;
+        throw new ResponseUnreadableError(error instanceof Error ? error.message : undefined);
+      }
 
       if (!response.ok) {
         return {

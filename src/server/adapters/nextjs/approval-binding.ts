@@ -505,6 +505,8 @@ export interface VerifiedApproval {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly input: unknown;
+  /** The verified, single-use approval id. */
+  readonly approvalId: string;
 }
 
 /**
@@ -609,7 +611,7 @@ export async function enforceApprovalBindings(
         : bindingCode({ input, toolName, toolCallId, approvalId, binder: options.binder })
           ?? (isUnsettledApproval(record) ? 'approval_not_runnable' : undefined);
       if (!code) {
-        if (runnable && record.providerExecuted !== true) verified.push({ toolCallId, toolName, input });
+        if (runnable && record.providerExecuted !== true) verified.push({ toolCallId, toolName, input, approvalId });
         parts.push(part);
         continue;
       }

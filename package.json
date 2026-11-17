@@ -1,6 +1,6 @@
 {
   "name": "glirastes",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Official Chainmatics SDK for building AI-powered chat, tools, and agent systems. Part of the Glirastes platform.",
   "license": "Apache-2.0",
   "author": {
@@ -292,6 +292,7 @@
     "build": "node scripts/generate-embed-styles.mjs --check && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && cp src/react/styles.css dist/cjs/react/styles.css && cp src/react/pills.css dist/react/pills.css && cp src/react/pills.css dist/cjs/react/pills.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs && cp src/codegen/tools/probe-child.mjs src/codegen/tools/probe-loader.mjs dist/codegen/tools/ && cp src/codegen/tools/sources/fastapi-routes.py dist/codegen/tools/sources/",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
+    "check:egress": "bun scripts/check-model-egress.ts",
     "test": "vitest run"
   },
   "dependencies": {
@@ -372,6 +373,7 @@
     }
   },
   "devDependencies": {
+    "@ai-sdk/anthropic": "3.0.40",
     "@ai-sdk/openai": "^3",
     "@ai-sdk/react": "^3.0.0",
     "@nestjs/common": "^11.0.0",

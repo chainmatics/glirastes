@@ -881,11 +881,31 @@ export interface IntentClassifierConfig {
   locale?: string;
 }
 
+/**
+ * Per-call options of a pipeline or classifier. In the protected-text
+ * profile the handler passes `wrapModel`: every classifier model call then
+ * goes through the turn's privacy boundary, and nothing of the request is
+ * kept beyond the call (no learned fast path).
+ */
+export interface PipelineCallOptions {
+  wrapModel?: <M>(model: M) => M;
+  /**
+   * A protected turn's classifier call: exactly this model through this
+   * call, instead of the configured classifier model and `generateText`
+   * callback, so the classifier runs only on the turn's approved provider.
+   */
+  classifierCall?: {
+    model: unknown;
+    generateText: (options: { model: unknown; prompt: string; abortSignal?: AbortSignal }) => Promise<{ text: string }>;
+  };
+}
+
 export interface IntentClassifier {
   classify(
     input: string,
     context?: ToolContext,
     conversationHistory?: ConversationMessage[],
+    options?: PipelineCallOptions,
   ): Promise<IntentClassification>;
 }
 
@@ -939,6 +959,7 @@ export interface AiPipeline {
     input: string,
     context: ToolContext,
     conversationHistory?: ConversationMessage[],
+    options?: PipelineCallOptions,
   ): Promise<PipelineResult>;
 }
 

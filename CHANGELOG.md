@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - Unreleased
+
+### Privacy integration
+
+- Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.
+
+- Protected turns withhold tool results exceeding `maxResultChars` with a visible
+  `outputWithheld` notice. Clipping raw strings before identity registration can
+  create identifying fragments; narrow read requests instead. Writes are not
+  retried. Ordinary off-profile result compaction remains available.
+
+- Memory operations on a permitted off turn recheck its live privacy gate
+  before provider dispatch (including automatic retries), note mutations,
+  and summary publication. Revoking the pinned off policy also stops memory.
+
+- Protected chat explicitly refuses enabled chat memory with HTTP 503,
+  `privacy_unsupported_content`, feature `chat-memory`, before note stores,
+  note tools or the summary provider run. Use `memory: false` for protected
+  requests. Rolling summaries and persistent/browser notes are not yet bound
+  to privacy mapping generations; they cannot safely restore expired, deleted
+  or cross-scope context. Ordinary chat memory remains available when the
+  effective privacy profile is off. There is no embedding or retrieval model
+  call in the current memory implementation.
+- Screenshots require explicit signed `screenshots.mode: allow-original` in
+  managed protected mode. Attachment options can narrow this permission;
+  they cannot enable images on their own. Allowed images remain unprotected.
+
 ### Added
 
 - `maxResultChars` on `createAiChatHandler` (model turns and direct commands), `createGlirastes` (handed on by `chatTurn()`), `ToolToAiToolOptions` and the runtime container (`application.maxResultChars`): the upper bound of a serialized successful tool result the model sees, an integer from 1,000 to 200,000, default 16,000. An invalid value throws when the handler or the instance is created (the container: when the config is parsed). New exports from `glirastes/server`: `DEFAULT_MAX_RESULT_CHARS`, `MIN_MAX_RESULT_CHARS`, `MAX_MAX_RESULT_CHARS`, `isValidMaxResultChars`, `assertMaxResultChars`, `PAGINATION_PARAMETER_NAMES` and the types `TruncateToolResultOptions` and `TruncatedMarker`.
@@ -816,3 +843,5 @@ No code changes — patch-level docs release.
 [0.14.0]: https://github.com/chainmatics/glirastes/compare/v0.13.1...v0.14.0
 [0.15.0]: https://github.com/chainmatics/glirastes/compare/v0.14.0...v0.15.0
 [0.16.0]: https://github.com/chainmatics/glirastes/compare/v0.15.0...v0.16.0
+
+[0.17.0]: https://github.com/chainmatics/glirastes/compare/v0.16.0...v0.17.0

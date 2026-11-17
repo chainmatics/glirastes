@@ -353,22 +353,9 @@ well. `voice.adapter` plugs in another provider (an `SttProviderAdapter`;
 its identity stable.
 
 A finished recording (`RecordedSttAdapter`, `audio/wav` to
-`/api/ai/speech-recognize`) needs one route; the app's transcription service
-(any `POST /v1/audio/transcriptions` server) stays on the server:
-
-```ts
-// src/app/api/ai/speech-recognize/route.ts
-import { createRecordingTranscriptionHandler } from 'glirastes/server/nextjs';
-import { resolvePrincipal } from '@/lib/glirastes-principal';
-
-export const runtime = 'nodejs';
-export const POST = createRecordingTranscriptionHandler({
-  authorize: async (request) => Boolean(await resolvePrincipal(request)),
-  url: process.env.STT_RECORDING_URL,
-  apiKey: process.env.STT_RECORDING_API_KEY,
-  model: process.env.STT_RECORDING_MODEL,
-});
-```
+`/api/ai/speech-recognize`) needs one server route with
+`createRecordingTranscriptionHandler`; route, limits and the local-only
+rule: [references/recording-transcription.md](references/recording-transcription.md).
 
 `useStt` is the hook, `VoiceInputButton` and `RecordingBar` the surface. Speech
 traffic goes directly between the target app's local provider adapter and its

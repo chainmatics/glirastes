@@ -5,6 +5,8 @@
  * origin tools alike.
  */
 import { z } from 'zod';
+import { markResultReader } from './result-reader.js';
+export { isResultReader } from './result-reader.js';
 import { MAX_MAX_RESULT_CHARS } from '../../runtime/result-limit.js';
 import {
   READ_RESULT_ID_PREFIX,
@@ -467,6 +469,15 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
  * handle of them and the PII shield does not seal them again.
  */
 export function createReadResultTool(store: ResultStore, guard: ReadResultGuard = {}): Tool {
+  const ownerMatches = async (handle: ResultHandle): Promise<boolean> => {
+    if (!handle.owner) return true;
+    try {
+      const current = await store.captureOwner();
+      return Boolean(current && current.subjectId === handle.owner.subjectId && current.tenantId === handle.owner.tenantId);
+    } catch {
+      return false;
+    }
+  };
   const tool = defineTool({
     id: READ_RESULT_TOOL_NAME,
     description: DESCRIPTION,
@@ -515,9 +526,15 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
         if (await guard.failedRead?.() === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };
         return expired(input.resultId);
       }
+      if (!await ownerMatches(handle)) {
+        if (await guard.failedRead?.() === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };
+        return { ...DENIED };
+      }
       const decision = await guard.beforeRead?.({ handle, input });
       if (decision === 'denied') return { ...DENIED };
       if (decision === 'budget_exhausted') return { ...BUDGET_EXHAUSTED };
+      if (!await ownerMatches(handle)) return { ...DENIED };
+      if (store.get(input.resultId) !== handle) return expired(input.resultId);
       const startedAt = Date.now();
       // A private copy: nothing of the stored result leaves by reference.
       const result = JSON.parse(JSON.stringify(readResultHandle(handle, input, paths))) as Record<string, unknown>;
@@ -526,13 +543,5 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
       return result;
     },
   });
-  RESULT_READERS.add(tool);
-  return tool;
-}
-
-const RESULT_READERS = new WeakSet<object>();
-
-/** Whether `tool` is a `read_result` instance (it needs no owner capture: it never creates a handle). */
-export function isResultReader(tool: unknown): boolean {
-  return typeof tool === 'object' && tool !== null && RESULT_READERS.has(tool);
+  return markResultReader(tool);
 }

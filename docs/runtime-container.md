@@ -217,3 +217,5 @@ image mode tests the built runtime image. Browser tests use the existing embed
 and frontend action bridge. See the fixture README for commands and exact coverage.
 A deterministic model proves transport and authorization behavior; a provider
 account smoke test is a separate customer acceptance step and incurs usage.
+
+Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.

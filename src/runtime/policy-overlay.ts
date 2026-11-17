@@ -1,6 +1,7 @@
 import {
   AppSetupArtifactSchema,
   type ExecutionBudget,
+  type PrivacyPolicyBlock,
   type RuntimePolicyRevision,
   type RuntimeToolPolicy,
   type ToolRiskClass,
@@ -72,6 +73,8 @@ export interface VerifiedPolicyOverlay {
   entries: PolicyOverlayEntry[];
   /** Optional Platform budget; it can only tighten the local limits. */
   budget?: ExecutionBudget;
+  /** The signed privacy block of the revision; pinned per turn with it. */
+  privacy?: PrivacyPolicyBlock;
 }
 
 /**
@@ -219,5 +222,6 @@ export function policyOverlayFromRevision(
     revision: revision.revision,
     entries: revision.toolOverrides.map((delta) => ({ ...delta })),
     budget: revision.budget,
+    ...(revision.privacy ? { privacy: structuredClone(revision.privacy) } : {}),
   };
 }
