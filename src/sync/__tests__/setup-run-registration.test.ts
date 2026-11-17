@@ -77,6 +77,7 @@ describe('runner registration with the setup run (P10)', () => {
       discoveryDigest: digest('A'),
       setupRunId: RUN_ID,
       policyRelaxations: 1,
+      privacyPolicyVersions: [1],
     });
   });
 
@@ -90,6 +91,18 @@ describe('runner registration with the setup run (P10)', () => {
     await expect(withoutRun.register({ capabilities: { setupRunId: RUN_ID } }))
       .rejects.toThrow(/setupRunId/);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('never lets a caller claim privacy policy versions the runtime does not enforce', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ runnerId: id('7') })));
+    const runtime = client({ discoveryDigest: digest('A') }, fetchImpl);
+    for (const claim of [[1, 2], [2], [], 1]) {
+      await expect(runtime.register({ capabilities: { privacyPolicyVersions: claim } }))
+        .rejects.toThrow(/privacyPolicyVersions/);
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await runtime.register({ capabilities: { privacyPolicyVersions: [1] } });
+    expect(bodies(fetchImpl)[0]?.capabilities).toMatchObject({ privacyPolicyVersions: [1] });
   });
 
   it('refuses a setup run without a discovery digest or outside the uuid form', () => {

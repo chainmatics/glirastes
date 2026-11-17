@@ -1,4 +1,5 @@
 import { findForbiddenContentPath } from '../contracts/content-boundary.js';
+import { PRIVACY_POLICY_SCHEMA_VERSIONS } from '../contracts/privacy-policy.js';
 import {
   DISCOVERY_DIGEST_PATTERN,
   POLICY_RELAXATIONS_VERSION,
@@ -138,6 +139,17 @@ export class RuntimeControlPlaneClient {
       throw new Error('capabilities.policyRelaxations is reported by the runtime');
     }
     if (relaxations !== undefined) capabilities.policyRelaxations = relaxations;
+    // The privacy block versions this SDK can verify, pin and enforce or
+    // refuse. Reported by the runtime only: the Platform sends a block only
+    // in a version listed here, so a claim the code cannot keep would let a
+    // policy pass as applied.
+    if (
+      capabilities.privacyPolicyVersions !== undefined
+      && JSON.stringify(capabilities.privacyPolicyVersions) !== JSON.stringify(PRIVACY_POLICY_SCHEMA_VERSIONS)
+    ) {
+      throw new Error('capabilities.privacyPolicyVersions is reported by the runtime');
+    }
+    capabilities.privacyPolicyVersions = [...PRIVACY_POLICY_SCHEMA_VERSIONS];
     this.assertTechnicalMetadata(capabilities);
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
     this.assertWritable('register');

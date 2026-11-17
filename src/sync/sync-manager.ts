@@ -7,6 +7,7 @@ import {
 } from '../contracts/revisions.js';
 import type { RuntimeRevisionVerifier } from './signature-verifier.js';
 import {
+  type RuntimePrivacyFloor,
   type RuntimeStateStore,
   type RuntimeSyncState,
 } from './state-store.js';
@@ -24,6 +25,86 @@ export interface RuntimeSyncApplyResult {
   state: RuntimeSyncState;
   rejectedDeploymentIds: string[];
   rejectedRevocationIds: string[];
+  /** Deployments refused because they would lower the privacy floor (`privacy_policy_downgrade`). */
+  privacyDowngradeDeploymentIds: string[];
+  /** Deployments whose protected block this runner cannot enforce (`privacy_refused`). */
+  privacyRefusedDeploymentIds: string[];
+}
+
+/**
+ * Thrown by `validateDeployment` when this runner cannot enforce the
+ * protected privacy block of a verified deployment. The deployment is
+ * rejected and recorded in `privacyRefusedDeploymentIds` of the state, which
+ * blocks AI traffic until the Platform stops offering it or it is accepted.
+ */
+export class PrivacyRefusedError extends Error {
+  constructor() {
+    super('privacy_refused');
+    this.name = 'PrivacyRefusedError';
+  }
+}
+
+/** Thrown inside deployment validation when a revision would lower the privacy floor. */
+class PrivacyDowngradeError extends Error {
+  constructor() {
+    super('privacy_policy_downgrade');
+    this.name = 'PrivacyDowngradeError';
+  }
+}
+
+/**
+ * Whether a verified deployment may be accepted under the floor. Below a
+ * protected floor a revision needs a protected block, or an explicitly
+ * signed `off` that is newer than the floor and not revoked; an older,
+ * validly signed `off` (replay) is refused.
+ */
+function lowersPrivacyFloor(
+  floor: RuntimePrivacyFloor | null | undefined,
+  revisions: MaterializedDeploymentRevisions,
+  revocations: ReadonlyArray<SecurityRevocation>,
+): boolean {
+  if (floor?.profile !== 'protected-text/v1') return false;
+  const policy = revisions.policyRevision;
+  const block = policy.privacy;
+  if (!block) return true;
+  if (block.profile !== 'off') return false;
+  const revoked = revocations.some((revocation) => revocation.policyRevisionIds.includes(policy.revisionId));
+  return revoked || policy.revision <= floor.policyRevision;
+}
+
+/** The floor after the given deployments became the accepted active state. */
+function nextPrivacyFloor(
+  floor: RuntimePrivacyFloor | null | undefined,
+  active: ReadonlyArray<{ deploymentId: string; revisions: MaterializedDeploymentRevisions }>,
+): RuntimePrivacyFloor | null {
+  let next = floor ?? null;
+  const ordered = [...active].sort((left, right) => left.revisions.policyRevision.revision - right.revisions.policyRevision.revision);
+  for (const { deploymentId, revisions } of ordered) {
+    const policy = revisions.policyRevision;
+    const profile = policy.privacy?.profile;
+    if (!profile) continue;
+    const record = { deploymentId, revisionId: policy.revisionId };
+    if (profile === 'protected-text/v1') {
+      next = next?.profile === 'protected-text/v1' && next.policyRevision >= policy.revision
+        ? next
+        : { profile, policyRevision: policy.revision, ...record };
+    } else if (!next || policy.revision > next.policyRevision) {
+      next = { profile, policyRevision: policy.revision, ...record };
+    }
+  }
+  return next;
+}
+
+/** The floor after a verified protected revision was refused; unchanged for an older one. */
+function raisedByRefusal(
+  floor: RuntimePrivacyFloor | null | undefined,
+  deploymentId: string,
+  revisions: MaterializedDeploymentRevisions,
+): RuntimePrivacyFloor | null {
+  const policy = revisions.policyRevision;
+  if (policy.privacy?.profile !== 'protected-text/v1') return floor ?? null;
+  if (floor && policy.revision <= floor.policyRevision) return floor;
+  return { profile: 'protected-text/v1', policyRevision: policy.revision, deploymentId, revisionId: policy.revisionId };
 }
 
 export class RuntimeSyncManager {
@@ -38,9 +119,23 @@ export class RuntimeSyncManager {
     onRevocations?: (revocations: SecurityRevocation[]) => void | Promise<void>;
     onPending?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
     onActivated?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
+    /** Deployments refused because they would lower the privacy floor. */
+    onPrivacyDowngrade?: (deploymentIds: string[]) => void | Promise<void>;
   }) {}
 
-  async apply(rawBundle: unknown): Promise<RuntimeSyncApplyResult> {
+  private applying: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Applies one sync bundle. Calls run one after another (poll and push may
+   * overlap), so no update reads a state another one is about to replace.
+   */
+  apply(rawBundle: unknown): Promise<RuntimeSyncApplyResult> {
+    const run = this.applying.then(() => this.applyOne(rawBundle));
+    this.applying = run.catch(() => undefined);
+    return run;
+  }
+
+  private async applyOne(rawBundle: unknown): Promise<RuntimeSyncApplyResult> {
     const wire = WireSyncBundleSchema.parse(rawBundle);
     let state = await this.options.store.load() ?? this.emptyState();
     const rejectedRevocationIds: string[] = [];
@@ -83,7 +178,10 @@ export class RuntimeSyncManager {
     }
 
     const acceptedDeployments: RuntimeDeploymentBundle[] = [];
+    const materializedById = new Map<string, MaterializedDeploymentRevisions>();
     const rejectedDeploymentIds: string[] = [];
+    const privacyDowngradeDeploymentIds: string[] = [];
+    const privacyRefusedDeploymentIds: string[] = [];
     let rejectedActive = false;
     let rejectedPending = false;
     for (const rawDeployment of wire.deployments) {
@@ -103,6 +201,7 @@ export class RuntimeSyncManager {
         else rejectedPending = true;
         continue;
       }
+      let verified: MaterializedDeploymentRevisions | undefined;
       try {
         await this.options.verifier.verifyRevision(parsed.data.agentRevision);
         await this.options.verifier.verifyRevision(parsed.data.manifestRevision);
@@ -119,9 +218,24 @@ export class RuntimeSyncManager {
           );
         }
         const materialized = materializeDeploymentRevisions(parsed.data);
+        verified = materialized;
+        if (lowersPrivacyFloor(state.privacyFloor, materialized, state.revocations)) {
+          throw new PrivacyDowngradeError();
+        }
         await this.options.validateDeployment?.(parsed.data, materialized);
         acceptedDeployments.push(parsed.data);
-      } catch {
+        materializedById.set(parsed.data.deploymentId, materialized);
+      } catch (error) {
+        if (error instanceof PrivacyDowngradeError) privacyDowngradeDeploymentIds.push(parsed.data.deploymentId);
+        if (error instanceof PrivacyRefusedError) {
+          privacyRefusedDeploymentIds.push(parsed.data.deploymentId);
+          // A verified protected requirement this runner cannot meet raises
+          // the floor: withdrawing it later never leads back to an
+          // unprotected revision; only a newer satisfiable protected policy
+          // or a newer signed `off` lifts it. Only signature-checked
+          // revisions get here, and an older one (replay) never moves it.
+          if (verified) state = { ...state, privacyFloor: raisedByRefusal(state.privacyFloor, parsed.data.deploymentId, verified) };
+        }
         rejectedDeploymentIds.push(parsed.data.deploymentId);
         if (parsed.data.status === 'active') rejectedActive = true;
         else rejectedPending = true;
@@ -135,10 +249,17 @@ export class RuntimeSyncManager {
       (deployment) => deployment.status === 'pending',
     );
     if (!rejectedActive && wire.activeSnapshotComplete) {
+      const stable = this.latest(active, 'stable');
+      const canary = this.latest(active, 'canary');
+      const now = [stable, canary]
+        .filter((deployment): deployment is RuntimeDeploymentBundle => deployment !== null)
+        .map((deployment) => ({ deploymentId: deployment.deploymentId, revisions: materializedById.get(deployment.deploymentId)! }));
+      // The floor is part of the accepted state and saved with it below.
       state = {
         ...state,
-        stable: this.latest(active, 'stable'),
-        canary: this.latest(active, 'canary'),
+        stable,
+        canary,
+        privacyFloor: nextPrivacyFloor(state.privacyFloor, now),
       };
     }
     const activeIds = new Set(
@@ -152,16 +273,28 @@ export class RuntimeSyncManager {
     state = {
       ...state,
       pending: nextPending,
+      // Every bundle is a complete snapshot: the refusals it produced replace
+      // the earlier ones, so a deployment the Platform withdrew unlocks.
+      privacyRefusedDeploymentIds: privacyRefusedDeploymentIds.slice(-64),
       cursor: wire.cursor,
       updatedAt: wire.cursor,
     };
     await this.options.store.saveAtomic(state);
+    if (privacyDowngradeDeploymentIds.length > 0) {
+      await this.options.onPrivacyDowngrade?.(privacyDowngradeDeploymentIds);
+    }
     if (pending.length > 0) await this.options.onPending?.(pending);
     if (active.length > 0 && !rejectedActive) {
       await this.options.onActivated?.(active);
     }
 
-    return { state, rejectedDeploymentIds, rejectedRevocationIds };
+    return {
+      state,
+      rejectedDeploymentIds,
+      rejectedRevocationIds,
+      privacyDowngradeDeploymentIds,
+      privacyRefusedDeploymentIds,
+    };
   }
 
   private deploymentScopeMatches(deployment: RuntimeDeploymentBundle): boolean {

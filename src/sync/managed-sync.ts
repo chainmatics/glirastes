@@ -11,7 +11,8 @@ import {
   MemoryRuntimeStateStore,
   type RuntimeStateStore,
 } from './state-store.js';
-import { RuntimeSyncManager } from './sync-manager.js';
+import { PrivacyRefusedError, RuntimeSyncManager } from './sync-manager.js';
+export { PrivacyRefusedError } from './sync-manager.js';
 import {
   RuntimeControlPlaneClient,
   type RuntimePushConnector,
@@ -19,9 +20,32 @@ import {
 import type {
   RuntimeDeploymentBundle,
 } from '../contracts/revisions.js';
-import type {
-  MaterializedDeploymentRevisions,
+import type { PrivacyRuntimeStatus } from '../contracts/privacy-policy.js';
+import {
+  materializeDeploymentRevisions,
+  type MaterializedDeploymentRevisions,
 } from './materialize-deployment.js';
+import { privacyPolicyDigest } from './privacy-digest.js';
+import { isProtectedPolicy } from '../contracts/privacy-policy.js';
+
+/**
+ * The privacy status of a runner without privacy infrastructure: a
+ * protected block cannot be enforced here and is refused; without one the
+ * profile is off.
+ */
+export function unsupportedPrivacyStatus(revisions: MaterializedDeploymentRevisions): PrivacyRuntimeStatus {
+  const block = revisions.policyRevision.privacy;
+  return {
+    schemaVersion: 1,
+    state: isProtectedPolicy(block) ? 'refused' : 'off',
+    policyRevisionId: block ? revisions.policyRevision.revisionId : null,
+    publishedPolicyDigest: block ? privacyPolicyDigest(block) : null,
+    effectivePolicyDigest: null,
+    localRestrictions: [],
+    reasons: isProtectedPolicy(block) ? ['store_missing'] : [],
+  };
+}
+
 
 export function createManagedRuntimeSync(options: {
   baseUrl: string;
@@ -42,6 +66,17 @@ export function createManagedRuntimeSync(options: {
     revisions: MaterializedDeploymentRevisions,
   ) => void | Promise<void>;
   onError?: (error: unknown) => void;
+  /**
+   * Whether this runner can enforce the privacy block of a verified
+   * deployment (store, keyring, approved provider bindings). Its content-free
+   * status goes into the heartbeat. A `refused` deployment is reported
+   * unhealthy (`validationStage: 'privacy_refused'`), rejected and recorded in
+   * the state's `privacyRefusedDeploymentIds`; the accepted deployment stays,
+   * but AI traffic must stay blocked while a refusal is recorded (the
+   * `createGlirastes` gate does this). Without it, a deployment with a
+   * protected block is refused too: this runner has no privacy infrastructure.
+   */
+  privacyStatus?: (revisions: MaterializedDeploymentRevisions) => PrivacyRuntimeStatus;
   /**
    * The committed setup artifact of the running code, e.g. the generated
    * module's `setupArtifact`. Its discovery digest goes into every runner
@@ -70,22 +105,38 @@ export function createManagedRuntimeSync(options: {
   });
   const verifier = new RuntimeRevisionVerifier(keys);
   let client: RuntimeControlPlaneClient;
+  const privacyOfRevisions = (revisions: MaterializedDeploymentRevisions): PrivacyRuntimeStatus =>
+    (options.privacyStatus ?? unsupportedPrivacyStatus)(revisions);
+  const privacyOf = (deployment: RuntimeDeploymentBundle): PrivacyRuntimeStatus =>
+    privacyOfRevisions(materializeDeploymentRevisions(deployment));
+  const stage = options.validateDeployment ? 'signature-schema-bindings' : 'missing-local-binding-validator';
+  const health = options.validateDeployment ? 'healthy' : 'degraded';
   const manager = new RuntimeSyncManager({
     environmentId: options.environmentId,
     store,
     verifier,
-    validateDeployment: options.validateDeployment,
+    validateDeployment: async (deployment, revisions) => {
+      const privacy = privacyOfRevisions(revisions);
+      if (privacy.state === 'refused') {
+        if (!options.readOnly) {
+          // Reported, then rejected and recorded: traffic stays blocked.
+          await client.heartbeat({
+            health: 'unhealthy',
+            validatedDeploymentId: deployment.deploymentId,
+            technicalMetadata: { validationStage: 'privacy_refused', privacy },
+          }).catch((error: unknown) => options.onError?.(error));
+        }
+        throw new PrivacyRefusedError();
+      }
+      await options.validateDeployment?.(deployment, revisions);
+    },
     onPending: async (deployments) => {
       if (options.readOnly) return;
       for (const deployment of deployments) {
         await client.heartbeat({
-          health: options.validateDeployment ? 'healthy' : 'degraded',
+          health,
           validatedDeploymentId: deployment.deploymentId,
-          technicalMetadata: {
-            validationStage: options.validateDeployment
-              ? 'signature-schema-bindings'
-              : 'missing-local-binding-validator',
-          },
+          technicalMetadata: { validationStage: stage, privacy: privacyOf(deployment) },
         });
       }
     },
@@ -93,12 +144,30 @@ export function createManagedRuntimeSync(options: {
       if (options.readOnly) return;
       for (const deployment of deployments) {
         await client.heartbeat({
-          health: options.validateDeployment ? 'healthy' : 'degraded',
+          health,
           lastAppliedDeploymentId: deployment.deploymentId,
+          technicalMetadata: { activationStage: stage, privacy: privacyOf(deployment) },
+        });
+      }
+    },
+    onPrivacyDowngrade: async (deploymentIds) => {
+      if (options.readOnly) return;
+      for (const deploymentId of deploymentIds) {
+        // The runner keeps serving the accepted, protected revision.
+        await client.heartbeat({
+          health: 'degraded',
+          validatedDeploymentId: deploymentId,
           technicalMetadata: {
-            activationStage: options.validateDeployment
-              ? 'signature-schema-bindings'
-              : 'missing-local-binding-validator',
+            validationStage: 'privacy_policy_downgrade',
+            privacy: {
+              schemaVersion: 1,
+              state: 'downgrade-rejected',
+              policyRevisionId: null,
+              publishedPolicyDigest: null,
+              effectivePolicyDigest: null,
+              localRestrictions: [],
+              reasons: ['policy_downgrade'],
+            } satisfies PrivacyRuntimeStatus,
           },
         });
       }

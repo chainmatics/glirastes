@@ -8,14 +8,44 @@ import {
   type SecurityRevocation,
 } from '../contracts/revisions.js';
 
+/**
+ * The privacy floor of the accepted state. Once a protected policy was
+ * accepted, a later revision without a privacy block is refused, and only
+ * an explicitly signed `off` with a higher policy revision lowers it. It is
+ * stored with the accepted state in the same write.
+ */
+export interface RuntimePrivacyFloor {
+  profile: 'protected-text/v1' | 'off';
+  /** The policy revision number (monotonic per environment) that set the floor. */
+  policyRevision: number;
+  deploymentId: string;
+  revisionId: string;
+}
+
 export interface RuntimeSyncState {
   cursor: string | null;
   stable: RuntimeDeploymentBundle | null;
   canary: RuntimeDeploymentBundle | null;
   pending: RuntimeDeploymentBundle[];
   revocations: SecurityRevocation[];
+  /** Absent in state written before privacy policies existed: no floor. */
+  privacyFloor?: RuntimePrivacyFloor | null;
+  /**
+   * Verified deployments whose protected privacy block this runner cannot
+   * enforce. While one is listed, AI traffic is blocked
+   * (`privacy_not_configured`) instead of running unprotected on the
+   * accepted revision. Absent in older state: none.
+   */
+  privacyRefusedDeploymentIds?: string[];
   updatedAt: string;
 }
+
+const RuntimePrivacyFloorSchema = z.object({
+  profile: z.enum(['protected-text/v1', 'off']),
+  policyRevision: z.number().int().positive(),
+  deploymentId: z.uuid(),
+  revisionId: z.uuid(),
+}).strict();
 
 const RuntimeSyncStateSchema: z.ZodType<RuntimeSyncState> = z.object({
   cursor: z.iso.datetime({ offset: true }).nullable(),
@@ -23,6 +53,8 @@ const RuntimeSyncStateSchema: z.ZodType<RuntimeSyncState> = z.object({
   canary: RuntimeDeploymentBundleSchema.nullable(),
   pending: z.array(RuntimeDeploymentBundleSchema),
   revocations: z.array(SecurityRevocationSchema),
+  privacyFloor: RuntimePrivacyFloorSchema.nullable().optional(),
+  privacyRefusedDeploymentIds: z.array(z.uuid()).max(64).optional(),
   updatedAt: z.iso.datetime({ offset: true }),
 }).strict();
 
