@@ -6,9 +6,16 @@ import {
 } from '../../core/index.js';
 import { CLARIFICATION_TOOL_NAME } from '../../../contracts/clarification.js';
 import { PLAN_TOOL_NAME } from '../../../contracts/plan.js';
+import { MEMORY_FORGET_TOOL_NAME, MEMORY_REMEMBER_TOOL_NAME } from '../../../contracts/memory.js';
+import { createChatMemory, type ChatMemoryTurn, type PreparedChatMemory } from './chat-memory.js';
 
 /** Handler-created built-ins that stay callable for every tool selection. */
-const ALWAYS_ON_BUILTINS: ReadonlyArray<string> = [CLARIFICATION_TOOL_NAME, PLAN_TOOL_NAME];
+const ALWAYS_ON_BUILTINS: ReadonlyArray<string> = [
+  CLARIFICATION_TOOL_NAME,
+  PLAN_TOOL_NAME,
+  MEMORY_REMEMBER_TOOL_NAME,
+  MEMORY_FORGET_TOOL_NAME,
+];
 import {
   applyClarificationResume,
   resolveClarificationResume,
@@ -148,6 +155,13 @@ export interface StreamHandlerContext {
   locale?: string;
   /** How earlier turns are sent to the model (see `AiChatHandlerConfig.history`). */
   history?: HistoryOptions | false;
+  /**
+   * Chat memory of this turn (see `AiChatHandlerConfig.memory`). A custom
+   * stream handler sends `preamble` ahead of the messages, passes
+   * `historyTokens` on as `history.maxTokens`, and calls `connect` with its
+   * stream writer, awaiting `done()` before the stream closes.
+   */
+  memory?: PreparedChatMemory;
   /** Cache breakpoints and a stable tool order (see `AiChatHandlerConfig.promptCaching`). */
   promptCaching?: boolean;
   /** Keep technical ids out of answers (see `AiChatHandlerConfig.hideIds`). */
@@ -595,10 +609,24 @@ async function defaultStreamHandler(
     }
     idLabels = protectedLabels;
   }
-  const modelMessages = await prepareModelMessages(
+  const preparedMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
-    { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
+    ctx.memory?.historyTokens
+      // Chat memory decides what stays; counts no longer drop earlier turns.
+      ? {
+          maxContextMessages: Number.MAX_SAFE_INTEGER,
+          history: ctx.history === false ? false : {
+            ...ctx.history,
+            maxTurns: Number.MAX_SAFE_INTEGER,
+            maxTokens: ctx.memory.historyTokens,
+          },
+        }
+      : { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
   );
+  // User role, not system: memory is background a user could have written.
+  const modelMessages = ctx.memory?.preamble
+    ? [{ role: 'user', content: ctx.memory.preamble }, ...preparedMessages]
+    : preparedMessages;
   // Executed approvals are visible output for the stream and the metric alike.
   const resumedApprovals = resumesToolApprovals(modelMessages);
   const promptMessages = promptCaching
@@ -646,6 +674,10 @@ async function defaultStreamHandler(
       let finalStateWritten = false;
       // Cost of the running model step, read from its raw stream chunks.
       let stepRawCostUsd: number | null = null;
+
+      const memoryUpdates = ctx.memory?.connect((part) => {
+        writer.write(part as Parameters<typeof writer.write>[0]);
+      });
 
       const writePipelineState = (
         state: PipelineStreamState,
@@ -887,6 +919,7 @@ async function defaultStreamHandler(
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
+        await memoryUpdates?.done();
       } catch (error) {
         ctx.turnMetrics?.finish({ status: 'error', errorCode: 'model_error' });
         if (finalStateWritten) return;
@@ -994,7 +1027,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     crossOriginProtection,
     maxBodyBytes: configuredMaxBodyBytes,
     attachments,
+    memory: memoryConfig,
   } = config;
+  const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
   if (privacy) {
     if (piiShield) throw new Error('createAiChatHandler: privacy replaces piiShield; set only one');
@@ -1266,6 +1301,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // messages keeps (privacy history, clarification, command strip).
       const turnId = deriveSessionId(requestMessages);
 
+
       let managedTurn: ManagedTurnGuard | undefined;
       let managedPrincipal: Principal | undefined;
       /** The manifest tool ids the guard would allow right now; empty when that cannot be decided. */
@@ -1467,6 +1503,48 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         : stripChatCommandMessages(clarificationResume
           ? applyClarificationResume(requestMessages, clarificationResume)
           : requestMessages);
+
+      // Memory summaries/notes currently have no mapping-generation binding.
+      // Refuse the feature before loading stores or calling its separate model;
+      // replaying it could resurrect deleted or withheld conversation context.
+      if (privacyTurn && chatMemory && !directCommand) {
+        countPrivacyDecision(privacy?.onDecision, 'privacy_unsupported_content');
+        return Response.json({code: 'privacy_unsupported_content', feature: 'chat-memory',
+          error: 'Chat memory is unavailable in protected-text/v1. Disable memory for protected requests.'}, {status: 503});
+      }
+      const memoryTurn: ChatMemoryTurn | undefined = chatMemory && !directCommand
+        ? await chatMemory.begin(req, body.value)
+        : undefined;
+      const withMemoryTools = (registry: ToolRegistry): ToolRegistry => {
+        let next = registry;
+        for (const tool of memoryTurn?.tools ?? []) {
+          if (!next[tool.id]) next = { ...next, [tool.id]: tool };
+        }
+        return next;
+      };
+      const prepareMemory = async (
+        messages: unknown[],
+        model: unknown,
+        shieldSessionId: string,
+      ): Promise<PreparedChatMemory | undefined> => {
+        if (!memoryTurn) return undefined;
+        const prepared = memoryTurn.prepare({
+          messages,
+          model,
+          abortSignal: req.signal,
+          ...(piiShield
+            ? {
+                anonymize: (text: string) => piiShield.outbound(text, shieldSessionId),
+                restore: async (text: string) => (piiShield.inboundAsync
+                  ? piiShield.inboundAsync(text, shieldSessionId)
+                  : piiShield.inbound(text, shieldSessionId)),
+              }
+            : {}),
+        });
+        return piiShield && prepared.preamble
+          ? { ...prepared, preamble: await piiShield.outbound(prepared.preamble, shieldSessionId) }
+          : prepared;
+      };
 
       // Build tool context
       const toolContext = buildToolContext(req, { locale, trustForwardedHeaders });
@@ -1734,10 +1812,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (followupTool && !registry[followupTool.id]) {
           registry = { ...registry, [followupTool.id]: followupTool };
         }
-        registry = withAlwaysOnBuiltins(registry);
+        registry = withMemoryTools(withAlwaysOnBuiltins(registry));
         const handlerBuiltinNames = findHandlerBuiltins(
           registry,
-          [followupTool, clarificationTool, planTool],
+          [followupTool, clarificationTool, planTool, ...(memoryTurn?.tools ?? [])],
         );
         const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
         processedMessages = pipelineApprovals.messages;
@@ -1968,7 +2046,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         const contextWindow =
           pipelineResult.module?.executionDefaults?.contextWindow ??
           maxContextMessages;
-        let recentMessages = processedMessages.slice(-contextWindow);
+        const memory = await prepareMemory(processedMessages, model, sessionId);
+        let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
 
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
@@ -2017,6 +2096,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxContextMessages,
         locale,
         history,
+        memory,
         promptCaching,
         hideIds,
           modelTier: pipelineResult.model.modelId,
@@ -2066,8 +2146,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       } else {
         registry = await loadTools!(endpointToolContext);
       }
-      registry = withAlwaysOnBuiltins(registry);
-      const handlerBuiltinNames = findHandlerBuiltins(registry, [clarificationTool, planTool]);
+      registry = withMemoryTools(withAlwaysOnBuiltins(registry));
+      const handlerBuiltinNames = findHandlerBuiltins(
+        registry,
+        [clarificationTool, planTool, ...(memoryTurn?.tools ?? [])],
+      );
       const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
       processedMessages = legacyApprovals.messages;
       // Routing sees what the model may see: a consumer router can hand the
@@ -2179,7 +2262,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           managedTurn?.snapshot.budget.maxModelSteps,
       });
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
-      let recentMessages = processedMessages.slice(-contextWindow);
+      const memory = await prepareMemory(processedMessages, model, legacySessionId);
+      let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
 
       // PII Shield: anonymize message history + wrap tools (legacy mode)
       if (piiShield) {
@@ -2226,6 +2310,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         maxContextMessages,
         locale,
         history,
+        memory,
         promptCaching,
         hideIds,
         modelTier: routing?.modelTier,

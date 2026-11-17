@@ -417,8 +417,9 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 
 ## Agent skills
 
-The package ships eight skills in [`skills/`](skills/README.md) for your
+The package ships nine skills in [`skills/`](skills/README.md) for your
 existing coding agent (Codex, Claude Code, Gemini): `setting-up-glirastes`,
+`setting-up-glirastes-memory`,
 `integrating-glirastes-nextjs`, `integrating-glirastes-web`,
 `maintaining-glirastes-tools`, `describing-glirastes-tools`,
 `building-glirastes-chat-ui`, `curating-glirastes-chat-interactions` and

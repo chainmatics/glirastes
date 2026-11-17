@@ -167,11 +167,11 @@
       "reason": "NestJS speech gateway (not exported) relays to cloud Deepgram; outside the protected profile, which uses local recorded transcription only."
     },
     {
-      "file": "src/server/adapters/nextjs/create-ai-chat-handler.ts",
-      "symbol": "protectedStreamText(nullable)",
-      "kind": "facade_call",
-      "decision": "protected",
-      "reason": "Passes ctx.privacy?.boundary ?? null: the boundary of every protected turn. null when the handler was created without 'privacy', or with 'privacy' and policy.required: false for a turn whose signed policy is absent or 'off' (the policy's decision, reported as state 'off'); a protected block never runs with null."
+      "file": "src/server/adapters/nextjs/chat-memory.ts",
+      "symbol": "generateText",
+      "kind": "model_call",
+      "decision": "exception",
+      "reason": "Existing optional chat memory summarization, outside protected-text/v1: the handler explicitly refuses enabled memory before store reads, note tools or summary calls. Protected handler and two-adapter HTTP capture regressions verify zero dispatch; memory:false ignores browser notes and withholds unbound summary replay."
     },
     {
       "file": "src/server/adapters/nextjs/create-ai-chat-handler.ts",
@@ -179,6 +179,13 @@
       "kind": "facade_call",
       "decision": "protected",
       "reason": "The intent classifier of a protected turn with a resolved provider: the turn's registry-resolved model behind the classifier boundary of the same scope (pseudonymized prompt, policy check, provider approval). Replaces the configured classifier model and callback."
+    },
+    {
+      "file": "src/server/adapters/nextjs/create-ai-chat-handler.ts",
+      "symbol": "protectedStreamText(nullable)",
+      "kind": "facade_call",
+      "decision": "protected",
+      "reason": "Passes ctx.privacy?.boundary ?? null: the boundary of every protected turn. null when the handler was created without 'privacy', or with 'privacy' and policy.required: false for a turn whose signed policy is absent or 'off' (the policy's decision, reported as state 'off'); a protected block never runs with null."
     },
     {
       "file": "src/server/adapters/nextjs/recording-transcription-handler.ts",

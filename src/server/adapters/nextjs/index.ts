@@ -51,6 +51,19 @@ export type { ApprovalStore, ApprovalDenialCode } from './approval-binding.js';
 export type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 export type { HistoryOptions } from './prepare-model-messages.js';
 export {
+  contextWindowOf,
+  type ChatCompactionOptions,
+  type ChatMemoryConfig,
+  type MemoryScopeKeys,
+} from './chat-memory.js';
+export {
+  createInMemoryMemoryStore,
+  verifyMemoryStore,
+  type MemoryEntry,
+  type MemoryScope,
+  type MemoryStore,
+} from '../../core/memory-store.js';
+export {
   resolveDirectCommand,
   runDirectCommand,
   stripChatCommandMessages,
