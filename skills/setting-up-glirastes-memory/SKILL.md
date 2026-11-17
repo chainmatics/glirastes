@@ -103,6 +103,11 @@ createAiChatHandler({
   `maxContextMessages`; the summary threshold bounds the context instead.
 - `chat: false` turns the summary off, omitting `user` and `shared` turns
   notes off. `memory: {}` is the chat summary alone.
+- Roles: `shared.canWrite` decides per request who may add or remove shared
+  notes; read the role from the verified session, as the app's other
+  permission checks do. Without write access the model gets no shared scope
+  on its tools, and everyone still reads the notes. Let the store refuse the
+  same write, so the rule holds for any other caller of the store.
 - `shared.approval: false` lets shared notes change without confirmation;
   keep the default unless the developer decides otherwise.
 - Limits: a note has at most 240 characters; 20 user notes and 30 shared
