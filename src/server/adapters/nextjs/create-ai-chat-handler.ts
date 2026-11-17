@@ -645,7 +645,7 @@ async function defaultStreamHandler(
    * limit without a final answer: stopped without a summary call, a summary
    * that failed or said nothing, or the turn's time limit.
    */
-  const stopNotice = (terminal: 'finish' | 'error' | 'abort'): string | undefined => {
+  const stopNotice = (terminal: 'finish' | 'error' | 'abort', hadText: boolean): string | undefined => {
     let limits: ReadonlyArray<BudgetStopLimit> | null = null;
     if (terminal === 'abort') {
       // Only the turn timeout aborts a request the browser did not cancel.
@@ -659,7 +659,7 @@ async function defaultStreamHandler(
     } else if (finalSummary && !finalSummary.answered) {
       limits = finalSummary.budget;
     }
-    return limits && limits.length > 0 ? budgetStopText(limits, budgetStopTexts, ctx.locale) : undefined;
+    return limits && limits.length > 0 ? budgetStopText(limits, budgetStopTexts, ctx.locale, hadText) : undefined;
   };
 
   let providerErrorReported = false;

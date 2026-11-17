@@ -314,7 +314,7 @@ export interface AiChatHandlerConfig {
   /**
    * Texts of the closing notice the built-in stream handler appends when it
    * stops a turn at a limit (step cap or runtime budget) without a final
-   * answer of the model. Keys: `closing` (with `{reason}`), and per reason
+   * answer of the model. Keys: `closing` and `closingWithoutAnswer` (with `{reason}`), and per reason
    * (`maxSteps`, `maxModelSteps`, `maxToolCalls`, `totalTimeoutMs`,
    * `maxInputTokens`, `maxOutputTokens`, `maxEstimatedCostUsd`,
    * `maxRepeatedFingerprint`, `maxConsecutiveErrors`) a text with `{limit}`.

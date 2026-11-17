@@ -13,13 +13,15 @@ export type BudgetStopReason = BudgetReason | 'maxSteps';
 
 /**
  * The texts of the closing notice, keyed by reason. `closing` is the whole
- * notice, `{reason}` the reached limits; each reason text gets the limit as
+ * notice after text of the model, `closingWithoutAnswer` the one for a turn
+ * that showed no text at all; `{reason}` are the reached limits; each reason text gets the limit as
  * `{limit}` (number formatted for the locale; a duration with its unit).
  */
-export type BudgetStopTexts = { closing: string } & Record<BudgetStopReason, string>;
+export type BudgetStopTexts = { closing: string; closingWithoutAnswer: string } & Record<BudgetStopReason, string>;
 
 const EN: BudgetStopTexts = Object.freeze({
-  closing: 'I had to stop here: {reason}. The answer above may be incomplete. Ask me to continue to pick up where I left off.',
+  closing: 'I had to stop here: {reason}. The answer above may be incomplete.',
+  closingWithoutAnswer: 'I could not finish this request: {reason}.',
   maxSteps: 'the step limit for this request was reached ({limit} steps)',
   maxModelSteps: 'the step limit for this request was reached ({limit} steps)',
   maxToolCalls: 'the limit for this request was reached (tool calls: {limit})',
@@ -32,8 +34,8 @@ const EN: BudgetStopTexts = Object.freeze({
 });
 
 const DE: BudgetStopTexts = Object.freeze({
-  closing: 'Ich musste hier aufhören: {reason}. Die Antwort oben ist möglicherweise unvollständig. '
-    + 'Bitte mich weiterzumachen, dann setze ich an dieser Stelle fort.',
+  closing: 'Ich musste hier aufhören: {reason}. Die Antwort oben ist möglicherweise unvollständig.',
+  closingWithoutAnswer: 'Ich konnte diese Anfrage nicht abschließen: {reason}.',
   maxSteps: 'das Schrittlimit für diese Anfrage ist erreicht ({limit} Schritte)',
   maxModelSteps: 'das Schrittlimit für diese Anfrage ist erreicht ({limit} Schritte)',
   maxToolCalls: 'das Limit für diese Anfrage ist erreicht (Tool-Aufrufe: {limit})',
@@ -100,14 +102,18 @@ export interface BudgetStopLimit {
  */
 export function withStopNotice<T>(
   source: ReadableStream<T>,
-  notice: (terminal: 'finish' | 'error' | 'abort') => string | undefined,
+  notice: (terminal: 'finish' | 'error' | 'abort', hadText: boolean) => string | undefined,
 ): ReadableStream<T> {
   let written = false;
+  // Whether the user has seen any text of the model in this answer.
+  let hadText = false;
   return source.pipeThrough(new TransformStream<T, T>({
     transform(chunk, controller) {
       const type = (chunk as { type?: unknown }).type;
+      if (type === 'text-delta' && typeof (chunk as { delta?: unknown }).delta === 'string'
+        && ((chunk as { delta: string }).delta).trim() !== '') hadText = true;
       if (!written && (type === 'finish' || type === 'error' || type === 'abort')) {
-        const text = notice(type);
+        const text = notice(type, hadText);
         if (text) {
           written = true;
           const id = 'glirastes-stop-notice';
@@ -126,6 +132,7 @@ export function budgetStopText(
   limits: ReadonlyArray<BudgetStopLimit>,
   texts: BudgetStopTexts,
   locale?: string,
+  hadText = true,
 ): string {
   const seen = new Set<string>();
   const reasons: string[] = [];
@@ -135,5 +142,6 @@ export function budgetStopText(
     seen.add(reason);
     reasons.push(reason);
   }
-  return texts.closing.split('{reason}').join(reasons.join('; '));
+  // "The answer above" only makes sense when there is one.
+  return (hadText ? texts.closing : texts.closingWithoutAnswer).split('{reason}').join(reasons.join('; '));
 }

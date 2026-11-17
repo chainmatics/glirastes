@@ -664,11 +664,22 @@ short. It names the reached limit and its value, never usage of other
 dimensions, tool data or principal data:
 
 ```text
-I had to stop here: the limit for this request was reached (input tokens: 40,000). The answer above may be incomplete. Ask me to continue to pick up where I left off.
+I had to stop here: the limit for this request was reached (input tokens: 40,000). The answer above may be incomplete.
 ```
 
-The texts come from one table keyed by reason. `closing` is the whole notice
-with `{reason}`; each reason has a text with `{limit}` (the number formatted
+A turn that showed no text of the model before the stop (only tool calls) gets
+the other form, since there is no answer above to speak of:
+
+```text
+I could not finish this request: the limit for this request was reached (input tokens: 40,000).
+```
+
+Neither form invites the user to "continue": a result handle of the stopped
+turn has expired by then, so the next turn would load the data again and may
+reach the same limit.
+
+The texts come from one table keyed by reason. `closing` and
+`closingWithoutAnswer` are the whole notice with `{reason}`; each reason has a text with `{limit}` (the number formatted
 for `locale`, a duration as `150 ms` or `60 s`). Several reached limits are
 joined with `; `. The handler ships English and German defaults (German for a
 `locale` starting with `de`), exported as `DEFAULT_BUDGET_STOP_TEXTS` from
@@ -677,7 +688,8 @@ replaces single keys:
 
 | Key | English default |
 | --- | --- |
-| `closing` | `I had to stop here: {reason}. The answer above may be incomplete. Ask me to continue to pick up where I left off.` |
+| `closing` | `I had to stop here: {reason}. The answer above may be incomplete.` |
+| `closingWithoutAnswer` | `I could not finish this request: {reason}.` |
 | `maxSteps`, `maxModelSteps` | `the step limit for this request was reached ({limit} steps)` |
 | `maxToolCalls` | `the limit for this request was reached (tool calls: {limit})` |
 | `totalTimeoutMs` | `the time limit for this request was reached ({limit})` |
@@ -690,7 +702,7 @@ replaces single keys:
 ```ts
 createAiChatHandler({
   locale: 'en-US',
-  budgetStopTexts: { closing: 'Stopped early: {reason}. Ask me to continue.' },
+  budgetStopTexts: { closing: 'Stopped early: {reason}.' },
   // ...
 });
 ```

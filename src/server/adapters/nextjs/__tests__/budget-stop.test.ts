@@ -15,8 +15,8 @@ import {
 
 const INTERIM = 'I\'ll keep reading the variants. One moment.';
 const NOTICE_ID = 'glirastes-stop-notice';
-const notice = (reason: string) => `I had to stop here: ${reason}. The answer above may be incomplete. `
-  + 'Ask me to continue to pick up where I left off.';
+const notice = (reason: string) => `I had to stop here: ${reason}. The answer above may be incomplete.`;
+const noticeWithoutAnswer = (reason: string) => `I could not finish this request: ${reason}.`;
 
 const usage = (input: number, output = 10) => ({
   inputTokens: { total: input, noCache: input, cacheRead: undefined, cacheWrite: undefined },
@@ -206,7 +206,8 @@ describe('a turn stopped at a limit that leaves no room for a model call', () =>
     });
 
     expect(turn.model.doStreamCalls).toHaveLength(1);
-    expect(notices(turn.chunks)).toEqual([notice(reason)]);
+    // Only tool calls were shown: there is no answer above to speak of.
+    expect(notices(turn.chunks)).toEqual([noticeWithoutAnswer(reason)]);
     expect(turn.events[0]).toMatchObject({ status: 'safety-stop', errorCode: 'budget_exhausted' });
   });
 
@@ -216,7 +217,7 @@ describe('a turn stopped at a limit that leaves no room for a model call', () =>
       limits: { totalTimeoutMs: 150 },
     });
 
-    expect(notices(turn.chunks)).toEqual([notice('the time limit for this request was reached (150 ms)')]);
+    expect(notices(turn.chunks)).toEqual([noticeWithoutAnswer('the time limit for this request was reached (150 ms)')]);
     // The notice comes before the abort, which ends the stream as before.
     expect(turn.chunks.at(-1)).toMatchObject({ type: 'abort' });
     expect(turn.chunks.at(-2)).toMatchObject({ type: 'text-end', id: NOTICE_ID });
@@ -320,7 +321,7 @@ describe('the texts of the notice', () => {
 
     expect(notices(turn.chunks)).toEqual([
       'Ich musste hier aufhören: das Limit für diese Anfrage ist erreicht (Eingabe-Tokens: 40.000). '
-        + 'Die Antwort oben ist möglicherweise unvollständig. Bitte mich weiterzumachen, dann setze ich an dieser Stelle fort.',
+        + 'Die Antwort oben ist möglicherweise unvollständig.',
     ]);
   });
 
