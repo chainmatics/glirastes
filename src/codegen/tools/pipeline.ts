@@ -55,7 +55,7 @@ import { sortFindings, toolFinding, TRANSIENT_FINDING_CODES } from './findings.j
 import { readPromptBundle, readToolInputs, type PromptBundleInput } from './inputs.js';
 import { checkMcpNames } from './mcp-names.js';
 import type { ToolsMode } from './mode.js';
-import { lookupSemantics, resolveToolProse, type DescriptionOrigin } from './prose.js';
+import { lookupSemantics, resolveToolProse, type DescriptionOrigin, type ToolSemantics } from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
 import {
@@ -66,6 +66,7 @@ import {
   validateSemanticsEntry,
   type SemanticsCheck,
   type SemanticsFacts,
+  type ToolSemanticsEntry,
 } from './semantics.js';
 import { createNestEndpointSource } from './sources/nest-endpoints.js';
 import { createOpenapiEndpointSource } from './sources/openapi-endpoints.js';
@@ -257,6 +258,40 @@ function localPolicyOrigin(
   }
   if (local?.requiresApproval === true) reported.requiresApproval = 'local-policy';
   return reported;
+}
+
+/**
+ * tool-semantics.json entries no tool used: their stableKey or name matches no
+ * tool, so their title, usage hints, synonyms, examples and presentation are
+ * dropped. An entry for an excluded operation is not reported. Names the key,
+ * never the entry's text; for a stableKey the name the operation had before,
+ * when a current tool holds that name.
+ */
+function orphanedSemanticsFindings(
+  semantics: ToolSemantics,
+  used: ReadonlySet<ToolSemanticsEntry>,
+  excluded: ReadonlyMap<string, ExcludedTool>,
+  previous: PreviousToolState['state'],
+  executions: ReadonlyArray<{ stableKey: string; definitionId: string }>,
+): ToolFinding[] {
+  const earlierName = new Map([...previous?.tombstones ?? [], ...previous?.inventory.executions ?? []]
+    .map((entry) => [entry.stableKey, entry.definitionId] as const));
+  const keyByName = new Map(executions.map((execution) => [execution.definitionId, execution.stableKey] as const));
+  const findings: ToolFinding[] = [];
+  for (const entry of new Set([...semantics.byStableKey.values(), ...semantics.byName.values()])) {
+    if (used.has(entry) || (entry.stableKey !== undefined && excluded.has(entry.stableKey))) continue;
+    if (entry.stableKey !== undefined) {
+      const name = earlierName.get(entry.stableKey);
+      const now = name === undefined ? undefined : keyByName.get(name);
+      findings.push(toolFinding('semantics-entry-orphaned', 'warning', entry.stableKey,
+        `The tool-semantics.json entry with stableKey "${entry.stableKey}" matches no tool, so its texts are not used.`
+        + (now ? ` The tool named ${name} is now "${now}".` : '')));
+    } else {
+      findings.push(toolFinding('semantics-entry-orphaned', 'warning', `${TOOLS_PATHS.semantics}#${entry.name!}`,
+        `The tool-semantics.json entry with name "${entry.name!}" matches no tool, so its texts are not used.`));
+    }
+  }
+  return findings;
 }
 
 function policyWarningMessage(code: string, field: string | undefined): string {
@@ -558,6 +593,7 @@ async function generate(
   const contractEntries: ToolContractsEntry[] = [];
   const reportTools: ToolReportTool[] = [];
   const languages = requiredLanguages(config.locale);
+  const usedSemantics = new Set<ToolSemanticsEntry>();
 
   for (const execution of inventory.executions) {
     const tool = observedByKey.get(execution.stableKey);
@@ -613,6 +649,7 @@ async function generate(
     }
     findings.push(...tool.findings);
     const semanticsEntry = lookupSemantics(inputs.semantics, execution.stableKey, execution.definitionId);
+    if (semanticsEntry) usedSemantics.add(semanticsEntry);
     const semantics: SemanticsCheck = semanticsEntry
       ? validateSemanticsEntry(semanticsEntry, {
         stableKey: execution.stableKey,
@@ -732,6 +769,7 @@ async function generate(
   };
   for (const key of Object.keys(inputs.policy.tools ?? {})) orphaned(key, 'tools');
   for (const key of Object.keys(inputs.policy.acceptedRisk ?? {})) orphaned(key, 'acceptedRisk');
+  findings.push(...orphanedSemanticsFindings(inputs.semantics, usedSemantics, excludedByKey, previous.state, inventory.executions));
   for (const key of inputs.mcpNames?.keys() ?? []) {
     if (observedByKey.get(key)?.execution.executionKind === 'endpoint') continue;
     findings.push(toolFinding('mcp-tool-names-invalid', 'warning', key,

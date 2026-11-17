@@ -141,7 +141,7 @@ describe('an opt-in OpenAPI source through the tools pipeline', () => {
     // Roles on unmarked operations (one of them malformed) report nothing; a malformed marker and an excluded marked operation do.
     expect(result.findings.map((finding) => [finding.code, finding.subjectRef])).toEqual([
       ['opt-in-excluded', 'POST /api/auth/login'],
-      ['output-contract-opaque', 'DELETE /api/tags/:tagId'],
+      // DELETE /api/tags/{tagId} declares only 204: no output-contract-opaque.
       ['tool-marker-invalid', 'GET /api/reports'],
     ]);
     // Neither finding is swallowed because its operation is no tool.
@@ -429,4 +429,75 @@ describe('applyCodeRoles', () => {
     expect(disjointCodeRolesFinding(execution, resolved(['a']), undefined)).toBeUndefined();
     expect(disjointCodeRolesFinding(execution, resolved(['a']), [])).toBeUndefined();
   });
+});
+
+describe('tool-semantics.json entries that match no tool', () => {
+  const orphans = (result: ToolsPipelineResult) => result.findings
+    .filter((finding) => finding.code === 'semantics-entry-orphaned')
+    .map((finding) => [finding.severity, finding.subjectRef, finding.message]);
+  const semantics = (tools: unknown[]) => JSON.stringify({ schemaVersion: 1, tools });
+
+  it('reports each orphaned entry once by its key, never one that matches or belongs to an excluded operation', async () => {
+    const app = await optInApp();
+    await app.write(TOOLS_PATHS.semantics, semantics([
+      { stableKey: 'GET /api/tags', usageHints: ['Lists the tags.'] },
+      { name: 'delete_tag', usageHints: ['Deletes a tag.'] },
+      // Its stableKey is gone, but the name matches a tool: used.
+      { stableKey: 'POST /api/old-tags', name: 'create_tag', usageHints: ['Creates a tag.'] },
+      // Excluded as not-opted-in: not reported.
+      { stableKey: 'GET /api/tasks', usageHints: ['Lists the tasks.'] },
+      { stableKey: 'GET /api/gone', usageHints: ['Secret-free text that is never repeated.'] },
+      { name: 'nothing.here', usageHints: ['Never repeated either.'] },
+    ]));
+    const result = await refresh(app);
+
+    expect(orphans(result)).toEqual([
+      ['warning', '.glirastes/tool-semantics.json#nothing.here',
+        'The tool-semantics.json entry with name "nothing.here" matches no tool, so its texts are not used.'],
+      ['warning', 'GET /api/gone',
+        'The tool-semantics.json entry with stableKey "GET /api/gone" matches no tool, so its texts are not used.'],
+    ]);
+    expect(JSON.stringify(result.findings)).not.toContain('never repeated');
+    expect(candidates(result).get('POST /api/tags')?.usageHints).toEqual(['Creates a tag.']);
+    expect(buildResolveWorklist(result).items.filter((item) => item.code === 'semantics-entry-orphaned').map((item) => item.target))
+      .toEqual([
+        { kind: 'file', file: TOOLS_PATHS.semantics, key: 'tools[name="nothing.here"]' },
+        { kind: 'file', file: TOOLS_PATHS.semantics, key: 'tools[stableKey="GET /api/gone"]' },
+      ]);
+    // A warning: the frozen check stays green once the outputs are current.
+    const frozen = await runToolsPipelineWith({ root: app.root, mode: 'frozen', keepGoing: true }, { now: NOW });
+    expect(frozen.driftPaths).toEqual([]);
+    expect(orphans(frozen)).toEqual(orphans(result));
+  }, 60_000);
+
+  it('reports a stableKey entry after the path changed, with the tool that kept its name', async () => {
+    const spec = await optInSpec();
+    const app = await optInApp({ spec });
+    await app.write(TOOLS_PATHS.semantics, semantics([{ stableKey: 'PATCH /api/tags/:tagId', usageHints: ['Renames a tag.'] }]));
+    expect(orphans(await refresh(app))).toEqual([]);
+
+    spec.paths['/api/labels/{tagId}'] = { patch: spec.paths['/api/tags/{tagId}']!.patch! };
+    delete spec.paths['/api/tags/{tagId}']!.patch;
+    await app.write('openapi.json', JSON.stringify(spec));
+    const message = 'The tool-semantics.json entry with stableKey "PATCH /api/tags/:tagId" matches no tool, so its texts are not used.'
+      + ' The tool named update_tag is now "PATCH /api/labels/:tagId".';
+    const moved = await refresh(app);
+    expect(orphans(moved)).toEqual([['warning', 'PATCH /api/tags/:tagId', message]]);
+    // The next refresh (and check) still finds the earlier name, now in the tombstones.
+    expect(orphans(await refresh(app))).toEqual([['warning', 'PATCH /api/tags/:tagId', message]]);
+  }, 60_000);
+
+  it('reports a name-only entry once after the tool was renamed', async () => {
+    const spec = await optInSpec();
+    const app = await optInApp({ spec });
+    await app.write(TOOLS_PATHS.semantics, semantics([{ name: 'update_tag', usageHints: ['Renames a tag.'] }]));
+    expect(orphans(await refresh(app))).toEqual([]);
+
+    spec.paths['/api/tags/{tagId}']!.patch!['x-glirastes-name'] = 'rename_tag';
+    await app.write('openapi.json', JSON.stringify(spec));
+    expect(orphans(await refresh(app))).toEqual([[
+      'warning', '.glirastes/tool-semantics.json#update_tag',
+      'The tool-semantics.json entry with name "update_tag" matches no tool, so its texts are not used.',
+    ]]);
+  }, 60_000);
 });

@@ -94,6 +94,10 @@ maintains a Node server or imports a generated TypeScript module.
    are tools and validated. Findings `opt-in-excluded`, `tool-marker-invalid`,
    `tool-group-invalid` and `tool-roles-invalid` (tool stays disabled) are
    fixed in the backend that writes the export, never in generated files.
+   A path or query parameter's `description` reaches the model as the input
+   property's description (it wins over the schema's): write call-time
+   guidance there, e.g. NestJS
+   `@ApiQuery({ name: 'limit', required: false, description: 'Omit to get all playlists' })`.
 3. Build a new artifact directory with the exact deployed SDK/image version:
    `glirastes-runtime build --project /workspace/app --out /artifacts/release-2`.
    Review and commit the generated inputs/outputs. Then CI builds a separate
@@ -127,6 +131,8 @@ identity/configuration when installed; otherwise use the matching SDK's
 | `schema-not-exported`, `schema-module-unloadable`, `schema-content-rejected`, `parameter-collision`, `contract-effect-invalid` | the app code the message names; a schema moves into a side-effect-free module (a sibling `contract.ts` or a schema file) that the handler imports, never into a new export of `route.ts`, whose exports Next.js type-checks |
 | `ui-action-id-dynamic`, `ui-action-id-invalid`, `ui-action-id-reserved`, `definition-id-invalid`, `contract-presentation-invalid` | the registration or contract in `target.files`: a literal action id, a valid contract id or presentation |
 | `max-result-chars-invalid` | the OpenAPI operation's `x-glirastes-max-result-chars` or the `maxResultChars` of the `contract.ts` entry: an integer from 1000 to 200000, or remove it; the handler's limit applies meanwhile |
+| `output-contract-opaque` | a typed response. OpenAPI: a JSON `content` schema on the 200/201/202 response; an endpoint without a body declares `204` (NestJS `@HttpCode(204)` and `@ApiNoContentResponse()`), which closes it. Other sources: return a typed object or validate it with an exported schema |
+| `semantics-entry-orphaned` | the `.glirastes/tool-semantics.json` entry `target.key` names: re-key it to the operation it describes (`"stableKey": "METHOD /path"` as in the tool report, or the current `name`), keeping its texts, or delete it when the operation is gone |
 | `tool-semantics-invalid` | the entry `target.key` names in `.glirastes/tool-semantics.json`; keep its human text, fix only the shape |
 | `input-schema-not-object` | an object at the root of the input schema (optional fields, or one field holding the variants), changed together with every caller of the route; for an internal route, tell the developer instead |
 | `navigation-bridge-missing` | mount `useGlirastesNavigationBridge` (React) or `registerNavigationBridge` (`glirastes/browser`) where it is always mounted |

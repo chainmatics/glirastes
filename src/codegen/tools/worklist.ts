@@ -256,6 +256,14 @@ function resolveItem(finding: ToolFinding, tool: ToolsPipelineTool | undefined):
   if (code === 'resolution-rejected' || code === 'tool-semantics-invalid') {
     return { ...base, owner: 'agent', target: entryTarget(finding) };
   }
+  if (code === 'semantics-entry-orphaned') {
+    // `GET /api/tags` for a stableKey entry, `.glirastes/tool-semantics.json#tags.list` for a name-only one.
+    const prefix = `${TOOLS_PATHS.semantics}#`;
+    const key = finding.subjectRef.startsWith(prefix)
+      ? `tools[name=${JSON.stringify(finding.subjectRef.slice(prefix.length))}]`
+      : semanticsKey(finding.subjectRef);
+    return { ...base, owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.semantics, key } };
+  }
   if (code === 'mcp-tool-names-invalid') {
     const key = finding.subjectRef.startsWith('.glirastes/') ? finding.subjectRef : toolKey(finding.subjectRef);
     return { ...base, owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.mcpToolNames, key } };
