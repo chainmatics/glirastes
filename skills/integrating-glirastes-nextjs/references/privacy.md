@@ -111,6 +111,9 @@ export const POST = createAiChatHandler({
 tenant rule and the user's choice (`ScreenshotMode`: `blocked` or
 `allow-original`). `resolveAttachmentPolicy` takes the most restrictive one,
 so a browser flag never widens the app or tenant rule. Default: `blocked`.
+The rule only narrows the effective policy: originals need `allow-original`
+in the signed block or, without one, in `policy.screenshots.mode`
+(see "Platform-governed policy").
 
 - `blocked`: a screenshot in the new message is refused with 403
   `privacy_attachment_blocked`; older files are withheld from the model.
@@ -333,15 +336,29 @@ export const POST = createAiChatHandler({
 - `policy` (`LocalPrivacyPolicy`) is the app's own floor. `required`
   defaults to true, so the profile stays on when the Platform publishes
   `off` or nothing. Without a signed block the local values apply
-  (`PRIVACY_LOCAL_DEFAULTS`: 1 h idle, 24 h absolute, 60 s speech) and
-  `attachments` and the registry decide as before. Pass `required: false`
-  only where an unprotected turn is acceptable without a Platform decision.
+  (`PRIVACY_LOCAL_DEFAULTS`: 1 h idle, 24 h absolute, 60 s speech), exactly
+  as the reported effective digest says: screenshots stay blocked unless
+  `policy.screenshots.mode` is `allow-original`, `providerEntryIds` narrow
+  the registry's offer and `openRouterOnly` the upstream providers. The
+  `attachments` rule only narrows that further; on its own it never opens
+  originals. Pass `required: false` only where an unprotected turn is
+  acceptable without a Platform decision.
 - Approvals name an entry id and the digest of its non-secret binding
   (`ProviderBinding`: adapter, protocol, endpoint, model, routing, image
   capability; `normalizeProviderEndpoint`). Re-pointing an entry at another
   endpoint, model or routing changes the digest, so the old approval no
   longer applies and the turn is refused with `provider_not_allowed`;
   rotating a key does not. An adapter without a binding is never approved.
+  Under a signed list every model of the turn must be the one the registry
+  built for it: the boundary refuses any other model before a request.
+- The OpenRouter adapter replaces the `provider` field of every request
+  with exactly the bound routing (`only`, no fallbacks, `data_collection:
+  'deny'`, `zdr`); routing options set to `undefined` or to weaker values,
+  and provider fields a request carries, change nothing on the wire.
+- In a protected turn with `providers`, a pipeline's intent classifier runs
+  on the turn's resolved, approved model through the SDK; the classifier
+  model and `generateText` callback configured on `createLocalAiPipeline`
+  are not used for it.
 - Report the entries the Platform may approve in `.glirastes/tools.json`:
   `"privacyProviders": [{ "id": "standard", "label": "Standard", "binding": <registry.bindingOf('standard')> }]`.
   Setup writes only id, label, adapter and binding digest into the setup
@@ -358,32 +375,50 @@ export const POST = createAiChatHandler({
   withdrawing or revoking it does not lead back to an unprotected revision.
   Traffic resumes only with a protected revision this runtime can enforce,
   or a newer, explicitly signed `off`. A candidate with an invalid signature
-  never refuses or raises anything.
+  never refuses or raises anything. The floor is a high-water mark of the
+  accepted revision number: a rollback, a replayed older `off`, a rejected
+  revision, a dropped connection or a failed save never lowers it.
 - Once a protected block was accepted or refused, a later revision without
   one is refused (`privacy_policy_downgrade`); only a newer, explicitly
-  signed `off` lowers the floor. A connected runtime with `privacy` answers
-  503 `privacy_policy_unavailable` until its first verified deployment. The
-  gate runs again before every model call and tool call, also the one an
-  approval resumes: a refusal or a revocation of the pinned revision
-  (`privacy_policy_revoked`) arriving during a turn stops the next call.
-- The floor lives in the sync state. Pass `stateStore: (environmentId) =>
-  new FileRuntimeStateStore(path)` (`glirastes/sync`, one file per
-  environment) to `createGlirastes` so it survives a restart; without it,
-  a restarted runner knows a refused requirement again only while the
-  Platform still offers it. An unreadable state file keeps a runtime with
-  `privacy` at `privacy_policy_unavailable`.
+  signed `off` lowers the floor. The gate runs again before every model
+  step and tool call, also the one an approval resumes: a refusal or a
+  revocation of the pinned revision (`privacy_policy_revoked`) arriving
+  during a turn stops the next call, so no result of a running tool reaches
+  the model after the lock. A custom `streamHandler` must await
+  `ctx.beforeModelStep?.()` first in `prepareStep`, as the built-in one does.
+- Managed privacy needs durable state. A connected runner is managed when it
+  has `privacy`, a `stateStore`, or `privacyProviders` in its setup
+  artifact. Pass `stateStore: (environmentId) => new FileRuntimeStateStore(path)`
+  (`glirastes/sync`, one file per environment, on a persistent volume).
+  Without a durable store (none, or `MemoryRuntimeStateStore`) the runner
+  claims no `privacyPolicyVersions` capability and refuses a protected block
+  with the reason `accepted_state_missing`; it never reports it as applied.
+- Until a verified sync was saved durably, a managed runner answers 503
+  `privacy_policy_unavailable` to chat turns, `privacyPolicy()` and
+  `speechPolicy()`. That covers a new or lost state, a Platform that is
+  unreachable at start (the `ready()` timeout releases nothing: the
+  connection and its state are only known after the lookup), an unreadable
+  state file (reported as `RuntimeStateUnreadable`, retried, never
+  overwritten with defaults) and a failed save (blocked until a later
+  verified state was saved). A lost state has no local floor: the first
+  verified answer of the Platform decides.
+- A connected runner without `privacy`, `stateStore` or privacy providers
+  works as before: it claims no privacy capability, and a protected block is
+  refused, never applied.
 - With `metrics` on the handler, decisions under a policy are also counted
   as content-free `privacy.decisions` events (codes from
   `PRIVACY_DECISION_CODES`, windows of at most 60 s, a bounded buffer that
   drops and counts the oldest windows). A rejected batch never changes
   enforcement. The counts show protected calls that were reported, not that
   no other path sent content.
-- Speech: pass `policy: () => glirastes.privacyPolicy()?.speech ?? null` to
+- Speech: pass `policy: () => glirastes.speechPolicy()` to
   `createRecordingTranscriptionHandler` (`SpeechPrivacyPolicy`). It is read
   per request; a protected policy forces a private service address and caps
-  the duration, and a missing, revoked or malformed policy answers 503.
-  `glirastes.privacyPolicy()` throws the same `PrivacyError` a chat turn
-  would.
+  the duration. Only an explicit `'off'` (what `speechPolicy()` returns when
+  no protected policy applies) leaves the recording unprotected; `null`,
+  `undefined`, a throw or a malformed value answers 503. `speechPolicy()`
+  throws the same `PrivacyError` a chat turn would. Route every audio input
+  (cloud and WebSocket routes included) through this policy.
 
 ## Errors and diagnostics
 
