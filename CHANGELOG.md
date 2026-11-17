@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-17
+
+### Added
+
+- Chat memory on `createAiChatHandler` through `memory` (Next.js adapter). Three independent parts:
+  - **Chat summary** (`memory.chat`, on by default once `memory` is set): when the estimated tokens of the conversation history pass the auto-compact threshold, the turns before the last one fold into a running summary written by `memory.model` (default: the chat model) in parallel with the answer. The summary travels as a persisted `data-memory-summary` part of the assistant message, so it needs no storage of its own and survives reloads with the chat. A summary covers only messages it read in full: long messages are read in several calls, at most about 48000 characters are folded per turn and the rest stays verbatim until a later turn, and a failing call keeps what the calls before it covered. The threshold is `memory.chat.autoCompact`, else the environment variable `GLIRASTES_AUTOCOMPACT`, else 8000 tokens and at most 30 % of the model's context window; a value up to `1` is a share of the context window, a larger one a token count, `off` disables. `contextWindowOf(model)` knows common model families; `memory.chat.contextWindow` overrides.
+  - **User notes** (`memory.user`): short notes every chat of one user sees, kept in the browser (`true`, with `createLocalMemoryStore` on `useVercelAiChatTransport({ memory })`) or in the app's database (`{ store }`).
+  - **Shared notes** (`memory.shared: { store }`): notes every user of one workspace sees. Writing them asks for confirmation by default (`approval`) and can be limited with `canWrite(request)`.
+- Built-in tools `memory_remember({ note, scope })` and `memory_forget({ id, note })`, offered only when a note scope is writable. A note that a parallel request pushed beyond the limit is taken back. `memory_forget` refuses a `note` text that is not the note's, so a confirmation card shows what is removed.
+- `MemoryStore` (`list`, `add`, `remove`), `createInMemoryMemoryStore()` and `verifyMemoryStore(store, { authorId?, keys? })`, a contract check to run against the real database (`keys` for a store that only accepts the keys of a real user and workspace). `memory.scope(request)` supplies the user and workspace keys from the verified session; a store without `scope` is a configuration error.
+- Skill `setting-up-glirastes-memory` (part of the setup skills, referenced from `setting-up-glirastes`): asks which parts and which storage, and carries a generic SQL schema, store templates for Drizzle, Prisma and plain SQL and the store test.
+
+### Changed
+
+- With `memory` set, the history is no longer cut at `maxContextMessages` and `history.maxTurns`; the auto-compact threshold bounds it. Notes and summary reach the model as a `<memory>` block in a user-role message ahead of the conversation, marked as context that is not an instruction, and pass the PII shield like messages. Handlers without `memory` behave as before.
+
 ## [0.15.0] - 2026-11-16
 
 ### Added
@@ -773,3 +789,4 @@ No code changes — patch-level docs release.
 
 [0.14.0]: https://github.com/chainmatics/glirastes/compare/v0.13.1...v0.14.0
 [0.15.0]: https://github.com/chainmatics/glirastes/compare/v0.14.0...v0.15.0
+[0.16.0]: https://github.com/chainmatics/glirastes/compare/v0.15.0...v0.16.0

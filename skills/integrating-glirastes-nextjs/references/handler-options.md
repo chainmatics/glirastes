@@ -48,7 +48,8 @@ it. The type's JSDoc carries the full detail.
 | Key | What it does |
 | --- | --- |
 | `history` | compacted earlier turns (default on); `HistoryOptions` or `false` |
-| `maxContextMessages` | most model messages kept (default 12); the current turn is never split |
+| `maxContextMessages` | most model messages kept (default 12); the current turn is never split. Not applied when `memory` is set |
+| `memory` | chat memory: a rolling summary of older turns (`chat`, threshold `autoCompact` or `GLIRASTES_AUTOCOMPACT`), notes per user (`user`: browser or a `MemoryStore`) and per tenant (`shared`: a `MemoryStore`), with `scope(request)` giving the verified keys. Adds the built-in tools `memory_remember` and `memory_forget`. See the `setting-up-glirastes-memory` skill |
 | `maxConversationHistoryPairs` | user/assistant pairs the intent classifier sees (default 4) |
 | `promptCaching` | cache breakpoints and stable tool order (default `true`) |
 | `hideIds` | keep technical ids out of answers (default `true`) |

@@ -20,6 +20,8 @@ import type {
   FilePart,
 } from '../types.js';
 import { limitRequestAttachments } from '../utils/attachments.js';
+import { MEMORY_BODY_FIELD, MEMORY_MAX_USER_NOTES, MEMORY_NOTES_PART, readMemoryEntries } from '../../contracts/memory.js';
+import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
 
 /**
  * Body of each chat request: the client actions the open page handles, so
@@ -28,9 +30,14 @@ import { limitRequestAttachments } from '../utils/attachments.js';
  */
 export function chatRequestBody(
   extras: Record<string, unknown> | (() => Record<string, unknown>) | undefined,
+  memory?: BrowserMemoryStore,
 ): Record<string, unknown> {
   const resolved = !extras ? {} : typeof extras === 'function' ? extras() : extras;
-  return { glirastesClientActions: getDefaultUiActionBus().registeredActionIds(), ...resolved };
+  return {
+    glirastesClientActions: getDefaultUiActionBus().registeredActionIds(),
+    ...(memory ? { [MEMORY_BODY_FIELD]: { user: memory.read() } } : {}),
+    ...resolved,
+  };
 }
 
 export interface UseVercelAiChatTransportOptions extends ChatTransportConfig {
@@ -51,6 +58,12 @@ export interface UseVercelAiChatTransportOptions extends ChatTransportConfig {
    * ```
    */
   bodyExtras?: Record<string, unknown> | (() => Record<string, unknown>);
+  /**
+   * Browser-side notes for a handler with `memory.user: true` (see
+   * `createLocalMemoryStore`): sent with every request, replaced when the
+   * model adds or removes one. Not needed when the handler has a store.
+   */
+  memory?: BrowserMemoryStore;
 }
 
 export function useVercelAiChatTransport(
@@ -62,7 +75,11 @@ export function useVercelAiChatTransport(
     onData,
     autoResumeOnApproval = true,
     bodyExtras,
+    memory,
   } = options;
+
+  const memoryRef = useRef(memory);
+  memoryRef.current = memory;
 
   const headersRef = useRef(userHeaders);
   headersRef.current = userHeaders;
@@ -91,7 +108,7 @@ export function useVercelAiChatTransport(
               return typeof h === 'function' ? h() : h ?? {};
             }
           : undefined,
-        body: () => chatRequestBody(bodyExtrasRef.current),
+        body: () => chatRequestBody(bodyExtrasRef.current, memoryRef.current),
         // Same body as the default, with file data only in the latest user turns.
         prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => ({
           body: {
@@ -122,6 +139,10 @@ export function useVercelAiChatTransport(
       : undefined,
     onData: (dataPart) => {
       const part = dataPart as { type: string; data: unknown };
+      if (part.type === MEMORY_NOTES_PART && memoryRef.current) {
+        const notes = (part.data as { user?: unknown } | null)?.user;
+        if (Array.isArray(notes)) memoryRef.current.write(readMemoryEntries(notes, MEMORY_MAX_USER_NOTES));
+      }
       onDataRef.current?.(part);
       subscribersRef.current.forEach((fn) => fn(part));
     },

@@ -18,6 +18,7 @@ import type { Lancer } from '../../lancer/index.js';
 import type { ApprovalStore } from './approval-binding.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions } from './prepare-model-messages.js';
+import type { ChatMemoryConfig } from './chat-memory.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ToolFailureClassifier } from '../../core/index.js';
 import type {
   Principal,
@@ -348,6 +349,19 @@ export interface AiChatHandlerConfig {
    * follow-up messages. Defaults to 4.
    */
   maxConversationHistoryPairs?: number;
+
+  /**
+   * Chat memory. `chat` (default on) replaces the fixed message window: the
+   * conversation stays verbatim until it reaches the auto-compact threshold,
+   * then `model` folds the older turns into a short summary that travels in
+   * the chat as a `data-memory-summary` part. `user` and `shared` give the
+   * model `memory_remember` / `memory_forget` for short notes that later
+   * chats of the user, or all users of a workspace, get. Notes and summary
+   * reach the model as background ahead of the messages, never as
+   * instructions. With `memory.chat` on, `maxContextMessages` and
+   * `history.maxTurns` no longer drop earlier turns.
+   */
+  memory?: ChatMemoryConfig;
 
   /**
    * The app's own input check. Runs before the pipeline or the intent router,

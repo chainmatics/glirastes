@@ -132,10 +132,10 @@ describe('bundled local-first setup workflow', () => {
     }
   });
 
-  it('lists eight skills with the curating skill in both READMEs', async () => {
+  it('lists nine skills with the curating skill in both READMEs', async () => {
     for (const path of [join(findPackageSkillsDir(), 'README.md'), join(findPackageSkillsDir(), '../README.md')]) {
       const readme = await readFile(path, 'utf8');
-      expect(readme, path).toContain('eight skills');
+      expect(readme, path).toContain('nine skills');
       expect(readme, path).toContain('curating-glirastes-chat-interactions');
     }
   });
