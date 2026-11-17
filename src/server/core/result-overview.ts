@@ -91,8 +91,11 @@ const MAX_LISTED_PATH_CHARS = 120;
 /** Child keys named per left-out parent, and their longest. */
 const MAX_LISTED_KEYS = 8;
 const MAX_LISTED_KEY_CHARS = 64;
+/** Identity keys that identify an entry (its id), and those that name it for a person. */
+export const IDENTITY_ID_KEYS: ReadonlyArray<string> = ['id', 'uuid', 'key', 'slug', 'code'];
+export const IDENTITY_NAME_KEYS: ReadonlyArray<string> = ['name', 'title', 'label', 'displayName'];
 /** An entry's own fields that name it stay as long as they are small. Foreign keys (`folderId`) do not. */
-const IDENTITY_KEY = /^(id|uuid|key|slug|code|name|title|label|displayName)$/;
+const IDENTITY_KEY = new RegExp(`^(${[...IDENTITY_ID_KEYS, ...IDENTITY_NAME_KEYS].join('|')})$`);
 const MAX_IDENTITY_FIELD_CHARS = 200;
 
 /**
@@ -158,11 +161,11 @@ interface DominantArray {
 }
 
 /** Arrays reached through object properties only (not inside arrays), largest first. */
-function findArrays(root: JsonObject): Array<{ route: string[]; entries: Json[]; size: number }> {
+function findArrays(root: JsonObject, skip: ReadonlySet<string> = new Set()): Array<{ route: string[]; entries: Json[]; size: number }> {
   const found: Array<{ route: string[]; entries: Json[]; size: number }> = [];
   const visit = (object: JsonObject, route: string[]): void => {
     for (const key of Object.keys(object)) {
-      if (route.length === 0 && (PROTECTED_KEYS.has(key) || key === MARKER_KEY)) continue;
+      if (route.length === 0 && (PROTECTED_KEYS.has(key) || key === MARKER_KEY || skip.has(key))) continue;
       const value = object[key]!;
       if (Array.isArray(value)) {
         if (value.length > 0) found.push({ route: [...route, key], entries: value, size: serializedLength(value) });
@@ -180,9 +183,12 @@ function findArrays(root: JsonObject): Array<{ route: string[]; entries: Json[];
   });
 }
 
-/** Object keys from the root to the dominant array (the largest one reached through object properties). */
-export function dominantArrayRoute(root: Record<string, unknown>): string[] | undefined {
-  return findArrays(root as JsonObject)[0]?.route;
+/**
+ * Object keys from the root to the dominant array (the largest one reached
+ * through object properties); `skip` names further top-level keys to pass over.
+ */
+export function dominantArrayRoute(root: Record<string, unknown>, skip?: ReadonlySet<string>): string[] | undefined {
+  return findArrays(root as JsonObject, skip)[0]?.route;
 }
 
 /** What the values of one field path look like across all entries. */
@@ -379,15 +385,23 @@ function without(value: Json, node: RemovalNode | undefined, property = false): 
   return property && kept === 0 && keys.length > 0 ? SHELL : output;
 }
 
+/**
+ * What the model does once a handle has expired: a read origin may be called
+ * again, a write origin must not (it has run).
+ */
+export function expiredInstruction(readOnly: boolean): string {
+  return readOnly
+    ? 'call the original tool again.'
+    : 'do not call the tool again (it has run); say the details are no longer available or use a read tool.';
+}
+
 function hintOf(options: BuildResultOverviewOptions, shown: string, omittedFields: boolean, unnamed: boolean, keyed: boolean): string {
   const first = `Overview${shown}${omittedFields ? ', without the fields in omitted' : ''}.`;
   const infer = omittedFields ? ' Do not infer missing fields from other fields; read them or say they are not known.' : '';
   const read = ` Read more with ${READ_RESULT_TOOL_NAME} in this turn (resultId = _result.id; fields as in omitted${keyed ? ' (path or path.key)' : ''}, `
     + '"[]" every entry, "[2]" one; offset, limit).';
   const odd = unnamed ? ' Fields with unusual key names are only counted (omittedMore); read them with their parent.' : '';
-  const expired = options.readOnly
-    ? ' On result_expired call the original tool again.'
-    : ' On result_expired do not call the tool again (it has run); say the details are no longer available or use a read tool.';
+  const expired = ` On result_expired ${expiredInstruction(options.readOnly)}`;
   return first + infer + read + odd + expired;
 }
 
