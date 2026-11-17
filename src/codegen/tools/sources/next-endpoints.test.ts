@@ -171,6 +171,21 @@ describe('next-app endpoint source', () => {
     expect(tools.get('GET /api/tasks')).not.toHaveProperty('outputAllowedFields');
   }, 30_000);
 
+  it('joins the app-wide output.deniedFields of tools.json with a contract.ts deny-list', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  POST: { input: z.object({ title: z.string() }), id: 'notes.add', output: z.object({ id: z.string(), fileUrl: z.string(), etag: z.string() }),\n"
+        + "    outputDeniedFields: ['etag'] },\n};\n",
+    }, { toolsConfig: { output: { deniedFields: ['**.fileUrl'] } } });
+    const tools = byKey((await createNextEndpointSource().observe(context(app.root))).observations);
+    const add = tools.get('POST /api/notes')!;
+    expect(add.outputDeniedFields).toEqual(['**.fileUrl', 'etag']);
+    expect(JSON.stringify(add.contract!.output)).not.toMatch(/fileUrl|etag/);
+    expect(tools.get('GET /api/tasks')!.outputDeniedFields).toEqual(['**.fileUrl']);
+    expect(add.findings.filter((finding) => finding.code === 'output-field-unknown')).toEqual([]);
+  }, 30_000);
+
   it('carries maxResultChars of the sibling contract.ts to the observation', async () => {
     const app = await createAppFixture({
       ...APP_FILES,

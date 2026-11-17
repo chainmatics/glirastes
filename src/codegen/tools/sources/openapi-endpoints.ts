@@ -561,6 +561,7 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
         },
         ...(entry.output ? { inferredOutput: entry.output } : {}),
         probes,
+        ...(ctx.config.output?.deniedFields ? { appDeniedFields: ctx.config.output.deniedFields } : {}),
         openapi: entry.input,
         ...(resolution ? { resolution } : {}),
         ...(previousContract ? { previousContract } : {}),

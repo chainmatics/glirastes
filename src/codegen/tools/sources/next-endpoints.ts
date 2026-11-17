@@ -288,6 +288,7 @@ function observeRoute(
     },
     ...(inferredOutput ? { inferredOutput } : {}),
     probes,
+    ...(ctx.config.output?.deniedFields ? { appDeniedFields: ctx.config.output.deniedFields } : {}),
     ...(candidate ? { contractModule: candidate } : {}),
     ...(resolution ? { resolution } : {}),
     ...(previousContract ? { previousContract } : {}),

@@ -511,7 +511,8 @@ describe('non-leak property test of the upper bound', () => {
       return output;
     };
     const root = object(0);
-    root.data = Array.from({ length: 4 }, () => object(1));
+    // Entries with identity fields: read_result adds them to entries it reads below.
+    root.data = Array.from({ length: 4 }, () => ({ id: token('Wq'), name: token('Wq'), ...object(1) }));
     root[SHARED] = { inner: token('Wq') };
     root.nested = [[{ [SHARED]: token('Wq'), keep: token('Wq') }]];
     return root;
@@ -560,6 +561,9 @@ describe('non-leak property test of the upper bound', () => {
       for (const entry of all) if (hidden(entry.steps, false)) forbidden.add(entry.key);
       // A shared key name may also be visible elsewhere; every value is unique.
       for (const entry of all) if (!hidden(entry.steps, false)) forbidden.delete(entry.key);
+      // `id` and `name` are also words of the markers (`_result.id`); their values stay checked.
+      forbidden.delete('id');
+      forbidden.delete('name');
       for (const leaf of found.leaves) if (hidden(leaf.steps, true)) forbidden.add(leaf.value);
       // The pattern key itself: hidden everywhere when declared.
       if (patterns.length > 0) expect(forbidden.has(SHARED)).toBe(true);

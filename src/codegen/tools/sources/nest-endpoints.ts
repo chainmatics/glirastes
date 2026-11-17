@@ -435,6 +435,7 @@ function observeEntry(
     },
     ...(analysis.inferredOutput ? { inferredOutput: analysis.inferredOutput } : {}),
     probes,
+    ...(ctx.config.output?.deniedFields ? { appDeniedFields: ctx.config.output.deniedFields } : {}),
     ...(resolution ? { resolution } : {}),
     ...(previousContract ? { previousContract } : {}),
   });

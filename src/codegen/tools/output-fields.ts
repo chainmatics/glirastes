@@ -33,6 +33,12 @@ export interface DeclaredOutputFields {
   allowed?: string[] | 'invalid';
   denied?: string[] | 'invalid';
   default?: string[] | 'invalid';
+  /**
+   * The app-wide `output.deniedFields` of `.glirastes/tools.json` (only
+   * `**.<key>` patterns, already validated): joined with `denied`. A pattern
+   * that one tool's schema lacks is no finding of that tool.
+   */
+  appDenied?: string[];
 }
 
 export interface ResolvedOutputFields {
@@ -48,6 +54,10 @@ export interface ResolvedOutputFields {
   findings: ToolFinding[];
   /** The output schema reduced to `allowed`; undefined when it stays as it is. */
   output?: JsonSchemaLike;
+  /** App-wide patterns whose key the declared output schema names (for the nowhere-matching warning). */
+  appDeniedHits?: string[];
+  /** Declared keys that differ from an app-wide pattern's key only by case (for its near-miss hint). */
+  appDeniedNearKeys?: string[];
 }
 
 const NAMES = {
@@ -456,7 +466,8 @@ export function resolveOutputFields(
   declared: DeclaredOutputFields | undefined,
   output: JsonSchemaLike | undefined,
 ): ResolvedOutputFields {
-  if (!declared || (declared.allowed === undefined && declared.denied === undefined && declared.default === undefined)) {
+  const app = declared?.appDenied && declared.appDenied.length > 0 ? declared.appDenied : undefined;
+  if (!declared || (declared.allowed === undefined && declared.denied === undefined && declared.default === undefined && !app)) {
     return { findings: [] };
   }
   const findings: ToolFinding[] = [];
@@ -464,9 +475,13 @@ export function resolveOutputFields(
   // Fail closed: with an upper bound that cannot be read nothing is allowed (the tool is disabled as well).
   const broken = declared.allowed === 'invalid' || declared.denied === 'invalid';
   const allowed = broken ? [] : declared.allowed as string[] | undefined;
-  const denied = broken ? undefined : declared.denied as string[] | undefined;
+  const own = broken ? undefined : declared.denied as string[] | undefined;
+  // Effective deny-list: the tool's own paths and the app-wide patterns, de-duplicated and sorted.
+  const denied = broken ? undefined
+    : app ? [...new Set([...(own ?? []), ...app])].sort(compareCodeUnits) : own;
   let defaults = declared.default === 'invalid' ? undefined : declared.default;
-  for (const [which, paths] of [['allowed', allowed], ['denied', denied], ['default', defaults]] as const) {
+  // Only the tool's own paths are checked against its schema; app-wide patterns are checked across all tools.
+  for (const [which, paths] of [['allowed', allowed], ['denied', own], ['default', defaults]] as const) {
     if (!paths || (broken && which === 'allowed')) continue;
     const unknown = unknownOutputFields(output, paths);
     if (unknown.length === 0) continue;
@@ -516,12 +531,24 @@ export function resolveOutputFields(
         `${declared.where} declares output fields, but ${reduced.unprojected === 1 ? 'one part' : `${reduced.unprojected} parts`} of the response schema (a $ref, patternProperties or an open additionalProperties) could not be reduced to them; that part of the output contract stays as it is. Results are reduced all the same.`));
     }
   }
+  const appHits = (() => {
+    if (!app || !output) return undefined;
+    const keys = declaredKeys(resultSchema(output).schema);
+    const hits = app.filter((path) => keys.has(parseAnyDepthKey(path)!));
+    const near = app.map((path) => parseAnyDepthKey(path)!).filter((key) => !keys.has(key))
+      .flatMap((key) => {
+        const match = [...keys].sort(compareCodeUnits).find((candidate) => candidate.toLowerCase() === key.toLowerCase());
+        return match ? [match] : [];
+      });
+    return { hits, near };
+  })();
   return {
     ...(allowed ? { allowed } : {}),
     ...(denied ? { denied } : {}),
     ...(defaults ? { default: defaults } : {}),
     findings,
     ...(projected ? { output: projected } : {}),
+    ...(appHits ? { appDeniedHits: appHits.hits, appDeniedNearKeys: appHits.near } : {}),
   };
 }
 
@@ -530,10 +557,14 @@ export function outputFieldLists(resolved: {
   outputAllowedFields?: string[];
   outputDeniedFields?: string[];
   outputDefaultFields?: string[];
-} | undefined): Pick<ObservedTool, 'outputAllowedFields' | 'outputDeniedFields' | 'outputDefaultFields'> {
+  appDeniedHits?: string[];
+  appDeniedNearKeys?: string[];
+} | undefined): Pick<ObservedTool, 'outputAllowedFields' | 'outputDeniedFields' | 'outputDefaultFields' | 'appDeniedHits' | 'appDeniedNearKeys'> {
   return {
     ...(resolved?.outputAllowedFields ? { outputAllowedFields: [...resolved.outputAllowedFields] } : {}),
     ...(resolved?.outputDeniedFields ? { outputDeniedFields: [...resolved.outputDeniedFields] } : {}),
     ...(resolved?.outputDefaultFields ? { outputDefaultFields: [...resolved.outputDefaultFields] } : {}),
+    ...(resolved?.appDeniedHits ? { appDeniedHits: [...resolved.appDeniedHits] } : {}),
+    ...(resolved?.appDeniedNearKeys ? { appDeniedNearKeys: [...resolved.appDeniedNearKeys] } : {}),
   };
 }

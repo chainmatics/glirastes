@@ -275,6 +275,10 @@ function resolveItem(finding: ToolFinding, tool: ToolsPipelineTool | undefined):
     const key = finding.subjectRef.startsWith('.glirastes/') ? finding.subjectRef : toolKey(finding.subjectRef);
     return { ...base, owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.mcpToolNames, key } };
   }
+  if (code === 'output-denied-key-unmatched') {
+    // tools.json is developer-owned: a person checks the pattern.
+    return { ...base, owner: 'developer', target: { kind: 'review', file: TOOLS_PATHS.config, key: 'output.deniedFields' } };
+  }
   if (code === 'auth-evidence-missing') {
     return {
       ...base,

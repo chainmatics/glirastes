@@ -94,6 +94,23 @@ const MAX_LISTED_KEY_CHARS = 64;
 /** An entry's own fields that name it stay as long as they are small. Foreign keys (`folderId`) do not. */
 const IDENTITY_KEY = /^(id|uuid|key|slug|code|name|title|label|displayName)$/;
 const MAX_IDENTITY_FIELD_CHARS = 200;
+
+/**
+ * The identity fields of one entry that name it: an identity key with a
+ * scalar value whose field (key and value, serialized) is at most 200
+ * characters, in the entry's key order. `read_result` adds them to the
+ * entries of an array it reads below; the overview keeps the same keys.
+ */
+export function identityFieldsOf(entry: Record<string, unknown>): Array<[string, unknown]> {
+  const fields: Array<[string, unknown]> = [];
+  for (const key of Object.keys(entry)) {
+    if (!IDENTITY_KEY.test(key)) continue;
+    const value = entry[key];
+    const scalar = value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+    if (scalar && serializedLength(key) + 1 + serializedLength(value) + 1 <= MAX_IDENTITY_FIELD_CHARS) fields.push([key, value]);
+  }
+  return fields;
+}
 /**
  * A field that refers to another record (`folderId`, `tenant_id`,
  * `brandKitIDs`), not a word ending in "ID" (`VALID`, `COVID`).

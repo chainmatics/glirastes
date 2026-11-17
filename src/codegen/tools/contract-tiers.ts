@@ -60,6 +60,8 @@ export interface ResolveEndpointContractInput {
    * sibling contract module declares its own in its entry.
    */
   outputFields?: DeclaredOutputFields;
+  /** `output.deniedFields` of `.glirastes/tools.json`: any-depth patterns every endpoint tool gets. */
+  appDeniedFields?: ReadonlyArray<string>;
 }
 
 export interface OpenapiOperationInput {
@@ -85,6 +87,9 @@ export interface ResolvedEndpointContract {
   outputDeniedFields?: string[];
   /** Effective `outputDefaultFields`: within the upper bound. */
   outputDefaultFields?: string[];
+  /** App-wide patterns the declared output schema names, and case near-misses (not written to outputs). */
+  appDeniedHits?: string[];
+  appDeniedNearKeys?: string[];
 }
 
 export const OPAQUE_SCHEMA_DIGEST = jsonSchemaDigest(OPAQUE_JSON_SCHEMA);
@@ -513,7 +518,7 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     ...(entry?.presentation ? { presentation: entry.presentation } : {}),
   };
   // Output fields: of the OpenAPI operation, else of the contract module entry.
-  const declaredFields: DeclaredOutputFields | undefined = input.outputFields ?? (entry && input.contractModule
+  const ownFields: DeclaredOutputFields | undefined = input.outputFields ?? (entry && input.contractModule
     ? {
         where: input.contractModule.module,
         form: 'contract',
@@ -525,6 +530,11 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
         ...(entry.invalidFields?.includes('outputDefaultFields') ? { default: 'invalid' as const } : {}),
       }
     : undefined);
+  // The app-wide patterns of tools.json join every tool's own deny-list.
+  const appDenied = input.appDeniedFields && input.appDeniedFields.length > 0 ? [...input.appDeniedFields] : undefined;
+  const declaredFields: DeclaredOutputFields | undefined = appDenied
+    ? { ...(ownFields ?? { where: '.glirastes/tools.json output.deniedFields', form: 'contract' as const }), appDenied }
+    : ownFields;
   const outputFieldsOf = (output: JsonSchemaLike | undefined) => {
     const fields = resolveOutputFields(subject, declaredFields, output);
     return {
@@ -533,6 +543,8 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
         ...(fields.allowed ? { outputAllowedFields: fields.allowed } : {}),
         ...(fields.denied ? { outputDeniedFields: fields.denied } : {}),
         ...(fields.default ? { outputDefaultFields: fields.default } : {}),
+        ...(fields.appDeniedHits ? { appDeniedHits: fields.appDeniedHits } : {}),
+        ...(fields.appDeniedNearKeys ? { appDeniedNearKeys: fields.appDeniedNearKeys } : {}),
       },
     };
   };

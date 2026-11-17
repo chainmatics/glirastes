@@ -218,6 +218,24 @@ function emptyChanges(): ToolsPipelineResult['changes'] {
   return { added: [], changed: [], removed: [], unchanged: [] };
 }
 
+/**
+ * An app-wide pattern (`output.deniedFields` of tools.json) whose key no
+ * endpoint tool's declared output schema names: probably misspelt. One
+ * warning per pattern, on tools.json; a pattern one tool lacks is no finding.
+ */
+function unmatchedAppDeniedFindings(patterns: ReadonlyArray<string>, tools: ReadonlyArray<ObservedTool>): ToolFinding[] {
+  const endpoints = tools.filter((tool) => tool.execution.executionKind === 'endpoint');
+  return patterns.filter((path) => !endpoints.some((tool) => tool.appDeniedHits?.includes(path))).map((path) => {
+    const key = path.slice(3).toLowerCase();
+    const near = [...new Set(endpoints.flatMap((tool) => tool.appDeniedNearKeys ?? []))]
+      .filter((candidate) => candidate.toLowerCase() === key).sort(compareCodeUnits);
+    return toolFinding('output-denied-key-unmatched', 'warning', TOOLS_PATHS.config,
+      `${TOOLS_PATHS.config} output.deniedFields has ${path}, whose key is not found in the declared response schema of any tool`
+      + (near.length > 0 ? ` (the schemas have ${near.join(', ')}; names match exactly, case included)` : '')
+      + '; if the field only occurs in undeclared parts, ignore this. A misspelt pattern excludes nothing.');
+  });
+}
+
 function isError(finding: ToolFinding): boolean {
   return finding.severity === 'error';
 }
@@ -793,6 +811,7 @@ async function generate(
       if (mcpNames.fallback.has(entry.stableKey)) delete entry.mcp;
     }
   }
+  findings.push(...unmatchedAppDeniedFindings(config.output?.deniedFields ?? [], [...observedByKey.values()]));
   for (const view of toolViews) {
     view.findings = sortFindings(findings.filter((finding) => finding.subjectRef === view.stableKey));
   }

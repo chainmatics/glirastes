@@ -9,7 +9,7 @@ byte-checked by `glirastes tools check`. Never write an output by hand: rerun
 
 | File | Who writes it | Contract |
 | --- | --- | --- |
-| `.glirastes/tools.json` | `glirastes init`, then you or the developer | `schemaVersion: 1`, `appId` (UUID, never changed after the first committed refresh), `targetAppKey`, `locale`, `sources`, optional `emit`, `enrich`, `ci`. Never a key. |
+| `.glirastes/tools.json` | `glirastes init`, then you or the developer | `schemaVersion: 1`, `appId` (UUID, never changed after the first committed refresh), `targetAppKey`, `locale`, `sources`, optional `emit`, `enrich`, `ci`, `output` (`deniedFields`: only `**.<key>` patterns every generated endpoint tool hides, e.g. `**.fileUrl`; anything else is `E-TOOLS-002`). Never a key. |
 | `.glirastes/prompt-bundle.json` | `glirastes init`, then you | `schemaVersion: 1`, the same `appId`, `artifactRef`, and `sections` with `planner`, `appBehavior`, `responseStyle`, `capabilityFragments`. This is local prompt text; only digests leave the app. Preserve tuned text. |
 | `.glirastes/tool-policy.json` | the developer, through `glirastes tools policy` | Overrides and exclusions. It can only restrict what the code allows, except a reviewed, pinned confirmation relaxation of a write tool. You never write it. |
 | `.glirastes/tool-resolutions.json` | you or the developer | `conventions` (`handlerWrappers`, `bodyReaders`, `authHelpers`, `filterValues`) and per-tool contracts bound to an `interfaceDigest`. Data only. |

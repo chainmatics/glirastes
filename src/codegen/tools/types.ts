@@ -122,6 +122,14 @@ export interface ObservedTool {
   outputAllowedFields?: string[];
   outputDeniedFields?: string[];
   outputDefaultFields?: string[];
+  /**
+   * App-wide patterns (`output.deniedFields` of tools.json) whose key this
+   * tool's declared output schema names, and declared keys that differ from
+   * one only by case. Only for the warning about a pattern that matches no
+   * tool; never written to an output.
+   */
+  appDeniedHits?: string[];
+  appDeniedNearKeys?: string[];
 }
 
 export interface ExcludedTool {
