@@ -193,6 +193,9 @@ export class RuntimeControlPlaneClient {
 
   async syncOnce() {
     const query = new URLSearchParams({ runnerKey: this.options.runnerKey });
+    if (this.options.readOnly && this.options.privacyCapable) {
+      query.set('privacyPolicyVersions', PRIVACY_POLICY_SCHEMA_VERSIONS.join(','));
+    }
     if (this.cursor) query.set('cursor', this.cursor);
     const bundle = await this.request(`sync?${query.toString()}`, {
       method: 'GET',

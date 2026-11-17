@@ -23,6 +23,16 @@ async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
 }
 
 describe('RuntimeControlPlaneClient', () => {
+  it.each([true, false])('negotiates readonly privacy only from runtime capability (%s)', async (privacyCapable) => {
+    const fetchImpl = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ cursor: '2026-11-17T12:00:00.000Z', activeSnapshotComplete: true, deployments: [], revocations: [] })));
+    const client = new RuntimeControlPlaneClient({ ...baseOptions, fetchImpl, readOnly: true, privacyCapable,
+      manager: { apply: vi.fn().mockResolvedValue({}) } as never });
+    await client.syncOnce();
+    const url = new URL(String(fetchImpl.mock.calls[0]![0]));
+    expect(url.searchParams.get('privacyPolicyVersions')).toBe(privacyCapable ? '1' : null);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('registers and polls using only the app-scoped credential header', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'runner-1' }), {

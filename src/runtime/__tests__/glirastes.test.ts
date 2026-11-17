@@ -860,10 +860,11 @@ describe('createGlirastes with a privacy policy', () => {
     }))).toBe('privacy_policy_unavailable');
   });
 
-  it.each([false, true])('blocks chat and speech when accepted off is revoked (local infrastructure: %s)', async (configured) => {
+  it.each([[false, false], [false, true], [true, false], [true, true]])('blocks revoked off (local infrastructure: %s, deployment withdrawn: %s)', async (configured, withdrawn) => {
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
     const revocations: SecurityRevocation[] = [];
-    const http = platform({ deployments: [activeDeployment(privateKey, [], { schemaVersion: 1, profile: 'off' })], publicKey, revocations });
+    const deployments = [activeDeployment(privateKey, [], { schemaVersion: 1, profile: 'off' })];
+    const http = platform({ deployments, publicKey, revocations });
     const glirastes = track(createGlirastes({
       generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
       pollIntervalMs: 10, onError: vi.fn(), stateStore: () => new SharedDurableTestStore(),
@@ -879,11 +880,13 @@ describe('createGlirastes with a privacy policy', () => {
     };
     revocations.push({ ...unsigned, signature: { algorithm: 'Ed25519', keyId: 'runtime-key',
       value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url') } });
+    if (withdrawn) deployments.splice(0);
     await vi.waitFor(() => expect(glirastes.revocations()).toHaveLength(1));
-    expect(codeOf(() => glirastes.speechPolicy())).toBe('privacy_policy_revoked');
+    const expected = withdrawn ? 'privacy_policy_unavailable' : 'privacy_policy_revoked';
+    expect(codeOf(() => glirastes.speechPolicy())).toBe(expected);
     expect(codeOf(() => turn.managedRuntime.privacyGate({
       request: new Request('https://app.example/api/chat'), snapshot: { policyRevision: pinned } as never,
-    }))).toBe('privacy_policy_revoked');
+    }))).toBe(expected);
   });
 
   it('enforces the signed block of the accepted deployment and reports it', async () => {
