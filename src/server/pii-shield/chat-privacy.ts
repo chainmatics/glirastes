@@ -29,10 +29,12 @@ export interface ChatPrivacyConfig {
   shield: StrictPiiShield;
   /**
    * The authenticated scope of this request. `conversationId` is the chat id
-   * the client sent (`body.id`); tenant, app, environment and principal must
-   * come from the server-side session. Return `null` to refuse (401).
+   * the client sent (`body.id`; a request without one is refused with 400
+   * `privacy_scope_invalid` before this is called); tenant, app, environment
+   * and principal must come from the server-side session. Return `null` to
+   * refuse (401).
    */
-  scope(req: Request, chat: { conversationId: string | undefined }): PrivacyScope | null | Promise<PrivacyScope | null>;
+  scope(req: Request, chat: { conversationId: string }): PrivacyScope | null | Promise<PrivacyScope | null>;
   /**
    * Identities the principal is authorized to see and that should be
    * protected deterministically: at least the signed-in user. Never load
@@ -138,7 +140,9 @@ export async function openChatPrivacyTurn(
   req: Request,
   body: { id?: unknown },
 ): Promise<ChatPrivacyTurn | null> {
-  const conversationId = typeof body.id === 'string' && body.id.length > 0 ? body.id : undefined;
+  // Without a chat id every conversation would share one mapping: refuse.
+  if (typeof body.id !== 'string' || body.id.length === 0) throw new PrivacyError('privacy_scope_invalid');
+  const conversationId = body.id;
   const scope = await config.scope(req, { conversationId });
   if (!scope) return null;
   const session = await config.shield.open(scope, { signal: req.signal });

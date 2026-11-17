@@ -78,15 +78,15 @@ describe('registered identities are protected deterministically', () => {
 
   it('pseudonymizes the same value identically across calls and in JSON keys, values and numeric ids', async () => {
     const s = await memoryShield().open(testScope());
-    await s.registerIdentities([{ id: 4711, name: CANARY.colleague }]);
-    const json = await s.pseudonymizeJson({ [CANARY.colleague]: { id: 4711, label: CANARY.colleague } });
+    await s.registerIdentities([{ id: 4711001, name: CANARY.colleague }]);
+    const json = await s.pseudonymizeJson({ [CANARY.colleague]: { id: 4711001, label: CANARY.colleague } });
     const serialized = JSON.stringify(json);
     expect(serialized).not.toMatch(CANARY_PATTERN);
-    expect(serialized).not.toContain('4711');
+    expect(serialized).not.toContain('4711001');
     const [key] = Object.keys(json);
     expect((json as Record<string, { label: string; id: number }>)[key!]!.label).toBe(key);
     expect(typeof (json as Record<string, { id: number }>)[key!]!.id).toBe('number');
-    expect(s.rehydrateJson(json)).toEqual({ [CANARY.colleague]: { id: 4711, label: CANARY.colleague } });
+    expect(s.rehydrateJson(json)).toEqual({ [CANARY.colleague]: { id: 4711001, label: CANARY.colleague } });
   });
 
   it('short lowercase name parts are not matched case-insensitively (documented residual risk)', async () => {
@@ -121,5 +121,52 @@ describe('registered identities are protected deterministically', () => {
     expect(s.countLeaks(`Hallo ${CANARY.name}`)).toBe(1);
     expect(s.countLeaks(`Hallo ${CANARY.email}`)).toBe(1);
     expect(s.countLeaks('Hallo Anna')).toBe(0);
+  });
+});
+
+describe('matching forms that must not slip through', () => {
+  async function session() {
+    const s = await memoryShield().open(testScope());
+    await s.registerIdentities([{ id: CANARY.userId, name: CANARY.name, email: CANARY.email }]);
+    return s;
+  }
+
+  it.each([
+    ['a mention', 'Ping @Anna bitte'],
+    ['an abbreviation without space', 'Frau Dr.Muster meldet sich'],
+    ['fullwidth letters', 'Hallo Ａｎｎａ Ｍｕｓｔｅｒ'],
+    ['a zero-width space', 'Hallo A​nna Muster'],
+    ['a soft hyphen', 'Frau Mus­ter ruft an'],
+    ['a sentence end', 'Das war Anna.'],
+  ])('protects %s', async (_label, text) => {
+    const s = await session();
+    const out = await s.pseudonymizeText(text);
+    expect(out).not.toMatch(CANARY_PATTERN);
+    // Output leak check: a full name in any of these forms is a leak.
+    if (/Anna\s*Muster|Ａｎｎａ/.test(text.replace(/\u200b/g, ''))) expect(s.countLeaks(text)).toBeGreaterThan(0);
+  });
+
+  it('leaves the e-mail span intact as one pseudonym', async () => {
+    const s = await session();
+    const out = await s.pseudonymizeText(`Mail an ${CANARY.email}`);
+    expect(out).not.toMatch(CANARY_PATTERN);
+    expect(out).toMatch(/^Mail an [a-z]+\.[a-z]+\d*@example\.org$/);
+  });
+
+  it('does not touch quantities: short numeric ids are not registered', async () => {
+    const s = await memoryShield().open(testScope());
+    await s.registerIdentities([{ id: 42, name: CANARY.name }, { id: 'ab', name: CANARY.colleague }]);
+    expect(await s.pseudonymizeJson({ qty: 42, note: 'Bestell 42 Stück' })).toEqual({ qty: 42, note: 'Bestell 42 Stück' });
+    expect(s.rehydrateJson({ qty: 17 })).toEqual({ qty: 17 });
+  });
+
+  it('protects a long numeric id in strings and number positions, and maps it back', async () => {
+    const s = await memoryShield().open(testScope());
+    await s.registerIdentities([{ id: 4_711_001, name: CANARY.name }]);
+    const masked = await s.pseudonymizeJson({ assigneeId: 4_711_001, text: 'Nutzer 4711001' }) as { assigneeId: number; text: string };
+    expect(masked.assigneeId).not.toBe(4_711_001);
+    expect(String(masked.assigneeId)).toMatch(/^[1-9]\d{6}$/);
+    expect(masked.text).not.toContain('4711001');
+    expect(s.rehydrateJson(masked)).toEqual({ assigneeId: 4_711_001, text: 'Nutzer 4711001' });
   });
 });

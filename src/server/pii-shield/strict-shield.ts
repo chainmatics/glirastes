@@ -71,8 +71,22 @@ export interface StrictPiiShield {
 
 const CASE_INSENSITIVE = new Set(['person', 'email', 'name-full']);
 const LEAK_CATEGORIES_EXCLUDED = new Set(['name-first', 'name-last']);
-const BOUNDARY_BEFORE = '(?<![\\p{L}\\p{N}_@.])';
-const BOUNDARY_AFTER = '(?![\\p{L}\\p{N}_@])';
+// Letters, digits and `_` continue a word. `@` and `.` do not: "@Anna" and
+// "Dr.Muster" name the person. A registered e-mail address is a longer
+// span at the same start and wins over its name parts.
+const BOUNDARY_BEFORE = '(?<![\\p{L}\\p{N}_])';
+const BOUNDARY_AFTER = '(?![\\p{L}\\p{N}_])';
+/** Invisible format characters (zero-width space/joiner, soft hyphen, bidi marks). */
+const FORMAT_CHARACTERS = /\p{Cf}/gu;
+
+/**
+ * The form a text is matched and sent in: NFKC (fullwidth and other
+ * compatibility forms fold to their plain letters) without invisible format
+ * characters, so "Ａｎｎａ" or "A\u200bnna" cannot slip past a matcher.
+ */
+export function foldProtectedText(text: string): string {
+  return text.normalize('NFKC').replace(FORMAT_CHARACTERS, '');
+}
 const MAX_APPEND_ATTEMPTS = 6;
 
 function escapeRegex(value: string): string {
@@ -260,9 +274,9 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
 
     async function pseudonymizeText(text: string): Promise<string> {
       if (typeof text !== 'string' || text.length === 0) return text;
-      const spans = await detect(text.normalize('NFC'));
-      if (spans.length === 0) return text.normalize('NFC');
-      const normalized = text.normalize('NFC');
+      const normalized = foldProtectedText(text);
+      const spans = await detect(normalized);
+      if (spans.length === 0) return normalized;
       await ensure(spans.filter((s) => s.category !== 'known').map((s) => ({ original: s.text, category: s.category })));
       const categories: Record<string, number> = {};
       let out = '';
@@ -282,8 +296,10 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
       if (depth > 64) throw new PrivacyError('privacy_unsupported_content');
       if (typeof value === 'string') return pseudonymizeText(value);
       if (typeof value === 'number' || typeof value === 'bigint') {
+        // Only a registered id maps a number; quantities and other numbers
+        // never match, since short numeric ids are not registered.
         const entry = index.byOriginal.get(String(value));
-        if (!entry) return value;
+        if (!entry || entry.category !== 'identity-id') return value;
         const asNumber = Number(entry.pseudonym);
         return Number.isFinite(asNumber) && typeof value === 'number' ? asNumber : entry.pseudonym;
       }
@@ -323,7 +339,7 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
       if (typeof value === 'string') return rehydrateText(value);
       if (typeof value === 'number') {
         const entry = index.byPseudonym.get(String(value));
-        if (!entry) return value;
+        if (!entry || entry.category !== 'identity-id') return value;
         const original = Number(entry.original);
         return Number.isFinite(original) ? original : entry.original;
       }
@@ -381,8 +397,9 @@ export function createStrictPiiShield(config: StrictPiiShieldConfig): StrictPiiS
       audit('identities-registered', { total: identities.length });
     }
 
-    function countLeaks(text: string): number {
-      if (typeof text !== 'string') return 0;
+    function countLeaks(raw: string): number {
+      if (typeof raw !== 'string') return 0;
+      const text = foldProtectedText(raw);
       let leaks = 0;
       for (const span of [...matchAll(index.originalMatcher, text, 'known'), ...matchAll(index.originalMatcherCi, text, 'known')]) {
         const entry = lookupOriginal(span.text);

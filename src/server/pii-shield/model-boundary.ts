@@ -38,7 +38,7 @@ export type ProviderOptionsAllowlist = Readonly<Record<string, readonly string[]
 export const DEFAULT_PROVIDER_OPTIONS_ALLOWLIST: ProviderOptionsAllowlist = Object.freeze({
   anthropic: ['cacheControl'],
   openrouter: ['cacheControl', 'cache_control'],
-  openai: ['parallelToolCalls', 'store', 'reasoningEffort', 'strictJsonSchema', 'structuredOutputs', 'promptCacheKey'],
+  openai: ['parallelToolCalls', 'store', 'reasoningEffort', 'strictJsonSchema', 'structuredOutputs'],
   bedrock: ['cachePoint'],
 });
 
@@ -88,11 +88,21 @@ function checkProviderOptions(options: SharedV3ProviderOptions | undefined, allo
     if (!allowed || !isPlainObject(values)) throw new PrivacyError('privacy_provider_option_blocked');
     for (const [key, value] of Object.entries(values)) {
       if (!allowed.includes(key)) throw new PrivacyError('privacy_provider_option_blocked');
-      // Allowed options are flags and small enums, never free text.
-      const serialized = JSON.stringify(value ?? null);
-      if (serialized.length > 200) throw new PrivacyError('privacy_provider_option_blocked');
+      if (!isOptionValue(value, 0)) throw new PrivacyError('privacy_provider_option_blocked');
     }
   }
+}
+
+/** Allowed options are flags, numbers and short enum tokens (`low`, `ephemeral`, `1h`), never free text. */
+const OPTION_TOKEN = /^[a-z0-9_-]{1,24}$/;
+
+function isOptionValue(value: unknown, depth: number): boolean {
+  if (value === null || value === undefined || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'string') return OPTION_TOKEN.test(value);
+  if (depth >= 2 || !isPlainObject(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length <= 8 && entries.every(([key, inner]) => OPTION_TOKEN.test(key.toLowerCase()) && isOptionValue(inner, depth + 1));
 }
 
 const SCHEMA_TEXT_KEYS = new Set(['description', 'title', '$comment']);
@@ -415,10 +425,13 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
             controller.terminate();
           }
         },
-        flush() {
-          // A part without its end was never checked; it is not released.
+        flush(controller) {
+          // A part without its end was never checked: it is not released, and
+          // the caller learns that the answer is incomplete.
+          const incomplete = held.size > 0;
           held.clear();
           texts.clear();
+          if (incomplete) controller.enqueue({ type: 'error', error: new PrivacyError('privacy_output_incomplete') });
         },
       });
       return { ...result, stream: result.stream.pipeThrough(checker) };

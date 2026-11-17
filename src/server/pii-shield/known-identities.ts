@@ -54,9 +54,15 @@ export function nameVariants(full: string): string[] {
   return [full, `${last}, ${rest}`];
 }
 
+/**
+ * The id as registered for protection. Purely numeric ids shorter than six
+ * digits are not registered: they cannot be told apart from quantities,
+ * page numbers or amounts, and replacing those would corrupt tool input.
+ */
 export function identityIdString(id: string | number | undefined): string | undefined {
   if (id === undefined || id === null) return undefined;
   const value = String(id).normalize('NFKC').trim();
+  if (/^\d+$/.test(value)) return value.length >= 6 ? value : undefined;
   return value.length >= 2 ? value : undefined;
 }
 

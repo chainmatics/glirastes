@@ -117,6 +117,29 @@ describe('idempotent writes with receipts', () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it('a failure the tool returns instead of throwing is recorded as failed, not completed', async () => {
+    const { boundary } = await setup();
+    for (const [i, answer] of [{ error: 'Error in mail.send: tool_failed' }, { success: false }].entries()) {
+      const receipts = memoryReceipts();
+      const execute = vi.fn(async (_input: unknown, _options?: unknown) => answer);
+      const tools = wrapToolsForPrivacy({ send: { execute } }, boundary, { receipts });
+      expect(await tools.send.execute!({ n: i }, { toolCallId: 'call-f' })).toEqual(answer);
+      expect([...receipts.rows.values()].map((row) => row.status)).toEqual(['failed']);
+      await expect(tools.send.execute!({ n: i }, { toolCallId: 'call-f' })).rejects.toMatchObject({ code: 'privacy_tool_failed' });
+      expect(execute).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('a reused call id with a different input is a different call', async () => {
+    const { boundary } = await setup();
+    const receipts = memoryReceipts();
+    const execute = vi.fn(async (_input: unknown, _options?: unknown) => ({ sent: true }));
+    const tools = wrapToolsForPrivacy({ send: { execute } }, boundary, { receipts });
+    await tools.send.execute!({ n: 1 }, { toolCallId: 'call_0' });
+    expect(await tools.send.execute!({ n: 2 }, { toolCallId: 'call_0' })).toEqual({ sent: true });
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it('the receipt holds neither originals nor a digest of them or of the result', async () => {
     const { boundary, fakeEmail } = await setup();
     const receipts = memoryReceipts();
@@ -132,6 +155,8 @@ describe('idempotent writes with receipts', () => {
 });
 
 const url = process.env.GLIRASTES_TEST_POSTGRES_URL;
+// CI sets GLIRASTES_REQUIRE_POSTGRES: a missing database must fail there, not skip.
+if (process.env.GLIRASTES_REQUIRE_POSTGRES === '1' && !url) throw new Error('GLIRASTES_TEST_POSTGRES_URL is required');
 
 describe.skipIf(!url)('receipts in the Postgres runtime store', () => {
   let pool: Pool;

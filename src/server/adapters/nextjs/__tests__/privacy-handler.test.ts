@@ -75,7 +75,7 @@ function privacyConfig(extra: Partial<ChatPrivacyConfig> = {}): ChatPrivacyConfi
   const scope = testScope({ conversationId: 'chat-1' });
   return {
     shield: memoryShield(),
-    scope: (_req, chat) => (chat.conversationId ? { ...scope, conversationId: chat.conversationId } : null),
+    scope: (_req, chat) => ({ ...scope, conversationId: chat.conversationId }),
     knownIdentities: () => [
       { id: CANARY.userId, name: CANARY.name, email: CANARY.email },
       { id: CANARY.colleagueId, name: CANARY.colleague, email: CANARY.colleagueEmail },
@@ -199,9 +199,19 @@ describe('fail-closed refusals', () => {
   it('answers 401 without an authenticated scope and never calls the model', async () => {
     const { tools } = registry();
     const { model, calls } = echoModel();
+    const handler = createAiChatHandler({ tools, model, systemPrompt: SYSTEM, privacy: { ...privacyConfig(), scope: () => null } });
+    const response = await handler(post([user('Hallo')]));
+    expect(response.status).toBe(401);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('answers 400 without a chat id and never calls the model', async () => {
+    const { tools } = registry();
+    const { model, calls } = echoModel();
     const handler = createAiChatHandler({ tools, model, systemPrompt: SYSTEM, privacy: privacyConfig() });
     const response = await handler(post([user('Hallo')], null));
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'privacy_scope_invalid' });
     expect(calls).toHaveLength(0);
   });
 

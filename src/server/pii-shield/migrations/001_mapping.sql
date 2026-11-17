@@ -29,3 +29,9 @@ CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_entries (
   PRIMARY KEY (scope_key, generation, original_digest),
   UNIQUE (scope_key, generation, pseudonym_digest)
 );
+CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_tokens (
+  scope_key text NOT NULL REFERENCES glirastes_privacy_mapping_scopes (scope_key) ON DELETE CASCADE,
+  generation integer NOT NULL,
+  digest text NOT NULL,
+  PRIMARY KEY (scope_key, generation, digest)
+);

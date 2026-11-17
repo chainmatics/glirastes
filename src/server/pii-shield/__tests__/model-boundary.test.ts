@@ -14,6 +14,8 @@ import {
   testScope,
 } from './privacy-fixtures.js';
 import { createOpenAI } from '@ai-sdk/openai';
+import { MockLanguageModelV3 } from 'ai/test';
+import type { LanguageModelV3StreamPart } from '@ai-sdk/provider';
 
 async function boundaryFor(options: Parameters<typeof createPrivacyBoundary>[0] extends infer O ? Partial<O> : never = {}) {
   const session = await memoryShield().open(testScope());
@@ -128,6 +130,50 @@ describe('output leak check', () => {
     expect(errors).toEqual([expect.objectContaining({ code: 'privacy_output_leak' })]);
     // Deltas are held until the part passed the check: no fragment escapes.
     expect(text).toBe('');
+  });
+
+  it('a stream that ends inside a text part reports an error instead of silently dropping it', async () => {
+    const boundary = await boundaryFor();
+    const parts: LanguageModelV3StreamPart[] = [
+      { type: 'stream-start', warnings: [] },
+      { type: 'text-start', id: 't' },
+      { type: 'text-delta', id: 't', delta: 'Halb fertig' },
+    ];
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: new ReadableStream<LanguageModelV3StreamPart>({ start(c) { for (const p of parts) c.enqueue(p); c.close(); } }),
+      }),
+    });
+    const errors: unknown[] = [];
+    const result = streamText({ model: boundary.wrapModel(model), prompt: 'x', onError: ({ error }) => { errors.push(error); } });
+    let text = '';
+    for await (const part of result.fullStream) if (part.type === 'text-delta') text += part.text;
+    expect(text).toBe('');
+    expect(errors).toEqual([expect.objectContaining({ code: 'privacy_output_incomplete' })]);
+  });
+});
+
+describe('provider options', () => {
+  it.each([
+    ['a free-text cache key', { openai: { promptCacheKey: `user-${CANARY.email}` } }],
+    ['a free-text value in an allowed key', { openai: { reasoningEffort: CANARY.name } }],
+    ['a nested free-text value', { anthropic: { cacheControl: { type: 'ephemeral', note: CANARY.name } } }],
+  ])('stops %s', async (_label, providerOptions) => {
+    const boundary = await boundaryFor();
+    const { model, calls } = captureModel();
+    await expect(generateText({ model: boundary.wrapModel(model), prompt: 'x', providerOptions: providerOptions as never, maxRetries: 0 }))
+      .rejects.toMatchObject({ code: 'privacy_provider_option_blocked' });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('passes flags and small enums', async () => {
+    const boundary = await boundaryFor();
+    const { model, calls } = captureModel();
+    await generateText({
+      model: boundary.wrapModel(model), prompt: 'x', maxRetries: 0,
+      providerOptions: { openai: { reasoningEffort: 'low', store: false }, anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } } },
+    });
+    expect(calls).toHaveLength(1);
   });
 });
 

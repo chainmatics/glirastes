@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { generateObject, generateText, jsonSchema, stepCountIs, streamText, tool } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -180,6 +180,20 @@ describe('provider switch through the chat handler', () => {
       expect(other.requests).toHaveLength(0);
       expect(transports[id].requests.map((r) => r.body).join('\n')).not.toMatch(CANARY_PATTERN);
     }
+  });
+
+  it('a request without a chat id is refused before the scope is built (no shared mapping)', async () => {
+    const { registry, transports } = setup();
+    const scope = vi.fn(config(registry, 'standard').scope);
+    const handler = createAiChatHandler({ tools: tools(), systemPrompt: 'Assistent', privacy: { ...config(registry, 'standard'), scope } });
+    const response = await handler(new Request('https://app.example/api/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Hallo' }] }] }),
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'privacy_scope_invalid' });
+    expect(scope).not.toHaveBeenCalled();
+    expect(transports.standard.requests).toHaveLength(0);
   });
 
   it('a choice from another tenant is refused with 403 before any model call', async () => {

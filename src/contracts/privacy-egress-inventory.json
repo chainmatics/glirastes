@@ -6,7 +6,8 @@
       "symbol": "fetch",
       "kind": "network",
       "decision": "exception",
-      "reason": "CI agent OpenRouter routing wrapper; no end-user content."
+      "reason": "CI agent OpenRouter routing wrapper; no end-user content.",
+      "count": 2
     },
     {
       "file": "src/agent/platform-jobs.ts",
@@ -41,7 +42,8 @@
       "symbol": "fetch",
       "kind": "network",
       "decision": "content-free",
-      "reason": "CLI download of the deferred full package build; no prompt or business content."
+      "reason": "CLI download of the deferred full package build; no prompt or business content.",
+      "count": 4
     },
     {
       "file": "src/codegen/asset-sync.ts",
@@ -55,7 +57,8 @@
       "symbol": "<computed>",
       "kind": "dynamic_import",
       "decision": "content-free",
-      "reason": "Codegen probe loads the developer's own route modules by path at build time; no network."
+      "reason": "Codegen probe loads the developer's own route modules by path at build time; no network.",
+      "count": 5
     },
     {
       "file": "src/codegen/tools/probe-loader.mjs",
@@ -97,7 +100,8 @@
       "symbol": "WebSocket",
       "kind": "network",
       "decision": "exception",
-      "reason": "Cloud Deepgram streaming adapter; the protected profile must not use it (local recorded transcription only). The consumer blocks its token route server-side."
+      "reason": "Cloud Deepgram streaming adapter; the protected profile must not use it (local recorded transcription only). The consumer blocks its token route server-side.",
+      "count": 7
     },
     {
       "file": "src/react/stt/recorded.ts",
@@ -128,6 +132,13 @@
       "reason": "Container verifies the forwarded user credentials against the consumer backend."
     },
     {
+      "file": "src/runtime-service/server.ts",
+      "symbol": "node:http",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "Inbound HTTP server of the configured runtime container; the container has no privacy profile in Stage 1 and is not part of the protected GID path."
+    },
+    {
       "file": "src/runtime-service/service.ts",
       "symbol": "@ai-sdk/openai",
       "kind": "provider_import",
@@ -140,6 +151,13 @@
       "kind": "network",
       "decision": "content-free",
       "reason": "Content-free turn metrics to the configured sink; no prompt, tool or business content."
+    },
+    {
+      "file": "src/server/adapters/nestjs/chat/ws-loader.ts",
+      "symbol": "ws",
+      "kind": "network",
+      "decision": "exception",
+      "reason": "NestJS speech gateway (not exported) relays to cloud Deepgram; outside the protected profile, which uses local recorded transcription only."
     },
     {
       "file": "src/server/adapters/nextjs/recording-transcription-handler.ts",
@@ -160,7 +178,8 @@
       "symbol": "fetch",
       "kind": "network",
       "decision": "exception",
-      "reason": "Internal Lancer client (not exported); refused together with the protected-text profile."
+      "reason": "Internal Lancer client (not exported); refused together with the protected-text profile.",
+      "count": 2
     },
     {
       "file": "src/server/lancer/telemetry-buffer.ts",

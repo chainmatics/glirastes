@@ -19,7 +19,7 @@ export const CANARY = {
   colleagueEmail: 'bernd.beispiel@example.invalid',
 } as const;
 
-export const CANARY_PATTERN = /Anna Muster|Muster|user-17|anna@example\.invalid|Bernd Beispiel|Beispiel|u-4711|bernd\.beispiel@example\.invalid|6f9619ff-8b86-4d11-b42d-00c04fc964ff/;
+export const CANARY_PATTERN = /\bAnna\b|\bBernd\b|Anna Muster|Muster|user-17|anna@example\.invalid|Bernd Beispiel|Beispiel|u-4711|bernd\.beispiel@example\.invalid|6f9619ff-8b86-4d11-b42d-00c04fc964ff/;
 
 export function testScope(overrides: Partial<PrivacyScope> = {}): PrivacyScope {
   return {

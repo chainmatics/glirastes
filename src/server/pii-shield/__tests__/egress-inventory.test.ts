@@ -41,6 +41,8 @@ describe('model egress inventory', () => {
     ['star re-export', `export * from 'ai';`, '*'],
     ['experimental transcription', `import { experimental_transcribe } from 'ai';`, 'experimental_transcribe'],
     ['raw provider call', `await model.doStream(options);`, 'doStream'],
+    ['raw provider call by key', `await model['doGenerate'](options);`, 'doGenerate'],
+    ['AI SDK 6 agent', `import { ToolLoopAgent } from 'ai';`, 'ToolLoopAgent'],
   ])('refuses a new direct model call: %s', (_label, source, symbol) => {
     expect(scanFixture(source)).toContainEqual(expect.objectContaining({ code: 'unapproved_model_call', symbol }));
   });
@@ -52,6 +54,10 @@ describe('model egress inventory', () => {
     ['global fetch', `await fetch(url, { body });`, 'unapproved_network_call', 'fetch'],
     ['fetch as a value', `const f = options.fetch ?? globalThis.fetch;`, 'unapproved_network_call', 'fetch'],
     ['websocket', `new WebSocket(url);`, 'unapproved_network_call', 'WebSocket'],
+    ['fetch by key', `globalThis['fetch'](url);`, 'unapproved_network_call', 'fetch'],
+    ['node https', `import https from 'node:https';`, 'unapproved_network_call', 'node:https'],
+    ['axios', `const axios = require('axios');`, 'unapproved_network_call', 'axios'],
+    ['beacon', `navigator.sendBeacon(url, body);`, 'unapproved_network_call', 'sendBeacon'],
   ])('refuses an unreviewed %s', (_label, source, code, symbol) => {
     expect(scanFixture(source)).toContainEqual(expect.objectContaining({ code, symbol }));
   });
@@ -64,6 +70,16 @@ describe('model egress inventory', () => {
     ['a member or key named fetch', `registry.fetch(ref);\nconst o = { fetch: 1 };\ninterface X { fetch(): void }\nfunction f(fetch: typeof globalThis.fetch) {}`],
   ])('accepts %s', (_label, source) => {
     expect(scanFixture(source)).toEqual([]);
+  });
+
+  it('a second call in a file with a reviewed one fails until the count is raised', () => {
+    const source = `import { generateText } from 'ai';\nexport const a = () => fetch(x);\nexport const b = () => fetch(y);`;
+    const findings = scanSourceForEgress('src/f.ts', source);
+    const entry = (count?: number) => ({ file: 'src/f.ts', symbol: 'fetch', kind: 'network' as const, decision: 'protected' as const, reason: 'Calls the app backend.', ...(count ? { count } : {}) });
+    const model = { file: 'src/f.ts', symbol: 'generateText', kind: 'model_call' as const, decision: 'facade' as const, reason: 'The facade itself.' };
+    expect(checkEgressInventory(findings, { schemaVersion: 1, entries: [model, entry()] }))
+      .toEqual([{ code: 'inventory_count_mismatch', file: 'src/f.ts', symbol: 'fetch', line: 3 }]);
+    expect(checkEgressInventory(findings, { schemaVersion: 1, entries: [model, entry(2)] })).toEqual([]);
   });
 
   it('a stale or duplicate entry fails, so the inventory never names a removed call', () => {

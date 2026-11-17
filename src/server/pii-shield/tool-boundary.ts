@@ -85,7 +85,10 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
           ? {
               environmentId,
               runId,
-              idempotencyKey: toolCallId,
+              // A provider may reuse ids such as `call_0` across turns: the
+              // key also binds the (pseudonymized) input, so a different call
+              // under a reused id is not taken for a replay.
+              idempotencyKey: `${toolCallId}:${fingerprint(input)}`,
               toolUuid: name,
               // The model's input holds scope-local pseudonyms only; a digest of
               // the originals could be checked against guessed values.
@@ -117,9 +120,11 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
         }
         if (claim) {
           // The receipt records the outcome only, never the result or a digest of it.
+          // An SDK tool reports a caught failure as a returned `{ error }` or
+          // `{ success: false }`: that is not a completed write.
           await options.receipts!.completeToolExecution({
             ...claim,
-            status: 'completed',
+            status: isFailureResult(result) ? 'failed' : 'completed',
             result: null,
             resultFingerprint: 'not-recorded',
           }).catch((error) => options.onToolError?.(name, toSafeError(error)));
@@ -129,4 +134,11 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
     };
   }
   return wrapped as T;
+}
+
+/** A tool result that reports a failure instead of throwing. */
+function isFailureResult(result: unknown): boolean {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return false;
+  const record = result as Record<string, unknown>;
+  return record.success === false || (typeof record.error === 'string' && record.error.length > 0);
 }

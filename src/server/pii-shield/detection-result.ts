@@ -20,6 +20,7 @@ export type PrivacyErrorCode =
   | 'privacy_provider_option_blocked'
   | 'privacy_tool_schema_blocked'
   | 'privacy_output_leak'
+  | 'privacy_output_incomplete'
   | 'privacy_unsupported_content'
   | 'privacy_tool_failed'
   | 'privacy_tool_outcome_unknown'
@@ -42,6 +43,7 @@ const MESSAGES: Record<PrivacyErrorCode, string> = {
   privacy_provider_option_blocked: 'A provider option is not allowed in the protected profile.',
   privacy_tool_schema_blocked: 'A tool schema contains protected values.',
   privacy_output_leak: 'The model output contained a protected original value.',
+  privacy_output_incomplete: 'The model output ended inside an unchecked part.',
   privacy_unsupported_content: 'The request contains content the privacy boundary cannot check.',
   privacy_tool_failed: 'The tool failed.',
   privacy_tool_outcome_unknown: 'The tool outcome is unknown; reconcile before retrying.',

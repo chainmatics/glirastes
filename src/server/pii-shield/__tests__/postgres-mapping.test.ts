@@ -21,6 +21,8 @@ import { CANARY, CANARY_PATTERN, testKeyring, testScope } from './privacy-fixtur
 
 const here = dirname(fileURLToPath(import.meta.url));
 const url = process.env.GLIRASTES_TEST_POSTGRES_URL;
+// CI sets GLIRASTES_REQUIRE_POSTGRES: a missing database must fail there, not skip.
+if (process.env.GLIRASTES_REQUIRE_POSTGRES === '1' && !url) throw new Error('GLIRASTES_TEST_POSTGRES_URL is required');
 
 function clock(start = Date.parse('2026-11-17T10:00:00Z')) {
   let t = start;
@@ -229,6 +231,39 @@ describe.skipIf(!url)('postgres mapping store (isolated test database)', () => {
       expect(text).toContain(byOriginal.get(originals[writer % originals.length]!)!);
       expect(text).not.toMatch(/person\d@example\.invalid/);
     });
+  });
+
+  it('concurrent appends never store an original that equals another entry\'s pseudonym', async () => {
+    for (let round = 0; round < 40; round += 1) {
+      const scope = testScope({ conversationId: `cross-${randomBytes(6).toString('hex')}` });
+      await pg().load(scope);
+      // Writer A maps X → P while writer B maps P → Q: only one may win.
+      await Promise.allSettled([
+        pg().append(scope, 1, [entry('x@example.invalid', 'p@example.invalid')]),
+        pg().append(scope, 1, [entry('p@example.invalid', 'q@example.invalid')]),
+      ]);
+      const { entries } = await pg().load(scope);
+      const originals = new Set(entries.map((e) => e.original));
+      expect(entries.filter((e) => originals.has(e.pseudonym))).toEqual([]);
+    }
+  });
+
+  it('a delete racing appends leaves no entry of the scope behind', async () => {
+    for (let round = 0; round < 20; round += 1) {
+      const scope = testScope({ conversationId: `del-${randomBytes(6).toString('hex')}` });
+      await pg().load(scope);
+      await Promise.allSettled([
+        ...Array.from({ length: 6 }, (_, i) => pg().append(scope, 1, [entry(`d${i}@example.invalid`, `pd${i}@example.invalid`)])),
+        pg().delete(scope),
+        ...Array.from({ length: 6 }, (_, i) => pg().append(scope, 1, [entry(`e${i}@example.invalid`, `pe${i}@example.invalid`)])),
+      ]);
+      const left = await client.unsafe<{ n: string }>(
+        'SELECT count(*) AS n FROM glirastes_privacy_mapping_entries WHERE scope_key = $1',
+        [scopeKeyOf(scope)],
+      );
+      expect(Number(left[0]!.n)).toBe(0);
+      await expect(pg().load(scope)).rejects.toMatchObject({ code: 'privacy_mapping_deleted' });
+    }
   });
 
   it('survives a restart: a new store and shield reproduce the same pseudonyms', async () => {

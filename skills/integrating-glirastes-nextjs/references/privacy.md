@@ -54,7 +54,7 @@ export const POST = createAiChatHandler({
     shield,
     scope: async (req, chat) => {
       const user = await auth(req);
-      return user && chat.conversationId
+      return user
         ? { tenantId: user.tenantId, appId: 'my-app', environment: 'prod', principalId: user.id, conversationId: chat.conversationId }
         : null;
     },
@@ -87,11 +87,15 @@ export const POST = createAiChatHandler({
   the turn's text.
 - `privacy` replaces `piiShield`. It cannot be combined with `lancer` or
   `telemetry`, and a `pipeline` must be the local one, not the remote Pro pipeline.
-- The client must send the chat id (`body.id`; `useChat` does). Without a
-  scope the handler answers 401.
+- The client must send the chat id (`body.id`; `useChat` does). A request
+  without one is refused with 400 `privacy_scope_invalid` before `scope` runs,
+  so conversations never share a mapping. Without a scope the handler
+  answers 401.
 - `providerLabel` names the model in the status line. `providerOptions`
   (`ProviderOptionsAllowlist`, default `DEFAULT_PROVIDER_OPTIONS_ALLOWLIST`)
-  lists the content-free provider options that may pass.
+  lists the content-free provider options that may pass. Their values must be
+  flags, numbers or short enum tokens (`low`, `ephemeral`, `1h`); free text
+  stops the call with `privacy_provider_option_blocked`.
 
 ## Screenshots
 
@@ -211,7 +215,10 @@ gone fails as stale. `scanSourceForEgress` checks one file; `ScanTreeOptions`
 narrows the tree; `MODEL_CALL_SYMBOLS` lists the `ai` calls it treats as
 model egress. `EgressFinding` and `EgressInventory` are the result and file
 types. The check guards against accidental bypasses; it is not a proof
-against deliberately hidden code.
+against deliberately hidden code. It verifies that every site is listed
+with an expected count, not that its decision is true: whether a
+`protected` site really passes the boundary is the reviewer's call and the
+job of tests.
 
 `PrivacySession` (from `shield.open`, backed by a `PrivacyMappingStore`) exposes `pseudonymizeText`, `pseudonymizeJson`,
 `rehydrateText` and `rehydrateJson`. `PrivacyBoundary.wrapModel` refuses a
@@ -225,6 +232,8 @@ model id string or a model of another boundary.
 - `onError` and `onToolError` receive `privacySafeError(error)`: name, code
   and a numeric provider status, never a message. Use `toSafeError` for
   your own logs.
+- An answer stream that ends inside an unfinished part (provider cut off)
+  does not release the held text; it ends with `privacy_output_incomplete`.
 - A custom `streamHandler` gets the wrapped model and `ctx.privacy`; it must
   pipe its UI stream through `projectUiMessageStream` before
   `bindApprovalRequests`.
@@ -235,6 +244,8 @@ model id string or a model of another boundary.
   are not protected. Register the people the user works with.
 - Short name parts (three letters) match their exact case only.
 - An original equal to a pseudonym already used in the conversation stops
-  the turn (`privacy_mapping_conflict`).
+  the turn (`privacy_mapping_conflict`), also when two turns race. The
+  conversation recovers by starting a new chat (new chat id) or after the
+  mapping is deleted; there is no silent remapping.
 - Screenshots in `allow-original` mode are not pseudonymized.
 - Speech must be transcribed locally before it enters the chat.

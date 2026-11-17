@@ -17,8 +17,11 @@ import {
 /**
  * Schema of the scoped privacy mapping (also in `migrations/001_mapping.sql`).
  * Values are AES-256-GCM sealed with the scope as associated data; only
- * keyed digests are stored in clear for uniqueness. The database role needs
- * SELECT, INSERT, UPDATE and DELETE on these two tables only.
+ * keyed digests are stored in clear for uniqueness. Every original and
+ * pseudonym digest is also a row of the tokens table, so no value can be an
+ * original in one entry and a pseudonym in another, even under concurrent
+ * appends. The database role needs SELECT, INSERT, UPDATE and DELETE on these
+ * three tables only.
  */
 export const POSTGRES_PRIVACY_MAPPING_SCHEMA_SQL = `/* glirastes:privacy-mapping-schema */
 CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_scopes (
@@ -51,6 +54,12 @@ CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_entries (
   PRIMARY KEY (scope_key, generation, original_digest),
   UNIQUE (scope_key, generation, pseudonym_digest)
 );
+CREATE TABLE IF NOT EXISTS glirastes_privacy_mapping_tokens (
+  scope_key text NOT NULL REFERENCES glirastes_privacy_mapping_scopes (scope_key) ON DELETE CASCADE,
+  generation integer NOT NULL,
+  digest text NOT NULL,
+  PRIMARY KEY (scope_key, generation, digest)
+);
 `;
 
 export interface PostgresPrivacyMappingStoreOptions extends MappingLifetime {
@@ -61,11 +70,18 @@ function at(date: Date, offsetMs: number): string {
   return new Date(date.getTime() + offsetMs).toISOString();
 }
 
+/** A unique violation inside an append: a concurrent append took a value; retried. */
+class TokenTaken extends Error {}
+
+const APPEND_ATTEMPTS = 3;
+
 /**
- * Persistent scoped mapping in the consumer's own Postgres. Every operation is
- * one atomic statement: the scope row is locked by its UPDATE, so concurrent
- * appends and a delete of the same scope serialize, and a tombstone is never
- * overwritten by a late append. Database errors surface as
+ * Persistent scoped mapping in the consumer's own Postgres. An append is one
+ * atomic statement that locks the scope row, so appends and a delete of the
+ * same scope serialize and a tombstone is never overwritten by a late
+ * append. A delete first writes the tombstone (waiting for running appends)
+ * and then removes the entries in a second statement that sees everything
+ * committed before it. Database errors surface as
  * `privacy_mapping_unavailable` without their text.
  */
 export function createPostgresPrivacyMappingStore(
@@ -91,6 +107,7 @@ export function createPostgresPrivacyMappingStore(
       return params ? await client.unsafe<T>(sql, params) : await client.unsafe<T>(sql);
     } catch (error) {
       if (isPrivacyError(error)) throw error;
+      if ((error as { code?: unknown } | null)?.code === '23505') throw new TokenTaken();
       throw new PrivacyError('privacy_mapping_unavailable');
     }
   }
@@ -159,6 +176,9 @@ ORDER BY created_at, original_digest`,
       // Entries of an expired generation are not readable any more; remove them.
       await query(
         `/* glirastes:privacy-mapping-old-generations */
+WITH tokens AS (
+  DELETE FROM glirastes_privacy_mapping_tokens WHERE scope_key = $1 AND generation < $2
+)
 DELETE FROM glirastes_privacy_mapping_entries WHERE scope_key = $1 AND generation < $2`,
         [scopeKey, generation],
       );
@@ -188,7 +208,18 @@ DELETE FROM glirastes_privacy_mapping_entries WHERE scope_key = $1 AND generatio
       const originalDigests = unique.map((e) => valueDigest(keyring, scopeKey, e.original));
       const pseudonymDigests = unique.map((e) => valueDigest(keyring, scopeKey, e.pseudonym));
       const sealed = unique.map((e) => sealEntry(keyring, scopeKey, generation, e));
-      const rows = await query<{ version: string | number | null; inserted: string[] | null }>(
+      const params = [
+        scopeKey, generation, at(date, idleTtl), nowIso,
+        appendOptions?.expectedVersion ?? null,
+        originalDigests, pseudonymDigests, sealed.map((s) => s.keyId), sealed.map((s) => s.sealed),
+      ];
+      // A token another append committed after this statement's snapshot
+      // raises a unique violation and rolls the whole statement back; the
+      // retry sees it and leaves the entry out instead.
+      let rows: Array<{ version: string | number | null; inserted: string[] | null }> | undefined;
+      for (let attempt = 1; !rows; attempt += 1) {
+        try {
+          rows = await query<{ version: string | number | null; inserted: string[] | null }>(
         `/* glirastes:privacy-mapping-append */
 WITH header AS (
   UPDATE glirastes_privacy_mapping_scopes
@@ -216,16 +247,21 @@ WITH header AS (
   SELECT h.scope_key, h.generation, c.original_digest, c.pseudonym_digest, c.key_id, c.sealed, $4::timestamptz
   FROM header h CROSS JOIN candidate c
   ON CONFLICT DO NOTHING
-  RETURNING original_digest
+  RETURNING original_digest, pseudonym_digest
+), tokens AS (
+  INSERT INTO glirastes_privacy_mapping_tokens (scope_key, generation, digest)
+  SELECT $1, $2, t.digest
+  FROM inserted i CROSS JOIN LATERAL (VALUES (i.original_digest), (i.pseudonym_digest)) AS t(digest)
 )
 SELECT (SELECT version FROM header) AS version,
        (SELECT array_agg(original_digest) FROM inserted) AS inserted`,
-        [
-          scopeKey, generation, at(date, idleTtl), nowIso,
-          appendOptions?.expectedVersion ?? null,
-          originalDigests, pseudonymDigests, sealed.map((s) => s.keyId), sealed.map((s) => s.sealed),
-        ],
-      );
+            params,
+          );
+        } catch (error) {
+          if (!(error instanceof TokenTaken)) throw error;
+          if (attempt >= APPEND_ATTEMPTS) throw new PrivacyError('privacy_mapping_conflict');
+        }
+      }
       const result = rows[0];
       if (!result || result.version === null || result.version === undefined) throw await failureOf(scopeKey);
       const inserted = new Set(result.inserted ?? []);
@@ -241,23 +277,30 @@ SELECT (SELECT version FROM header) AS version,
       const date = now();
       const nowIso = date.toISOString();
       const until = at(date, tombstoneTtl);
+      // 1. The tombstone waits for appends holding the scope row and blocks all later ones.
       await query(
         `/* glirastes:privacy-mapping-delete */
-WITH tombstone AS (
-  INSERT INTO glirastes_privacy_mapping_scopes AS s
-    (scope_key, tenant_id, app_id, environment, principal_id, conversation_id,
-     generation, version, idle_expires_at, absolute_expires_at, deleted_at, created_at, updated_at)
-  VALUES ($1, $2, $3, $4, $5, $6, 1, 1, $8::timestamptz, $8::timestamptz, $7::timestamptz, $7::timestamptz, $7::timestamptz)
-  ON CONFLICT (scope_key) DO UPDATE SET
-    version = s.version + 1,
-    deleted_at = COALESCE(s.deleted_at, $7::timestamptz),
-    idle_expires_at = $8::timestamptz,
-    absolute_expires_at = $8::timestamptz,
-    updated_at = $7::timestamptz
-  RETURNING scope_key
-)
-DELETE FROM glirastes_privacy_mapping_entries WHERE scope_key IN (SELECT scope_key FROM tombstone)`,
+INSERT INTO glirastes_privacy_mapping_scopes AS s
+  (scope_key, tenant_id, app_id, environment, principal_id, conversation_id,
+   generation, version, idle_expires_at, absolute_expires_at, deleted_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, 1, 1, $8::timestamptz, $8::timestamptz, $7::timestamptz, $7::timestamptz, $7::timestamptz)
+ON CONFLICT (scope_key) DO UPDATE SET
+  version = s.version + 1,
+  deleted_at = COALESCE(s.deleted_at, $7::timestamptz),
+  idle_expires_at = $8::timestamptz,
+  absolute_expires_at = $8::timestamptz,
+  updated_at = $7::timestamptz`,
         [scopeKey, scope.tenantId, scope.appId, scope.environment, scope.principalId, scope.conversationId, nowIso, until],
+      );
+      // 2. A new statement, so it sees every entry committed before the tombstone.
+      //    If it fails, the tombstone already refuses the scope; a retried delete finishes it.
+      await query(
+        `/* glirastes:privacy-mapping-delete-entries */
+WITH tokens AS (
+  DELETE FROM glirastes_privacy_mapping_tokens WHERE scope_key = $1
+)
+DELETE FROM glirastes_privacy_mapping_entries WHERE scope_key = $1`,
+        [scopeKey],
       );
     },
 
