@@ -92,15 +92,13 @@ maintains a Node server or imports a generated TypeScript module.
    explicitly authorized exclusion may remove it, and it remains in coverage.
    With `"selection": "opt-in"` only operations marked `x-glirastes-tool: true`
    are tools and validated. Findings `opt-in-excluded`, `tool-marker-invalid`,
-   `tool-group-invalid` and `tool-roles-invalid` (tool stays disabled) are
-   fixed in the backend that writes the export, never in generated files.
+   `tool-group-invalid`, `tool-roles-invalid`, `output-allowed-fields-invalid`
+   and `output-denied-fields-invalid` (tool stays disabled) are fixed in the
+   backend that writes the export, never in generated files.
    A path or query parameter's `description` reaches the model as the input
    property's description (it wins over the schema's): write call-time
    guidance there, e.g. NestJS
    `@ApiQuery({ name: 'limit', required: false, description: 'Omit to get all playlists' })`.
-   `tool-group-invalid`, `tool-roles-invalid`, `output-allowed-fields-invalid`
-   and `output-denied-fields-invalid` (tool stays disabled) are fixed in the
-   backend that writes the export, never in generated files.
 3. Build a new artifact directory with the exact deployed SDK/image version:
    `glirastes-runtime build --project /workspace/app --out /artifacts/release-2`.
    Review and commit the generated inputs/outputs. Then CI builds a separate
