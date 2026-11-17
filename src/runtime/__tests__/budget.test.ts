@@ -35,6 +35,36 @@ describe('ExecutionBudgetTracker', () => {
     expect(tracker.claimFinalSummary()).toBe(false);
   });
 
+  it('grants the final summary only when every reached limit is a tool limit', () => {
+    const reach: Record<string, (tracker: ExecutionBudgetTracker) => void> = {
+      maxToolCalls: (tracker) => tracker.recordToolCall(),
+      maxRepeatedFingerprint: (tracker) => tracker.recordFingerprint('same'),
+      maxConsecutiveErrors: (tracker) => tracker.recordError(),
+      maxModelSteps: (tracker) => tracker.recordModelStep(),
+      maxInputTokens: (tracker) => tracker.recordTokens(1, 0),
+      maxOutputTokens: (tracker) => tracker.recordTokens(0, 1),
+      maxEstimatedCostUsd: (tracker) => tracker.recordEstimatedCost(1),
+    };
+    const grants = Object.fromEntries(Object.entries(reach).map(([dimension, record]) => {
+      const tracker = new ExecutionBudgetTracker({ ...localLimits, [dimension]: 1 });
+      record(tracker);
+      expect(tracker.evaluate()).toMatchObject({ state: 'hard-limit', reasons: [dimension] });
+      return [dimension, tracker.claimFinalSummary()];
+    }));
+    expect(grants).toEqual({
+      maxToolCalls: true, maxRepeatedFingerprint: true, maxConsecutiveErrors: true,
+      maxModelSteps: false, maxInputTokens: false, maxOutputTokens: false, maxEstimatedCostUsd: false,
+    });
+
+    const timedOut = new ExecutionBudgetTracker({ ...localLimits, totalTimeoutMs: 10 }, { now: () => 10, startedAtMs: 0 });
+    expect(timedOut.claimFinalSummary()).toBe(false);
+
+    const both = new ExecutionBudgetTracker({ ...localLimits, maxToolCalls: 1, maxInputTokens: 1 });
+    both.recordToolCall();
+    both.recordTokens(1, 0);
+    expect(both.claimFinalSummary()).toBe(false);
+  });
+
   it('stops after the configured consecutive error threshold', () => {
     const tracker = new ExecutionBudgetTracker({
       ...localLimits,

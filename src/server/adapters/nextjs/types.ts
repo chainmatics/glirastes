@@ -19,6 +19,7 @@ import type { ApprovalStore } from './approval-binding.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions } from './prepare-model-messages.js';
 import type { ChatMemoryConfig } from './chat-memory.js';
+import type { BudgetStopTexts } from './budget-stop-notice.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ResultHandleLimits, ToolFailureClassifier } from '../../core/index.js';
 import type {
   Principal,
@@ -310,6 +311,17 @@ export interface AiChatHandlerConfig {
         turnSnapshot?: TurnSnapshot;
       }) => string);
   locale?: string;
+  /**
+   * Texts of the closing notice the built-in stream handler appends when it
+   * stops a turn at a limit (step cap or runtime budget) without a final
+   * answer of the model. Keys: `closing` (with `{reason}`), and per reason
+   * (`maxSteps`, `maxModelSteps`, `maxToolCalls`, `totalTimeoutMs`,
+   * `maxInputTokens`, `maxOutputTokens`, `maxEstimatedCostUsd`,
+   * `maxRepeatedFingerprint`, `maxConsecutiveErrors`) a text with `{limit}`.
+   * Given keys replace the defaults of `locale` (German for `de*`, else
+   * English); an unknown key or an empty text throws.
+   */
+  budgetStopTexts?: Partial<BudgetStopTexts>;
   uiActionSchema?: SchemaLike;
   maxOutputTokens?: number;
   temperature?: number;

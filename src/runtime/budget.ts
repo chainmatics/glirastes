@@ -33,6 +33,16 @@ export const BUDGET_USAGE_KEYS: Readonly<Record<BudgetReason, keyof ExecutionUsa
   maxConsecutiveErrors: 'consecutiveErrors',
 });
 
+/**
+ * The limits after which the turn still gets one tool-free final summary
+ * call: they limit tools, and the summary calls none.
+ */
+export const FINAL_SUMMARY_REASONS: ReadonlySet<BudgetReason> = new Set<BudgetReason>([
+  'maxToolCalls',
+  'maxRepeatedFingerprint',
+  'maxConsecutiveErrors',
+]);
+
 /** One budget dimension with its limit and what the turn has used of it. */
 export interface BudgetLimitState {
   dimension: BudgetReason;
@@ -145,8 +155,19 @@ export class ExecutionBudgetTracker {
     return { state: 'within-budget', reasons: [] };
   }
 
+  /**
+   * Grants the one tool-free final summary call at the hard limit, once, and
+   * only when every reached limit is a tool limit (see
+   * `FINAL_SUMMARY_REASONS`): a limit on model steps, tokens, cost or time
+   * would be exceeded by that call itself.
+   */
   claimFinalSummary(): boolean {
-    if (this.evaluate().state !== 'hard-limit' || this.finalSummaryClaimed) {
+    const evaluation = this.evaluate();
+    if (
+      evaluation.state !== 'hard-limit'
+      || this.finalSummaryClaimed
+      || !evaluation.reasons.every((reason) => FINAL_SUMMARY_REASONS.has(reason))
+    ) {
       return false;
     }
     this.finalSummaryClaimed = true;

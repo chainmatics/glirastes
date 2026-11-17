@@ -232,16 +232,16 @@ describe('turn metrics in the Next chat handler', () => {
 
     const wire = await (await handler(request())).text();
 
-    // At the limit the runtime blocks further tools and allows one bounded
-    // final summary, so the turn still ends with an answer.
-    expect(model.doStreamCalls).toHaveLength(2);
-    expect(model.doStreamCalls[1]!.tools ?? []).toHaveLength(0);
-    expect(wire).toContain('Erledigt:');
+    // A summary call would exceed the cost limit further: the turn ends
+    // without one and the handler closes it with the stop notice.
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(wire).not.toContain('Erledigt:');
+    expect(wire).toContain('the cost limit for this request was reached (0.002 USD)');
     expect(wire).toContain('Stopped at runtime budget: maxEstimatedCostUsd.');
     expect(events[0]).toMatchObject({ status: 'safety-stop', errorCode: 'budget_exhausted' });
   });
 
-  it('answers once without tools when the input token budget runs out mid-turn', async () => {
+  it('ends without another model call when the input token budget runs out mid-turn', async () => {
     const model = scriptedModel([
       () => toolStep(),
       () => textStep(),
@@ -255,9 +255,9 @@ describe('turn metrics in the Next chat handler', () => {
 
     const wire = await (await handler(request())).text();
 
-    expect(model.doStreamCalls).toHaveLength(2);
-    expect(model.doStreamCalls[1]!.tools ?? []).toHaveLength(0);
-    expect(wire).toContain('Erledigt:');
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(wire).not.toContain('Erledigt:');
+    expect(wire).toContain('the limit for this request was reached (input tokens: 10)');
     expect(wire).toContain('"status":"safety-stop"');
     expect(wire).toContain('Stopped at runtime budget: maxInputTokens.');
   });

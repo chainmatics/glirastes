@@ -55,6 +55,15 @@ import {
 } from './direct-command.js';
 import { collectIdLabels, createHideIdsTransform, HIDE_IDS_PROMPT, type IdLabels } from './hide-ids.js';
 import { createToolStreamErrorMask, streamErrorText } from './stream-error-text.js';
+import {
+  budgetStopText,
+  resolveBudgetStopTexts,
+  withStopNotice,
+  type BudgetStopLimit,
+  type BudgetStopTexts,
+} from './budget-stop-notice.js';
+import { finalSummaryInstruction } from '../../../runtime/tool-denial.js';
+import type { BudgetLimitState } from '../../../runtime/budget.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
 import type { Tool, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
@@ -531,6 +540,7 @@ async function defaultStreamHandler(
   ctx: StreamHandlerContext,
   onFinish?: AiChatHandlerConfig['onFinish'],
   onStreamError?: (error: unknown, info?: AiChatErrorInfo) => void,
+  budgetStopTexts: BudgetStopTexts = resolveBudgetStopTexts(ctx.locale, undefined),
 ): Promise<Response> {
   // SDK built-ins the handler created itself are not manifest tools, so the
   // managed guard would deny them. Everything else stays guarded.
@@ -590,24 +600,66 @@ async function defaultStreamHandler(
     : modelMessages;
 
   let wasTruncated = false;
-  // At the runtime budget the turn blocks further tools and gets one bounded
-  // final summary, so it still ends with an answer instead of silence.
+  // At a tool limit of the runtime budget the turn blocks further tools and
+  // gets one bounded final summary, so it still ends with an answer instead
+  // of silence. `stepNumber` is the summary's step, `answered` whether it
+  // said anything.
   let finalSummaryClaimed = false;
+  let finalSummary: { budget: BudgetLimitState[]; stepNumber: number; answered: boolean } | null = null;
+  // Set when the turn stops at a limit without a summary call: the handler
+  // closes the answer with the notice of these limits.
+  let stopLimits: BudgetStopLimit[] | null = null;
   const budgetExhausted = () =>
     ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
   const shouldStop = (event: {
     steps: Array<{ toolCalls: Array<{ toolName: string }> }>;
   }) => {
-    const budgetState = ctx.managedTurn?.tracker.evaluate().state;
-    const summarize = budgetState === 'hard-limit'
-      && ctx.managedTurn!.tracker.claimFinalSummary();
-    if (summarize) finalSummaryClaimed = true;
-    return shouldStopManagedExecution({
-      stepCount: event.steps.length,
+    const tracker = ctx.managedTurn?.tracker;
+    const evaluation = tracker?.evaluate();
+    const budgetState = evaluation?.state;
+    const stepCount = event.steps.length;
+    const atStepCap = stepCount >= ctx.maxSteps;
+    // At the step cap no further step runs, so no summary is claimed.
+    const summarize = budgetState === 'hard-limit' && !atStepCap && tracker!.claimFinalSummary();
+    if (summarize) {
+      finalSummaryClaimed = true;
+      finalSummary = { budget: tracker!.limitStates(evaluation!.reasons), stepNumber: stepCount, answered: false };
+    }
+    const lastStepToolNames = event.steps.at(-1)?.toolCalls.map((call) => call.toolName);
+    const stop = shouldStopManagedExecution({
+      stepCount,
       maxSteps: ctx.maxSteps,
       budgetState: summarize ? undefined : budgetState,
-      lastStepToolNames: event.steps.at(-1)?.toolCalls.map((call) => call.toolName),
+      lastStepToolNames,
     });
+    // A clarification ends the turn on purpose; it needs no notice.
+    if (stop && !(lastStepToolNames ?? []).includes(CLARIFICATION_TOOL_NAME)) {
+      stopLimits = budgetState === 'hard-limit'
+        ? tracker!.limitStates(evaluation!.reasons)
+        : atStepCap ? [{ dimension: 'maxSteps', limit: ctx.maxSteps }] : null;
+    }
+    return stop;
+  };
+  /**
+   * The closing notice for the turn's last stream part, if it ends at a
+   * limit without a final answer: stopped without a summary call, a summary
+   * that failed or said nothing, or the turn's time limit.
+   */
+  const stopNotice = (terminal: 'finish' | 'error' | 'abort'): string | undefined => {
+    let limits: ReadonlyArray<BudgetStopLimit> | null = null;
+    if (terminal === 'abort') {
+      // Only the turn timeout aborts a request the browser did not cancel.
+      const tracker = ctx.managedTurn?.tracker;
+      if (!ctx.abortSignal?.aborted && tracker) {
+        const evaluation = tracker.evaluate();
+        limits = tracker.limitStates(evaluation.state === 'hard-limit' ? evaluation.reasons : ['totalTimeoutMs']);
+      }
+    } else if (stopLimits) {
+      limits = stopLimits;
+    } else if (finalSummary && !finalSummary.answered) {
+      limits = finalSummary.budget;
+    }
+    return limits && limits.length > 0 ? budgetStopText(limits, budgetStopTexts, ctx.locale) : undefined;
   };
 
   let providerErrorReported = false;
@@ -694,9 +746,17 @@ async function defaultStreamHandler(
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
-        prepareStep: async () => {
+        prepareStep: async ({ messages }) => {
           if (budgetExhausted()) {
-            return { activeTools: [], toolChoice: 'none' as const };
+            // The summary call: no tools, and the instruction to close the
+            // answer (for this call only; it is no part of the chat).
+            return {
+              activeTools: [],
+              toolChoice: 'none' as const,
+              ...(finalSummary
+                ? { messages: [...messages, { role: 'user' as const, content: finalSummaryInstruction(finalSummary.budget) }] }
+                : {}),
+            };
           }
           // A role lost or a revocation loaded since the request started
           // takes the tool away from the next step, not only from its call.
@@ -730,6 +790,9 @@ async function defaultStreamHandler(
           reportError(error);
         },
         onStepFinish: async (event) => {
+          if (finalSummary && event.stepNumber === finalSummary.stepNumber && event.text.trim() !== '') {
+            finalSummary.answered = true;
+          }
           const inputTokens = event.usage.inputTokens ?? 0;
           const outputTokens = event.usage.outputTokens ?? 0;
           const model = stepModelId(event);
@@ -783,8 +846,9 @@ async function defaultStreamHandler(
         },
         onAbort: (event) => {
           // Distinguish request cancellation from a runtime budget stop.
+          const budgetEvaluation = ctx.managedTurn?.tracker.evaluate();
           const abortedByBudget =
-            !ctx.abortSignal?.aborted && ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
+            !ctx.abortSignal?.aborted && budgetEvaluation?.state === 'hard-limit';
           ctx.turnMetrics?.finish(
             abortedByBudget
               ? { status: 'safety-stop', errorCode: 'budget_exhausted' }
@@ -799,7 +863,9 @@ async function defaultStreamHandler(
               finishReason: 'stop',
               maxSteps: ctx.maxSteps,
               stepLimitSource: ctx.stepLimitSource,
-              message: 'Stopped by user.',
+              message: abortedByBudget
+                ? `Stopped at runtime budget: ${budgetEvaluation!.reasons.join(', ')}.`
+                : 'Stopped by user.',
             }),
           );
           finalStateWritten = true;
@@ -881,12 +947,10 @@ async function defaultStreamHandler(
         },
       });
 
+      const answerStream = withStopNotice(result.toUIMessageStream({ onError: maskToolStreamError }), stopNotice);
       const uiStream = resumedApprovals
-        ? result.toUIMessageStream({ onError: maskToolStreamError })
-        : withSilentTurnFallback(
-          result.toUIMessageStream({ onError: maskToolStreamError }),
-          silentTurnFallbackText(ctx.locale),
-        );
+        ? answerStream
+        : withSilentTurnFallback(answerStream, silentTurnFallbackText(ctx.locale));
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
@@ -1000,8 +1064,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     maxBodyBytes: configuredMaxBodyBytes,
     attachments,
     memory: memoryConfig,
+    budgetStopTexts: budgetStopTextsConfig,
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
+  const budgetStopTexts = resolveBudgetStopTexts(locale, budgetStopTextsConfig);
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
   const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
@@ -1089,6 +1155,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const context = { ...ctx, abortSignal: req.signal };
       return customStreamHandler ? customStreamHandler(context) : defaultStreamHandler(
         context, wrappedOnFinish, (error, info) => (info ? onError?.(error, req, info) : onError?.(error, req)),
+        budgetStopTexts,
       );
     };
   }
