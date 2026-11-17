@@ -206,16 +206,21 @@ FROM glirastes_privacy_mapping_scopes s WHERE s.scope_key = $1`,
       if (!content || content.deleted) throw new PrivacyError('privacy_mapping_deleted');
       if (String(content.generation) !== generation) throw new PrivacyError('privacy_mapping_conflict');
       const entries = content.entries.map(([keyId, sealed]) => openEntry(keyring, scopeKey, generation, { keyId, sealed }));
-      // Entries of an expired generation are not readable any more; remove them.
+      // Entries of an expired generation are not readable any more; remove
+      // them. "Current" is the generation stored on the scope row when this
+      // statement runs, not the one this load read: a turn that renewed the
+      // scope meanwhile keeps its entries.
       await query(
         `/* glirastes:privacy-mapping-old-generations */
-WITH tokens AS (
-  DELETE FROM glirastes_privacy_mapping_tokens WHERE scope_key = $1 AND generation <> $2
+WITH current AS (
+  SELECT generation FROM glirastes_privacy_mapping_scopes WHERE scope_key = $1
+), tokens AS (
+  DELETE FROM glirastes_privacy_mapping_tokens t USING current c WHERE t.scope_key = $1 AND t.generation <> c.generation
 ), bindings AS (
-  DELETE FROM glirastes_privacy_mapping_bindings WHERE scope_key = $1 AND generation <> $2
+  DELETE FROM glirastes_privacy_mapping_bindings b USING current c WHERE b.scope_key = $1 AND b.generation <> c.generation
 )
-DELETE FROM glirastes_privacy_mapping_entries WHERE scope_key = $1 AND generation <> $2`,
-        [scopeKey, generation],
+DELETE FROM glirastes_privacy_mapping_entries e USING current c WHERE e.scope_key = $1 AND e.generation <> c.generation`,
+        [scopeKey],
       );
       return { generation, version: Number(header.version), entries, origin, bindings: new Set(content.bindings) };
     },

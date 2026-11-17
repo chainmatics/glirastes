@@ -407,6 +407,31 @@ describe.skipIf(!url)('postgres mapping store (isolated test database)', () => {
     expect(deleted).toBe(true);
   });
 
+  it('a load that read an older generation never removes the entries of a generation renewed meanwhile', async () => {
+    const scope = testScope({ conversationId: `generation-race-${randomBytes(6).toString('hex')}` });
+    const c = clock();
+    const lifetime = { idleTtlMs: 1000, now: c.now };
+    let renewed: string | undefined;
+    const racing: PostgresQueryClient = {
+      unsafe: async (sql, params) => {
+        if (!renewed && sql.includes('glirastes:privacy-mapping-old-generations')) {
+          // Another turn renews the expired scope and writes into the new generation
+          // after this load read its generation, before its cleanup runs.
+          c.advance(2000);
+          renewed = (await pg(lifetime).load(scope)).generation;
+          await pg(lifetime).append(scope, renewed, [entry(CANARY.email, 'p-renewed@example.invalid')]);
+        }
+        return client.unsafe(sql, params);
+      },
+    };
+    const stale = await createPostgresPrivacyMappingStore(racing, { keyring: ring, ...lifetime }).load(scope);
+    expect(renewed).toBeDefined();
+    expect(stale.generation).not.toBe(renewed);
+    const current = await pg(lifetime).load(scope);
+    expect(current.generation).toBe(renewed);
+    expect(current.entries).toEqual([entry(CANARY.email, 'p-renewed@example.invalid')]);
+  });
+
   it('bindings hold keyed digests only', async () => {
     const store = pg();
     const scope = testScope();

@@ -12,6 +12,7 @@ import {
   type PrivacyDecisionsEvent,
 } from '../../contracts/events.js';
 import type { RuntimeMetricsSink } from './turn-recorder.js';
+import { onRuntimeMetricsSinkClose } from './sink.js';
 
 /** The policy a decision was taken under; content-free ids and digests. */
 export interface PrivacyDecisionPolicy {
@@ -159,12 +160,18 @@ export function createPrivacyDecisionRecorder(options: PrivacyDecisionRecorderOp
 
 const recorders = new WeakMap<RuntimeMetricsSink, PrivacyDecisionRecorder>();
 
-/** The one decision recorder of a metrics sink (shared by every turn on it). */
+/**
+ * The one decision recorder of a metrics sink (shared by every turn on it).
+ * Closing the sink closes the recorder first: its open windows reach the
+ * sink and its timer stops.
+ */
 export function privacyDecisionRecorderFor(sink: RuntimeMetricsSink): PrivacyDecisionRecorder {
   let recorder = recorders.get(sink);
   if (!recorder) {
-    recorder = createPrivacyDecisionRecorder({ sink });
-    recorders.set(sink, recorder);
+    const created = createPrivacyDecisionRecorder({ sink });
+    recorder = created;
+    recorders.set(sink, created);
+    onRuntimeMetricsSinkClose(sink, () => created.close());
   }
   return recorder;
 }

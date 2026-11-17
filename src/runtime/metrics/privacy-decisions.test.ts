@@ -7,6 +7,7 @@ import {
   privacyDecisionRecorderFor,
   type PrivacyDecisionPolicy,
 } from './privacy-decisions.js';
+import { createRuntimeMetricsSink } from './sink.js';
 
 const APP_ID = '019fb900-0000-7000-8000-0000000000a1';
 const ENVIRONMENT_ID = '019fb900-0000-7000-8000-0000000000e1';
@@ -138,6 +139,36 @@ describe('privacy decision recorder (K5)', () => {
     const [event] = events;
     expect(event?.eventType === 'privacy.decisions' && event.decisions).toEqual([{ code: 'turn_protected', count: 1_000_000 }]);
     expect(PrivacyDecisionsEventSchema.safeParse(event).success).toBe(true);
+  });
+
+  it('closing the runtime sink hands over the open windows and stops the recorder', async () => {
+    const sent: unknown[] = [];
+    const sink = createRuntimeMetricsSink({
+      controlPlaneUrl: 'https://platform.example.invalid',
+      apiKey: 'test-runtime-key-0000',
+      appId: APP_ID,
+      environmentId: ENVIRONMENT_ID,
+      instanceId: 'web-1',
+      fetch: (async (_input: unknown, init?: RequestInit) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return new Response(null, { status: 202 });
+      }) as typeof globalThis.fetch,
+    });
+    const recorder = privacyDecisionRecorderFor(sink);
+    recorder.count('turn_protected', signed);
+    recorder.count('model_call_protected', signed);
+    await sink.close();
+    const events = sent.flatMap((batch) => (batch as { events: RuntimeMetricEvent[] }).events);
+    const decisions = events.filter((e) => e.eventType === 'privacy.decisions');
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]!.eventType === 'privacy.decisions' && decisions[0]!.decisions).toEqual([
+      { code: 'turn_protected', count: 1 },
+      { code: 'model_call_protected', count: 1 },
+    ]);
+    // Closed: later counts go nowhere.
+    recorder.count('turn_protected', signed);
+    recorder.flush();
+    expect(sent.flatMap((batch) => (batch as { events: unknown[] }).events)).toHaveLength(events.length);
   });
 
   it('keeps one recorder per sink', () => {
