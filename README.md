@@ -334,13 +334,18 @@ optional and defaults to `https://api.glirastes.io`; set it only
 for a self-hosted or local Platform.
 
 ```bash
-npx glirastes connect   # connect once: issues one app key, writes GLIRASTES_API_KEY
+npx glirastes connect   # connect once: issues one app key, GLIRASTES_API_KEY
 npx glirastes sync      # upload the current local setup
 npx glirastes doctor    # local checks, no network
 ```
 
 Pass `--base-url <platform-url>` to `connect` only for a self-hosted or local
-Platform. In Citadel the approver chooses the key lifetime: 90 days (the
+Platform. The key goes to `--dotenv <path>` (a Git-ignored file inside the
+project; not `--env-file`, which Node.js 20+ consumes itself), else to
+`.env.local` in a Next.js app; any other app gets it shown
+once on the terminal (or in `--json`) to set as `GLIRASTES_API_KEY` in the
+server's environment. A deployed app needs only the environment variables, not
+`.glirastes/` (see [docs/managed-runtime-sync.md](docs/managed-runtime-sync.md)). In Citadel the approver chooses the key lifetime: 90 days (the
 default), 1 year or no expiry.
 
 Every deployment uses that one secret, `GLIRASTES_API_KEY`, and sets
@@ -403,9 +408,9 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes tools enrich --managed [--first-run] [--base <branch>] [--head <branch>] [--environments <a,b,c>]` | Pro, CI only: run the managed tool agent |
 | `glirastes setup [--dry-run] [--managed]` | Validate and install the local setup artifacts |
 | `glirastes setup inspect` | Inspect project manifests before integration |
-| `glirastes connect [--base-url <url>]` | Connect the app once and issue one app key (`--base-url` only for self-hosted) |
-| `glirastes sync` | Upload the current local setup |
-| `glirastes doctor [--managed] [--verbose] [--json]` | Diagnose the local setup |
+| `glirastes connect [--base-url <url>] [--dotenv <path>] [--json]` | Connect the app once and issue one app key (`--base-url` only for self-hosted, `--dotenv` for the Git-ignored key file) |
+| `glirastes sync [--dotenv <path>]` | Upload the current local setup |
+| `glirastes doctor [--managed] [--dotenv <path>] [--verbose] [--json]` | Diagnose the local setup |
 | `glirastes install [--host a,b]` | Install the agent skills only |
 | `glirastes-runtime build --project <dir> --out <new-dir> [--frozen]` | Generate an immutable JSON runtime artifact; frozen mode checks committed generation |
 | `glirastes-runtime validate --artifact <dir>` | Check exact SDK version, hashes and bindings |

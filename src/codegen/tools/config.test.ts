@@ -137,8 +137,18 @@ describe('tools config', () => {
     ['the next-pages source twice', { ...minimal, sources: ['next-pages', { kind: 'next-pages', appDir: 'app' }] }],
     ['the url-filters source twice', { ...minimal, sources: ['url-filters', 'url-filters'] }],
     ['a page option on the actions source', { ...minimal, sources: [{ kind: 'react-actions', appDir: 'src/app' }] }],
+    ['an empty connection env file', { ...minimal, connection: { envFile: ' ' } }],
+    ['an unknown connection key', { ...minimal, connection: { apiKey: 'value' } }],
   ])('rejects %s', (_label, value) => {
     expect(ToolsConfigSchema.safeParse(value).success).toBe(false);
+  });
+
+  it('accepts an app-relative connection env file and adds no default', () => {
+    expect(ToolsConfigSchema.parse({ ...minimal, connection: { envFile: 'apps/backend/.env' } }).connection)
+      .toEqual({ envFile: 'apps/backend/.env' });
+    expect(ToolsConfigSchema.parse(minimal)).not.toHaveProperty('connection');
+    // The connect commands report a path outside the app themselves.
+    expect(ToolsConfigSchema.safeParse({ ...minimal, connection: { envFile: '../shared/.env' } }).success).toBe(true);
   });
 
   it('reports a missing config with E-TOOLS-001', async () => {

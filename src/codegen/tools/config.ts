@@ -115,6 +115,19 @@ export const ToolsConfigSchema = z.object({
     /** `tools check` fails while an enabled tool has only a template description or field names. */
     requireEnrichment: z.boolean().optional(),
   }).strict().default({}),
+  /**
+   * Local CLI settings of `glirastes connect`, `sync` and `doctor`; never part
+   * of a generated artifact. `envFile`: the app-relative, Git-ignored file
+   * that holds `GLIRASTES_API_KEY` (e.g. `apps/backend/.env`); `--dotenv`
+   * wins. Without it Next.js uses `.env.local` and other stacks the process
+   * environment. Only shape-checked here: `connect`, `sync` and `doctor`
+   * validate the path itself (inside the project, Git-ignored) and report
+   * `E-CONNECT-PATH-OUTSIDE` and friends, so a wrong path never breaks the
+   * tools commands.
+   */
+  connection: z.object({
+    envFile: z.string().trim().min(1).max(512).optional(),
+  }).strict().optional(),
 }).strict().superRefine((config, context) => {
   const kinds = config.sources.map((source) => (typeof source === 'string' ? source : source.kind));
   for (const kind of SINGLETON_SOURCES) {

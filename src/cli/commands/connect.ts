@@ -3,10 +3,10 @@ import { DEFAULT_CONTROL_PLANE_URL } from '../../runtime/runtime-mode.js';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { loadToolsConfig, normalizeSources, TOOLS_PATHS, type ToolsConfig } from '../../codegen/tools/config.js';
+import { loadToolsConfig, TOOLS_PATHS } from '../../codegen/tools/config.js';
 import type {
   PairingStartRequest,
   PairingStartResponse,
@@ -20,11 +20,18 @@ import {
 } from '../../sync/runtime-connect-client.js';
 import type { AtomicArtifactWriteHooks } from './atomic-artifact-write.js';
 import {
+  isSelfHostedControlPlane,
   materializeConnectionEnvironment,
+  prepareSecretStaging,
   preflightConnectionEnvironment,
+  type SecretStagingOptions,
+  selectConnectionSecret,
+  type ConnectionEnvironmentPreflightOptions,
   type ConnectionEnvironmentTargets,
   type MaterializeConnectionEnvironmentOptions,
 } from './connection-environment.js';
+
+export { connectFrameworkOf } from './connection-environment.js';
 import {
   acceptsReceiptPlanDigest,
   createSelfSetupPlan,
@@ -65,16 +72,19 @@ export interface ConnectCommandOptions {
   rootDir: string;
   baseUrl?: string;
   json?: boolean;
+  /**
+   * Project-relative file for `GLIRASTES_API_KEY` (must be Git-ignored).
+   * Wins over `connection.envFile` of `tools.json` and over `.env.local`.
+   */
+  envFile?: string;
 }
 
 export interface ConnectCommandDependencies {
   createPlan?: (options: { rootDir: string }) => Promise<SetupPlan>;
   createSelfPlan?: (options: { rootDir: string }) => Promise<SetupPlan>;
-  preflight?: (options: {
-    projectRoot: string;
-    framework: 'nextjs';
-    isGitIgnored?: (path: string, root: string) => Promise<boolean>;
-  }) => Promise<ConnectionEnvironmentTargets>;
+  preflight?: (
+    options: ConnectionEnvironmentPreflightOptions,
+  ) => Promise<ConnectionEnvironmentTargets>;
   materialize?: (
     options: MaterializeConnectionEnvironmentOptions,
   ) => Promise<unknown>;
@@ -90,6 +100,10 @@ export interface ConnectCommandDependencies {
   atomicWriteHooks?: AtomicArtifactWriteHooks;
   createRunnerKey?: () => string;
   log?: (message: string) => void;
+  /** Where the secret is staged while it is written (test seams). */
+  staging?: SecretStagingOptions;
+  /** Whether stdout is a terminal; defaults to `process.stdout.isTTY`. */
+  isTTY?: () => boolean;
 }
 
 function connectError(
@@ -129,15 +143,6 @@ function resolveBaseUrl(flag: string | undefined): string {
   return flag?.trim()
     || process.env.GLIRASTES_CONTROL_PLANE_URL?.trim()
     || DEFAULT_CONTROL_PLANE_URL;
-}
-
-/**
- * The framework of the app as `tools.json` declares it (spec 7): Next.js when a
- * `next-*` source is configured. Automatic secret materialization exists for
- * Next.js only; other stacks set the connection variables themselves.
- */
-export function connectFrameworkOf(config: ToolsConfig): 'nextjs' | undefined {
-  return normalizeSources(config).some((source) => source.kind.startsWith('next-')) ? 'nextjs' : undefined;
 }
 
 async function connectedAppId(rootDir: string): Promise<string | undefined> {
@@ -241,27 +246,44 @@ export async function runConnect(
       'restore-tools-app-id',
     );
   }
-  const framework = tools
-    ? connectFrameworkOf(tools)
-    : packageJson.data.dependencies?.next !== undefined || packageJson.data.devDependencies?.next !== undefined
-      ? 'nextjs'
-      : undefined;
-  if (framework !== 'nextjs') {
+  const secret = selectConnectionSecret({
+    projectRoot: rootDir,
+    envFile: options.envFile,
+    tools,
+    packageJson: packageJson.data,
+  });
+  const writesSecretFile = secret.environmentPath !== undefined
+    || secret.framework === 'nextjs';
+  const isTTY = dependencies.isTTY ?? (() => Boolean(process.stdout.isTTY));
+  if (!writesSecretFile && !options.json && !isTTY()) {
+    // Agents and CI start connect too: a key printed into their logs or
+    // transcripts would outlive the session. Refuse before any key exists.
     throw connectError(
-      'E-CONNECT-FRAMEWORK-UNSUPPORTED',
-      tools
-        ? `Automatic connection materialization currently requires Next.js; .glirastes/tools.json declares ${normalizeSources(tools).map((source) => source.kind).join(', ')}.`
-        : 'Automatic connection materialization currently requires Next.js.',
-      'configure-supported-secret-target',
+      'E-CONNECT-SECRET-OUTPUT-REFUSED',
+      'No secret file is configured and the output is not a terminal, so the connection key would land in a log. Pass --dotenv <path> to write it to a Git-ignored file, or --json to receive it as machine-readable output.',
+      'choose-connection-secret-target',
     );
   }
 
+  // Every check of the secret target runs before pairing: no key is issued
+  // that cannot be stored.
   const preflight = dependencies.preflight ?? preflightConnectionEnvironment;
-  await preflight({
+  const targets = await preflight({
     projectRoot: rootDir,
-    framework,
+    ...(secret.framework ? { framework: secret.framework } : {}),
+    ...(secret.environmentPath ? { environmentPath: secret.environmentPath } : {}),
+    intendedBaseUrl: baseUrl,
     isGitIgnored: dependencies.isGitIgnored,
   });
+  if (targets?.environmentPath) {
+    // Prove a safe staging place exists (and renames into the target
+    // directory) now: an EXDEV after pairing would orphan the key.
+    const staging = await prepareSecretStaging(targets, {
+      ...dependencies.staging,
+      isGitIgnored: dependencies.isGitIgnored,
+    });
+    await staging.release();
+  }
 
   const client = (dependencies.clientFactory ?? (
     (clientOptions) => new RuntimeConnectClient(clientOptions)
@@ -337,25 +359,62 @@ export async function runConnect(
 
   const materialize = dependencies.materialize
     ?? materializeConnectionEnvironment;
-  await materialize({
-    projectRoot: rootDir,
-    framework,
-    connection: {
-      ...connection,
-      runnerKey: (dependencies.createRunnerKey ?? localRunnerKey)(),
-    },
-    apiKey: token.apiKey,
-    isGitIgnored: dependencies.isGitIgnored,
-    atomicWriteHooks: dependencies.atomicWriteHooks,
-  });
+  try {
+    await materialize({
+      projectRoot: rootDir,
+      ...(secret.framework ? { framework: secret.framework } : {}),
+      ...(secret.environmentPath ? { environmentPath: secret.environmentPath } : {}),
+      connection: {
+        ...connection,
+        runnerKey: (dependencies.createRunnerKey ?? localRunnerKey)(),
+      },
+      apiKey: token.apiKey,
+      isGitIgnored: dependencies.isGitIgnored,
+      ...dependencies.staging,
+      atomicWriteHooks: dependencies.atomicWriteHooks,
+    });
+  } catch (error) {
+    // The key exists on the Platform now; say so, never print it.
+    const reason = error instanceof FoundationDiagnosticError
+      ? ` (${error.code}: ${error.message})`
+      : error instanceof Error ? ` (${error.message})` : '';
+    throw connectError(
+      'E-CONNECT-SECRET-NOT-STORED',
+      `The Platform issued a connection key, but it could not be stored${reason}. Fix the cause, run glirastes connect again, and revoke the unused key on the Platform.`,
+      'rerun-connect-and-revoke-unused-key',
+    );
+  }
 
+  const envFile = writesSecretFile
+    ? relative(rootDir, secret.environmentPath ?? resolve(rootDir, '.env.local'))
+    : undefined;
+  const selfHostedUrl = isSelfHostedControlPlane(connection.baseUrl)
+    ? connection.baseUrl
+    : undefined;
   if (options.json) {
     log(JSON.stringify({
       schemaVersion: 1,
       status: 'connected',
       appId: token.connection.appId,
       environmentId: environmentId ?? null,
+      ...(envFile !== undefined
+        ? { secretTarget: 'file', envFile }
+        : {
+            secretTarget: 'output',
+            apiKey: token.apiKey,
+            ...(selfHostedUrl ? { controlPlaneUrl: selfHostedUrl } : {}),
+          }),
     }));
+  } else if (envFile === undefined) {
+    log('Connected to the Glirastes Platform.');
+    log(`GLIRASTES_API_KEY=${token.apiKey}`);
+    log('Set this value as GLIRASTES_API_KEY in the environment of the server process. It was not stored anywhere and cannot be shown again.');
+    if (selfHostedUrl) {
+      log(`Also set GLIRASTES_CONTROL_PLANE_URL=${selfHostedUrl}.`);
+    }
+    log('Then restart the application.');
+  } else if (secret.environmentPath !== undefined) {
+    log(`Connected to the Glirastes Platform. GLIRASTES_API_KEY was written to ${envFile}. Restart the application.`);
   } else {
     log('Connected to the Glirastes Platform. Restart the application.');
   }

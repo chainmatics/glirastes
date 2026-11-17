@@ -15,6 +15,8 @@ export { formatDoctorReport } from './doctor-presentation.js';
 import {
   OBSOLETE_CONNECTION_VARIABLES,
   preflightConnectionEnvironment,
+  readConnectionSecretSelection,
+  type ConnectionSecretSelection,
 } from './connection-environment.js';
 import {
   assertConnectionScope,
@@ -47,6 +49,8 @@ export interface DoctorReport {
 export interface CreateDoctorReportOptions {
   rootDir: string;
   managed?: boolean;
+  /** Project-relative, Git-ignored file holding `GLIRASTES_API_KEY`. */
+  envFile?: string;
   env?: NodeJS.ProcessEnv;
   isGitIgnored?: (path: string, root: string) => Promise<boolean>;
 }
@@ -99,19 +103,25 @@ function finish(
 async function hasObsoleteConnectionVariables(options: {
   rootDir: string;
   env: NodeJS.ProcessEnv;
-  readSecretFile: boolean;
+  /** The secret file to read, when the app has one. */
+  secretFile?: ConnectionSecretSelection;
   isGitIgnored?: (path: string, root: string) => Promise<boolean>;
 }): Promise<boolean> {
   if (OBSOLETE_CONNECTION_VARIABLES.some((name) => options.env[name]?.trim())) {
     return true;
   }
-  if (!options.readSecretFile) return false;
+  const secretFile = options.secretFile;
+  if (!secretFile || (!secretFile.environmentPath && secretFile.framework !== 'nextjs')) {
+    return false;
+  }
   try {
     const { environmentPath } = await preflightConnectionEnvironment({
       projectRoot: options.rootDir,
-      framework: 'nextjs',
+      ...(secretFile.framework ? { framework: secretFile.framework } : {}),
+      ...(secretFile.environmentPath ? { environmentPath: secretFile.environmentPath } : {}),
       isGitIgnored: options.isGitIgnored,
     });
+    if (!environmentPath) return false;
     const raw = await readFile(environmentPath, 'utf8');
     return raw.split(/\r?\n/).some((line) => {
       const name = line.match(/^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=/)?.[1];
@@ -251,6 +261,23 @@ export async function createDoctorReport(
   }
 
   let connectedValid = false;
+  let secretSelection: ConnectionSecretSelection | undefined;
+  let selectionError: unknown;
+  if (mode !== 'standalone') {
+    try {
+      secretSelection = await readConnectionSecretSelection({
+        projectRoot: rootDir,
+        envFile: options.envFile,
+      });
+    } catch (error) {
+      selectionError = error;
+    }
+  }
+  // Without a secret file (no --dotenv, not Next.js) the key lives in the
+  // process environment only; there is no file path to check.
+  const usesSecretFile = secretSelection === undefined
+    || secretSelection.environmentPath !== undefined
+    || secretSelection.framework === 'nextjs';
   if (mode !== 'standalone') {
     let descriptor: Awaited<ReturnType<typeof readPlatformConnectionDescriptor>> | undefined;
     let credentials: Awaited<ReturnType<typeof loadConnectionCredentials>> | undefined;
@@ -274,26 +301,38 @@ export async function createDoctorReport(
       ));
     }
     try {
+      if (selectionError) throw selectionError;
       credentials = await loadConnectionCredentials({
         rootDir,
+        envFile: options.envFile,
         env: options.env,
         isGitIgnored: options.isGitIgnored,
         requireLocalSecretFile: true,
       });
-      checks.push(check('connection-secret-path', 'pass', 'E-CONNECT-101'));
+      if (usesSecretFile) checks.push(check('connection-secret-path', 'pass', 'E-CONNECT-101'));
       checks.push(check('connection-credential', 'pass', 'E-CONNECT-102'));
     } catch (error) {
-      checks.push(check(
-        'connection-secret-path',
-        'fail',
-        failureCode(error, 'E-CONNECT-002'),
-        'repair-ignored-local-secret',
-      ));
+      if (selectionError) {
+        // tools.json itself is broken: point at it, not at the secret file.
+        checks.push(check(
+          'connection-secret-path',
+          'fail',
+          failureCode(error, 'E-CONNECT-002'),
+          isFoundationDiagnosticError(error) ? error.remediation : 'repair-tools-config',
+        ));
+      } else if (usesSecretFile) {
+        checks.push(check(
+          'connection-secret-path',
+          'fail',
+          failureCode(error, 'E-CONNECT-002'),
+          'repair-ignored-local-secret',
+        ));
+      }
       checks.push(check(
         'connection-credential',
         'fail',
         'E-CONNECT-003',
-        'rerun-connect',
+        usesSecretFile ? 'rerun-connect' : 'provide-connection-api-key',
       ));
     }
     if (descriptor && credentials) {
@@ -327,7 +366,7 @@ export async function createDoctorReport(
   if (await hasObsoleteConnectionVariables({
     rootDir,
     env,
-    readSecretFile: mode !== 'standalone',
+    ...(mode !== 'standalone' && secretSelection ? { secretFile: secretSelection } : {}),
     isGitIgnored: options.isGitIgnored,
   })) {
     checks.push(check(
