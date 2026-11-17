@@ -49,9 +49,12 @@ export interface ResultStoreOptions extends ResultHandleLimits {
    */
   seal?: (value: unknown) => unknown | Promise<unknown>;
   /**
-   * The owner a new handle is bound to. When given and it answers
-   * undefined, no handle is created. `read_result` compares it with the
-   * principal of every read.
+   * Resolves the current principal (managed turns). When given, a handle is
+   * bound to the owner captured before the origin tool ran
+   * (`captureOwner`, passed as `ResultStorePutInput.owner`); `put` resolves
+   * it again and creates no handle when it is missing or differs, so a
+   * result produced for one principal is never stored for another.
+   * `read_result` compares the owner with the principal of every read.
    */
   owner?: () => ResultHandleOwner | undefined | Promise<ResultHandleOwner | undefined>;
 }
@@ -75,9 +78,21 @@ export interface ResultStorePutInput {
   maxChars: number;
   /** A successful record result (`success` not false), larger than `maxChars` serialized. */
   value: Record<string, unknown>;
+  /**
+   * The owner `captureOwner` returned before the origin tool ran. Required
+   * when the store has `owner`: without it, or when it is not the principal
+   * resolved now, no handle is created.
+   */
+  owner?: ResultHandleOwner;
 }
 
 export interface ResultStore {
+  /**
+   * The current principal as a handle owner, resolved now; call it before
+   * the origin tool runs and pass the answer to `put` as `owner`. Undefined
+   * (no call) for a store without `owner` (no principal to bind to).
+   */
+  captureOwner(): Promise<ResultHandleOwner | undefined> | undefined;
   /**
    * Stores `value` and returns its overview, or undefined when the store
    * refuses it (handle count or size limits, an unserializable value, no
@@ -169,6 +184,12 @@ export function createResultStore(options: ResultStoreOptions = {}): ResultStore
   };
 
   return {
+    captureOwner() {
+      if (!options.owner) return undefined;
+      return Promise.resolve(options.owner()).then((owner) => (
+        owner ? { subjectId: owner.subjectId, tenantId: owner.tenantId } : undefined
+      ));
+    },
     async put(input) {
       if (cleared) return undefined;
       let serialized: string | undefined;
@@ -191,10 +212,14 @@ export function createResultStore(options: ResultStoreOptions = {}): ResultStore
         reservedBytes -= keptBytes;
       };
       try {
-        const owner = options.owner ? await options.owner() : undefined;
-        if (options.owner && !owner) {
-          release();
-          return undefined;
+        // The owner is the principal the tool ran for; still the same one now, or no handle.
+        const owner = input.owner;
+        if (options.owner) {
+          const current = await options.owner();
+          if (!owner || !current || current.subjectId !== owner.subjectId || current.tenantId !== owner.tenantId) {
+            release();
+            return undefined;
+          }
         }
         // A private copy: the caller's object may change later.
         const copy = JSON.parse(serialized) as unknown;

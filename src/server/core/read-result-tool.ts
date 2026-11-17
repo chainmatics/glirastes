@@ -248,7 +248,7 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
  * handle of them and the PII shield does not seal them again.
  */
 export function createReadResultTool(store: ResultStore, guard: ReadResultGuard = {}): Tool {
-  return defineTool({
+  const tool = defineTool({
     id: READ_RESULT_TOOL_NAME,
     description: DESCRIPTION,
     inputSchema: ReadResultInputSchema,
@@ -298,4 +298,13 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
       return result;
     },
   });
+  RESULT_READERS.add(tool);
+  return tool;
+}
+
+const RESULT_READERS = new WeakSet<object>();
+
+/** Whether `tool` is a `read_result` instance (it needs no owner capture: it never creates a handle). */
+export function isResultReader(tool: unknown): boolean {
+  return typeof tool === 'object' && tool !== null && RESULT_READERS.has(tool);
 }

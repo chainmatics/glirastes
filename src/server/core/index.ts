@@ -27,6 +27,7 @@ import {
 } from '../../runtime/result-limit.js';
 import { truncateToolResult } from './truncate-tool-result.js';
 import type { ResultStore } from './result-store.js';
+import { isResultReader } from './read-result-tool.js';
 export {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
@@ -1024,6 +1025,9 @@ export function toolToAiTool(
       } : context;
       const startTime = Date.now();
       try {
+        // A handle belongs to the principal the tool runs for: captured before it runs.
+        const store = options?.resultStore;
+        const capturedOwner = store && !isResultReader(tool) ? await store.captureOwner() : undefined;
         const result = await tool.execute(input, executionContext);
 
         // Audit: tool executed successfully
@@ -1104,14 +1108,16 @@ export function toolToAiTool(
         // Bound the result so it cannot overflow the model context: with a
         // result store an oversized record result keeps its handle and the
         // model gets an overview, otherwise (or when the store refuses) it is cut.
-        const store = options?.resultStore;
         const fromStore = store?.isIssued(result) === true;
         const overview = store && !fromStore
           && isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success !== false
           // A payload with its own `_result` keeps it: no overview would replace it.
           && !Object.prototype.hasOwnProperty.call(cleanResult, '_result')
           && exceedsLimit(cleanResult, resultLimit)
-          ? await store.put({ toolName: name, readOnly, maxChars: resultLimit, value: cleanResult })
+          ? await store.put({
+              toolName: name, readOnly, maxChars: resultLimit, value: cleanResult,
+              ...(capturedOwner ? { owner: capturedOwner } : {}),
+            })
           : undefined;
         cleanResult = overview
           ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });

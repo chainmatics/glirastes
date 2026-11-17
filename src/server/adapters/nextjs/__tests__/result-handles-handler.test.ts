@@ -690,3 +690,72 @@ describe('read_result arguments and the async rehydration path', () => {
     });
   });
 });
+
+describe('the owner of a handle is the principal the origin tool ran for', () => {
+  const otherTenant = '019fb710-0000-7000-8000-0000000000ff';
+
+  it.each([
+    ['subject', () => ({ ...principal(), subjectId: 'bob' })],
+    ['tenant', () => ({ ...principal(), tenantId: otherTenant })],
+  ] as const)('creates no handle when the %s changes while the tool runs', async (_label, switched) => {
+    let current: Principal = principal();
+    const runtime = managed({ current: () => current });
+    let release: () => void = () => undefined;
+    const slow = vi.fn(async () => {
+      // The principal switches while the backend call is in flight.
+      await new Promise<void>((resolve) => { release = resolve; current = switched(); setTimeout(resolve, 5); });
+      return bigTasks();
+    });
+    const turn = harness({
+      tools: { tasks_list: defineTool({ id: LIST_TASKS_ID, description: 'List.', inputSchema: z.object({}).strict(), execute: slow }) },
+      ...runtime.config,
+    });
+    await turn.run(async (call) => {
+      const result = await call('tasks_list', {});
+      release();
+      expect(result).toHaveProperty('_truncated');
+      expect(result).not.toHaveProperty('_result');
+      // Nothing produced for the first principal is readable, by any id.
+      expect(await call('read_result', { resultId: 'ro_00000000' })).toMatchObject({ error: 'result_expired' });
+    });
+    expect(slow).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the handle when the principal stays, with one resolve before and one after the tool', async () => {
+    const runtime = managed();
+    const { registry } = taskTools();
+    const turn = harness({ tools: registry, ...runtime.config });
+    await turn.run(async (call) => {
+      const before = runtime.resolvePrincipal.mock.calls.length;
+      const overview = await call('tasks_list', {}) as Overview;
+      expect(overview._result.id).toMatch(/^ro_/);
+      expect(runtime.resolvePrincipal.mock.calls.length - before).toBe(2);
+      const small = await call('read_result', { resultId: overview._result.id, fields: ['tasks[].id'] });
+      expect(small).toHaveProperty('tasks');
+    });
+  });
+
+  it('denies a read when the principal changes while the read guard runs', async () => {
+    let current: Principal = principal();
+    let resolves = 0;
+    let switchAt = Number.POSITIVE_INFINITY;
+    const runtime = managed({
+      current: () => {
+        resolves += 1;
+        if (resolves >= switchAt) current = { ...principal(), subjectId: 'bob' };
+        return current;
+      },
+    });
+    const { registry } = taskTools();
+    const turn = harness({ tools: registry, ...runtime.config });
+    await turn.run(async (call, ctx) => {
+      const overview = await call('tasks_list', {}) as Overview;
+      // precheck (owner + guard) and the first owner check of beforeRead see alice; the guard's own resolve onward sees bob.
+      switchAt = resolves + 4;
+      const answer = await call('read_result', { resultId: overview._result.id });
+      expect(answer).toMatchObject({ error: 'result_denied' });
+      expect(answer).not.toHaveProperty('tasks');
+      expect(ctx.managedTurn!.tracker.usage.consecutiveErrors).toBeGreaterThan(0);
+    });
+  });
+});

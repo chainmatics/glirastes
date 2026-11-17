@@ -114,6 +114,12 @@ export function createTurnResults(options: {
             if (error instanceof ToolExecutionDeniedError && error.reason === 'budget_exhausted') return 'budget_exhausted';
             throw error;
           }
+          // Checked again right before the data is projected (synchronously after this): a principal
+          // that changed while the guard ran gets nothing. The call is counted already; add the error.
+          if (!await ownerMatches(handle)) {
+            await managedTurn.onToolError({ toolName: handle.toolName, input, error: new Error('result_denied'), durationMs: 0 });
+            return 'denied';
+          }
           return undefined;
         },
         afterRead: async ({ handle, input, result, durationMs }) => {

@@ -222,11 +222,27 @@ describe('createResultStore', () => {
     expect(store.isIssued(overview)).toBe(true);
   });
 
-  it('creates no handle without an owner when one is asked for', async () => {
-    expect(await put(createResultStore({ owner: async () => undefined }))).toBeUndefined();
-    const store = createResultStore({ owner: async () => ({ subjectId: 'alice', tenantId: 't1' }) });
-    const overview = await put(store) as Overview;
-    expect(store.get(overview._result.id)?.owner).toEqual({ subjectId: 'alice', tenantId: 't1' });
+  it('binds a handle to the owner captured before the tool ran, and only while it is still current', async () => {
+    const alice = { subjectId: 'alice', tenantId: 't1' };
+    let current: typeof alice | undefined = alice;
+    const store = createResultStore({ owner: async () => current });
+    const putAs = (owner?: typeof alice) => store.put({
+      toolName: 'playlists_list', readOnly: true, maxChars: 16_000, value: playlists(), ...(owner ? { owner } : {}),
+    });
+    const captured = await store.captureOwner();
+    expect(captured).toEqual(alice);
+    const overview = await putAs(captured) as Overview;
+    expect(store.get(overview._result.id)?.owner).toEqual(alice);
+    // No captured owner, another subject, another tenant, or no principal now: no handle.
+    expect(await putAs()).toBeUndefined();
+    current = { subjectId: 'bob', tenantId: 't1' };
+    expect(await putAs(alice)).toBeUndefined();
+    current = { subjectId: 'alice', tenantId: 't2' };
+    expect(await putAs(alice)).toBeUndefined();
+    current = undefined;
+    expect(await putAs(alice)).toBeUndefined();
+    expect(store.size).toBe(1);
+    expect(createResultStore().captureOwner()).toBeUndefined();
   });
 });
 
