@@ -152,6 +152,11 @@ export type PrivacyProviderReport = z.infer<typeof PrivacyProviderReportSchema>;
 export interface LocalPrivacyPolicy {
   /** Require the protected profile even when the Platform says `off` or nothing. */
   required?: boolean;
+  /**
+   * Under a signed block only a stricter mode or fewer image types apply.
+   * Without one this is the screenshot rule itself: `blocked` unless
+   * `allow-original` is declared here.
+   */
   screenshots?: { mode?: 'blocked' | 'allow-original'; imageTypes?: readonly PrivacyImageType[] };
   /** Entry ids the consumer offers at all; absent: every local entry. */
   providerEntryIds?: readonly string[];
@@ -227,7 +232,8 @@ export function mergePrivacyPolicy(
   if (!fromPlatform) restrictions.add('local_profile_required');
 
   // Screenshots
-  const platformMode = fromPlatform ? platform.screenshots.mode : 'blocked';
+  // Without a signed block the local declaration is the rule (default blocked).
+  const platformMode = fromPlatform ? platform.screenshots.mode : local.screenshots?.mode ?? 'blocked';
   const localMode = local.screenshots?.mode ?? platformMode;
   const platformTypes = fromPlatform ? platform.screenshots.imageTypes ?? DEFAULT_PRIVACY_IMAGE_TYPES : DEFAULT_PRIVACY_IMAGE_TYPES;
   const imageTypes = local.screenshots?.imageTypes

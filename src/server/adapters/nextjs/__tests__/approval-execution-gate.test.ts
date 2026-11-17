@@ -371,6 +371,32 @@ describe('approval execution gate', () => {
         expect(state.gateCalls).toBeGreaterThanOrEqual(2);
         expect(JSON.stringify(chunks)).not.toContain('Done.');
       });
+
+      it('a lock that arrives while a permitted tool runs stops the next model step: its result is never sent', async () => {
+        const { state, runtime } = lockingRuntime();
+        const list = vi.fn(async (_input: unknown) => {
+          // The refusal reaches the runner while the permitted tool executes.
+          state.locked = true;
+          return { tasks: ['private result'] };
+        });
+        const registry: ToolRegistry = {
+          tasks_list: defineTool({ id: 'tasks.list', description: 'List.', inputSchema: z.object({ query: z.string() }).strict(), execute: list }),
+        };
+        const prompts: unknown[] = [];
+        const model = scriptedModel([toolCall('tasks_list', { query: 'x' }, 'call-0')]);
+        const doStream = model.doStream.bind(model);
+        model.doStream = async (options) => {
+          prompts.push(options.prompt);
+          return doStream(options);
+        };
+        const handler = createAiChatHandler({ tools: registry, systemPrompt: 'A', approvalSecret: SECRET, managedRuntime: runtime, model });
+        const chunks = await streamChunks(await handler(post([user])));
+        expect(list).toHaveBeenCalledTimes(1);
+        // One model call only: the step that would carry the tool result never starts.
+        expect(prompts).toHaveLength(1);
+        expect(JSON.stringify(prompts)).not.toContain('private result');
+        expect(JSON.stringify(chunks)).not.toContain('Done.');
+      });
     });
 
     it('does not run an unverified approval of that tool through a custom stream handler', async () => {

@@ -24,7 +24,7 @@ import { canonicalDigest, privacyPolicyDigest, providerBindingDigest } from '../
  * this digest on purpose and goes to the Platform together with it.
  */
 const PRIVACY_POLICY_VECTORS_SHA256 =
-  '511bee0483b6cee7fc4cec0383f71aff595b9d655da120199d8683e90eb0133a';
+  'b24876515741a6c14786ea7abd6de2a5236286c9504a1964b18370c61a7159e4';
 
 interface Vectors {
   providerBindings: Array<{ name: string; binding: ProviderBinding; digest: string }>;

@@ -293,12 +293,29 @@ describe('screenshots', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('allow-original with a vision model passes the image unchanged and shows the notice', async () => {
+  it('an allow-original attachments rule cannot widen the effective policy: without the declared mode it stays blocked', async () => {
     const { tools } = registry();
     const { model, calls } = echoModel();
     const handler = createAiChatHandler({
       tools, model, systemPrompt: SYSTEM, attachments: { enabled: true },
       privacy: privacyConfig({ attachments: () => ({ app: 'allow-original', tenant: 'allow-original' }), modelCapabilities: { images: true } }),
+    });
+    const response = await handler(post([user('Bild', 'u1', [shot])]));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'privacy_attachment_blocked' });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('allow-original with a vision model passes the image unchanged and shows the notice', async () => {
+    const { tools } = registry();
+    const { model, calls } = echoModel();
+    const handler = createAiChatHandler({
+      tools, model, systemPrompt: SYSTEM, attachments: { enabled: true },
+      privacy: privacyConfig({
+        policy: { screenshots: { mode: 'allow-original' } },
+        attachments: () => ({ app: 'allow-original', tenant: 'allow-original' }),
+        modelCapabilities: { images: true },
+      }),
     });
     const chunks = await streamChunks(await handler(post([user('Bild', 'u1', [shot])])));
     const files = calls[0]!.prompt.flatMap((m): unknown[] => (Array.isArray(m.content) ? [...m.content] : [])).filter((p) => (p as { type: string }).type === 'file');
@@ -312,7 +329,7 @@ describe('screenshots', () => {
     const { model, calls } = echoModel();
     const handler = createAiChatHandler({
       tools, model, systemPrompt: SYSTEM, attachments: { enabled: true },
-      privacy: privacyConfig({ attachments: () => ({ app: 'allow-original' }) }),
+      privacy: privacyConfig({ policy: { screenshots: { mode: 'allow-original' } }, attachments: () => ({ app: 'allow-original' }) }),
     });
     const response = await handler(post([user('Bild', 'u1', [shot])]));
     expect(response.status).toBe(422);

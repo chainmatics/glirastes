@@ -72,6 +72,12 @@ export interface PrivacyBoundaryOptions {
    * unprotected, but does not take those pseudonyms for raw input.
    */
   protectedPrompt?: boolean;
+  /**
+   * Checks the model before it is wrapped; throwing (`provider_not_allowed`)
+   * refuses it before any request. A turn with a signed approval list holds
+   * every model of the turn to it, the classifier's included.
+   */
+  approveModel?: (model: unknown) => void;
 }
 
 /** One turn's privacy boundary around the model, tools and display. */
@@ -544,6 +550,7 @@ export function createPrivacyBoundary(options: PrivacyBoundaryOptions): PrivacyB
       const marker = (model as Record<symbol, unknown>)[WRAPPED] as PrivacyBoundary | undefined;
       if (marker === boundary) return model;
       if (marker) throw new PrivacyError('privacy_scope_invalid');
+      options.approveModel?.(model);
       const v3 = model as unknown as LanguageModelV3;
       if (v3.specificationVersion !== 'v3') throw new PrivacyError('privacy_unsupported_content');
       const wrapped = wrapLanguageModel({ model: v3, middleware });

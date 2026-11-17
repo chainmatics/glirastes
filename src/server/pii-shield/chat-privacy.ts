@@ -25,7 +25,7 @@ import {
 } from './model-boundary.js';
 import type { PrivacySession, StrictPiiShield } from './strict-shield.js';
 import type { PrivacyToolOptions, ToolReceiptStore } from './tool-boundary.js';
-import type { ProviderRegistry, ResolvedProvider } from './provider-registry.js';
+import type { ProviderPolicyConstraint, ProviderRegistry, ResolvedProvider } from './provider-registry.js';
 
 /**
  * The protected-text profile of a chat handler. Every model call of a turn
@@ -51,7 +51,9 @@ export interface ChatPrivacyConfig {
   knownIdentities?(req: Request, scope: PrivacyScope): ReadonlyArray<KnownIdentity> | Promise<ReadonlyArray<KnownIdentity>>;
   /**
    * The screenshot rule of this turn: app ceiling, tenant rule and the user's
-   * choice, resolved to the most restrictive. Default: blocked.
+   * choice, resolved to the most restrictive. Default: blocked. It only
+   * narrows the effective policy: `allow-original` needs that mode in the
+   * signed block or, without one, in `policy.screenshots`.
    */
   attachments?(req: Request, scope: PrivacyScope): AttachmentPolicyInput | Promise<AttachmentPolicyInput>;
   /** What the resolved model can receive. Default: text, tools, structured output; no images. */
@@ -69,8 +71,12 @@ export interface ChatPrivacyConfig {
    * `required` defaults to true: configuring privacy protects every turn,
    * also without a Platform block. `required: false` leaves the decision to
    * the signed policy of the turn (no block or `off`: unprotected). Its
-   * screenshot, provider and OpenRouter fields narrow a signed block; without
-   * one, `attachments` and the provider registry decide as configured.
+   * screenshot, provider and OpenRouter fields narrow a signed block.
+   * Without a signed block they apply as merged: screenshots are blocked
+   * unless `screenshots.mode` is `allow-original`, `providerEntryIds`
+   * narrow the registry's offer and `openRouterOnly` the upstream
+   * providers, exactly as the effective policy digest reports. The
+   * `attachments` rule can only narrow that further.
    */
   policy?: LocalPrivacyPolicy;
   /**
@@ -113,8 +119,8 @@ export interface ChatPrivacyTurn {
   readonly policy: EffectivePrivacyPolicy | undefined;
   /** Options for `wrapToolsForPrivacy`: the policy check and the rehydration counter. */
   toolHooks(): Pick<PrivacyToolOptions, 'beforeExecute' | 'onRehydrated'>;
-  /** Options for another boundary of this turn (the classifier): stops, policy check, counter. */
-  boundaryHooks(): Pick<PrivacyBoundaryOptions, 'onBlocked' | 'beforeModelCall' | 'onProtected'>;
+  /** Options for another boundary of this turn (the classifier): stops, policy check, counter, provider approval. */
+  boundaryHooks(): Pick<PrivacyBoundaryOptions, 'onBlocked' | 'beforeModelCall' | 'onProtected' | 'approveModel'>;
   readonly attachments: AttachmentPolicySnapshot;
   readonly config: ChatPrivacyConfig;
   /** The provider resolved for this turn, when `providers` is configured. */
@@ -235,9 +241,8 @@ async function openTurn(
   // Without a chat id every conversation would share one mapping: refuse.
   if (typeof body.id !== 'string' || body.id.length === 0) throw new PrivacyError('privacy_scope_invalid');
   const effective = policy?.effective;
-  // Only a signed block narrows attachments and providers. Without one the
-  // local configuration (the `attachments` rule, the registry) governs as
-  // before; the policy's lifetimes still apply.
+  // The effective policy narrows attachments and providers, with or without
+  // a signed block; only a signed block carries an approval list.
   const signed = effective?.source === 'platform' ? effective : undefined;
   // A signed approval list needs the registry's bindings: without a registry
   // nothing can show that the handler's model is an approved one.
@@ -260,13 +265,30 @@ async function openTurn(
   const identities = await config.knownIdentities?.(req, session.scope) ?? [];
   if (identities.length > 0) await session.registerIdentities(identities);
   const local = resolveAttachmentPolicy(await config.attachments?.(req, session.scope) ?? {});
-  const attachments = signed ? constrainAttachmentPolicy(local, signed.screenshots) : local;
+  // The effective policy governs as merged, with or without a signed block:
+  // what the reported digest says is what runs.
+  const attachments = effective ? constrainAttachmentPolicy(local, effective.screenshots) : local;
+  const constraint: ProviderPolicyConstraint | undefined = effective
+    ? {
+        ...effective.providers,
+        ...(!signed && config.policy?.providerEntryIds ? { offeredEntryIds: [...config.policy.providerEntryIds] } : {}),
+      }
+    : undefined;
+  const registry = config.providers?.registry;
   const provider = config.providers
     ? config.providers.registry.resolve(
         session.scope,
         await config.providers.selection?.(req, session.scope),
-        signed?.providers,
+        constraint,
       )
+    : undefined;
+  // Every model of a turn with a signed approval list must be the one the
+  // registry built under that approval; anything else is refused before a
+  // request (the classifier's own model included).
+  const approveModel = signed && registry && constraint
+    ? (model: unknown) => {
+        if (!registry.approves(model, constraint)) throw new PrivacyError('provider_not_allowed');
+      }
     : undefined;
   const checkFiles = (message: unknown, visionCapable: boolean) => {
     for (const part of filePartsOf(message)) {
@@ -277,10 +299,11 @@ async function openTurn(
   };
 
   let admitted: (ProtectedHistory & { answerAnchor: string | null }) | undefined;
-  const boundaryHooks = (): Pick<PrivacyBoundaryOptions, 'onBlocked' | 'beforeModelCall' | 'onProtected'> => ({
+  const boundaryHooks = (): Pick<PrivacyBoundaryOptions, 'onBlocked' | 'beforeModelCall' | 'onProtected' | 'approveModel'> => ({
     onBlocked,
     ...(policy?.check ? { beforeModelCall: policy.check } : {}),
     onProtected: () => decide('model_call_protected'),
+    ...(approveModel ? { approveModel } : {}),
   });
 
   return {

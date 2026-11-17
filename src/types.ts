@@ -874,6 +874,15 @@ export interface IntentClassifierConfig {
  */
 export interface PipelineCallOptions {
   wrapModel?: <M>(model: M) => M;
+  /**
+   * A protected turn's classifier call: exactly this model through this
+   * call, instead of the configured classifier model and `generateText`
+   * callback, so the classifier runs only on the turn's approved provider.
+   */
+  classifierCall?: {
+    model: unknown;
+    generateText: (options: { model: unknown; prompt: string; abortSignal?: AbortSignal }) => Promise<{ text: string }>;
+  };
 }
 
 export interface IntentClassifier {

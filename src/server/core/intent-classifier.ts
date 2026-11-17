@@ -371,14 +371,16 @@ export function createIntentClassifier(
         return { intent: 'ambiguous', confidence: 0 };
       }
 
-      // Try LLM classification when both model and generateText are available
-      if (model && generateText) {
+      // A protected turn's own call replaces the configured model and
+      // callback; otherwise LLM classification runs when both are available.
+      const call = options?.classifierCall ?? (model && generateText ? { model, generateText } : undefined);
+      if (call) {
         try {
           const result = await classifyWithLlm(
             input,
             modules,
-            options?.wrapModel ? options.wrapModel(model) : model,
-            generateText,
+            !options?.classifierCall && options?.wrapModel ? options.wrapModel(call.model) : call.model,
+            call.generateText,
             timeoutMs,
             conversationHistory,
           );

@@ -105,8 +105,14 @@ export interface ProviderRegistryConfig {
   allowUnqualified?: boolean;
 }
 
-/** The provider part of the effective privacy policy of a turn. */
-export type ProviderPolicyConstraint = EffectivePrivacyPolicy['providers'];
+/**
+ * The provider part of the effective privacy policy of a turn. Without a
+ * signed block (`allowed: null`) the local `providerEntryIds` narrow the
+ * offer as `offeredEntryIds`.
+ */
+export type ProviderPolicyConstraint = EffectivePrivacyPolicy['providers'] & {
+  offeredEntryIds?: readonly string[];
+};
 
 export interface ProviderRegistry {
   /**
@@ -138,6 +144,14 @@ export interface ProviderRegistry {
   capabilitiesOf(model: unknown): ModelCapabilities | undefined;
   /** For `ChatPrivacyConfig.providerLabel`: label of a model this registry built. */
   labelOf(model: unknown): string | undefined;
+  /**
+   * True only for a model this registry built by `resolve` under exactly
+   * this constraint, whose entry is still approved by it. Every model call
+   * of a turn with a signed approval list is held to it, the classifier's
+   * included: another model, or the same entry built without the approval,
+   * is refused before any request.
+   */
+  approves(model: unknown, constraint: ProviderPolicyConstraint): boolean;
 }
 
 const DEFAULT_CAPABILITIES: ModelCapabilities = { images: false };
@@ -175,6 +189,7 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
   }
 
   const built = new WeakMap<object, ProviderOption>();
+  const builtUnder = new WeakMap<object, { entry: ProviderEntry; constraint: ProviderPolicyConstraint | undefined }>();
   const option = (entry: ProviderEntry): ProviderOption => ({
     id: entry.id,
     label: entry.label,
@@ -190,8 +205,13 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
     }
   };
 
-  /** Whether a constraint lets this entry run at all (binding present and approved). */
+  /**
+   * Whether a constraint lets this entry run at all: it needs a binding the
+   * digest can name and the local offer; a signed list also needs that
+   * binding approved.
+   */
   const approved = (entry: ProviderEntry, constraint: ProviderPolicyConstraint): boolean => {
+    if (constraint.offeredEntryIds && !constraint.offeredEntryIds.includes(entry.id)) return false;
     const bound = bindingsById.get(entry.id);
     if (!bound) return false;
     if (constraint.allowed === null) return true;
@@ -246,7 +266,13 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
       });
       const resolved = option(entry);
       built.set(model, resolved);
+      builtUnder.set(model, { entry, constraint });
       return { ...resolved, model };
+    },
+    approves(model, constraint) {
+      if (typeof model !== 'object' || model === null) return false;
+      const record = builtUnder.get(model);
+      return record !== undefined && record.constraint === constraint && approved(record.entry, constraint);
     },
     capabilitiesOf(model) {
       return typeof model === 'object' && model !== null ? built.get(model)?.capabilities : undefined;
@@ -295,15 +321,21 @@ export const STRICT_OPENROUTER_ROUTING: Readonly<OpenRouterRoutingPolicy> = Obje
 });
 
 /**
- * Merges the routing policy into the `provider` field of every JSON POST
- * body. The policy's keys win over anything the request already set; a body
- * that is not a JSON object is refused rather than sent without routing.
+ * Sets the `provider` field of every JSON POST body to exactly the routing
+ * policy. Only `only` comes from the caller; the strict values are applied
+ * last, and whatever `provider` the request carried is replaced, so neither
+ * the request nor an option (`undefined` included) can remove, change or
+ * add to what the binding digest certifies. A body that is not a JSON
+ * object is refused rather than sent without routing.
  */
 export function withOpenRouterRouting(
   policy: OpenRouterRoutingPolicy,
   baseFetch: typeof globalThis.fetch = globalThis.fetch,
 ): typeof globalThis.fetch {
-  const routing = { ...STRICT_OPENROUTER_ROUTING, ...policy };
+  const routing: Record<string, unknown> = {
+    ...(Array.isArray(policy.only) ? { only: [...policy.only] } : {}),
+    ...STRICT_OPENROUTER_ROUTING,
+  };
   return (async (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
     if (init?.method?.toUpperCase() !== 'POST') return baseFetch(input, init);
     let body: unknown;
@@ -315,11 +347,7 @@ export function withOpenRouterRouting(
     if (body === null || typeof body !== 'object' || Array.isArray(body)) {
       throw new PrivacyError('provider_not_allowed');
     }
-    const record = body as Record<string, unknown>;
-    const existing = record.provider && typeof record.provider === 'object' && !Array.isArray(record.provider)
-      ? record.provider as Record<string, unknown>
-      : {};
-    return baseFetch(input, { ...init, body: JSON.stringify({ ...record, provider: { ...existing, ...routing } }) });
+    return baseFetch(input, { ...init, body: JSON.stringify({ ...(body as Record<string, unknown>), provider: { ...routing } }) });
   }) as typeof globalThis.fetch;
 }
 
@@ -367,7 +395,7 @@ export function openRouterAdapter(options: {
         baseURL: baseURL ?? OPENROUTER_ENDPOINT,
         apiKey,
         name: 'openrouter',
-        fetch: withOpenRouterRouting({ ...options.routing, ...(only ? { only: [...only] } : {}) }, options.fetch),
+        fetch: withOpenRouterRouting(only ? { only: [...only] } : {}, options.fetch),
       });
       return asV3(provider.chat(modelId));
     },

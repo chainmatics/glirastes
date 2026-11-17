@@ -13,9 +13,10 @@ import {
 } from '../provider-registry.js';
 import { CANARY, CANARY_PATTERN, captureFetch, memoryShield, testScope } from './privacy-fixtures.js';
 import { createAiChatHandler } from '../../adapters/nextjs/create-ai-chat-handler.js';
-import { defineTool, type ToolRegistry } from '../../../types.js';
+import { defineTool, type ModuleDefinition, type ToolRegistry } from '../../../types.js';
+import { createLocalAiPipeline } from '../../local-pipeline.js';
 import type { ChatPrivacyConfig } from '../chat-privacy.js';
-import type { PrivacyPolicyBlock } from '../../../contracts/privacy-policy.js';
+import type { LocalPrivacyPolicy, PrivacyPolicyBlock } from '../../../contracts/privacy-policy.js';
 import { createTurnSnapshot } from '../../../runtime/turn-snapshot.js';
 import {
   agentRevision,
@@ -116,11 +117,11 @@ describe('provider routing', () => {
     }
   });
 
-  it('a request cannot weaken the routing policy', async () => {
+  it('a request cannot weaken, change or add to the routing policy', async () => {
     const seen: string[] = [];
     const routed = withOpenRouterRouting({}, async (_input, init) => { seen.push(String(init?.body)); return new Response('{}'); });
-    await routed('https://openrouter.example.invalid', { method: 'POST', body: JSON.stringify({ provider: { allow_fallbacks: true, data_collection: 'allow', order: ['x'] } }) });
-    expect(JSON.parse(seen[0]!).provider).toEqual({ order: ['x'], allow_fallbacks: false, data_collection: 'deny', zdr: true });
+    await routed('https://openrouter.example.invalid', { method: 'POST', body: JSON.stringify({ provider: { allow_fallbacks: true, data_collection: 'allow', order: ['x'], only: ['openai'] } }) });
+    expect(JSON.parse(seen[0]!).provider).toEqual({ allow_fallbacks: false, data_collection: 'deny', zdr: true });
     await expect(routed('https://openrouter.example.invalid', { method: 'POST', body: 'not json' })).rejects.toMatchObject({ code: 'provider_not_allowed' });
   });
 });
@@ -289,9 +290,9 @@ describe('provider switch through the chat handler', () => {
   function tools(): ToolRegistry {
     return { noop: defineTool({ id: 'noop', description: 'Nichts.', inputSchema: z.object({}).strict(), execute: async () => ({ ok: true }) }) };
   }
-  const post = (text: string) => new Request('https://app.example/api/chat', {
+  const post = (text: string, files: unknown[] = []) => new Request('https://app.example/api/chat', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id: 'chat-1', messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] }),
+    body: JSON.stringify({ id: 'chat-1', messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text }, ...files] }] }),
   });
 
   function config(registry: ReturnType<typeof setup>['registry'], selection: string | undefined, tenantId = 'tenant-a'): ChatPrivacyConfig {
@@ -349,13 +350,16 @@ describe('signed provider approval through the chat handler (K1, request capture
   };
   type Patch = Partial<Record<'standard' | 'direct', Partial<{ baseURL: string; modelId: string }>>>;
 
-  /** The registry of this runtime; `patch` is a local change after the approval. */
-  function runtimeRegistry(patch: Patch = {}) {
+  /**
+   * The registry of this runtime; `patch` is a local change after the
+   * approval, `routing` the OpenRouter options it was configured with.
+   */
+  function runtimeRegistry(patch: Patch = {}, routing: Parameters<typeof openRouterAdapter>[0]['routing'] = { only: ['anthropic'] }) {
     const openrouter = captureFetch('openai-chat');
     const anthropic = captureFetch('anthropic');
     const registry = createProviderRegistry({
       adapters: [
-        openRouterAdapter({ createOpenAI, fetch: openrouter.fetch, routing: { only: ['anthropic'] } }),
+        openRouterAdapter({ createOpenAI, fetch: openrouter.fetch, routing }),
         anthropicAdapter({ createAnthropic, fetch: anthropic.fetch }),
       ],
       entries: [
@@ -389,7 +393,12 @@ describe('signed provider approval through the chat handler (K1, request capture
     };
   }
 
-  function handlerFor(registry: ReturnType<typeof runtimeRegistry>['registry'], block: PrivacyPolicyBlock, selection?: string) {
+  function handlerFor(
+    registry: ReturnType<typeof runtimeRegistry>['registry'],
+    block: PrivacyPolicyBlock | null,
+    selection?: string,
+    extra: { pipeline?: ReturnType<typeof createLocalAiPipeline>; policy?: LocalPrivacyPolicy } = {},
+  ) {
     const tools: ToolRegistry = {
       list_tasks: defineTool({
         id: agentRevision.toolAllowlist[0]!, description: 'Aufgaben.', inputSchema: z.object({}).strict(), execute: async () => ({ tasks: [] }),
@@ -398,10 +407,12 @@ describe('signed provider approval through the chat handler (K1, request capture
     return createAiChatHandler({
       tools,
       systemPrompt: 'Assistent',
+      ...(extra.pipeline ? { pipeline: extra.pipeline } : {}),
+      attachments: { enabled: true },
       managedRuntime: {
         resolvePrincipal: async () => principal,
         resolveTurnSnapshot: async ({ turnId }) => createTurnSnapshot({
-          turnId, agentRevision, manifestRevision, policyRevision: { ...policyRevision, privacy: block }, principal, localLimits,
+          turnId, agentRevision, manifestRevision, policyRevision: block ? { ...policyRevision, privacy: block } : policyRevision, principal, localLimits,
         }),
       },
       privacy: {
@@ -409,12 +420,15 @@ describe('signed provider approval through the chat handler (K1, request capture
         scope: (_req, chat) => ({ ...testScope(), conversationId: chat.conversationId ?? 'x' }),
         knownIdentities: () => [{ id: CANARY.colleagueId, name: CANARY.colleague, email: CANARY.colleagueEmail }],
         providers: { registry, selection: () => selection },
+        // The tenant rule would allow originals; only the effective policy may.
+        attachments: () => ({ app: 'allow-original', tenant: 'allow-original' }),
+        ...(extra.policy ? { policy: extra.policy } : {}),
       },
     });
   }
-  const post = (text: string) => new Request('https://app.example/api/chat', {
+  const post = (text: string, files: unknown[] = []) => new Request('https://app.example/api/chat', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id: 'chat-1', messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] }),
+    body: JSON.stringify({ id: 'chat-1', messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text }, ...files] }] }),
   });
 
   it('the approved default sends only to its approved endpoint', async () => {
@@ -457,5 +471,132 @@ describe('signed provider approval through the chat handler (K1, request capture
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'provider_not_allowed' });
     expect(total()).toBe(0);
+  });
+
+  describe('the classifier and every side call use the approved provider only (H2)', () => {
+    const modules: ModuleDefinition[] = [{
+      id: 'tasks', name: 'Aufgaben', description: 'Aufgaben lesen.', tools: ['list_tasks'],
+      classification: { hint: 'Aufgaben lesen', examples: ['zeig meine aufgaben'] },
+    }];
+    /** A classifier model on a transport no approval covers. */
+    function rogueModel() {
+      const rogue = captureFetch('anthropic', { text: JSON.stringify({ moduleId: 'tasks', confidence: 0.99 }) });
+      const model = createAnthropic({ apiKey: 'rogue-key', baseURL: 'https://rogue.example.invalid/v1', fetch: rogue.fetch })('claude-haiku-4-5');
+      return { model, rogue };
+    }
+    const variants = {
+      'the SDK facade': (_rogue: unknown) => generateText,
+      'a callback that ignores the model it gets': (rogue: unknown) =>
+        ((options: Parameters<typeof generateText>[0]) => generateText({ ...options, model: rogue as never })) as typeof generateText,
+    };
+    for (const [name, callback] of Object.entries(variants)) {
+      it(`a configured classifier model and ${name} send nothing; classifier and answer reach only the approved endpoint`, async () => {
+        const { registry, transports } = runtimeRegistry();
+        const { model, rogue } = rogueModel();
+        const pipeline = createLocalAiPipeline({ modules, classifier: { modules, model }, generateText: callback(model) as never });
+        const response = await handlerFor(registry, signedBlock(false), undefined, { pipeline })(post(`Zeig Aufgaben von ${CANARY.colleague}`));
+        expect(response.status).toBe(200);
+        await response.text();
+        expect(rogue.requests).toHaveLength(0);
+        expect(transports.direct.requests).toHaveLength(0);
+        const sent = bodies(transports.standard.requests);
+        // One classifier call (non-streaming) and the streamed answer.
+        expect(sent.filter((body) => body.stream !== true).length).toBeGreaterThanOrEqual(1);
+        expect(sent.filter((body) => body.stream === true).length).toBeGreaterThanOrEqual(1);
+        for (const request of transports.standard.requests) expect(request.url.startsWith(`${APPROVED.standard.baseURL}/`)).toBe(true);
+        for (const body of sent) expect(body.model).toBe(APPROVED.standard.modelId);
+        expect(transports.standard.requests.map((r) => r.body).join('\n')).not.toMatch(CANARY_PATTERN);
+      });
+    }
+
+    it('under a signed list the boundary refuses any model the registry did not build under that approval', async () => {
+      const { registry, transports } = runtimeRegistry();
+      const { model: rogue, rogue: rogueTransport } = rogueModel();
+      const { session } = await protectedSession();
+      const signed = signedBlock(false);
+      if (signed.profile !== 'protected-text/v1') throw new Error('fixture');
+      const constraint = { allowed: signed.providers.allowed, defaultEntryId: 'standard', userChoice: false };
+      const resolved = registry.resolve(session.scope, undefined, constraint);
+      expect(registry.approves(resolved.model, constraint)).toBe(true);
+      // The same model under another constraint, a foreign model, a non-object: refused.
+      expect(registry.approves(resolved.model, { ...constraint })).toBe(false);
+      expect(registry.approves(rogue, constraint)).toBe(false);
+      expect(registry.approves(null, constraint)).toBe(false);
+      const boundary = createPrivacyBoundary({
+        session,
+        approveModel: (model) => { if (!registry.approves(model, constraint)) throw Object.assign(new Error('provider_not_allowed'), { code: 'provider_not_allowed' }); },
+      });
+      expect(() => boundary.wrapModel(rogue)).toThrow(expect.objectContaining({ code: 'provider_not_allowed' }));
+      await generateText({ model: boundary.wrapModel(resolved.model), prompt: 'Hallo' });
+      expect(rogueTransport.requests).toHaveLength(0);
+      expect(transports.standard.requests).toHaveLength(1);
+    });
+  });
+
+  describe('the routing on the wire is exactly the approved one (M4)', () => {
+    const STRICT = { only: ['anthropic'], allow_fallbacks: false, data_collection: 'deny', zdr: true };
+    const sloppy: Array<[string, Record<string, unknown>]> = [
+      ['undefined strict fields', { only: ['anthropic'], allow_fallbacks: undefined, data_collection: undefined, zdr: undefined }],
+      ['widening strict fields', { only: ['anthropic'], allow_fallbacks: true, data_collection: 'allow', zdr: false, order: ['openai'] }],
+    ];
+    for (const [name, routing] of sloppy) {
+      it(`an adapter configured with ${name} has the approved digest and sends exactly the strict routing`, async () => {
+        const approved = runtimeRegistry().registry.bindings();
+        const { registry, transports } = runtimeRegistry({}, routing as never);
+        expect(registry.bindings()).toEqual(approved);
+        const response = await handlerFor(registry, signedBlock(false))(post('Hallo'));
+        expect(response.status).toBe(200);
+        await response.text();
+        const sent = bodies(transports.standard.requests);
+        expect(sent.length).toBeGreaterThan(0);
+        for (const body of sent) expect(body.provider).toEqual(STRICT);
+      });
+    }
+  });
+
+  describe('local restrictions without a signed block run as the digest reports (M5)', () => {
+    const png = `data:image/png;base64,${Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).toString('base64')}`;
+    const shot = { type: 'file', mediaType: 'image/png', url: png, filename: 'shot.png' };
+
+    it('providerEntryIds narrow the offer: another entry is refused with 403 and nothing is sent', async () => {
+      const { registry, total } = runtimeRegistry();
+      const response = await handlerFor(registry, null, 'direct', { policy: { providerEntryIds: ['standard'] } })(post('Hallo'));
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: 'provider_not_allowed' });
+      expect(total()).toBe(0);
+    });
+
+    it('openRouterOnly reaches the wire', async () => {
+      const { registry, transports } = runtimeRegistry({}, {});
+      const response = await handlerFor(registry, null, undefined, { policy: { openRouterOnly: ['anthropic'] } })(post('Hallo'));
+      expect(response.status).toBe(200);
+      await response.text();
+      const sent = bodies(transports.standard.requests);
+      expect(sent.length).toBeGreaterThan(0);
+      for (const body of sent) expect(body.provider).toEqual({ only: ['anthropic'], allow_fallbacks: false, data_collection: 'deny', zdr: true });
+    });
+
+    it('screenshots stay blocked although the tenant rule allows originals; only the declared mode opens them', async () => {
+      const blocked = runtimeRegistry();
+      const refused = await handlerFor(blocked.registry, null, 'direct')(post('Bild', [shot]));
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toEqual({ error: 'privacy_attachment_blocked' });
+      expect(blocked.total()).toBe(0);
+
+      const declared = runtimeRegistry();
+      const response = await handlerFor(declared.registry, null, 'direct', { policy: { screenshots: { mode: 'allow-original' } } })(post('Bild', [shot]));
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(declared.transports.direct.requests.length).toBeGreaterThan(0);
+      expect(declared.transports.direct.requests[0]!.body).toContain('"image"');
+    });
+
+    it('a signed blocked mode is not widened by the tenant rule either', async () => {
+      const { registry, total } = runtimeRegistry();
+      const response = await handlerFor(registry, signedBlock(true), 'direct', { policy: { screenshots: { mode: 'allow-original' } } })(post('Bild', [shot]));
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: 'privacy_attachment_blocked' });
+      expect(total()).toBe(0);
+    });
   });
 });

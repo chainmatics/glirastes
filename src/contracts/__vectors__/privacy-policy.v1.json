@@ -1146,6 +1146,51 @@
       }
     },
     {
+      "name": "no-platform-local-allow-original",
+      "platform": null,
+      "local": {
+        "required": true,
+        "screenshots": {
+          "mode": "allow-original"
+        }
+      },
+      "providers": {
+        "bindings": {
+          "local-entry": "sha256:ea09nPsXoAU0cn2Zv04MHK2D5s65ltwiXU8k6Y41jD8"
+        },
+        "defaultEntryId": "local-entry"
+      },
+      "expected": {
+        "profile": "protected-text/v1",
+        "source": "local",
+        "screenshots": {
+          "mode": "allow-original",
+          "imageTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "providers": {
+          "allowed": null,
+          "defaultEntryId": "local-entry",
+          "userChoice": true
+        },
+        "mapping": {
+          "idleTtlSeconds": 3600,
+          "absoluteTtlSeconds": 86400
+        },
+        "speech": {
+          "localOnly": true,
+          "maxDurationSeconds": 60
+        },
+        "localRestrictions": [
+          "local_profile_required"
+        ],
+        "unmatchedEntryIds": []
+      }
+    },
+    {
       "name": "binding-mismatch-blocks-entry-and-default",
       "platform": {
         "schemaVersion": 1,

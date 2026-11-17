@@ -75,7 +75,7 @@ import {
   type streamText,
   type UIMessage,
 } from 'ai';
-import { protectedStreamText } from '../../pii-shield/model-calls.js';
+import { protectedGenerateText, protectedStreamText } from '../../pii-shield/model-calls.js';
 import type {
   AiChatHandlerConfig,
   IntentRoutingResult,
@@ -220,6 +220,14 @@ export interface StreamHandlerContext {
    * no other tool; a custom one should intersect its `activeTools` with it.
    */
   authorizedToolNames?: () => Promise<ReadonlySet<string>>;
+  /**
+   * Set in a managed turn with a privacy gate: runs before every model step
+   * and throws a `PrivacyError` once the gate locks during the turn (a
+   * refused or raised protected requirement, a failed state save). The
+   * built-in stream handler calls it first in `prepareStep`, so no further
+   * model or tool call happens after a lock; a custom one must do the same.
+   */
+  beforeModelStep?: () => Promise<void>;
   /**
    * Identity set of SDK built-ins (`NON_DOMAIN_TOOL_NAMES`) whose tool
    * instance this handler created itself for the turn. Only these run outside
@@ -677,6 +685,8 @@ async function defaultStreamHandler(
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
         prepareStep: async () => {
+          // A lock during the turn ends it here, before the step's model call.
+          await ctx.beforeModelStep?.();
           if (budgetExhausted()) {
             return { activeTools: [], toolChoice: 'none' as const };
           }
@@ -1260,6 +1270,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       let managedPrincipal: Principal | undefined;
       /** The manifest tool ids the guard would allow right now; empty when that cannot be decided. */
       let currentToolIds: () => Promise<ReadonlySet<string>> = async () => new Set();
+      let beforeModelStep: (() => Promise<void>) | undefined;
       if (managedRuntime) {
         const principalResult = PrincipalSchema.safeParse(
           await managedRuntime.resolvePrincipal(req),
@@ -1306,6 +1317,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
               return await managedRuntime.loadRevocations?.({ request: req, snapshot }) ?? [];
             }
           : undefined;
+        if (managedRuntime.privacyGate) {
+          const gate = managedRuntime.privacyGate;
+          beforeModelStep = async () => {
+            await gate({ request: req, snapshot });
+          };
+        }
         managedTurn = createManagedTurnGuard({
           snapshot,
           resolvePrincipal: resolveCurrentPrincipal,
@@ -1755,7 +1772,25 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             ...(privacy?.providerOptions ? { providerOptions: privacy.providerOptions } : {}),
             ...privacyTurn.boundaryHooks(),
           });
-          classifierOptions = { wrapModel: (model) => classifierBoundary.wrapModel(model) };
+          // A resolved provider replaces the classifier's model too, and the
+          // call goes through the SDK facade, not the configured callback:
+          // the classifier sends only to the turn's approved provider. Under
+          // a signed approval list the boundary refuses any other model.
+          const approvedModel = privacyTurn.provider?.model;
+          classifierOptions = {
+            wrapModel: (model) => classifierBoundary.wrapModel(model),
+            ...(approvedModel
+              ? {
+                  classifierCall: {
+                    model: classifierBoundary.wrapModel(approvedModel),
+                    generateText: ({ model, prompt, abortSignal }) => protectedGenerateText(
+                      { model: model as never, prompt, ...(abortSignal ? { abortSignal } : {}) },
+                      classifierBoundary,
+                    ),
+                  },
+                }
+              : {}),
+          };
         }
 
         // Run pipeline: guardrails + classification + routing + model selection
@@ -2003,6 +2038,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           handlerBuiltinToolNames: discoveryController
             ? [...handlerBuiltinNames, 'find_tools']
             : handlerBuiltinNames,
+          ...(beforeModelStep ? { beforeModelStep } : {}),
           bindApprovalRequests: (stream) => bindApprovalRequests(stream, pipelineApprovals.binder),
         });
       }
@@ -2211,6 +2247,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         handlerBuiltinToolNames: discoveryController
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,
+        ...(beforeModelStep ? { beforeModelStep } : {}),
         bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder),
       });
     } catch (error) {
@@ -2260,7 +2297,6 @@ function findHandlerBuiltins(
 
 const PRIVACY_DECISION_CODE_SET: ReadonlySet<string> = new Set(PRIVACY_DECISION_CODES);
 
-/** Counts a refusal before the privacy turn opened; a sink never changes the answer. */
 /**
  * The decision callback of a protected turn: the app's own `onDecision` and,
  * with a metrics sink, the content-free `privacy.decisions` counter. A
@@ -2282,6 +2318,7 @@ function decisionCounter(
   };
 }
 
+/** Counts a refusal before the privacy turn opened; a sink never changes the answer. */
 function countPrivacyDecision(onDecision: ((code: PrivacyDecisionCode) => void) | undefined, code: string): void {
   if (!onDecision || !PRIVACY_DECISION_CODE_SET.has(code)) return;
   try {
