@@ -6,7 +6,8 @@
  * they carry for the model, measured in the data across all entries: first
  * nested arrays and objects, foreign keys, opaque ids, URLs and long texts,
  * then other strings, last booleans, numbers, null and short enum-like
- * labels; within each class the largest first. Pure and deterministic.
+ * labels; in the last two classes nested fields before an entry's own,
+ * then within each class the largest first. Pure and deterministic.
  */
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import { formatResultPath, isSelectablePath, setOwn, type PathStep } from './result-paths.js';
@@ -28,12 +29,25 @@ export interface ResultOverviewMarker {
    * staying as `{}`). Every path is a valid `fields` path of `read_result`
    * that reads exactly that field: a field whose path cannot be written so
    * (a key that is empty or holds `.`, `[` or `]`, a path over 120
-   * characters) is not listed, only counted in `omittedMore`.
+   * characters) is not listed, only counted in `omittedMore`. A listed
+   * parent names in `keys` up to eight of its direct child keys, largest
+   * first, each a valid path as `path.key` (`keysMore` counts the others);
+   * keys are given up before any field when space is short.
    */
-  omitted?: Array<{ path: string; approxChars: number }>;
+  omitted?: OmittedEntry[];
   /** Further left-out fields (or parents) that `omitted` does not list: beyond twenty, or not selectable by path. */
   omittedMore?: number;
   hint: string;
+}
+
+/** One entry of `_result.omitted`. */
+export interface OmittedEntry {
+  path: string;
+  approxChars: number;
+  /** Set for a left-out parent: its direct child keys, readable as `path.key`. */
+  keys?: string[];
+  /** Further child keys of the parent that `keys` does not list. */
+  keysMore?: number;
 }
 
 export interface BuildResultOverviewOptions {
@@ -56,6 +70,9 @@ const MAX_CANDIDATES = 500;
 const MAX_LISTED_OMITTED = 20;
 const MAX_LISTED_ARRAYS = 5;
 const MAX_LISTED_PATH_CHARS = 120;
+/** Child keys named per left-out parent, and their longest. */
+const MAX_LISTED_KEYS = 8;
+const MAX_LISTED_KEY_CHARS = 64;
 /** An entry's own fields that name it stay as long as they are small. Foreign keys (`folderId`) do not. */
 const IDENTITY_KEY = /^(id|uuid|key|slug|code|name|title|label|displayName)$/;
 const MAX_IDENTITY_FIELD_CHARS = 200;
@@ -327,10 +344,10 @@ function without(value: Json, node: RemovalNode | undefined, property = false): 
   return property && kept === 0 && keys.length > 0 ? SHELL : output;
 }
 
-function hintOf(options: BuildResultOverviewOptions, shown: string, omittedFields: boolean, unnamed: boolean): string {
+function hintOf(options: BuildResultOverviewOptions, shown: string, omittedFields: boolean, unnamed: boolean, keyed: boolean): string {
   const first = `Overview${shown}${omittedFields ? ', without the fields in omitted' : ''}.`;
   const infer = omittedFields ? ' Do not infer missing fields from other fields; read them or say they are not known.' : '';
-  const read = ` Read more with ${READ_RESULT_TOOL_NAME} in this turn (resultId = _result.id; fields as in omitted, `
+  const read = ` Read more with ${READ_RESULT_TOOL_NAME} in this turn (resultId = _result.id; fields as in omitted${keyed ? ' (path or path.key)' : ''}, `
     + '"[]" every entry, "[2]" one; offset, limit).';
   const odd = unnamed ? ' Fields with unusual key names are only counted (omittedMore); read them with their parent.' : '';
   const expired = options.readOnly
@@ -375,47 +392,74 @@ export function buildResultOverview(
     keep.add(smallest[0]);
   }
   const rank = new Map(candidates.map((candidate) => [candidate, valueRank(candidate)]));
-  // Low value first, within a class the largest first.
+  // Low value first; in the two upper classes nested fields before an entry's own; then the largest first.
+  const own = (candidate: Candidate) => (candidate.steps.length - candidate.base > 1 ? 0 : 1);
   const droppable = candidates
     .filter((candidate) => candidate.entryKey === undefined || !keep.has(candidate.entryKey))
-    .sort((left, right) => rank.get(left)! - rank.get(right)! || right.size - left.size || byPath(left, right));
+    .sort((left, right) => rank.get(left)! - rank.get(right)!
+      || (rank.get(left)! > 0 ? own(left) - own(right) : 0) || right.size - left.size || byPath(left, right));
 
   // Parents (below the dominant array or its route) a field can be listed under, shallowest first.
   const parentsOf = new Map<Candidate, string[]>();
   const fieldsUnder = new Map<string, number>();
   /** Whether a path (a field or a parent) can be written so that `read_result` reads exactly it. */
   const selectable = new Map<string, boolean>();
+  /** Per parent: the size under each direct child key, and whether `parent.key` is a listable path. */
+  const childKeys = new Map<string, Map<string, { size: number; listable: boolean }>>();
   for (const candidate of all) {
     const parents: string[] = [];
     for (let length = candidate.base + 1; length <= candidate.steps.length; length += 1) {
       const steps = candidate.steps.slice(0, length);
       const path = length === candidate.steps.length ? candidate.path : formatResultPath(steps);
       if (!selectable.has(path)) selectable.set(path, isSelectablePath(steps, MAX_LISTED_PATH_CHARS));
-      if (length < candidate.steps.length) parents.push(path);
+      if (length < candidate.steps.length) {
+        parents.push(path);
+        const child = candidate.steps[length]!;
+        if (child.kind !== 'key') continue;
+        const children = childKeys.get(path) ?? new Map<string, { size: number; listable: boolean }>();
+        childKeys.set(path, children);
+        const known = children.get(child.key);
+        if (known) known.size += candidate.size;
+        else {
+          const listable = child.key.length <= MAX_LISTED_KEY_CHARS && isSelectablePath(steps.concat(child), MAX_LISTED_PATH_CHARS);
+          children.set(child.key, { size: candidate.size, listable });
+        }
+      }
     }
     parentsOf.set(candidate, parents);
     for (const path of [...parents, candidate.path]) fieldsUnder.set(path, (fieldsUnder.get(path) ?? 0) + 1);
   }
+  /** The listable direct child keys of a parent, largest first, and how many child keys it has in all. */
+  const keysOf = (parent: string): { keys: string[]; count: number } => {
+    const children = [...(childKeys.get(parent) ?? [])];
+    const keys = children.filter(([, child]) => child.listable)
+      .sort((left, right) => right[1].size - left[1].size || (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+      .slice(0, MAX_LISTED_KEYS).map(([key]) => key);
+    return { keys, count: children.length };
+  };
   /** Left-out fields, a parent whose fields were all left out listed once instead, largest first. */
-  const omittedGroups = (dropped: Candidate[]): Array<{ path: string; size: number; selectable: boolean }> => {
+  const omittedGroups = (dropped: Candidate[]): Array<{ path: string; size: number; selectable: boolean; parent: boolean }> => {
     const droppedUnder = new Map<string, number>();
     for (const candidate of dropped) {
       for (const path of [...parentsOf.get(candidate)!, candidate.path]) droppedUnder.set(path, (droppedUnder.get(path) ?? 0) + 1);
     }
     const groups = new Map<string, number>();
+    const parents = new Set<string>();
     for (const candidate of dropped) {
       const parent = parentsOf.get(candidate)!.find((path) => droppedUnder.get(path) === fieldsUnder.get(path));
       const path = parent ?? candidate.path;
       groups.set(path, (groups.get(path) ?? 0) + candidate.size);
+      if (parent !== undefined) parents.add(parent);
     }
-    return [...groups].map(([path, size]) => ({ path, size, selectable: selectable.get(path) === true }))
+    return [...groups].map(([path, size]) => ({ path, size, selectable: selectable.get(path) === true, parent: parents.has(path) }))
       .sort((left, right) => right.size - left.size || (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
   };
 
   const arraysMarker: Record<string, number> = {};
   for (const array of arrays.slice(0, MAX_LISTED_ARRAYS)) setOwn(arraysMarker, listedPath(array.route.join('.')), array.entries.length);
 
-  const build = (dropCount: number, entryCount: number): { output: Record<string, unknown>; size: number } => {
+  /** `keyCount`: at most this many `keys` per listed parent (help, not data: given up before any field). */
+  const build = (dropCount: number, entryCount: number, keyCount = 0): { output: Record<string, unknown>; size: number } => {
     const dropped = droppable.slice(0, dropCount);
     const trie = removalTrie(dropped.map((candidate) => candidate.steps));
     let data = without(root, trie) as JsonObject;
@@ -435,10 +479,15 @@ export function buildResultOverview(
       data = cut(data, 0);
     }
     // Only paths that read exactly the left-out field are listed; the others are counted.
-    const omitted = groups.filter((group) => group.selectable).slice(0, MAX_LISTED_OMITTED).map((group) => ({
-      path: group.path,
-      approxChars: approx(group.size),
-    }));
+    const omitted = groups.filter((group) => group.selectable).slice(0, MAX_LISTED_OMITTED).map((group) => {
+      const listed: OmittedEntry = { path: group.path, approxChars: approx(group.size) };
+      if (!group.parent || keyCount === 0) return listed;
+      const { keys, count } = keysOf(group.path);
+      if (keys.length === 0) return listed;
+      listed.keys = keys.slice(0, keyCount);
+      if (count > listed.keys.length) listed.keysMore = count - listed.keys.length;
+      return listed;
+    });
     const shown = dominant
       ? entryCount === dominant.entries.length
         ? `: all ${entryCount} entries of ${listedPath(dominantPath!)}`
@@ -450,7 +499,7 @@ export function buildResultOverview(
       ...(dominant ? { showing: entryCount, total: dominant.entries.length } : {}),
       ...(omitted.length > 0 ? { omitted } : {}),
       ...(groups.length > omitted.length ? { omittedMore: groups.length - omitted.length } : {}),
-      hint: hintOf(options, shown, dropped.length > 0, groups.some((group) => !group.selectable)),
+      hint: hintOf(options, shown, dropped.length > 0, groups.some((group) => !group.selectable), omitted.some((entry) => entry.keys)),
     };
     const output: Record<string, unknown> = {};
     for (const key of Object.keys(root)) {
@@ -463,8 +512,8 @@ export function buildResultOverview(
   };
 
   const total = dominant ? dominant.entries.length : 0;
-  const fits = (dropCount: number, entryCount: number) => build(dropCount, entryCount).size <= options.maxChars;
-  let chosen: { output: Record<string, unknown>; size: number } | undefined;
+  const fits = (dropCount: number, entryCount: number, keyCount = 0) => build(dropCount, entryCount, keyCount).size <= options.maxChars;
+  let chosen: { dropCount: number; entryCount: number } | undefined;
   if (fits(droppable.length, total)) {
     // The fewest fields left out (largest first) with every entry.
     let low = 0;
@@ -474,7 +523,7 @@ export function buildResultOverview(
       if (fits(mid, total)) high = mid;
       else low = mid + 1;
     }
-    chosen = build(low, total);
+    chosen = { dropCount: low, entryCount: total };
   } else if (dominant) {
     // Small fields alone do not fit: the most leading entries that do.
     let low = 0;
@@ -484,10 +533,24 @@ export function buildResultOverview(
       if (fits(droppable.length, mid)) low = mid;
       else high = mid - 1;
     }
-    const candidate = build(droppable.length, low);
-    if (candidate.size <= options.maxChars) chosen = candidate;
+    if (fits(droppable.length, low)) chosen = { dropCount: droppable.length, entryCount: low };
   }
-  if (!chosen || chosen.size > options.maxChars) return undefined;
+  if (!chosen) return undefined;
+  // With fields and entries settled, as many keys per left-out parent as fit (none when even one does not).
+  let keyCount = MAX_LISTED_KEYS;
+  if (chosen.dropCount > 0 && !fits(chosen.dropCount, chosen.entryCount, keyCount)) {
+    let low = 0;
+    let high = MAX_LISTED_KEYS - 1;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (fits(chosen.dropCount, chosen.entryCount, mid)) low = mid;
+      else high = mid - 1;
+    }
+    keyCount = low;
+  }
+  let result = build(chosen.dropCount, chosen.entryCount, chosen.dropCount > 0 ? keyCount : 0);
+  if (result.size > options.maxChars) result = build(chosen.dropCount, chosen.entryCount);
+  if (result.size > options.maxChars) return undefined;
   // Nothing of the stored result leaks out by reference.
-  return JSON.parse(JSON.stringify(chosen.output)) as Record<string, unknown>;
+  return JSON.parse(JSON.stringify(result.output)) as Record<string, unknown>;
 }

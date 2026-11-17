@@ -913,7 +913,7 @@ describe('pilot feedback: the overview keeps short labels and drops opaque ids f
     expect(read.data).toEqual([{}, { extra: value.data[1]!.extra }]);
     // Without the empty one, the parent is listed once.
     const whole = buildResultOverview({ data: value.data.slice(1) }, { id: 'ro_abcdefgh', maxChars: 2_000, readOnly: true }) as Overview;
-    expect(whole._result.omitted).toEqual([{ path: 'data[].extra', approxChars: expect.any(Number) }]);
+    expect(whole._result.omitted).toEqual([{ path: 'data[].extra', approxChars: expect.any(Number), keys: ['blob', 'ref'] }]);
     expect((whole.data as Array<Record<string, unknown>>)[0]).toEqual({ id: 1, status: 'on' });
   });
 
@@ -926,6 +926,77 @@ describe('pilot feedback: the overview keeps short labels and drops opaque ids f
     const overview = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: size(value) - 1_200, readOnly: true }) as Overview;
     expect(Object.keys((overview.items as Array<Record<string, unknown>>)[1]!)).toEqual(['id', 'kind', 'score']);
     expect(overview._result.omitted!.map((entry) => entry.path)).toEqual(['items[].link', 'items[].ownerId']);
+  });
+});
+
+describe('second pilot run: an entry\'s own labels outrank nested scalars, left-out parents name their keys', () => {
+  const uuid = (index: number) => `0b9d5c1e-7a3f-4c2b-9e1d-${String(index).padStart(12, '0')}`;
+  const body = 'v'.repeat(700);
+  const states = ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'NOT_REQUESTED'];
+  /** 45 designs (~102k characters) whose longest enum is the largest field of the last class. */
+  const designs = (pad: number) => ({
+    data: Array.from({ length: 45 }, (_, index) => ({
+      id: uuid(index), name: `Design number ${index} for the autumn campaign`, approvalStatus: states[index % 4]!,
+      reviewState: ['OPEN', 'DONE'][index % 2]!, contentType: ['IMAGE', 'VIDEO'][index % 2]!, isDraft: index % 2 === 0,
+      hasDraftChanges: index % 3 === 0, draftRevision: index % 7, brandKitId: uuid(index + 100), tenantId: uuid(1),
+      folderId: uuid(index % 5), createdAt: '2026-10-01T10:00:00.000Z', updatedAt: '2026-11-01T10:00:00.000Z',
+      description: 'd'.repeat(pad), width: 1920, height: 1080, durationMs: 15_000, sortOrder: index, version: 3,
+      publishedVersion: { versionNumber: index % 4, status: 'LIVE', publishedAt: '2026-10-05T10:00:00.000Z', variants: [{ label: 'a', body }] },
+      draftVersion: { versionNumber: 1 + (index % 4), variants: [{ label: 'a', body }] },
+    })),
+  });
+
+  it.each([0, 40, 130])('keeps the own status, type and flag fields of all 45 entries at 16,000 (description %i)', (pad) => {
+    const value = designs(pad);
+    const overview = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: 16_000, readOnly: true }) as Overview;
+    expect(size(overview)).toBeLessThanOrEqual(16_000);
+    const data = overview.data as Array<Record<string, unknown>>;
+    expect(data).toHaveLength(45);
+    for (const [index, entry] of data.entries()) {
+      const { approvalStatus, reviewState, contentType, isDraft, hasDraftChanges } = value.data[index]!;
+      expect(entry).toMatchObject({ approvalStatus, reviewState, contentType, isDraft, hasDraftChanges });
+    }
+    const omitted = overview._result.omitted!.map((entry) => entry.path);
+    for (const key of ['approvalStatus', 'reviewState', 'contentType', 'isDraft', 'hasDraftChanges']) expect(omitted).not.toContain(`data[].${key}`);
+  });
+
+  /** 30 entries whose `extra` is always left out whole; its child keys differ in size. */
+  const keyed = () => ({
+    data: Array.from({ length: 30 }, (_, index) => ({
+      id: index,
+      extra: {
+        ...Object.fromEntries(Array.from({ length: 10 }, (_, key) => [`k${key}`, 'x'.repeat(10 * (key + 1))])),
+        'a.b': 'y'.repeat(500), ['l'.repeat(65)]: 'z'.repeat(400),
+      },
+    })),
+  });
+
+  it('names up to eight selectable child keys of a left-out parent, largest first, and counts the others', () => {
+    const overview = buildResultOverview(keyed(), { id: 'ro_abcdefgh', maxChars: 2_000, readOnly: true }) as Overview;
+    expect(size(overview)).toBeLessThanOrEqual(2_000);
+    expect(overview._result.omitted).toEqual([{
+      path: 'data[].extra', approxChars: expect.any(Number), keys: ['k9', 'k8', 'k7', 'k6', 'k5', 'k4', 'k3', 'k2'], keysMore: 4,
+    }]);
+    expect(overview._result.hint).toContain('fields as in omitted (path or path.key)');
+  });
+
+  it('gives up keys before any field when space is short', () => {
+    const value = designs(0);
+    const keyedOverview = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: 16_000, readOnly: true }) as Overview;
+    const parents = keyedOverview._result.omitted!.filter((entry) => entry.keys);
+    expect(parents.map((entry) => [entry.path, entry.keys])).toEqual([
+      ['data[].publishedVersion', ['variants', 'publishedAt', 'versionNumber', 'status']],
+      ['data[].draftVersion', ['variants', 'versionNumber']],
+    ]);
+    // The same overview without keys: exactly as large as a limit that leaves no room for them.
+    const bare = JSON.parse(JSON.stringify(keyedOverview)) as Overview;
+    for (const entry of bare._result.omitted!) {
+      delete entry.keys;
+      delete entry.keysMore;
+    }
+    bare._result.hint = bare._result.hint.replace(' (path or path.key)', '');
+    const tight = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: size(bare), readOnly: true }) as Overview;
+    expect(tight).toEqual(bare);
   });
 });
 
@@ -1155,16 +1226,18 @@ describe('review round: every listed omitted path reads exactly the left-out dat
     },
     { report: { sections: Array.from({ length: 8 }, (_, index) => ({ title: `S${index}`, body: 'b'.repeat(400), notes: { text: 'n'.repeat(200) } })) }, extra: 'e'.repeat(900) },
     { title: 'Report', body: 'r'.repeat(1_500), appendix: { notes: 'n'.repeat(1_200), author: 'A', 'odd key': 'o'.repeat(400) } },
+    { items: Array.from({ length: 30 }, (_, index) => ({ id: index, more: { body: 'b'.repeat(400), note: { text: `n${index}`.repeat(150) } } })) },
   ];
 
   it.each([2_000, 4_000, 8_000])('round-trips page by page at %i characters, and never lists an unselectable key', async (maxChars) => {
     let listedPaths = 0;
+    let keyPaths = 0;
     for (const value of shapes()) {
       if (JSON.stringify(value).length <= maxChars) continue;
       const store = createResultStore();
       const overview = await store.put({ toolName: 't', readOnly: true, maxChars, value }) as Overview;
       const tool = createReadResultTool(store);
-      for (const { path } of overview._result.omitted ?? []) {
+      const roundTrip = async (path: string) => {
         const parsed = parseResultPath(path)!;
         expect(formatResultPath(parsed.steps)).toBe(path);
         let joined: unknown;
@@ -1179,12 +1252,21 @@ describe('review round: every listed omitted path reads exactly the left-out dat
           offset = marker.nextOffset;
         }
         expect(joined).toEqual(select(value, parsed.steps));
+      };
+      for (const { path, keys } of overview._result.omitted ?? []) {
+        await roundTrip(path);
         listedPaths += 1;
+        // Every key named inside a left-out parent reads exactly that child as `path.key`.
+        for (const key of keys ?? []) {
+          await roundTrip(`${path}.${key}`);
+          keyPaths += 1;
+        }
       }
-      const listed = (overview._result.omitted ?? []).map((entry) => entry.path).join(' ');
+      const listed = (overview._result.omitted ?? []).map((entry) => [entry.path, ...(entry.keys ?? [])].join(' ')).join(' ');
       for (const odd of ['a.b', 'c[0]', 'kkkk', '[].)', 'odd key']) expect(listed).not.toContain(odd);
     }
     expect(listedPaths).toBeGreaterThan(0);
+    expect(keyPaths).toBeGreaterThan(0);
   });
 
   it('counts fields a path cannot name in omittedMore and says how to read them', () => {
