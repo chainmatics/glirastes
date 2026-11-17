@@ -77,6 +77,28 @@ hundreds of protected non-tool operations report nothing.
 `glirastes tools refresh` prints the `not-opted-in` operations as one counted
 line; `.glirastes/tool-report.json` lists each of them.
 
+The `description` of a path or query parameter becomes the `description` of
+that input property, which the model reads when it fills the call; it wins over
+a `description` inside the parameter's `schema` (which stays when the parameter
+has none), also for `$ref` parameters and schemas (the shared component is not
+changed). Write what the model must know there, e.g. "Omit to get all
+playlists" for an optional `limit`. With NestJS:
+`@ApiQuery({ name: 'limit', required: false, description: 'Omit to get all playlists' })`.
+Header and cookie parameters are no tool input. A parameter's `example`,
+`examples` and `deprecated` are not passed on (an `example` inside its
+`schema` is).
+
+An operation whose success responses declare `204` and no `content` (no other
+2xx response with content) gets the output contract `{ success: true }`: success
+means the action was executed, and there is no result data. This is exactly
+what the runtime returns for an empty response, so no `output-contract-opaque`
+is reported. A `200` or `201` without `content` alone, only `default` or no
+responses keep the finding. @nestjs/swagger writes `"200": { "description": "" }`
+(`201` for POST) for any handler without a response decorator; it writes `204`
+for `@HttpCode(204)`, or when the handler has other response decorators,
+only with `@ApiNoContentResponse()` next to them. Declare both:
+`@HttpCode(204) @ApiNoContentResponse()`.
+
 Renaming keeps everything that is keyed on `METHOD /path`: `tool-policy.json`
 (`tools`, `exclude`, `acceptedRisk`), `tool-resolutions.json`,
 `mcp-tool-names.json` and the tool id never use the name, so adding or
@@ -95,6 +117,29 @@ operations; it also appears in `glirastes tools resolve --print`). Before
 renaming, give the affected entries a `stableKey` (`"GET /api/tags"`), or move
 them to the new name in the same change; if the takeover was not intended,
 choose a name no other tool holds.
+
+An entry that matches no tool, by `stableKey` or by `name` (a changed path or
+method, a rename), is reported as `semantics-entry-orphaned` (warning, once per
+entry, naming only its key; the stableKey variant also names the tool that now
+holds the operation's earlier name). Its title, usage hints, synonyms, examples
+and presentation are not used until it is re-keyed to `"METHOD /path"` (as in
+the tool report) or the current name, or deleted. An entry for an excluded
+operation (`not-opted-in`, `x-glirastes-ignore`, ...) is not reported. The
+finding is listed by `glirastes tools resolve --print`; like every warning it
+fails neither `tools check` nor `--strict`.
+
+### What the model sees when
+
+- Calling a tool: its `description` and the input schema with the property
+  descriptions (OpenAPI parameter descriptions included). Whatever must hold
+  at call time belongs there.
+- `find_tools` results only: `usageHints` (each cut to 300 characters; the
+  description there to 500). They are not part of the definition used for the
+  call.
+- Never: `synonyms` feed only the search index; `examples` feed only intent
+  routing and `glirastes tools eval`, not `find_tools`.
+- An `examples` list with fewer than 3 (or more than 5) sentences in a language
+  rejects the whole `tool-semantics.json` entry (`tool-semantics-invalid`).
 
 Without a group, a name with a dot keeps its module (the part before the first
 dot); a name without a dot (`list_tags`) takes the module from the path

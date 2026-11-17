@@ -125,6 +125,85 @@ describe("runtime container artifact", () => {
     expect(plainLoaded.createToolBindings()[0]!.tool).not.toHaveProperty("maxResultChars");
   });
 
+  it("carries a query parameter description into tool-contracts.json, the generated module and the container", async () => {
+    const app = await fixture({
+      parameters: [
+        {
+          name: "limit",
+          in: "query",
+          required: false,
+          description: "Omit to get all tasks",
+          schema: { type: "integer" },
+        },
+      ],
+    });
+    await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    const limit = { type: "integer", description: "Omit to get all tasks" };
+    const written = ToolContractsFileSchema.parse(
+      JSON.parse(await app.read(".glirastes/tool-contracts.json")),
+    );
+    expect(written.tools[0]!.contract!.input).toMatchObject({
+      properties: { limit },
+    });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    const module = renderGeneratedModule({
+      modulePath: "generated.ts",
+      artifact: payload.setupArtifact,
+      contracts: payload.contracts.tools,
+    });
+    expect(module).toContain("Omit to get all tasks");
+    const [binding] = (
+      await loadRuntimeArtifact(app.path("artifact"))
+    ).createToolBindings();
+    expect(
+      (binding!.inputSchema as { jsonSchema?: unknown }).jsonSchema,
+    ).toMatchObject({ properties: { limit } });
+  });
+
+  it("types a 204-only operation as no content, and the runtime result for a 204 matches it", async () => {
+    const app = await fixture();
+    const spec = JSON.parse(await app.read("api/openapi.json"));
+    spec.paths["/api/devices/{id}"] = {
+      delete: {
+        description: "Delete device",
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: { "204": { description: "Deleted" } },
+      },
+    };
+    await app.write("api/openapi.json", JSON.stringify(spec));
+    await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    const report = JSON.parse(await app.read(".glirastes/tool-report.json"));
+    expect(JSON.stringify(report)).not.toContain("output-contract-opaque");
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    const binding = loaded
+      .createToolBindings()
+      .find((candidate) => "method" in candidate && candidate.method === "DELETE")!;
+    expect(
+      (binding.outputSchema as { jsonSchema?: unknown }).jsonSchema,
+    ).toMatchObject({ required: ["success"], additionalProperties: false });
+    // A 204 has no body: the HTTP caller reads it as `undefined`.
+    const result = await binding.tool.execute(
+      { id: "d1" },
+      {
+        currentDate: new Date(0),
+        locale: "en-US",
+        callEndpoint: async () => ({ ok: true, status: 204, data: undefined }),
+      } as never,
+    );
+    // What the model receives is the JSON of the result.
+    const received = JSON.parse(JSON.stringify(result));
+    expect(received).toEqual({ success: true });
+    expect(binding.outputSchema.safeParse(received).success).toBe(true);
+  });
+
   it("has the same tool bindings and schemas as the existing generated module", async () => {
     const app = await fixture({
       parameters: [{ name: "status", in: "query", schema: { type: "string" } }],

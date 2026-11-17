@@ -99,6 +99,22 @@ in each description which neighbour fits better for which request.
 }
 ```
 
+### What the model sees when
+
+- When it calls the tool: the `description` and the input schema with its
+  property descriptions (for the `openapi` source also the parameter
+  descriptions, see `docs/tool-policy.md`). Put everything that must hold at
+  call time there ("Omit limit to get all").
+- Only in `find_tools` results: `usageHints` (each cut to 300 characters,
+  the description there to 500), never in the definition used for the call.
+- Never: `synonyms` only feed the search index; `examples` only feed intent
+  routing and `glirastes tools eval`, not `find_tools`.
+- An `examples` list with fewer than 3 (or more than 5) sentences in one
+  language rejects the whole entry (`tool-semantics-invalid`,
+  `resolution-rejected` for an agent entry): its other texts are lost too.
+- An entry whose `stableKey` or `name` matches no tool is reported as
+  `semantics-entry-orphaned`; re-key it (`"METHOD /path"`) or delete it.
+
 ## Chat entities and commands
 
 When the app has a chat, `glirastes tools refresh` also derives its `@`

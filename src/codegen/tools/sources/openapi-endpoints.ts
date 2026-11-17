@@ -54,6 +54,14 @@ const COUNT_TIMEOUT_MS = 30_000;
 const DECLARED_EFFECTS: ReadonlyArray<string> = ['read', 'write', 'destructive', 'external', 'financial'];
 const READ_METHODS: ReadonlySet<EndpointMethod> = new Set(['GET', 'HEAD', 'DELETE']);
 const SUCCESS_STATUSES = ['200', '201', '202'];
+/** What the runtime returns for a success without a body: `{ success: true }`, nothing else. */
+const NO_CONTENT_OUTPUT: JsonSchemaLike = {
+  type: 'object',
+  description: 'No content: success means the action was executed; there is no result data.',
+  properties: { success: { const: true } },
+  required: ['success'],
+  additionalProperties: false,
+};
 
 export interface OpenapiSourceOptions {
   /** App-relative path of the exported OpenAPI 3.0 or 3.1 JSON document. */
@@ -145,6 +153,18 @@ function parametersOf(document: OpenapiDocument, entry: OpenapiOperationEntry): 
   return { list: [...merged.values()], problems };
 }
 
+/**
+ * The schema of a dereferenced parameter. The parameter's own `description`,
+ * written for this operation, wins over the schema's; without one the schema
+ * keeps its own. The schema is a copy made by `dereference`, and the
+ * description goes on a further copy, so no shared component changes.
+ */
+function parameterSchema(parameter: JsonObject): JsonSchemaLike {
+  const schema = isObject(parameter.schema) ? parameter.schema as JsonSchemaLike : {};
+  const description = typeof parameter.description === 'string' ? parameter.description.trim() : '';
+  return description ? { ...schema, description } : schema;
+}
+
 function jsonContent(document: OpenapiDocument, carrier: unknown): { schema?: JsonSchemaLike; problems: string[]; nonJson: boolean } {
   const resolved = dereference(document, carrier);
   const content = isObject(resolved.value) ? resolved.value.content : undefined;
@@ -155,14 +175,34 @@ function jsonContent(document: OpenapiDocument, carrier: unknown): { schema?: Js
   return { schema, problems: resolved.problems, nonJson: false };
 }
 
+/**
+ * A declared `204` next to success responses that all carry no `content`: the
+ * server answers without a body. A missing or unresolvable response counts as
+ * content, and a `200` without `content` alone is no declaration (it is what
+ * @nestjs/swagger writes for any undocumented handler).
+ */
+function declaresNoContent(document: OpenapiDocument, responses: JsonObject): boolean {
+  const successes = Object.keys(responses).filter((status) => /^2(\d\d|XX)$/.test(status));
+  if (!successes.includes('204')) return false;
+  return successes.every((status) => {
+    const resolved = dereference(document, responses[status]);
+    const content = isObject(resolved.value) ? resolved.value.content : undefined;
+    return resolved.problems.length === 0 && (content === undefined || (isObject(content) && Object.keys(content).length === 0));
+  });
+}
+
 function successOutput(document: OpenapiDocument, operation: JsonObject): { schema?: JsonSchemaLike; problems: string[] } {
   const responses = isObject(operation.responses) ? operation.responses : {};
+  const noContent = (problems: string[]) => ({
+    ...(declaresNoContent(document, responses) ? { schema: structuredClone(NO_CONTENT_OUTPUT) } : {}),
+    problems,
+  });
   for (const status of SUCCESS_STATUSES) {
     if (responses[status] === undefined) continue;
     const { schema, problems } = jsonContent(document, responses[status]);
-    return { ...(schema ? { schema } : {}), problems };
+    return schema ? { schema, problems } : noContent(problems);
   }
-  return { problems: [] };
+  return noContent([]);
 }
 
 /** `security` of the operation, else of the document; every requirement must name a scheme. */
@@ -194,7 +234,7 @@ function readEntry(
   const queryProperties = new Map<string, JsonSchemaLike>();
   const queryRequired: string[] = [];
   for (const parameter of parameters.list) {
-    const schema = isObject(parameter.schema) ? parameter.schema as JsonSchemaLike : {};
+    const schema = parameterSchema(parameter);
     const name = parameter.name as string;
     if (parameter.in === 'path' && pathProperties.has(name)) pathProperties.set(name, schema);
     else if (parameter.in === 'query') {

@@ -220,8 +220,6 @@ describe('OpenAPI endpoint source', () => {
     expect(byKey.get('DELETE /api/tasks/:task_id')!.evidence.declaredEffect).toBeUndefined();
     expect(byKey.get('DELETE /api/tasks/:task_id')!.findings.map((finding) => [finding.code, finding.severity])).toEqual([
       ['contract-effect-invalid', 'needs_attention'],
-      // 204 No Content: there is no response schema to show the model.
-      ['output-contract-opaque', 'warning'],
     ]);
     const create = byKey.get('POST /api/tasks')!;
     expect(create.findings).toEqual([expect.objectContaining({ code: 'schema-reference-unresolved', severity: 'warning' })]);
@@ -353,6 +351,130 @@ describe('OpenAPI endpoint source', () => {
     expect(update.findings).toEqual(expect.arrayContaining([expect.objectContaining({
       code: 'input-role-unsupported', severity: 'needs_attention',
     })]));
+  });
+});
+
+/** Path and query parameters with descriptions on every level the document can carry them. */
+function describedDocument(version: string): string {
+  const document = JSON.parse(documentOf({
+    '/api/playlists': {
+      get: {
+        summary: 'List playlists',
+        security: SECURED,
+        parameters: [
+          // @nestjs/swagger's @ApiQuery({ name: 'limit', required: false, description, example }).
+          { name: 'limit', in: 'query', required: false, description: 'Omit to get all playlists', example: 10, schema: { type: 'integer' } },
+          { $ref: '#/components/parameters/Cursor' },
+          { name: 'status', in: 'query', description: 'Only playlists in this state', schema: { $ref: '#/components/schemas/PlaylistStatus' } },
+          { name: 'sort', in: 'query', description: 'Written for this operation', schema: { type: 'string', description: 'Written for the schema' } },
+          { name: 'order', in: 'query', schema: { type: 'string', description: 'Only the schema has one' } },
+          { name: 'page', in: 'query', description: '   ', schema: { type: 'integer' } },
+        ],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
+    '/api/playlists/{playlist_id}': {
+      parameters: [{ name: 'playlist_id', in: 'path', required: true, description: 'The playlist to read', schema: { type: 'string' } }],
+      get: {
+        summary: 'Get playlist',
+        security: SECURED,
+        // The same shared schema without a parameter description.
+        parameters: [{ name: 'status', in: 'query', schema: { $ref: '#/components/schemas/PlaylistStatus' } }],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
+  })) as { openapi: string; components: Record<string, Record<string, unknown>> };
+  document.openapi = version;
+  document.components.schemas!.PlaylistStatus = { type: 'string', enum: ['active', 'archived'] };
+  document.components.parameters = {
+    Cursor: { name: 'cursor', in: 'query', description: 'The cursor of the previous page', schema: { type: 'string' } },
+  };
+  return JSON.stringify(document);
+}
+
+describe('OpenAPI parameter descriptions', () => {
+  it.each(['3.1.0', '3.0.3'])('passes path and query parameter descriptions into the input schema (OpenAPI %s)', async (version) => {
+    const observed = await observe({ 'api/openapi.json': describedDocument(version) });
+
+    expect(observed.findings).toEqual([]);
+    const byKey = new Map(observed.observations.map((tool) => [tool.execution.stableKey, tool]));
+    expect(byKey.get('GET /api/playlists')!.contract!.input).toEqual({
+      type: 'object',
+      properties: {
+        cursor: { type: 'string', description: 'The cursor of the previous page' },
+        limit: { type: 'integer', description: 'Omit to get all playlists' },
+        // The parameter's description wins over the schema's.
+        sort: { type: 'string', description: 'Written for this operation' },
+        // Only the schema has one: it stays.
+        order: { type: 'string', description: 'Only the schema has one' },
+        // A blank description is no description.
+        page: { type: 'integer' },
+        status: { type: 'string', enum: ['active', 'archived'], description: 'Only playlists in this state' },
+      },
+      additionalProperties: false,
+    });
+    // The shared PlaylistStatus schema keeps no description of another operation.
+    expect(byKey.get('GET /api/playlists/:playlist_id')!.contract!.input).toEqual({
+      type: 'object',
+      properties: {
+        playlist_id: { type: 'string', description: 'The playlist to read' },
+        status: { type: 'string', enum: ['active', 'archived'] },
+      },
+      required: ['playlist_id'],
+      additionalProperties: false,
+    });
+  });
+
+  it('writes a parameter without a description exactly as before', async () => {
+    const observed = await observe({ 'api/openapi.json': documentOf(TASK_PATHS) });
+    const list = observed.observations.find((tool) => tool.execution.stableKey === 'GET /api/tasks')!;
+    expect(JSON.stringify(list.contract!.input)).toBe(
+      '{"type":"object","properties":{"status":{"anyOf":[{"type":"string","enum":["open","done"]},{"type":"null"}]}},"additionalProperties":false}',
+    );
+  });
+});
+
+const NO_CONTENT = {
+  type: 'object',
+  description: 'No content: success means the action was executed; there is no result data.',
+  properties: { success: { const: true } },
+  required: ['success'],
+  additionalProperties: false,
+};
+const DEVICE = { type: 'object', properties: { id: { type: 'string' } } };
+const withJson = (schema: unknown) => ({ description: 'ok', content: { 'application/json': { schema } } });
+
+describe('OpenAPI responses without a body', () => {
+  it.each([
+    ['only 204', { '204': { description: 'Deleted' } }, NO_CONTENT],
+    ['204 by reference', { '204': { $ref: '#/components/responses/NoContent' } }, NO_CONTENT],
+    ['204 next to a 200 without content', { '200': { description: '' }, '204': { description: '' } }, NO_CONTENT],
+    ['204 next to a 200 with content', { '200': withJson(DEVICE), '204': { description: 'Deleted' } }, DEVICE],
+    // @nestjs/swagger writes this for any handler without a response decorator: no declaration.
+    ['200 without content', { '200': { description: '' } }, {}],
+    ['204 next to a 2XX with content', { '204': { description: '' }, '2XX': withJson(DEVICE) }, {}],
+    ['default only', { default: { description: 'Deleted' } }, {}],
+    ['no responses', {}, {}],
+  ])('%s', async (_label, responses, output) => {
+    for (const version of ['3.1.0', '3.0.3']) {
+      const document = JSON.parse(documentOf({
+        '/api/devices/{id}': {
+          delete: {
+            summary: 'Delete device',
+            security: SECURED,
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            responses,
+          },
+        },
+      })) as { openapi: string; components: Record<string, unknown> };
+      document.openapi = version;
+      document.components.responses = { NoContent: { description: 'Deleted' } };
+      const observed = await observe({ 'api/openapi.json': JSON.stringify(document) });
+
+      const [tool] = observed.observations;
+      expect(tool!.contract!.output).toEqual(output);
+      expect(tool!.findings.some((finding) => finding.code === 'output-contract-opaque')).toBe(output === undefined || Object.keys(output).length === 0);
+    }
   });
 });
 
