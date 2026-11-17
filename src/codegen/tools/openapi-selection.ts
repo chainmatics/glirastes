@@ -1,3 +1,4 @@
+import { isValidMaxResultChars } from '../../runtime/result-limit.js';
 import type { ExcludedTool } from './types.js';
 
 /**
@@ -74,4 +75,14 @@ export function declaredRoles(operation: Operation): DeclaredValue<string[]> {
   if (roles.some((role) => role === undefined)) return { invalid: true };
   const distinct = [...new Set(roles as string[])].sort();
   return distinct.length > MAX_DECLARED_ROLES ? { invalid: true } : { value: distinct };
+}
+
+/**
+ * `x-glirastes-max-result-chars`: the upper bound of the tool's serialized
+ * result, an integer from 1,000 to 200,000. Anything else is invalid.
+ */
+export function declaredMaxResultChars(operation: Operation): DeclaredValue<number> {
+  const value = operation['x-glirastes-max-result-chars'];
+  if (value === undefined) return undefined;
+  return isValidMaxResultChars(value) ? { value } : { invalid: true };
 }

@@ -57,6 +57,7 @@ string) or `opt-in`. The extensions are read on the operation object only
 | `x-glirastes-group` | string | The module, above `tool-semantics.json` and any derivation | Finding `tool-group-invalid` (warning); module derived |
 | `x-glirastes-roles` | string array | Code default of `allowedRoles` (any-of); `[]` means no restriction; duplicates are removed. `tool-policy.json` roles that share none with it disable the tool: `policy-roles-disjoint` (warning) | Not a list of at most 50 non-empty role names: `tool-roles-invalid` (needs attention), the tool stays disabled |
 | `x-glirastes-effect` | `read`, `write`, `destructive`, `external`, `financial` | Declared effect; can only raise the risk class | `contract-effect-invalid` (needs attention); ignored |
+| `x-glirastes-max-result-chars` | integer, 1000 to 200000 | Upper bound of the tool's serialized result for the model; wins over the handler's `maxResultChars` (default 16,000). Local only: written to `tool-contracts.json` and the generated module, never to the Platform | Finding `max-result-chars-invalid` (warning); ignored, the handler's limit applies |
 | `x-glirastes-ignore` | `true` | Never a tool (excluded as `ai-ignore`) | – |
 
 Precedence: an operation is first checked for an unsupported method or path,

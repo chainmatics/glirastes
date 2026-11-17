@@ -42,6 +42,7 @@ import { policyOverlayFromRevision } from './policy-overlay.js';
 import { resolveRuntimeConnectionConfig } from './runtime-mode.js';
 import { resolveLocalLimits, type LocalLimits } from './local-limits.js';
 import { SDK_VERSION } from './sdk-version.js';
+import { assertMaxResultChars } from './result-limit.js';
 import type { ToolSearchSemanticsMap } from './tool-discovery.js';
 import type { ToolFailureClassifier } from './tool-failure.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
@@ -92,6 +93,13 @@ export interface CreateGlirastesOptions {
    * counted locally only and never sent to the Platform.
    */
   classifyToolFailure?: ToolFailureClassifier;
+  /**
+   * Upper bound of a serialized successful tool result in characters
+   * (integer from 1,000 to 200,000, default 16,000); `chatTurn()` hands it to
+   * `createAiChatHandler` (see `AiChatHandlerConfig.maxResultChars`). A
+   * tool's own `maxResultChars` wins. An invalid value throws here.
+   */
+  maxResultChars?: number;
   /** Options for the metrics sink, or false to send no metrics. */
   metrics?: Omit<
     RuntimeMetricsSinkOptions,
@@ -116,6 +124,7 @@ export interface GlirastesChatTurn {
   toolSemantics?: ToolSearchSemanticsMap;
   metrics?: RuntimeMetricsSink;
   classifyToolFailure?: ToolFailureClassifier;
+  maxResultChars?: number;
 }
 
 export interface Glirastes {
@@ -246,6 +255,7 @@ function instances(): Map<string, Glirastes> {
  * error, never a silent switch. A malformed key or URL throws here.
  */
 export function createGlirastes(options: CreateGlirastesOptions): Glirastes {
+  assertMaxResultChars(options.maxResultChars, 'createGlirastes');
   const appId = AppSetupArtifactSchema.parse(options.generated.setupArtifact).appId;
   const existing = instances().get(appId);
   if (existing) return existing;
@@ -551,6 +561,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           : {}),
         ...(currentMetrics ? { metrics: currentMetrics } : {}),
         ...(options.classifyToolFailure ? { classifyToolFailure: options.classifyToolFailure } : {}),
+        ...(options.maxResultChars !== undefined ? { maxResultChars: options.maxResultChars } : {}),
       };
     },
     async stop() {

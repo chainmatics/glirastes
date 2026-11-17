@@ -71,6 +71,8 @@ export interface ResolvedEndpointContract {
   prose: ToolProseHints;
   explicitId?: string;
   declaredEffect?: DeclaredEffect;
+  /** `maxResultChars` of the sibling contract module, when valid. */
+  maxResultChars?: number;
 }
 
 export const OPAQUE_SCHEMA_DIGEST = jsonSchemaDigest(OPAQUE_JSON_SCHEMA);
@@ -175,6 +177,10 @@ function invalidMetadataFindings(subject: string, module: string, entry: ProbedC
   if (entry.invalidFields?.includes('presentation')) {
     findings.push(toolFinding('contract-presentation-invalid', 'warning', subject,
       `${module} declares a presentation that does not match the presentation schema, so it is ignored.`));
+  }
+  if (entry.invalidFields?.includes('maxResultChars')) {
+    findings.push(toolFinding('max-result-chars-invalid', 'warning', subject,
+      `${module} declares a maxResultChars that is not an integer from 1000 to 200000; the declaration is ignored and the handler's limit applies.`));
   }
   return findings;
 }
@@ -496,6 +502,7 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     prose,
     ...(entry?.id ? { explicitId: entry.id } : {}),
     ...(effect ? { declaredEffect: effect } : {}),
+    ...(entry?.maxResultChars !== undefined ? { maxResultChars: entry.maxResultChars } : {}),
   };
   // A contract module with secret-looking content or unusable metadata is reported on every path, also when another tier wins.
   const moduleFindings = ((): ToolFinding[] => {

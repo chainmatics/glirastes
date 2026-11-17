@@ -404,6 +404,16 @@ export interface AiChatHandlerConfig {
    */
   classifyToolFailure?: ToolFailureClassifier;
   /**
+   * Upper bound of a serialized successful tool result, in characters, for
+   * every tool of the handler (model turns and direct commands): an integer
+   * from 1,000 to 200,000, default 16,000. A larger result is cut (the
+   * largest array first, then long fields) and carries a `_truncated` marker
+   * with a hint for the model. A tool's own `maxResultChars` (OpenAPI
+   * `x-glirastes-max-result-chars`) wins. An invalid value throws when the
+   * handler is created.
+   */
+  maxResultChars?: number;
+  /**
    * Called after pipeline classification and tool scoping, before streaming.
    * Use this to log which intent, module, model, and tools were selected.
    */

@@ -241,6 +241,18 @@ describe('createGlirastes in standalone', () => {
     expect(await plain.chatTurn(principal)).not.toHaveProperty('classifyToolFailure');
   });
 
+  it('hands maxResultChars to the chat turn, and rejects an invalid value', async () => {
+    const limited = track(createGlirastes({ generated: generated(), env: {}, maxResultChars: 40_000 }));
+    expect((await limited.chatTurn(principal)).maxResultChars).toBe(40_000);
+    await limited.stop();
+    instances.splice(instances.indexOf(limited), 1);
+
+    const plain = track(createGlirastes({ generated: generated(), env: {} }));
+    expect(await plain.chatTurn(principal)).not.toHaveProperty('maxResultChars');
+    expect(() => createGlirastes({ generated: generated(OTHER_APP_ID), env: {}, maxResultChars: 500 }))
+      .toThrow('createGlirastes: maxResultChars must be an integer from 1000 to 200000');
+  });
+
   it('runs without localLimits', async () => {
     const glirastes = track(createGlirastes({ generated: generated(), env: {} }));
     await glirastes.ready();

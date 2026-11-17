@@ -33,6 +33,17 @@ describe("runtime service trust configuration", () => {
     c.application.apiOrigin = apiOrigin;
     expect(() => parseRuntimeConfig(c)).toThrow();
   });
+  it("accepts maxResultChars from 1000 to 200000 and leaves it unset by default", () => {
+    expect(parseRuntimeConfig(raw()).application.maxResultChars).toBeUndefined();
+    for (const value of [1_000, 40_000, 200_000]) {
+      const c = { ...raw(), application: { ...raw().application, maxResultChars: value } };
+      expect(parseRuntimeConfig(c).application.maxResultChars).toBe(value);
+    }
+    for (const value of [999, 200_001, 5_000.5, "40000"]) {
+      const c = { ...raw(), application: { ...raw().application, maxResultChars: value } };
+      expect(() => parseRuntimeConfig(c)).toThrow();
+    }
+  });
   it("rejects unsafe identity targets and unknown settings", () => {
     const c = raw();
     c.identity.endpoint = "//evil/me";
