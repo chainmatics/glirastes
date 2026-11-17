@@ -130,6 +130,8 @@ async function runDefaultTurn(
     onError,
     onFinish,
     approvalSecret: 'tool-denial-test-secret-32-chars!!',
+    // These tests name the domain tools offered; read_result has its own tests (result-handles-handler).
+    resultHandles: false,
     managedRuntime: {
       resolvePrincipal,
       resolveTurnSnapshot: async ({ turnId }) => createTurnSnapshot({

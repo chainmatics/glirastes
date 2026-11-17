@@ -50,7 +50,7 @@ describe('explicit pipeline selection at the Next.js boundary', () => {
     });
 
     expect((await handler(request())).status).toBe(200);
-    expect(active).toEqual(discovery ? ['find_tools'] : []);
+    expect(active).toEqual(discovery ? ['find_tools', 'read_result'] : ['read_result']);
   });
 
   it('preserves the unspecified empty selection of legacy custom pipelines', async () => {
@@ -64,6 +64,6 @@ describe('explicit pipeline selection at the Next.js boundary', () => {
       },
     });
     expect((await handler(request())).status).toBe(200);
-    expect(active).toEqual(['list_tasks']);
+    expect(active).toEqual(['list_tasks', 'read_result']);
   });
 });

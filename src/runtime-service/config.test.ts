@@ -44,6 +44,17 @@ describe("runtime service trust configuration", () => {
       expect(() => parseRuntimeConfig(c)).toThrow();
     }
   });
+  it("accepts resultHandles as a boolean and leaves it unset by default", () => {
+    expect(parseRuntimeConfig(raw()).application.resultHandles).toBeUndefined();
+    for (const value of [true, false]) {
+      const c = { ...raw(), application: { ...raw().application, resultHandles: value } };
+      expect(parseRuntimeConfig(c).application.resultHandles).toBe(value);
+    }
+    for (const value of ["false", 0, { maxResults: 2 }]) {
+      const c = { ...raw(), application: { ...raw().application, resultHandles: value } };
+      expect(() => parseRuntimeConfig(c)).toThrow();
+    }
+  });
   it("rejects unsafe identity targets and unknown settings", () => {
     const c = raw();
     c.identity.endpoint = "//evil/me";
