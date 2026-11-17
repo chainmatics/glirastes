@@ -8,6 +8,7 @@ import {
   type AppSetupOperationGroup,
   type AppSetupToolCandidate,
   type AppSetupToolProvenance,
+  type PrivacyProviderReport,
   type ToolRiskClass,
 } from '../../contracts/index.js';
 import { confirmationFloor, type EffectiveToolPolicy } from '../../contracts/tool-policy.js';
@@ -57,6 +58,8 @@ export interface BuildSetupArtifactInput {
   now: (() => Date) | null;
   /** Reported as the artifact's `exclusions`, clipped to the Platform caps. */
   exclusions?: ReadonlyArray<ExcludedTool>;
+  /** Provider entries under the privacy profile: id, label, adapter, binding digest. */
+  privacyProviders?: ReadonlyArray<PrivacyProviderReport>;
 }
 
 /**
@@ -157,6 +160,13 @@ export function buildSetupArtifact(input: BuildSetupArtifactInput): { artifact: 
     prompts: promptMetadata(input.promptBundle),
     warnings,
     ...(input.exclusions ? { exclusions: clipExclusions(input.exclusions) } : {}),
+    ...(input.privacyProviders?.length
+      ? {
+          privacyProviders: [...input.privacyProviders]
+            .map((provider) => ({ ...provider }))
+            .sort((left, right) => compareCodeUnits(left.id, right.id)),
+        }
+      : {}),
     generatedAt: EPOCH,
   });
   const contentDigest = contentDigestOf(withoutIdentity(draft));
