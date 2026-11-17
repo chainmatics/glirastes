@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
-import type { ApprovalCardProps } from '../types.js';
+import type { ApprovalCardProps, ApprovalSubject, ChatLocale, PendingApproval } from '../types.js';
 
 const COLLAPSED_ITEMS = 2;
 const LONG_TEXT_LENGTH = 100;
@@ -51,6 +51,82 @@ function DetailValue({ value, items }: { value: string; items?: string[] }) {
   );
 }
 
+/** A named id line: label and the names shown for the ids under one argument. */
+interface SubjectLine {
+  label: string;
+  names: string[];
+}
+
+/**
+ * The names of the call's ids, one line per argument, leaving out a name the
+ * detail lines already show (an app's `nameLabels`, or the call's own text).
+ */
+export function approvalSubjectLines(approval: PendingApproval, locale: ChatLocale): SubjectLine[] {
+  const lines = new Map<string, SubjectLine>();
+  const shown = (name: string) => (approval.details ?? []).some((detail) => detail.endsWith(`: ${name}`));
+  for (const subject of approval.subjects ?? []) {
+    if (subject.status !== 'named' || !subject.name || shown(subject.name)) continue;
+    const line = lines.get(subject.path) ?? { label: subject.label ?? locale.approvalTargetLabel, names: [] };
+    if (!line.names.includes(subject.name)) line.names.push(subject.name);
+    lines.set(subject.path, line);
+  }
+  return [...lines.values()];
+}
+
+/** The ids of the call without a single known name. */
+export function flaggedApprovalSubjects(approvals: ReadonlyArray<PendingApproval>): ApprovalSubject[] {
+  return approvals.flatMap((approval) => (approval.subjects ?? []).filter((subject) => subject.status !== 'named'));
+}
+
+/**
+ * The warning for ids this conversation showed no name (or different names)
+ * for. The id itself is shown so the person approving can check it; colour is
+ * not the only cue (icon and text), and the approve button points to it via
+ * `aria-describedby`.
+ */
+export function ApprovalIdWarning({ id, subjects }: { id: string; subjects: ReadonlyArray<ApprovalSubject> }) {
+  const { locale } = useChatContext();
+  const unknown = subjects.filter((subject) => subject.status === 'unknown');
+  const ambiguous = subjects.filter((subject) => subject.status === 'ambiguous');
+  const labelOf = (subject: ApprovalSubject) => subject.label ?? locale.approvalTargetLabel;
+  return (
+    <div id={id} data-element="id-warning" role="alert">
+      <span data-element="warning-icon" aria-hidden="true">{'\u26A0'}</span>
+      <div data-element="warning-body">
+        {unknown.length > 0 && (
+          <>
+            <p data-element="warning-text">
+              {unknown.length === 1 ? locale.approvalUnknownIdWarning : locale.approvalUnknownIdsWarning}
+            </p>
+            <ul data-element="warning-ids">
+              {unknown.map((subject, i) => (
+                <li key={i} data-element="detail-line" data-status="unknown">
+                  <span data-element="detail-label">{labelOf(subject)}</span>
+                  <code data-element="subject-id">{subject.id}</code>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {ambiguous.map((subject, i) => (
+          <div key={i} data-element="warning-ambiguous">
+            <p data-element="warning-text">
+              {locale.approvalAmbiguousIdWarning.replace('{names}', (subject.names ?? []).join(', '))}
+            </p>
+            <ul data-element="warning-ids">
+              <li data-element="detail-line" data-status="ambiguous">
+                <span data-element="detail-label">{labelOf(subject)}</span>
+                <span data-element="detail-value">{subject.name}</span>
+                <code data-element="subject-id">{subject.id}</code>
+              </li>
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Single tool approval card with rich detail display.
  *
@@ -66,6 +142,10 @@ export function ApprovalCard({
   isProcessing,
 }: ApprovalCardProps) {
   const { classNames, locale } = useChatContext();
+  const warningId = useId();
+  const subjectLines = approvalSubjectLines(approval, locale);
+  const flagged = flaggedApprovalSubjects([approval]);
+  const hasDetails = subjectLines.length > 0 || (approval.details?.length ?? 0) > 0;
 
   return (
     <div
@@ -73,6 +153,7 @@ export function ApprovalCard({
       data-component="approval-card"
       data-tool={approval.toolName}
       data-state={isProcessing ? 'processing' : 'pending'}
+      data-warning={flagged.length > 0 ? '' : undefined}
     >
       {/* Header */}
       <div data-element="header">
@@ -82,9 +163,16 @@ export function ApprovalCard({
       </div>
 
       {/* Details */}
-      {approval.details && approval.details.length > 0 && (
+      {hasDetails && (
         <div data-element="details">
-          {approval.details.map((detail, i) => {
+          {/* Names of the call's ids, from the browser's own history: what the user checks first. */}
+          {subjectLines.map((line, i) => (
+            <div key={`subject-${i}`} data-element="detail-line" data-subject="">
+              <span data-element="detail-label">{line.label}</span>
+              <DetailValue value={line.names.join(', ')} items={line.names.length > 1 ? line.names : undefined} />
+            </div>
+          ))}
+          {(approval.details ?? []).map((detail, i) => {
             const colonIndex = detail.indexOf(':');
             if (colonIndex === -1) {
               return (
@@ -105,6 +193,8 @@ export function ApprovalCard({
         </div>
       )}
 
+      {flagged.length > 0 && <ApprovalIdWarning id={warningId} subjects={flagged} />}
+
       {/* Actions */}
       <div data-element="actions">
         <button
@@ -118,6 +208,7 @@ export function ApprovalCard({
           onClick={() => onApprove(approval.id)}
           disabled={isProcessing}
           data-action="approve"
+          aria-describedby={flagged.length > 0 ? warningId : undefined}
         >
           {'\u2713'} {approval.confirmText ?? locale.confirmButton}
         </button>

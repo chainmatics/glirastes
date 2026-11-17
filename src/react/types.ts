@@ -695,6 +695,14 @@ export interface ChatLocale {
   planTitle: string;
   /** Shown when the user sends while an approval card waits for a decision. */
   approvalPendingHint: string;
+  /** Label of a bare `id` argument whose entity type is not known ("Target"). */
+  approvalTargetLabel: string;
+  /** Warning on an approval card for one id no name was shown for in this conversation. */
+  approvalUnknownIdWarning: string;
+  /** The same warning for several ids. */
+  approvalUnknownIdsWarning: string;
+  /** Warning for an id shown with different names; supports `{names}`. */
+  approvalAmbiguousIdWarning: string;
 
   // Floating widget / chat window chrome
   chatTitle: string;                 // default header title ("AI Assistant")
@@ -769,7 +777,7 @@ export type OnToolResult = (toolName: string, result: unknown) => void;
 
 /** What the chat knows beyond the arguments of the call to approve. */
 export interface ApprovalDescriptionContext {
-  /** Record names the tool results of this conversation reported, by lower-case record id. */
+  /** Record names the tool results of this conversation reported (and the user's `@` mentions named), by lower-case record id. */
   names?: ReadonlyMap<string, string>;
 }
 
@@ -881,6 +889,13 @@ export interface AiChatProviderConfig {
   uiActionBus?: UiActionBus;
   onBeforeSend?: OnBeforeSend;
   approvalDescription?: ApprovalDescriptionFn;
+  /**
+   * Show on each approval card the name this conversation showed for every id
+   * the call carries, and warn (showing the id) about ids without one. Names
+   * come from the browser's own message history: a convenience for the person
+   * approving, not a trust boundary. Default true.
+   */
+  approvalSubjects?: boolean;
   continueMessage?: string;
   toolLabels?: ToolLabelConfig;
   pipelineMessageTranslator?: PipelineMessageTranslator;
@@ -1012,6 +1027,30 @@ export interface PendingApproval {
   detailItems?: Array<string[] | undefined>;
   /** Confirm button text override */
   confirmText?: string;
+  /**
+   * The ids of the call with the name this conversation showed for each
+   * (`approvalSubjects`). Display only: the approved arguments are `args`.
+   */
+  subjects?: ApprovalSubject[];
+}
+
+/**
+ * One id of a pending tool call and what the browser's own message history
+ * showed for it. Client-side data, so a convenience, never a trust boundary.
+ */
+export interface ApprovalSubject {
+  /** Argument path (`id`, `playlist.id`, `items[].productId`). */
+  path: string;
+  /** Entity from the key or a mention (`Playlist`); absent for a bare `id` of unknown type. */
+  label?: string;
+  /** The id exactly as the call carries it. */
+  id: string;
+  /** `named`: one name shown; `ambiguous`: different names for a non-UUID id; `unknown`: no name shown. */
+  status: 'named' | 'ambiguous' | 'unknown';
+  /** The most recent name shown for the id. */
+  name?: string;
+  /** All names shown for an ambiguous id, most recent first. */
+  names?: string[];
 }
 
 export interface UseApprovalsReturn {

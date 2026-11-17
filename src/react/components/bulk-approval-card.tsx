@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import type { BulkApprovalCardProps } from '../types.js';
+import { ApprovalIdWarning, approvalSubjectLines, flaggedApprovalSubjects } from './approval-card.js';
 
 /**
  * Grouped approval card for 2+ tool calls of the same type.
@@ -27,13 +28,19 @@ export function BulkApprovalCard({
   // Extract one primary detail per approval (first detail value = typically the title)
   const primaryDetails: string[] = [];
   for (const approval of approvals) {
-    if (approval.details && approval.details.length > 0) {
+    // The name of the call's id comes first, as on the single card.
+    const subject = approvalSubjectLines(approval, locale)[0];
+    if (subject) {
+      primaryDetails.push(subject.names.join(', '));
+    } else if (approval.details && approval.details.length > 0) {
       const first = approval.details[0];
       const colonIndex = first.indexOf(':');
       const value = colonIndex > -1 ? first.substring(colonIndex + 1).trim() : first;
       if (value) primaryDetails.push(value);
     }
   }
+  const flagged = flaggedApprovalSubjects(approvals);
+  const warningId = useId();
 
   const maxVisible = 3;
   const visibleDetails = expanded ? primaryDetails : primaryDetails.slice(0, maxVisible);
@@ -47,6 +54,7 @@ export function BulkApprovalCard({
       data-tool={toolName}
       data-count={count}
       data-state={isProcessing ? 'processing' : 'pending'}
+      data-warning={flagged.length > 0 ? '' : undefined}
     >
       {/* Header */}
       <div data-element="header">
@@ -77,6 +85,8 @@ export function BulkApprovalCard({
         </div>
       )}
 
+      {flagged.length > 0 && <ApprovalIdWarning id={warningId} subjects={flagged} />}
+
       {/* Actions */}
       <div data-element="actions">
         <button
@@ -90,6 +100,7 @@ export function BulkApprovalCard({
           onClick={onApproveAll}
           disabled={isProcessing}
           data-action="approve"
+          aria-describedby={flagged.length > 0 ? warningId : undefined}
         >
           {'\u2713'} {count === 1 ? (locale.confirmButton) : allCountText}
         </button>

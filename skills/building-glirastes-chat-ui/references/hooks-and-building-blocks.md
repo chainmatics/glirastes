@@ -49,6 +49,20 @@ work log of one assistant turn; both style through `data-*` attributes.
   for every successful result and fallbacks per tool name.
 - `createApprovalDescriptionGenerator({ toolLabels, dateLocale })` builds the
   provider's `approvalDescription`: readable confirmation text per tool.
+- `ApprovalCard` and `BulkApprovalCard` name the ids of the call (on by
+  default; `approvalSubjects={false}` on the provider turns it off). An id
+  argument (`id`, `…Id`, `…_id`, `…ID`, plural too, or a UUID value) shows the
+  name this conversation's tool results or the user's `@` mentions showed for
+  it ("Playlist: Abend-Promos") instead of the id. An id without a known name
+  gets a warning with the id shown (`role="alert"`, icon, danger colours,
+  linked from the approve button); a short id shown with different names gets
+  a warning too. Texts: `approvalTargetLabel`, `approvalUnknownIdWarning`,
+  `approvalUnknownIdsWarning`, `approvalAmbiguousIdWarning` in `locale`
+  (English and German built in). A custom card reads
+  `PendingApproval.subjects` (`ApprovalSubject[]`). The names are client-side
+  history, a convenience and not a trust boundary: the server executes exactly
+  the signed arguments. A subject the server resolves and signs is the planned
+  stronger variant. Details: `docs/concepts.md`, Approvals.
 
 ## Sessions
 
