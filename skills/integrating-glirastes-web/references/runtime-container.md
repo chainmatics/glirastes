@@ -160,7 +160,11 @@ each successful tool result the model sees; an operation's
 `x-glirastes-max-result-chars` wins for that tool. A larger result gets a
 turn-scoped handle and an overview, and the model reads more with the built-in
 `read_result`; `application.resultHandles: false` (optional, default on) cuts
-it instead.
+it instead. `x-glirastes-output-allowed-fields`, `x-glirastes-output-denied-fields`
+(`**.fileUrl` removes a key at any depth) and `x-glirastes-output-default-fields`
+on an operation travel in the artifact too and are applied by the container: the
+upper bound before anything is stored or shown, the default view in the first
+answer.
 
 For bearer authentication use `"credential": {"type":"bearer"}`. For existing
 backend CSRF middleware set `identity.csrfHeader` to `x-csrf-token` or

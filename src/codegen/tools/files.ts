@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { isSafeAppHref } from '../../browser/navigation.js';
 import { MAX_MAX_RESULT_CHARS, MIN_MAX_RESULT_CHARS } from '../../runtime/result-limit.js';
+import {
+  isValidOutputFields,
+  MAX_OUTPUT_FIELD_CHARS,
+  MAX_OUTPUT_FIELDS,
+  type OutputFieldsName,
+} from '../../server/core/output-fields.js';
 import { ToolRiskClassSchema } from '../../contracts/index.js';
 import { TOOL_POLICY_RULES_VERSION } from '../../contracts/tool-policy.js';
 import { ExecutionGenerationStateSchema } from '../inventory-generation.js';
@@ -121,6 +127,11 @@ export const McpToolNamesFileSchema = z.object({
   }
 });
 
+/** Declared output fields: valid field paths (local only, never sent to the Platform). */
+const outputFieldsSchema = (name: OutputFieldsName) => z.array(z.string().min(1).max(MAX_OUTPUT_FIELD_CHARS))
+  .max(MAX_OUTPUT_FIELDS)
+  .refine((paths) => isValidOutputFields(paths, name), { message: 'Not a list of output field paths' });
+
 const ToolTitleSchema = z.object({
   de: z.string().min(1).max(200).optional(),
   en: z.string().min(1).max(200).optional(),
@@ -139,6 +150,9 @@ export const ToolContractsFileSchema = z.object({
     title: ToolTitleSchema.optional(),
     mcp: z.array(McpToolNameSchema).min(1).max(10).optional(),
     maxResultChars: z.number().int().min(MIN_MAX_RESULT_CHARS).max(MAX_MAX_RESULT_CHARS).optional(),
+    outputAllowedFields: outputFieldsSchema('outputAllowedFields').optional(),
+    outputDeniedFields: outputFieldsSchema('outputDeniedFields').optional(),
+    outputDefaultFields: outputFieldsSchema('outputDefaultFields').optional(),
   }).strict()).max(5_000),
 }).strict();
 

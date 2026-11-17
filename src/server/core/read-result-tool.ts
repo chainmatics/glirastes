@@ -11,10 +11,11 @@ import {
   READ_RESULT_TOOL_NAME,
 } from '../../contracts/result-handle.js';
 import { defineTool, type Tool } from '../../types.js';
-import { dominantArrayRoute } from './result-overview.js';
+import { dominantArrayRoute, identityFieldsOf } from './result-overview.js';
 import {
   describeMissingPath,
   formatResultPath,
+  isAnyDepthForm,
   MAX_RESULT_PATH_CHARS,
   MAX_RESULT_PATHS,
   mixedArraySelections,
@@ -118,7 +119,7 @@ export interface ReadResultGuard {
 const DESCRIPTION = 'Read more of a large tool result that was shown as an overview with a "_result" marker: '
   + 'omitted fields or further entries. Pass its resultId, optionally "fields" (paths such as "data[].name", '
   + '"data[].owner.name" or "meta"; "[]" means every element of an array, "[2]" one element, returned keyed by its index: "data[2].items") '
-  + 'and "offset"/"limit" for the entries. '
+  + 'and "offset"/"limit" for the entries; entries read below an array keep their id and name. '
   + 'Works only within the current turn and never calls the original tool again.';
 
 const MAX_LISTED_UNKNOWN = 10;
@@ -268,6 +269,87 @@ function defaultPaths(root: Record<string, unknown>): ParsedPath[] {
   return paths;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Whether `prefix` selects the subtree `steps` reach (equal or above it). */
+function selects(prefix: ReadonlyArray<PathStep>, steps: ReadonlyArray<PathStep>): boolean {
+  return prefix.length <= steps.length && prefix.every((step, index) => {
+    const other = steps[index]!;
+    if (step.kind !== other.kind) return false;
+    if (step.kind === 'key') return step.key === (other as { key: string }).key;
+    if (step.kind === 'index') return step.index === (other as { index: number }).index;
+    return true;
+  });
+}
+
+/**
+ * Adds the identity fields of each entry (`identityFieldsOf`, read from the
+ * stored value, so always inside the tool's upper bound) to the entries of
+ * the outermost array a selected path reads below (`data[].owner.name`,
+ * `data[3].items`), so the model knows which entry each value belongs to.
+ * Not for a path that selects whole entries, not for a field a selected path
+ * already covers, not for an entry that is no object. Changes `value` (a
+ * fresh projection or cut) in place; the identity fields come first.
+ */
+function identityAdder(source: Record<string, unknown>, known: ReadonlyArray<ParsedPath>, offset: number) {
+  const targets = new Map<string, { route: string[]; step: PathStep }>();
+  for (const path of known) {
+    const at = path.steps.findIndex((step) => step.kind !== 'key');
+    if (at < 0 || at === path.steps.length - 1) continue;
+    const route = path.steps.slice(0, at).map((step) => (step as { key: string }).key);
+    const step = path.steps[at]!;
+    targets.set(JSON.stringify([route, step]), { route, step });
+  }
+  const covered = (steps: PathStep[]) => known.some((path) => selects(path.steps, steps));
+  const enrich = (entry: unknown, original: unknown, routeSteps: PathStep[]): unknown => {
+    if (!isPlainRecord(entry) || !isPlainRecord(original)) return entry;
+    const added = identityFieldsOf(original).filter(([key]) => (
+      !Object.prototype.hasOwnProperty.call(entry, key) && !covered([...routeSteps, { kind: 'key', key }])
+    ));
+    if (added.length === 0) return entry;
+    const output: Record<string, unknown> = {};
+    for (const [key, field] of added) setOwn(output, key, field);
+    for (const key of Object.keys(entry)) setOwn(output, key, entry[key]);
+    return output;
+  };
+  return (value: Record<string, unknown>): Record<string, unknown> => {
+    for (const { route, step } of targets.values()) {
+      let projected: unknown = value;
+      let original: unknown = source;
+      let holder: Record<string, unknown> | undefined;
+      let last = '';
+      for (const key of route) {
+        if (!isPlainRecord(projected) || !isPlainRecord(original)
+          || !Object.prototype.hasOwnProperty.call(projected, key) || !Object.prototype.hasOwnProperty.call(original, key)) {
+          projected = undefined;
+          break;
+        }
+        holder = projected;
+        last = key;
+        projected = projected[key];
+        original = original[key];
+      }
+      if (!holder || !Array.isArray(original)) continue;
+      const routeSteps: PathStep[] = route.map((key) => ({ kind: 'key', key }));
+      if (step.kind === 'each' && Array.isArray(projected)) {
+        const start = Math.min(offset, original.length);
+        const entries = original;
+        setOwn(holder, last, projected.map((entry, index) => enrich(entry, entries[start + index], [...routeSteps, step])));
+      } else if (step.kind === 'index' && isPlainRecord(projected)) {
+        const key = String(step.index);
+        if (Object.prototype.hasOwnProperty.call(projected, key)) {
+          const copy: Record<string, unknown> = { ...projected };
+          setOwn(copy, key, enrich(projected[key], original[step.index], [...routeSteps, step]));
+          setOwn(holder, last, copy);
+        }
+      }
+    }
+    return value;
+  };
+}
+
 /**
  * Projects a handle for one read, bounded by the origin tool's limit. A path
  * whose index is beyond its array answers `index_out_of_range` instead.
@@ -340,8 +422,12 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
    * without the sentence about all entries (`short`), or for a shortened
    * entry (`cut`, with what reads more of it).
    */
-  const answer = (limit: number | undefined, detail: 0 | 1 | 2, mode?: { short: true } | { cut: string }) => {
+  // Identity fields of the entries read below an array: only when the model chose the fields.
+  const addIdentity = paths ? identityAdder(source, known, offset) : (value: Record<string, unknown>) => value;
+  const answer = (limit: number | undefined, detail: 0 | 1 | 2, mode?: { short: true } | { cut: string }, identity = true) => {
     const projection = projectResult(source, known, { offset, ...(limit !== undefined ? { limit } : {}) });
+    // They count against the limit like all data: the fit loop below sees them.
+    if (identity) addIdentity(projection.value);
     // The array with the most entries decides the paging: with one window for all, it has more iff any has.
     const primary = projection.slices.reduce<typeof projection.slices[number] | undefined>(
       (best, slice) => (!best || slice.total > best.total ? slice : best), undefined,
@@ -404,11 +490,15 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
   if (fits(short.output)) return short.output;
   // Not even that fits: cut that one entry like any large result. The cut hint holds the short one,
   // so the cut always shortens something.
-  const leaves = countLeaves(short.value, 2);
+  const leaves = countLeaves(answer(1, 0, { short: true }, false).value, 2);
   const remedy = leaves <= 1
     ? 'it cannot be read in full'
     : known.length === 1 && paths ? 'for more, read a narrower path below it' : 'for more, select fewer fields';
-  const single = answer(1, 0, { cut: remedy });
+  // The entry is cut without its identity fields, which are added back after the cut: they are the
+  // last thing of an entry to go (only when nothing of the entry fits next to them).
+  const single = answer(1, 0, { cut: remedy }, false);
+  const identityChars = JSON.stringify(addIdentity(JSON.parse(JSON.stringify(single.value)) as Record<string, unknown>)).length
+    - JSON.stringify(single.value).length;
   const markerChars = JSON.stringify(single.marker).length + 12;
   const pageLeaves = countLeaves(single.value, 1);
   /**
@@ -418,8 +508,9 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
    * total (`_result` has them; the cut saw a one-entry page). `freed` is the
    * space that removal gave back.
    */
-  const cutWithin = (budget: number) => {
-    const cut = truncateToolResult(single.value, Math.max(1, budget), { readOnly: true }) as Record<string, unknown>;
+  const cutWithin = (budget: number, identity: boolean) => {
+    const reserve = identity ? identityChars : 0;
+    const cut = truncateToolResult(single.value, Math.max(1, budget - reserve), { readOnly: true }) as Record<string, unknown>;
     const output: Record<string, unknown> = { ...cut };
     const marker = output._truncated as { field?: string; showing?: number; total?: number; hint?: string } | undefined;
     if (!marker) return { freed: 0 };
@@ -431,20 +522,24 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
     const freed = JSON.stringify(marker).length - JSON.stringify(kept).length;
     delete output._truncated;
     if ((paged && showing === 0) || (pageLeaves > 0 && countLeaves(output, 1, true) === 0)) return { freed };
+    if (identity) addIdentity(output);
     output._truncated = kept;
     setOwn(output, '_result', single.marker);
     return { output: fits(output) ? output : undefined, freed };
   };
   // The space the removed marker parts took goes back to the entry (a few passes; deterministic).
-  let budget = handle.maxChars - markerChars;
+  // First with the identity fields kept; only when that holds nothing, without them.
   let best: Record<string, unknown> | undefined;
-  for (let pass = 0; pass < 3; pass += 1) {
-    const attempt = cutWithin(budget);
-    if (attempt.output) best = attempt.output;
-    if (attempt.freed === 0) break;
-    budget += attempt.freed;
+  for (const identity of identityChars > 0 ? [true, false] : [false]) {
+    let budget = handle.maxChars - markerChars;
+    for (let pass = 0; pass < 3; pass += 1) {
+      const attempt = cutWithin(budget, identity);
+      if (attempt.output) best = attempt.output;
+      if (attempt.freed === 0) break;
+      budget += attempt.freed;
+    }
+    if (best) return best;
   }
-  if (best) return best;
   // The last resort always fits the smallest limit: the marker and a short instruction.
   const entry = single.primary && single.primary.returned > 0 ? `entry ${offset} of ${single.primary.total}` : 'the selection';
   const next = single.marker.nextOffset;
@@ -489,7 +584,8 @@ export function createReadResultTool(store: ResultStore, guard: ReadResultGuard 
         const invalid: number[] = [];
         input.fields.forEach((text, index) => {
           const parsed = parseResultPath(text);
-          if (parsed) paths!.push(parsed);
+          // "**.key" is no read path (only outputDeniedFields knows it): invalid, never a field named "**".
+          if (parsed && !isAnyDepthForm(parsed.steps)) paths!.push(parsed);
           else invalid.push(index + 1);
         });
         if (invalid.length > 0) {

@@ -10,6 +10,7 @@
  * then within each class the largest first. Pure and deterministic.
  */
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
+import { leftOutFields, outputFieldTree, projectOutputFields, type LeftOutField } from './output-fields.js';
 import { formatResultPath, isSelectablePath, setOwn, type PathStep } from './result-paths.js';
 
 /** The `_result` marker of an overview. */
@@ -56,10 +57,27 @@ export interface BuildResultOverviewOptions {
   maxChars: number;
   /** Whether the origin tool only reads (decides the `result_expired` instruction). */
   readOnly: boolean;
+  /**
+   * The tool's `outputDefaultFields` (valid paths): the overview shows only
+   * these fields, also when everything would fit, and lists every other
+   * field in `omitted` (merged with what the size limit leaves out, by
+   * size). When the view itself is too large, the usual ranking drops fields
+   * of the view, so the declared fields are the last to go.
+   */
+  defaultFields?: ReadonlyArray<string>;
 }
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 type JsonObject = { [key: string]: Json };
+
+/** A left-out field or parent as `omitted` lists it; `view` is set for one the default view left out. */
+interface OmittedGroup {
+  path: string;
+  size: number;
+  selectable: boolean;
+  parent: boolean;
+  view?: LeftOutField;
+}
 
 const PROTECTED_KEYS: ReadonlySet<string> = new Set(['success', 'uiAction']);
 const MARKER_KEY = '_result';
@@ -76,6 +94,23 @@ const MAX_LISTED_KEY_CHARS = 64;
 /** An entry's own fields that name it stay as long as they are small. Foreign keys (`folderId`) do not. */
 const IDENTITY_KEY = /^(id|uuid|key|slug|code|name|title|label|displayName)$/;
 const MAX_IDENTITY_FIELD_CHARS = 200;
+
+/**
+ * The identity fields of one entry that name it: an identity key with a
+ * scalar value whose field (key and value, serialized) is at most 200
+ * characters, in the entry's key order. `read_result` adds them to the
+ * entries of an array it reads below; the overview keeps the same keys.
+ */
+export function identityFieldsOf(entry: Record<string, unknown>): Array<[string, unknown]> {
+  const fields: Array<[string, unknown]> = [];
+  for (const key of Object.keys(entry)) {
+    if (!IDENTITY_KEY.test(key)) continue;
+    const value = entry[key];
+    const scalar = value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+    if (scalar && serializedLength(key) + 1 + serializedLength(value) + 1 <= MAX_IDENTITY_FIELD_CHARS) fields.push([key, value]);
+  }
+  return fields;
+}
 /**
  * A field that refers to another record (`folderId`, `tenant_id`,
  * `brandKitIDs`), not a word ending in "ID" (`VALID`, `COVID`).
@@ -106,7 +141,7 @@ function serializedLength(value: unknown): number {
 }
 
 /** Approximate size: tens below 1,000, else two significant digits. */
-function approx(size: number): number {
+export function approx(size: number): number {
   if (size < 1_000) return Math.max(10, Math.round(size / 10) * 10);
   const magnitude = 10 ** (Math.floor(Math.log10(size)) - 1);
   return Math.round(size / magnitude) * magnitude;
@@ -367,7 +402,10 @@ export function buildResultOverview(
   value: Record<string, unknown>,
   options: BuildResultOverviewOptions,
 ): Record<string, unknown> | undefined {
-  const root = value as JsonObject;
+  // A default view: the overview is built from the view, and what the view leaves out is listed as omitted.
+  const view = options.defaultFields ? outputFieldTree(options.defaultFields) : undefined;
+  const viewLeftOut: LeftOutField[] = view ? leftOutFields(value, view) : [];
+  const root = (view ? projectOutputFields(value, view) : value) as JsonObject;
   const arrays = findArrays(root);
   const largest = arrays[0];
   const dominant: DominantArray | undefined = largest ? { route: largest.route, entries: largest.entries } : undefined;
@@ -437,8 +475,21 @@ export function buildResultOverview(
       .slice(0, MAX_LISTED_KEYS).map(([key]) => key);
     return { keys, count: children.length };
   };
+  /** The listable direct child keys of a field the default view leaves out, like `keysOf`. */
+  const viewKeysOf = (field: LeftOutField): { keys: string[]; count: number } => {
+    const keys = [...field.children]
+      .filter(([key]) => key.length <= MAX_LISTED_KEY_CHARS
+        && isSelectablePath([...field.steps, { kind: 'key', key }], MAX_LISTED_PATH_CHARS))
+      .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+      .slice(0, MAX_LISTED_KEYS).map(([key]) => key);
+    return { keys, count: field.children.size };
+  };
+  const viewGroups: OmittedGroup[] = viewLeftOut.map((field) => ({
+    path: field.path, size: field.size, selectable: isSelectablePath(field.steps, MAX_LISTED_PATH_CHARS),
+    parent: field.parent, view: field,
+  }));
   /** Left-out fields, a parent whose fields were all left out listed once instead, largest first. */
-  const omittedGroups = (dropped: Candidate[]): Array<{ path: string; size: number; selectable: boolean; parent: boolean }> => {
+  const omittedGroups = (dropped: Candidate[]): OmittedGroup[] => {
     const droppedUnder = new Map<string, number>();
     for (const candidate of dropped) {
       for (const path of [...parentsOf.get(candidate)!, candidate.path]) droppedUnder.set(path, (droppedUnder.get(path) ?? 0) + 1);
@@ -451,7 +502,11 @@ export function buildResultOverview(
       groups.set(path, (groups.get(path) ?? 0) + candidate.size);
       if (parent !== undefined) parents.add(parent);
     }
-    return [...groups].map(([path, size]) => ({ path, size, selectable: selectable.get(path) === true, parent: parents.has(path) }))
+    const own: OmittedGroup[] = [...groups].map(([path, size]) => ({ path, size, selectable: selectable.get(path) === true, parent: parents.has(path) }));
+    // A field the view left out below a parent the size limit left out is read with that parent.
+    const under = (path: string) => own.some((group) => group.parent
+      && (path.startsWith(`${group.path}.`) || path.startsWith(`${group.path}[`)));
+    return [...own, ...viewGroups.filter((group) => !under(group.path))]
       .sort((left, right) => right.size - left.size || (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
   };
 
@@ -482,7 +537,7 @@ export function buildResultOverview(
     const omitted = groups.filter((group) => group.selectable).slice(0, MAX_LISTED_OMITTED).map((group) => {
       const listed: OmittedEntry = { path: group.path, approxChars: approx(group.size) };
       if (!group.parent || keyCount === 0) return listed;
-      const { keys, count } = keysOf(group.path);
+      const { keys, count } = group.view ? viewKeysOf(group.view) : keysOf(group.path);
       if (keys.length === 0) return listed;
       listed.keys = keys.slice(0, keyCount);
       if (count > listed.keys.length) listed.keysMore = count - listed.keys.length;
@@ -499,7 +554,7 @@ export function buildResultOverview(
       ...(dominant ? { showing: entryCount, total: dominant.entries.length } : {}),
       ...(omitted.length > 0 ? { omitted } : {}),
       ...(groups.length > omitted.length ? { omittedMore: groups.length - omitted.length } : {}),
-      hint: hintOf(options, shown, dropped.length > 0, groups.some((group) => !group.selectable), omitted.some((entry) => entry.keys)),
+      hint: hintOf(options, shown, groups.length > 0, groups.some((group) => !group.selectable), omitted.some((entry) => entry.keys)),
     };
     const output: Record<string, unknown> = {};
     for (const key of Object.keys(root)) {
@@ -537,8 +592,10 @@ export function buildResultOverview(
   }
   if (!chosen) return undefined;
   // With fields and entries settled, as many keys per left-out parent as fit (none when even one does not).
+  // Fields are left out when the size limit drops some or the default view leaves some out.
+  const leftOut = chosen.dropCount > 0 || viewGroups.length > 0;
   let keyCount = MAX_LISTED_KEYS;
-  if (chosen.dropCount > 0 && !fits(chosen.dropCount, chosen.entryCount, keyCount)) {
+  if (leftOut && !fits(chosen.dropCount, chosen.entryCount, keyCount)) {
     let low = 0;
     let high = MAX_LISTED_KEYS - 1;
     while (low < high) {
@@ -548,7 +605,7 @@ export function buildResultOverview(
     }
     keyCount = low;
   }
-  let result = build(chosen.dropCount, chosen.entryCount, chosen.dropCount > 0 ? keyCount : 0);
+  let result = build(chosen.dropCount, chosen.entryCount, leftOut ? keyCount : 0);
   if (result.size > options.maxChars) result = build(chosen.dropCount, chosen.entryCount);
   if (result.size > options.maxChars) return undefined;
   // Nothing of the stored result leaks out by reference.

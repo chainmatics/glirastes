@@ -58,8 +58,19 @@ const PLAIN_KEY = /^[^.[\]]+$/;
  */
 export function isSelectablePath(steps: ReadonlyArray<PathStep>, maxChars: number): boolean {
   return steps.length > 0 && steps.length <= MAX_PATH_STEPS
+    && !isAnyDepthForm(steps)
     && steps.every((step) => step.kind !== 'key' || PLAIN_KEY.test(step.key))
     && formatResultPath(steps).length <= Math.min(maxChars, MAX_RESULT_PATH_CHARS);
+}
+
+/**
+ * Whether a path starts with a field named `**`: the any-depth form of
+ * `outputDeniedFields` (`**.fileUrl`), which `read_result` refuses as an
+ * invalid field instead of reading a field of that name.
+ */
+export function isAnyDepthForm(steps: ReadonlyArray<PathStep>): boolean {
+  const first = steps[0];
+  return first?.kind === 'key' && first.key === '**';
 }
 
 /** Formats steps back into the path syntax (`data[].name`, `data[2].items`). */

@@ -135,6 +135,57 @@ describe('next-app endpoint source', () => {
     expect(notes.prose?.contractDescription).toBe('Create a note for the caller');
   }, 60_000);
 
+  it('carries output fields of the sibling contract.ts, reduces the output contract and fails closed on an invalid bound', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  POST: { input: z.object({ title: z.string() }), id: 'notes.add',\n"
+        + '    output: z.object({ id: z.string(), title: z.string(), fileUrl: z.string(), meta: z.object({ etag: z.string() }) }),\n'
+        + "    outputAllowedFields: ['title', 'id', 'meta'], outputDeniedFields: ['**.fileUrl', 'meta.etag'], outputDefaultFields: ['title'] },\n"
+        + "  GET: { input: z.object({}), id: 'notes.list', outputAllowedFields: ['data[0]'], outputDefaultFields: 'title' },\n};\n",
+      'src/app/api/notes/route.ts': "import { getSession } from '@/lib/session';\nimport { contract } from './contract';\n"
+        + 'declare function createNote(input: unknown, shape: typeof contract): Promise<{ id: string }>;\n'
+        + 'export async function POST(request: Request) {\n  await getSession(request);\n  const body = await request.json();\n'
+        + '  return Response.json(await createNote(body, contract));\n}\n'
+        + 'export async function GET(request: Request) {\n  await getSession(request);\n  return Response.json(await createNote({}, contract));\n}\n',
+    });
+    const observed = await createNextEndpointSource().observe(context(app.root));
+    const tools = byKey(observed.observations);
+    const add = tools.get('POST /api/notes')!;
+    expect(add.outputAllowedFields).toEqual(['id', 'meta', 'title']);
+    expect(add.outputDeniedFields).toEqual(['**.fileUrl', 'meta.etag']);
+    expect(add.outputDefaultFields).toEqual(['title']);
+    expect(JSON.stringify(add.contract!.output)).not.toContain('fileUrl');
+    expect(JSON.stringify(add.contract!.output)).not.toContain('etag');
+    // A zod output keeps its runtime schema and digest: the Returns: text is reduced at runtime.
+    expect(add.contract!.runtime.output.kind).toBe('module-export');
+    const list = tools.get('GET /api/notes')!;
+    expect(list.findings.map((finding) => [finding.code, finding.severity])).toEqual(expect.arrayContaining([
+      ['output-allowed-fields-invalid', 'needs_attention'],
+      ['output-default-fields-invalid', 'warning'],
+    ]));
+    expect(list.findings.find((finding) => finding.code === 'output-allowed-fields-invalid')!.message)
+      .toContain('src/app/api/notes/contract.ts declares an outputAllowedFields');
+    expect(list.outputAllowedFields).toEqual([]);
+    expect(list).not.toHaveProperty('outputDefaultFields');
+    expect(tools.get('GET /api/tasks')).not.toHaveProperty('outputAllowedFields');
+  }, 30_000);
+
+  it('joins the app-wide output.deniedFields of tools.json with a contract.ts deny-list', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  POST: { input: z.object({ title: z.string() }), id: 'notes.add', output: z.object({ id: z.string(), fileUrl: z.string(), etag: z.string() }),\n"
+        + "    outputDeniedFields: ['etag'] },\n};\n",
+    }, { toolsConfig: { output: { deniedFields: ['**.fileUrl'] } } });
+    const tools = byKey((await createNextEndpointSource().observe(context(app.root))).observations);
+    const add = tools.get('POST /api/notes')!;
+    expect(add.outputDeniedFields).toEqual(['**.fileUrl', 'etag']);
+    expect(JSON.stringify(add.contract!.output)).not.toMatch(/fileUrl|etag/);
+    expect(tools.get('GET /api/tasks')!.outputDeniedFields).toEqual(['**.fileUrl']);
+    expect(add.findings.filter((finding) => finding.code === 'output-field-unknown')).toEqual([]);
+  }, 30_000);
+
   it('carries maxResultChars of the sibling contract.ts to the observation', async () => {
     const app = await createAppFixture({
       ...APP_FILES,

@@ -74,12 +74,19 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     .sort((left, right) => compareCodeUnits(left.toolId, right.toolId));
   const bound = tools.map((tool) => {
     const contract: ToolContract | null | undefined = contractsById.get(tool.toolId)?.contract;
-    const maxResultChars = contractsById.get(tool.toolId)?.maxResultChars;
+    const entry = contractsById.get(tool.toolId);
+    const maxResultChars = entry?.maxResultChars;
+    // Output fields bound endpoint results only; a UI tool has no backend answer.
+    const outputFields = tool.executionKind === 'endpoint'
+      ? ([['outputAllowedFields', entry?.outputAllowedFields], ['outputDeniedFields', entry?.outputDeniedFields],
+        ['outputDefaultFields', entry?.outputDefaultFields]] as const)
+        .filter((field): field is readonly [typeof field[0], string[]] => field[1] !== undefined)
+      : [];
     if (!contract) throw new Error(`Enabled tool ${tool.name} has no contract to bind.`);
     if (tool.executionKind === 'ui' && !contract.uiAction) {
       throw new Error(`Enabled UI tool ${tool.name} has no UI action to bind.`);
     }
-    return { tool, contract, maxResultChars };
+    return { tool, contract, maxResultChars, outputFields };
   });
   // Search-only synonyms of the enabled tools, keyed like `toolSemantics` of createAiChatHandler.
   const searchSemantics = Object.fromEntries(tools
@@ -142,7 +149,7 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
       lines.push(`  const output${index} = ${expression(contract.runtime.output)};`);
     });
     lines.push('  return [');
-    bound.forEach(({ tool, contract, maxResultChars }, index) => {
+    bound.forEach(({ tool, contract, maxResultChars, outputFields }, index) => {
       const entry = `toolCatalog[${index}]`;
       const shared = [
         `        id: ${entry}.definitionId,`,
@@ -159,6 +166,7 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
           ...(contract.runtime.output.kind === 'module-export' ? [`        outputSchema: output${index},`] : []),
           `        needsApproval: ${entry}.requiresApproval,`,
           ...(maxResultChars !== undefined ? [`        maxResultChars: ${maxResultChars},`] : []),
+          ...outputFields.map(([name, paths]) => `        ${name}: ${literal(paths, 8)},`),
           '      }),',
         ]
         : [

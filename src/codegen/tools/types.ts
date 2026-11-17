@@ -113,6 +113,23 @@ export interface ObservedTool {
    * Platform.
    */
   maxResultChars?: number;
+  /**
+   * Output fields the code declares (OpenAPI `x-glirastes-output-allowed-fields`,
+   * `-denied-fields`, `-default-fields`; contract.ts `outputAllowedFields`,
+   * `outputDeniedFields`, `outputDefaultFields`); effective and normalized.
+   * Local only: written to tool-contracts.json, never sent to the Platform.
+   */
+  outputAllowedFields?: string[];
+  outputDeniedFields?: string[];
+  outputDefaultFields?: string[];
+  /**
+   * App-wide patterns (`output.deniedFields` of tools.json) whose key this
+   * tool's declared output schema names, and declared keys that differ from
+   * one only by case. Only for the warning about a pattern that matches no
+   * tool; never written to an output.
+   */
+  appDeniedHits?: string[];
+  appDeniedNearKeys?: string[];
 }
 
 export interface ExcludedTool {
@@ -156,6 +173,10 @@ export interface ToolContractsEntry {
   mcp?: McpToolName[];
   /** Upper bound of the serialized result the code declares; the generated module passes it on. */
   maxResultChars?: number;
+  /** Output fields the code declares (see `ObservedTool`); the generated module passes them on. */
+  outputAllowedFields?: string[];
+  outputDeniedFields?: string[];
+  outputDefaultFields?: string[];
 }
 
 export interface ToolSourceContext {

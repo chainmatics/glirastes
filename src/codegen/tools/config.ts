@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
+import { MAX_OUTPUT_FIELDS, normalizeOutputFields, parseAnyDepthKey } from '../../server/core/output-fields.js';
 
 /** Every file the tools generator reads (inputs) or owns (outputs), app-relative. */
 export const TOOLS_PATHS = {
@@ -25,6 +26,8 @@ export const TOOLS_PATHS = {
 } as const;
 
 export const DEFAULT_GENERATED_MODULE = 'src/generated/glirastes/tools.generated.ts';
+
+const APP_DENIED_MESSAGE = 'output.deniedFields takes only any-depth patterns such as "**.fileUrl" (at most 200, one field name after "**.", no whitespace); an exact path belongs to one tool';
 
 function insideApp(value: string): boolean {
   return !value.startsWith('/') && !/^[A-Za-z]:/.test(value)
@@ -128,6 +131,17 @@ export const ToolsConfigSchema = z.object({
   connection: z.object({
     envFile: z.string().trim().min(1).max(512).optional(),
   }).strict().optional(),
+  /**
+   * Output fields for every generated endpoint tool. `deniedFields`: only
+   * any-depth patterns `**.<key>` (e.g. `**.fileUrl`), joined with each
+   * tool's own `outputDeniedFields`. Local: written into the generated tool
+   * contracts, never sent to the Platform. Not for hand-written tools.
+   */
+  output: z.object({
+    deniedFields: z.array(z.string()).max(MAX_OUTPUT_FIELDS)
+      .refine((paths) => paths.every((path) => parseAnyDepthKey(path) !== undefined)
+        && normalizeOutputFields(paths, 'outputDeniedFields') !== undefined, { message: APP_DENIED_MESSAGE }),
+  }).strict().optional(),
 }).strict().superRefine((config, context) => {
   const kinds = config.sources.map((source) => (typeof source === 'string' ? source : source.kind));
   for (const kind of SINGLETON_SOURCES) {
@@ -163,11 +177,11 @@ export type ToolSourceConfig =
   | { kind: 'next-pages' | 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[] }
   | { kind: 'react-router' | 'vue-router' | 'react-actions'; srcDir?: string };
 
-function invalidConfig(): FoundationDiagnosticError {
+function invalidConfig(detail?: string): FoundationDiagnosticError {
   return new FoundationDiagnosticError({
     code: 'E-TOOLS-002',
     operation: 'tools.config',
-    message: 'The Glirastes tools configuration is invalid.',
+    message: detail ? `The Glirastes tools configuration is invalid: ${detail}.` : 'The Glirastes tools configuration is invalid.',
     remediation: 'repair-tools-config',
     path: TOOLS_PATHS.config,
   });
@@ -196,7 +210,11 @@ export function loadToolsConfig(root: string): ToolsConfig {
     throw invalidConfig();
   }
   const parsed = ToolsConfigSchema.safeParse(json);
-  if (!parsed.success) throw invalidConfig();
+  if (!parsed.success) {
+    // An app-wide deny-list that cannot be read fails closed: no tools are generated without it.
+    if (parsed.error.issues.some((issue) => issue.path[0] === 'output')) throw invalidConfig(APP_DENIED_MESSAGE);
+    throw invalidConfig();
+  }
   return parsed.data;
 }
 

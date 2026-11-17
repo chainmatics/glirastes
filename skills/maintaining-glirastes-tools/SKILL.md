@@ -92,8 +92,9 @@ maintains a Node server or imports a generated TypeScript module.
    explicitly authorized exclusion may remove it, and it remains in coverage.
    With `"selection": "opt-in"` only operations marked `x-glirastes-tool: true`
    are tools and validated. Findings `opt-in-excluded`, `tool-marker-invalid`,
-   `tool-group-invalid` and `tool-roles-invalid` (tool stays disabled) are
-   fixed in the backend that writes the export, never in generated files.
+   `tool-group-invalid`, `tool-roles-invalid`, `output-allowed-fields-invalid`
+   and `output-denied-fields-invalid` (tool stays disabled) are fixed in the
+   backend that writes the export, never in generated files.
    A path or query parameter's `description` reaches the model as the input
    property's description (it wins over the schema's): write call-time
    guidance there, e.g. NestJS
@@ -133,6 +134,11 @@ identity/configuration when installed; otherwise use the matching SDK's
 | `max-result-chars-invalid` | the OpenAPI operation's `x-glirastes-max-result-chars` or the `maxResultChars` of the `contract.ts` entry: an integer from 1000 to 200000, or remove it; the handler's limit applies meanwhile |
 | `output-contract-opaque` | a typed response. OpenAPI: a JSON `content` schema on the 200/201/202 response; an endpoint without a body declares `204` (NestJS `@HttpCode(204)` and `@ApiNoContentResponse()`), which closes it. Other sources: return a typed object or validate it with an exported schema |
 | `semantics-entry-orphaned` | the `.glirastes/tool-semantics.json` entry `target.key` names: re-key it to the operation it describes (`"stableKey": "METHOD /path"` as in the tool report, or the current `name`), keeping its texts, or delete it when the operation is gone |
+| `output-allowed-fields-invalid`, `output-denied-fields-invalid` | the OpenAPI operation's `x-glirastes-output-allowed-fields` / `x-glirastes-output-denied-fields` or `outputAllowedFields` / `outputDeniedFields` of the `contract.ts` entry: a list of at most 200 field paths such as `data[].name` (no index; `**.key` only in the deny-list), or remove it; the tool stays disabled meanwhile (fail closed) |
+| `output-default-fields-invalid` | `x-glirastes-output-default-fields` / `outputDefaultFields`: a list of field paths like the others, or remove it; ignored meanwhile |
+| `output-field-unknown`, `output-default-fields-outside-allowed`, `output-default-fields-denied` | the path the message names in the declaration: correct it to a field of the response (a list response is under `data`); a misspelt denied path excludes nothing, so fix it before relying on it |
+| `output-denied-key-unmatched` | developer: a pattern in `output.deniedFields` of `.glirastes/tools.json` whose key no tool's declared response schema names; correct the spelling (names match exactly, case included) or remove it; never edit tools.json without the developer |
+| `output-schema-unprojected` | optional: inline the `$ref` or replace `patternProperties` / the open `additionalProperties` in the response schema; results are reduced either way |
 | `tool-semantics-invalid` | the entry `target.key` names in `.glirastes/tool-semantics.json`; keep its human text, fix only the shape |
 | `input-schema-not-object` | an object at the root of the input schema (optional fields, or one field holding the variants), changed together with every caller of the route; for an internal route, tell the developer instead |
 | `navigation-bridge-missing` | mount `useGlirastesNavigationBridge` (React) or `registerNavigationBridge` (`glirastes/browser`) where it is always mounted |

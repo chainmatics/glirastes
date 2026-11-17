@@ -76,8 +76,18 @@ export interface ResultStorePutInput {
   toolName: string;
   readOnly: boolean;
   maxChars: number;
-  /** A successful record result (`success` not false), larger than `maxChars` serialized. */
+  /**
+   * A successful record result (`success` not false), larger than
+   * `maxChars` serialized or, with `defaultFields`, with fields the default
+   * view leaves out.
+   */
   value: Record<string, unknown>;
+  /**
+   * The tool's `outputDefaultFields`: the overview is the default view of
+   * the sealed copy (see `BuildResultOverviewOptions.defaultFields`); the
+   * whole value stays readable through the handle.
+   */
+  defaultFields?: ReadonlyArray<string>;
   /**
    * The owner `captureOwner` returned before the origin tool ran. Required
    * when the store has `owner`: without it, or when it is not the principal
@@ -239,7 +249,10 @@ export function createResultStore(options: ResultStoreOptions = {}): ResultStore
         }
         const value = JSON.parse(sealedText) as Record<string, unknown>;
         const id = newId(input.readOnly);
-        const overview = buildResultOverview(value, { id, maxChars: input.maxChars, readOnly: input.readOnly });
+        const overview = buildResultOverview(value, {
+          id, maxChars: input.maxChars, readOnly: input.readOnly,
+          ...(input.defaultFields ? { defaultFields: input.defaultFields } : {}),
+        });
         if (!overview) {
           release();
           return undefined;

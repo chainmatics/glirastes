@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { defineEndpointTool, defineTool, type PiiDetector, type PiiEntity, type ToolContext } from '../../types.js';
 import { endpointToolToTool, toolToAiTool, type InternalApiResponse } from './index.js';
 import { createReadResultTool, readResultHandle, type ReadResultInput, type ReadResultMarker } from './read-result-tool.js';
-import { buildResultOverview, type ResultOverviewMarker } from './result-overview.js';
+import { buildResultOverview, identityFieldsOf, type ResultOverviewMarker } from './result-overview.js';
 import {
   formatResultPath, isSelectablePath, mixedArraySelections, parseResultPath, projectResult, type ParsedPath, type PathStep,
 } from './result-paths.js';
@@ -271,7 +271,8 @@ describe('read_result', () => {
   it('reads omitted fields of chosen entries with offset and limit', async () => {
     const { read, store } = await setup();
     const result = await read({ fields: ['data[].id', 'data[].tracks'], offset: 2, limit: 1 });
-    expect(result.data).toEqual([{ id: 'p2', tracks: 'x'.repeat(8_000) }]);
+    // The entry's own name comes with it (identity fields); id was selected anyway.
+    expect(result.data).toEqual([{ name: 'List 2', id: 'p2', tracks: 'x'.repeat(8_000) }]);
     expect(result._result).toMatchObject({ offset: 2, returned: 1, total: 20, nextOffset: 3 });
     expect(store.isIssued(result)).toBe(true);
     expect(result).not.toHaveProperty('uiAction');
@@ -280,7 +281,9 @@ describe('read_result', () => {
   it('reads nested paths and a paginated envelope', async () => {
     const { read } = await setup({ data: { items: playlists().data, page: 1 } });
     const result = await read({ fields: ['data.items[].owner.name', 'data.page'], limit: 2 });
-    expect(result.data).toEqual({ items: [{ owner: { name: 'Owner 0' } }, { owner: { name: 'Owner 1' } }], page: 1 });
+    expect(result.data).toEqual({
+      items: [{ id: 'p0', name: 'List 0', owner: { name: 'Owner 0' } }, { id: 'p1', name: 'List 1', owner: { name: 'Owner 1' } }], page: 1,
+    });
   });
 
   it('pages within the origin tool\'s limit and says where to continue', async () => {
@@ -765,7 +768,9 @@ describe('pilot feedback: one entry by index', () => {
     expect((entry.data as Record<string, { name: string; items: unknown[] }>)['3']).toMatchObject({ name: 'List 3', items: [lists().data[3]!.items[0]] });
     expect(entry._result).toMatchObject({ returned: 1, total: 13, nextOffset: 1 });
     const nested = await read({ fields: ['data[3].items[2].title'] });
-    expect(nested.data).toEqual({ 3: { items: { 2: { title: 't3-2' } } } });
+    // An indexed entry carries its identity fields too; nested arrays do not.
+    expect(nested.data).toEqual({ 3: { id: 'p3', name: 'List 3', items: { 2: { title: 't3-2' } } } });
+    expect(Object.keys((answer.data as Record<string, object>)['0']!)).toEqual(['id', 'name', 'items']);
     expect(nested._result).toEqual({ id: nested._result.id, offset: 0 });
   });
 
@@ -806,7 +811,7 @@ describe('pilot feedback: one entry by index', () => {
       .toEqual([1, 2, 3]);
     // Single entries of different arrays, or several single entries of one, combine.
     const several = await read({ fields: ['data[0].name', 'data[2].name'] });
-    expect(several.data).toEqual({ 0: { name: 'List 0' }, 2: { name: 'List 2' } });
+    expect(several.data).toEqual({ 0: { id: 'p0', name: 'List 0' }, 2: { id: 'p2', name: 'List 2' } });
   });
 
   it('names the accepted forms and offset/limit for an invalid path', async () => {
@@ -910,7 +915,7 @@ describe('pilot feedback: the overview keeps short labels and drops opaque ids f
     // `data[].extra` itself stays (entry 0 shows it), so its left-out fields are listed one by one.
     expect(overview._result.omitted?.map((entry) => entry.path)).toEqual(['data[].extra.blob', 'data[].extra.ref']);
     const read = await createReadResultTool(store).execute({ resultId: overview._result.id, fields: overview._result.omitted!.map((entry) => entry.path), limit: 2 }, {} as ToolContext) as Record<string, unknown>;
-    expect(read.data).toEqual([{}, { extra: value.data[1]!.extra }]);
+    expect(read.data).toEqual([{ id: 0 }, { id: 1, extra: value.data[1]!.extra }]);
     // Without the empty one, the parent is listed once.
     const whole = buildResultOverview({ data: value.data.slice(1) }, { id: 'ro_abcdefgh', maxChars: 2_000, readOnly: true }) as Overview;
     expect(whole._result.omitted).toEqual([{ path: 'data[].extra', approxChars: expect.any(Number), keys: ['blob', 'ref'] }]);
@@ -1203,6 +1208,33 @@ describe('review round: every listed omitted path reads exactly the left-out dat
     const inner = select((value as Record<string, unknown>)[step!.key], rest);
     return inner === undefined ? undefined : { [step!.key]: inner };
   };
+  /**
+   * The identity fields read_result adds: for a path that reads below the
+   * entries of its outermost array, each entry's `identityFieldsOf` that the
+   * path does not select itself and the entry does not already show.
+   */
+  const withIdentity = (expected: unknown, value: unknown, steps: ReadonlyArray<PathStep>): unknown => {
+    const at = steps.findIndex((step) => step.kind !== 'key');
+    if (at < 0 || at === steps.length - 1 || steps[at]!.kind !== 'each') return expected;
+    const route = steps.slice(0, at).map((step) => (step as { key: string }).key);
+    const selected = at + 2 === steps.length && steps[at + 1]!.kind === 'key' ? (steps[at + 1] as { key: string }).key : undefined;
+    const copy = JSON.parse(JSON.stringify(expected)) as Record<string, unknown>;
+    let holder: Record<string, unknown> = copy;
+    let original = value as Record<string, unknown>;
+    for (const key of route.slice(0, -1)) {
+      holder = holder[key] as Record<string, unknown>;
+      original = original[key] as Record<string, unknown>;
+    }
+    const last = route[route.length - 1]!;
+    const entries = original[last] as Array<Record<string, unknown>>;
+    holder[last] = (holder[last] as Array<Record<string, unknown>>).map((entry, index) => {
+      const own = entries[index];
+      if (typeof own !== 'object' || own === null || Array.isArray(own)) return entry;
+      const added = identityFieldsOf(own).filter(([key]) => key !== selected && !(key in entry));
+      return { ...Object.fromEntries(added), ...entry };
+    });
+    return copy;
+  };
   /** Pages joined: arrays concatenated, objects merged. */
   const merge = (left: unknown, right: unknown): unknown => {
     if (left === undefined) return right;
@@ -1251,7 +1283,7 @@ describe('review round: every listed omitted path reads exactly the left-out dat
           joined = merge(joined, data);
           offset = marker.nextOffset;
         }
-        expect(joined).toEqual(select(value, parsed.steps));
+        expect(joined).toEqual(withIdentity(select(value, parsed.steps), value, parsed.steps));
       };
       for (const { path, keys } of overview._result.omitted ?? []) {
         await roundTrip(path);
@@ -1398,7 +1430,8 @@ describe('final check: an entry the answer does not show is never counted as ret
       { resultId: 'ro_abcdefgh', limit: 3 } as ReadResultInput,
       [parseResultPath('data[].published.label')!],
     );
-    expect(answer.data).toEqual([{}, {}, {}]);
+    // Each entry still says which one it is (its identity fields).
+    expect(answer.data).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }]);
     expect(answer._result).toMatchObject({ returned: 3, total: 6, nextOffset: 3 });
     expect((answer._result as ReadResultMarker).unknownFields).toBeUndefined();
   });

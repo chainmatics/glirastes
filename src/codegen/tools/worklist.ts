@@ -113,6 +113,13 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'tool-group-invalid',
   'tool-roles-invalid',
   'max-result-chars-invalid',
+  'output-allowed-fields-invalid',
+  'output-denied-fields-invalid',
+  'output-default-fields-invalid',
+  'output-field-unknown',
+  'output-default-fields-outside-allowed',
+  'output-default-fields-denied',
+  'output-schema-unprojected',
   // A name (contract id or x-glirastes-name) taken from another tool, fixed where it is declared.
   'definition-id-reassigned',
 ]);
@@ -267,6 +274,10 @@ function resolveItem(finding: ToolFinding, tool: ToolsPipelineTool | undefined):
   if (code === 'mcp-tool-names-invalid') {
     const key = finding.subjectRef.startsWith('.glirastes/') ? finding.subjectRef : toolKey(finding.subjectRef);
     return { ...base, owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.mcpToolNames, key } };
+  }
+  if (code === 'output-denied-key-unmatched') {
+    // tools.json is developer-owned: a person checks the pattern.
+    return { ...base, owner: 'developer', target: { kind: 'review', file: TOOLS_PATHS.config, key: 'output.deniedFields' } };
   }
   if (code === 'auth-evidence-missing') {
     return {

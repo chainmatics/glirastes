@@ -31,12 +31,14 @@ import {
   declaredMaxResultChars,
   declaredName,
   declaredRoles,
+  readOutputFieldExtensions,
   selectionExclusion,
   toolMarkerOf,
   type OpenapiSelection,
 } from '../openapi-selection.js';
 import { validateResolutionEntry, type ResolutionEntry } from '../resolutions.js';
 import type { SchemaProbeItem, SchemaProbeResult } from '../schema-probe.js';
+import { outputFieldLists, type DeclaredOutputFields } from '../output-fields.js';
 import type {
   ExcludedTool,
   JsonSchemaLike,
@@ -104,6 +106,8 @@ interface OpenapiEntry {
   roles?: string[];
   /** `x-glirastes-max-result-chars`: the tool's result bound, above the handler's global value. */
   maxResultChars?: number;
+  /** `x-glirastes-output-*-fields`, checked against the response schema by `resolveEndpointContract`. */
+  outputFields?: DeclaredOutputFields;
 }
 
 interface OpenapiPiece {
@@ -287,6 +291,8 @@ function readEntry(
     findings.push(toolFinding('max-result-chars-invalid', 'warning', stableKey,
       `${where} declares an x-glirastes-max-result-chars that is not an integer from 1000 to 200000; the declaration is ignored and the handler's limit applies.`));
   }
+  const outputFields = readOutputFieldExtensions(operation.operation, where, stableKey);
+  findings.push(...outputFields.findings);
   const description = typeof operation.operation.description === 'string' && operation.operation.description.trim()
     ? operation.operation.description.trim()
     : typeof operation.operation.summary === 'string' && operation.operation.summary.trim()
@@ -312,6 +318,7 @@ function readEntry(
     ...(group && 'value' in group ? { group: group.value } : {}),
     ...(roles && 'value' in roles && roles.value.length > 0 ? { roles: roles.value } : {}),
     ...(maxResultChars && 'value' in maxResultChars ? { maxResultChars: maxResultChars.value } : {}),
+    ...(outputFields.declared ? { outputFields: outputFields.declared } : {}),
   };
 }
 
@@ -405,6 +412,7 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
     prose,
     ...(entry.roles ? { codeRoles: [...entry.roles] } : {}),
     ...(entry.maxResultChars !== undefined ? { maxResultChars: entry.maxResultChars } : {}),
+    ...outputFieldLists(resolved),
   };
 }
 
@@ -553,9 +561,11 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
         },
         ...(entry.output ? { inferredOutput: entry.output } : {}),
         probes,
+        ...(ctx.config.output?.deniedFields ? { appDeniedFields: ctx.config.output.deniedFields } : {}),
         openapi: entry.input,
         ...(resolution ? { resolution } : {}),
         ...(previousContract ? { previousContract } : {}),
+        ...(entry.outputFields ? { outputFields: entry.outputFields } : {}),
       });
     } catch (error) {
       // Only a schema of this operation that Ajv cannot compile is the

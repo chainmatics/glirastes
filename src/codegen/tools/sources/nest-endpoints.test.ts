@@ -97,6 +97,17 @@ describe('nest endpoint source', () => {
     });
   });
 
+  it('gives every endpoint tool the app-wide output.deniedFields of tools.json', async () => {
+    const app = await createAppFixture(APP, { toolsConfig: { sources: [{ kind: 'nest' }], output: { deniedFields: ['**.title'] } } });
+    const tools = byKey((await createNestEndpointSource().observe(context(app.root))).observations);
+    const create = tools.get('POST /api/tasks')!;
+    expect(create.outputDeniedFields).toEqual(['**.title']);
+    expect(create.appDeniedHits).toEqual(['**.title']);
+    expect(JSON.stringify(create.contract!.output)).not.toContain('title');
+    expect(tools.get('DELETE /api/tasks/:id')!.outputDeniedFields).toEqual(['**.title']);
+    expect(create.findings).toEqual([]);
+  });
+
   it('reads Zod pipes as the input contract and a parsed return as the output', async () => {
     const app = await createAppFixture(APP, { toolsConfig: { sources: [{ kind: 'nest' }] } });
     const tools = byKey((await createNestEndpointSource().observe(context(app.root))).observations);
