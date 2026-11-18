@@ -154,6 +154,35 @@ describe('ApprovalCard ids of the call', () => {
     expect([...warning.querySelectorAll('[data-element="subject-id"]')].map((id) => id.textContent)).toEqual(['t-3', 'f-9']);
   });
 
+  it('shows an id seen in a tool result without a name neutrally: fallback or id, a note, no warning', () => {
+    const { container } = renderCard(approval({
+      subjects: [
+        { path: 'versionId', id: 'v-3', status: 'seen', label: 'Version', fallback: 'Version number 3' },
+        { path: 'baseVersionId', id: 'v-2', status: 'seen', label: 'Base version' },
+      ],
+    }));
+    const lines = [...container.querySelectorAll('[data-subject][data-status="seen"]')];
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'VersionVersion number 3kam in dieser Unterhaltung vor',
+      'Base versionv-2kam in dieser Unterhaltung vor',
+    ]);
+    expect(lines[1]!.querySelector('[data-element="subject-id"]')!.textContent).toBe('v-2');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(container.querySelector('[data-warning]')).toBeNull();
+  });
+
+  it('still warns about an unknown id next to a seen one', () => {
+    const { container } = renderCard(approval({
+      subjects: [
+        { path: 'versionId', id: 'v-3', status: 'seen', label: 'Version' },
+        { path: 'folderId', id: 'f-9', status: 'unknown', label: 'Folder' },
+      ],
+    }));
+    const warning = screen.getByRole('alert');
+    expect([...warning.querySelectorAll('[data-element="subject-id"]')].map((id) => id.textContent)).toEqual(['f-9']);
+    expect(container.querySelector('[data-warning]')).not.toBeNull();
+  });
+
   it('flags an id shown with different names, with the latest name and the id', () => {
     renderCard(approval({
       subjects: [{ path: 'userId', id: '7', status: 'ambiguous', name: 'Vertrieb', names: ['Vertrieb', 'Ada'], label: 'User' }],

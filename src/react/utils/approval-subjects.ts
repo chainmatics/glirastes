@@ -1,5 +1,5 @@
 import type { ApprovalSubject } from '../types.js';
-import { entityIdKey, isUuidLike, type EntitySighting } from './entity-names.js';
+import { entityIdKey, isUuidLike, type EntitySighting, type SeenEntity } from './entity-names.js';
 
 const MAX_DEPTH = 4;
 /** Id values checked per approval; a call with more ids is rare and the rest are not listed. */
@@ -57,11 +57,15 @@ function labelOfKey(key: string): string | undefined {
  * - `ambiguous`: a non-UUID id was shown with different names. Short ids repeat
  *   across entity types (playlist 7, user 7), so the most recent name is shown
  *   with the id and a warning.
- * - `unknown`: no name was shown for the id; the card warns and shows the id.
+ * - `seen`: no name was shown, but a tool result of this conversation carried
+ *   the id as a record id (`seenIds`, e.g. a version without a name field); no
+ *   warning, with a fallback field of that record when it has one.
+ * - `unknown`: the id occurred nowhere; the card warns and shows the id.
  */
 export function resolveApprovalSubjects(
   args: unknown,
   sightings: ReadonlyMap<string, EntitySighting>,
+  seenIds: ReadonlyMap<string, SeenEntity> = new Map(),
 ): ApprovalSubject[] {
   const subjects: ApprovalSubject[] = [];
 
@@ -71,7 +75,10 @@ export function resolveApprovalSubjects(
     const id = typeof raw === 'string' ? raw.trim() : String(raw);
     const seen = sightings.get(key);
     if (!seen) {
-      subjects.push({ path, id, status: 'unknown', ...(label ? { label } : {}) });
+      const record = seenIds.get(key);
+      subjects.push(record
+        ? { path, id, status: 'seen', ...(label ? { label } : {}), ...(record.fallback ? { fallback: record.fallback } : {}) }
+        : { path, id, status: 'unknown', ...(label ? { label } : {}) });
       return;
     }
     const resolvedLabel = label ?? (seen.type ? humanize(seen.type) : undefined);

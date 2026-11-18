@@ -705,6 +705,8 @@ export interface ChatLocale {
   approvalUnknownIdsWarning: string;
   /** Warning for an id shown with different names; supports `{names}`. */
   approvalAmbiguousIdWarning: string;
+  /** Note next to an id a tool result of this conversation carried without a name (no warning). */
+  approvalSeenIdNote: string;
 
   // Floating widget / chat window chrome
   chatTitle: string;                 // default header title ("AI Assistant")
@@ -1047,12 +1049,22 @@ export interface ApprovalSubject {
   label?: string;
   /** The id exactly as the call carries it. */
   id: string;
-  /** `named`: one name shown; `ambiguous`: different names for a non-UUID id; `unknown`: no name shown. */
-  status: 'named' | 'ambiguous' | 'unknown';
+  /**
+   * `named`: one name shown; `ambiguous`: different names for a non-UUID id;
+   * `seen`: no name, but a tool result of this conversation carried the id as
+   * a record id (no warning); `unknown`: the id occurred nowhere (warning).
+   */
+  status: 'named' | 'ambiguous' | 'seen' | 'unknown';
   /** The most recent name shown for the id. */
   name?: string;
   /** All names shown for an ambiguous id, most recent first. */
   names?: string[];
+  /**
+   * For `seen`: a short field of the record that stands in for its name
+   * (`Version number 3`, from `versionNumber`, `version`, `number`, `code` or
+   * `slug`), when it has one.
+   */
+  fallback?: string;
 }
 
 export interface UseApprovalsReturn {
