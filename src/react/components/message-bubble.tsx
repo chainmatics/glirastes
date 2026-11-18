@@ -16,6 +16,7 @@ import {
   stripClarificationMarkers,
 } from '../../contracts/clarification.js';
 import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
+import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
 import type { ChatLocale, FilePart, MessageBubbleProps, PipelineState, TextPart } from '../types.js';
 
 // Lazy-load react-markdown — keeps it out of the synchronous import graph so
@@ -238,6 +239,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         if (
           shouldRenderToolResult(toolName, mode, allowlist)
           && typeof part.output.message === 'string'
+          && !isUiActionHandoffMessage(part.output.message)
         ) {
           summaries.push(part.output.message);
         }
@@ -250,7 +252,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         && shouldRenderToolResult(part.toolName, mode, allowlist)
         && isRecord(part.result)
       ) {
-        if (typeof part.result.message === 'string') {
+        if (typeof part.result.message === 'string' && !isUiActionHandoffMessage(part.result.message)) {
           summaries.push(part.result.message);
         }
       }
@@ -410,6 +412,8 @@ function DefaultToolResult({
   result: unknown;
   className?: string;
 }) {
+  // A UI tool's hand-off note is for the model; the app shows the action itself.
+  if (isRecord(result) && isUiActionHandoffMessage(result.message)) return null;
   if (isRecord(result) && typeof result.message === 'string' && result.message.trim().length > 0) {
     return (
       <div className={className} data-component="tool-result" data-tool={toolName}>

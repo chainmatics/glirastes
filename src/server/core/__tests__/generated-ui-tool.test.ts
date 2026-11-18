@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createJsonSchemaLike } from '../../../runtime/json-schema.js';
 import { createUiActionSchema } from '../../../types.js';
-import { endpointToolToTool, normalizeResultUiAction, uiActionToolToTool } from '../index.js';
+import { endpointToolToTool, normalizeResultUiAction, uiActionToolToTool, uiToolToTool } from '../index.js';
+
+// The exact model-facing text: a UI tool only hands its action to the browser.
+const NOTE = 'Whether it was carried out is not known: do not tell the user it succeeded, say it was requested. Do not quote this text.';
+const HANDOFF = `Handed to the app. ${NOTE}`;
 
 const context = { currentDate: new Date(), locale: 'en-US' } as never;
 const anyObject = createJsonSchemaLike({ type: 'object' });
@@ -45,12 +49,12 @@ describe('uiActionToolToTool', () => {
     const on = (clientActions: string[]) => ({ currentDate: new Date(), locale: 'de-DE', runtime: { clientActions } });
     await expect(tool.execute({}, on(['task-details.open']))).resolves.toEqual({
       success: true,
-      message: 'The app opens /templates and runs the action there.',
+      message: 'Handed to the app, which opens /templates to run the action there. ' + NOTE,
       uiAction: { type: 'glirastes.action', actionId: 'template-create-dialog.open', payload: {}, route: '/templates' },
     });
     await expect(tool.execute({}, on(['template-create-dialog.open']))).resolves.toEqual({
       success: true,
-      message: 'Action executed.',
+      message: HANDOFF,
       uiAction: { type: 'glirastes.action', actionId: 'template-create-dialog.open', payload: {}, route: '/templates' },
     });
   });
@@ -67,7 +71,7 @@ describe('uiActionToolToTool', () => {
     expect(tool.needsApproval).toBe(false);
     await expect(tool.execute({ destination: '/tasks/:id', params: { id: '7' } }, context)).resolves.toEqual({
       success: true,
-      message: 'Action executed.',
+      message: HANDOFF,
       uiAction: {
         type: 'glirastes.navigate',
         actionId: 'glirastes.navigate',
@@ -120,7 +124,7 @@ describe('uiActionToolToTool', () => {
     expect(tool.needsApproval).toBe(true);
     await expect(tool.execute({ taskId: '2' }, context)).resolves.toEqual({
       success: true,
-      message: 'Action executed.',
+      message: HANDOFF,
       uiAction: { type: 'glirastes.action', actionId: 'tasks.highlight', payload: { taskId: '2' } },
     });
   });
@@ -177,5 +181,47 @@ describe('endpoint results and the glirastes.* UI actions', () => {
       uiAction: [{ type: 'navigate', path: '/tasks' }],
     });
     await expect(tool.execute({ id: '2' }, { callEndpoint } as never)).resolves.toEqual({ success: true });
+  });
+});
+
+describe('the result text of a UI tool', () => {
+  it('says a generated filter only handed its navigation to the app', async () => {
+    const tool = uiActionToolToTool({
+      id: 'ui.filter.tasks', toolName: 'ui_filter_tasks', description: 'Filter the tasks page.',
+      inputSchema: anyObject, needsApproval: false,
+      action: { kind: 'filter', destination: '/tasks', keys: [{ key: 'status' }] },
+    });
+    await expect(tool.execute({ status: 'done' }, context)).resolves.toMatchObject({ success: true, message: HANDOFF });
+  });
+
+  it('says a hand-written defineUiTool only handed its action to the app, with and without a uiAction', async () => {
+    const withAction = uiToolToTool({
+      id: 'ui.tasks.focus', toolName: 'ui_tasks_focus', description: 'Focus a task.',
+      inputSchema: z.object({ taskId: z.string() }),
+      uiAction: { type: 'focus-task', taskId: '$taskId' },
+    });
+    await expect(withAction.execute({ taskId: '7' }, context)).resolves.toEqual({
+      success: true,
+      message: HANDOFF,
+      uiAction: { type: 'focus-task', taskId: '7' },
+    });
+    const withoutAction = uiToolToTool({
+      id: 'ui.noop', toolName: 'ui_noop', description: 'Has no UI action of its own.',
+      inputSchema: z.object({}),
+    });
+    await expect(withoutAction.execute({}, context)).resolves.toEqual({ success: true, message: HANDOFF });
+  });
+
+  it('keeps the successMessage an app declared', async () => {
+    const tool = uiToolToTool({
+      id: 'ui.tasks.focus', toolName: 'ui_tasks_focus', description: 'Focus a task.',
+      inputSchema: z.object({ taskId: z.string() }),
+      successMessage: 'Focus requested.',
+      uiAction: { type: 'focus-task', taskId: '$taskId' },
+    });
+    await expect(tool.execute({ taskId: '7' }, context)).resolves.toMatchObject({
+      success: true,
+      message: 'Focus requested.',
+    });
   });
 });

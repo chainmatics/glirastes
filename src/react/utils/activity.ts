@@ -1,11 +1,13 @@
 import { CLARIFICATION_TOOL_NAME } from '../../contracts/clarification.js';
 import { PLAN_TOOL_NAME, readPlanItems, type PlanItem } from '../../contracts/plan.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
+import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
 
 /**
  * `declined`: the call did not run because its approval was refused (by the
  * user, or by the server for an expired or reused approval). It is not a
- * failure.
+ * failure. `error`: the call threw, or its output is an object with
+ * `success: false` (a failed backend call, a refused UI action).
  */
 export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting' | 'declined';
 
@@ -38,10 +40,19 @@ function toolPartName(part: Record<string, unknown>): string | null {
   return type.slice('tool-'.length);
 }
 
-function stepStatus(state: unknown): ActivityStepStatus {
+/**
+ * A tool that reports its own failure answers with an output, not an error:
+ * an endpoint tool's failed backend call, a refused UI action, a custom tool.
+ * Any object output with `success: false` is a failed step.
+ */
+function isFailedOutput(output: unknown): output is Record<string, unknown> {
+  return isRecord(output) && !Array.isArray(output) && output.success === false;
+}
+
+function stepStatus(state: unknown, output: unknown): ActivityStepStatus {
   switch (state) {
     case 'output-available':
-      return 'done';
+      return isFailedOutput(output) ? 'error' : 'done';
     case 'output-error':
       return 'error';
     case 'output-denied':
@@ -67,16 +78,20 @@ export function readActivitySteps(
     if (!isRecord(part)) return;
     const toolName = toolPartName(part);
     if (!toolName || BUILTIN_TOOL_NAMES.has(toolName)) return;
-    const status = stepStatus(part.state);
+    const status = stepStatus(part.state, part.output);
     const step: ActivityStep = {
       id: typeof part.toolCallId === 'string' ? part.toolCallId : `part-${index}`,
       toolName,
       status,
     };
     if (allowDetail(toolName)) {
-      const detail = status === 'error'
-        ? part.errorText
-        : status === 'done' && isRecord(part.output) ? part.output.message : undefined;
+      let detail: unknown;
+      if (status === 'error') {
+        detail = isFailedOutput(part.output) ? part.output.error : part.errorText;
+      } else if (status === 'done' && isRecord(part.output)) {
+        // The hand-off note of a UI tool is for the model, not the user.
+        detail = isUiActionHandoffMessage(part.output.message) ? undefined : part.output.message;
+      }
       if (typeof detail === 'string' && detail.trim()) step.detail = detail.trim();
     }
     steps.push(step);

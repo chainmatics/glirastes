@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import type { ChatTransport } from '../types.js';
+import { UI_ACTION_HANDOFF_MESSAGE } from '../../browser/ui-action-handoff.js';
 import {
   dispatchAiClientAction,
   getDefaultUiActionBus,
@@ -100,7 +101,7 @@ describe('AiChatProvider and generated UI actions', () => {
       <AiChatProvider
         transport={transport({
           success: true,
-          message: 'Action executed.',
+          message: UI_ACTION_HANDOFF_MESSAGE,
           uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks?status=done' } },
         })}
         uiActionBus={bus}

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- UI tools no longer tell the model an action succeeded when the server only handed it to the browser. **The model-facing result text of UI tools changed:** `message` of a hand-written `defineUiTool` (without its own `successMessage`) and of every generated UI tool (navigation, filter, client action) was `Action executed.` and is now `Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested. Do not quote this text.` A page-bound client action the open page lacks was `The app opens <route> and runs the action there.` and is now `Handed to the app, which opens <route> to run the action there. Whether it was carried out is not known: …` (same note). Before, a browser that refused the action (payload contract, a handler returning `false`, no handler at all, e.g. `glirastes.navigate` without a navigation bridge) left the model believing it had happened. The result shape (`success: true`, `message`, `uiAction`) and the stream are unchanged; a declared `successMessage` still wins. The chat UI does not show this note to the user: the default tool result block renders nothing for it, the fallback summary of a text-less message and the activity step detail leave it out (a custom `ToolResultBlock` still receives the result unchanged).
+- Activity log (`readActivitySteps`, `ActivityLog`): a tool output that is an object with `success: false` now reads as a failed step (`'error'`, with the output's `error` text as detail when the display mode allows details) instead of `'done'`. This covers every tool that reports its failure as an output: a failed backend call of an endpoint tool (also one `classifyToolFailure` marks as expected), a refused generated UI tool, a custom tool. Arrays, strings, `null` and outputs without `success: false` stay `'done'`; `declined`, `waiting` and thrown errors are unchanged. Such a turn's summary now counts the step as failed.
+
 ## [0.17.2] - 2026-11-18
 
 ### Changed

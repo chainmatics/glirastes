@@ -3,6 +3,7 @@ import {
   GLIRASTES_NAVIGATE_ACTION_ID,
   type QueryValue,
 } from '../../browser/navigation.js';
+import { UI_ACTION_HANDOFF_MESSAGE, uiActionHandoffToRouteMessage } from '../../browser/ui-action-handoff.js';
 import { defineTool, type SchemaLike, type Tool } from '../../types.js';
 
 /** What a generated UI tool asks the browser to do. */
@@ -45,6 +46,8 @@ function stringParams(value: unknown): Record<string, string> | undefined {
  * Runtime of the tools that `glirastes tools refresh` generates from pages,
  * URL filters and client actions. They never call a server: the result
  * carries a `glirastes.*` uiAction that the chat hands to the app's bridge.
+ * The server does not learn whether the app carried it out, so the result
+ * text tells the model it was handed over, not that it happened.
  */
 export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool {
   return defineTool({
@@ -69,7 +72,7 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
           if (route) {
             return {
               success: true,
-              message: `The app opens ${route} and runs the action there.`,
+              message: uiActionHandoffToRouteMessage(route),
               uiAction,
             };
           }
@@ -79,7 +82,7 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
             retryable: false,
           };
         }
-        return { success: true, message: 'Action executed.', uiAction };
+        return { success: true, message: UI_ACTION_HANDOFF_MESSAGE, uiAction };
       }
       const params = stringParams(input.params);
       try {
@@ -88,7 +91,7 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
           const href = buildNavigationHref({ destination, ...(params ? { params } : {}) });
           return {
             success: true,
-            message: 'Action executed.',
+            message: UI_ACTION_HANDOFF_MESSAGE,
             uiAction: {
               type: 'glirastes.navigate',
               actionId: GLIRASTES_NAVIGATE_ACTION_ID,
@@ -110,7 +113,7 @@ export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool 
         });
         return {
           success: true,
-          message: 'Action executed.',
+          message: UI_ACTION_HANDOFF_MESSAGE,
           uiAction: {
             type: 'glirastes.navigate',
             actionId: GLIRASTES_NAVIGATE_ACTION_ID,

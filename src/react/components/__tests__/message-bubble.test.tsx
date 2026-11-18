@@ -122,6 +122,40 @@ describe('MessageBubble tool-result visibility', () => {
     expect(document.querySelectorAll('[data-component="tool-result"]')).toHaveLength(1);
   });
 
+  it('never shows the model-facing hand-off note of a UI tool to the user', () => {
+    const note = 'Whether it was carried out is not known: do not tell the user it succeeded, say it was requested. Do not quote this text.';
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-handoff',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-ui_navigate',
+              toolCallId: 'call-h1',
+              state: 'output-available',
+              output: {
+                success: true,
+                message: `Handed to the app. ${note}`,
+                uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks' } },
+              },
+            } as never,
+            {
+              type: 'tool-result',
+              toolInvocationId: 'call-h2',
+              toolName: 'ui_open',
+              result: { success: true, message: `Handed to the app, which opens /templates to run the action there. ${note}` },
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(document.body.textContent).not.toContain(note);
+    expect(document.querySelectorAll('[data-component="tool-result"]')).toHaveLength(0);
+    expect(document.querySelector('[data-component="activity-log"]')).not.toBeNull();
+  });
+
   it('does not render standard follow-up registration as a raw tool result', () => {
     render(
       <MessageBubble
