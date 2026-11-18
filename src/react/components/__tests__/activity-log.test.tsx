@@ -118,6 +118,39 @@ describe('ActivityLog', () => {
     expect(rows()[2].textContent).toContain('unknown_tool');
   });
 
+  it('shows a declined call neutrally: not counted as failed, no error state', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'list_tasks', status: 'done' },
+          { id: 'c2', toolName: 'create_team', status: 'declined' },
+        ]}
+      />,
+    );
+    const summary = document.querySelector('[data-element="activity-summary"]')!;
+    expect(root()!.getAttribute('data-state')).toBe('done');
+    expect(summary.textContent).toBe('2 Schritte ausgeführt, 1 abgelehnt');
+    expect(summary.querySelector('[data-icon="check"]')).not.toBeNull();
+    expect(rows()[1].getAttribute('data-status')).toBe('declined');
+    expect(rows()[1].querySelector('[data-element="icon"]')!.getAttribute('data-icon')).toBe('declined');
+  });
+
+  it('counts failed and declined calls apart', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'create_team', status: 'error' },
+          { id: 'c2', toolName: 'list_tasks', status: 'declined' },
+        ]}
+      />,
+    );
+    expect(root()!.getAttribute('data-state')).toBe('error');
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
+      .toBe('2 Schritte ausgeführt, 1 fehlgeschlagen, 1 abgelehnt');
+  });
+
   it('uses the singular for one step', () => {
     render(<ActivityLog active={false} steps={[{ id: 'c1', toolName: 'list_tasks', status: 'done' }]} />);
     expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
@@ -146,6 +179,8 @@ describe('ActivityLog', () => {
   it('has English defaults for every new text', () => {
     expect(DEFAULT_LOCALE.activityDoneLabel).toBe('{count} steps done');
     expect(DEFAULT_LOCALE.activityDoneOneLabel).toBe('1 step done');
+    expect(DEFAULT_LOCALE.activityDeclinedLabel).toBe('{count} declined');
+    expect(deChatLocale.activityDeclinedLabel).toBe('{count} abgelehnt');
   });
 });
 

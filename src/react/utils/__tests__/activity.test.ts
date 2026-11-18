@@ -18,7 +18,7 @@ describe('readActivitySteps', () => {
       { id: 'c1', toolName: 'list_tasks', status: 'done', detail: '3 Aufgaben' },
       { id: 'c3', toolName: 'create_team', status: 'error', detail: 'Name fehlt' },
       { id: 'c4', toolName: 'invite_member', status: 'waiting' },
-      { id: 'c5', toolName: 'delete_task', status: 'error' },
+      { id: 'c5', toolName: 'delete_task', status: 'declined' },
       { id: 'c7', toolName: 'archive_task', status: 'running' },
     ]);
   });

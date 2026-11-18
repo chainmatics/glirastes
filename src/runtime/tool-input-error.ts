@@ -18,8 +18,10 @@ const MAX_PATH_CHARS = 80;
 const MAX_EXPECTED_CHARS = 120;
 const MAX_LIST_ITEMS = 10;
 
-export const INVALID_TOOL_INPUT_INSTRUCTION = 'Correct the arguments and call the tool again; '
-  + 'look up missing ids with a read tool instead of asking the user.';
+/** Fixed and content-free: it never repeats a value the model wrote. */
+export const INVALID_TOOL_INPUT_INSTRUCTION = 'Correct the arguments and call the tool again now, in this turn. '
+  + 'If a field expects an id or uuid and you only have a name, first find the id with a list or search tool, '
+  + 'then call this tool again; do not ask the user for an id.';
 
 /**
  * Handed to the app's `onError` for a model tool call with invalid input:

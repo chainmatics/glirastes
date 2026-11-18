@@ -16,6 +16,7 @@ const STEP_ICONS: Record<ActivityStepStatus, StatusIconKind> = {
   error: 'error',
   running: 'spinner',
   waiting: 'pending',
+  declined: 'declined',
 };
 
 /**
@@ -55,6 +56,8 @@ export function ActivityLog({ steps, active, notice, className }: ActivityLogPro
   const label = (toolName: string) => toolLabels.labels?.[toolName]?.singular ?? toolName;
   const running = steps.find((step) => step.status === 'running');
   const failed = steps.filter((step) => step.status === 'error').length;
+  // A declined call is not a failure: counted on its own, never turns the summary to error.
+  const declined = steps.filter((step) => step.status === 'declined').length;
   const waiting = steps.some((step) => step.status === 'waiting');
 
   const state = running || active ? 'running' : waiting ? 'waiting' : failed > 0 ? 'error' : 'done';
@@ -74,6 +77,9 @@ export function ActivityLog({ steps, active, notice, className }: ActivityLogPro
       : locale.activityDoneLabel.replace('{count}', String(steps.length));
     if (failed > 0) {
       summaryText += `, ${locale.activityFailedLabel.replace('{count}', String(failed))}`;
+    }
+    if (declined > 0) {
+      summaryText += `, ${locale.activityDeclinedLabel.replace('{count}', String(declined))}`;
     }
   }
 

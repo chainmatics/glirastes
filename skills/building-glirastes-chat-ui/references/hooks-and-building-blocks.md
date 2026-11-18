@@ -37,6 +37,9 @@ classes and `classNames` per slot. `MessageList` scrolls, auto-follows and
 pages upwards through `loadMore`. `PlanChecklist` renders the latest
 `update_plan` call (nothing below two items), `ActivityLog` the collapsible
 work log of one assistant turn; both style through `data-*` attributes.
+`readActivitySteps` gives each step an `ActivityStepStatus`: `running`,
+`done`, `error`, `waiting` or `declined` (an approval refused: shown
+neutrally, not counted as failed).
 
 ## Tool results and approvals
 
@@ -53,11 +56,15 @@ work log of one assistant turn; both style through `data-*` attributes.
   default; `approvalSubjects={false}` on the provider turns it off). An id
   argument (`id`, `…Id`, `…_id`, `…ID`, plural too, or a UUID value) shows the
   name this conversation's tool results or the user's `@` mentions showed for
-  it ("Playlist: Abend-Promos") instead of the id. An id without a known name
+  it ("Playlist: Abend-Promos") instead of the id. An id without a name that
+  a tool result carried as a record id (a version without a name field) is
+  shown neutrally with a fallback field (`Version number 3`) or the id and
+  "seen in this conversation"; an id that occurred nowhere
   gets a warning with the id shown (`role="alert"`, icon, danger colours,
   linked from the approve button); a short id shown with different names gets
   a warning too. Texts: `approvalTargetLabel`, `approvalUnknownIdWarning`,
-  `approvalUnknownIdsWarning`, `approvalAmbiguousIdWarning` in `locale`
+  `approvalUnknownIdsWarning`, `approvalAmbiguousIdWarning`,
+  `approvalSeenIdNote` in `locale`
   (English and German built in). A custom card reads
   `PendingApproval.subjects` (`ApprovalSubject[]`). The names are client-side
   history, a convenience and not a trust boundary: the server executes exactly
@@ -66,8 +73,9 @@ work log of one assistant turn; both style through `data-*` attributes.
 - A custom `ApprovalCard` or `BulkApprovalCard` (`components`) does not get
   this for free: render `approval.subjects` yourself (grouped card: on each
   entry of `approvals`). One entry per id argument, `{ path, id, label?,
-  status, name?, names? }` with `status` `named` | `unknown` | `ambiguous`;
-  show a warning with the id for `unknown` and `ambiguous`. A card that
+  status, name?, names?, fallback? }` with `status` `named` | `seen` |
+  `unknown` | `ambiguous`; show `fallback` or the id without a warning for
+  `seen`, a warning with the id for `unknown` and `ambiguous`. A card that
   renders only `details` drops the safeguard silently.
 
 ## Sessions

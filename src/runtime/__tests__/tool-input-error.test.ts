@@ -95,7 +95,7 @@ describe('ToolInputValidationError', () => {
   it('carries tool, fields and expectations with the instruction', () => {
     const error = new ToolInputValidationError('playlists_get', [{ path: 'playlistId', expected: 'expected format uuid' }], 2);
     expect(error.message).toBe('Invalid input for tool playlists_get: playlistId: expected format uuid; 2 more. '
-      + 'Correct the arguments and call the tool again; look up missing ids with a read tool instead of asking the user.');
+      + 'Correct the arguments and call the tool again now, in this turn. If a field expects an id or uuid and you only have a name, first find the id with a list or search tool, then call this tool again; do not ask the user for an id.');
     expect(error).toMatchObject({ name: 'ToolInputValidationError', toolName: 'playlists_get', omittedIssues: 2 });
   });
 });

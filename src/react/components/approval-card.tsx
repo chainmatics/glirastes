@@ -73,9 +73,18 @@ export function approvalSubjectLines(approval: PendingApproval, locale: ChatLoca
   return [...lines.values()];
 }
 
-/** The ids of the call without a single known name. */
+/**
+ * The ids of the call that get a warning: no single known name and not seen
+ * as a record id in this conversation (`unknown`, `ambiguous`).
+ */
 export function flaggedApprovalSubjects(approvals: ReadonlyArray<PendingApproval>): ApprovalSubject[] {
-  return approvals.flatMap((approval) => (approval.subjects ?? []).filter((subject) => subject.status !== 'named'));
+  return approvals.flatMap((approval) => (approval.subjects ?? [])
+    .filter((subject) => subject.status === 'unknown' || subject.status === 'ambiguous'));
+}
+
+/** The ids a tool result of this conversation carried without a name: shown neutrally, no warning. */
+function seenApprovalSubjects(approval: PendingApproval): ApprovalSubject[] {
+  return (approval.subjects ?? []).filter((subject) => subject.status === 'seen');
 }
 
 /**
@@ -145,7 +154,8 @@ export function ApprovalCard({
   const warningId = useId();
   const subjectLines = approvalSubjectLines(approval, locale);
   const flagged = flaggedApprovalSubjects([approval]);
-  const hasDetails = subjectLines.length > 0 || (approval.details?.length ?? 0) > 0;
+  const seen = seenApprovalSubjects(approval);
+  const hasDetails = subjectLines.length > 0 || seen.length > 0 || (approval.details?.length ?? 0) > 0;
 
   return (
     <div
@@ -170,6 +180,15 @@ export function ApprovalCard({
             <div key={`subject-${i}`} data-element="detail-line" data-subject="">
               <span data-element="detail-label">{line.label}</span>
               <DetailValue value={line.names.join(', ')} items={line.names.length > 1 ? line.names : undefined} />
+            </div>
+          ))}
+          {seen.map((subject, i) => (
+            <div key={`seen-${i}`} data-element="detail-line" data-subject="" data-status="seen">
+              <span data-element="detail-label">{subject.label ?? locale.approvalTargetLabel}</span>
+              {subject.fallback
+                ? <span data-element="detail-value">{subject.fallback}</span>
+                : <code data-element="subject-id">{subject.id}</code>}
+              <span data-element="subject-note">{locale.approvalSeenIdNote}</span>
             </div>
           ))}
           {(approval.details ?? []).map((detail, i) => {

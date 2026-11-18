@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { resolveApprovalSubjects, isIdKey } from '../approval-subjects.js';
-import { collectEntitySightings } from '../entity-names.js';
+import { collectEntitySightings, collectSeenEntityIds } from '../entity-names.js';
 
 const P1 = '14f1e041-4609-4b24-a723-631b133115cc';
 const P2 = '0df1344c-6fa7-4ea1-bc23-f0d12e01a0b1';
@@ -138,5 +138,54 @@ describe('resolveApprovalSubjects', () => {
   it('leaves calls without ids alone and bounds the ids checked', () => {
     expect(resolveApprovalSubjects({ title: 'Bericht', done: true, n: 4, tags: ['a'] }, seen)).toEqual([]);
     expect(resolveApprovalSubjects({ ids: Array.from({ length: 500 }, (_, i) => `x-${i}`) }, seen)).toHaveLength(100);
+  });
+});
+
+describe('ids a tool result carried without a name', () => {
+  const VERSION = 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e';
+  const BARE = 'c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f';
+  const history = [
+    tool('playlist_versions_list', { data: [{ id: VERSION, versionNumber: 3, status: 'draft' }, { id: BARE, createdAt: '2026-11-01' }] }),
+    tool('playlists_get', { data: { id: P1, name: 'Abend-Promos', draftVersionId: UNSEEN } }),
+  ];
+
+  it('marks such an id as seen, with a fallback field of its record when it has one', () => {
+    const subjects = resolveApprovalSubjects(
+      { playlistId: P1, versionId: VERSION, baseVersionId: BARE },
+      collectEntitySightings(history),
+      collectSeenEntityIds(history),
+    );
+    expect(subjects).toEqual([
+      { path: 'playlistId', id: P1, status: 'named', name: 'Abend-Promos', label: 'Playlist' },
+      { path: 'versionId', id: VERSION, status: 'seen', label: 'Version', fallback: 'Version number 3' },
+      { path: 'baseVersionId', id: BARE, status: 'seen', label: 'Base version' },
+    ]);
+  });
+
+  it('keeps unknown for an id that occurred only as a reference or nowhere', () => {
+    const subjects = resolveApprovalSubjects(
+      { versionId: UNSEEN, otherId: 'zz-1' },
+      collectEntitySightings(history),
+      collectSeenEntityIds(history),
+    );
+    expect(subjects.map((subject) => subject.status)).toEqual(['unknown', 'unknown']);
+  });
+
+  it('reads tool results only, never the model calls or mentions', () => {
+    const seen = collectSeenEntityIds([
+      { role: 'assistant', parts: [{ type: 'tool-versions_approve', toolCallId: 'c1', state: 'approval-requested', input: { id: VERSION } }] },
+      { role: 'user', parts: [{ type: 'text', text: `{{mention:version:${BARE}:Version 2}}` }] },
+    ]);
+    expect(seen.size).toBe(0);
+  });
+
+  it('takes the fallback from the newest result and bounds its length', () => {
+    const seen = collectSeenEntityIds([
+      tool('versions_list', { data: [{ id: 'v1', version: '1.0' }] }),
+      tool('versions_get', { data: { id: 'v1', version: '1.1' } }),
+      tool('designs_list', { data: [{ id: 'd1', code: 'x'.repeat(81) }] }),
+    ]);
+    expect(seen.get('v1')).toEqual({ fallback: 'Version 1.1' });
+    expect(seen.get('d1')).toEqual({});
   });
 });
