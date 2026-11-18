@@ -44,6 +44,8 @@ import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
 import { dispatchToolResultUiActions } from '../../browser/client-actions.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
+import { resolveTextTable } from '../../contracts/localized-text.js';
+import { deChatLocale } from '../locale-de.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
   parseClarificationAnswer,
@@ -424,6 +426,7 @@ export function AiChatProvider({
   components: userComponents,
   suggestions: userSuggestions,
   locale: userLocale,
+  locales: userLocales,
   theme: userTheme,
   themeScope = 'inline',
   unstyled = false,
@@ -445,9 +448,19 @@ export function AiChatProvider({
   const pageLanguage = usePageLanguage();
   const language = toolPresentation?.locale ?? pageLanguage;
   // English defaults, then the built-in texts of the app's language, then the caller's overrides.
+  // With `locales`, per key in the language's fallback order (the app's table before the built-in one).
   const locale = useMemo<ChatLocale>(
-    () => ({ ...DEFAULT_LOCALE, ...languageLocale(language), ...(userLocale ?? {}) }),
-    [userLocale, language],
+    () => (userLocales
+      ? {
+        ...resolveTextTable<ChatLocale>({
+          requested: language ?? undefined,
+          builtIn: { en: DEFAULT_LOCALE, de: { ...DEFAULT_LOCALE, ...deChatLocale } },
+          app: userLocales,
+        }),
+        ...(userLocale ?? {}),
+      }
+      : { ...DEFAULT_LOCALE, ...languageLocale(language), ...(userLocale ?? {}) }),
+    [userLocale, userLocales, language],
   );
   // Resolve `theme` prop → CSS variables spread onto widget roots.
   const themeVars = useMemo<CSSProperties>(

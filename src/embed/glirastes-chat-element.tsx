@@ -5,6 +5,7 @@ import {
   type ChatInteractionsData,
   type ChatLocaleCode,
 } from '../contracts/chat-interactions.js';
+import { isLanguageTag } from '../contracts/localized-text.js';
 import { AiChatPanel } from '../react/components/ai-chat-panel.js';
 import {
   defineChatCommand,
@@ -258,9 +259,10 @@ export class GlirastesChatElement extends BaseElement {
     this.#render();
   }
 
+  /** The nearest `lang` as a BCP-47 tag (`pl-PL`); English without one. Texts fall back per `chatText`. */
   #locale(): ChatLocaleCode {
-    const lang = this.closest('[lang]')?.getAttribute('lang') ?? '';
-    return lang.toLowerCase().startsWith('de') ? 'de' : 'en';
+    const lang = (this.closest('[lang]')?.getAttribute('lang') ?? '').trim().replace(/_/g, '-');
+    return isLanguageTag(lang) ? lang : 'en';
   }
 
   /** `interactions` attribute: GET the data from its URL, or from the endpoint when empty. */

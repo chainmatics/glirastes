@@ -167,7 +167,7 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
     id: 'chat-commands',
     trigger: '/',
     search({ query, limit }) {
-      const group = locale === 'de' ? 'Befehle' : 'Commands';
+      const group = /^de(?:-|$)/i.test(locale) ? 'Befehle' : 'Commands';
       return [...commands.values()]
         .map((command) => {
           const label = chatText(command.label, locale);
