@@ -37,6 +37,9 @@ classes and `classNames` per slot. `MessageList` scrolls, auto-follows and
 pages upwards through `loadMore`. `PlanChecklist` renders the latest
 `update_plan` call (nothing below two items), `ActivityLog` the collapsible
 work log of one assistant turn; both style through `data-*` attributes.
+`readActivitySteps` gives each step an `ActivityStepStatus`: `running`,
+`done`, `error`, `waiting` or `declined` (an approval refused: shown
+neutrally, not counted as failed).
 
 ## Tool results and approvals
 

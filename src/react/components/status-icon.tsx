@@ -1,4 +1,4 @@
-export type StatusIconKind = 'check' | 'spinner' | 'pending' | 'error';
+export type StatusIconKind = 'check' | 'spinner' | 'pending' | 'error' | 'declined';
 
 /**
  * Inline status icon. It carries its own shape and motion (SMIL), so it
@@ -21,6 +21,7 @@ export function StatusIcon({ icon }: { icon: StatusIconKind }) {
     >
       {icon === 'check' && <path d="M3 8.5l3.5 3.5L13 4.5" />}
       {icon === 'error' && <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />}
+      {icon === 'declined' && <path d="M4.5 8h7" />}
       {icon === 'pending' && <circle cx="8" cy="8" r="5.5" strokeWidth="1.5" opacity="0.5" />}
       {icon === 'spinner' && (
         <path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5">

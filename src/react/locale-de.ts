@@ -40,6 +40,7 @@ export const deChatLocale: ChatLocale = {
   activityDoneLabel: '{count} Schritte ausgeführt',
   activityDoneOneLabel: '1 Schritt ausgeführt',
   activityFailedLabel: '{count} fehlgeschlagen',
+  activityDeclinedLabel: '{count} abgelehnt',
   planTitle: 'Plan',
   chatTitle: 'KI-Assistent',
   closeChatAriaLabel: 'Chat schließen',

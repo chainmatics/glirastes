@@ -11,4 +11,15 @@ describe('readActivitySteps', () => {
     ];
     expect(readActivitySteps(parts, () => false).map((step) => step.toolName)).toEqual(['tasks_list']);
   });
+
+  it('reads a declined approval as declined, not as an error', () => {
+    const parts = [
+      { type: 'tool-tasks_delete', toolCallId: 'c1', state: 'output-denied', approval: { id: 'a1', approved: false } },
+      { type: 'tool-tasks_list', toolCallId: 'c2', state: 'output-error', errorText: 'boom' },
+    ];
+    expect(readActivitySteps(parts, () => true).map((step) => [step.status, step.detail])).toEqual([
+      ['declined', undefined],
+      ['error', 'boom'],
+    ]);
+  });
 });

@@ -47,6 +47,7 @@ import {
   type ApprovalBinder,
   type VerifiedApproval,
 } from './approval-binding.js';
+import { withModelFacingDenialReasons } from './approval-denial-text.js';
 import {
   pseudonymizeCommandToolInputs,
   resolveDirectCommand,
@@ -1270,7 +1271,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     const checked = await enforceApprovalBindings(messages, {
       binder, store: approvalStore, scope: storeScope, localToolNames: new Set(Object.keys(registry)),
     });
-    return { binder, storeScope, messages: checked.messages, verified: checked.verified };
+    // The model reads a refusal or denial as the server's fixed text, never
+    // the reason the client wrote or a bare code.
+    const messagesForModel = withModelFacingDenialReasons(checked.messages, checked.denied);
+    return { binder, storeScope, messages: messagesForModel, verified: checked.verified };
   }
 
   /**

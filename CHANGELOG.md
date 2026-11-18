@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A tool call whose approval was declined no longer reads as a failure, to the model or in the chat. The model gets a fixed server text as the call's result instead of the reason the browser sent (`Rejected by user.`, or any text a client writes, never reaches the model): `The user declined this action in the approval dialog, so it was not executed. This is not an error: do not retry it and do not guess a cause. Acknowledge it briefly and ask the user what they want to do instead.` A call the server refused (`enforceApprovalBindings`) reaches the model as one sentence per code instead of the bare code (`approval_expired`, `approval_already_used`, `approval_not_issued`, `approval_not_runnable`, `approval_store_unavailable`; e.g. `This action was not executed: its approval expired before it could run. Do not guess another cause. If the user still wants it, call the tool again so they can confirm it again.`), and an approved call denied in an earlier request as `This action was not executed: its approval could not be used. …`. Applied after the approval checks for model turns of `createAiChatHandler` (pipeline and default path, so also `chatTurn()` and the runtime container), including refusals of direct commands replayed in later turns; only the reason text changes, never approval ids, answers or what is verified and consumed. The codes stay in the `denied` result of the checks.
+- Activity log (`ActivityLog`, `readActivitySteps`): a call with the AI SDK state `output-denied` (approval declined) gets the new step status `'declined'` instead of `'error'`, shown with a neutral icon (`data-status="declined"`), counted on its own in the summary (`2 steps done, 1 declined`) and never counted as failed or turning the summary to the error state. New locale key `activityDeclinedLabel` (`{count} declined`, German `{count} abgelehnt`). **Type change:** `ActivityStepStatus` gains the member `'declined'`; an app with an exhaustive `switch` or `Record<ActivityStepStatus, …>` over it needs a case for it. A custom full `ChatLocale` object needs the new key. The embedded chat styles are regenerated.
+
 ## [0.17.0] - 2026-11-18
 
 ### Added

@@ -692,6 +692,8 @@ export interface ChatLocale {
   activityDoneLabel: string;         // supports `{count}`
   activityDoneOneLabel: string;
   activityFailedLabel: string;       // supports `{count}`
+  /** Calls whose approval was declined (not counted as failed); supports `{count}`. */
+  activityDeclinedLabel: string;
   planTitle: string;
   /** Shown when the user sends while an approval card waits for a decision. */
   approvalPendingHint: string;

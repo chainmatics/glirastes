@@ -93,6 +93,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   activityDoneLabel: '{count} steps done',
   activityDoneOneLabel: '1 step done',
   activityFailedLabel: '{count} failed',
+  activityDeclinedLabel: '{count} declined',
   planTitle: 'Plan',
   chatTitle: 'AI Assistant',
   closeChatAriaLabel: 'Close chat',

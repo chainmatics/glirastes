@@ -570,6 +570,9 @@
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"][data-state="error"] [data-element="activity-summary"] [data-element="icon"] {
   color: #dc2626;
 }
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-step"][data-status="declined"] [data-element="icon"] {
+  color: var(--cm-text-muted);
+}
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="detail"] {
   opacity: 0.8;
   overflow-wrap: anywhere;

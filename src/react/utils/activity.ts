@@ -2,7 +2,12 @@ import { CLARIFICATION_TOOL_NAME } from '../../contracts/clarification.js';
 import { PLAN_TOOL_NAME, readPlanItems, type PlanItem } from '../../contracts/plan.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 
-export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting';
+/**
+ * `declined`: the call did not run because its approval was refused (by the
+ * user, or by the server for an expired or reused approval). It is not a
+ * failure.
+ */
+export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting' | 'declined';
 
 export interface ActivityStep {
   id: string;
@@ -38,8 +43,9 @@ function stepStatus(state: unknown): ActivityStepStatus {
     case 'output-available':
       return 'done';
     case 'output-error':
-    case 'output-denied':
       return 'error';
+    case 'output-denied':
+      return 'declined';
     case 'approval-requested':
     case 'approval-responded':
       return 'waiting';
