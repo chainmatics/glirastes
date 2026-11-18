@@ -188,7 +188,9 @@ export function resolveApprovalSubjects(
   ): void {
     const key = entityIdKey(raw);
     if (key === undefined) return;
-    const sameKind = (known: string, declared: boolean | undefined) => (strict && declared ? known === kind : kindsMatch(known, kind!));
+    // Exact up to separators (`playlist-version` = `playlist version`, the kind a mention's type names).
+    const exact = (left: string, right: string) => left.toLowerCase().split(/[ _.-]+/).join(' ') === right.toLowerCase().split(/[ _.-]+/).join(' ');
+    const sameKind = (known: string, declared: boolean | undefined) => (strict && declared ? exact(known, kind!) : kindsMatch(known, kind!));
     const id = typeof raw === 'string' ? raw.trim() : String(raw);
     const seen = sightings.get(key);
     if (seen?.kinds && seen.kinds.length > 1 && (!isUuidLike(id) || (strict && seen.kinds.some((candidate) => candidate.declared)))) {

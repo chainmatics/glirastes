@@ -128,7 +128,17 @@ export function entitySitesOf(
       return;
     }
     const properties = isObject(node.properties) ? node.properties : undefined;
-    if (!properties && !types.includes('object')) return;
+    if (!properties && !types.includes('object')) {
+      // An allOf/anyOf wrapper (`{ allOf: [{ $ref: Base }], x-glirastes-entity }`): its own name and
+      // declaration belong to the object site its branches reached, and win over the branches'.
+      const known = sites.get(pathText(steps));
+      if (known && ['anyOf', 'oneOf', 'allOf'].some((keyword) => Array.isArray(node[keyword]))) {
+        const wrapperType = entityTypeOfName(component ?? (typeof node.title === 'string' ? node.title : undefined));
+        if (wrapperType) known.type = wrapperType;
+        if (node[ENTITY_EXTENSION] !== undefined) known.extension = node[ENTITY_EXTENSION];
+      }
+      return;
+    }
     const path = pathText(steps);
     const open = (node.additionalProperties !== undefined && node.additionalProperties !== false)
       || node.patternProperties !== undefined || !properties;

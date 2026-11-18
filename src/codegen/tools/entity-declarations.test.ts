@@ -258,3 +258,18 @@ describe('code-defined tools', () => {
     expect(entitiesOf(undefined, undefined)).toEqual({});
   });
 });
+
+describe('allOf wrappers', () => {
+  it('keeps the declaration and the name of an allOf wrapper around a referenced base', () => {
+    const schemas: Record<string, unknown> = {
+      Base: { type: 'object', properties: { recordNo: { type: 'integer' }, label: { type: 'string' } } },
+      Record: { allOf: [{ $ref: '#/components/schemas/Base' }], 'x-glirastes-entity': { id: 'recordNo' } },
+    };
+    const resolve = (ref: string) => {
+      const name = ref.split('/').at(-1)!;
+      return schemas[name] ? { schema: schemas[name], name } : undefined;
+    };
+    const sites = entitySitesOf({ $ref: '#/components/schemas/Record' }, resolve);
+    expect(sites).toEqual([{ path: '', fields: ['recordNo', 'label'], type: 'record', extension: { id: 'recordNo' } }]);
+  });
+});

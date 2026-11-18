@@ -174,3 +174,18 @@ describe('composite keys and nameless records of several types', () => {
     expect(resolve('channel_rollback')).toMatchObject({ status: 'seen', fallback: 'Rev 9', fallbackField: 'rev' });
   });
 });
+
+describe('explicit mention types on declared arguments', () => {
+  it('does not name a channel-version after a mentioned playlist-version with the same id', () => {
+    const REFS: EntityDeclarationsByTool = {
+      channel_rollback: { input: [{ type: 'channel-version', args: 'version_id' }] },
+      playlist_rollback: { input: [{ type: 'playlist-version', args: 'version_id' }] },
+    };
+    const messages = [user('{{mention:playlist-version:7:Version A}}')];
+    const resolve = (toolName: string) => resolveApprovalSubjects({ version_id: 7 }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName, inputEntities: REFS[toolName]!.input!, userTexts: [], declarations: REFS,
+    })[0];
+    expect(resolve('channel_rollback')).toMatchObject({ status: 'unknown' });
+    expect(resolve('playlist_rollback')).toMatchObject({ status: 'named', name: 'Version A', provenance: 'mention' });
+  });
+});

@@ -239,6 +239,9 @@ export function collectEntitySightings(
           if (segment.kind !== 'mention' || segment.mention.type === 'command') continue;
           add(segment.mention.id, segment.mention.displayName, segment.mention.type, true);
           addKind(segment.mention.id, kindOfField(segment.mention.type), segment.mention.displayName);
+          // A mention names its type explicitly: with declarations it is compared exactly too.
+          const mentioned = entityIdKey(segment.mention.id);
+          if (declarations && mentioned) declaredKinds.add(`${mentioned}\u0000${kindOfField(segment.mention.type)}`);
         }
       }
     }
