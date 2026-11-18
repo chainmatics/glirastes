@@ -12,7 +12,7 @@ import {
 import { idParameterStem, isBareIdParameter, NAME_KEYS, searchIdFieldCandidates } from '../../contracts/entity-identity.js';
 import type { AppSetupArtifact } from '../../contracts/index.js';
 import { compareCodeUnits } from './canonical.js';
-import { actionLabel, commandLabel, humanizeIdentifier, singular, type Label } from './chat-labels.js';
+import { actionLabel, commandLabel, humanizeIdentifier, singular, titleIn, type Label } from './chat-labels.js';
 import type { JsonSchemaLike, ToolContract, ToolContractsEntry, ToolTitle } from './types.js';
 
 export { humanizeIdentifier } from './chat-labels.js';
@@ -399,8 +399,8 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
         id: `filter.${idSegment(view)}`,
         label: {
           ...otherTitleLanguages(tool.title),
-          en: tool.title?.en ?? clamp(`Filter ${title}`),
-          de: tool.title?.de ?? clamp(`${title} filtern`),
+          en: titleIn(tool.title, 'en') ?? clamp(`Filter ${title}`),
+          de: titleIn(tool.title, 'de') ?? clamp(`${title} filtern`),
         },
         ...(args.length > 0 ? { args } : {}),
         run: { kind: 'ui', tool: tool.definitionId },

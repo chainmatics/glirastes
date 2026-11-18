@@ -1,3 +1,4 @@
+import { pickLanguage, primaryLanguage } from '../../contracts/localized-text.js';
 import type { ToolTitle } from './types.js';
 
 /** A label in English and German, plus any language a tool's title adds (`pl`, `pt-BR`). */
@@ -110,10 +111,20 @@ export function phraseLabel(words: ReadonlyArray<string>, fallbackVerb?: string)
   return { en: `${found.en} ${text}`, de: `${capitalize(text)} ${found.de.toLowerCase()}` };
 }
 
+/**
+ * The title in a language, also from another region of it (`de-DE` for
+ * `de`): a regional title must not lose to the derived label of its language.
+ */
+export function titleIn(title: ToolTitle | undefined, language: 'en' | 'de'): string | undefined {
+  const keys = Object.keys(title ?? {}).filter((key) => typeof title?.[key] === 'string');
+  const key = pickLanguage(keys, language);
+  return key !== undefined && primaryLanguage(key) === language ? title![key] : undefined;
+}
+
 function withTitle(derived: Label, title: ToolTitle | undefined): Label {
   const extra = Object.fromEntries(Object.entries(title ?? {})
     .filter((entry): entry is [string, string] => entry[0] !== 'en' && entry[0] !== 'de' && typeof entry[1] === 'string'));
-  return { ...extra, en: title?.en ?? derived.en, de: title?.de ?? derived.de };
+  return { ...extra, en: titleIn(title, 'en') ?? derived.en, de: titleIn(title, 'de') ?? derived.de };
 }
 
 const both = (text: string): Label => ({ en: text, de: text });
