@@ -199,7 +199,8 @@ export function resolveApprovalSubjects(
     const sameKind = (known: string, type: string | undefined) => (strict && type !== undefined ? type === kind : kindsMatch(known, kind!));
     const id = typeof raw === 'string' ? raw.trim() : String(raw);
     // A declared opaque id is case-sensitive: `abc-7` is not the `AbC-7` a result showed.
-    const exactly = (known: { exactIds?: string[] } | undefined) => !known?.exactIds || known.exactIds.includes(id);
+    // A declared speaking argument matches case-insensitively; its type picks the record.
+    const exactly = (known: { exactIds?: string[] } | undefined) => (strict && !exact) || !known?.exactIds || known.exactIds.includes(id);
     const shown = sightings.get(key);
     const seen = exactly(shown) ? shown : undefined;
     if (seen?.kinds && seen.kinds.length > 1 && (!isUuidLike(id) || (strict && seen.kinds.some((candidate) => candidate.type !== undefined)))) {

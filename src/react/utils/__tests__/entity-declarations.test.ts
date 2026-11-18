@@ -287,3 +287,20 @@ describe('case-sensitive ids of different types', () => {
     expect(resolve('AbC-7')).toMatchObject({ status: 'named', name: 'Dokument A' });
   });
 });
+
+describe('opaque and speaking ids sharing a lower-cased value', () => {
+  it('still names the order abc next to a document ABC', () => {
+    const REFS: EntityDeclarationsByTool = {
+      docs_list: { output: [{ type: 'document', id: 'ref', name: 'title', path: 'docs[]' }] },
+      orders_list: { output: [{ type: 'order', id: 'orderKey', name: 'customer', idKind: 'speaking', path: 'orders[]' }] },
+      orders_cancel: { input: [{ type: 'order', args: 'orderKey' }] },
+    };
+    const messages = [
+      tool('docs_list', { docs: [{ ref: 'ABC', title: 'Doc' }] }),
+      tool('orders_list', { orders: [{ orderKey: 'abc', customer: 'Ada' }] }),
+    ];
+    expect(resolveApprovalSubjects({ orderKey: 'abc' }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'orders_cancel', inputEntities: REFS.orders_cancel!.input!, userTexts: [], declarations: REFS,
+    })[0]).toMatchObject({ status: 'named', name: 'Ada', idKind: 'speaking' });
+  });
+});
