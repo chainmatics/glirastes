@@ -691,6 +691,16 @@ joined with `; `. The handler ships English and German defaults (German for a
 `glirastes/server/nextjs`; `budgetStopTexts` on `createAiChatHandler`
 replaces single keys:
 
+> **Set `locale` for a non-English chat.** The stop notice follows the
+> handler's `locale` option only, not the language of the chat or of the
+> model's answers. Without it (default `en-US`) the notice stays English in a
+> German chat. Pass `locale: 'de-DE'` (any value starting with `de`) to
+> `createAiChatHandler`, or `budgetStopTexts` with your own texts. It is one
+> value per handler, not per request: an app with several chat languages
+> creates one handler per language or passes its own texts. The runtime
+> container has no locale setting yet and writes English notices.
+
+
 | Key | English default |
 | --- | --- |
 | `closing` | `I had to stop here: {reason}. The answer above may be incomplete.` |

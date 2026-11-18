@@ -310,6 +310,11 @@ export interface AiChatHandlerConfig {
          */
         turnSnapshot?: TurnSnapshot;
       }) => string);
+  /**
+   * Locale of the texts the handler writes itself, e.g. the budget stop
+   * notice (German for `de*`, else English; default `en-US`). Not derived
+   * from the chat or the model's answers: set it for a non-English chat.
+   */
   locale?: string;
   /**
    * Texts of the closing notice the built-in stream handler appends when it

@@ -36,7 +36,7 @@ it. The type's JSDoc carries the full detail.
 | --- | --- |
 | `model` | model instance or resolver |
 | `systemPrompt` | string or function of routing, date and pinned `TurnSnapshot` |
-| `locale` | answer locale |
+| `locale` | locale of the texts the handler writes itself, e.g. the budget stop notice (`en-US` by default; any `de*` value gives German). Not taken from the chat or the model's answers: a German chat without `locale: 'de-DE'` gets an English stop notice. One value per handler, not per request |
 | `temperature`, `maxOutputTokens` | passed to the model call |
 | `maxSteps` | hard step cap; without it `safetyMaxSteps` (default 24) is the soft cap |
 | `safetyMaxSteps` | guard against runaway loops when no `maxSteps` is set |
