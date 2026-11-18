@@ -526,3 +526,22 @@ describe('history compaction and an id that is also the name', () => {
     expect((clipped.data as Entry[]).some((entry) => String(entry.slug).endsWith('[clipped]'))).toBe(true);
   });
 });
+
+describe('hideIds keeps declared speaking input ids', () => {
+  it('leaves a UUID-shaped speaking key of a delete call readable', async () => {
+    const key = '3f2a9c1e-4b7d-4e2a-9f10-2c3d4e5f6a7b';
+    const entities = { orders_delete: { input: [{ type: 'order', args: 'key', idKind: 'speaking' as const }] } };
+    const parts = [
+      { type: 'tool-call', toolCallId: 'c1', toolName: 'orders_delete', input: { key } },
+      { type: 'tool-result', toolCallId: 'c1', toolName: 'orders_delete', input: { key }, output: { success: true } },
+      { type: 'text-start', id: 't' },
+      { type: 'text-delta', id: 't', text: `Order ${key} deleted.` },
+      { type: 'text-end', id: 't' },
+    ];
+    const stream = convertArrayToReadableStream(parts as never)
+      .pipeThrough(createHideIdsTransform(new Map(), { entities })({ tools: {}, stopStream: () => {} }) as never);
+    let text = '';
+    for await (const part of stream as unknown as AsyncIterable<{ type: string; text?: string }>) if (part.type === 'text-delta') text += part.text;
+    expect(text).toBe(`Order ${key} deleted.`);
+  });
+});

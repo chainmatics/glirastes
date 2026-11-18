@@ -10,7 +10,10 @@ import {
 import {
   declarationsForRead,
   declaredRecordsOf,
+  entityIdKindOf,
   entityIdText,
+  inputRefArgs,
+  type InputEntityRef,
   type EntityDeclarationsByTool,
   type OutputEntityDeclaration,
 } from '../../../contracts/entity-declaration.js';
@@ -92,6 +95,7 @@ function idPattern(ids: Iterable<string>): string {
 export function redactIds(text: string, labels: IdLabels): string {
   if (!text) return text;
   const keep = readable.get(labels);
+  // (A kept id also escapes the UUID rule: it is set aside before any pattern runs.)
   if (keep && keep.size > 0) return redactKeeping(text, labels, keep);
   return redactAll(text, labels);
 }
@@ -134,6 +138,48 @@ function redactAll(text: string, labels: IdLabels): string {
     .replace(/[ \t]+([.,;:!?)])/g, '$1');
 }
 
+/** A speaking id stays readable, also when the guess learnt it before. */
+function keepReadable(labels: IdLabels, values: ReadonlyArray<string | number>): void {
+  let set = readable.get(labels);
+  if (!set) readable.set(labels, set = new Set());
+  for (const raw of values) {
+    const id = typeof raw === 'string' ? raw.trim() : String(raw);
+    set.add(id.toLowerCase());
+    labels.delete(id);
+    prefixedOnly.get(labels)?.delete(id);
+  }
+}
+
+/**
+ * Keeps the speaking ids a tool's `inputEntities` name in its arguments
+ * readable (an order key the user typed): never learnt, never removed, also
+ * when the call returns no record. A reference is speaking by its `idKind`,
+ * else by the `idKind` its type has in any tool's `outputEntities`, else by
+ * its argument names (`key`, `slug`, `code`).
+ */
+export function keepDeclaredInputIds(
+  input: unknown,
+  refs: ReadonlyArray<InputEntityRef> | undefined,
+  labels: IdLabels,
+  entities?: EntityDeclarationsByTool,
+): void {
+  if (!refs || refs.length === 0 || typeof input !== 'object' || input === null) return;
+  for (const ref of refs) {
+    const paths = inputRefArgs(ref);
+    const typeKind = Object.values(entities ?? {}).flatMap((entry) => entry.output ?? [])
+      .find((declaration) => declaration.type === ref.type);
+    const kind = ref.idKind ?? (typeKind ? entityIdKindOf(typeKind) : entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) }));
+    if (kind !== 'speaking') continue;
+    const values: Array<string | number> = [];
+    for (const path of paths) {
+      let current: unknown = input;
+      for (const key of path.split('.')) current = typeof current === 'object' && current !== null ? (current as Record<string, unknown>)[key] : undefined;
+      if (typeof current === 'string' || typeof current === 'number') values.push(current);
+    }
+    keepReadable(labels, values);
+  }
+}
+
 /**
  * Records the opaque ids of the records a tool's `outputEntities` declare in
  * its result (`value`), labelled with their declared name. Speaking ids
@@ -149,15 +195,7 @@ export function collectDeclaredIdLabels(
   if (!declarations || declarations.length === 0) return;
   for (const identity of declaredRecordsOf(value, declarations).values()) {
     if (identity.idKind !== 'opaque') {
-      // A speaking id stays readable, also when the guess learnt it before.
-      let set = readable.get(labels);
-      if (!set) readable.set(labels, set = new Set());
-      for (const raw of identity.idValues) {
-        const id = typeof raw === 'string' ? raw.trim() : String(raw);
-        set.add(id.toLowerCase());
-        labels.delete(id);
-        prefixedOnly.get(labels)?.delete(id);
-      }
+      keepReadable(labels, identity.idValues);
       continue;
     }
     // A composite key: the whole key (`abc123456/def123456`) carries the name, its parts are
@@ -206,6 +244,7 @@ export function collectDeclaredIdLabelsFromMessages(
   }
   for (const { name, part } of toolParts) {
     collectDeclaredIdLabels(part.output, producers.declarationsFor(entities, name, part.input), labels);
+    if (Object.prototype.hasOwnProperty.call(entities, name)) keepDeclaredInputIds(part.input, entities[name]!.input, labels, entities);
   }
 }
 
@@ -285,6 +324,10 @@ export function createHideIdsTransform(
 ): StreamTextTransform<ToolSet> {
   const producers = new ResultProducers();
   if (options.entities) producers.noteMessages(options.messages);
+  const keepInputIds = (toolName: unknown, input: unknown) => {
+    if (typeof toolName !== 'string' || !options.entities || !Object.prototype.hasOwnProperty.call(options.entities, toolName)) return;
+    keepDeclaredInputIds(input, options.entities[toolName]!.input, labels, options.entities);
+  };
   const declaredOf = (toolName: unknown, input: unknown, output: unknown) => {
     if (typeof toolName !== 'string' || !options.entities) return undefined;
     producers.note(toolName, output);
@@ -311,11 +354,15 @@ export function createHideIdsTransform(
           held.set(key, { part, text: text.slice(cut) });
           return;
         }
-        if (part.type === 'tool-call') collectIdLabels(part.input, labels);
+        if (part.type === 'tool-call') {
+          collectIdLabels(part.input, labels);
+          keepInputIds(part.toolName, part.input);
+        }
         if (part.type === 'tool-result') {
           collectIdLabels(part.input, labels);
           collectIdLabels(part.output, labels);
           collectDeclaredIdLabels(part.output, declaredOf(part.toolName, part.input, part.output), labels);
+          keepInputIds(part.toolName, part.input);
         }
         flush(controller, part.type === 'text-end' ? part.id : undefined);
         controller.enqueue(part);
