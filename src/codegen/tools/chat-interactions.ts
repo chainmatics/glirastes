@@ -58,13 +58,20 @@ function safe(text: string | undefined): string | undefined {
 }
 
 function safeTitle(title: ToolTitle | undefined): ToolTitle | undefined {
-  const en = safe(title?.en);
-  const de = safe(title?.de);
-  return en || de ? { ...(en ? { en } : {}), ...(de ? { de } : {}) } : undefined;
+  const kept = Object.entries(title ?? {})
+    .map(([language, text]) => [language, safe(text)] as const)
+    .filter((entry): entry is readonly [string, string] => entry[1] !== undefined);
+  return kept.length > 0 ? Object.fromEntries(kept) : undefined;
+}
+
+/** The title's languages besides English and German, for a label derived in those two. */
+function otherTitleLanguages(title: ToolTitle | undefined): Record<string, string> {
+  return Object.fromEntries(Object.entries(title ?? {})
+    .filter((entry): entry is [string, string] => entry[0] !== 'en' && entry[0] !== 'de' && typeof entry[1] === 'string'));
 }
 
 function clampLabel(label: Label): Label {
-  return { en: clamp(label.en), de: clamp(label.de) };
+  return Object.fromEntries(Object.entries(label).map(([language, text]) => [language, clamp(text)])) as Label;
 }
 
 function nounOf(entity: ChatEntityData, language: 'de' | 'en'): string | undefined {
@@ -390,7 +397,11 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
       const title = humanizeIdentifier(view);
       addCommand({
         id: `filter.${idSegment(view)}`,
-        label: { en: tool.title?.en ?? clamp(`Filter ${title}`), de: tool.title?.de ?? clamp(`${title} filtern`) },
+        label: {
+          ...otherTitleLanguages(tool.title),
+          en: tool.title?.en ?? clamp(`Filter ${title}`),
+          de: tool.title?.de ?? clamp(`${title} filtern`),
+        },
         ...(args.length > 0 ? { args } : {}),
         run: { kind: 'ui', tool: tool.definitionId },
       });

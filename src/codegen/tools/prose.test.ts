@@ -133,9 +133,13 @@ describe('tool prose', () => {
     });
   });
 
-  it('prefers contract module, hints and presentation over semantics', async () => {
+  it('keeps the code module, but lets a maintained semantics entry beat the code texts and says so', async () => {
     const { semantics } = await semanticsFile(JSON.stringify({
-      schemaVersion: 1, tools: [{ name: 'tasks.create', module: 'from_semantics', usageHints: ['From semantics.'] }],
+      schemaVersion: 1,
+      tools: [{
+        name: 'tasks.create', module: 'from_semantics', description: 'From semantics.', usageHints: ['From semantics.'],
+        presentation: { locale: 'en-US', singular: 'New task', plural: 'New tasks', approval: 'Create the task?' },
+      }],
     }));
     const prose = resolveToolProse({
       ...base,
@@ -149,8 +153,116 @@ describe('tool prose', () => {
     });
     expect(prose).toMatchObject({
       module: 'task_mutation',
+      description: 'From semantics.',
+      descriptionOrigin: 'human',
+      usageHints: ['From semantics.'],
+      presentation: { singular: 'New task', approval: 'Create the task?' },
+    });
+    expect(prose.findings.map((finding) => [finding.code, finding.message])).toEqual([
+      ['semantics-overrides-code', expect.stringContaining('The description in tool-semantics.json')],
+      ['semantics-overrides-code', expect.stringContaining('The usageHints in tool-semantics.json')],
+      ['semantics-overrides-code', expect.stringContaining('The presentation in tool-semantics.json')],
+    ]);
+    for (const finding of prose.findings) expect(finding.message).not.toContain('From semantics');
+  });
+
+  it('keeps agent-written and code-copied semantics fields below the code, as before', async () => {
+    const { semantics } = await semanticsFile(JSON.stringify({
+      schemaVersion: 1,
+      tools: [{
+        name: 'tasks.create', description: 'Agent text.', usageHints: ['Agent hint.'],
+        presentation: { locale: 'en-US', singular: 'Agent', plural: 'Agents', approval: 'Agent?' },
+        origin: { description: 'agent', usageHints: 'code', presentation: 'agent' },
+      }],
+    }));
+    const prose = resolveToolProse({
+      ...base,
+      semantics,
+      jsDoc: 'Creates a task.',
+      hints: {
+        usageHints: ['From the contract.'],
+        presentation: { locale: 'en-US', singular: 'Create task', plural: 'Create tasks', approval: 'Create this task?' },
+      },
+    });
+    expect(prose).toMatchObject({
+      description: 'Creates a task.',
+      descriptionOrigin: 'code',
       usageHints: ['From the contract.'],
-      presentation: { singular: 'Create task', approval: 'Create this task?' },
+      presentation: { singular: 'Create task' },
+      findings: [],
+    });
+  });
+
+  it('lets a locked field beat the code even when an agent wrote it first', async () => {
+    const { semantics } = await semanticsFile(JSON.stringify({
+      schemaVersion: 1,
+      tools: [{ name: 'tasks.create', description: 'Reviewed.', origin: { description: 'code' }, locked: { description: `sha256:${'A'.repeat(43)}` } }],
+    }));
+    expect(resolveToolProse({ ...base, semantics, jsDoc: 'Creates a task.' }).description).toBe('Reviewed.');
+  });
+
+  it('sends the model one description: English, else another layer, else the first language', async () => {
+    const { semantics } = await semanticsFile(JSON.stringify({
+      schemaVersion: 1, tools: [{ name: 'tasks.create', description: { de: 'Legt eine Aufgabe an.', pl: 'Tworzy zadanie.' } }],
+    }));
+    // The entry has no English text: the plain JSDoc serves English.
+    expect(resolveToolProse({ ...base, semantics, jsDoc: 'Creates a task.' }).description).toBe('Creates a task.');
+    expect(resolveToolProse({ ...base, semantics }).description).toBe('Legt eine Aufgabe an.');
+    expect(resolveToolProse({ ...base, hints: { declaredDescription: { en: 'Declared.', de: 'Deklariert.' } }, jsDoc: 'Doc.' }).description)
+      .toBe('Declared.');
+  });
+
+  describe('labels per language (tools.json languages)', () => {
+    const languages = ['en', 'de', 'pl'];
+
+    it('leaves the labels out and the presentation unchanged without languages', () => {
+      const prose = resolveToolProse({ ...base, hints: { title: { de: 'Aufgabe anlegen', pl: 'Utwórz zadanie' } } });
+      expect(prose.labels).toBeUndefined();
+      expect(prose.presentation).toEqual({ locale: 'en-US', singular: 'Create tasks', plural: 'Create tasks', approval: 'Create tasks' });
+    });
+
+    it('mixes the semantics entry and the endpoint per language, the maintained entry first', async () => {
+      const { semantics } = await semanticsFile(JSON.stringify({
+        schemaVersion: 1, tools: [{ name: 'tasks.create', title: { de: 'Neue Aufgabe' } }],
+      }));
+      const prose = resolveToolProse({
+        ...base, semantics, languages, locale: 'de-DE',
+        hints: { title: { de: 'Aufgabe anlegen', pl: 'Utwórz zadanie' } },
+      });
+      expect(prose.labels).toEqual({
+        en: { singular: 'Create tasks', plural: 'Create tasks', approval: 'Create tasks' },
+        de: { singular: 'Neue Aufgabe', plural: 'Neue Aufgabe', approval: 'Neue Aufgabe' },
+        pl: { singular: 'Utwórz zadanie', plural: 'Utwórz zadanie', approval: 'Utwórz zadanie' },
+      });
+      expect(prose.presentation).toEqual({ locale: 'de-DE', singular: 'Neue Aufgabe', plural: 'Neue Aufgabe', approval: 'Neue Aufgabe' });
+      expect(prose.missingLabelLanguages).toBeUndefined();
+    });
+
+    it('takes a presentation per language before a title and reports languages without an own label', async () => {
+      const { semantics } = await semanticsFile(JSON.stringify({
+        schemaVersion: 1,
+        tools: [{
+          name: 'tasks.create',
+          presentation: { de: { singular: 'Aufgabe', plural: 'Aufgaben', approval: 'Aufgabe anlegen?' } },
+          title: { de: 'Aufgabe anlegen' },
+        }],
+      }));
+      const prose = resolveToolProse({ ...base, semantics, languages: ['en', 'de', 'pl-PL'] });
+      expect(prose.labels?.de).toEqual({ singular: 'Aufgabe', plural: 'Aufgaben', approval: 'Aufgabe anlegen?' });
+      // No Polish label anywhere: English (the template) before the first available language.
+      expect(prose.labels?.['pl-PL']).toEqual({ singular: 'Create tasks', plural: 'Create tasks', approval: 'Create tasks' });
+      expect(prose.missingLabelLanguages).toEqual(['pl-PL']);
+    });
+
+    it('uses a language-free endpoint title for every language the entry lacks', () => {
+      const prose = resolveToolProse({ ...base, languages, hints: { title: 'Task wizard' } });
+      expect(Object.values(prose.labels ?? {}).map((labels) => labels.approval)).toEqual(['Task wizard', 'Task wizard', 'Task wizard']);
+      expect(prose.missingLabelLanguages).toBeUndefined();
+    });
+
+    it('drops a secret-looking label instead of shipping it', () => {
+      const prose = resolveToolProse({ ...base, languages, hints: { title: { pl: `Bearer ${'a'.repeat(30)}` } } });
+      expect(JSON.stringify(prose)).not.toContain('Bearer');
     });
   });
 

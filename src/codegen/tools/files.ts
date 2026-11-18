@@ -9,6 +9,7 @@ import {
 } from '../../server/core/output-fields.js';
 import { ToolRiskClassSchema } from '../../contracts/index.js';
 import { TOOL_POLICY_RULES_VERSION } from '../../contracts/tool-policy.js';
+import { LANGUAGE_TAG_PATTERN, MAX_TEXT_LANGUAGES } from '../../contracts/localized-text.js';
 import { ExecutionGenerationStateSchema } from '../inventory-generation.js';
 import type { ToolContract, ToolContractsEntry } from './types.js';
 
@@ -132,10 +133,21 @@ const outputFieldsSchema = (name: OutputFieldsName) => z.array(z.string().min(1)
   .max(MAX_OUTPUT_FIELDS)
   .refine((paths) => isValidOutputFields(paths, name), { message: 'Not a list of output field paths' });
 
-const ToolTitleSchema = z.object({
-  de: z.string().min(1).max(200).optional(),
-  en: z.string().min(1).max(200).optional(),
-}).strict();
+const ToolTitleSchema = z.record(z.string().regex(LANGUAGE_TAG_PATTERN).max(35), z.string().min(1).max(200))
+  .refine((title) => Object.keys(title).length <= MAX_TEXT_LANGUAGES, { message: `At most ${MAX_TEXT_LANGUAGES} languages` });
+
+/**
+ * The labels of a tool per language for the chat (tools.json `languages`):
+ * local only, written to tool-contracts.json and the generated module, never
+ * part of the setup artifact the Platform receives.
+ */
+const ToolLabelsSchema = z.record(z.string().regex(LANGUAGE_TAG_PATTERN).max(35), z.object({
+  singular: z.string().min(1).max(200),
+  plural: z.string().min(1).max(200),
+  approval: z.string().min(1).max(500),
+}).strict()).refine((labels) => Object.keys(labels).length >= 1 && Object.keys(labels).length <= MAX_TEXT_LANGUAGES, {
+  message: `One to ${MAX_TEXT_LANGUAGES} languages`,
+});
 
 export const ToolContractsFileSchema = z.object({
   schemaVersion: z.literal(1),
@@ -148,6 +160,7 @@ export const ToolContractsFileSchema = z.object({
     defaults: ToolPolicyDefaultsSchema,
     search: ToolSearchFactsSchema.optional(),
     title: ToolTitleSchema.optional(),
+    labels: ToolLabelsSchema.optional(),
     mcp: z.array(McpToolNameSchema).min(1).max(10).optional(),
     maxResultChars: z.number().int().min(MIN_MAX_RESULT_CHARS).max(MAX_MAX_RESULT_CHARS).optional(),
     outputAllowedFields: outputFieldsSchema('outputAllowedFields').optional(),

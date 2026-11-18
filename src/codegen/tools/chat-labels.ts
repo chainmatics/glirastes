@@ -1,8 +1,10 @@
 import type { ToolTitle } from './types.js';
 
+/** A label in English and German, plus any language a tool's title adds (`pl`, `pt-BR`). */
 export interface Label {
   en: string;
   de: string;
+  [language: string]: string;
 }
 
 const verb = (en: string, de: string): Label => Object.freeze({ en, de });
@@ -109,7 +111,9 @@ export function phraseLabel(words: ReadonlyArray<string>, fallbackVerb?: string)
 }
 
 function withTitle(derived: Label, title: ToolTitle | undefined): Label {
-  return { en: title?.en ?? derived.en, de: title?.de ?? derived.de };
+  const extra = Object.fromEntries(Object.entries(title ?? {})
+    .filter((entry): entry is [string, string] => entry[0] !== 'en' && entry[0] !== 'de' && typeof entry[1] === 'string'));
+  return { ...extra, en: title?.en ?? derived.en, de: title?.de ?? derived.de };
 }
 
 const both = (text: string): Label => ({ en: text, de: text });

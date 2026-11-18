@@ -620,8 +620,9 @@ async function generate(
   const artifactTools: ArtifactToolInput[] = [];
   const contractEntries: ToolContractsEntry[] = [];
   const reportTools: ToolReportTool[] = [];
-  const languages = requiredLanguages(config.locale);
+  const languages = requiredLanguages(config.locale, config.languages);
   const usedSemantics = new Set<ToolSemanticsEntry>();
+  const missingLabels = new Map<string, string[]>();
 
   for (const execution of inventory.executions) {
     const tool = observedByKey.get(execution.stableKey);
@@ -699,6 +700,7 @@ async function generate(
       ...(execution.executionKind === 'endpoint' ? { method: execution.method, path: execution.path } : {}),
       operationGroup: defaults.operationGroup,
       locale: config.locale,
+      ...(config.languages ? { languages: config.languages } : {}),
       ...(tool.evidence.jsDoc ? { jsDoc: tool.evidence.jsDoc } : {}),
       ...(tool.prose ? { hints: tool.prose } : {}),
       semantics: inputs.semantics,
@@ -721,8 +723,13 @@ async function generate(
         schemaSource: schemaQuality,
       },
     });
-    const search = semanticsSearch(semantics.entry);
-    const title = semanticsTitle(semantics.entry);
+    for (const language of prose.missingLabelLanguages ?? []) {
+      const list = missingLabels.get(language) ?? [];
+      list.push(execution.definitionId);
+      missingLabels.set(language, list);
+    }
+    const search = semanticsSearch(semantics.entry, tool.prose);
+    const title = semanticsTitle(semantics.entry, tool.prose?.title, languages);
     const mcp = execution.executionKind === 'endpoint' ? inputs.mcpNames?.get(execution.stableKey) : undefined;
     contractEntries.push({
       toolId: execution.toolId,
@@ -740,6 +747,7 @@ async function generate(
         }
         : {}),
       ...(title ? { title } : {}),
+      ...(prose.labels ? { labels: prose.labels } : {}),
       ...(tool.maxResultChars !== undefined ? { maxResultChars: tool.maxResultChars } : {}),
       ...(tool.outputAllowedFields ? { outputAllowedFields: tool.outputAllowedFields } : {}),
       ...(tool.outputDeniedFields ? { outputDeniedFields: tool.outputDeniedFields } : {}),
@@ -801,6 +809,12 @@ async function generate(
   for (const key of Object.keys(inputs.policy.tools ?? {})) orphaned(key, 'tools');
   for (const key of Object.keys(inputs.policy.acceptedRisk ?? {})) orphaned(key, 'acceptedRisk');
   findings.push(...orphanedSemanticsFindings(inputs.semantics, usedSemantics, excludedByKey, previous.state, inventory.executions));
+  for (const [language, names] of [...missingLabels].sort(([left], [right]) => compareCodeUnits(left, right))) {
+    const shown = [...names].sort(compareCodeUnits);
+    findings.push(toolFinding('label-translation-missing', 'warning', `${TOOLS_PATHS.config}#languages.${language}`,
+      `${shown.length} tool${shown.length === 1 ? ' has' : 's have'} no label in ${language} and show${shown.length === 1 ? 's' : ''} the fallback language: `
+      + `${shown.slice(0, 5).join(', ')}${shown.length > 5 ? `, and ${shown.length - 5} more` : ''}.`));
+  }
   for (const key of inputs.mcpNames?.keys() ?? []) {
     if (observedByKey.get(key)?.execution.executionKind === 'endpoint') continue;
     findings.push(toolFinding('mcp-tool-names-invalid', 'warning', key,

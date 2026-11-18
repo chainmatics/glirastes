@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
+import { LANGUAGE_TAG_PATTERN, MAX_TEXT_LANGUAGES } from '../../contracts/localized-text.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import { MAX_OUTPUT_FIELDS, normalizeOutputFields, parseAnyDepthKey } from '../../server/core/output-fields.js';
 
@@ -98,6 +99,17 @@ export const ToolsConfigSchema = z.object({
   targetAppKey: z.string().trim().min(1).max(200),
   locale: z.string().trim().min(2).max(35)
     .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/),
+  /**
+   * The languages of the app's UI as BCP-47 tags (e.g. `["en", "de", "pl"]`).
+   * Optional; with it, every tool gets its chat labels per language (from
+   * its presentation, else its title, else the English or German template)
+   * in the generated module, `describe` asks for texts in these languages,
+   * and a language without an own label is reported. Local only: the setup
+   * artifact keeps one presentation in `locale`.
+   */
+  languages: z.array(z.string().regex(LANGUAGE_TAG_PATTERN).max(35)).min(1).max(MAX_TEXT_LANGUAGES)
+    .refine((tags) => new Set(tags.map((tag) => tag.toLowerCase())).size === tags.length, { message: 'Each language once' })
+    .optional(),
   sources: z.array(SourceSchema).min(1).max(20),
   emit: z.object({
     module: modulePath.optional(),
