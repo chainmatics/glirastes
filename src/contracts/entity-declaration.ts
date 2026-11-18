@@ -275,9 +275,19 @@ export function declaredIdentityOf(record: unknown, declaration: OutputEntityDec
   };
 }
 
-/** The display form of a composite id (`lobby/503`); a single id as it is. */
+/** The display form of a composite id (`lobby/503`); a single id as it is. Not unique: never a lookup key. */
 export function entityIdText(values: ReadonlyArray<string | number>): string {
   return values.map((value) => (typeof value === 'string' ? value.trim() : String(value))).join('/');
+}
+
+/**
+ * The lookup form of an id: a single id as it is (so it meets the same id
+ * elsewhere), a composite key as its JSON tuple (`["a/b","c"]` and
+ * `["a","b/c"]` stay apart).
+ */
+export function entityLookupId(values: ReadonlyArray<string | number>): string | number {
+  if (values.length === 1) return typeof values[0] === 'string' ? values[0].trim() : values[0]!;
+  return JSON.stringify(values.map((value) => (typeof value === 'string' ? value.trim() : value)));
 }
 
 /** Keys of a result's top level that are never data (the SDK adds them). */

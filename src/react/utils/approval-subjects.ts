@@ -13,6 +13,7 @@ import {
 import {
   entityIdKindOf,
   entityIdText,
+  entityLookupId,
   inputRefArgs,
   isEntityIdValue,
   type EntityDeclarationsByTool,
@@ -170,11 +171,12 @@ export function resolveApprovalSubjects(
   };
 
   function subjectFor(
-    path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false,
+    path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false, display?: string,
   ): ApprovalSubject | undefined {
     const subjects: ApprovalSubject[] = [];
     resolve(subjects, path, label, raw, kind, strict);
-    return subjects[0];
+    const subject = subjects[0];
+    return subject && display !== undefined ? { ...subject, id: display } : subject;
   }
 
   /**
@@ -216,7 +218,9 @@ export function resolveApprovalSubjects(
       && (!isUuidLike(id) || (strict && !!declared)) && !sameKind(known, declared);
     if (!seen || otherKind(seen.kind, seen.kindDeclared)) {
       const found = seenIds.get(key);
-      const record = found && !otherKind(found.type, true) ? found : undefined;
+      // A declared type that carried this id: its own record, whichever came first.
+      const typed = found?.byType && kind ? Object.entries(found.byType).find(([type]) => sameKind(type, true)) : undefined;
+      const record = typed ? { ...typed[1], type: typed[0] } : found && !otherKind(found.type, true) ? found : undefined;
       subjects.push(record
         ? {
           path, id, status: 'seen', ...(label ? { label } : {}), ...(record.fallback ? { fallback: record.fallback } : {}),
@@ -248,12 +252,13 @@ export function resolveApprovalSubjects(
       if (!values.every(isEntityIdValue)) continue;
       for (const path of paths) declaredPaths.add(path);
       const id = entityIdText(values as Array<string | number>);
-      const key = entityIdKey(id);
+      const lookup = entityLookupId(values as Array<string | number>);
+      const key = entityIdKey(lookup);
       const sighting = key !== undefined ? sightings.get(key) : undefined;
       const record = key !== undefined ? seenIds.get(key) : undefined;
       const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? sighting?.idKind ?? record?.idKind
         ?? entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) });
-      const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, id, ref.type, true);
+      const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, lookup, ref.type, true, id);
       if (!subject) continue;
       let provenance: ApprovalSubject['provenance'];
       if (subject.status !== 'unknown') provenance = sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';

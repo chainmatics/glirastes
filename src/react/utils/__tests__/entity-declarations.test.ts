@@ -107,7 +107,7 @@ describe('entity links with declarations (D1–D4)', () => {
     expect(collectKnownEntities(conversation as never, [], DECLARED)).toEqual([
       { type: 'album', id: '4', label: 'Blue' },
       { type: 'album', id: '5', label: 'Red' },
-      { type: 'track', id: '4/1', label: 'Intro' },
+      { type: 'track', id: '4/1', label: 'Intro', data: { idValues: [4, 1] } },
       { type: 'order', id: 'ORD-9', label: 'Ada' },
     ]);
     expect(collectKnownEntities(conversation as never, [])).toEqual([]);
@@ -139,5 +139,38 @@ describe('declared types are compared exactly', () => {
       });
       expect(resolved[0]).toMatchObject({ status: 'unknown', type: 'channel-version' });
     }
+  });
+});
+
+describe('composite keys and nameless records of several types', () => {
+  it('keeps composite keys apart whose parts contain the separator', () => {
+    const PARTS: EntityDeclarationsByTool = {
+      files_list: { output: [{ type: 'file', id: ['dir', 'name'], name: 'title', path: 'files[]' }] },
+      files_delete: { input: [{ type: 'file', args: ['dir', 'name'] }] },
+    };
+    const messages = [tool('files_list', { files: [{ dir: 'a/b', name: 'c', title: 'First' }] })];
+    const resolve = (args: Record<string, unknown>) => resolveApprovalSubjects(args, collectEntitySightings(messages, PARTS), collectSeenEntityIds(messages, PARTS), {
+      toolName: 'files_delete', inputEntities: PARTS.files_delete!.input!, userTexts: [], declarations: PARTS,
+    });
+    expect(resolve({ dir: 'a/b', name: 'c' })[0]).toMatchObject({ id: 'a/b/c', status: 'named', name: 'First' });
+    expect(resolve({ dir: 'a', name: 'b/c' })[0]).toMatchObject({ id: 'a/b/c', status: 'unknown' });
+  });
+
+  it('keeps the fallback of each declared type for one id value', () => {
+    const TWO: EntityDeclarationsByTool = {
+      playlist_versions: { output: [{ type: 'playlist-version', id: 'version_id', fallback: 'n', path: 'versions[]' }] },
+      channel_versions: { output: [{ type: 'channel-version', id: 'version_id', fallback: 'rev', path: 'versions[]' }] },
+      playlist_rollback: { input: [{ type: 'playlist-version', args: 'version_id' }] },
+      channel_rollback: { input: [{ type: 'channel-version', args: 'version_id' }] },
+    };
+    const messages = [
+      tool('playlist_versions', { versions: [{ version_id: 7, n: 3 }] }),
+      tool('channel_versions', { versions: [{ version_id: 7, rev: 9 }] }),
+    ];
+    const resolve = (toolName: string) => resolveApprovalSubjects({ version_id: 7 }, collectEntitySightings(messages, TWO), collectSeenEntityIds(messages, TWO), {
+      toolName, inputEntities: TWO[toolName]!.input!, userTexts: [], declarations: TWO,
+    })[0];
+    expect(resolve('playlist_rollback')).toMatchObject({ status: 'seen', fallback: 'N 3', fallbackField: 'n' });
+    expect(resolve('channel_rollback')).toMatchObject({ status: 'seen', fallback: 'Rev 9', fallbackField: 'rev' });
   });
 });

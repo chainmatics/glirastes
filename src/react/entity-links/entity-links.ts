@@ -5,6 +5,7 @@ import { parseMentionSegments } from '../utils/mention-markup.js';
 import {
   declaredRecordsOf,
   entityIdText,
+  entityLookupId,
   type EntityDeclarationsByTool,
 } from '../../contracts/entity-declaration.js';
 
@@ -123,7 +124,9 @@ export function splitEntityText(
       continue;
     }
     const list = candidates.get(label) ?? [];
-    if (!list.some((known) => known.type === reference.type && known.id === reference.id)) list.push(reference);
+    const same = (known: ChatEntityReference) => known.type === reference.type && known.id === reference.id
+      && JSON.stringify(known.data?.idValues) === JSON.stringify(reference.data?.idValues);
+    if (!list.some(same)) list.push(reference);
     candidates.set(label, list);
   }
   for (const [label, list] of candidates) {
@@ -219,8 +222,8 @@ export function collectKnownEntities(
   declarations?: EntityDeclarationsByTool,
 ): ChatEntityReference[] {
   const found = new Map<string, ChatEntityReference>();
-  const add = (reference: ChatEntityReference) => {
-    const key = `${reference.type}\u0000${reference.id}`;
+  const add = (reference: ChatEntityReference, lookup?: string) => {
+    const key = `${reference.type}\u0000${lookup ?? reference.id}`;
     if (!found.has(key)) found.set(key, reference);
   };
   const byTool = new Map(searches.map((entry) => [toolKey(entry.search.tool), entry]));
@@ -241,7 +244,12 @@ export function collectKnownEntities(
       if (result && declared) {
         for (const identity of declaredRecordsOf(result.output, declared).values()) {
           if (identity.declaration.type && identity.name) {
-            add({ type: identity.declaration.type, id: entityIdText(identity.idValues), label: identity.name });
+            // A composite key: readable id, its parts in `data`; told apart by its tuple.
+            const composite = identity.idValues.length > 1;
+            add({
+              type: identity.declaration.type, id: entityIdText(identity.idValues), label: identity.name,
+              ...(composite ? { data: { idValues: [...identity.idValues] } } : {}),
+            }, composite ? String(entityLookupId(identity.idValues)) : undefined);
           }
         }
       }

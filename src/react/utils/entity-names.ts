@@ -13,7 +13,7 @@ import {
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import {
   declaredRecordsOf,
-  entityIdText,
+  entityLookupId,
   type DeclaredRecordIdentity,
   type EntityDeclarationsByTool,
   type EntityIdKind,
@@ -91,9 +91,9 @@ function declaredOf(
   return found.size > 0 ? found : undefined;
 }
 
-/** The id text of a declared record: its id, or a composite key's values joined with `/`. */
-function declaredId(identity: DeclaredRecordIdentity): string {
-  return entityIdText(identity.idValues);
+/** The lookup id of a declared record: its id, or a composite key's JSON tuple. */
+function declaredId(identity: DeclaredRecordIdentity): string | number {
+  return entityLookupId(identity.idValues);
 }
 
 /** The tool whose overview a `read_result` answer reads, by result id. */
@@ -274,6 +274,11 @@ export interface SeenEntity {
   /** Set only for a declared record: its declared type and id kind. */
   type?: string;
   idKind?: EntityIdKind;
+  /**
+   * Set only for declared records: what each declared type that carried this
+   * id showed (two nameless records of different types can share an id).
+   */
+  byType?: Record<string, { fallback?: string; fallbackField?: string; idKind: EntityIdKind }>;
 }
 
 /**
@@ -302,14 +307,21 @@ export function collectSeenEntityIds(
     const idKey = identity ? undefined : ID_KEYS.find((key) => entityIdKey(value[key]) !== undefined);
     if (identity) {
       const key = entityIdKey(declaredId(identity));
-      const known = key ? seen.get(key) : undefined;
-      if (key && (!known || !known.fallback)) {
+      if (key) {
         const fallback = identity.fallbackField !== undefined
           ? { fallback: fallbackText(identity.fallbackField, identity.fallbackValue!), fallbackField: identity.fallbackField }
           : {};
-        seen.set(key, {
-          ...known, ...fallback, ...(identity.declaration.type ? { type: identity.declaration.type } : {}), idKind: identity.idKind,
-        });
+        const type = identity.declaration.type;
+        let known = seen.get(key);
+        // The newest record is read first: it wins, an older one only fills a missing fallback of its own type.
+        if (!known) seen.set(key, known = { ...fallback, ...(type ? { type } : {}), idKind: identity.idKind });
+        else if (!known.fallback && (known.type === undefined || known.type === type)) Object.assign(known, fallback);
+        if (type) {
+          known.byType ??= {};
+          const entry = known.byType[type];
+          if (!entry) known.byType[type] = { ...fallback, idKind: identity.idKind };
+          else if (!entry.fallback) Object.assign(entry, fallback);
+        }
       }
     } else if (idKey) {
       const key = entityIdKey(value[idKey])!;

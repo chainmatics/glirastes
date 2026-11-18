@@ -109,7 +109,11 @@ FastAPI: `model_config = ConfigDict(json_schema_extra={'x-glirastes-entity': {..
   subjects carry `fallbackField` next to `fallback` (deprecated, still filled).
   No new `status` values.
 - **Entity links:** the declared records of any tool result with a `type` and
-  a name become known references, also nested.
+  a name become known references, also nested. A composite key's reference
+  has the readable id (`lobby/503`) and its parts in `data.idValues`.
+
+Composite keys are compared by their parts, never by the readable `a/b` form,
+so `["a/b", "c"]` and `["a", "b/c"]` stay two records.
 
 The browser gets the declarations from the built-in chat handler
 (`data-tool-entities`, only sent when a tool declares something) or from
