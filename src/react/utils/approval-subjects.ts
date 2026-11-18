@@ -257,7 +257,10 @@ export function resolveApprovalSubjects(
       const key = entityIdKey(lookup);
       const sighting = key !== undefined ? sightings.get(key) : undefined;
       const record = key !== undefined ? seenIds.get(key) : undefined;
-      const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? sighting?.idKind ?? record?.idKind
+      // Only a record of the reference's own type tells its id kind; another type's record says nothing.
+      const typedRecord = record?.byType?.[ref.type] ?? (record?.type === ref.type ? record : undefined);
+      const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? typedRecord?.idKind
+        ?? (sighting?.kindType === ref.type ? sighting.idKind : undefined)
         ?? entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) });
       const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, lookup, ref.type, true, id);
       if (!subject) continue;

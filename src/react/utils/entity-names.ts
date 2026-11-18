@@ -371,14 +371,19 @@ export function collectEntityNames(
   return new Map([...collectEntitySightings(messages, declarations)].map(([id, sighting]) => [id, sighting.name]));
 }
 
-/** The plain texts of the user's own messages, newest first (at most 50). */
+/**
+ * What the user typed in their own messages, newest first (at most 50): the
+ * text segments only, never the markup of an `@` mention (its id was picked,
+ * not typed; a mention counts as its own provenance).
+ */
 export function userTextsOf(messages: ReadonlyArray<unknown>): string[] {
   const texts: string[] = [];
   for (let m = messages.length - 1; m >= 0 && texts.length < 50; m -= 1) {
     const message = messages[m];
     if (!isRecord(message) || message.role !== 'user' || !Array.isArray(message.parts)) continue;
     for (const part of message.parts as unknown[]) {
-      if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') texts.push(part.text);
+      if (!isRecord(part) || part.type !== 'text' || typeof part.text !== 'string') continue;
+      texts.push(parseMentionSegments(part.text).map((segment) => (segment.kind === 'text' ? segment.text : ' ')).join(''));
     }
   }
   return texts;

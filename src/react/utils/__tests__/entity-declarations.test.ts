@@ -220,3 +220,27 @@ describe('typed composite keys', () => {
     expect(resolved[0]).toMatchObject({ id: 'a/b/c', status: 'unknown' });
   });
 });
+
+describe('provenance and id kind stay with the type', () => {
+  it('takes no id kind from a record of another type', () => {
+    const REFS: EntityDeclarationsByTool = {
+      channels_list: { output: [{ type: 'channel', id: 'key', name: 'title', path: 'channels[]' }] },
+      people_delete: { input: [{ type: 'person', args: 'personNo' }] },
+    };
+    const messages = [tool('channels_list', { channels: [{ key: '4', title: 'Four' }] })];
+    const resolved = resolveApprovalSubjects({ personNo: 4 }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'people_delete', inputEntities: REFS.people_delete!.input!, userTexts: userTextsOf(messages), declarations: REFS,
+    });
+    expect(resolved[0]).toMatchObject({ status: 'unknown', idKind: 'opaque' });
+  });
+
+  it('never counts the id inside a mention as typed', () => {
+    const REFS: EntityDeclarationsByTool = { channel_rollback: { input: [{ type: 'channel-version', args: 'version_id' }] } };
+    const messages = [user('Roll back {{mention:playlist-version:7:Version A}}')];
+    expect(userTextsOf(messages)).toEqual(['Roll back  ']);
+    const resolved = resolveApprovalSubjects({ version_id: 7 }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'channel_rollback', inputEntities: REFS.channel_rollback!.input!, userTexts: userTextsOf(messages), declarations: REFS,
+    });
+    expect(resolved[0]).toMatchObject({ status: 'unknown' });
+  });
+});
