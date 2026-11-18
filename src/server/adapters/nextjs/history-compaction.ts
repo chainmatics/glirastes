@@ -23,6 +23,7 @@ import { dominantArrayRoute, expiredInstruction } from '../../core/result-overvi
 import {
   declarationForEntries,
   declaredIdentityKeys,
+  entityPathOf,
   type OutputEntityDeclaration,
 } from '../../../contracts/entity-declaration.js';
 
@@ -266,6 +267,32 @@ export interface CompactHistoryResultOptions {
  * the caller sends the turn as text.
  */
 export function compactHistoryResult(value: unknown, options: CompactHistoryResultOptions = {}): unknown {
+  const compacted = compactHistoryResultOnce(value, options);
+  return options.entities ? withRootIdentity(compacted, value, options.entities) : compacted;
+}
+
+/**
+ * The declared identity of the result itself (`path: ''`, or a path-less
+ * declaration of a result without an array) as the tool returned it: string
+ * clipping (`maxStringLength`) never shortens a declared id or name there.
+ */
+function withRootIdentity(compacted: unknown, value: unknown, entities: ReadonlyArray<OutputEntityDeclaration>): unknown {
+  if (!isPlainObject(compacted) || !isPlainObject(value)) return compacted;
+  const declared = entities.find((declaration) => {
+    const steps = entityPathOf(declaration, value);
+    return steps !== undefined && steps.length === 0;
+  });
+  if (!declared) return compacted;
+  for (const key of declaredIdentityKeys(declared)) {
+    const original = Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+    if ((typeof original === 'string' || typeof original === 'number') && Object.prototype.hasOwnProperty.call(compacted, key)) {
+      setOwn(compacted, key, original);
+    }
+  }
+  return compacted;
+}
+
+function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultOptions): unknown {
   const limits: Limits = {
     maxItems: options.maxItems ?? HISTORY_DEFAULTS.maxItems,
     maxStringLength: options.maxStringLength ?? HISTORY_DEFAULTS.maxStringLength,
