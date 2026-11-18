@@ -126,9 +126,18 @@ function effectOf(app: AppProgram, raw: ts.Expression | undefined): EffectRead {
   const known = (value: string | undefined): EffectRead => (
     value !== undefined && DECLARED_EFFECTS.has(value) ? { kind: 'declared', effect: value as DeclaredEffect } : { kind: 'invalid' });
   if (ts.isObjectLiteralExpression(options)) {
-    const property = options.properties.find((entry): entry is ts.PropertyAssignment | ts.ShorthandPropertyAssignment => (
+    const members = [...options.properties];
+    const isEffect = (entry: ts.ObjectLiteralElementLike): boolean => (
       (ts.isPropertyAssignment(entry) || ts.isShorthandPropertyAssignment(entry))
-      && (ts.isIdentifier(entry.name) || ts.isStringLiteral(entry.name)) && entry.name.text === 'effect'));
+      && (ts.isIdentifier(entry.name) || ts.isStringLiteral(entry.name)) && entry.name.text === 'effect');
+    let index = members.length - 1;
+    while (index >= 0 && !isEffect(members[index]!)) index -= 1;
+    const property = index >= 0 ? members[index] as ts.PropertyAssignment | ts.ShorthandPropertyAssignment : undefined;
+    // A later spread that may carry an effect decides at runtime, so the literal is not the final value.
+    const overridden = property !== undefined && members.slice(index + 1).some((entry) => (
+      ts.isSpreadAssignment(entry)
+      && checker.getPropertyOfType(checker.getTypeAtLocation(entry.expression), 'effect') !== undefined));
+    if (overridden) return { kind: 'invalid' };
     if (property) {
       const expression = ts.isPropertyAssignment(property) ? property.initializer : property.name;
       return known(literalId(expression) ?? stringOfType(checker.getTypeAtLocation(expression)));
