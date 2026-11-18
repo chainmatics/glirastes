@@ -260,6 +260,15 @@ function isTypeOnlyInline(app: AppProgram, contract: ts.Expression, zodNames: Re
   let typeOnly = true;
   const visit = (node: ts.Node): void => {
     if (!typeOnly) return;
+    // A schema held elsewhere (`z.object({ id: idSchema })`) may carry a format the syntax here does not show.
+    const parent = node.parent;
+    const isName = parent !== undefined && (
+      (ts.isPropertyAssignment(parent) && parent.name === node)
+      || (ts.isPropertyAccessExpression(parent) && parent.name === node));
+    if (ts.isIdentifier(node) && !isName && !zodNames.has(node.text) && isSchemaExpression(app, node)) {
+      typeOnly = false;
+      return;
+    }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
       const receiver = node.expression.expression;
       const onZod = (ts.isIdentifier(receiver) && zodNames.has(receiver.text)) || isSchemaExpression(app, receiver);

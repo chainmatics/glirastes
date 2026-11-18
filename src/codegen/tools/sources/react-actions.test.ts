@@ -446,18 +446,22 @@ describe('react-actions source', () => {
           + 'export const broken = z.object({ id: z.string().uuid() });\n',
         'src/a.tsx': "import { z } from 'zod';\nimport { useAiClientAction } from 'glirastes/react';\n"
           + "import { search } from './lib/v3';\nimport { broken } from './lib/broken';\n"
+          + 'const idSchema = z.string().uuid();\n'
           + 'export function A() {\n'
           + "  useAiClientAction('rows.search', (payload) => console.log(payload), search);\n"
           + "  useAiClientAction('rows.broken', (payload) => console.log(payload), broken);\n"
           + "  useAiClientAction('rows.inline', (payload) => console.log(payload), z.object({ id: z.string().uuid(), tag: z.string().default('') }));\n"
           + "  useAiClientAction('rows.empty', () => {}, z.object({}));\n"
           + "  useAiClientAction('rows.sort', (payload) => console.log(payload), z.object({ by: z.enum(['name', 'date']).optional() }).strict());\n"
+          + "  useAiClientAction('rows.ref', (payload) => console.log(payload), z.object({ id: idSchema }));\n"
           + '  return null;\n}\n',
       });
       const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
       for (const [name, reason] of [
         ['ui.rows.broken', 'import-failed'],
         ['ui.rows.inline', 'export'],
+        // An inline contract that reuses a schema held elsewhere may lose its format: flagged too.
+        ['ui.rows.ref', 'export'],
       ] as const) {
         const tool = tools.get(name);
         expect(findingsOf(tool, 'ui-action-contract-unprobed')).toEqual([expect.objectContaining({
