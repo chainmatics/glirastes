@@ -13,9 +13,18 @@ export interface ToolSearchDocument {
   readonly synonyms?: ReadonlyArray<string>;
 }
 
+/** One ranked document: an exact name match first, then the score. */
+export interface ToolSearchHit {
+  readonly name: string;
+  readonly exact: boolean;
+  readonly score: number;
+}
+
 export interface ToolSearchIndex {
   /** Document names ordered by relevance; empty when no query term matches. */
   search(query: string, limit: number): ReadonlyArray<string>;
+  /** The same order as `search`, with the relevance, so a caller can break ties its own way. */
+  rank(query: string, limit: number): ReadonlyArray<ToolSearchHit>;
 }
 
 const STEMMERS: ReadonlyArray<Stemmer> = [
@@ -153,41 +162,45 @@ export function createToolSearchIndex(
       SEARCH_FIELDS.some((field) =>
         matchStrength(term, document.fields[field]) > 0)).length;
 
-  return Object.freeze({
-    search(query: string, limit: number) {
-      const terms = searchTermVariants(query);
-      if (terms.length === 0 || indexed.length === 0) return Object.freeze([]);
-      const inverseFrequency = terms.map((term) =>
-        Math.log(1 + indexed.length / Math.max(1, documentFrequency(term))));
-      const normalizedQuery = searchTokens(query).join(' ');
+  const rank = (query: string, limit: number): ReadonlyArray<ToolSearchHit> => {
+    const terms = searchTermVariants(query);
+    if (terms.length === 0 || indexed.length === 0) return Object.freeze([]);
+    const inverseFrequency = terms.map((term) =>
+      Math.log(1 + indexed.length / Math.max(1, documentFrequency(term))));
+    const normalizedQuery = searchTokens(query).join(' ');
 
-      const ranked = indexed
-        .map((document) => {
-          let score = 0;
-          terms.forEach((term, index) => {
-            let best = 0;
-            for (const field of SEARCH_FIELDS) {
-              best = Math.max(
-                best,
-                matchStrength(term, document.fields[field]) * FIELD_WEIGHTS[field],
-              );
-            }
-            score += best * inverseFrequency[index]!;
-          });
-          return {
-            name: document.name,
-            exact: normalizedQuery === document.normalizedName ? 1 : 0,
-            score,
-          };
-        })
-        .filter((candidate) => candidate.score > 0)
-        .sort((left, right) =>
-          right.exact - left.exact
-          || right.score - left.score
-          || left.name.localeCompare(right.name))
-        .slice(0, Math.max(0, Math.trunc(limit)))
-        .map((candidate) => candidate.name);
-      return Object.freeze(ranked);
+    const ranked = indexed
+      .map((document) => {
+        let score = 0;
+        terms.forEach((term, index) => {
+          let best = 0;
+          for (const field of SEARCH_FIELDS) {
+            best = Math.max(
+              best,
+              matchStrength(term, document.fields[field]) * FIELD_WEIGHTS[field],
+            );
+          }
+          score += best * inverseFrequency[index]!;
+        });
+        return Object.freeze({
+          name: document.name,
+          exact: normalizedQuery === document.normalizedName,
+          score,
+        });
+      })
+      .filter((candidate) => candidate.score > 0)
+      .sort((left, right) =>
+        Number(right.exact) - Number(left.exact)
+        || right.score - left.score
+        || left.name.localeCompare(right.name))
+      .slice(0, Math.max(0, Math.trunc(limit)));
+    return Object.freeze(ranked);
+  };
+
+  return Object.freeze({
+    rank,
+    search(query: string, limit: number) {
+      return Object.freeze(rank(query, limit).map((hit) => hit.name));
     },
   });
 }
