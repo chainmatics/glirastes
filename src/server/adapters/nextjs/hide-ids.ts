@@ -115,7 +115,8 @@ function redactAll(text: string, labels: IdLabels): string {
     const all = idPattern(labels.keys());
     const word = idPattern([...labels.keys()].filter((id) => !onlyPrefixed.has(id)));
     wrapped = new RegExp(String.raw`[ \t]*[(\[]\s*(?:${prefix}\x60?${all}|\x60?${word})\x60?\s*[)\]]`, 'gi');
-    prefixed = new RegExp(String.raw`[ \t]*[,;–-]?[ \t]*\b${prefix}\x60?${all}\x60?(?![\w-])`, 'gi');
+    // A whole id only: not the 3 of `3.14` or of `3/7` (a composite key), but the 3 that ends a sentence.
+    prefixed = new RegExp(String.raw`[ \t]*[,;–-]?[ \t]*\b${prefix}\x60?${all}\x60?(?![\w-]|[./:][\w])`, 'gi');
     bare = new RegExp(String.raw`(?<![\w-])\x60?(${word})\x60?(?![\w-])`, 'gi');
   }
   return text

@@ -349,10 +349,15 @@ export function objectsAt(root: unknown, steps: ReadonlyArray<EntityPathStep>, l
     for (const holder of current) {
       if (!isRecord(holder) || !Object.prototype.hasOwnProperty.call(holder, step.key)) continue;
       const value = holder[step.key];
-      if (!step.each) next.push(value);
-      else if (Array.isArray(value)) next.push(...value);
-      else if (isRecord(value) && Object.keys(value).every((key) => /^\d+$/.test(key))) next.push(...Object.values(value));
-      if (next.length > limit) break;
+      // One by one, never spread: a large array stays within `limit` and the engine's argument bound.
+      const items: Iterable<unknown> = !step.each ? [value]
+        : Array.isArray(value) ? value
+          : isRecord(value) && Object.keys(value).every((key) => /^\d+$/.test(key)) ? Object.values(value) : [];
+      for (const item of items) {
+        if (next.length >= limit) break;
+        next.push(item);
+      }
+      if (next.length >= limit) break;
     }
     current = next;
   }

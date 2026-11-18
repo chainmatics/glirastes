@@ -275,3 +275,16 @@ describe('read_result names nested declared entries', () => {
     expect((plain.playlists as Entry[])[0]!.items).toEqual([{ durationSec: 5 }, { durationSec: 6 }]);
   });
 });
+
+describe('bounds and whole ids', () => {
+  it('reads a very large array without spreading it', () => {
+    const data = Array.from({ length: 200_000 }, (_, index) => ({ trackNo: index + 1 }));
+    expect(declaredRecordsOf({ data }, [{ ...TRACK, path: 'data[]' }]).size).toBe(10_000);
+  });
+
+  it('removes a declared short id only as a whole id', () => {
+    const labels: IdLabels = new Map();
+    collectDeclaredIdLabels(tracks(5), [TRACK], labels);
+    expect(redactIds('See ID: 3.14 and ID: 3/7, then ID: 3.', labels)).toBe('See ID: 3.14 and ID: 3/7, then.');
+  });
+});
