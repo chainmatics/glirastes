@@ -189,3 +189,24 @@ describe('explicit mention types on declared arguments', () => {
     expect(resolve('playlist_rollback')).toMatchObject({ status: 'named', name: 'Version A', provenance: 'mention' });
   });
 });
+
+describe('exact declared types and read_result links', () => {
+  it('keeps playlist-version and playlist.version apart', () => {
+    const REFS: EntityDeclarationsByTool = {
+      a_list: { output: [{ type: 'playlist-version', id: 'v', name: 'n', path: 'items[]' }] },
+      b_rollback: { input: [{ type: 'playlist.version', args: 'v' }] },
+    };
+    const messages = [tool('a_list', { items: [{ v: 7, n: 'Seven' }] })];
+    expect(resolveApprovalSubjects({ v: 7 }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'b_rollback', inputEntities: REFS.b_rollback!.input!, userTexts: [], declarations: REFS,
+    })[0]).toMatchObject({ status: 'unknown' });
+  });
+
+  it('links a record a read_result answer names, by the producing tool', () => {
+    const messages = [
+      tool('albums_list', { albums: [{ albumNo: 4 }], _result: { id: 'ro_abc12345', hint: 'Overview' } }),
+      { role: 'assistant', parts: [{ type: 'tool-read_result', toolCallId: 'r1', state: 'output-available', input: { resultId: 'ro_abc12345' }, output: { albums: [{ albumNo: 4, caption: 'Blue' }] } }] },
+    ];
+    expect(collectKnownEntities(messages as never, [], DECLARED)).toEqual([{ type: 'album', id: '4', label: 'Blue' }]);
+  });
+});

@@ -2,6 +2,7 @@ import { buildNavigationHref } from '../../browser/navigation.js';
 import type { ChatEntitySearchData } from '../../contracts/chat-interactions.js';
 import type { ChatEntityDefinition } from '../interactions/definitions.js';
 import { parseMentionSegments } from '../utils/mention-markup.js';
+import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import {
   declaredRecordsOf,
   entityIdText,
@@ -227,6 +228,21 @@ export function collectKnownEntities(
     if (!found.has(key)) found.set(key, reference);
   };
   const byTool = new Map(searches.map((entry) => [toolKey(entry.search.tool), entry]));
+  // A `read_result` answer belongs to the tool that produced the result it reads.
+  const producers = new Map<string, string>();
+  if (declarations) {
+    for (const message of messages) {
+      for (const part of message.parts) {
+        const result = toolOutputOf(part);
+        const marker = result && isRecord(result.output) ? result.output._result : undefined;
+        if (result && result.tool !== READ_RESULT_TOOL_NAME && isRecord(marker) && typeof marker.id === 'string') producers.set(marker.id, result.tool);
+      }
+    }
+  }
+  const producerOf = (part: unknown, tool: string): string => {
+    if (tool !== READ_RESULT_TOOL_NAME || !isRecord(part) || !isRecord(part.input)) return tool;
+    return typeof part.input.resultId === 'string' ? producers.get(part.input.resultId) ?? tool : tool;
+  };
   for (const message of messages) {
     for (const part of message.parts) {
       if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') {
@@ -238,8 +254,9 @@ export function collectKnownEntities(
       }
       const result = toolOutputOf(part);
       // A tool whose `outputEntities` declare a type and a name: every such record, also nested (D1).
-      const declared = result && declarations && Object.prototype.hasOwnProperty.call(declarations, result.tool)
-        ? declarations[result.tool]!.output
+      const producer = result ? producerOf(part, result.tool) : undefined;
+      const declared = producer && declarations && Object.prototype.hasOwnProperty.call(declarations, producer)
+        ? declarations[producer]!.output
         : undefined;
       if (result && declared) {
         for (const identity of declaredRecordsOf(result.output, declared).values()) {

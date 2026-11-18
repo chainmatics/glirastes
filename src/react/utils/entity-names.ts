@@ -62,8 +62,8 @@ export interface EntitySighting {
    * named by it.
    */
   kind?: string;
-  /** Set when `kind` is a declared `type`. */
-  kindDeclared?: true;
+  /** Set when `kind` comes from a declared or mentioned type: that type exactly (`playlist-version`). */
+  kindType?: string;
   /** Set when only an `@` mention of the user named the id, no tool result. */
   mentionedOnly?: true;
 }
@@ -72,8 +72,11 @@ export interface EntitySighting {
 export interface EntityKindSighting {
   /** `user`, `playlist`, `owner`, `playlist version`. */
   kind: string;
-  /** Set when the kind is a declared `type` (compared exactly), not a guess from a field or tool name. */
-  declared?: true;
+  /**
+   * Set when the kind comes from a declared `type` or a mention's type, not a
+   * guess from a field or tool name: that type exactly, for an exact comparison.
+   */
+  type?: string;
   /** Their distinct names, newest first (at most five); empty when they had none. */
   names: string[];
 }
@@ -144,8 +147,8 @@ export function collectEntitySightings(
   const sightings = new Map<string, EntitySighting>();
   /** Per id value: the kinds of the records that carried it as their own id, with their names. */
   const kinds = new Map<string, Map<string, string[]>>();
-  /** `id key` + NUL + kind for every kind a declaration gave. */
-  const declaredKinds = new Set<string>();
+  /** `id key` + NUL + kind → the exact type a declaration or a mention gave for it. */
+  const declaredKinds = new Map<string, string>();
   let budget = MAX_NODES;
   const tools = producingTools(messages);
 
@@ -206,7 +209,7 @@ export function collectEntitySightings(
       else if (entityIdKey(id)) fromTools.add(entityIdKey(id)!);
       addKind(id, identity.declaration.type ?? holder ?? stem, identity.name);
       const key = entityIdKey(id);
-      if (key && identity.declaration.type) declaredKinds.add(`${key}\u0000${identity.declaration.type}`);
+      if (key && identity.declaration.type) declaredKinds.set(`${key}\u0000${identity.declaration.type}`, identity.declaration.type);
       if (key && !idKinds.has(key)) idKinds.set(key, identity.idKind);
       below = true;
     } else {
@@ -241,7 +244,8 @@ export function collectEntitySightings(
           addKind(segment.mention.id, kindOfField(segment.mention.type), segment.mention.displayName);
           // A mention names its type explicitly: with declarations it is compared exactly too.
           const mentioned = entityIdKey(segment.mention.id);
-          if (declarations && mentioned) declaredKinds.add(`${mentioned}\u0000${kindOfField(segment.mention.type)}`);
+          const mentionKind = kindOfField(segment.mention.type);
+          if (declarations && mentioned && mentionKind) declaredKinds.set(`${mentioned}\u0000${mentionKind}`, segment.mention.type);
         }
       }
     }
@@ -251,14 +255,15 @@ export function collectEntitySightings(
     const byKind = kinds.get(key);
     if (byKind && byKind.size > 1) {
       sighting.kinds = [...byKind].map(([kind, names]) => ({
-        kind, names: [...names], ...(declaredKinds.has(`${key}\u0000${kind}`) ? { declared: true as const } : {}),
+        kind, names: [...names], ...(declaredKinds.has(`${key}\u0000${kind}`) ? { type: declaredKinds.get(`${key}\u0000${kind}`)! } : {}),
       }));
     }
     // Only with a declaration: an app without one sees the sightings it always had.
     if (declarations) {
       if (byKind && byKind.size === 1) {
         sighting.kind = [...byKind.keys()][0]!;
-        if (declaredKinds.has(`${key}\u0000${sighting.kind}`)) sighting.kindDeclared = true;
+        const kindType = declaredKinds.get(`${key}\u0000${sighting.kind}`);
+        if (kindType) sighting.kindType = kindType;
       }
       const idKind = idKinds.get(key);
       if (idKind) sighting.idKind = idKind;

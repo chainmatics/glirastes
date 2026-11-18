@@ -188,14 +188,13 @@ export function resolveApprovalSubjects(
   ): void {
     const key = entityIdKey(raw);
     if (key === undefined) return;
-    // Exact up to separators (`playlist-version` = `playlist version`, the kind a mention's type names).
-    const exact = (left: string, right: string) => left.toLowerCase().split(/[ _.-]+/).join(' ') === right.toLowerCase().split(/[ _.-]+/).join(' ');
-    const sameKind = (known: string, declared: boolean | undefined) => (strict && declared ? exact(known, kind!) : kindsMatch(known, kind!));
+    // `type`: the exact declared (or mentioned) type behind a kind; compared as it is for a declared argument.
+    const sameKind = (known: string, type: string | undefined) => (strict && type !== undefined ? type === kind : kindsMatch(known, kind!));
     const id = typeof raw === 'string' ? raw.trim() : String(raw);
     const seen = sightings.get(key);
-    if (seen?.kinds && seen.kinds.length > 1 && (!isUuidLike(id) || (strict && seen.kinds.some((candidate) => candidate.declared)))) {
+    if (seen?.kinds && seen.kinds.length > 1 && (!isUuidLike(id) || (strict && seen.kinds.some((candidate) => candidate.type !== undefined)))) {
       const resolvedLabel = label ?? (seen.type ? humanize(seen.type) : undefined);
-      const picked = kind ? seen.kinds.filter((candidate) => sameKind(candidate.kind, candidate.declared)) : [];
+      const picked = kind ? seen.kinds.filter((candidate) => sameKind(candidate.kind, candidate.type)) : [];
       const one = picked.length === 1 ? picked[0]! : undefined;
       if (one && one.names.length === 1) {
         subjects.push({ path, id, status: 'named', name: one.names[0]!, ...(resolvedLabel ? { label: resolvedLabel } : {}) });
@@ -216,13 +215,13 @@ export function resolveApprovalSubjects(
       return;
     }
     // A declared record of another kind than the argument's does not name it (user 1 is not playlist 1).
-    const otherKind = (known: string | undefined, declared: boolean | undefined) => !!known && !!kind
-      && (!isUuidLike(id) || (strict && !!declared)) && !sameKind(known, declared);
-    if (!seen || otherKind(seen.kind, seen.kindDeclared)) {
+    const otherKind = (known: string | undefined, type: string | undefined) => !!known && !!kind
+      && (!isUuidLike(id) || (strict && type !== undefined)) && !sameKind(known, type);
+    if (!seen || otherKind(seen.kind, seen.kindType)) {
       const found = seenIds.get(key);
       // A declared type that carried this id: its own record, whichever came first.
-      const typed = found?.byType && kind ? Object.entries(found.byType).find(([type]) => sameKind(type, true)) : undefined;
-      const record = typed ? { ...typed[1], type: typed[0] } : found && !otherKind(found.type, true) ? found : undefined;
+      const typed = found?.byType && kind ? Object.entries(found.byType).find(([type]) => sameKind(type, type)) : undefined;
+      const record = typed ? { ...typed[1], type: typed[0] } : found && !otherKind(found.type, found.type) ? found : undefined;
       subjects.push(record
         ? {
           path, id, status: 'seen', ...(label ? { label } : {}), ...(record.fallback ? { fallback: record.fallback } : {}),
