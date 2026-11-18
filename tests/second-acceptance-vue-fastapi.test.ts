@@ -12,7 +12,8 @@ import { createReadResultTool } from '../src/server/core/read-result-tool.js';
 import { buildResultOverview } from '../src/server/core/result-overview.js';
 import { createResultStore } from '../src/server/core/result-store.js';
 import { compactHistoryResult } from '../src/server/adapters/nextjs/history-compaction.js';
-import { collectIdLabels, redactIds, type IdLabels } from '../src/server/adapters/nextjs/hide-ids.js';
+import { collectDeclaredIdLabels, collectIdLabels, redactIds, type IdLabels } from '../src/server/adapters/nextjs/hide-ids.js';
+import { entityDeclarationsOfTools } from '../src/server/adapters/nextjs/tool-entities.js';
 import { collectEntitySightings, collectSeenEntityIds } from '../src/react/utils/entity-names.js';
 import { resolveApprovalSubjects } from '../src/react/utils/approval-subjects.js';
 import {
@@ -38,7 +39,10 @@ import { artifactOf, chatBody, passingCheck, toolNamed } from './support/tool-sy
  * Tests titled `KNOWN GAP SA-nn` assert today's behaviour where the SDK only
  * fits the pilot's shapes. They are findings, not the intended behaviour: a fix
  * makes the assertion fail, and the test then changes to the fixed behaviour
- * (and the gap leaves the list in the acceptance doc).
+ * (and the gap leaves the list in the acceptance doc). The app declares its
+ * object identity (`x-glirastes-entity`, `x-glirastes-entities`,
+ * `x-glirastes-entity-ref`, tools.json `identity`); tests marked "without
+ * declarations" show that an app without them keeps the field-name fallback.
  */
 const PYTHON_READY = pythonReady();
 
@@ -264,67 +268,142 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: approval subjects', (
       ...(withUsers ? [toolPart('users_list', await call(tools, 'users_list', {}))] : []),
     );
   }
-  const subjects = async (args: Json, withUsers = true, toolName?: string) => {
+  /**
+   * The card's subjects as the browser resolves them. `declared` (default): with the
+   * declarations the chat handler sends (`data-tool-entities`, from the generated tools'
+   * `outputEntities`/`inputEntities`); `false`: an app without any, the field-name guess.
+   */
+  const subjects = async (args: Json, withUsers = true, toolName?: string, declared = true) => {
     const messages = await browserHistory(withUsers);
-    return resolveApprovalSubjects(args, collectEntitySightings(messages), collectSeenEntityIds(messages), toolName ? { toolName } : {});
+    const declarations = declared ? entityDeclarationsOfTools(chatTools()) : undefined;
+    const inputEntities = declarations && toolName ? declarations[toolName]?.input : undefined;
+    return resolveApprovalSubjects(args, collectEntitySightings(messages, declarations), collectSeenEntityIds(messages, declarations), {
+      ...(toolName ? { toolName } : {}),
+      ...(inputEntities ? { inputEntities, userTexts: [], declarations } : {}),
+    });
   };
 
-  it('names a user by its `id` with its displayName', async () => {
-    expect(await subjects({ user_id: 2 })).toEqual([
-      { path: 'user_id', id: '2', status: 'named', name: 'Grace Hopper', label: 'User' },
-    ]);
+  it('names a user by its `id` with its displayName, with and without declarations', async () => {
+    for (const declared of [true, false]) {
+      expect(await subjects({ user_id: 2 }, true, undefined, declared)).toEqual([
+        { path: 'user_id', id: '2', status: 'named', name: 'Grace Hopper', label: 'User' },
+      ]);
+    }
   });
 
-  it('KNOWN GAP SA-04: a listed playlist is `unknown` on the card: playlist_id is no record id', async () => {
-    // KNOWN GAP SA-04 (src/react/utils/entity-names.ts:5 ID_KEYS = id, _id, uuid): the 60
-    // listed playlists are neither sightings nor seen ids.
-    expect(await subjects({ playlist_id: 7 })).toEqual([{ path: 'playlist_id', id: '7', status: 'unknown', label: 'Playlist' }]);
+  it('SA-04 (fixed in 0.18.0): a listed playlist is named on the card by its declared playlist_id', async () => {
+    // `x-glirastes-entity` on the Playlist schema: id playlist_id, name displayName.
+    expect(await subjects({ playlist_id: 7 })).toEqual([
+      { path: 'playlist_id', id: '7', status: 'named', name: 'Weekend Loop', label: 'Playlist' },
+    ]);
+    // With the tool's `x-glirastes-entity-ref`, the subject is typed.
+    expect(await subjects({ playlist_id: 7 }, true, 'playlists_delete')).toEqual([{
+      path: 'playlist_id', id: '7', status: 'named', name: 'Weekend Loop', label: 'Playlist',
+      type: 'playlist', role: 'target', idKind: 'opaque', provenance: 'tool-result',
+    }]);
     const messages = await browserHistory(false);
-    expect(collectEntitySightings(messages).size).toBe(0);
+    expect(collectEntitySightings(messages, entityDeclarationsOfTools(chatTools())).get('7')?.name).toBe('Weekend Loop');
+  });
+
+  it('without declarations a listed playlist stays `unknown` (the field-name fallback, as before)', async () => {
+    expect(await subjects({ playlist_id: 7 }, true, undefined, false))
+      .toEqual([{ path: 'playlist_id', id: '7', status: 'unknown', label: 'Playlist' }]);
+    expect(collectEntitySightings(await browserHistory(false)).size).toBe(0);
   });
 
   it('SA-05 (fixed in 0.17.2): id 3 of a user, a playlist and versions names the kind the call picks, or none', async () => {
-    // Id 3 was the own id of user 3 (`id`), of playlist 3 (`playlist_id`, no recognised id)
-    // and of the versions of playlist 3 (`playlist_id` next to `version_id`, no name): three
-    // kinds (src/react/utils/entity-kinds.ts). The argument picks one, or the card names none.
-    expect(await subjects({ playlist_id: 3 })).toEqual([
+    // Without declarations. Id 3 was the own id of user 3 (`id`), of playlist 3 (`playlist_id`,
+    // no recognised id) and of the versions of playlist 3 (`playlist_id` next to `version_id`,
+    // no name): three kinds (src/contracts/entity-identity.ts). The argument picks one, or none.
+    const guessed = (args: Json, withUsers = true, toolName?: string) => subjects(args, withUsers, toolName, false);
+    expect(await guessed({ playlist_id: 3 })).toEqual([
       { path: 'playlist_id', id: '3', status: 'named', name: 'Lobby Loop', label: 'Playlist' },
     ]);
-    expect(await subjects({ id: 3 }, true, 'playlists_delete')).toEqual([{ path: 'id', id: '3', status: 'named', name: 'Lobby Loop' }]);
-    expect(await subjects({ user_id: 3 })).toEqual([{ path: 'user_id', id: '3', status: 'named', name: 'Linus Torvalds', label: 'User' }]);
-    expect(await subjects({ id: 3 })).toEqual([{
+    expect(await guessed({ id: 3 }, true, 'playlists_delete')).toEqual([{ path: 'id', id: '3', status: 'named', name: 'Lobby Loop' }]);
+    expect(await guessed({ user_id: 3 })).toEqual([{ path: 'user_id', id: '3', status: 'named', name: 'Linus Torvalds', label: 'User' }]);
+    expect(await guessed({ id: 3 })).toEqual([{
       path: 'id', id: '3', status: 'ambiguous', names: ['Linus Torvalds', 'Lobby Loop'],
       candidates: [{ label: 'User', name: 'Linus Torvalds' }, { label: 'Version' }, { label: 'Playlist', name: 'Lobby Loop' }],
     }]);
     // Deleting user 1 after only the playlists were shown: no name at all.
-    expect(await subjects({ user_id: 1 }, false)).toEqual([{ path: 'user_id', id: '1', status: 'unknown', label: 'User' }]);
+    expect(await guessed({ user_id: 1 }, false)).toEqual([{ path: 'user_id', id: '1', status: 'unknown', label: 'User' }]);
   });
 
-  it('KNOWN GAP SA-06: a channel deleted by its `key` gets no subject on the card', async () => {
-    // KNOWN GAP SA-06 (src/react/utils/approval-subjects.ts:13-20 isIdKey, src/react/utils/entity-names.ts:5):
-    // `key` is no id argument and channels are no sightings, so the card names nothing.
-    expect(await subjects({ key: 'lobby' })).toEqual([]);
+  it('with declarations id 3 collides only between the user and the playlist; a version is no candidate', async () => {
+    // The versions declare `version_id` as their id: their `playlist_id` names the parent, not them.
+    expect(await subjects({ id: 3 })).toEqual([{
+      path: 'id', id: '3', status: 'ambiguous', names: ['Linus Torvalds', 'Lobby Loop'],
+      candidates: [{ label: 'User', name: 'Linus Torvalds' }, { label: 'Playlist', name: 'Lobby Loop' }],
+    }]);
+    expect(await subjects({ id: 3 }, true, 'playlists_delete')).toEqual([{ path: 'id', id: '3', status: 'named', name: 'Lobby Loop' }]);
+    expect(await subjects({ user_id: 3 }, true, 'users_delete')).toEqual([{
+      path: 'user_id', id: '3', status: 'named', name: 'Linus Torvalds', label: 'User',
+      type: 'user', role: 'target', idKind: 'opaque', provenance: 'tool-result',
+    }]);
+    expect(await subjects({ user_id: 1 }, false, 'users_delete')).toEqual([{
+      path: 'user_id', id: '1', status: 'unknown', label: 'User', type: 'user', role: 'target', idKind: 'opaque',
+    }]);
   });
 
-  it('KNOWN GAP SA-07: a listed version is `unknown`, not `seen` with "Version number 3"', async () => {
-    // KNOWN GAP SA-07 (src/react/utils/entity-names.ts:5 ID_KEYS in collectSeenEntityIds):
-    // version_id is no record id, so its versionNumber fallback is never used.
-    // (Playlist 3 is named since SA-05 was fixed.)
+  it('SA-06 (fixed in 0.18.0): a channel deleted by its declared `key` gets a typed, named subject', async () => {
+    // tools.json `identity.entities.channel`: id key (speaking), name title; `x-glirastes-entity-ref` on `key`.
+    expect(await subjects({ key: 'lobby' }, true, 'channels_delete')).toEqual([{
+      path: 'key', id: 'lobby', status: 'named', name: 'Lobby screens', label: 'Channel',
+      type: 'channel', role: 'target', idKind: 'speaking', provenance: 'tool-result',
+    }]);
+    // A speaking key the user typed (case-insensitive) is valid provenance: seen, no warning.
+    const declarations = entityDeclarationsOfTools(chatTools())!;
+    expect(resolveApprovalSubjects({ key: 'atrium' }, new Map(), new Map(), {
+      toolName: 'channels_delete', inputEntities: declarations.channels_delete!.input!, userTexts: ['Delete the ATRIUM channel'],
+    })).toEqual([{
+      path: 'key', id: 'atrium', status: 'seen', label: 'Channel', type: 'channel', role: 'target', idKind: 'speaking', provenance: 'user-message',
+    }]);
+    // Without the user's words it stays unknown, but speaking: the card shows no warning for it.
+    expect(resolveApprovalSubjects({ key: 'atrium' }, new Map(), new Map(), {
+      toolName: 'channels_delete', inputEntities: declarations.channels_delete!.input!, userTexts: [],
+    })).toEqual([{ path: 'key', id: 'atrium', status: 'unknown', label: 'Channel', type: 'channel', role: 'target', idKind: 'speaking' }]);
+  });
+
+  it('without declarations a channel deleted by its `key` gets no subject (as before)', async () => {
+    expect(await subjects({ key: 'lobby' }, true, 'channels_delete', false)).toEqual([]);
+  });
+
+  it('SA-07 (fixed in 0.18.0): a listed version is `seen` with its declared fallback "Version number 3"', async () => {
+    // `x-glirastes-entities` on the versions list: id version_id, fallback versionNumber.
     expect(await subjects({ playlist_id: 3, version_id: 303 })).toEqual([
+      { path: 'playlist_id', id: '3', status: 'named', name: 'Lobby Loop', label: 'Playlist' },
+      { path: 'version_id', id: '303', status: 'seen', label: 'Version', fallback: 'Version number 3', fallbackField: 'versionNumber' },
+    ]);
+    expect(await subjects({ playlist_id: 3, version_id: 303 }, true, 'playlistsVersionsRollback_create')).toEqual([
+      {
+        path: 'playlist_id', id: '3', status: 'named', name: 'Lobby Loop', label: 'Playlist',
+        type: 'playlist', role: 'parent', idKind: 'opaque', provenance: 'tool-result',
+      },
+      {
+        path: 'version_id', id: '303', status: 'seen', label: 'Playlist version', fallback: 'Version number 3', fallbackField: 'versionNumber',
+        type: 'playlist-version', role: 'target', idKind: 'opaque', provenance: 'tool-result',
+      },
+    ]);
+  });
+
+  it('without declarations a listed version stays `unknown`; under `id` it would be seen (as before)', async () => {
+    expect(await subjects({ playlist_id: 3, version_id: 303 }, true, undefined, false)).toEqual([
       { path: 'playlist_id', id: '3', status: 'named', name: 'Lobby Loop', label: 'Playlist' },
       { path: 'version_id', id: '303', status: 'unknown', label: 'Version' },
     ]);
-    // The same record under `id` would be seen with its fallback.
     const asId = history(toolPart('versions', { versions: [{ id: 303, versionNumber: 3 }] }));
     expect(resolveApprovalSubjects({ version_id: 303 }, collectEntitySightings(asId), collectSeenEntityIds(asId)))
       .toEqual([{ path: 'version_id', id: '303', status: 'seen', label: 'Version', fallback: 'Version number 3' }]);
   });
 
-  it('KNOWN GAP SA-08: a revision with `rev` has no fallback, even when seen under `id`', async () => {
-    // KNOWN GAP SA-08 (src/react/utils/entity-names.ts:125 FALLBACK_KEYS: versionNumber,
-    // version, number, code, slug): `rev` is not among them. With the fixture's
-    // `revision_id` the revision is not even seen (SA-07).
+  it('SA-08 (fixed in 0.18.0): a revision is `seen` with its declared fallback `rev`', async () => {
     expect(await subjects({ key: 'lobby', revision_id: 503 })).toEqual([
+      { path: 'revision_id', id: '503', status: 'seen', label: 'Revision', fallback: 'Rev 3', fallbackField: 'rev' },
+    ]);
+  });
+
+  it('without declarations `rev` is no fallback, even for a record seen under `id` (as before)', async () => {
+    expect(await subjects({ key: 'lobby', revision_id: 503 }, true, undefined, false)).toEqual([
       { path: 'revision_id', id: '503', status: 'unknown', label: 'Revision' },
     ]);
     const asId = history(toolPart('revisions', { revisions: [{ id: 503, rev: 3, channelKey: 'lobby' }] }));
@@ -334,18 +413,32 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: approval subjects', (
 });
 
 describe.skipIf(!PYTHON_READY)('second acceptance fixture: ids in the answer (hideIds)', () => {
-  it('KNOWN GAP SA-09: integer ids are never learnt, so "(ID: 3)" stays in the answer', async () => {
-    // KNOWN GAP SA-09 (src/server/adapters/nextjs/hide-ids.ts:23-32 and :77): only
-    // string ids of 8+ characters with a digit (or UUIDs) are collected; integer
-    // `playlist_id`/`id` values are skipped. Only the result handle is learnt.
+  /** The labels `hideIds` learns from the three lists, with or without the tools' declarations. */
+  async function learnt(declared: boolean): Promise<IdLabels> {
     const tools = chatTools();
     const labels: IdLabels = new Map();
-    for (const output of [
-      await call(tools, 'playlists_list', {}),
-      await call(tools, 'users_list', {}),
-      await call(tools, 'channels_list', {}),
-    ]) collectIdLabels(output, labels);
-    expect([...labels.keys()]).toEqual([expect.stringMatching(/^ro_/)]);
+    const declarations = declared ? entityDeclarationsOfTools(tools) : undefined;
+    for (const name of ['playlists_list', 'users_list', 'channels_list']) {
+      const output = await call(tools, name, {});
+      collectIdLabels(output, labels);
+      collectDeclaredIdLabels(output, declarations?.[name]?.output, labels);
+    }
+    return labels;
+  }
+
+  it('SA-09 (fixed in 0.18.0): declared integer ids are learnt, so "(ID: 3)" leaves the answer; a bare number stays', async () => {
+    const labels = await learnt(true);
+    expect(labels.get('14')).toBe('Opening Loop');
+    // Speaking channel keys stay readable: never learnt.
+    expect(labels.has('lobby')).toBe(false);
+    expect(redactIds('Deleted Lobby Loop (ID: 3) and user 1.', labels)).toBe('Deleted Lobby Loop and user 1.');
+    expect(redactIds('3 playlists are drafts (3 of 60), ID 14 is archived.', labels)).toBe('3 playlists are drafts (3 of 60) is archived.');
+  });
+
+  it('without declarations integer ids are never learnt, so "(ID: 3)" stays (as before)', async () => {
+    const labels = await learnt(false);
+    // Only result handles (`ro_…`) can be learnt; integer `playlist_id`/`id` values are skipped.
+    expect([...labels.keys()].every((key) => key.startsWith('ro_'))).toBe(true);
     expect(redactIds('Deleted Lobby Loop (ID: 3) and user 1.', labels)).toBe('Deleted Lobby Loop (ID: 3) and user 1.');
   });
 });
