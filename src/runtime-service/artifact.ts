@@ -22,6 +22,7 @@ import {
   type ToolReportFile,
 } from "../codegen/tools/artifact.js";
 import { canonicalJson } from "../codegen/tools/canonical.js";
+import { toolSearchSemanticsOf } from "../codegen/tools/emit-module.js";
 import {
   loadToolsConfig,
   normalizeSources,
@@ -481,9 +482,9 @@ function materialize(
     manifest,
     toolSearchSemantics: Object.fromEntries(
       tools.flatMap((tool) => {
-        const synonyms = byId.get(tool.toolId)?.search?.synonyms;
-        return synonyms?.length
-          ? [[tool.modelName ?? modelFacingToolName(tool.name), { synonyms }]]
+        const semantics = toolSearchSemanticsOf(byId.get(tool.toolId)?.search);
+        return semantics
+          ? [[tool.modelName ?? modelFacingToolName(tool.name), semantics]]
           : [];
       }),
     ),

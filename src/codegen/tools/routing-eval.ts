@@ -46,9 +46,10 @@ export interface RoutingEvaluation {
 /**
  * Deterministic routing check (spec 4.7 "Qualitätsschleife"): every example
  * sentence of a tool must find that tool among the first `find_tools` hits,
- * built exactly like the runtime index (name, description, module, shared
- * modules, usage hints, synonyms), and the first hit must lie in the tool's
- * module. No model, no network, no clock: the same outputs give the same
+ * built like the runtime index (name, description, module, shared modules,
+ * usage hints, synonyms) but without the example sentences the runtime also
+ * indexes: they are the held-out corpus here, so the check keeps measuring
+ * the other texts. The first hit must lie in the tool's module. No model, no network, no clock: the same outputs give the same
  * bytes, so CI can run it as the FR-3 regression corpus.
  */
 export function evaluateRouting(input: {

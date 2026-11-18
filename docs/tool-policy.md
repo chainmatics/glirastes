@@ -139,8 +139,11 @@ fails neither `tools check` nor `--strict`.
 - `find_tools` results only: `usageHints` (each cut to 300 characters; the
   description there to 500). They are not part of the definition used for the
   call.
-- Never: `synonyms` feed only the search index; `examples` feed only intent
-  routing and `glirastes tools eval`, not `find_tools`.
+- Never: `synonyms` and `examples` feed only the search index (`find_tools`
+  and the start set of a turn; examples with the low weight of usage hints)
+  and are never shown. `glirastes tools eval` still ranks each example
+  against an index without examples, so it keeps measuring how well name,
+  description, hints and synonyms find the tool.
 - An `examples` list with fewer than 3 (or more than 5) sentences in a language
   rejects the whole `tool-semantics.json` entry (`tool-semantics-invalid`).
 - A 404 of a route with path parameters (`/playlists/:id`): the failure

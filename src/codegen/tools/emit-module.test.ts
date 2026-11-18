@@ -103,15 +103,16 @@ describe('renderGeneratedModule', () => {
     expect(text).toContain('] as const;');
   });
 
-  it('exports the synonyms of enabled tools for find_tools, keyed by model-facing name', () => {
+  it('exports the synonyms and examples of enabled tools for find_tools and routing, keyed by model-facing name', () => {
     const searched = contracts('src/app/api/notes/schemas.ts').map((entry) => (
       entry.toolId === id('a2') ? { ...entry, search: { synonyms: ['Notizen', 'memos'], examples: ['Show my notes'] } }
         : entry.toolId === id('a3') ? { ...entry, search: { synonyms: ['archive'] } } : entry
     ));
     const text = renderGeneratedModule({ modulePath: 'src/generated/glirastes/tools.generated.js', artifact, contracts: searched });
-    expect(text).toContain('export const toolSearchSemantics = {\n  "notes_list": {\n    "synonyms": [\n      "Notizen",\n      "memos"\n    ]\n  }\n};');
+    expect(text).toContain('export const toolSearchSemantics = {\n  "notes_list": {\n    "examples": [\n      "Show my notes"\n    ],\n'
+      + '    "synonyms": [\n      "Notizen",\n      "memos"\n    ]\n  }\n};');
+    // Only enabled tools.
     expect(text).not.toContain('"notes_archive": {');
-    expect(text).not.toContain('Show my notes');
   });
 
   it('emits the MCP catalog of enabled endpoint tools on request, under the names MCP keeps', () => {

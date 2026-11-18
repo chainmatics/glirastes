@@ -143,7 +143,7 @@ export interface ExcludedTool {
   origin: 'default' | 'policy' | 'code';
 }
 
-/** Checked stage-2 search data: synonyms reach `find_tools`, examples feed `tools eval`. */
+/** Checked stage-2 search data: both rank `find_tools` and the start set; examples are also the `tools eval` corpus. */
 export interface ToolSearchFacts {
   synonyms?: string[];
   examples?: string[];

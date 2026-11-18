@@ -107,8 +107,10 @@ in each description which neighbour fits better for which request.
   call time there ("Omit limit to get all").
 - Only in `find_tools` results: `usageHints` (each cut to 300 characters,
   the description there to 500), never in the definition used for the call.
-- Never: `synonyms` only feed the search index; `examples` only feed intent
-  routing and `glirastes tools eval`, not `find_tools`.
+- Never: `synonyms` and `examples` only feed the search index (`find_tools`
+  and the start set of a turn) and are never shown. `glirastes tools eval`
+  ranks each example against an index without examples, so a passing eval
+  still means name, description, hints and synonyms find the tool.
 - An `examples` list with fewer than 3 (or more than 5) sentences in one
   language rejects the whole entry (`tool-semantics-invalid`,
   `resolution-rejected` for an agent entry): its other texts are lost too.

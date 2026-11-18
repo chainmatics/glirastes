@@ -522,7 +522,7 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
     expect(entry?.search).toEqual({ synonyms: ['my work', 'to-dos'], examples: [...EXAMPLES].sort() });
     expect(entry?.title).toEqual({ de: 'Aufgaben auflisten', en: 'List tasks' });
     const module = await fixture.read(DEFAULT_GENERATED_MODULE);
-    expect(module).toContain('export const toolSearchSemantics = {\n  "tasks_list": {\n    "synonyms": [\n      "my work",');
+    expect(module).toContain(`export const toolSearchSemantics = {\n  "tasks_list": {\n    "examples": ${JSON.stringify([...EXAMPLES].sort(), null, 2).replace(/\n/g, '\n    ')},\n    "synonyms": [\n      "my work",`);
     const view = result.tools?.find((tool) => tool.stableKey === 'GET /api/tasks');
     expect(view).toMatchObject({
       definitionId: 'tasks.list',
