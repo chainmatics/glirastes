@@ -463,6 +463,7 @@ installed SDK version. The versioned source guides remain available below.
 - [Managed runtime sync](docs/managed-runtime-sync.md)
 - [Runtime persistence](docs/runtime-persistence.md)
 - [0.5.0 acceptance](docs/acceptance/0.5.0-acceptance.md)
+- [Second acceptance app (Vue + FastAPI), run per release](docs/acceptance/second-app-vue-fastapi.md)
 - [Agent skills](skills/README.md)
 - Examples: [`examples/`](examples/)
 

@@ -53,3 +53,34 @@ describe('user test protocol', () => {
     expect(protocol).toContain('Write and delete tools asked before running');
   });
 });
+
+describe('second acceptance app protocol', () => {
+  const protocol = read('docs/acceptance/second-app-vue-fastapi.md');
+  const template = read('docs/acceptance/records/second-app-vue-fastapi-template.md');
+
+  it('lists cases 1 to 17, each with tool calls, a visible result and what to record', () => {
+    const rows = protocol.split('\n').filter((line) => /^\| \d+ \|/.test(line));
+    expect(rows.map((row) => Number(row.split('|')[1]))).toEqual(Array.from({ length: 17 }, (_, index) => index + 1));
+    for (const row of rows) {
+      const cells = row.slice(1, -1).split(' | ').map((cell) => cell.trim());
+      expect(cells, row).toHaveLength(5);
+      expect(cells.every((cell) => cell !== ''), row).toBe(true);
+    }
+  });
+
+  it('names only paths that exist, and each known gap has its test', () => {
+    const paths = [...`${protocol}\n${template}`.matchAll(/`((?:src|tests|docs|examples)\/[^`\s<]+)`/g)].map((match) => match[1]!);
+    expect(paths.length).toBeGreaterThan(5);
+    expect(paths.filter((path) => !existsSync(join(SDK_ROOT, path)))).toEqual([]);
+    const gaps = [...protocol.matchAll(/^\| (SA-\d\d) \|/gm)].map((match) => match[1]!);
+    const tests = read('tests/second-acceptance-vue-fastapi.test.ts');
+    expect([...tests.matchAll(/it\('KNOWN GAP (SA-\d\d):/g)].map((match) => match[1])).toEqual(gaps);
+  });
+
+  it('records every case for both models as a pass rate of three runs', () => {
+    const rows = template.split('\n').filter((line) => /^\| \d+(-DE)? \|/.test(line));
+    expect(new Set(rows.map((row) => row.split('|')[1]!.trim().replace('-DE', ''))))
+      .toEqual(new Set(Array.from({ length: 17 }, (_, index) => String(index + 1))));
+    for (const row of rows) expect(row.match(/\/3/g), row).toHaveLength(2);
+  });
+});
