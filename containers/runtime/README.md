@@ -16,10 +16,10 @@ closure. Customers need no Node server code or customer-maintained Node package.
 ## Use the public release
 
 The Linux amd64 image is public; pulling it needs no GitHub account or registry
-credentials. Release 0.17.1 was published from SDK commit `113bb9b`:
+credentials. Release 0.17.2 was published from SDK commit `ca365df`:
 
 ```sh
-export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime:0.17.1
+export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime:0.17.2
 docker pull "$GLIRASTES_RUNTIME_IMAGE"
 docker run --rm "$GLIRASTES_RUNTIME_IMAGE" --help
 ```
@@ -27,10 +27,10 @@ docker run --rm "$GLIRASTES_RUNTIME_IMAGE" --help
 For production, pin the verified release digest instead of a mutable tag:
 
 ```sh
-export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime@sha256:657cda12a33cafcc4fa5ab47cc6e61a971e2d321b74a0b8b1f359ac2a7613543
+export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime@sha256:9776d67f44e888f8972e7539e602a5f15e407b40126e1561ec927bbfe555551f
 ```
 
-Use SDK 0.17.1 to build artifacts for this image and for the browser package.
+Use SDK 0.17.2 to build artifacts for this image and for the browser package.
 The [PHP walkthrough](../../examples/php-runtime/README.md) includes
 [Docker Compose](../../examples/php-runtime/compose.yaml) and a sample JSON config.
 Its fixture login/reset endpoints are test-only; production uses your existing

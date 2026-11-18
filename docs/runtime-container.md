@@ -6,7 +6,7 @@ configuration; they do not write a Node server. A suitable existing Node/Next.js
 server can continue embedding the SDK instead. `glirastes/server/http` is an
 alias for the framework-neutral handler exports previously named `/server/nextjs`.
 
-The official image is `ghcr.io/chainmatics/glirastes-runtime:0.17.1` for
+The official image is `ghcr.io/chainmatics/glirastes-runtime:0.17.2` for
 Linux amd64. Use a pinned version (or digest) with matching artifact SDK version;
 ARM users can build the supplied Dockerfile locally.
 
