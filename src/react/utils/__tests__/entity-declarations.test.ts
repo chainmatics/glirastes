@@ -304,3 +304,19 @@ describe('opaque and speaking ids sharing a lower-cased value', () => {
     })[0]).toMatchObject({ status: 'named', name: 'Ada', idKind: 'speaking' });
   });
 });
+
+describe('long composite keys', () => {
+  it('looks up a composite key of long parts exactly', () => {
+    const REFS: EntityDeclarationsByTool = {
+      blobs_list: { output: [{ type: 'blob', id: ['bucket', 'object'], name: 'title', path: 'blobs[]' }] },
+      blobs_delete: { input: [{ type: 'blob', args: ['bucket', 'object'] }] },
+    };
+    const bucket = 'B'.repeat(150);
+    const messages = [tool('blobs_list', { blobs: [{ bucket, object: 'O'.repeat(150), title: 'Upper' }] })];
+    const resolve = (object: string) => resolveApprovalSubjects({ bucket, object }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'blobs_delete', inputEntities: REFS.blobs_delete!.input!, userTexts: [], declarations: REFS,
+    })[0];
+    expect(resolve('O'.repeat(150))).toMatchObject({ status: 'named', name: 'Upper' });
+    expect(resolve('o'.repeat(150))).toMatchObject({ status: 'unknown' });
+  });
+});

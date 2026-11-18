@@ -13,6 +13,8 @@
  *
  * @module
  */
+import { COMPOSITE_ID_MARK } from './entity-identity.js';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -282,12 +284,12 @@ export function entityIdText(values: ReadonlyArray<string | number>): string {
 
 /**
  * The lookup form of an id: a single id as it is (so it meets the same id
- * elsewhere), a composite key as its JSON tuple (`["a/b","c"]` and
- * `["a","b/c"]` stay apart).
+ * elsewhere), a composite key as its marked JSON tuple (`["a/b","c"]` and
+ * `["a","b/c"]` stay apart; up to 1,024 characters, see `maxIdLength`).
  */
 export function entityLookupId(values: ReadonlyArray<string | number>): string | number {
   if (values.length === 1) return typeof values[0] === 'string' ? values[0].trim() : values[0]!;
-  return JSON.stringify(values.map((value) => (typeof value === 'string' ? value.trim() : value)));
+  return COMPOSITE_ID_MARK + JSON.stringify(values.map((value) => (typeof value === 'string' ? value.trim() : value)));
 }
 
 /** Keys of a result's top level that are never data (the SDK adds them). */

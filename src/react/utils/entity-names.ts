@@ -4,6 +4,7 @@ import {
   fallbackText,
   fallbackTextOf,
   idLikeFieldsOf,
+  maxIdLength,
   isGenericWrapper,
   kindOfField,
   kindOfToolName,
@@ -43,7 +44,7 @@ export function exactEntityKey(value: unknown): string | undefined {
   if (typeof value === 'number') return Number.isSafeInteger(value) ? `\u0001${value}` : undefined;
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
-  return trimmed && trimmed.length <= 200 ? `\u0001${trimmed}` : undefined;
+  return trimmed && trimmed.length <= maxIdLength(trimmed) ? `\u0001${trimmed}` : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
