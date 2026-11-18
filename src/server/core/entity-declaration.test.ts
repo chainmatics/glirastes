@@ -489,3 +489,17 @@ describe('history compaction keeps declared entry ids unclipped', () => {
     expect((plain.data as Entry[])[0]!.orderNo).not.toBe('ORDER-2026-000000-ALPHA');
   });
 });
+
+describe('history compaction restores ids only where entries line up', () => {
+  it('leaves identity entries after a skipped entry as they are', () => {
+    const records = { data: [
+      ...Array.from({ length: 10 }, (_, index) => ({ recordNo: index + 1, note: 'n'.repeat(400) })),
+      { note: 'no id' },
+      { recordNo: 11 },
+      { recordNo: 12 },
+    ] };
+    const compacted = compactHistoryResult(records, { entities: [{ id: 'recordNo', path: 'data[]' }] }) as Entry;
+    const ids = (compacted.data as Entry[]).map((entry) => entry.recordNo);
+    expect(ids).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  });
+});

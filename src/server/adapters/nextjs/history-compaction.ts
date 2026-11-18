@@ -272,7 +272,7 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
   const compacted = compactHistoryResultOnce(value, options);
   if (!options.entities) return compacted;
   const rooted = withRootIdentity(compacted, value, options.entities, options.maxChars);
-  return withEntryIds(rooted, value, options.entities, options.maxChars);
+  return withEntryIds(rooted, value, options.entities, options.maxChars, options.maxItems ?? HISTORY_DEFAULTS.maxItems);
 }
 
 /**
@@ -286,6 +286,7 @@ function withEntryIds(
   value: unknown,
   entities: ReadonlyArray<OutputEntityDeclaration>,
   maxChars: number | undefined,
+  maxItems: number,
 ): unknown {
   const rootArray = Array.isArray(value);
   if (!rootArray && !isPlainObject(value)) return compacted;
@@ -301,8 +302,11 @@ function withEntryIds(
   for (const key of outputRoute) holder = isPlainObject(holder) ? holder[key] : undefined;
   if (!Array.isArray(source) || !Array.isArray(holder)) return compacted;
   const output = holder;
+  // Only the complete leading entries line up with the source; identity entries carry their ids unclipped.
+  const marker = isPlainObject(compacted) ? compacted[HISTORY_MARKER_KEY] : undefined;
+  const complete = isPlainObject(marker) && typeof marker.full === 'number' ? marker.full : maxItems;
   const restoredIndices: Array<[number, Record<string, unknown>]> = [];
-  for (let index = 0; index < Math.min(output.length, source.length); index += 1) {
+  for (let index = 0; index < Math.min(output.length, source.length, complete); index += 1) {
     const entry = output[index];
     const original = source[index];
     if (!isPlainObject(entry) || !isPlainObject(original)) continue;
