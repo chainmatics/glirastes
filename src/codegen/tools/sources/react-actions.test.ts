@@ -317,6 +317,29 @@ describe('react-actions source', () => {
       expect(observed.observations.every((tool) => tool.contract === undefined)).toBe(true);
     }, 120_000);
 
+    it('keeps ui-action-payload-untyped when only the handler body uses an unresolved import', async () => {
+      const app = await createAppFixture({
+        ...MONOREPO,
+        'apps/web/src/panel.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+          + "import { logger } from '@missing/logger';\n"
+          + "export function Panel() {\n  useAiClientAction('entity.log', (payload) => logger(payload));\n  return null;\n}\n",
+      });
+      const [log] = (await createReactActionSource({ srcDir: 'apps/web/src' }).observe(context(app.root))).observations;
+      expect(log?.findings).toEqual([expect.objectContaining({ code: 'ui-action-payload-untyped' })]);
+    }, 120_000);
+
+    it('reports an imported handler whose module cannot be resolved', async () => {
+      const app = await createAppFixture({
+        ...MONOREPO,
+        'apps/web/src/panel.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+          + "import { openEntity } from '@missing/handlers';\n"
+          + "export function Panel() {\n  useAiClientAction('entity.open', openEntity);\n  return null;\n}\n",
+      });
+      const [open] = (await createReactActionSource({ srcDir: 'apps/web/src' }).observe(context(app.root))).observations;
+      expect(open?.findings).toEqual([expect.objectContaining({ code: 'ui-action-import-unresolved' })]);
+      expect(open?.findings[0]!.message).toContain('"@missing/handlers"');
+    }, 120_000);
+
     it('names the TypeScript defaults when the app has no tsconfig', async () => {
       const { 'tsconfig.json': _root, 'apps/web/tsconfig.json': _web, ...withoutTsconfig } = MONOREPO;
       const app = await createAppFixture(withoutTsconfig);

@@ -196,12 +196,21 @@ function importOf(declaration: ts.Declaration | undefined): ts.ImportDeclaration
 
 /**
  * Module specifiers the checker cannot resolve that the registration's
- * contract, handler or handler parameter type is imported from: the reason a
- * payload is untyped although the code types it. Only specifiers, no source.
+ * contract, handler (by name) or handler parameter type is imported from: the
+ * reason a payload is untyped although the code types it. Only specifiers.
  */
 function unresolvedImports(app: AppProgram, registration: Registration): string[] {
-  const nodes: ts.Node[] = [registration.contract, registration.handler]
-    .filter((node): node is ts.Expression => node !== undefined);
+  const nodes: ts.Node[] = registration.contract ? [registration.contract] : [];
+  // The handler counts by its name (an imported function), never by the imports its body uses.
+  let handler = registration.handler ? unwrap(registration.handler) : undefined;
+  for (let depth = 0; handler && depth < 4; depth += 1) {
+    if (ts.isCallExpression(handler) && ts.isIdentifier(handler.expression) && handler.expression.text === 'useCallback') {
+      handler = handler.arguments[0] ? unwrap(handler.arguments[0]) : undefined;
+      continue;
+    }
+    if (ts.isIdentifier(handler) || ts.isPropertyAccessExpression(handler)) nodes.push(handler);
+    break;
+  }
   const parameter = functionOf(app, registration.handler)?.parameters[0];
   if (parameter?.type) nodes.push(parameter.type);
   const found = new Set<string>();
