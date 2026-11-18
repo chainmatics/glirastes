@@ -13,8 +13,8 @@ import {
 } from '../../contracts/entity-identity.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import {
+  claimedRecordsOf,
   declarationsForRead,
-  declaredRecordsOf,
   entityLookupId,
   type DeclaredRecordIdentity,
   type EntityDeclarationsByTool,
@@ -107,7 +107,7 @@ function declaredOf(
   tools: ReadonlyMap<string, string>,
   declarations: EntityDeclarationsByTool | undefined,
   outputs?: ReadonlyMap<string, unknown>,
-): Map<Record<string, unknown>, DeclaredRecordIdentity> | undefined {
+): Map<Record<string, unknown>, DeclaredRecordIdentity | null> | undefined {
   if (!declarations) return undefined;
   const tool = resultToolOf(part, tools);
   if (!Object.prototype.hasOwnProperty.call(declarations, tool)) return undefined;
@@ -117,7 +117,7 @@ function declaredOf(
   const input = part.input;
   const resultId = isRecord(input) && typeof input.resultId === 'string' ? input.resultId : undefined;
   const list = read ? declarationsForRead(own, resultId !== undefined ? outputs?.get(resultId) : undefined) : own;
-  const found = declaredRecordsOf(part.output, list);
+  const found = claimedRecordsOf(part.output, list);
   return found.size > 0 ? found : undefined;
 }
 
@@ -235,7 +235,7 @@ export function collectEntitySightings(
    */
   const walk = (
     value: unknown, depth: number, holder?: string, inRecord = false, stem?: string,
-    declared?: ReadonlyMap<Record<string, unknown>, DeclaredRecordIdentity>,
+    declared?: ReadonlyMap<Record<string, unknown>, DeclaredRecordIdentity | null>,
   ): void => {
     if (depth > MAX_DEPTH || budget <= 0) return;
     budget -= 1;
@@ -246,7 +246,10 @@ export function collectEntitySightings(
     if (!isRecord(value)) return;
     const identity = declared?.get(value);
     let below: boolean;
-    if (identity) {
+    if (identity === null) {
+      // A declared record without its id (not shown): no other field is guessed as its id.
+      below = true;
+    } else if (identity) {
       // A declared record: its declared id, name and type, no guess.
       const id = declaredId(identity);
       // An opaque id also under its exact key: a declared argument finds its own record, per type.
@@ -375,7 +378,7 @@ export function collectSeenEntityIds(
   const tools = declarations ? producingTools(messages) : new Map<string, string>();
   const outputs = declarations ? producingOutputs(messages) : undefined;
 
-  const walk = (value: unknown, depth: number, declared?: ReadonlyMap<Record<string, unknown>, DeclaredRecordIdentity>): void => {
+  const walk = (value: unknown, depth: number, declared?: ReadonlyMap<Record<string, unknown>, DeclaredRecordIdentity | null>): void => {
     if (depth > MAX_DEPTH || budget <= 0) return;
     budget -= 1;
     if (Array.isArray(value)) {
@@ -384,7 +387,8 @@ export function collectSeenEntityIds(
     }
     if (!isRecord(value)) return;
     const identity = declared?.get(value);
-    const idKey = identity ? undefined : ID_KEYS.find((key) => entityIdKey(value[key]) !== undefined);
+    // A declared record without its id (`null`): nothing is guessed for it.
+    const idKey = identity !== undefined ? undefined : ID_KEYS.find((key) => entityIdKey(value[key]) !== undefined);
     if (identity) {
       for (const key of [entityIdKey(declaredId(identity)), ...(identity.idKind === 'opaque' ? [exactEntityKey(declaredId(identity))] : [])]) {
       if (key) {

@@ -418,13 +418,26 @@ export function declaredRecordsOf(
   declarations: ReadonlyArray<OutputEntityDeclaration> | undefined,
 ): Map<Record<string, unknown>, DeclaredRecordIdentity> {
   const found = new Map<Record<string, unknown>, DeclaredRecordIdentity>();
+  for (const [record, identity] of claimedRecordsOf(root, declarations)) if (identity) found.set(record, identity);
+  return found;
+}
+
+/**
+ * Every object a declaration reaches, with its identity, or `null` when its
+ * declared id is missing (left out by the default view, say): such an object
+ * is still the declared kind of record, so no field may be guessed as its id.
+ */
+export function claimedRecordsOf(
+  root: unknown,
+  declarations: ReadonlyArray<OutputEntityDeclaration> | undefined,
+): Map<Record<string, unknown>, DeclaredRecordIdentity | null> {
+  const found = new Map<Record<string, unknown>, DeclaredRecordIdentity | null>();
   for (const declaration of declarations ?? []) {
     const steps = entityPathOf(declaration, root);
     if (!steps) continue;
     for (const record of objectsAt(root, steps)) {
-      if (found.has(record)) continue;
-      const identity = declaredIdentityOf(record, declaration);
-      if (identity) found.set(record, identity);
+      if (found.get(record)) continue;
+      found.set(record, declaredIdentityOf(record, declaration) ?? found.get(record) ?? null);
     }
   }
   return found;

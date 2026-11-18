@@ -405,3 +405,19 @@ describe('type and tool names that are object properties', () => {
     expect(Object.keys(sanitized)).toEqual(['__proto__']);
   });
 });
+
+describe('a declared record without its id', () => {
+  it('never takes another field as its id', () => {
+    const REFS: EntityDeclarationsByTool = {
+      albums_list: { output: [{ type: 'album', id: 'albumNo', name: 'name', path: 'albums[]' }] },
+      albums_delete: { input: [{ type: 'album', args: 'albumNo' }] },
+    };
+    const messages = [tool('albums_list', { albums: [{ id: 7, name: 'Fremder Datensatz' }] })];
+    const sightings = collectEntitySightings(messages, REFS);
+    expect(sightings.size).toBe(0);
+    expect(collectSeenEntityIds(messages, REFS).size).toBe(0);
+    expect(resolveApprovalSubjects({ albumNo: 7 }, sightings, collectSeenEntityIds(messages, REFS), {
+      toolName: 'albums_delete', inputEntities: REFS.albums_delete!.input!, userTexts: [], declarations: REFS,
+    })[0]).toMatchObject({ status: 'unknown' });
+  });
+});
