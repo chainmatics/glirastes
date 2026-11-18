@@ -147,6 +147,29 @@ describe('AiChatProvider UI action outcomes', () => {
     expect(Object.keys(outcomes[0]!)).not.toContain('payload');
   });
 
+  it('keeps the running request and its results under StrictMode', async () => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    render(
+      <React.StrictMode>
+        <Host
+          initialStatus="streaming"
+          initial={[user, assistant(toolPart('c1', navigate('/first')))]}
+          config={{ uiActionBus: bus }}
+        />
+      </React.StrictMode>,
+    );
+    await settle();
+    expect(push).toHaveBeenCalledWith('/first');
+    await act(async () => {
+      control.set([user, assistant(toolPart('c1', navigate('/first')), toolPart('c2', navigate('/second')))], 'streaming');
+    });
+    await act(async () => { control.status('ready'); });
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/second'));
+    expect(push).toHaveBeenCalledTimes(2);
+  });
+
   it('runs a result that arrives in the same render that ends the stream', async () => {
     const { bus, outcomes } = setup();
     const push = vi.fn();

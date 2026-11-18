@@ -652,7 +652,21 @@ export function AiChatProvider({
     pageLeavingRef.current = false;
     deferredResultsRef.current.clear();
   }, []);
-  useEffect(() => resetUiActions, [resetUiActions]);
+  // Unmount drops queued actions; StrictMode's immediate remount keeps them
+  // (and the running request), so only a provider that stays unmounted resets.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      queueMicrotask(() => {
+        if (mountedRef.current) return;
+        uiActionGenerationRef.current += 1;
+        uiActionAbortRef.current.abort();
+        uiActionQueueRef.current = Promise.resolve();
+      });
+    };
+  }, []);
 
 
   // Stable refs for callbacks to avoid re-creating transport
