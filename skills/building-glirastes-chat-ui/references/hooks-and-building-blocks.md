@@ -63,6 +63,12 @@ work log of one assistant turn; both style through `data-*` attributes.
   history, a convenience and not a trust boundary: the server executes exactly
   the signed arguments. A subject the server resolves and signs is the planned
   stronger variant. Details: `docs/concepts.md`, Approvals.
+- A custom `ApprovalCard` or `BulkApprovalCard` (`components`) does not get
+  this for free: render `approval.subjects` yourself (grouped card: on each
+  entry of `approvals`). One entry per id argument, `{ path, id, label?,
+  status, name?, names? }` with `status` `named` | `unknown` | `ambiguous`;
+  show a warning with the id for `unknown` and `ambiguous`. A card that
+  renders only `details` drops the safeguard silently.
 
 ## Sessions
 
