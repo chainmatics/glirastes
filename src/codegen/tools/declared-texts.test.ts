@@ -43,6 +43,9 @@ describe('titles and search texts per language', () => {
   it('lets a language-free code title beat an agent title in every language', () => {
     const agent = entry({ name: 'tasks.get', title: { en: 'Agent title' }, origin: { title: 'agent' } });
     expect(semanticsTitle(agent, 'Show task', ['en', 'de'])).toEqual({ en: 'Show task', de: 'Show task' });
+    // Also in a language only the agent named.
+    const polish = entry({ name: 'tasks.get', title: { pl: 'Agent title' }, origin: { title: 'agent' } });
+    expect(semanticsTitle(polish, 'Show task', ['en'])).toEqual({ en: 'Show task', pl: 'Show task' });
     const human = entry({ name: 'tasks.get', title: { en: 'Reviewed title' } });
     expect(semanticsTitle(human, 'Show task', ['en', 'de'])).toEqual({ en: 'Reviewed title', de: 'Show task' });
     // The operation's German title above a language-free contract title, which keeps English and Polish.

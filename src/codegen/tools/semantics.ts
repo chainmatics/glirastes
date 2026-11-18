@@ -336,8 +336,10 @@ export function semanticsTitle(
   // In precedence order; a language-free title fills, at its own level, every language still open.
   const code = [declared, lowerDeclared];
   const layers = isMaintainedField(entry, 'title') ? [entry?.title, ...code] : [...code, entry?.title];
+  // A language-free title speaks for every language any source names, not only the required ones.
+  const named = [...new Set([...languages, ...layers.flatMap((layer) => (layer && typeof layer === 'object' ? Object.keys(layer) : []))])];
   for (const layer of layers) {
-    if (typeof layer === 'string') for (const language of languages) add(language, layer);
+    if (typeof layer === 'string') for (const language of named) add(language, layer);
     else for (const [language, value] of Object.entries(layer ?? {})) add(language, value);
   }
   return Object.keys(title).length > 0 ? title as ToolTitle : undefined;
