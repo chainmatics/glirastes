@@ -624,7 +624,7 @@ export function AiChatProvider({
   const handledApprovalIdsRef = useRef<Set<string>>(new Set());
   // UI actions run one tool result after another, in call order.
   const uiActionQueueRef = useRef<Promise<void>>(Promise.resolve());
-  // Set once a UI action started a full page load: nothing after it runs on this page.
+  // Set once a UI action started a full page load: nothing after it runs in this document, also not after a reset.
   const pageLeavingRef = useRef(false);
   // Live results held back until the earlier calls of their message have results.
   const deferredResultsRef = useRef<Map<string, {
@@ -649,7 +649,6 @@ export function AiChatProvider({
     staleRequestRef.current = streamActiveRef.current;
     liveRequestRef.current = false;
     uiActionQueueRef.current = Promise.resolve();
-    pageLeavingRef.current = false;
     deferredResultsRef.current.clear();
   }, []);
   // Unmount drops queued actions; StrictMode's immediate remount keeps them
@@ -921,7 +920,6 @@ export function AiChatProvider({
     const wasLive = liveRequestRef.current;
     liveRequestRef.current = isLoading && !staleRequestRef.current;
     const live = liveRequestRef.current || wasLive;
-    if (isLoading && !wasLive) pageLeavingRef.current = false;
     const lastMessage = rawMessages[rawMessages.length - 1];
 
     // Held-back results of a message that is no longer the last one run now, in their order.

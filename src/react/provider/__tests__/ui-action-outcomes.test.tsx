@@ -335,6 +335,10 @@ describe('AiChatProvider UI action outcomes', () => {
     expect(assign).toHaveBeenCalledWith('/reports');
     expect(later).not.toHaveBeenCalled();
     expect(outcomes).toHaveLength(1);
+    // The page is being left: a new request while it still loads runs nothing either.
+    await stream([user, { ...assistant(toolPart('c3', action('toast.show'))), id: 'a2' } as ChatMessage]);
+    await settle();
+    expect(later).not.toHaveBeenCalled();
   });
 
   it('catches a throwing hook and keeps running later results', async () => {
