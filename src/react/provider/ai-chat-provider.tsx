@@ -627,11 +627,21 @@ export function AiChatProvider({
   // Set once a UI action started a full page load: nothing after it runs on this page.
   const pageLeavingRef = useRef(false);
   // Live results held back until the earlier calls of their message have results.
-  const deferredResultsRef = useRef<Map<string, { toolName: string; output: Record<string, unknown>; messageId: string }>>(new Map());
+  const deferredResultsRef = useRef<Map<string, {
+    toolName: string;
+    output: Record<string, unknown>;
+    messageId: string;
+    /** Position of the call in its message. */
+    index: number;
+  }>>(new Map());
+  // Aborted with each reset so a running result stops before its next action.
+  const uiActionAbortRef = useRef(new AbortController());
   // Bumped by clear(), a session switch and unmount: queued actions of the left chat never start.
   const uiActionGenerationRef = useRef(0);
   const resetUiActions = useCallback(() => {
     uiActionGenerationRef.current += 1;
+    uiActionAbortRef.current.abort();
+    uiActionAbortRef.current = new AbortController();
     uiActionQueueRef.current = Promise.resolve();
     pageLeavingRef.current = false;
     deferredResultsRef.current.clear();
@@ -849,12 +859,16 @@ export function AiChatProvider({
     const actions = toolResultUiActions(output);
     if (actions.length === 0) return;
     const generation = uiActionGenerationRef.current;
+    const { signal } = uiActionAbortRef.current;
     uiActionQueueRef.current = uiActionQueueRef.current.then(async () => {
       if (pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
       const run = await runToolResultUiActions(
         output,
         uiActionBusRef.current ?? getDefaultUiActionBus(),
-        uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {},
+        {
+          signal,
+          ...(uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {}),
+        },
       ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }));
       if (!run || uiActionGenerationRef.current !== generation) return;
       if (run.code === 'initiated') pageLeavingRef.current = true;
@@ -892,8 +906,14 @@ export function AiChatProvider({
     const lastMessage = rawMessages[rawMessages.length - 1];
 
     // Held-back results of a message that is no longer the last one run now, in their order.
-    for (const [toolCallId, held] of deferredResultsRef.current) {
-      if (lastMessage?.id === held.messageId) continue;
+    const messageOrder = new Map<string, number>();
+    for (const held of deferredResultsRef.current.values()) {
+      if (!messageOrder.has(held.messageId)) messageOrder.set(held.messageId, messageOrder.size);
+    }
+    const released = [...deferredResultsRef.current]
+      .filter(([, held]) => lastMessage?.id !== held.messageId)
+      .sort(([, a], [, b]) => (messageOrder.get(a.messageId)! - messageOrder.get(b.messageId)!) || a.index - b.index);
+    for (const [toolCallId, held] of released) {
       deferredResultsRef.current.delete(toolCallId);
       if (processedToolCallsRef.current.has(toolCallId)) continue;
       processedToolCallsRef.current.add(toolCallId);
@@ -906,7 +926,7 @@ export function AiChatProvider({
     // While the request streams, a result waits for every earlier call of the
     // message to finish, so UI actions run in call order, not arrival order.
     let earlierCallOpen = false;
-    for (const part of lastMessage.parts) {
+    for (const [partIndex, part] of lastMessage.parts.entries()) {
       if (!('type' in part)) continue;
       const partType = (part as { type: string }).type;
 
@@ -976,7 +996,9 @@ export function AiChatProvider({
               continue;
             }
             if (earlierCallOpen && isLoading) {
-              deferredResultsRef.current.set(toolCallId, { toolName, output: toolPart.output, messageId: lastMessage.id });
+              deferredResultsRef.current.set(toolCallId, {
+                toolName, output: toolPart.output, messageId: lastMessage.id, index: partIndex,
+              });
               continue;
             }
             deferredResultsRef.current.delete(toolCallId);

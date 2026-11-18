@@ -135,7 +135,7 @@ actions never run, and a page-bound action (`{ route }`) never opens its page.
 It navigates through the navigation bridge, waits up to `routeTimeoutMs`
 (default 5000) for the page to register the handler, and rejects when it does
 not or when a handler returns `false`.
-`runToolResultUiActions(result, bus?, { timeoutMs, routeTimeoutMs })`
+`runToolResultUiActions(result, bus?, { timeoutMs, routeTimeoutMs, signal })`
 (`RunToolResultUiActionsOptions`) does the same without throwing and resolves
 a `UiActionRunResult` `{ code, dispatched, durationMs, error? }` (`null` when
 `toolResultUiActions(result)` finds no generated UI action):

@@ -211,6 +211,17 @@ describe('runToolResultUiActions', () => {
     expect(after).not.toHaveBeenCalled();
   });
 
+  it('stops before the next action once its signal aborts', async () => {
+    const bus = new UiActionBus();
+    const controller = new AbortController();
+    const second = vi.fn();
+    cleanups.push(bus.subscribeById('first', () => { controller.abort(); }));
+    cleanups.push(bus.subscribeById('second', second));
+    expect(await runToolResultUiActions(result([action('first'), action('second')]), bus, { signal: controller.signal }))
+      .toMatchObject({ code: 'unconfirmed', dispatched: 1 });
+    expect(second).not.toHaveBeenCalled();
+  });
+
   it('stops a result array at the first failure and reports its code', async () => {
     const bus = new UiActionBus();
     const first = vi.fn();

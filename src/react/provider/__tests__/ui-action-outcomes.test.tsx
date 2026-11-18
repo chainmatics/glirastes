@@ -242,6 +242,22 @@ describe('AiChatProvider UI action outcomes', () => {
     expect(outcomes.map((event) => event.toolCallId)).toEqual(['c2']);
   });
 
+  it('releases held-back results in call order, not arrival order', async () => {
+    const { bus } = setup();
+    const order: string[] = [];
+    cleanups.push(bus.subscribeById('second', () => { order.push('second'); }));
+    cleanups.push(bus.subscribeById('third', () => { order.push('third'); }));
+    await act(async () => { control.set([user], 'submitted'); });
+    const open = toolPart('c1', undefined, 'input-available');
+    const c2Open = toolPart('c2', undefined, 'input-available');
+    await act(async () => { control.set([user, assistant(open, c2Open, toolPart('c3', action('third')))], 'streaming'); });
+    const first = assistant(open, toolPart('c2', action('second')), toolPart('c3', action('third')));
+    await act(async () => { control.set([user, first], 'streaming'); });
+    const next = { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'Weiter.' }] } as unknown as ChatMessage;
+    await act(async () => { control.set([user, first, next], 'streaming'); });
+    await waitFor(() => expect(order).toEqual(['second', 'third']));
+  });
+
   it('does not wait for a call that is still open when the request ends', async () => {
     const { bus, outcomes } = setup();
     const seen = vi.fn();
@@ -398,6 +414,21 @@ describe('AiChatProvider never runs a UI action late', () => {
     await stream([user, { ...assistant(toolPart('c2', navigate('/fresh'))), id: 'a2' } as ChatMessage]);
     await waitFor(() => expect(push).toHaveBeenCalledWith('/fresh'));
     expect(outcomes.map((event) => event.toolCallId)).toEqual(['c2']);
+  });
+
+  it('stops the remaining actions of a running result on clear', async () => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    let release!: () => void;
+    cleanups.push(bus.subscribeById('slow', () => new Promise<void>((resolve) => { release = resolve; })));
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    render(<Host config={{ uiActionBus: bus }} />);
+    await stream([user, assistant(toolPart('c1', [action('slow'), navigate('/left')]))]);
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    await act(async () => { control.clear(); });
+    release();
+    await settle();
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('does not run results that come back after clear()', async () => {

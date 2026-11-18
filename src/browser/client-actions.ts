@@ -187,6 +187,11 @@ export interface RunToolResultUiActionsOptions extends DispatchToolResultOptions
    * action gets `routeTimeoutMs` on top for its page to register it.
    */
   timeoutMs?: number;
+  /**
+   * Stops the run before its next action (and before a page-bound action
+   * that waited for its page); the outcome is then `unconfirmed`.
+   */
+  signal?: AbortSignal;
 }
 
 /** The Glirastes UI actions (`glirastes.*`) of a successful tool result, in order. */
@@ -271,15 +276,20 @@ export async function runToolResultUiActions(
 
   const run = async (): Promise<Pick<UiActionRunResult, 'code' | 'error'>> => {
     let unconfirmed = false;
+    const stopped = () => timedOut || options.signal?.aborted === true;
     for (const action of actions) {
       if (timedOut) break;
+      if (stopped()) return { code: 'unconfirmed' };
       let step: StepCode | 'cancelled';
       try {
-        step = await runAction(bus, action, routeTimeoutMs, () => timedOut);
+        step = await runAction(bus, action, routeTimeoutMs, stopped);
       } catch (error) {
         return { code: failureCode(error), error };
       }
-      if (step === 'cancelled') break;
+      if (step === 'cancelled') {
+        if (timedOut) break;
+        return { code: 'unconfirmed' };
+      }
       if (step === 'unavailable') return { code: 'unavailable' };
       dispatched += 1;
       if (step === 'initiated') return { code: 'initiated' };
