@@ -2,12 +2,22 @@ import { buildNavigationHref } from '../../browser/navigation.js';
 import type { ChatEntitySearchData } from '../../contracts/chat-interactions.js';
 import type { ChatEntityDefinition } from '../interactions/definitions.js';
 import { parseMentionSegments } from '../utils/mention-markup.js';
+import {
+  declaredRecordsOf,
+  entityIdText,
+  type EntityDeclarationsByTool,
+} from '../../contracts/entity-declaration.js';
 
 /** One entity an assistant message refers to. */
 export interface ChatEntityReference {
   readonly type: string;
   readonly id: string;
   readonly label: string;
+  /**
+   * Free data of the app for `open` (a route, a tenant, a version), as a
+   * matcher's `resolve`, `knownEntities` or `resolveAmbiguous` returned it.
+   */
+  readonly data?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -25,6 +35,11 @@ export interface ChatEntityMatcher {
   resolve?(match: string): Promise<Omit<ChatEntityReference, 'type'> | undefined> | Omit<ChatEntityReference, 'type'> | undefined;
 }
 
+/** What `knownEntities` gets: the conversation the chat shows. */
+export interface ChatEntityLinksContext {
+  readonly messages: ReadonlyArray<{ readonly role?: string; readonly parts: ReadonlyArray<unknown> }>;
+}
+
 export interface ChatEntityLinksConfig {
   /** App-specific recognisers, e.g. task identifiers. */
   readonly matchers?: ReadonlyArray<ChatEntityMatcher>;
@@ -35,6 +50,22 @@ export interface ChatEntityLinksConfig {
   readonly known?: boolean;
   /** Shorter known names stay text; they collide with ordinary words. Default 4. */
   readonly minLabelLength?: number;
+  /**
+   * Further known references the app derives from the conversation (D3),
+   * merged after the built-in ones; called when the messages change.
+   * Memoize the function.
+   */
+  knownEntities?(context: ChatEntityLinksContext): ReadonlyArray<ChatEntityReference>;
+  /**
+   * When two known references share a name (two playlists "Lobby Loop"):
+   * `first` (default) links the first one found, `text` leaves the name as
+   * text. `resolveAmbiguous` decides instead when given.
+   */
+  readonly ambiguousNames?: 'first' | 'text';
+  /** Picks the reference for a name several known references share; `undefined` leaves it as text. */
+  resolveAmbiguous?(label: string, candidates: ReadonlyArray<ChatEntityReference>): ChatEntityReference | undefined;
+  /** `all` (default) links in every message, `assistant` only in the assistant's text. */
+  readonly scope?: 'all' | 'assistant';
   /**
    * Opens a reference. Return `false` to fall through to the default: the
    * entity's action that runs `ui.navigate` (a page like `/tasks/:taskId`),
@@ -76,13 +107,32 @@ export function splitEntityText(
     readonly matchers?: ReadonlyArray<Pick<ChatEntityMatcher, 'type' | 'pattern'>>;
     readonly known?: ReadonlyArray<ChatEntityReference>;
     readonly minLabelLength?: number;
+    readonly ambiguousNames?: 'first' | 'text';
+    readonly resolveAmbiguous?: (label: string, candidates: ReadonlyArray<ChatEntityReference>) => ChatEntityReference | undefined;
   } = {},
 ): ChatEntityTextSegment[] {
   const minLength = options.minLabelLength ?? 4;
   const byLabel = new Map<string, ChatEntityReference>();
+  const decide = options.resolveAmbiguous !== undefined || options.ambiguousNames === 'text';
+  const candidates = new Map<string, ChatEntityReference[]>();
   for (const reference of options.known ?? []) {
     const label = reference.label.trim();
-    if (label.length >= minLength && !byLabel.has(label)) byLabel.set(label, reference);
+    if (label.length < minLength) continue;
+    if (!decide) {
+      if (!byLabel.has(label)) byLabel.set(label, reference);
+      continue;
+    }
+    const list = candidates.get(label) ?? [];
+    if (!list.some((known) => known.type === reference.type && known.id === reference.id)) list.push(reference);
+    candidates.set(label, list);
+  }
+  for (const [label, list] of candidates) {
+    if (list.length === 1) {
+      byLabel.set(label, list[0]!);
+      continue;
+    }
+    const picked = options.resolveAmbiguous?.(label, list);
+    if (picked) byLabel.set(label, picked);
   }
   const labels = [...byLabel.keys()].sort((a, b) => b.length - a.length).map(escapeRegex);
   const patterns: Array<{ regex: RegExp; matcher?: number }> = (options.matchers ?? []).map((matcher, index) => ({
@@ -166,6 +216,7 @@ function toolOutputOf(part: unknown): { tool: string; output: unknown } | undefi
 export function collectKnownEntities(
   messages: ReadonlyArray<{ readonly parts: ReadonlyArray<unknown> }>,
   searches: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }> = [],
+  declarations?: EntityDeclarationsByTool,
 ): ChatEntityReference[] {
   const found = new Map<string, ChatEntityReference>();
   const add = (reference: ChatEntityReference) => {
@@ -183,6 +234,17 @@ export function collectKnownEntities(
         continue;
       }
       const result = toolOutputOf(part);
+      // A tool whose `outputEntities` declare a type and a name: every such record, also nested (D1).
+      const declared = result && declarations && Object.prototype.hasOwnProperty.call(declarations, result.tool)
+        ? declarations[result.tool]!.output
+        : undefined;
+      if (result && declared) {
+        for (const identity of declaredRecordsOf(result.output, declared).values()) {
+          if (identity.declaration.type && identity.name) {
+            add({ type: identity.declaration.type, id: entityIdText(identity.idValues), label: identity.name });
+          }
+        }
+      }
       const entry = result ? byTool.get(toolKey(result.tool)) : undefined;
       if (!result || !entry) continue;
       const { search, type } = entry;

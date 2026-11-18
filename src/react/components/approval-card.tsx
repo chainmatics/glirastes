@@ -79,7 +79,7 @@ export function approvalSubjectLines(approval: PendingApproval, locale: ChatLoca
  */
 export function flaggedApprovalSubjects(approvals: ReadonlyArray<PendingApproval>): ApprovalSubject[] {
   return approvals.flatMap((approval) => (approval.subjects ?? [])
-    .filter((subject) => subject.status === 'unknown' || subject.status === 'ambiguous'));
+    .filter((subject) => (subject.status === 'unknown' && subject.idKind !== 'speaking') || subject.status === 'ambiguous'));
 }
 
 /** The ids a tool result of this conversation carried without a name: shown neutrally, no warning. */
@@ -95,7 +95,8 @@ function seenApprovalSubjects(approval: PendingApproval): ApprovalSubject[] {
  */
 export function ApprovalIdWarning({ id, subjects }: { id: string; subjects: ReadonlyArray<ApprovalSubject> }) {
   const { locale } = useChatContext();
-  const unknown = subjects.filter((subject) => subject.status === 'unknown');
+  // A speaking key (declared) the user types needs no warning: it is readable on its own.
+  const unknown = subjects.filter((subject) => subject.status === 'unknown' && subject.idKind !== 'speaking');
   const ambiguous = subjects.filter((subject) => subject.status === 'ambiguous');
   const labelOf = (subject: ApprovalSubject) => subject.label ?? locale.approvalTargetLabel;
   return (

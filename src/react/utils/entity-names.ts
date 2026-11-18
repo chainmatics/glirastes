@@ -1,6 +1,7 @@
 import {
   BROWSER_RECOGNISED_ID_KEYS,
   entityIdKey,
+  fallbackText,
   fallbackTextOf,
   idLikeFieldsOf,
   isGenericWrapper,
@@ -10,6 +11,13 @@ import {
   OWN_ID_KEYS,
 } from '../../contracts/entity-identity.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
+import {
+  declaredRecordsOf,
+  entityIdText,
+  type DeclaredRecordIdentity,
+  type EntityDeclarationsByTool,
+  type EntityIdKind,
+} from '../../contracts/entity-declaration.js';
 import { parseMentionSegments } from './mention-markup.js';
 
 export { entityIdKey, isUuidLike } from '../../contracts/entity-identity.js';
@@ -46,6 +54,16 @@ export interface EntitySighting {
    * or, without a recognised id, with every id-like field (`playlist_id`).
    */
   kinds?: EntityKindSighting[];
+  /** Set only for a record a tool's `outputEntities` declare: its declared id kind. */
+  idKind?: EntityIdKind;
+  /**
+   * Set only with declarations, when every record that carried the id was of
+   * one kind: that kind (`playlist`). An argument of another kind is not
+   * named by it.
+   */
+  kind?: string;
+  /** Set when only an `@` mention of the user named the id, no tool result. */
+  mentionedOnly?: true;
 }
 
 /** The records of one kind that carried an id value. */
@@ -54,6 +72,24 @@ export interface EntityKindSighting {
   kind: string;
   /** Their distinct names, newest first (at most five); empty when they had none. */
   names: string[];
+}
+
+/** The declared records of a finished tool part, by the tool its result belongs to. */
+function declaredOf(
+  part: Record<string, unknown>,
+  tools: ReadonlyMap<string, string>,
+  declarations: EntityDeclarationsByTool | undefined,
+): Map<Record<string, unknown>, DeclaredRecordIdentity> | undefined {
+  if (!declarations) return undefined;
+  const tool = resultToolOf(part, tools);
+  if (!Object.prototype.hasOwnProperty.call(declarations, tool)) return undefined;
+  const found = declaredRecordsOf(part.output, declarations[tool]!.output);
+  return found.size > 0 ? found : undefined;
+}
+
+/** The id text of a declared record: its id, or a composite key's values joined with `/`. */
+function declaredId(identity: DeclaredRecordIdentity): string {
+  return entityIdText(identity.idValues);
 }
 
 /** The tool whose overview a `read_result` answer reads, by result id. */
@@ -99,6 +135,7 @@ function resultToolOf(part: Record<string, unknown>, tools: ReadonlyMap<string, 
  */
 export function collectEntitySightings(
   messages: ReadonlyArray<unknown>,
+  declarations?: EntityDeclarationsByTool,
 ): Map<string, EntitySighting> {
   const sightings = new Map<string, EntitySighting>();
   /** Per id value: the kinds of the records that carried it as their own id, with their names. */
@@ -120,10 +157,14 @@ export function collectEntitySightings(
     if (trimmed && !names.includes(trimmed) && names.length < MAX_NAMES_PER_ID) names.push(trimmed);
   };
 
-  const add = (id: unknown, name: string, type?: string) => {
+  /** Ids a tool result named (not only a mention), and the id kind a declaration gave. */
+  const fromTools = new Set<string>();
+  const idKinds = new Map<string, EntityIdKind>();
+  const add = (id: unknown, name: string, type?: string, mention = false) => {
     const key = entityIdKey(id);
     const trimmed = name.trim();
     if (!key || !trimmed) return;
+    if (!mention) fromTools.add(key);
     const known = sightings.get(key);
     if (!known) {
       sightings.set(key, { name: trimmed, names: [trimmed], ...(type ? { type } : {}) });
@@ -139,26 +180,42 @@ export function collectEntitySightings(
    * root and below generic wrappers at the top); `inRecord`: below a record;
    * `stem`: the kind the result's tool name names.
    */
-  const walk = (value: unknown, depth: number, holder?: string, inRecord = false, stem?: string): void => {
+  const walk = (
+    value: unknown, depth: number, holder?: string, inRecord = false, stem?: string,
+    declared?: ReadonlyMap<Record<string, unknown>, DeclaredRecordIdentity>,
+  ): void => {
     if (depth > MAX_DEPTH || budget <= 0) return;
     budget -= 1;
     if (Array.isArray(value)) {
-      for (const item of value) walk(item, depth + 1, holder, inRecord, stem);
+      for (const item of value) walk(item, depth + 1, holder, inRecord, stem, declared);
       return;
     }
     if (!isRecord(value)) return;
-    const idKey = ID_KEYS.find((key) => entityIdKey(value[key]) !== undefined);
-    const nameKey = NAME_KEYS.find((key) => typeof value[key] === 'string' && (value[key] as string).trim() !== '');
-    const name = nameKey ? value[nameKey] as string : undefined;
-    if (idKey && name) add(value[idKey], name);
-    const ownIds = idKey ? [idKey] : idLikeFieldsOf(value, RECOGNISED_KEYS);
-    for (const key of ownIds) addKind(value[key], holder ?? stem, name);
-    const below = inRecord || ownIds.length > 0;
+    const identity = declared?.get(value);
+    let below: boolean;
+    if (identity) {
+      // A declared record: its declared id, name and type, no guess.
+      const id = declaredId(identity);
+      if (identity.name) add(id, identity.name);
+      else if (entityIdKey(id)) fromTools.add(entityIdKey(id)!);
+      addKind(id, identity.declaration.type ?? holder ?? stem, identity.name);
+      const key = entityIdKey(id);
+      if (key && !idKinds.has(key)) idKinds.set(key, identity.idKind);
+      below = true;
+    } else {
+      const idKey = ID_KEYS.find((key) => entityIdKey(value[key]) !== undefined);
+      const nameKey = NAME_KEYS.find((key) => typeof value[key] === 'string' && (value[key] as string).trim() !== '');
+      const name = nameKey ? value[nameKey] as string : undefined;
+      if (idKey && name) add(value[idKey], name);
+      const ownIds = idKey ? [idKey] : idLikeFieldsOf(value, RECOGNISED_KEYS);
+      for (const key of ownIds) addKind(value[key], holder ?? stem, name);
+      below = inRecord || ownIds.length > 0;
+    }
     for (const [key, child] of Object.entries(value)) {
       if (typeof child !== 'object' || child === null) continue;
       // An index (`{ "2": { … } }`) and a generic wrapper at the top keep the kind of their holder.
       const childHolder = INDEX_KEY.test(key) || (!below && isGenericWrapper(key)) ? holder : kindOfField(key);
-      walk(child, depth + 1, childHolder, below, stem);
+      walk(child, depth + 1, childHolder, below, stem, declared);
     }
   };
 
@@ -169,11 +226,11 @@ export function collectEntitySightings(
       const part: unknown = message.parts[p];
       if (!isRecord(part) || typeof part.type !== 'string') continue;
       if (part.type.startsWith('tool-') && part.state === 'output-available') {
-        walk(part.output, 0, undefined, false, kindOfToolName(resultToolOf(part, tools)));
+        walk(part.output, 0, undefined, false, kindOfToolName(resultToolOf(part, tools)), declaredOf(part, tools, declarations));
       } else if (message.role === 'user' && part.type === 'text' && typeof part.text === 'string') {
         for (const segment of parseMentionSegments(part.text)) {
           if (segment.kind !== 'mention' || segment.mention.type === 'command') continue;
-          add(segment.mention.id, segment.mention.displayName, segment.mention.type);
+          add(segment.mention.id, segment.mention.displayName, segment.mention.type, true);
           addKind(segment.mention.id, kindOfField(segment.mention.type), segment.mention.displayName);
         }
       }
@@ -183,6 +240,13 @@ export function collectEntitySightings(
   for (const [key, sighting] of sightings) {
     const byKind = kinds.get(key);
     if (byKind && byKind.size > 1) sighting.kinds = [...byKind].map(([kind, names]) => ({ kind, names: [...names] }));
+    // Only with a declaration: an app without one sees the sightings it always had.
+    if (declarations) {
+      if (byKind && byKind.size === 1) sighting.kind = [...byKind.keys()][0]!;
+      const idKind = idKinds.get(key);
+      if (idKind) sighting.idKind = idKind;
+      if (!fromTools.has(key)) sighting.mentionedOnly = true;
+    }
   }
   return sightings;
 }
@@ -191,6 +255,11 @@ export function collectEntitySightings(
 export interface SeenEntity {
   /** A short field of the same record that tells it apart (`Version number 3`), when it has one. */
   fallback?: string;
+  /** Set only for a declared record with a declared fallback: the field it came from (`versionNumber`). */
+  fallbackField?: string;
+  /** Set only for a declared record: its declared type and id kind. */
+  type?: string;
+  idKind?: EntityIdKind;
 }
 
 /**
@@ -201,20 +270,34 @@ export interface SeenEntity {
  */
 export function collectSeenEntityIds(
   messages: ReadonlyArray<unknown>,
+  declarations?: EntityDeclarationsByTool,
 ): Map<string, SeenEntity> {
   const seen = new Map<string, SeenEntity>();
   let budget = MAX_NODES;
+  const tools = declarations ? producingTools(messages) : new Map<string, string>();
 
-  const walk = (value: unknown, depth: number): void => {
+  const walk = (value: unknown, depth: number, declared?: ReadonlyMap<Record<string, unknown>, DeclaredRecordIdentity>): void => {
     if (depth > MAX_DEPTH || budget <= 0) return;
     budget -= 1;
     if (Array.isArray(value)) {
-      for (const item of value) walk(item, depth + 1);
+      for (const item of value) walk(item, depth + 1, declared);
       return;
     }
     if (!isRecord(value)) return;
-    const idKey = ID_KEYS.find((key) => entityIdKey(value[key]) !== undefined);
-    if (idKey) {
+    const identity = declared?.get(value);
+    const idKey = identity ? undefined : ID_KEYS.find((key) => entityIdKey(value[key]) !== undefined);
+    if (identity) {
+      const key = entityIdKey(declaredId(identity));
+      const known = key ? seen.get(key) : undefined;
+      if (key && (!known || !known.fallback)) {
+        const fallback = identity.fallbackField !== undefined
+          ? { fallback: fallbackText(identity.fallbackField, identity.fallbackValue!), fallbackField: identity.fallbackField }
+          : {};
+        seen.set(key, {
+          ...known, ...fallback, ...(identity.declaration.type ? { type: identity.declaration.type } : {}), idKind: identity.idKind,
+        });
+      }
+    } else if (idKey) {
       const key = entityIdKey(value[idKey])!;
       const known = seen.get(key);
       if (!known) {
@@ -226,7 +309,7 @@ export function collectSeenEntityIds(
       }
     }
     for (const child of Object.values(value)) {
-      if (typeof child === 'object' && child !== null) walk(child, depth + 1);
+      if (typeof child === 'object' && child !== null) walk(child, depth + 1, declared);
     }
   };
 
@@ -236,7 +319,7 @@ export function collectSeenEntityIds(
     for (let p = message.parts.length - 1; p >= 0; p -= 1) {
       const part: unknown = message.parts[p];
       if (!isRecord(part) || typeof part.type !== 'string') continue;
-      if (part.type.startsWith('tool-') && part.state === 'output-available') walk(part.output, 0);
+      if (part.type.startsWith('tool-') && part.state === 'output-available') walk(part.output, 0, declaredOf(part, tools, declarations));
     }
   }
   return seen;
@@ -249,6 +332,20 @@ export function collectSeenEntityIds(
  */
 export function collectEntityNames(
   messages: ReadonlyArray<unknown>,
+  declarations?: EntityDeclarationsByTool,
 ): Map<string, string> {
-  return new Map([...collectEntitySightings(messages)].map(([id, sighting]) => [id, sighting.name]));
+  return new Map([...collectEntitySightings(messages, declarations)].map(([id, sighting]) => [id, sighting.name]));
+}
+
+/** The plain texts of the user's own messages, newest first (at most 50). */
+export function userTextsOf(messages: ReadonlyArray<unknown>): string[] {
+  const texts: string[] = [];
+  for (let m = messages.length - 1; m >= 0 && texts.length < 50; m -= 1) {
+    const message = messages[m];
+    if (!isRecord(message) || message.role !== 'user' || !Array.isArray(message.parts)) continue;
+    for (const part of message.parts as unknown[]) {
+      if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') texts.push(part.text);
+    }
+  }
+  return texts;
 }

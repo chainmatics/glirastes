@@ -10,6 +10,15 @@ import {
   kindOfToolName,
   kindsMatch,
 } from '../../contracts/entity-identity.js';
+import {
+  entityIdKindOf,
+  entityIdText,
+  inputRefArgs,
+  isEntityIdValue,
+  type EntityDeclarationsByTool,
+  type EntityIdKind,
+  type InputEntityRef,
+} from '../../contracts/entity-declaration.js';
 import type { EntitySighting, SeenEntity } from './entity-names.js';
 
 const MAX_DEPTH = 4;
@@ -50,6 +59,57 @@ export interface ApprovalSubjectOptions {
    * `id` at the top of its arguments addresses the kind this name names.
    */
   toolName?: string;
+  /**
+   * The tool's `inputEntities`: an argument (or the arguments of a composite
+   * key) declared to name a record of a type gets one subject with that
+   * `type`, its `role`, `idKind` and `provenance`; its type picks the record
+   * among colliding ids. Without it, every argument is judged by its key.
+   */
+  inputEntities?: ReadonlyArray<InputEntityRef>;
+  /**
+   * The texts of the user's own messages. With `inputEntities`, an id the
+   * user typed verbatim (a speaking key case-insensitively) is valid
+   * provenance: `seen` with `provenance: 'user-message'` instead of `unknown`.
+   */
+  userTexts?: ReadonlyArray<string>;
+  /**
+   * Every tool's declarations: the id kind an entity type is declared with
+   * anywhere (`speaking` for an order key) applies to a reference of that
+   * type the conversation never showed.
+   */
+  declarations?: EntityDeclarationsByTool;
+}
+
+/** The id kind each declared entity type has in the tools' outputs (the first declaration wins). */
+function idKindsByType(declarations: EntityDeclarationsByTool | undefined): Map<string, EntityIdKind> {
+  const kinds = new Map<string, EntityIdKind>();
+  for (const entry of Object.values(declarations ?? {})) {
+    for (const declaration of entry.output ?? []) {
+      if (declaration.type && !kinds.has(declaration.type)) kinds.set(declaration.type, entityIdKindOf(declaration));
+    }
+  }
+  return kinds;
+}
+
+/** The value at a dot path of the arguments (`filter.ownerId`). */
+function argumentAt(args: Record<string, unknown>, path: string): unknown {
+  let current: unknown = args;
+  for (const key of path.split('.')) {
+    if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, key)) return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Whether `id` occurs as a whole word in one of the user's texts (case-insensitive for a speaking key). */
+function typedByUser(id: string, texts: ReadonlyArray<string>, speaking: boolean): boolean {
+  if (!id || texts.length === 0) return false;
+  const pattern = new RegExp(`(?<![\\p{L}\\p{N}_-])${escapeRegex(id)}(?![\\p{L}\\p{N}_-])`, speaking ? 'iu' : 'u');
+  return texts.some((text) => pattern.test(text));
 }
 
 /** The kind an id argument addresses (`playlist_id` → `playlist`), or undefined when the key does not say. */
@@ -105,6 +165,17 @@ export function resolveApprovalSubjects(
   const toolKind = options.toolName ? kindOfToolName(options.toolName) : undefined;
 
   const add = (path: string, label: string | undefined, raw: unknown, kind: string | undefined) => {
+    const subject = subjectFor(path, label, raw, kind);
+    if (subject) subjects.push(subject);
+  };
+
+  function subjectFor(path: string, label: string | undefined, raw: unknown, kind: string | undefined): ApprovalSubject | undefined {
+    const subjects: ApprovalSubject[] = [];
+    resolve(subjects, path, label, raw, kind);
+    return subjects[0];
+  }
+
+  function resolve(subjects: ApprovalSubject[], path: string, label: string | undefined, raw: unknown, kind: string | undefined): void {
     const key = entityIdKey(raw);
     if (key === undefined) return;
     const id = typeof raw === 'string' ? raw.trim() : String(raw);
@@ -131,10 +202,16 @@ export function resolveApprovalSubjects(
       }
       return;
     }
-    if (!seen) {
-      const record = seenIds.get(key);
+    // A declared record of another kind than the argument's does not name it (user 1 is not playlist 1).
+    const otherKind = (known: string | undefined) => !!known && !!kind && !isUuidLike(id) && !kindsMatch(known, kind);
+    if (!seen || otherKind(seen.kind)) {
+      const found = seenIds.get(key);
+      const record = found && !otherKind(found.type) ? found : undefined;
       subjects.push(record
-        ? { path, id, status: 'seen', ...(label ? { label } : {}), ...(record.fallback ? { fallback: record.fallback } : {}) }
+        ? {
+          path, id, status: 'seen', ...(label ? { label } : {}), ...(record.fallback ? { fallback: record.fallback } : {}),
+          ...(record.fallbackField ? { fallbackField: record.fallbackField } : {}),
+        }
         : { path, id, status: 'unknown', ...(label ? { label } : {}) });
       return;
     }
@@ -148,7 +225,39 @@ export function resolveApprovalSubjects(
       ...(ambiguous ? { names: [...seen.names] } : {}),
       ...(resolvedLabel ? { label: resolvedLabel } : {}),
     });
-  };
+  }
+
+  // Declared arguments first: one subject per reference, typed; the walk below skips them.
+  const declaredPaths = new Set<string>();
+  const typeIdKinds = options.inputEntities?.length ? idKindsByType(options.declarations) : new Map<string, EntityIdKind>();
+  if (isRecord(args)) {
+    for (const ref of options.inputEntities ?? []) {
+      if (subjects.length >= MAX_IDS) break;
+      const paths = inputRefArgs(ref);
+      const values = paths.map((path) => argumentAt(args, path));
+      if (!values.every(isEntityIdValue)) continue;
+      for (const path of paths) declaredPaths.add(path);
+      const id = entityIdText(values as Array<string | number>);
+      const key = entityIdKey(id);
+      const sighting = key !== undefined ? sightings.get(key) : undefined;
+      const record = key !== undefined ? seenIds.get(key) : undefined;
+      const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? sighting?.idKind ?? record?.idKind
+        ?? entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) });
+      const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, id, ref.type);
+      if (!subject) continue;
+      let provenance: ApprovalSubject['provenance'];
+      if (subject.status !== 'unknown') provenance = sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';
+      else if (typedByUser(id, options.userTexts ?? [], idKind === 'speaking')) provenance = 'user-message';
+      subjects.push({
+        ...subject,
+        ...(provenance === 'user-message' ? { status: 'seen' as const } : {}),
+        type: ref.type,
+        role: ref.role ?? 'target',
+        idKind,
+        ...(provenance ? { provenance } : {}),
+      });
+    }
+  }
 
   const isIdValue = (key: string, value: unknown) =>
     isIdKey(key) || (typeof value === 'string' && isUuidLike(value));
@@ -162,6 +271,7 @@ export function resolveApprovalSubjects(
       if (subjects.length >= MAX_IDS) return;
       if (value === undefined || value === null) continue;
       const path = prefix ? `${prefix}.${key}` : key;
+      if (declaredPaths.has(path)) continue;
       // A bare `id` inside `playlist: { id }` takes the label of its object.
       const label = isBareIdArgumentKey(key) ? parentLabel : labelOfKey(key);
       const kind = isBareIdArgumentKey(key) ? parentKind : kindOfKey(key);
