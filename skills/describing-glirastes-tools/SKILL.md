@@ -118,6 +118,10 @@ in each description which neighbour fits better for which request.
   the first 10 entries complete), and older turns without tool results. A
   tool that takes an id should say in its description to look the id up by
   name with a list or search tool when it is not visible.
+- After a 404 of a route with path parameters (`/playlists/:id`) the failure
+  result carries a fixed `hint`: look the value up with a list or search
+  tool, and tell the user it was not found only when there is none or the
+  lookup finds nothing. It names the path parameters, never a value.
 
 ## Chat entities and commands
 

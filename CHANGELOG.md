@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- A 404 of an endpoint tool whose route has path parameters (`/playlists/:id`) now carries a fixed `hint` next to `error`, `status` and the app's own body (appended, never replacing it): `Not found: no record matches the path parameter "id". The value may not exist, or it may be the id of a different kind of record. If a list or search tool can find the record (for example by its name), look it up first, then call this tool again with the value it returns. Only if there is no such tool or the lookup finds nothing, tell the user it was not found; do not ask the user for an id before that.` (several parameters: `the path parameters "a", "b"`, at most five named). It names route-template parameters, never a value. Only path parameters count, whatever they are called; no hint for a route without path parameters, any other status, or a call the endpoint caller refused locally. Kept under an output bound (the body is still reduced or withheld), by `executeTool`, and in the runtime container. The loop fingerprint and the consecutive-error count of the failure are unchanged. No option: the text is the same for every app.
+
 ## [0.17.1] - 2026-11-18
 
 ### Changed
