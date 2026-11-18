@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parseRuntimeConfig } from "./config.js";
+import { parseRuntimeConfig, requestLocaleOf } from "./config.js";
 import { credentialHeaders, resolveBackendPrincipal } from "./identity.js";
 const raw = () => ({
   schemaVersion: 1,
@@ -54,6 +54,21 @@ describe("runtime service trust configuration", () => {
       const c = { ...raw(), application: { ...raw().application, resultHandles: value } };
       expect(() => parseRuntimeConfig(c)).toThrow();
     }
+  });
+  it("accepts the chat languages and leaves them unset by default", () => {
+    expect(parseRuntimeConfig(raw()).chat).toBeUndefined();
+    const chat = { locale: "de-DE", requestLocaleHeader: "accept-language", locales: { pl: { silentTurn: "Nie udało się." } } };
+    expect(parseRuntimeConfig({ ...raw(), chat }).chat).toEqual(chat);
+    for (const wrong of [{ locale: "de_DE" }, { requestLocaleHeader: "X-App Language" }, { locales: { de_DE: {} } }, { theme: "dark" }]) {
+      expect(() => parseRuntimeConfig({ ...raw(), chat: wrong })).toThrow();
+    }
+  });
+  it("reads the turn language from the configured header", () => {
+    const request = (headers: Record<string, string>) => new Request("https://app.test/glirastes/chat", { headers });
+    expect(requestLocaleOf(request({ "accept-language": "pl-PL,pl;q=0.9,en;q=0.8" }), "accept-language")).toBe("pl-PL");
+    expect(requestLocaleOf(request({ "x-app-language": "de" }), "x-app-language")).toBe("de");
+    expect(requestLocaleOf(request({ "x-app-language": "<script>" }), "x-app-language")).toBeUndefined();
+    expect(requestLocaleOf(request({}), "x-app-language")).toBeUndefined();
   });
   it("rejects unsafe identity targets and unknown settings", () => {
     const c = raw();

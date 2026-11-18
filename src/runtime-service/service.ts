@@ -11,8 +11,9 @@ import {
   createPostgresApprovalStore,
 } from "./approval-store.js";
 import { credentialHeaders, resolveBackendPrincipal } from "./identity.js";
-import { readSecret, type RuntimeServiceConfig } from "./config.js";
+import { readSecret, requestLocaleOf, type RuntimeServiceConfig } from "./config.js";
 import { createRuntimeHttpServer } from "./server.js";
+import { assertChatServerLocales } from "../server/adapters/nextjs/chat-texts.js";
 
 /** No business content or credential is included in service diagnostics. */
 function event(type: string) {
@@ -20,6 +21,8 @@ function event(type: string) {
 }
 
 export async function startRuntimeService(config: RuntimeServiceConfig) {
+  // Fails at start, not per turn: an unknown text key or an empty text.
+  assertChatServerLocales(config.chat?.locales, "Runtime configuration chat");
   const generated = await loadRuntimeArtifact(config.application.artifact);
   const [connectionString, approvalSecret, modelKey] = await Promise.all([
     readSecret(config.approvals.connectionStringFile),
@@ -146,6 +149,11 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
           maxBodyBytes: config.server.maxBodyBytes,
           maxSteps: config.limits.maxModelSteps,
           maxOutputTokens: config.limits.maxOutputTokens,
+          ...(config.chat?.locale ? { locale: config.chat.locale } : {}),
+          ...(config.chat?.locales ? { locales: config.chat.locales } : {}),
+          ...(config.chat?.requestLocaleHeader
+            ? { requestLocale: (req: Request) => requestLocaleOf(req, config.chat!.requestLocaleHeader!) }
+            : {}),
           ...(config.application.maxResultChars !== undefined
             ? { maxResultChars: config.application.maxResultChars }
             : {}),

@@ -20,6 +20,8 @@ import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions } from './prepare-model-messages.js';
 import type { ChatMemoryConfig } from './chat-memory.js';
 import type { BudgetStopTexts } from './budget-stop-notice.js';
+import type { ChatServerLocales } from './chat-texts.js';
+import type { ToolTextsMap } from '../../../runtime/tool-texts.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ResultHandleLimits, ToolFailureClassifier } from '../../core/index.js';
 import type {
   Principal,
@@ -249,9 +251,22 @@ export interface AiChatHandlerConfig {
    * name (for example `toolSearchSemantics` of the generated module). They
    * rank `find_tools` and the default start set and never make a tool
    * eligible or reach the model. Replaces the map `chatTurn()` hands on;
-   * it is not merged with it.
+   * it is not merged with it (to add your own, pass
+   * `mergeToolSearchSemantics(turn.toolSemantics, own)` from `glirastes/runtime`).
    */
   toolSemantics?: ToolSearchSemanticsMap;
+
+  /**
+   * Labels per language keyed by model-facing tool name (`toolTexts` of the
+   * generated module, written when tools.json names `languages`; `chatTurn()`
+   * hands it on). With it, the `data-tool-presentation` part of a managed
+   * turn words each tool in the turn's language (`requestLocale`, else an
+   * explicitly set `locale`, else the manifest's locale as before): the
+   * manifest presentation where it is in that language, else these labels
+   * (the language, another region of it, English, the first one). Local
+   * data; never sent to the Platform.
+   */
+  toolTexts?: ToolTextsMap;
 
   /**
    * Dynamic tool loader. Used in legacy mode (without pipeline).
@@ -318,6 +333,25 @@ export interface AiChatHandlerConfig {
    * from the chat or the model's answers: set it for a non-English chat.
    */
   locale?: string;
+  /**
+   * The language of one request, e.g. from a header the app's chat
+   * transport sends (`x-app-language`), a cookie or the user's profile; a
+   * BCP-47 tag (`pl-PL`). Opt-in: without it every turn uses `locale`.
+   * It sets the turn's language for the handler's own texts (with
+   * `locales`) and the tool labels (with `toolTexts`). Must not read the
+   * body; a value that is no language tag, or a throw, falls back to `locale`.
+   */
+  requestLocale?: (request: Request) => string | undefined | Promise<string | undefined>;
+  /**
+   * The handler's own texts per BCP-47 language tag, to add a language
+   * (`pl`) or change single texts of one: the keys of `budgetStopTexts` plus
+   * `silentTurn` (the answer of a turn that produced nothing). Partial tables
+   * fall back per key: the language, another region of it, the built-in
+   * German or English texts, English. `budgetStopTexts` stays language-free
+   * and wins for every language. An unknown key, an empty text or a key
+   * that is no language tag throws.
+   */
+  locales?: ChatServerLocales;
   /**
    * Texts of the closing notice the built-in stream handler appends when it
    * stops a turn at a limit (step cap or runtime budget) without a final

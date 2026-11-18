@@ -78,3 +78,39 @@ describe('a turn whose model returns no visible output', () => {
     },
   );
 });
+
+describe('the handler texts in the language of a request', () => {
+  const handlerWith = (extra: Record<string, unknown>) => createAiChatHandler({
+    tools: {},
+    model: new MockLanguageModelV3({ doStream: async () => ({ stream: silentStep('empty-text') }) }),
+    systemPrompt: 'Assistant',
+    ...extra,
+  });
+  const withLanguage = (language: string) => {
+    const base = request();
+    return new Request(base, { headers: { 'content-type': 'application/json', 'x-app-language': language } });
+  };
+  const pl = { silentTurn: 'Nie udało mi się odpowiedzieć.' };
+
+  it('answers in the app table of the request language, per key falling back to the built-in texts', async () => {
+    const handler = handlerWith({ requestLocale: (req: Request) => req.headers.get('x-app-language') ?? undefined, locales: { pl } });
+    expect(await (await handler(withLanguage('pl-PL'))).text()).toContain('Nie udało mi się odpowiedzieć.');
+    expect(await (await handler(withLanguage('de-AT'))).text()).toContain('keine Antwort');
+    expect(await (await handler(withLanguage('fr'))).text()).toContain('I did not produce an answer');
+    // No language tag, or a throwing resolver: the configured locale.
+    expect(await (await handler(withLanguage('de_DE; drop'))).text()).toContain('I did not produce an answer');
+    const throwing = handlerWith({ locale: 'de-DE', requestLocale: () => { throw new Error('no profile'); } });
+    expect(await (await throwing(withLanguage('pl'))).text()).toContain('keine Antwort');
+  });
+
+  it('keeps the configured locale for every turn without requestLocale', async () => {
+    const handler = handlerWith({ locale: 'pl', locales: { pl } });
+    expect(await (await handler(withLanguage('de'))).text()).toContain('Nie udało mi się odpowiedzieć.');
+  });
+
+  it('refuses an invalid table when the handler is created', () => {
+    expect(() => handlerWith({ locales: { de_DE: pl } })).toThrow('locales.de_DE is not a BCP-47 language tag');
+    expect(() => handlerWith({ locales: { pl: { sendButton: 'Wyślij' } } })).toThrow('locales.pl.sendButton is not a text key');
+    expect(() => handlerWith({ locales: { pl: { closing: ' ' } } })).toThrow('must be a non-empty string');
+  });
+});
