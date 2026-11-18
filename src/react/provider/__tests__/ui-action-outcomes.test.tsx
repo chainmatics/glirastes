@@ -226,6 +226,22 @@ describe('AiChatProvider UI action outcomes', () => {
     expect(order).toEqual(['first', 'second']);
   });
 
+  it('runs a held-back result when the request moves on to another assistant message', async () => {
+    const { bus, outcomes, onToolResult } = setup();
+    const seen = vi.fn();
+    cleanups.push(bus.subscribeById('second', seen));
+    await act(async () => { control.set([user], 'submitted'); });
+    const first = assistant(toolPart('c1', undefined, 'input-available'), toolPart('c2', action('second')));
+    await act(async () => { control.set([user, first], 'streaming'); });
+    await settle();
+    expect(seen).not.toHaveBeenCalled();
+    const next = { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'Weiter.' }] } as unknown as ChatMessage;
+    await act(async () => { control.set([user, first, next], 'streaming'); });
+    await waitFor(() => expect(seen).toHaveBeenCalledTimes(1));
+    expect(onToolResult).toHaveBeenCalledTimes(1);
+    expect(outcomes.map((event) => event.toolCallId)).toEqual(['c2']);
+  });
+
   it('does not wait for a call that is still open when the request ends', async () => {
     const { bus, outcomes } = setup();
     const seen = vi.fn();
@@ -370,6 +386,18 @@ describe('AiChatProvider never runs a UI action late', () => {
     release();
     await settle();
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it('does not hold a new chat behind a handler of the cleared one', async () => {
+    const { bus, outcomes } = setup({ uiActionOutcomeTimeoutMs: 60_000 });
+    const push = vi.fn();
+    cleanups.push(bus.subscribeById('hang', () => new Promise<void>(() => {})));
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    await stream([user, assistant(toolPart('c1', action('hang')))]);
+    await act(async () => { control.clear(); });
+    await stream([user, { ...assistant(toolPart('c2', navigate('/fresh'))), id: 'a2' } as ChatMessage]);
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/fresh'));
+    expect(outcomes.map((event) => event.toolCallId)).toEqual(['c2']);
   });
 
   it('does not run results that come back after clear()', async () => {

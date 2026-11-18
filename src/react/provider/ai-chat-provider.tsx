@@ -622,9 +622,21 @@ export function AiChatProvider({
   // Refs for deduplication
   const processedToolCallsRef = useRef<Set<string>>(new Set());
   const handledApprovalIdsRef = useRef<Set<string>>(new Set());
+  // UI actions run one tool result after another, in call order.
+  const uiActionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Set once a UI action started a full page load: nothing after it runs on this page.
+  const pageLeavingRef = useRef(false);
+  // Live results held back until the earlier calls of their message have results.
+  const deferredResultsRef = useRef<Map<string, { toolName: string; output: Record<string, unknown>; messageId: string }>>(new Map());
   // Bumped by clear(), a session switch and unmount: queued actions of the left chat never start.
   const uiActionGenerationRef = useRef(0);
-  useEffect(() => () => { uiActionGenerationRef.current += 1; }, []);
+  const resetUiActions = useCallback(() => {
+    uiActionGenerationRef.current += 1;
+    uiActionQueueRef.current = Promise.resolve();
+    pageLeavingRef.current = false;
+    deferredResultsRef.current.clear();
+  }, []);
+  useEffect(() => resetUiActions, [resetUiActions]);
 
 
   // Stable refs for callbacks to avoid re-creating transport
@@ -751,9 +763,9 @@ export function AiChatProvider({
   useEffect(() => {
     if (approvalSessionRef.current === activeSessionId) return;
     approvalSessionRef.current = activeSessionId;
-    uiActionGenerationRef.current += 1;
+    resetUiActions();
     setPendingApprovalsMap(new Map());
-  }, [activeSessionId]);
+  }, [activeSessionId, resetUiActions]);
 
   // Load messages from session whenever the active session changes.
   // Runs on mount and on every switchSession() call.
@@ -830,10 +842,6 @@ export function AiChatProvider({
     );
   }, [rawMessages, isInitialized, activeSessionId, loadedSessionId]);
 
-  // UI actions run one tool result after another, in call order.
-  const uiActionQueueRef = useRef<Promise<void>>(Promise.resolve());
-  // Set once a UI action started a full page load: nothing after it runs on this page.
-  const pageLeavingRef = useRef(false);
   // Whether the previous run of the tool-result effect saw a request of this instance running.
   const liveRequestRef = useRef(false);
 
@@ -848,7 +856,7 @@ export function AiChatProvider({
         uiActionBusRef.current ?? getDefaultUiActionBus(),
         uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {},
       ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }));
-      if (!run) return;
+      if (!run || uiActionGenerationRef.current !== generation) return;
       if (run.code === 'initiated') pageLeavingRef.current = true;
       if (run.code !== 'ok' && run.code !== 'initiated') {
         console.warn('[glirastes] A generated UI action was not carried out');
@@ -881,10 +889,19 @@ export function AiChatProvider({
     liveRequestRef.current = isLoading;
     const live = isLoading || wasLive;
     if (isLoading && !wasLive) pageLeavingRef.current = false;
-    if (rawMessages.length === 0) return;
-
     const lastMessage = rawMessages[rawMessages.length - 1];
-    if (lastMessage.role !== 'assistant') return;
+
+    // Held-back results of a message that is no longer the last one run now, in their order.
+    for (const [toolCallId, held] of deferredResultsRef.current) {
+      if (lastMessage?.id === held.messageId) continue;
+      deferredResultsRef.current.delete(toolCallId);
+      if (processedToolCallsRef.current.has(toolCallId)) continue;
+      processedToolCallsRef.current.add(toolCallId);
+      onToolResultRef.current?.(held.toolName, held.output);
+      runUiActions(held.toolName, toolCallId, held.output);
+    }
+
+    if (!lastMessage || lastMessage.role !== 'assistant') return;
 
     // While the request streams, a result waits for every earlier call of the
     // message to finish, so UI actions run in call order, not arrival order.
@@ -951,11 +968,19 @@ export function AiChatProvider({
         // Tool result available — call onToolResult
         if (toolPart.state === 'output-available' && isRecord(toolPart.output)) {
           const toolCallId = toolPart.toolCallId || `${lastMessage.id}-${partType}`;
-          if (earlierCallOpen && isLoading) continue;
           if (!processedToolCallsRef.current.has(toolCallId)) {
-            processedToolCallsRef.current.add(toolCallId);
             // A result that already carries an outcome was run before.
-            if (!live || 'outcome' in toolPart.output) continue;
+            if (!live || 'outcome' in toolPart.output) {
+              processedToolCallsRef.current.add(toolCallId);
+              deferredResultsRef.current.delete(toolCallId);
+              continue;
+            }
+            if (earlierCallOpen && isLoading) {
+              deferredResultsRef.current.set(toolCallId, { toolName, output: toolPart.output, messageId: lastMessage.id });
+              continue;
+            }
+            deferredResultsRef.current.delete(toolCallId);
+            processedToolCallsRef.current.add(toolCallId);
             onToolResultRef.current?.(toolName, toolPart.output);
             // Generated UI tools run in the browser through the app's bridge.
             runUiActions(toolName, toolCallId, toolPart.output);
@@ -1277,7 +1302,7 @@ export function AiChatProvider({
   }, [transportStop, pipelineSteps.length]);
 
   const clear = useCallback(() => {
-    uiActionGenerationRef.current += 1;
+    resetUiActions();
     setMessages([]);
     void Promise.resolve(sessionRef.current?.clear?.(activeSessionId));
     processedToolCallsRef.current.clear();
@@ -1294,7 +1319,7 @@ export function AiChatProvider({
     setIsMentionSearching(false);
     setPendingCommand(null);
     setSuggestionChips(suggestionsConfig.staticChips ?? []);
-  }, [setMessages, activeSessionId, suggestionsConfig.staticChips]);
+  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions]);
 
   // ---------------------------------------------------------------------------
   // Multi-session actions
