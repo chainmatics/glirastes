@@ -13,7 +13,15 @@ import {
 } from '../../contracts/entity-declaration.js';
 import { defineTool, type ToolContext } from '../../types.js';
 import { compactHistoryResult, type HistoryMarker } from '../adapters/nextjs/history-compaction.js';
-import { collectDeclaredIdLabels, collectIdLabels, redactIds, type IdLabels } from '../adapters/nextjs/hide-ids.js';
+import { convertArrayToReadableStream } from 'ai/test';
+import {
+  collectDeclaredIdLabels,
+  collectDeclaredIdLabelsFromMessages,
+  collectIdLabels,
+  createHideIdsTransform,
+  redactIds,
+  type IdLabels,
+} from '../adapters/nextjs/hide-ids.js';
 import { entityDeclarationsOfTools } from '../adapters/nextjs/tool-entities.js';
 import { endpointToolToTool, toolToAiTool } from './index.js';
 import { readResultHandle } from './read-result-tool.js';
@@ -297,5 +305,30 @@ describe('bounds and whole ids', () => {
     collectDeclaredIdLabels(tracks(5), [TRACK], labels);
     expect(redactIds('See ID: 3.14 and ID: 3/7, then ID: 3.', labels)).toBe('See ID: 3.14 and ID: 3/7, then.');
     expect(redactIds('Wert ID: 3,14 und ID: 3, fertig', labels)).toBe('Wert ID: 3,14 und, fertig');
+  });
+});
+
+describe('hideIds reads read_result answers with the producing tool', () => {
+  it('learns a declared id first seen in a read_result answer, in the stream and from earlier messages', async () => {
+    const entities = { tracks_list: { output: [{ ...TRACK, path: 'data[]' }] } };
+    const parts = [
+      { type: 'tool-result', toolCallId: 'c1', toolName: 'tracks_list', input: {}, output: { data: [{ trackNo: 1, label_text: 'One' }], _result: { id: 'ro_abc12345' } } },
+      { type: 'tool-result', toolCallId: 'c2', toolName: 'read_result', input: { resultId: 'ro_abc12345' }, output: { data: [{ trackNo: 42, label_text: 'Late' }] } },
+      { type: 'text-start', id: 't' },
+      { type: 'text-delta', id: 't', text: 'Late (ID: 42) is here.' },
+      { type: 'text-end', id: 't' },
+    ];
+    const stream = convertArrayToReadableStream(parts as never)
+      .pipeThrough(createHideIdsTransform(new Map(), { entities })({ tools: {}, stopStream: () => {} }) as never);
+    let text = '';
+    for await (const part of stream as unknown as AsyncIterable<{ type: string; text?: string }>) if (part.type === 'text-delta') text += part.text;
+    expect(text).toBe('Late is here.');
+
+    const labels: IdLabels = new Map();
+    collectDeclaredIdLabelsFromMessages([{ role: 'assistant', parts: [
+      { type: 'tool-tracks_list', state: 'output-available', input: {}, output: { data: [{ trackNo: 1, label_text: 'One' }], _result: { id: 'ro_abc12345' } } },
+      { type: 'tool-read_result', state: 'output-available', input: { resultId: 'ro_abc12345' }, output: { data: [{ trackNo: 42, label_text: 'Late' }] } },
+    ] }], entities, labels);
+    expect(labels.get('42')).toBe('Late');
   });
 });

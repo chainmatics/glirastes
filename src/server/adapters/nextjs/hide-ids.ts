@@ -12,6 +12,7 @@ import {
   type EntityDeclarationsByTool,
   type OutputEntityDeclaration,
 } from '../../../contracts/entity-declaration.js';
+import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 
 /**
  * Keeps technical ids out of the assistant's answers. Tool results teach the
@@ -173,6 +174,8 @@ export function collectDeclaredIdLabelsFromMessages(
   labels: IdLabels,
 ): void {
   if (!entities || !Array.isArray(messages)) return;
+  const producers = new ResultProducers();
+  const toolParts: Array<{ name: string; part: Record<string, unknown> }> = [];
   for (const message of messages) {
     const parts = (message as { parts?: unknown } | null)?.parts;
     if (!Array.isArray(parts)) continue;
@@ -180,9 +183,32 @@ export function collectDeclaredIdLabelsFromMessages(
       const type = (part as { type?: unknown } | null)?.type;
       if (typeof type !== 'string' || !type.startsWith('tool-')) continue;
       const name = type.slice('tool-'.length);
-      if (!Object.prototype.hasOwnProperty.call(entities, name)) continue;
-      collectDeclaredIdLabels((part as { output?: unknown }).output, entities[name]!.output, labels);
+      producers.note(name, (part as { output?: unknown }).output);
+      toolParts.push({ name, part: part as Record<string, unknown> });
     }
+  }
+  for (const { name, part } of toolParts) {
+    const producer = producers.of(name, part.input);
+    if (!Object.prototype.hasOwnProperty.call(entities, producer)) continue;
+    collectDeclaredIdLabels(part.output, entities[producer]!.output, labels);
+  }
+}
+
+/** The tool that produced each result handle: a `read_result` answer is read with that tool's declarations. */
+class ResultProducers {
+  private readonly byId = new Map<string, string>();
+
+  note(toolName: string, output: unknown): void {
+    if (toolName === READ_RESULT_TOOL_NAME || typeof output !== 'object' || output === null) return;
+    const marker = (output as { _result?: unknown })._result;
+    const id = typeof marker === 'object' && marker !== null ? (marker as { id?: unknown }).id : undefined;
+    if (typeof id === 'string') this.byId.set(id, toolName);
+  }
+
+  of(toolName: string, input: unknown): string {
+    if (toolName !== READ_RESULT_TOOL_NAME || typeof input !== 'object' || input === null) return toolName;
+    const id = (input as { resultId?: unknown }).resultId;
+    return (typeof id === 'string' && this.byId.get(id)) || toolName;
   }
 }
 
@@ -207,8 +233,13 @@ export function createHideIdsTransform(
   labels: IdLabels = new Map(),
   options: { entities?: EntityDeclarationsByTool } = {},
 ): StreamTextTransform<ToolSet> {
-  const declaredOf = (toolName: unknown) => (typeof toolName === 'string' && options.entities
-    && Object.prototype.hasOwnProperty.call(options.entities, toolName) ? options.entities[toolName]!.output : undefined);
+  const producers = new ResultProducers();
+  const declaredOf = (toolName: unknown, input: unknown, output: unknown) => {
+    if (typeof toolName !== 'string' || !options.entities) return undefined;
+    producers.note(toolName, output);
+    const producer = producers.of(toolName, input);
+    return Object.prototype.hasOwnProperty.call(options.entities, producer) ? options.entities[producer]!.output : undefined;
+  };
   return () => {
     const held = new Map<string, { part: TextDelta; text: string }>();
     const flush = (controller: TransformStreamDefaultController<Part>, id?: string) => {
@@ -234,7 +265,7 @@ export function createHideIdsTransform(
         if (part.type === 'tool-result') {
           collectIdLabels(part.input, labels);
           collectIdLabels(part.output, labels);
-          collectDeclaredIdLabels(part.output, declaredOf(part.toolName), labels);
+          collectDeclaredIdLabels(part.output, declaredOf(part.toolName, part.input, part.output), labels);
         }
         flush(controller, part.type === 'text-end' ? part.id : undefined);
         controller.enqueue(part);
