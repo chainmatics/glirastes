@@ -77,8 +77,9 @@ export interface NavigationBridgeOptions {
   /**
    * True when `push` loads a new document (`location.assign`, a multi-page
    * app): the chat then reports the navigation as started, not carried out.
+   * A function decides per target.
    */
-  reloads?: boolean;
+  reloads?: boolean | ((href: string) => boolean);
   bus?: UiActionBus;
 }
 
@@ -99,8 +100,22 @@ export function registerNavigationBridge(options: NavigationBridgeOptions): () =
     if (await options.push(href) === false) {
       throw new UiActionRejectedError('handler', `Navigation to ${href} was not carried out`);
     }
-    if (options.reloads) markUiActionInitiated(action);
+    const reloads = typeof options.reloads === 'function' ? options.reloads(href) : options.reloads === true;
+    if (reloads) markUiActionInitiated(action);
   });
+}
+
+/** False for a target that only changes the fragment of the open page: `location.assign` keeps the document. */
+function loadsNewDocument(href: string): boolean {
+  const current = globalThis.location?.href;
+  if (typeof current !== 'string' || !href.includes('#')) return true;
+  try {
+    const from = new URL(current);
+    const to = new URL(href, from);
+    return to.origin !== from.origin || to.pathname !== from.pathname || to.search !== from.search;
+  } catch {
+    return true;
+  }
 }
 
 export interface DocumentNavigationOptions {
@@ -116,7 +131,7 @@ export interface DocumentNavigationOptions {
 export function registerDocumentNavigation(options: DocumentNavigationOptions = {}): () => void {
   return registerNavigationBridge({
     push: (href) => { globalThis.location.assign(href); },
-    reloads: true,
+    reloads: loadsNewDocument,
     ...(options.bus ? { bus: options.bus } : {}),
   });
 }

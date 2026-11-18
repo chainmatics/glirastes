@@ -289,6 +289,19 @@ describe('navigation bridge outcomes', () => {
     expect(after).not.toHaveBeenCalled();
   });
 
+  it('treats a fragment change on the open page as carried out, not as a page load', async () => {
+    const bus = new UiActionBus();
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign, href: 'https://app.example/tasks?view=list' });
+    const after = vi.fn();
+    cleanups.push(registerDocumentNavigation({ bus }));
+    cleanups.push(bus.subscribeById('toast.show', after));
+    expect(await runToolResultUiActions(result([navigate('/tasks?view=list#details'), action('toast.show')]), bus))
+      .toMatchObject({ code: 'ok', dispatched: 2 });
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(await runToolResultUiActions(result(navigate('/reports#top')), bus)).toMatchObject({ code: 'initiated' });
+  });
+
   it('reports initiated for an own bridge that reloads', async () => {
     const bus = new UiActionBus();
     const push = vi.fn();
