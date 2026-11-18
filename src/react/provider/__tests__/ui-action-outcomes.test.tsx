@@ -242,6 +242,21 @@ describe('AiChatProvider UI action outcomes', () => {
     expect(outcomes.map((event) => event.toolCallId)).toEqual(['c2']);
   });
 
+  it('runs the earlier call first when its result and the next message arrive together', async () => {
+    const { bus } = setup();
+    const order: string[] = [];
+    cleanups.push(bus.subscribeById('first', () => { order.push('first'); }));
+    cleanups.push(bus.subscribeById('second', () => { order.push('second'); }));
+    await act(async () => { control.set([user], 'submitted'); });
+    await act(async () => {
+      control.set([user, assistant(toolPart('c1', undefined, 'input-available'), toolPart('c2', action('second')))], 'streaming');
+    });
+    const done = assistant(toolPart('c1', action('first')), toolPart('c2', action('second')));
+    const next = { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'Weiter.' }] } as unknown as ChatMessage;
+    await act(async () => { control.set([user, done, next], 'streaming'); });
+    await waitFor(() => expect(order).toEqual(['first', 'second']));
+  });
+
   it('releases held-back results in call order, not arrival order', async () => {
     const { bus } = setup();
     const order: string[] = [];

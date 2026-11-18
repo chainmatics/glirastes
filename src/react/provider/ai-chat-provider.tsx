@@ -911,19 +911,40 @@ export function AiChatProvider({
     const lastMessage = rawMessages[rawMessages.length - 1];
 
     // Held-back results of a message that is no longer the last one run now, in their order.
-    const messageOrder = new Map<string, number>();
-    for (const held of deferredResultsRef.current.values()) {
-      if (!messageOrder.has(held.messageId)) messageOrder.set(held.messageId, messageOrder.size);
-    }
-    const released = [...deferredResultsRef.current]
-      .filter(([, held]) => lastMessage?.id !== held.messageId)
-      .sort(([, a], [, b]) => (messageOrder.get(a.messageId)! - messageOrder.get(b.messageId)!) || a.index - b.index);
-    for (const [toolCallId, held] of released) {
-      deferredResultsRef.current.delete(toolCallId);
-      if (processedToolCallsRef.current.has(toolCallId)) continue;
-      processedToolCallsRef.current.add(toolCallId);
-      onToolResultRef.current?.(held.toolName, held.output);
-      runUiActions(held.toolName, toolCallId, held.output);
+    // A message that held results back and is no longer the last one: run its
+    // results now, in call order, including those that arrived with the update
+    // that moved on (a result of a call that never finished stays out).
+    const heldMessageIds = [...new Set([...deferredResultsRef.current.values()].map((held) => held.messageId))]
+      .filter((messageId) => lastMessage?.id !== messageId);
+    for (const messageId of heldMessageIds) {
+      const message = rawMessages.find((candidate) => candidate.id === messageId);
+      const results: Array<{ toolCallId: string; toolName: string; output: Record<string, unknown>; index: number }> = [];
+      if (message) {
+        for (const [index, part] of message.parts.entries()) {
+          const toolPart = part as { type?: unknown; state?: unknown; output?: unknown; toolCallId?: unknown };
+          if (typeof toolPart.type !== 'string' || !toolPart.type.startsWith('tool-')) continue;
+          if (toolPart.state !== 'output-available' || !isRecord(toolPart.output)) continue;
+          const toolCallId = typeof toolPart.toolCallId === 'string' && toolPart.toolCallId
+            ? toolPart.toolCallId
+            : `${message.id}-${toolPart.type}`;
+          results.push({ toolCallId, toolName: toolPart.type.replace('tool-', ''), output: toolPart.output, index });
+        }
+      } else {
+        for (const [toolCallId, held] of deferredResultsRef.current) {
+          if (held.messageId === messageId) results.push({ toolCallId, ...held });
+        }
+        results.sort((a, b) => a.index - b.index);
+      }
+      for (const [toolCallId, held] of deferredResultsRef.current) {
+        if (held.messageId === messageId) deferredResultsRef.current.delete(toolCallId);
+      }
+      for (const result of results) {
+        if (processedToolCallsRef.current.has(result.toolCallId)) continue;
+        processedToolCallsRef.current.add(result.toolCallId);
+        if ('outcome' in result.output) continue;
+        onToolResultRef.current?.(result.toolName, result.output);
+        runUiActions(result.toolName, result.toolCallId, result.output);
+      }
     }
 
     if (!lastMessage || lastMessage.role !== 'assistant') return;
