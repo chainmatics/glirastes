@@ -582,7 +582,8 @@
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"][data-state="error"] [data-element="activity-summary"] [data-element="icon"] {
   color: #dc2626;
 }
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-step"][data-status="declined"] [data-element="icon"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-step"][data-status="declined"] [data-element="icon"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-step"][data-status="expected"] [data-element="icon"] {
   color: var(--cm-text-muted);
 }
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="detail"] {

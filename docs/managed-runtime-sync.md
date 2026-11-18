@@ -490,7 +490,10 @@ counts as `'error'`. An expected failure still counts as a tool call and for
 the other budgets (tool calls, repeated fingerprint, timeouts), but neither
 increments nor resets the consecutive-error count, and it is no tool error in
 the metric event. The result carries `expectedFailure: true`, so the model
-knows the failure is a known outcome rather than a fault to retry.
+knows the failure is a known outcome rather than a fault to retry. The
+chat's activity log reads the same marker: such a step is shown neutrally as
+`expected` (`1 without result`), not as failed; an unclassified failure is
+shown as failed.
 
 Loop detection fingerprints an endpoint failure (a failure result with a
 `status`) by its stable fields only: tool, arguments, `success`, `status`,

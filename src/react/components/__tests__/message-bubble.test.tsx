@@ -123,7 +123,7 @@ describe('MessageBubble tool-result visibility', () => {
   });
 
   it('never shows the model-facing hand-off note of a UI tool to the user', () => {
-    const note = 'Whether it was carried out is not known: do not tell the user it succeeded, say it was requested. Do not quote this text.';
+    const note = 'Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.';
     render(
       <MessageBubble
         message={{
@@ -154,6 +154,44 @@ describe('MessageBubble tool-result visibility', () => {
     expect(document.body.textContent).not.toContain(note);
     expect(document.querySelectorAll('[data-component="tool-result"]')).toHaveLength(0);
     expect(document.querySelector('[data-component="activity-log"]')).not.toBeNull();
+  });
+
+  it('shows an expected failure as a neutral step and an unmarked one as failed', () => {
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-expected',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-tasks_get',
+              toolCallId: 'call-e1',
+              state: 'output-available',
+              output: { success: false, error: 'Not found', status: 404, retryable: false, expectedFailure: true },
+            } as never,
+            {
+              type: 'tool-tasks_list',
+              toolCallId: 'call-e2',
+              state: 'output-available',
+              output: { items: [] },
+            } as never,
+            {
+              type: 'tool-tasks_delete',
+              toolCallId: 'call-e3',
+              state: 'output-available',
+              output: { success: false, error: 'Server error', status: 500, retryable: true },
+            } as never,
+          ],
+        }}
+      />,
+    );
+
+    const log = document.querySelector('[data-component="activity-log"]')!;
+    expect(log.getAttribute('data-state')).toBe('error');
+    expect(log.querySelector('[data-element="activity-summary"]')!.textContent)
+      .toBe('3 Schritte ausgeführt, 1 fehlgeschlagen, 1 ohne Ergebnis');
+    expect(Array.from(log.querySelectorAll('[data-element="activity-step"]')).map((row) => row.getAttribute('data-status')))
+      .toEqual(['expected', 'done', 'error']);
   });
 
   it('does not render standard follow-up registration as a raw tool result', () => {

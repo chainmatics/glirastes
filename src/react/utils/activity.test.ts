@@ -23,12 +23,12 @@ describe('readActivitySteps', () => {
     ]);
   });
 
-  it('reads any output with success: false as a failed step, with its error text', () => {
+  it('reads an output with success: false and no expectedFailure marker as a failed step, with its error text', () => {
     const parts = [
       // Endpoint tool: a backend failure arrives as an output, not as output-error.
       { type: 'tool-tasks_get', toolCallId: 'c1', state: 'output-available', output: { success: false, error: 'Not found', status: 404, retryable: false } },
-      // Classified as expected by the app: still not carried out.
-      { type: 'tool-tasks_lock', toolCallId: 'c2', state: 'output-available', output: { success: false, error: 'Locked', status: 409, expectedFailure: true } },
+      // Not classified by the app (or produced by a server before classifyToolFailure): a failure.
+      { type: 'tool-tasks_lock', toolCallId: 'c2', state: 'output-available', output: { success: false, error: 'Locked', status: 409 } },
       // Generated UI tool refused on the server.
       { type: 'tool-ui_dialog_open', toolCallId: 'c3', state: 'output-available', output: { success: false, error: 'Not on this page.', retryable: false } },
       // Custom tool without an error text.
@@ -68,17 +68,49 @@ describe('readActivitySteps', () => {
     const parts = [
       { type: 'tool-ui_navigate', toolCallId: 'c1', state: 'output-available', output: {
         success: true,
-        message: 'Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested. Do not quote this text.',
+        message: 'Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.',
         uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks' } },
       } },
       { type: 'tool-ui_open', toolCallId: 'c2', state: 'output-available', output: {
         success: true,
-        message: 'Handed to the app, which opens /templates to run the action there. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested. Do not quote this text.',
+        message: 'Handed to the app, which opens /templates to run the action there. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.',
       } },
     ];
     expect(readActivitySteps(parts, () => true).map((step) => [step.status, step.detail])).toEqual([
       ['done', undefined],
       ['done', undefined],
     ]);
+  });
+
+  it('reads a failure classifyToolFailure marked as expected as its own neutral step, with its error text', () => {
+    const parts = [
+      { type: 'tool-tasks_get', toolCallId: 'c1', state: 'output-available', output: { success: false, error: 'Not found', status: 404, retryable: false, expectedFailure: true } },
+      { type: 'tool-tasks_delete', toolCallId: 'c2', state: 'output-available', output: { success: false, error: 'Forbidden', status: 403, retryable: false, expectedFailure: true } },
+      // Only the boolean marker next to success: false counts.
+      { type: 'tool-tasks_lock', toolCallId: 'c3', state: 'output-available', output: { success: false, error: 'Locked', expectedFailure: 'true' } },
+      { type: 'tool-tasks_list', toolCallId: 'c4', state: 'output-available', output: { success: true, expectedFailure: true } },
+      // A thrown error stays a failure whatever its output says.
+      { type: 'tool-tasks_sync', toolCallId: 'c5', state: 'output-error', errorText: 'boom', output: { success: false, expectedFailure: true } },
+    ];
+    expect(readActivitySteps(parts, () => true).map((step) => [step.status, step.detail])).toEqual([
+      ['expected', 'Not found'],
+      ['expected', 'Forbidden'],
+      ['error', 'Locked'],
+      ['done', undefined],
+      ['error', 'boom'],
+    ]);
+    expect(readActivitySteps(parts, () => false).map((step) => [step.status, step.detail])).toEqual([
+      ['expected', undefined], ['expected', undefined], ['error', undefined], ['done', undefined], ['error', undefined],
+    ]);
+  });
+
+  it('also hides the earlier wording of the hand-off note in a stored history', () => {
+    const parts = [
+      { type: 'tool-ui_navigate', toolCallId: 'c1', state: 'output-available', output: {
+        success: true,
+        message: 'Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested. Do not quote this text.',
+      } },
+    ];
+    expect(readActivitySteps(parts, () => true).map((step) => [step.status, step.detail])).toEqual([['done', undefined]]);
   });
 });

@@ -136,6 +136,41 @@ describe('ActivityLog', () => {
     expect(rows()[1].querySelector('[data-element="icon"]')!.getAttribute('data-icon')).toBe('declined');
   });
 
+  it('shows an expected failure neutrally: counted on its own, not as failed, no error state', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'list_tasks', status: 'expected', detail: 'Nicht gefunden' },
+          { id: 'c2', toolName: 'list_tasks', status: 'done' },
+        ]}
+      />,
+    );
+    const summary = document.querySelector('[data-element="activity-summary"]')!;
+    expect(root()!.getAttribute('data-state')).toBe('done');
+    expect(summary.textContent).toBe('2 Schritte ausgeführt, 1 ohne Ergebnis');
+    expect(summary.querySelector('[data-icon="check"]')).not.toBeNull();
+    expect(rows()[0].getAttribute('data-status')).toBe('expected');
+    expect(rows()[0].querySelector('[data-element="icon"]')!.getAttribute('data-icon')).toBe('notice');
+    expect(rows()[0].textContent).toContain('Nicht gefunden');
+  });
+
+  it('counts failed, declined and expected calls apart', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'create_team', status: 'error' },
+          { id: 'c2', toolName: 'list_tasks', status: 'declined' },
+          { id: 'c3', toolName: 'list_tasks', status: 'expected' },
+        ]}
+      />,
+    );
+    expect(root()!.getAttribute('data-state')).toBe('error');
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
+      .toBe('3 Schritte ausgeführt, 1 fehlgeschlagen, 1 abgelehnt, 1 ohne Ergebnis');
+  });
+
   it('counts failed and declined calls apart', () => {
     render(
       <ActivityLog
@@ -181,6 +216,8 @@ describe('ActivityLog', () => {
     expect(DEFAULT_LOCALE.activityDoneOneLabel).toBe('1 step done');
     expect(DEFAULT_LOCALE.activityDeclinedLabel).toBe('{count} declined');
     expect(deChatLocale.activityDeclinedLabel).toBe('{count} abgelehnt');
+    expect(DEFAULT_LOCALE.activityExpectedLabel).toBe('{count} without result');
+    expect(deChatLocale.activityExpectedLabel).toBe('{count} ohne Ergebnis');
   });
 });
 

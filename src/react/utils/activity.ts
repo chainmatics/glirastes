@@ -6,10 +6,13 @@ import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
 /**
  * `declined`: the call did not run because its approval was refused (by the
  * user, or by the server for an expired or reused approval). It is not a
- * failure. `error`: the call threw, or its output is an object with
- * `success: false` (a failed backend call, a refused UI action).
+ * failure. `expected`: the call answered with a failure the app classified
+ * as an expected outcome (`classifyToolFailure`, e.g. a 404 the model then
+ * looks up, a 403); a normal answer, not a failure. `error`: the call threw,
+ * or its output is an object with `success: false` and no such
+ * classification (a failed backend call, a refused UI action).
  */
-export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting' | 'declined';
+export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting' | 'declined' | 'expected';
 
 export interface ActivityStep {
   id: string;
@@ -49,10 +52,21 @@ function isFailedOutput(output: unknown): output is Record<string, unknown> {
   return isRecord(output) && !Array.isArray(output) && output.success === false;
 }
 
+/**
+ * The marker the server sets on a failed backend call `classifyToolFailure`
+ * returned `'expected'` for (the same rule as `toolResultFailure`). A
+ * backend body travels under `body` and cannot set it; an output from a
+ * server without a classifier has no marker and stays a failure.
+ */
+function isExpectedFailure(output: Record<string, unknown>): boolean {
+  return output.expectedFailure === true;
+}
+
 function stepStatus(state: unknown, output: unknown): ActivityStepStatus {
   switch (state) {
     case 'output-available':
-      return isFailedOutput(output) ? 'error' : 'done';
+      if (!isFailedOutput(output)) return 'done';
+      return isExpectedFailure(output) ? 'expected' : 'error';
     case 'output-error':
       return 'error';
     case 'output-denied':
@@ -86,8 +100,8 @@ export function readActivitySteps(
     };
     if (allowDetail(toolName)) {
       let detail: unknown;
-      if (status === 'error') {
-        detail = isFailedOutput(part.output) ? part.output.error : part.errorText;
+      if (status === 'error' || status === 'expected') {
+        detail = isFailedOutput(part.output) && part.state === 'output-available' ? part.output.error : part.errorText;
       } else if (status === 'done' && isRecord(part.output)) {
         // The hand-off note of a UI tool is for the model, not the user.
         detail = isUiActionHandoffMessage(part.output.message) ? undefined : part.output.message;

@@ -5,7 +5,7 @@ import { createUiActionSchema } from '../../../types.js';
 import { endpointToolToTool, normalizeResultUiAction, uiActionToolToTool, uiToolToTool } from '../index.js';
 
 // The exact model-facing text: a UI tool only hands its action to the browser.
-const NOTE = 'Whether it was carried out is not known: do not tell the user it succeeded, say it was requested. Do not quote this text.';
+const NOTE = 'Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.';
 const HANDOFF = `Handed to the app. ${NOTE}`;
 
 const context = { currentDate: new Date(), locale: 'en-US' } as never;
@@ -194,7 +194,7 @@ describe('the result text of a UI tool', () => {
     await expect(tool.execute({ status: 'done' }, context)).resolves.toMatchObject({ success: true, message: HANDOFF });
   });
 
-  it('says a hand-written defineUiTool only handed its action to the app, with and without a uiAction', async () => {
+  it('says a hand-written defineUiTool only handed its action to the app', async () => {
     const withAction = uiToolToTool({
       id: 'ui.tasks.focus', toolName: 'ui_tasks_focus', description: 'Focus a task.',
       inputSchema: z.object({ taskId: z.string() }),
@@ -205,11 +205,34 @@ describe('the result text of a UI tool', () => {
       message: HANDOFF,
       uiAction: { type: 'focus-task', taskId: '7' },
     });
+    const patterned = uiToolToTool({
+      id: 'ui.tasks.refresh', toolName: 'ui_tasks_refresh', description: 'Refresh the list.',
+      inputSchema: z.object({}),
+      uiPattern: { type: 'refresh', target: 'tasks' },
+    });
+    await expect(patterned.execute({}, context)).resolves.toMatchObject({ success: true, message: HANDOFF });
+  });
+
+  it('keeps "Action executed." for a defineUiTool that hands nothing to the app', async () => {
+    // No uiAction: nothing goes to the app, so there is no outcome the server does not know.
     const withoutAction = uiToolToTool({
       id: 'ui.noop', toolName: 'ui_noop', description: 'Has no UI action of its own.',
       inputSchema: z.object({}),
     });
-    await expect(withoutAction.execute({}, context)).resolves.toEqual({ success: true, message: HANDOFF });
+    await expect(withoutAction.execute({}, context)).resolves.toEqual({ success: true, message: 'Action executed.' });
+    const emptyActions = uiToolToTool({
+      id: 'ui.empty', toolName: 'ui_empty', description: 'Its action list is empty.',
+      inputSchema: z.object({}),
+      uiAction: [],
+    });
+    await expect(emptyActions.execute({}, context)).resolves.toEqual({ success: true, message: 'Action executed.' });
+    // A successMessage that resolves to nothing falls back the same way.
+    const emptyMessage = uiToolToTool({
+      id: 'ui.blank', toolName: 'ui_blank', description: 'Blank message.',
+      inputSchema: z.object({ note: z.string().optional() }),
+      successMessage: '$note',
+    });
+    await expect(emptyMessage.execute({}, context)).resolves.toMatchObject({ message: 'Action executed.' });
   });
 
   it('keeps the successMessage an app declared', async () => {

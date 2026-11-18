@@ -841,9 +841,12 @@ export function uiToolToTool<TInput extends SchemaLike>(
 
       // The server only hands the action to the browser and does not learn
       // whether the app carried it out; an app's own successMessage wins.
+      // Without a uiAction nothing is handed over, so the tool's run on the
+      // server is all there is and the earlier text still holds.
+      const fallback = uiAction ? UI_ACTION_HANDOFF_MESSAGE : 'Action executed.';
       const message = uiTool.successMessage
-        ? (applyUiTemplateValue(uiTool.successMessage, inputPayload) as string) || UI_ACTION_HANDOFF_MESSAGE
-        : UI_ACTION_HANDOFF_MESSAGE;
+        ? (applyUiTemplateValue(uiTool.successMessage, inputPayload) as string) || fallback
+        : fallback;
 
       return {
         success: true,

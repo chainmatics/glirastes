@@ -694,6 +694,12 @@ export interface ChatLocale {
   activityFailedLabel: string;       // supports `{count}`
   /** Calls whose approval was declined (not counted as failed); supports `{count}`. */
   activityDeclinedLabel: string;
+  /**
+   * Calls that answered with a failure `classifyToolFailure` marked as
+   * expected (a 404 the model then looks up, a 403): not counted as failed;
+   * supports `{count}`.
+   */
+  activityExpectedLabel: string;
   planTitle: string;
   /** Shown when the user sends while an approval card waits for a decision. */
   approvalPendingHint: string;
