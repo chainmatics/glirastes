@@ -104,7 +104,8 @@ FastAPI: `model_config = ConfigDict(json_schema_extra={'x-glirastes-entity': {..
   (user 1 is never named after playlist 1). A declared argument gets one
   subject with `type`, `role`, `idKind` and `provenance` (`tool-result`,
   `mention`, `user-message`). An id the user typed verbatim (a speaking key
-  case-insensitively, shown as the call carries it) is `seen` with
+  case-insensitively, shown as the call carries it; not a composite key, whose
+  text does not tell its parts apart) is `seen` with
   `provenance: 'user-message'`; an unknown speaking id gets no warning. `seen`
   subjects carry `fallbackField` next to `fallback` (deprecated, still filled).
   No new `status` values.

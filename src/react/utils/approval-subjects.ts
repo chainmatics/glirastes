@@ -263,7 +263,8 @@ export function resolveApprovalSubjects(
       if (!subject) continue;
       let provenance: ApprovalSubject['provenance'];
       if (subject.status !== 'unknown') provenance = sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';
-      else if (typedByUser(id, options.userTexts ?? [], idKind === 'speaking')) provenance = 'user-message';
+      // A composite key's text (`a/b/c`) does not tell its parts apart: never counted as typed.
+      else if (paths.length === 1 && typedByUser(id, options.userTexts ?? [], idKind === 'speaking')) provenance = 'user-message';
       subjects.push({
         ...subject,
         ...(provenance === 'user-message' ? { status: 'seen' as const } : {}),

@@ -210,3 +210,13 @@ describe('exact declared types and read_result links', () => {
     expect(collectKnownEntities(messages as never, [], DECLARED)).toEqual([{ type: 'album', id: '4', label: 'Blue' }]);
   });
 });
+
+describe('typed composite keys', () => {
+  it('never counts a composite key as typed by the user', () => {
+    const PARTS: EntityDeclarationsByTool = { files_delete: { input: [{ type: 'file', args: ['dir', 'name'] }] } };
+    const resolved = resolveApprovalSubjects({ dir: 'a', name: 'b/c' }, new Map(), new Map(), {
+      toolName: 'files_delete', inputEntities: PARTS.files_delete!.input!, userTexts: ['delete a/b/c'], declarations: PARTS,
+    });
+    expect(resolved[0]).toMatchObject({ id: 'a/b/c', status: 'unknown' });
+  });
+});
