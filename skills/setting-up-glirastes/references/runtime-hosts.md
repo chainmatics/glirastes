@@ -20,11 +20,11 @@ available in `integrating-glirastes-web` when that optional skill is installed.
 ## Container input contract
 
 The official public image is
-`ghcr.io/chainmatics/glirastes-runtime:0.14.0` for Linux amd64; no registry login
+`ghcr.io/chainmatics/glirastes-runtime:0.17.0` for Linux amd64; no registry login
 is required. Pin the approved digest in production and match its exact SDK
 version in artifact generation and the browser package. The
-[image guide](https://github.com/chainmatics/glirastes/blob/v0.14.0/containers/runtime/README.md)
-and [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.14.0/examples/php-runtime)
+[image guide](https://github.com/chainmatics/glirastes/blob/v0.17.0/containers/runtime/README.md)
+and [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.17.0/examples/php-runtime)
 are optional source references; the contracts below remain available offline.
 
 Provide `.glirastes/tools.json` with schemaVersion 1, a stable unique UUID appId,
