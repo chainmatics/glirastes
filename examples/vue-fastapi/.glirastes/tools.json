@@ -9,5 +9,6 @@
     { "kind": "url-filters", "srcDir": "web/src" },
     { "kind": "react-actions", "srcDir": "web/src" }
   ],
+  "output": { "deniedFields": ["**.fileUrl"] },
   "emit": { "module": ".glirastes/build/tools.generated.mjs" }
 }

@@ -15,9 +15,13 @@ afterEach(removeAppFixtures);
 
 const NOW = () => new Date('2026-11-16T00:00:00.000Z');
 
-/** The committed OpenAPI documents of the examples; their outputs must not move with the opt-in extensions. */
+/**
+ * The committed OpenAPI documents of the examples; their outputs must not move with the opt-in extensions.
+ * `openapi.vue-fastapi-tasks.json` is the Vue+FastAPI export as pinned (tasks only), frozen when that
+ * example gained the second-acceptance routers with x-glirastes-output-* extensions.
+ */
 const COMMITTED_DOCUMENTS = [
-  'examples/vue-fastapi/api/openapi.json',
+  'examples/openapi.vue-fastapi-tasks.json',
   'examples/php-runtime/api/openapi.json',
   'examples/openapi.todo.json',
   'examples/openapi-3.0.tasks.json',
@@ -68,19 +72,19 @@ describe('the openapi source without the opt-in extensions', () => {
           ".glirastes/tool-report.json": "555cec9eb5d05788",
           "module": "5892c7bbf0795a84",
         },
+        "examples/openapi.vue-fastapi-tasks.json": {
+          ".glirastes/foundation-execution-inventory.json": "63da202d5e7280cf",
+          ".glirastes/setup-artifact.json": "012ef8a6afdd9599",
+          ".glirastes/tool-contracts.json": "335ebed18b38ef75",
+          ".glirastes/tool-report.json": "f5f615ed8686b5fa",
+          "module": "0554be95b97e371d",
+        },
         "examples/php-runtime/api/openapi.json": {
           ".glirastes/foundation-execution-inventory.json": "e25bb3820cdb3aa1",
           ".glirastes/setup-artifact.json": "271f44587c09988b",
           ".glirastes/tool-contracts.json": "624b4530a1aaa84b",
           ".glirastes/tool-report.json": "015806f5bf3cd8a1",
           "module": "58d4277081607834",
-        },
-        "examples/vue-fastapi/api/openapi.json": {
-          ".glirastes/foundation-execution-inventory.json": "63da202d5e7280cf",
-          ".glirastes/setup-artifact.json": "012ef8a6afdd9599",
-          ".glirastes/tool-contracts.json": "335ebed18b38ef75",
-          ".glirastes/tool-report.json": "f5f615ed8686b5fa",
-          "module": "0554be95b97e371d",
         },
       }
     `);
