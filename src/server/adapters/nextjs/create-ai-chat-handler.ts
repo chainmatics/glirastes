@@ -769,7 +769,7 @@ async function defaultStreamHandler(
         model: ctx.model as Parameters<typeof streamText>[0]['model'],
         messages: promptMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
         ...(promptCaching ? {} : { system: systemPrompt }),
-        ...(hideIds ? { experimental_transform: createHideIdsTransform(idLabels, toolEntities ? { entities: toolEntities } : {}) } : {}),
+        ...(hideIds ? { experimental_transform: createHideIdsTransform(idLabels, toolEntities ? { entities: toolEntities, messages: ctx.messages } : {}) } : {}),
         tools: orderedTools as Parameters<typeof streamText>[0]['tools'],
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }

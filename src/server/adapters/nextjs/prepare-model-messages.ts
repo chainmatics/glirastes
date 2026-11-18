@@ -228,10 +228,40 @@ function isCompactable(part: Record<string, unknown>): part is CompactablePart {
  * leaves (a result smaller than its share keeps its size, the rest is split
  * evenly) and each is compacted within its share.
  */
+/**
+ * The tool that produced each result handle (`_result.id`) and the input of
+ * each `read_result` call, over all given messages: a `read_result` answer is
+ * compacted with the declarations of the tool whose handle it read, also when
+ * the handle came from an earlier turn of a store that keeps it longer.
+ */
+interface HandleProducers {
+  producers: Map<string, string>;
+  readInputs: Map<string, unknown>;
+}
+
+function handleProducersOf(messages: ReadonlyArray<ModelMessageLike>): HandleProducers {
+  const producers = new Map<string, string>();
+  const readInputs = new Map<string, unknown>();
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content as Array<Record<string, unknown>>) {
+      if (part.type === 'tool-call' && part.toolName === READ_RESULT_TOOL_NAME && typeof part.toolCallId === 'string') {
+        readInputs.set(part.toolCallId, part.input);
+      }
+      const value = part.type === 'tool-result' ? (part.output as { value?: unknown } | undefined)?.value : undefined;
+      const marker = typeof value === 'object' && value !== null ? (value as { _result?: unknown })._result : undefined;
+      const id = typeof marker === 'object' && marker !== null ? (marker as { id?: unknown }).id : undefined;
+      if (typeof id === 'string' && typeof part.toolName === 'string' && part.toolName !== READ_RESULT_TOOL_NAME) producers.set(id, part.toolName);
+    }
+  }
+  return { producers, readInputs };
+}
+
 function withCompactedResults(
   turn: ModelMessageLike[],
   limits: Required<HistoryOptions>,
   entities?: EntityDeclarationsByTool,
+  handles: HandleProducers = handleProducersOf(turn),
 ): ModelMessageLike[] {
   const withResults = (compact: (value: unknown, index: number, part: CompactablePart) => unknown): ModelMessageLike[] => {
     let index = 0;
@@ -254,22 +284,7 @@ function withCompactedResults(
   };
   const options = { maxItems: limits.maxItems, maxStringLength: limits.maxStringLength, keepIdentity: limits.keepIdentity };
   // A `read_result` answer is compacted with the declarations of the tool that produced its handle.
-  const producers = new Map<string, string>();
-  const readInputs = new Map<string, unknown>();
-  if (entities) {
-    for (const message of turn) {
-      if (!Array.isArray(message.content)) continue;
-      for (const part of message.content as Array<Record<string, unknown>>) {
-        if (part.type === 'tool-call' && part.toolName === READ_RESULT_TOOL_NAME && typeof part.toolCallId === 'string') {
-          readInputs.set(part.toolCallId, part.input);
-        }
-        const value = part.type === 'tool-result' ? (part.output as { value?: unknown } | undefined)?.value : undefined;
-        const marker = typeof value === 'object' && value !== null ? (value as { _result?: unknown })._result : undefined;
-        const id = typeof marker === 'object' && marker !== null ? (marker as { id?: unknown }).id : undefined;
-        if (typeof id === 'string' && typeof part.toolName === 'string' && part.toolName !== READ_RESULT_TOOL_NAME) producers.set(id, part.toolName);
-      }
-    }
-  }
+  const { producers, readInputs } = handles;
   const producerOf = (part: CompactablePart): unknown => {
     if (part.toolName !== READ_RESULT_TOOL_NAME || typeof part.toolCallId !== 'string') return part.toolName;
     const input = readInputs.get(part.toolCallId);
@@ -353,11 +368,12 @@ function turnAwareHistory(
   limits: Required<HistoryOptions>,
   entities?: EntityDeclarationsByTool,
 ): ModelMessageLike[] {
+  const handles = entities ? handleProducersOf(messages) : undefined;
   const turns = splitTurns(messages);
   const current = turns.pop() ?? [];
   const kept = turns.slice(-Math.max(0, limits.maxTurns));
   const isToolTurn = (index: number) => index >= kept.length - limits.toolTurns;
-  const earlier = kept.map((turn, index) => (isToolTurn(index) ? withCompactedResults(turn, limits, entities) : textOnly(turn)));
+  const earlier = kept.map((turn, index) => (isToolTurn(index) ? withCompactedResults(turn, limits, entities, handles) : textOnly(turn)));
   // Per earlier turn: sent as text with its tool calls and results left out.
   const dropped = kept.map((turn, index) => !isToolTurn(index) && hasToolContent(turn));
   const previousSource = kept.at(-1);

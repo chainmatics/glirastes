@@ -205,6 +205,19 @@ class ResultProducers {
     if (typeof id === 'string') this.byId.set(id, toolName);
   }
 
+  /** Notes the producers of the finished tool parts of UI messages (`tool-<name>`). */
+  noteMessages(messages: unknown): void {
+    if (!Array.isArray(messages)) return;
+    for (const message of messages) {
+      const parts = (message as { parts?: unknown } | null)?.parts;
+      if (!Array.isArray(parts)) continue;
+      for (const part of parts) {
+        const type = (part as { type?: unknown } | null)?.type;
+        if (typeof type === 'string' && type.startsWith('tool-')) this.note(type.slice('tool-'.length), (part as { output?: unknown }).output);
+      }
+    }
+  }
+
   of(toolName: string, input: unknown): string {
     if (toolName !== READ_RESULT_TOOL_NAME || typeof input !== 'object' || input === null) return toolName;
     const id = (input as { resultId?: unknown }).resultId;
@@ -231,9 +244,14 @@ export function holdFrom(text: string): number {
  */
 export function createHideIdsTransform(
   labels: IdLabels = new Map(),
-  options: { entities?: EntityDeclarationsByTool } = {},
+  options: {
+    entities?: EntityDeclarationsByTool;
+    /** The UI messages of the conversation so far: the producers of result handles a read in this turn may name. */
+    messages?: unknown;
+  } = {},
 ): StreamTextTransform<ToolSet> {
   const producers = new ResultProducers();
+  if (options.entities) producers.noteMessages(options.messages);
   const declaredOf = (toolName: unknown, input: unknown, output: unknown) => {
     if (typeof toolName !== 'string' || !options.entities) return undefined;
     producers.note(toolName, output);

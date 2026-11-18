@@ -356,3 +356,43 @@ describe('history compaction of read_result answers', () => {
     expect(plain).not.toContain('{"trackNo":125,"label_text":"Late 25"}');
   });
 });
+
+describe('read_result producers across turns', () => {
+  const entities = { tracks_list: { output: [{ ...TRACK, path: 'data[]' }] } };
+  const producerTurn = [
+    { id: 'u0', role: 'user', parts: [{ type: 'text', text: 'Tracks?' }] },
+    { id: 'a0', role: 'assistant', parts: [
+      { type: 'tool-tracks_list', toolCallId: 'c1', state: 'output-available', input: {}, output: { data: [{ trackNo: 1, label_text: 'One' }], _result: { id: 'ro_abc12345', hint: 'x' } } },
+      { type: 'text', text: 'One.' },
+    ] },
+  ];
+
+  it('compacts a later turn\'s read_result answer with the producer of an earlier turn', async () => {
+    const read = { data: Array.from({ length: 30 }, (_, index) => ({ trackNo: index + 100, label_text: `Late ${index}`, albumId: 7, lyrics: 'x'.repeat(50) })) };
+    const messages = [
+      ...producerTurn,
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'More?' }] },
+      { id: 'a1', role: 'assistant', parts: [
+        { type: 'tool-read_result', toolCallId: 'c2', state: 'output-available', input: { resultId: 'ro_abc12345' }, output: read },
+        { type: 'text', text: 'Read.' },
+      ] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'And now?' }] },
+    ];
+    const prepared = JSON.stringify(await prepareModelMessages(messages as never, { entities }));
+    expect(prepared).toContain('{"trackNo":125,"label_text":"Late 25"}');
+  });
+
+  it('streams with the producers of earlier turns', async () => {
+    const parts = [
+      { type: 'tool-result', toolCallId: 'c2', toolName: 'read_result', input: { resultId: 'ro_abc12345' }, output: { data: [{ trackNo: 42, label_text: 'Late' }] } },
+      { type: 'text-start', id: 't' },
+      { type: 'text-delta', id: 't', text: 'Late (ID: 42) is here.' },
+      { type: 'text-end', id: 't' },
+    ];
+    const stream = convertArrayToReadableStream(parts as never)
+      .pipeThrough(createHideIdsTransform(new Map(), { entities, messages: producerTurn })({ tools: {}, stopStream: () => {} }) as never);
+    let text = '';
+    for await (const part of stream as unknown as AsyncIterable<{ type: string; text?: string }>) if (part.type === 'text-delta') text += part.text;
+    expect(text).toBe('Late is here.');
+  });
+});
