@@ -445,6 +445,22 @@ describe('AiChatProvider never runs a UI action late', () => {
     expect(onToolResult).not.toHaveBeenCalled();
   });
 
+  it('drops a held-back result when another history replaces the messages', async () => {
+    const { bus, onToolResult } = setup();
+    const seen = vi.fn();
+    cleanups.push(bus.subscribeById('second', seen));
+    await act(async () => { control.set([user], 'submitted'); });
+    await act(async () => {
+      control.set([user, assistant(toolPart('c1', undefined, 'input-available'), toolPart('c2', action('second')))], 'streaming');
+    });
+    const otherUser = { ...user, id: 'u-other' } as ChatMessage;
+    await act(async () => { control.set([otherUser], 'streaming'); });
+    await act(async () => { control.status('ready'); });
+    await settle();
+    expect(seen).not.toHaveBeenCalled();
+    expect(onToolResult).not.toHaveBeenCalled();
+  });
+
   it('does not run results loaded through session.load', async () => {
     const bus = new UiActionBus();
     const push = vi.fn();

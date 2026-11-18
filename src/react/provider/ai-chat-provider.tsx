@@ -649,8 +649,6 @@ export function AiChatProvider({
     toolName: string;
     output: Record<string, unknown>;
     messageId: string;
-    /** Position of the call in its message. */
-    index: number;
   }>>(new Map());
   // Aborted with each reset so a running result stops before its next action.
   const uiActionAbortRef = useRef(new AbortController());
@@ -951,23 +949,22 @@ export function AiChatProvider({
     const heldMessageIds = [...new Set([...deferredResultsRef.current.values()].map((held) => held.messageId))]
       .filter((messageId) => lastMessage?.id !== messageId);
     for (const messageId of heldMessageIds) {
-      const message = rawMessages.find((candidate) => candidate.id === messageId);
-      const results: Array<{ toolCallId: string; toolName: string; output: Record<string, unknown>; index: number }> = [];
-      if (message) {
-        for (const [index, part] of message.parts.entries()) {
-          const toolPart = part as { type?: unknown; state?: unknown; output?: unknown; toolCallId?: unknown };
-          if (typeof toolPart.type !== 'string' || !toolPart.type.startsWith('tool-')) continue;
-          if (toolPart.state !== 'output-available' || !isRecord(toolPart.output)) continue;
-          const toolCallId = typeof toolPart.toolCallId === 'string' && toolPart.toolCallId
-            ? toolPart.toolCallId
-            : `${message.id}-${toolPart.type}`;
-          results.push({ toolCallId, toolName: toolPart.type.replace('tool-', ''), output: toolPart.output, index });
-        }
-      } else {
+      // Gone from the messages, or the messages are no longer this request's: drop them.
+      const message = live ? rawMessages.find((candidate) => candidate.id === messageId) : undefined;
+      const results: Array<{ toolCallId: string; toolName: string; output: Record<string, unknown> }> = [];
+      for (const part of message?.parts ?? []) {
+        const toolPart = part as { type?: unknown; state?: unknown; output?: unknown; toolCallId?: unknown };
+        if (typeof toolPart.type !== 'string' || !toolPart.type.startsWith('tool-')) continue;
+        if (toolPart.state !== 'output-available' || !isRecord(toolPart.output)) continue;
+        const toolCallId = typeof toolPart.toolCallId === 'string' && toolPart.toolCallId
+          ? toolPart.toolCallId
+          : `${messageId}-${toolPart.type}`;
+        results.push({ toolCallId, toolName: toolPart.type.replace('tool-', ''), output: toolPart.output });
+      }
+      if (!message) {
         for (const [toolCallId, held] of deferredResultsRef.current) {
-          if (held.messageId === messageId) results.push({ toolCallId, ...held });
+          if (held.messageId === messageId) processedToolCallsRef.current.add(toolCallId);
         }
-        results.sort((a, b) => a.index - b.index);
       }
       for (const [toolCallId, held] of deferredResultsRef.current) {
         if (held.messageId === messageId) deferredResultsRef.current.delete(toolCallId);
@@ -986,7 +983,7 @@ export function AiChatProvider({
     // While the request streams, a result waits for every earlier call of the
     // message to finish, so UI actions run in call order, not arrival order.
     let earlierCallOpen = false;
-    for (const [partIndex, part] of lastMessage.parts.entries()) {
+    for (const part of lastMessage.parts) {
       if (!('type' in part)) continue;
       const partType = (part as { type: string }).type;
 
@@ -1062,7 +1059,7 @@ export function AiChatProvider({
             }
             if (earlierCallOpen && isLoading) {
               deferredResultsRef.current.set(toolCallId, {
-                toolName, output: toolPart.output, messageId: lastMessage.id, index: partIndex,
+                toolName, output: toolPart.output, messageId: lastMessage.id,
               });
               continue;
             }
