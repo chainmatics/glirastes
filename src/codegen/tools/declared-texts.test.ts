@@ -28,13 +28,13 @@ describe('texts an endpoint declares', () => {
     })).toEqual({ hints: {}, invalid: ['title', 'description', 'synonyms', 'examples'] });
   });
 
-  it('merges two code sources per language, a language-free text replacing all', () => {
-    const contract = { title: { pl: 'Pokaż zadanie', de: 'Zeigen' }, synonyms: { pl: ['zadanie'] } };
+  it('merges search texts per language and keeps the contract title as its own lower source', () => {
+    const contract = { contractTitle: 'Show task', synonyms: { pl: ['zadanie'] } };
     expect(mergeDeclaredTexts(contract, { title: { de: 'Aufgabe anzeigen' }, synonyms: { de: ['Aufgabe'] } })).toEqual({
-      title: { pl: 'Pokaż zadanie', de: 'Aufgabe anzeigen' },
+      contractTitle: 'Show task',
+      title: { de: 'Aufgabe anzeigen' },
       synonyms: { pl: ['zadanie'], de: ['Aufgabe'] },
     });
-    expect(mergeDeclaredTexts(contract, { title: 'Show task' }).title).toBe('Show task');
     expect(mergeDeclaredTexts(contract, undefined)).toBe(contract);
   });
 });
@@ -45,6 +45,9 @@ describe('titles and search texts per language', () => {
     expect(semanticsTitle(agent, 'Show task', ['en', 'de'])).toEqual({ en: 'Show task', de: 'Show task' });
     const human = entry({ name: 'tasks.get', title: { en: 'Reviewed title' } });
     expect(semanticsTitle(human, 'Show task', ['en', 'de'])).toEqual({ en: 'Reviewed title', de: 'Show task' });
+    // The operation's German title above a language-free contract title, which keeps English and Polish.
+    expect(semanticsTitle(undefined, { de: 'Aufgabe anzeigen' }, ['en', 'de', 'pl'], 'Show task'))
+      .toEqual({ de: 'Aufgabe anzeigen', en: 'Show task', pl: 'Show task' });
   });
 
   it('indexes the synonyms of every language, the maintained entry first per language', () => {

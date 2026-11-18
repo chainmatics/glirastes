@@ -365,17 +365,19 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     .filter((value): value is string => value !== undefined && value !== module))]
     .sort(compareCodeUnits)
     .slice(0, 50);
-  const entryHints = entry?.usageHints?.length || entry?.approvalHint
-    ? [...entry.usageHints ?? [], ...entry.approvalHint ? [entry.approvalHint] : []]
-    : undefined;
+  // Usage hints and the approval hint each by their own origin, then joined (code hints replace both, as before,
+  // unless a maintained field of the entry beats them).
   const codeHints = input.hints?.usageHints?.length ? input.hints.usageHints : undefined;
-  const maintainedHints = entryHints !== undefined && (entry?.usageHints?.length
-    ? isMaintainedField(entry, 'usageHints')
-    : isMaintainedField(entry, 'approvalHint'));
-  if (maintainedHints && codeHints && codeHints.join('\n') !== entryHints.join('\n')) {
+  const entryUsage = entry?.usageHints?.length ? entry.usageHints : undefined;
+  const maintainedUsage = entryUsage !== undefined && isMaintainedField(entry, 'usageHints');
+  const maintainedApproval = entry?.approvalHint !== undefined && isMaintainedField(entry, 'approvalHint');
+  const usagePart = (maintainedUsage ? entryUsage : codeHints ?? entryUsage) ?? [];
+  const approvalPart = entry?.approvalHint && (maintainedApproval || !codeHints) ? [entry.approvalHint] : [];
+  const joinedHints = [...usagePart, ...approvalPart];
+  if ((maintainedUsage || maintainedApproval) && codeHints && codeHints.join('\n') !== joinedHints.join('\n')) {
     findings.push(overrideFinding(input.stableKey, 'usageHints'));
   }
-  const hintSource = (maintainedHints ? entryHints : undefined) ?? codeHints ?? entryHints ?? [description];
+  const hintSource = joinedHints.length > 0 ? joinedHints : [description];
   const usageHints = hintSource
     .map((hint) => bounded(hint, MAX_HINT))
     .filter((hint): hint is string => hint !== undefined)
@@ -399,6 +401,7 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     maintainedTitle ? semanticsTitle : undefined,
     codePresentation,
     withTitles ? titleLayer(input.hints?.title) : undefined,
+    withTitles ? titleLayer(input.hints?.contractTitle) : undefined,
     maintainedPresentation ? undefined : semanticsPresentation,
     maintainedTitle ? undefined : semanticsTitle,
   ];

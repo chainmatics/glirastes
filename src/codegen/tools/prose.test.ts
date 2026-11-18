@@ -193,6 +193,19 @@ describe('tool prose', () => {
     });
   });
 
+  it('ranks usage hints and the approval hint each by their own origin', async () => {
+    const hints = { usageHints: ['From the contract.'] };
+    const load = async (value: unknown) => (await semanticsFile(JSON.stringify({ schemaVersion: 1, tools: [value] }))).semantics;
+    // An agent wrote the usage hints, a person the approval hint: the code hints stay, the approval hint is added.
+    const mixed = await load({ name: 'tasks.create', usageHints: ['Agent hint.'], approvalHint: 'Confirm shared tasks.', origin: { usageHints: 'agent' } });
+    expect(resolveToolProse({ ...base, semantics: mixed, hints }).usageHints).toEqual(['From the contract.', 'Confirm shared tasks.']);
+    // A person wrote the usage hints, an agent the approval hint: the entry's hints win, the agent's approval hint stays out.
+    const reverse = await load({ name: 'tasks.create', usageHints: ['Human hint.'], approvalHint: 'Agent approval.', origin: { approvalHint: 'agent' } });
+    expect(resolveToolProse({ ...base, semantics: reverse, hints }).usageHints).toEqual(['Human hint.']);
+    // Without code hints both are used, as before.
+    expect(resolveToolProse({ ...base, semantics: reverse }).usageHints).toEqual(['Human hint.', 'Agent approval.']);
+  });
+
   it('lets a locked field beat the code even when an agent wrote it first', async () => {
     const { semantics } = await semanticsFile(JSON.stringify({
       schemaVersion: 1,
@@ -258,6 +271,12 @@ describe('tool prose', () => {
       const prose = resolveToolProse({ ...base, languages, hints: { title: 'Task wizard' } });
       expect(Object.values(prose.labels ?? {}).map((labels) => labels.approval)).toEqual(['Task wizard', 'Task wizard', 'Task wizard']);
       expect(prose.missingLabelLanguages).toBeUndefined();
+    });
+
+    it('keeps a language-free contract title for the languages the OpenAPI title lacks', () => {
+      const prose = resolveToolProse({ ...base, languages, hints: { title: { de: 'Aufgabe anlegen' }, contractTitle: 'New task' } });
+      expect(Object.fromEntries(Object.entries(prose.labels ?? {}).map(([language, labels]) => [language, labels.approval])))
+        .toEqual({ en: 'New task', de: 'Aufgabe anlegen', pl: 'New task' });
     });
 
     it('drops a secret-looking label instead of shipping it', () => {

@@ -324,6 +324,8 @@ export function semanticsTitle(
   entry: ToolSemanticsEntry | undefined,
   declared?: string | Readonly<Record<string, string>>,
   languages: ReadonlyArray<string> = [],
+  /** A lower code title (contract.ts below the OpenAPI operation). */
+  lowerDeclared?: string | Readonly<Record<string, string>>,
 ): ToolTitle | undefined {
   const title: Record<string, string> = {};
   const add = (language: string, value: string | undefined) => {
@@ -332,7 +334,9 @@ export function semanticsTitle(
     if (text && !taken) title[language] = text;
   };
   // In precedence order; a language-free title fills, at its own level, every language still open.
-  for (const layer of ordered<string | Readonly<Record<string, string>>>(entry, 'title', entry?.title, declared)) {
+  const code = [declared, lowerDeclared];
+  const layers = isMaintainedField(entry, 'title') ? [entry?.title, ...code] : [...code, entry?.title];
+  for (const layer of layers) {
     if (typeof layer === 'string') for (const language of languages) add(language, layer);
     else for (const [language, value] of Object.entries(layer ?? {})) add(language, value);
   }

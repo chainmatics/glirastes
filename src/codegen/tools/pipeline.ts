@@ -729,7 +729,7 @@ async function generate(
       missingLabels.set(language, list);
     }
     const search = semanticsSearch(semantics.entry, tool.prose);
-    const title = semanticsTitle(semantics.entry, tool.prose?.title, languages);
+    const title = semanticsTitle(semantics.entry, tool.prose?.title, languages, tool.prose?.contractTitle);
     const mcp = execution.executionKind === 'endpoint' ? inputs.mcpNames?.get(execution.stableKey) : undefined;
     contractEntries.push({
       toolId: execution.toolId,

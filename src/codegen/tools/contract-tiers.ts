@@ -518,7 +518,7 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
   const resolution = assessment.usable;
   const effect = strongerEffect(strongerEffect(entry?.effect, resolution?.effect), input.openapi?.effect);
   // A contract.ts description per language keeps the place of a plain one: below the JSDoc.
-  const { declaredDescription: contractDescriptions, ...contractTexts } = entry?.texts ?? {};
+  const { declaredDescription: contractDescriptions, title: contractTitle, ...contractTexts } = entry?.texts ?? {};
   const contractDescription = entry?.description ?? contractDescriptions;
   const prose: ToolProseHints = {
     ...(contractDescription ? { contractDescription } : {}),
@@ -526,6 +526,7 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     ...(entry?.usageHints?.length ? { usageHints: entry.usageHints } : {}),
     ...(entry?.presentation ? { presentation: entry.presentation } : {}),
     ...(entry?.presentations ? { presentations: entry.presentations } : {}),
+    ...(contractTitle !== undefined ? { contractTitle } : {}),
     ...contractTexts,
   };
   // Output fields: of the OpenAPI operation, else of the contract module entry.

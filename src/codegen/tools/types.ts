@@ -74,8 +74,10 @@ export interface ToolProseHints {
   presentation?: ToolPresentation;
   /** contract.ts `presentation` given per language tag. */
   presentations?: Readonly<Record<string, { singular: string; plural: string; approval: string }>>;
-  /** The endpoint's title (OpenAPI `x-glirastes-title`, contract.ts `title`): one text, or one per language tag. */
+  /** The endpoint's title (OpenAPI `x-glirastes-title`): one text, or one per language tag. */
   title?: LocalizedText;
+  /** contract.ts `title`, below the OpenAPI one per language (a language-free one stays for the languages it lacks). */
+  contractTitle?: LocalizedText;
   /** The endpoint's synonyms and example requests per language (search only). */
   synonyms?: Readonly<Record<string, ReadonlyArray<string>>>;
   examples?: Readonly<Record<string, ReadonlyArray<string>>>;
