@@ -139,10 +139,19 @@ fails neither `tools check` nor `--strict`.
 - `find_tools` results only: `usageHints` (each cut to 300 characters; the
   description there to 500). They are not part of the definition used for the
   call.
-- Never: `synonyms` feed only the search index; `examples` feed only intent
-  routing and `glirastes tools eval`, not `find_tools`.
+- Never: `synonyms` and `examples` feed only the search index (`find_tools`
+  and the start set of a turn; examples with the low weight of usage hints)
+  and are never shown. `glirastes tools eval` still ranks each example
+  against an index without examples, so it keeps measuring how well name,
+  description, hints and synonyms find the tool.
 - An `examples` list with fewer than 3 (or more than 5) sentences in a language
   rejects the whole `tool-semantics.json` entry (`tool-semantics-invalid`).
+- A 404 of a route with path parameters (`/playlists/:id`): the failure
+  result carries a fixed `hint` naming the parameters (never a value) that
+  says the value may not exist or belong to another kind of record, to look
+  it up with a list or search tool first, and to tell the user it was not
+  found only when no such tool exists or the lookup finds nothing. Name path
+  parameters so the model can tell which record they address.
 
 Without a group, a name with a dot keeps its module (the part before the first
 dot); a name without a dot (`list_tags`) takes the module from the path

@@ -705,6 +705,12 @@ export interface ChatLocale {
   approvalUnknownIdsWarning: string;
   /** Warning for an id shown with different names; supports `{names}`. */
   approvalAmbiguousIdWarning: string;
+  /**
+   * Warning for an id seen for records of different kinds (user 3, playlist 3)
+   * when the call does not say which one it means; supports `{candidates}`
+   * (`Linus Torvalds (User), Lobby Loop (Playlist)`).
+   */
+  approvalCollidingIdWarning: string;
   /** Note next to an id a tool result of this conversation carried without a name (no warning). */
   approvalSeenIdNote: string;
 
@@ -1050,15 +1056,25 @@ export interface ApprovalSubject {
   /** The id exactly as the call carries it. */
   id: string;
   /**
-   * `named`: one name shown; `ambiguous`: different names for a non-UUID id;
-   * `seen`: no name, but a tool result of this conversation carried the id as
-   * a record id (no warning); `unknown`: the id occurred nowhere (warning).
+   * `named`: one name shown; `ambiguous`: different names for a non-UUID id,
+   * or a non-UUID id seen for records of more than one kind (user 3 and
+   * playlist 3) when the argument does not pick one of them (then without
+   * `name`, with `candidates`); `seen`: no name, but a tool result of this
+   * conversation carried the id as a record id (no warning); `unknown`: the
+   * id occurred nowhere (warning).
    */
   status: 'named' | 'ambiguous' | 'seen' | 'unknown';
-  /** The most recent name shown for the id. */
+  /** The most recent name shown for the id; absent for an id seen for records of different kinds. */
   name?: string;
   /** All names shown for an ambiguous id, most recent first. */
   names?: string[];
+  /**
+   * Set for an id seen for records of different kinds that the argument
+   * does not pick one of: every candidate record, most recent kind first,
+   * with the kind as a label (`User`, `Playlist`, from the field or tool that
+   * returned it) and its name when it had one. Show them all; name none.
+   */
+  candidates?: Array<{ label: string; name?: string }>;
   /**
    * For `seen`: a short field of the record that stands in for its name
    * (`Version number 3`, from `versionNumber`, `version`, `number`, `code` or

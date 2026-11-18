@@ -72,9 +72,13 @@ describe('second acceptance app protocol', () => {
     const paths = [...`${protocol}\n${template}`.matchAll(/`((?:src|tests|docs|examples)\/[^`\s<]+)`/g)].map((match) => match[1]!);
     expect(paths.length).toBeGreaterThan(5);
     expect(paths.filter((path) => !existsSync(join(SDK_ROOT, path)))).toEqual([]);
-    const gaps = [...protocol.matchAll(/^\| (SA-\d\d) \|/gm)].map((match) => match[1]!);
+    // The open gaps come first; the fixed ones follow under "Fixed (".
+    const [open, fixed = ''] = protocol.split(/^Fixed \(/m);
+    const gaps = [...open!.matchAll(/^\| (SA-\d\d) \|/gm)].map((match) => match[1]!);
     const tests = read('tests/second-acceptance-vue-fastapi.test.ts');
     expect([...tests.matchAll(/it\('KNOWN GAP (SA-\d\d):/g)].map((match) => match[1])).toEqual(gaps);
+    const fixedGaps = [...fixed.matchAll(/^\| (SA-\d\d) \|/gm)].map((match) => match[1]!);
+    expect([...tests.matchAll(/it\('(SA-\d\d) \(fixed in /g)].map((match) => match[1]).sort()).toEqual([...fixedGaps].sort());
   });
 
   it('records every case for both models as a pass rate of three runs', () => {

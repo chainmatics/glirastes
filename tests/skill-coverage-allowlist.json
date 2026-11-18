@@ -531,6 +531,7 @@
   "ToolRiskClass": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "ToolRiskClassSchema": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "ToolSearchDocument": "Runtime building block behind createGlirastes().chatTurn(); a standard integration never touches it (see its JSDoc).",
+  "ToolSearchHit": "Runtime building block behind createGlirastes().chatTurn(); a standard integration never touches it (see its JSDoc).",
   "ToolSearchIndex": "Runtime building block behind createGlirastes().chatTurn(); a standard integration never touches it (see its JSDoc).",
   "ToolSearchSemantics": "Runtime building block behind createGlirastes().chatTurn(); a standard integration never touches it (see its JSDoc).",
   "ToolSearchSemanticsMap": "Runtime building block behind createGlirastes().chatTurn(); a standard integration never touches it (see its JSDoc).",

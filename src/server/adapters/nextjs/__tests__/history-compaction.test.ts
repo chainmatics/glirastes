@@ -339,7 +339,8 @@ describe('history compaction properties', () => {
       let from = marker.full;
       for (const entry of listed.slice(marker.full) as Entry[]) {
         const keys = Object.keys(entry);
-        expect(keys.every((key) => ID_KEYS.includes(key) || NAME_KEYS.includes(key)), label).toBe(true);
+        // `ownerId` is id-like: kept only by an entry without a recognised id (checked below).
+        expect(keys.every((key) => ID_KEYS.includes(key) || NAME_KEYS.includes(key) || key === 'ownerId'), label).toBe(true);
         const same = (candidate: Entry, key: string) => candidate[key] === entry[key]
           || (typeof entry[key] === 'string' && (entry[key] as string).endsWith('…[clipped]')
             && NAME_KEYS.includes(key) && typeof candidate[key] === 'string'
@@ -350,6 +351,9 @@ describe('history compaction properties', () => {
         expect(match, label).toBeGreaterThanOrEqual(from);
         // An entry with an id has a name exactly when its source entry has a scalar name.
         const source = entries[match] as Entry;
+        const recognised = ID_KEYS.some((key) => typeof source[key] === 'string' && source[key] !== ''
+          && JSON.stringify(key).length + 1 + JSON.stringify(source[key]).length <= 200);
+        if (keys.includes('ownerId')) expect(recognised, label).toBe(false);
         if (keys.some((key) => ID_KEYS.includes(key))) {
           const sourceHasName = NAME_KEYS.some((key) => key in source && typeof source[key] !== 'object');
           expect(keys.some((key) => NAME_KEYS.includes(key)), label).toBe(sourceHasName);

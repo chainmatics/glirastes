@@ -245,9 +245,11 @@ export interface AiChatHandlerConfig {
   intentRouting?: boolean | DefaultIntentRoutingOptions;
 
   /**
-   * Search-only synonyms keyed by model-facing tool name (for example from
-   * generated tool semantics). They improve `find_tools` ranking and never
-   * make a tool eligible or reach the model.
+   * Search-only synonyms and example sentences keyed by model-facing tool
+   * name (for example `toolSearchSemantics` of the generated module). They
+   * rank `find_tools` and the default start set and never make a tool
+   * eligible or reach the model. Replaces the map `chatTurn()` hands on;
+   * it is not merged with it.
    */
   toolSemantics?: ToolSearchSemanticsMap;
 

@@ -10,6 +10,8 @@ import {
 import { createContractBindings } from "../runtime/contract-bindings.js";
 import { ToolContractsFileSchema } from "../codegen/tools/files.js";
 import { buildRuntimeArtifact, loadRuntimeArtifact } from "./artifact.js";
+import { createRegistryToolDiscovery } from "../runtime/tool-discovery.js";
+import { defaultIntentRouterFor } from "../server/adapters/nextjs/default-intent-routing.js";
 
 const response = {
   "200": {
@@ -376,6 +378,66 @@ describe("runtime container artifact", () => {
         body: { title: "test" },
       }),
     );
+  });
+
+  it("lets the example sentences of tool-semantics.json reach find_tools and the start set, in the container and the generated module", async () => {
+    const app = await fixture();
+    const examples = [
+      "Zeig mir meine Erledigungen",
+      "Welche Erledigungen sind offen?",
+      "Erledigungen von heute anzeigen",
+    ];
+    await app.write(
+      ".glirastes/tool-semantics.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        tools: [
+          {
+            stableKey: "GET /api/tasks",
+            synonyms: { de: ["Aufgabenliste"] },
+            examples: { de: examples },
+          },
+        ],
+      }),
+    );
+    await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    const [binding] = loaded.createToolBindings();
+    // The model-facing name the container materializes next to each binding.
+    const name = (binding as unknown as { modelName: string }).modelName;
+    expect(name).toBe("tasks_list");
+    // The container: the loaded semantics carry the examples.
+    expect(loaded.toolSearchSemantics?.[name]).toEqual({
+      synonyms: ["Aufgabenliste"],
+      examples: [...examples].sort(),
+    });
+    // The embedded app: the generated module carries the same map.
+    const module = renderGeneratedModule({
+      modulePath: "generated.ts",
+      artifact: payload.setupArtifact,
+      contracts: payload.contracts.tools,
+    });
+    expect(module).toContain(
+      `export const toolSearchSemantics = ${JSON.stringify({ [name]: { examples: [...examples].sort(), synonyms: ["Aufgabenliste"] } }, null, 2)} as const;`,
+    );
+    const registry = { [name]: binding!.tool };
+    const query = "Erledigungen";
+    const discovery = createRegistryToolDiscovery({
+      turnId: "t",
+      registry,
+      semantics: loaded.toolSearchSemantics,
+    });
+    expect(discovery.search(query).map((result) => result.name)).toEqual([name]);
+    expect(
+      defaultIntentRouterFor({
+        registry,
+        semantics: loaded.toolSearchSemantics,
+      }).route({ text: query }).toolNames,
+    ).toContain(name);
   });
 
   it("rejects payload tampering and incompatible SDK versions", async () => {

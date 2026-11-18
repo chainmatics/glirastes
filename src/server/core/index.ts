@@ -42,6 +42,7 @@ import {
   ENDPOINT_FAILURE,
   ENDPOINT_FAILURE_DATA,
   endpointFailureFields,
+  notFoundHint,
 } from './tool-failure-result.js';
 import type { ResultStore } from './result-store.js';
 import { isResultReader } from './read-result-tool.js';
@@ -584,6 +585,8 @@ export function endpointToolToTool<TInput extends SchemaLike>(
     ? normalizeOutputFields(endpointTool.outputDefaultFields, 'outputDefaultFields')!
     : undefined;
   const ownBound = outputBoundOf({ outputAllowedFields, outputDeniedFields });
+  // Fixed per route: only a route with path parameters addresses one record.
+  const pathNotFoundHint = notFoundHint(endpointTool.path);
   let description = endpointTool.description;
   if (endpointTool.outputSchema) {
     // The model is told only about the fields it can get.
@@ -668,6 +671,7 @@ export function endpointToolToTool<TInput extends SchemaLike>(
           ...(Number.isInteger(response.status) ? { status: response.status } : {}),
           // Under the tool's bound the body is reduced before it is serialized and cut.
           ...(fromBackend ? endpointFailureFields(response.data, ownBound) : {}),
+          ...(fromBackend && response.status === 404 && pathNotFoundHint ? { hint: pathNotFoundHint } : {}),
           ...(expected ? { expectedFailure: true } : {}),
         };
         Object.defineProperty(failure, ENDPOINT_FAILURE, { value: true });

@@ -97,6 +97,7 @@ export {
   searchTermVariants,
   searchTokens,
   type ToolSearchDocument,
+  type ToolSearchHit,
   type ToolSearchIndex,
 } from './tool-search.js';
 export {

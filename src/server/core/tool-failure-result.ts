@@ -26,6 +26,33 @@ export const ENDPOINT_FAILURE = Symbol.for('glirastes.endpointFailure');
  */
 export const ENDPOINT_FAILURE_DATA = Symbol.for('glirastes.endpointFailureData');
 
+/** At most this many path parameters are named in the not-found hint. */
+const MAX_NOT_FOUND_PARAMS = 5;
+const MAX_NOT_FOUND_PARAM_CHARS = 64;
+
+/**
+ * The hint a 404 of an endpoint tool carries when its route template has
+ * path parameters (`/playlists/:id`): the record the call addressed was not
+ * found. It names the parameters (route-template names the input schema also
+ * shows), never a value, and holds in apps with lookup tools and in apps
+ * whose users type keys (order numbers): look the value up when a list or
+ * search tool can, otherwise tell the user. `undefined` without path
+ * parameters: a 404 of `/playlists` says nothing about an id.
+ */
+export function notFoundHint(pathTemplate: string): string | undefined {
+  const names = [...new Set([...pathTemplate.matchAll(/:([A-Za-z0-9_]+)/g)].map((match) => match[1]!))];
+  if (names.length === 0) return undefined;
+  const shown = names.slice(0, MAX_NOT_FOUND_PARAMS)
+    .map((name) => `"${name.slice(0, MAX_NOT_FOUND_PARAM_CHARS)}"`)
+    .join(', ') + (names.length > MAX_NOT_FOUND_PARAMS ? ', …' : '');
+  return `Not found: no record matches the path parameter${names.length > 1 ? 's' : ''} ${shown}. `
+    + 'The value may not exist, or it may be the id of a different kind of record. '
+    + 'If a list or search tool can find the record (for example by its name), look it up first, '
+    + 'then call this tool again with the value it returns. '
+    + 'Only if there is no such tool or the lookup finds nothing, tell the user it was not found; '
+    + 'do not ask the user for an id before that.';
+}
+
 /** How far a cut may move back to end on a whole token. */
 const MAX_TOOL_ERROR_BACKTRACK_CHARS = 256;
 const TOOL_ERROR_TOKEN_DELIMITER = /[\s",:{}[\]]/;
@@ -88,7 +115,8 @@ export function endpointFailureFields(data: unknown, bound: OutputBound | undefi
 
 /**
  * The failure result the model and the browser get: the error (cut), retry
- * information and, for a failed backend call, its status and bounded body.
+ * information and, for a failed backend call, its status, bounded body and,
+ * for a 404 of a route with path parameters, the fixed `notFoundHint`.
  * Under a tool's bound (`outputAllowedFields`, `outputDeniedFields`) the body
  * is reduced from the parsed backend body (`reduceFailureBody`); a body that
  * is no longer available unserialized (cut) is withheld.
@@ -124,6 +152,10 @@ export function boundedToolFailure(
     retryable: result.retryable === true,
     ...(fromEndpoint && Number.isInteger(result.status) ? { status: result.status } : {}),
     ...body,
+    // Only the fixed not-found hint `endpointToolToTool` sets (a backend body travels under `body`).
+    ...(fromEndpoint && result.status === 404 && typeof result.hint === 'string'
+      ? { hint: cutToolErrorText(result.hint, MAX_TOOL_ERROR_MESSAGE_CHARS) }
+      : {}),
     ...(fromEndpoint && result.expectedFailure === true ? { expectedFailure: true } : {}),
   };
 }

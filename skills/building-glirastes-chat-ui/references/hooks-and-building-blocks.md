@@ -62,9 +62,12 @@ neutrally, not counted as failed).
   "seen in this conversation"; an id that occurred nowhere
   gets a warning with the id shown (`role="alert"`, icon, danger colours,
   linked from the approve button); a short id shown with different names gets
-  a warning too. Texts: `approvalTargetLabel`, `approvalUnknownIdWarning`,
+  a warning too, and a short id seen for records of different kinds (user 3,
+  playlist 3) is named only when the argument picks one kind (`playlist_id`,
+  or a bare `id` of `playlists_delete`), else the card names none and lists
+  every candidate. Texts: `approvalTargetLabel`, `approvalUnknownIdWarning`,
   `approvalUnknownIdsWarning`, `approvalAmbiguousIdWarning`,
-  `approvalSeenIdNote` in `locale`
+  `approvalCollidingIdWarning`, `approvalSeenIdNote` in `locale`
   (English and German built in). A custom card reads
   `PendingApproval.subjects` (`ApprovalSubject[]`). The names are client-side
   history, a convenience and not a trust boundary: the server executes exactly
@@ -73,9 +76,11 @@ neutrally, not counted as failed).
 - A custom `ApprovalCard` or `BulkApprovalCard` (`components`) does not get
   this for free: render `approval.subjects` yourself (grouped card: on each
   entry of `approvals`). One entry per id argument, `{ path, id, label?,
-  status, name?, names?, fallback? }` with `status` `named` | `seen` |
+  status, name?, names?, candidates?, fallback? }` with `status` `named` | `seen` |
   `unknown` | `ambiguous`; show `fallback` or the id without a warning for
-  `seen`, a warning with the id for `unknown` and `ambiguous`. A card that
+  `seen`, a warning with the id for `unknown` and `ambiguous`. An `ambiguous`
+  subject without `name` but with `candidates` (`{ label, name? }[]`) is an
+  id of different kinds: list every candidate, name none. A card that
   renders only `details` drops the safeguard silently.
 
 ## Sessions

@@ -12,6 +12,7 @@
  */
 
 import { READ_RESULT_ID_PREFIX, WRITE_RESULT_ID_PREFIX, READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
+import { idLikeFieldsOf } from '../../../contracts/record-identity.js';
 import {
   dominantArrayRoute,
   expiredInstruction,
@@ -56,7 +57,19 @@ const MARKER_LENGTH = JSON.stringify(HISTORY_MARKER_KEY).length;
 const OWN_MARKERS: ReadonlySet<string> = new Set(['_truncated', HISTORY_MARKER_KEY]);
 const ID_KEYS: ReadonlySet<string> = new Set(IDENTITY_ID_KEYS);
 const NAME_KEYS: ReadonlySet<string> = new Set(IDENTITY_NAME_KEYS);
-const KEY_ORDER = [...IDENTITY_ID_KEYS, ...IDENTITY_NAME_KEYS];
+
+/**
+ * The marker's `keys` in a fixed order: the recognised id keys, then the
+ * id-like keys of entries without one (`playlist_id`, in the order they first
+ * occur), then the name keys.
+ */
+function orderedKeys(kept: ReadonlySet<string>, idLikeOrder: ReadonlyArray<string>): string[] {
+  return [
+    ...IDENTITY_ID_KEYS.filter((key) => kept.has(key)),
+    ...idLikeOrder.filter((key) => kept.has(key) && !ID_KEYS.has(key) && !NAME_KEYS.has(key)),
+    ...IDENTITY_NAME_KEYS.filter((key) => kept.has(key)),
+  ];
+}
 
 type Limits = { maxItems: number; maxStringLength: number };
 
@@ -128,10 +141,13 @@ type IdentityLevel = 'all' | 'pair' | 'clipped';
  * fields; `pair` its first id field and its first name field; `clipped`
  * that pair with the name clipped. A name too long to be an identity field
  * is kept clipped on every level, so an entry with a name never loses it.
+ * An entry without a recognised identifier keeps every id-like field
+ * (`idLikeFieldsOf`) on every level.
  */
 function identityOf(entry: unknown, level: IdentityLevel): Array<[string, unknown]> {
   if (!isPlainObject(entry)) return [];
   const kept = new Map(identityFieldsOf(entry));
+  const idLike = new Set(idLikeFieldsOf(entry, IDENTITY_ID_KEYS));
   let fields: Array<[string, unknown]> = [];
   for (const key of Object.keys(entry)) {
     const value = entry[key];
@@ -141,7 +157,7 @@ function identityOf(entry: unknown, level: IdentityLevel): Array<[string, unknow
   if (level === 'all') return fields;
   const id = fields.find(([key]) => ID_KEYS.has(key));
   const name = fields.find(([key]) => NAME_KEYS.has(key));
-  fields = fields.filter((field) => field === id || field === name);
+  fields = fields.filter((field) => field === id || field === name || idLike.has(field[0]));
   return level === 'clipped'
     ? fields.map(([key, value]) => [key, NAME_KEYS.has(key) && typeof value === 'string' ? clipName(value) : value])
     : fields;
@@ -198,7 +214,9 @@ export interface CompactHistoryResultOptions {
  * other entries keep only their identity fields (`id`, `uuid`, `key`,
  * `slug`, `code`, `name`, `title`, `label`, `displayName`; scalars, at most
  * 200 characters per field, a longer name clipped to 60), so every id stays
- * with its own name. A `_history` marker says what was reduced. Nested
+ * with its own name. An entry without a recognised id (`id`, `uuid`, `key`,
+ * `slug`, `code`) keeps every id-like field instead (`playlist_id`,
+ * `ownerId`; `idLikeFieldsOf`), on every level below. A `_history` marker says what was reduced. Nested
  * arrays keep the earlier treatment (first entries plus a count).
  *
  * Within `maxChars` things give way in this order: complete entries are
@@ -229,6 +247,10 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
   const source: unknown[] = entries;
   const length = source.length;
 
+  // Id-like keys of entries without a recognised identifier, in the order they first occur.
+  const idLikeSeen = new Set<string>();
+  for (const entry of source) for (const key of idLikeFieldsOf(entry, IDENTITY_ID_KEYS)) idLikeSeen.add(key);
+  const idLikeOrder = [...idLikeSeen];
   // Identity per entry on each level, with prefix sums of their sizes and counts.
   const forms = (['all', 'pair', 'clipped'] as const).map((level) => {
     const sizes = [0];
@@ -242,7 +264,7 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
       sizes.push(sizes.at(-1)! + (fields.length > 0 ? serializedLength(objectOf(fields)) : 0));
       counts.push(counts.at(-1)! + (fields.length > 0 ? 1 : 0));
     }
-    return { level, sizes, counts, clipped, keys: KEY_ORDER.filter((key) => keys.has(key)) };
+    return { level, sizes, counts, clipped, keys: orderedKeys(keys, idLikeOrder) };
   });
   if (forms[0]!.counts[length] === 0) return legacy;
   const fullCount = Math.min(limits.maxItems, length);
@@ -312,7 +334,7 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
   let holder = output;
   for (const key of (rootArray ? ['data'] : route).slice(0, -1)) holder = holder[key] as Record<string, unknown>;
   setOwn(holder, rootArray ? 'data' : route.at(-1)!, array);
-  setOwn(output, HISTORY_MARKER_KEY, markerOf(plan, KEY_ORDER.filter((key) => kept.has(key)), anyClipped));
+  setOwn(output, HISTORY_MARKER_KEY, markerOf(plan, orderedKeys(kept, idLikeOrder), anyClipped));
   return output;
 }
 

@@ -164,6 +164,34 @@ describe('AiChatProvider approval lifecycle', () => {
     expect(approvalDescription.mock.calls[0][3]?.names?.get(taskId)).toBe('Angebot Meier');
   });
 
+  it('hands the description only the name of the kind the call picks for an id of different kinds', async () => {
+    const history = {
+      id: 'assistant-0',
+      role: 'assistant' as const,
+      parts: [
+        { type: 'tool-users_list', toolCallId: 'call-u', state: 'output-available', input: {}, output: { users: [{ id: 3, displayName: 'Linus' }] } },
+        { type: 'tool-playlists_list', toolCallId: 'call-p', state: 'output-available', input: {}, output: { playlists: [{ playlist_id: 3, displayName: 'Lobby Loop' }] } },
+      ] as never[],
+    };
+    const namesFor = async (toolName: string, input: Record<string, unknown>) => {
+      const transport = createTransport(vi.fn());
+      transport.messages = [history, {
+        id: 'assistant-1', role: 'assistant',
+        parts: [{ type: `tool-${toolName}`, toolCallId: 'call-1', state: 'approval-requested', input, approval: { id: 'approval-1' } } as never],
+      }];
+      const approvalDescription = vi.fn((tool: string, id: string, args: unknown, _context?: { names?: ReadonlyMap<string, string> }) => ({
+        id, toolName: tool, args: args as Record<string, unknown>, messageId: '', description: '', details: [],
+      }));
+      render(<AiChatProvider transport={transport} approvalDescription={approvalDescription}><ApprovalProbe /></AiChatProvider>);
+      await waitFor(() => expect(screen.getByTestId('approval-count').textContent).toBe('1'));
+      cleanup();
+      return approvalDescription.mock.calls[0]![3]?.names;
+    };
+    expect((await namesFor('playlists_delete', { playlist_id: 3 }))?.get('3')).toBe('Lobby Loop');
+    expect((await namesFor('playlists_delete', { id: 3 }))?.get('3')).toBe('Lobby Loop');
+    expect((await namesFor('links_create', { target_id: 3 }))?.has('3')).toBe(false);
+  });
+
   it('leaves an open approval behind when the host switches to another chat', async () => {
     const withApproval = createTransport(vi.fn());
     const empty = { ...createTransport(vi.fn()), messages: [] };

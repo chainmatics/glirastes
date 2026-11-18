@@ -118,14 +118,17 @@ export function ApprovalIdWarning({ id, subjects }: { id: string; subjects: Read
           </>
         )}
         {ambiguous.map((subject, i) => (
-          <div key={i} data-element="warning-ambiguous">
+          <div key={i} data-element="warning-ambiguous" data-candidates={subject.candidates ? '' : undefined}>
             <p data-element="warning-text">
-              {locale.approvalAmbiguousIdWarning.replace('{names}', (subject.names ?? []).join(', '))}
+              {subject.candidates
+                ? locale.approvalCollidingIdWarning.replace('{candidates}', subject.candidates
+                  .map((candidate) => (candidate.name ? `${candidate.name} (${candidate.label})` : candidate.label)).join(', '))
+                : locale.approvalAmbiguousIdWarning.replace('{names}', (subject.names ?? []).join(', '))}
             </p>
             <ul data-element="warning-ids">
               <li data-element="detail-line" data-status="ambiguous">
                 <span data-element="detail-label">{labelOf(subject)}</span>
-                <span data-element="detail-value">{subject.name}</span>
+                {subject.name !== undefined && <span data-element="detail-value">{subject.name}</span>}
                 <code data-element="subject-id">{subject.id}</code>
               </li>
             </ul>

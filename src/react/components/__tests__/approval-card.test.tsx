@@ -192,4 +192,19 @@ describe('ApprovalCard ids of the call', () => {
     expect(warning.querySelector('[data-element="detail-value"]')!.textContent).toBe('Vertrieb');
     expect(warning.querySelector('[data-element="subject-id"]')!.textContent).toBe('7');
   });
+
+  it('names no record for an id of different kinds and lists every candidate with its kind', () => {
+    const { container } = renderCard(approval({
+      subjects: [{
+        path: 'id', id: '3', status: 'ambiguous', names: ['Lobby Loop', 'Linus Torvalds'],
+        candidates: [{ label: 'Playlist', name: 'Lobby Loop' }, { label: 'User', name: 'Linus Torvalds' }, { label: 'Version' }],
+      }],
+    }));
+    const warning = screen.getByRole('alert');
+    expect(warning.textContent).toContain('Diese ID kam bei verschiedenen Arten von Datensätzen vor: Lobby Loop (Playlist), Linus Torvalds (User), Version. Prüfe, welcher gemeint ist, bevor du bestätigst.');
+    expect(warning.querySelector('[data-element="detail-value"]')).toBeNull();
+    expect(warning.querySelector('[data-element="subject-id"]')!.textContent).toBe('3');
+    // No name line in the details either.
+    expect(container.querySelector('[data-subject]')).toBeNull();
+  });
 });

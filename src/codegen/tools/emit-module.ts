@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import type { AppSetupArtifact } from '../../contracts/index.js';
+import type { ToolSearchSemantics } from '../../runtime/tool-discovery.js';
 import { compareCodeUnits, sortKeysDeep } from './canonical.js';
 import { deriveChatInteractions } from './chat-interactions.js';
 import type { RuntimeSchemaSource, ToolContract, ToolContractsEntry } from './types.js';
@@ -47,6 +48,21 @@ function literal(value: unknown, indent = 0): string {
 
 type ArtifactTool = AppSetupArtifact['tools'][number];
 
+/**
+ * The search-only semantics of one tool contract (`search` of
+ * tool-contracts.json): synonyms and example sentences, `undefined` when it
+ * has neither. Shared by the generated module and the container artifact.
+ */
+export function toolSearchSemanticsOf(search: ToolContractsEntry['search']): ToolSearchSemantics | undefined {
+  const synonyms = search?.synonyms ?? [];
+  const examples = search?.examples ?? [];
+  if (synonyms.length === 0 && examples.length === 0) return undefined;
+  return {
+    ...(synonyms.length > 0 ? { synonyms: [...synonyms] } : {}),
+    ...(examples.length > 0 ? { examples: [...examples] } : {}),
+  };
+}
+
 function catalogEntry(tool: ArtifactTool): Record<string, unknown> {
   const common = {
     toolId: tool.toolId,
@@ -88,12 +104,11 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     }
     return { tool, contract, maxResultChars, outputFields };
   });
-  // Search-only synonyms of the enabled tools, keyed like `toolSemantics` of createAiChatHandler.
+  // Search-only synonyms and examples of the enabled tools, keyed like `toolSemantics` of createAiChatHandler.
   const searchSemantics = Object.fromEntries(tools
-    .map((tool) => [catalogEntry(tool).modelName as string, contractsById.get(tool.toolId)?.search?.synonyms] as const)
-    .filter((entry): entry is readonly [string, string[]] => (entry[1]?.length ?? 0) > 0)
-    .sort(([left], [right]) => compareCodeUnits(left, right))
-    .map(([modelName, synonyms]) => [modelName, { synonyms }]));
+    .map((tool) => [catalogEntry(tool).modelName as string, toolSearchSemanticsOf(contractsById.get(tool.toolId)?.search)] as const)
+    .filter((entry): entry is readonly [string, ToolSearchSemantics] => entry[1] !== undefined)
+    .sort(([left], [right]) => compareCodeUnits(left, right)));
   const modules = [...new Set(bound
     .flatMap(({ contract }) => [contract.runtime.input, contract.runtime.output])
     .flatMap((source) => (source.kind === 'module-export' ? [source.module] : [])))]
@@ -135,6 +150,8 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
       ? tools.map((tool) => JSON.stringify(tool.toolId)).join(' | ')
       : 'never'};`, '');
   }
+  // The emitted comment stays as it was (examples now take part too), so a
+  // module of an app without examples stays byte-identical.
   lines.push(
     '/** Pass as `toolSemantics` to createAiChatHandler: synonyms help find_tools, they never grant a tool. */',
     `export const toolSearchSemantics = ${literal(searchSemantics)}${typescript ? ' as const' : ''};`,
