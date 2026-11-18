@@ -152,7 +152,11 @@ second, hand-maintained catalogue.
    closed (`parseAsStringLiteral([...])`, `parseAsInteger`, `parseAsArrayOf`);
    `parseAsString` stays open and is reported as `filter-domain-open`.
 6. Client actions: `useAiClientAction('tasks.highlight', handler, contract)`
-   where the state lives, with a Zod payload contract as third argument. An
+   where the state lives, with a Zod payload contract as third argument. The
+   tool is `ui.tasks.highlight`; a single-segment id (`navigate`) or one
+   starting with `navigate.`, `filter.` or `action.` becomes
+   `ui.action.<id>`, so it never takes the generated `ui.navigate` or
+   `ui.filter.*` names. An
    action whose component lives on one page gets that page's path as fourth
    argument, in the page component itself:
 

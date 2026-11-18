@@ -114,6 +114,21 @@ in each description which neighbour fits better for which request.
 - An `examples` list with fewer than 3 (or more than 5) sentences in one
   language rejects the whole entry (`tool-semantics-invalid`,
   `resolution-rejected` for an agent entry): its other texts are lost too.
+- The description the model gets is the first non-empty of: `description`
+  in `.glirastes/tool-policy.json`, the code comment (JSDoc above the handler,
+  method or client action registration; for `openapi` the operation's
+  `description`, else `summary`), the `contract.ts` description (for
+  `ui.navigate` and `ui.filter.*` a generated text), the schema's
+  `.describe()`, then the `description` you write in `tool-semantics.json`;
+  the same for endpoint and UI tools. So a tool with a JSDoc comment ignores
+  your `description` today; if the comment is too thin, tell the developer
+  (you never change handler code). The next minor release is planned to let a maintained
+  `tool-semantics.json` entry win over the JSDoc.
+- Synonyms weigh second only to the name in the search. Never give a
+  collective tool (navigation, a generic "open object" tool) the names of its
+  targets as synonyms (`Playlists` on a navigation tool): it then joins every
+  request with that word and crowds out the tool that lists them. Give it
+  synonyms for the act only ("go to", "open page").
 - An entry whose `stableKey` or `name` matches no tool is reported as
   `semantics-entry-orphaned`; re-key it (`"METHOD /path"`) or delete it.
 - In later turns the model sees earlier lists reduced to id and name (only
