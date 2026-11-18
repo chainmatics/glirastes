@@ -452,15 +452,18 @@ describe('hideIds and negative numbers', () => {
 });
 
 describe('history compaction keeps a declared root identity', () => {
-  it('never clips a declared root id or name, also path-less without an array', () => {
+  it('never clips a declared root id, also path-less without an array, within maxChars', () => {
     const value = { orderNo: 'ORDER-2026-000001-ALPHA-BRAVO', customer: 'A very long customer name indeed', notes: 'n'.repeat(100) };
     for (const declaration of [{ id: 'orderNo', name: 'customer', path: '' }, { id: 'orderNo', name: 'customer' }]) {
       const compacted = compactHistoryResult(value, { maxStringLength: 20, entities: [declaration] }) as Entry;
       expect(compacted.orderNo).toBe(value.orderNo);
-      expect(compacted.customer).toBe(value.customer);
       expect(String(compacted.notes).length).toBeLessThan(100);
     }
     expect((compactHistoryResult(value, { maxStringLength: 20 }) as Entry).orderNo).not.toBe(value.orderNo);
+    // With a list and a tight bound, the bound wins.
+    const listed = { orderNo: 'O'.repeat(150), lines: Array.from({ length: 40 }, (_, index) => ({ sku: `S${index}`, name: `Line ${index}` })) };
+    const bounded = compactHistoryResult(listed, { maxStringLength: 20, maxChars: 900, entities: [{ id: 'orderNo', path: '' }] });
+    expect(JSON.stringify(bounded).length).toBeLessThanOrEqual(900);
   });
 });
 

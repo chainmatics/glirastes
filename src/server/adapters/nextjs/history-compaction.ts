@@ -23,7 +23,9 @@ import { dominantArrayRoute, expiredInstruction } from '../../core/result-overvi
 import {
   declarationForEntries,
   declaredIdentityKeys,
+  entityIdFields,
   entityPathOf,
+  isEntityIdValue,
   type OutputEntityDeclaration,
 } from '../../../contracts/entity-declaration.js';
 
@@ -268,28 +270,39 @@ export interface CompactHistoryResultOptions {
  */
 export function compactHistoryResult(value: unknown, options: CompactHistoryResultOptions = {}): unknown {
   const compacted = compactHistoryResultOnce(value, options);
-  return options.entities ? withRootIdentity(compacted, value, options.entities) : compacted;
+  return options.entities ? withRootIdentity(compacted, value, options.entities, options.maxChars) : compacted;
 }
 
 /**
- * The declared identity of the result itself (`path: ''`, or a path-less
+ * The declared id of the result itself (`path: ''`, or a path-less
  * declaration of a result without an array) as the tool returned it: string
- * clipping (`maxStringLength`) never shortens a declared id or name there.
+ * clipping (`maxStringLength`) never shortens it. Id values are at most 200
+ * characters; when the restored ids would break `maxChars`, the compacted
+ * copy stays as it is.
  */
-function withRootIdentity(compacted: unknown, value: unknown, entities: ReadonlyArray<OutputEntityDeclaration>): unknown {
+function withRootIdentity(
+  compacted: unknown,
+  value: unknown,
+  entities: ReadonlyArray<OutputEntityDeclaration>,
+  maxChars: number | undefined,
+): unknown {
   if (!isPlainObject(compacted) || !isPlainObject(value)) return compacted;
   const declared = entities.find((declaration) => {
     const steps = entityPathOf(declaration, value);
     return steps !== undefined && steps.length === 0;
   });
   if (!declared) return compacted;
-  for (const key of declaredIdentityKeys(declared)) {
+  const restored: Record<string, unknown> = { ...compacted };
+  let changed = false;
+  for (const key of entityIdFields(declared)) {
     const original = Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
-    if ((typeof original === 'string' || typeof original === 'number') && Object.prototype.hasOwnProperty.call(compacted, key)) {
-      setOwn(compacted, key, original);
+    if (isEntityIdValue(original) && Object.prototype.hasOwnProperty.call(restored, key) && restored[key] !== original) {
+      setOwn(restored, key, original);
+      changed = true;
     }
   }
-  return compacted;
+  if (!changed) return compacted;
+  return maxChars !== undefined && serializedLength(restored) > maxChars ? compacted : restored;
 }
 
 function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultOptions): unknown {
