@@ -278,7 +278,13 @@ export function resolveApprovalSubjects(
       const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, lookup, ref.type, true, id, idKind === 'opaque');
       if (!subject) continue;
       let provenance: ApprovalSubject['provenance'];
-      if (subject.status !== 'unknown') provenance = sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';
+      // Where the record of the reference's own type came from, not any record with this id.
+      const ofType = sighting?.kinds?.find((candidate) => candidate.type === ref.type);
+      if (subject.status !== 'unknown') {
+        provenance = ofType
+          ? (ofType.mentionedOnly && !(record?.byType && Object.prototype.hasOwnProperty.call(record.byType, ref.type)) ? 'mention' : 'tool-result')
+          : sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';
+      }
       // A composite key's text (`a/b/c`) does not tell its parts apart: never counted as typed.
       else if (paths.length === 1 && typedByUser(id, options.userTexts ?? [], idKind === 'speaking')) provenance = 'user-message';
       subjects.push({

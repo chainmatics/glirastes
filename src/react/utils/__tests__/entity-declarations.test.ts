@@ -421,3 +421,16 @@ describe('a declared record without its id', () => {
     })[0]).toMatchObject({ status: 'unknown' });
   });
 });
+
+describe('provenance of the picked type', () => {
+  it('is mention for an album only mentioned, next to a user 7 a tool returned', () => {
+    const REFS: EntityDeclarationsByTool = {
+      users_list: { output: [{ type: 'user', id: 'id', name: 'name', path: 'users[]' }] },
+      albums_delete: { input: [{ type: 'album', args: 'albumNo' }] },
+    };
+    const messages = [tool('users_list', { users: [{ id: 7, name: 'Ada' }] }), user('{{mention:album:7:Blue}} delete')];
+    expect(resolveApprovalSubjects({ albumNo: 7 }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'albums_delete', inputEntities: REFS.albums_delete!.input!, userTexts: userTextsOf(messages), declarations: REFS,
+    })[0]).toMatchObject({ status: 'named', name: 'Blue', provenance: 'mention' });
+  });
+});

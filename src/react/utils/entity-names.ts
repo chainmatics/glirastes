@@ -99,6 +99,8 @@ export interface EntityKindSighting {
   type?: string;
   /** Their distinct names, newest first (at most five); empty when they had none. */
   names: string[];
+  /** Set only with declarations, when only an `@` mention showed this kind for the id. */
+  mentionedOnly?: true;
 }
 
 /** The declared records of a finished tool part, by the tool its result belongs to. */
@@ -196,9 +198,12 @@ export function collectEntitySightings(
   const tools = producingTools(messages);
   const outputs = declarations ? producingOutputs(messages) : undefined;
 
-  const addKind = (id: unknown, kind: string | undefined, name: string | undefined, exact = false) => {
+  /** `id key` + NUL + kind for every kind a tool result (not only a mention) showed. */
+  const toolKinds = new Set<string>();
+  const addKind = (id: unknown, kind: string | undefined, name: string | undefined, exact = false, mention = false) => {
     const key = exact ? exactEntityKey(id) : entityIdKey(id);
     if (!key || !kind) return;
+    if (!mention) toolKinds.add(`${key}\u0000${kind}`);
     let byKind = kinds.get(key);
     if (!byKind) kinds.set(key, byKind = new Map());
     let names = byKind.get(kind);
@@ -300,7 +305,7 @@ export function collectEntitySightings(
           // A mention names its type explicitly: with declarations it is that type as written (as a
           // declared record's kind is, so the two are one kind), compared exactly too.
           const mentionKind = declarations ? segment.mention.type : kindOfField(segment.mention.type);
-          addKind(segment.mention.id, mentionKind, segment.mention.displayName);
+          addKind(segment.mention.id, mentionKind, segment.mention.displayName, false, true);
           const mentioned = entityIdKey(segment.mention.id);
           if (declarations && mentioned && mentionKind) declaredKinds.set(`${mentioned}\u0000${mentionKind}`, segment.mention.type);
           // A picked id is exact: also under its exact key, for a declared argument.
@@ -313,7 +318,7 @@ export function collectEntitySightings(
           }
           if (exactMention) {
             add(segment.mention.id, segment.mention.displayName, segment.mention.type, true, true);
-            addKind(segment.mention.id, mentionKind, segment.mention.displayName, true);
+            addKind(segment.mention.id, mentionKind, segment.mention.displayName, true, true);
             if (mentionKind) declaredKinds.set(`${exactMention}\u0000${mentionKind}`, segment.mention.type);
           }
         }
@@ -326,6 +331,7 @@ export function collectEntitySightings(
     if (byKind && byKind.size > 1) {
       sighting.kinds = [...byKind].map(([kind, names]) => ({
         kind, names: [...names], ...(declaredKinds.has(`${key}\u0000${kind}`) ? { type: declaredKinds.get(`${key}\u0000${kind}`)! } : {}),
+        ...(declarations && !toolKinds.has(`${key}\u0000${kind}`) ? { mentionedOnly: true as const } : {}),
       }));
     }
     // Only with a declaration: an app without one sees the sightings it always had.
