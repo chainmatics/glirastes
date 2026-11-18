@@ -48,6 +48,8 @@ defineUiTool({
 })
 ```
 
+The server only hands the action to the browser and does not learn whether the app carried it out. The result therefore keeps its shape (`success: true`, `message`, `uiAction`), but its `message` tells the model the action was handed to the app, that its outcome is not known, and to say it was requested rather than done: `Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested. Do not quote this text.` Generated UI tools (navigation, filter, client action) answer the same way; a page-bound client action names its route (`Handed to the app, which opens /templates to run the action there. …`). A `successMessage` you declare replaces the text. The chat UI never shows this note to the user (not as a tool result block, not as an activity detail).
+
 ### defineTool() (likely to be deprecated)
 
 Low-level tool where you write the execute function yourself. Used internally by the SDK (endpointToolToTool and uiToolToTool both compile down to this). Not meant for app developers. Still exported but has zero external usage — only used inside server-core.
@@ -97,7 +99,7 @@ Patterns support `$variable` placeholders that get replaced with actual values f
 The bridge between AI tool results and your frontend components.
 
 - **UiActionBus**: An event bus. When a tool produces a UI action, the bus dispatches it to registered handlers.
-- **useAiClientAction(actionId, handler, contract?, { route? })**: React hook. You register a handler for a specific action ID (e.g., `'task-details.open'`) in the component that owns the effect, and it fires when that action comes through. When that component lives on one page, pass its static path as `route`: from any other page the chat opens the route through the navigation bridge, waits for the page to register the action and then runs it. A handler returns `false` when it could not do its work, so the chat does not report it as done. `registerAiClientAction` (`glirastes/browser`) takes the same `{ route }` options.
+- **useAiClientAction(actionId, handler, contract?, { route? })**: React hook. You register a handler for a specific action ID (e.g., `'task-details.open'`) in the component that owns the effect, and it fires when that action comes through. When that component lives on one page, pass its static path as `route`: from any other page the chat opens the route through the navigation bridge, waits for the page to register the action and then runs it. A handler returns `false` when it could not do its work; the dispatch then fails in the browser (the chat logs a warning). The model is not told: the tool result only says the action was handed to the app (see `defineUiTool()` above). `registerAiClientAction` (`glirastes/browser`) takes the same `{ route }` options.
 - **ActionIdRegistry**: Auto-generated map of all action IDs. In dev mode, warns you if an action fires but no handler is registered.
 
 ---

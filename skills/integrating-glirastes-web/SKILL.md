@@ -236,7 +236,9 @@ is in the package's `docs/tool-policy.md`.
    page to register the action, then runs it. Do not relay a window event
    from a global registration to a listener on one page
    (`ui-action-indirect`). A handler returns `false` when it could not do its
-   work; the dispatch then fails instead of being reported as done.
+   work; the dispatch then fails in the browser. The model is not told: a UI
+   tool's result only says the action was handed to the app, so the model
+   reports it as requested, not done.
 
    Literal ids and literal filter definitions only: the generator reads them
    from code, in `.ts` modules and in the `<script lang="ts">` or

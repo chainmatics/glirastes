@@ -39,7 +39,11 @@ pages upwards through `loadMore`. `PlanChecklist` renders the latest
 work log of one assistant turn; both style through `data-*` attributes.
 `readActivitySteps` gives each step an `ActivityStepStatus`: `running`,
 `done`, `error`, `waiting` or `declined` (an approval refused: shown
-neutrally, not counted as failed).
+neutrally, not counted as failed). `error` covers a thrown tool error and any
+object output with `success: false` (e.g. a failed backend call of an
+endpoint tool, also one `classifyToolFailure` marks as expected); its detail
+is the output's `error` text. A UI tool's hand-off note is never shown as a
+detail.
 
 ## Tool results and approvals
 

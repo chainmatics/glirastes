@@ -37,6 +37,7 @@ import {
   toJsonRecord,
 } from './output-fields.js';
 import { applyDefaultViewWithoutStore } from './default-view.js';
+import { UI_ACTION_HANDOFF_MESSAGE } from '../../browser/ui-action-handoff.js';
 import {
   boundedToolFailure,
   ENDPOINT_FAILURE,
@@ -838,9 +839,11 @@ export function uiToolToTool<TInput extends SchemaLike>(
         }
       }
 
+      // The server only hands the action to the browser and does not learn
+      // whether the app carried it out; an app's own successMessage wins.
       const message = uiTool.successMessage
-        ? (applyUiTemplateValue(uiTool.successMessage, inputPayload) as string) || 'Action executed.'
-        : 'Action executed.';
+        ? (applyUiTemplateValue(uiTool.successMessage, inputPayload) as string) || UI_ACTION_HANDOFF_MESSAGE
+        : UI_ACTION_HANDOFF_MESSAGE;
 
       return {
         success: true,
