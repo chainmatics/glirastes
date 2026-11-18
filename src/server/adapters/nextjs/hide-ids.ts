@@ -8,6 +8,7 @@ import {
   UUID_PATTERN_SOURCE,
 } from '../../../contracts/entity-identity.js';
 import {
+  declarationsForRead,
   declaredRecordsOf,
   entityIdText,
   type EntityDeclarationsByTool,
@@ -200,21 +201,37 @@ export function collectDeclaredIdLabelsFromMessages(
     }
   }
   for (const { name, part } of toolParts) {
-    const producer = producers.of(name, part.input);
-    if (!Object.prototype.hasOwnProperty.call(entities, producer)) continue;
-    collectDeclaredIdLabels(part.output, entities[producer]!.output, labels);
+    collectDeclaredIdLabels(part.output, producers.declarationsFor(entities, name, part.input), labels);
   }
 }
 
 /** The tool that produced each result handle: a `read_result` answer is read with that tool's declarations. */
 class ResultProducers {
   private readonly byId = new Map<string, string>();
+  private readonly outputs = new Map<string, unknown>();
 
   note(toolName: string, output: unknown): void {
     if (toolName === READ_RESULT_TOOL_NAME || typeof output !== 'object' || output === null) return;
     const marker = (output as { _result?: unknown })._result;
     const id = typeof marker === 'object' && marker !== null ? (marker as { id?: unknown }).id : undefined;
-    if (typeof id === 'string') this.byId.set(id, toolName);
+    if (typeof id === 'string') {
+      this.byId.set(id, toolName);
+      this.outputs.set(id, output);
+    }
+  }
+
+  /** The declarations to read a part with: a read keeps the paths path-less ones had in the producing result. */
+  declarationsFor(
+    entities: EntityDeclarationsByTool,
+    toolName: string,
+    input: unknown,
+  ): ReadonlyArray<OutputEntityDeclaration> | undefined {
+    const producer = this.of(toolName, input);
+    if (!Object.prototype.hasOwnProperty.call(entities, producer)) return undefined;
+    const own = entities[producer]!.output;
+    if (toolName !== READ_RESULT_TOOL_NAME || producer === toolName) return own;
+    const id = (input as { resultId?: unknown }).resultId as string;
+    return declarationsForRead(own, this.outputs.get(id));
   }
 
   /** Notes the producers of the finished tool parts of UI messages (`tool-<name>`). */
@@ -267,8 +284,7 @@ export function createHideIdsTransform(
   const declaredOf = (toolName: unknown, input: unknown, output: unknown) => {
     if (typeof toolName !== 'string' || !options.entities) return undefined;
     producers.note(toolName, output);
-    const producer = producers.of(toolName, input);
-    return Object.prototype.hasOwnProperty.call(options.entities, producer) ? options.entities[producer]!.output : undefined;
+    return producers.declarationsFor(options.entities, toolName, input);
   };
   return () => {
     const held = new Map<string, { part: TextDelta; text: string }>();

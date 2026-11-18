@@ -389,6 +389,29 @@ export function objectsAt(root: unknown, steps: ReadonlyArray<EntityPathStep>, l
   return current.filter(isRecord).slice(0, limit);
 }
 
+/**
+ * The declarations for a `read_result` answer of a result: a path-less one
+ * gets the path it had in the producing result (`output`, the overview the
+ * model got: its `_result.arrays` names the dominant array first), so a read
+ * of a smaller array is never taken for the declared records. Without the
+ * producing result, path-less declarations are left out.
+ */
+export function declarationsForRead(
+  declarations: ReadonlyArray<OutputEntityDeclaration> | undefined,
+  output: unknown,
+): OutputEntityDeclaration[] | undefined {
+  if (!declarations) return undefined;
+  const marker = isRecord(output) && isRecord(output._result) ? output._result : undefined;
+  const listed = marker && isRecord(marker.arrays) ? Object.keys(marker.arrays)[0] : undefined;
+  const route = listed !== undefined ? listed.split('.') : output !== undefined ? largestArrayRoute(output) : undefined;
+  const pinned = declarations.flatMap((declaration): OutputEntityDeclaration[] => {
+    if (declaration.path !== undefined) return [declaration];
+    if (output === undefined) return [];
+    return [{ ...declaration, path: route ? `${route.join('.')}[]` : '' }];
+  });
+  return pinned.length > 0 ? pinned : undefined;
+}
+
 /** The declared records of a tool result: each object a declaration reaches, with its identity. */
 export function declaredRecordsOf(
   root: unknown,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   declarationForEntries,
+  declarationsForRead,
   declaredIdentityOf,
   declaredRecordsOf,
   defineEntity,
@@ -429,5 +430,14 @@ describe('declarations meet the guess and indexed reads', () => {
   it('finds a path-less declared record in an indexed read_result answer', () => {
     expect([...declaredRecordsOf({ data: { 2: { trackNo: 3, label_text: 'Track' } } }, [TRACK]).values()].map((identity) => identity.name))
       .toEqual(['Track']);
+  });
+});
+
+describe('declarationsForRead', () => {
+  it('pins a path-less declaration to the producing result\'s dominant array', () => {
+    const overview = { tracks: [{ n: 1 }], tags: [{ n: 2 }], _result: { id: 'ro_x', arrays: { tracks: 5, tags: 1 }, hint: 'x' } };
+    expect(declarationsForRead([{ id: 'n' }, { id: 'n', path: 'tags[]' }], overview)).toEqual([{ id: 'n', path: 'tracks[]' }, { id: 'n', path: 'tags[]' }]);
+    expect(declarationsForRead([{ id: 'n' }], { orderNo: 1 })).toEqual([{ id: 'n', path: '' }]);
+    expect(declarationsForRead([{ id: 'n' }], undefined)).toBeUndefined();
   });
 });

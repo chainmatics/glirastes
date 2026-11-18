@@ -13,6 +13,7 @@ import {
 } from '../../contracts/entity-identity.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import {
+  declarationsForRead,
   declaredRecordsOf,
   entityLookupId,
   type DeclaredRecordIdentity,
@@ -105,12 +106,33 @@ function declaredOf(
   part: Record<string, unknown>,
   tools: ReadonlyMap<string, string>,
   declarations: EntityDeclarationsByTool | undefined,
+  outputs?: ReadonlyMap<string, unknown>,
 ): Map<Record<string, unknown>, DeclaredRecordIdentity> | undefined {
   if (!declarations) return undefined;
   const tool = resultToolOf(part, tools);
   if (!Object.prototype.hasOwnProperty.call(declarations, tool)) return undefined;
-  const found = declaredRecordsOf(part.output, declarations[tool]!.output);
+  const own = declarations[tool]!.output;
+  // A read keeps the path a path-less declaration had in the producing result.
+  const read = (part.type as string) === `tool-${READ_RESULT_TOOL_NAME}` && tool !== READ_RESULT_TOOL_NAME;
+  const input = part.input;
+  const resultId = isRecord(input) && typeof input.resultId === 'string' ? input.resultId : undefined;
+  const list = read ? declarationsForRead(own, resultId !== undefined ? outputs?.get(resultId) : undefined) : own;
+  const found = declaredRecordsOf(part.output, list);
   return found.size > 0 ? found : undefined;
+}
+
+/** The output of the part that produced each result handle, by result id. */
+function producingOutputs(messages: ReadonlyArray<unknown>): Map<string, unknown> {
+  const outputs = new Map<string, unknown>();
+  for (const message of messages) {
+    if (!isRecord(message) || !Array.isArray(message.parts)) continue;
+    for (const part of message.parts as unknown[]) {
+      if (!isRecord(part) || typeof part.type !== 'string' || !part.type.startsWith('tool-')) continue;
+      const marker = isRecord(part.output) ? part.output._result : undefined;
+      if (isRecord(marker) && typeof marker.id === 'string' && part.type !== `tool-${READ_RESULT_TOOL_NAME}`) outputs.set(marker.id, part.output);
+    }
+  }
+  return outputs;
 }
 
 /** The lookup id of a declared record: its id, or a composite key's JSON tuple. */
@@ -172,6 +194,7 @@ export function collectEntitySightings(
   const declaredKinds = new Map<string, string>();
   let budget = MAX_NODES;
   const tools = producingTools(messages);
+  const outputs = declarations ? producingOutputs(messages) : undefined;
 
   const addKind = (id: unknown, kind: string | undefined, name: string | undefined, exact = false) => {
     const key = exact ? exactEntityKey(id) : entityIdKey(id);
@@ -266,7 +289,7 @@ export function collectEntitySightings(
       const part: unknown = message.parts[p];
       if (!isRecord(part) || typeof part.type !== 'string') continue;
       if (part.type.startsWith('tool-') && part.state === 'output-available') {
-        walk(part.output, 0, undefined, false, kindOfToolName(resultToolOf(part, tools)), declaredOf(part, tools, declarations));
+        walk(part.output, 0, undefined, false, kindOfToolName(resultToolOf(part, tools)), declaredOf(part, tools, declarations, outputs));
       } else if (message.role === 'user' && part.type === 'text' && typeof part.text === 'string') {
         for (const segment of parseMentionSegments(part.text)) {
           if (segment.kind !== 'mention' || segment.mention.type === 'command') continue;
@@ -350,6 +373,7 @@ export function collectSeenEntityIds(
   const seen = new Map<string, SeenEntity>();
   let budget = MAX_NODES;
   const tools = declarations ? producingTools(messages) : new Map<string, string>();
+  const outputs = declarations ? producingOutputs(messages) : undefined;
 
   const walk = (value: unknown, depth: number, declared?: ReadonlyMap<Record<string, unknown>, DeclaredRecordIdentity>): void => {
     if (depth > MAX_DEPTH || budget <= 0) return;
@@ -406,7 +430,7 @@ export function collectSeenEntityIds(
     for (let p = message.parts.length - 1; p >= 0; p -= 1) {
       const part: unknown = message.parts[p];
       if (!isRecord(part) || typeof part.type !== 'string') continue;
-      if (part.type.startsWith('tool-') && part.state === 'output-available') walk(part.output, 0, declaredOf(part, tools, declarations));
+      if (part.type.startsWith('tool-') && part.state === 'output-available') walk(part.output, 0, declaredOf(part, tools, declarations, outputs));
     }
   }
   return seen;

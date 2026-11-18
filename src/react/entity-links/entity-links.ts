@@ -4,6 +4,7 @@ import type { ChatEntityDefinition } from '../interactions/definitions.js';
 import { parseMentionSegments } from '../utils/mention-markup.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import {
+  declarationsForRead,
   declaredRecordsOf,
   entityIdText,
   entityLookupId,
@@ -230,12 +231,16 @@ export function collectKnownEntities(
   const byTool = new Map(searches.map((entry) => [toolKey(entry.search.tool), entry]));
   // A `read_result` answer belongs to the tool that produced the result it reads.
   const producers = new Map<string, string>();
+  const producerOutputs = new Map<string, unknown>();
   if (declarations) {
     for (const message of messages) {
       for (const part of message.parts) {
         const result = toolOutputOf(part);
         const marker = result && isRecord(result.output) ? result.output._result : undefined;
-        if (result && result.tool !== READ_RESULT_TOOL_NAME && isRecord(marker) && typeof marker.id === 'string') producers.set(marker.id, result.tool);
+        if (result && result.tool !== READ_RESULT_TOOL_NAME && isRecord(marker) && typeof marker.id === 'string') {
+          producers.set(marker.id, result.tool);
+          producerOutputs.set(marker.id, result.output);
+        }
       }
     }
   }
@@ -255,9 +260,13 @@ export function collectKnownEntities(
       const result = toolOutputOf(part);
       // A tool whose `outputEntities` declare a type and a name: every such record, also nested (D1).
       const producer = result ? producerOf(part, result.tool) : undefined;
-      const declared = producer && declarations && Object.prototype.hasOwnProperty.call(declarations, producer)
+      const own = producer && declarations && Object.prototype.hasOwnProperty.call(declarations, producer)
         ? declarations[producer]!.output
         : undefined;
+      // A read keeps the path a path-less declaration had in the producing result.
+      const readId = result && result.tool === READ_RESULT_TOOL_NAME && producer !== result.tool && isRecord(part) && isRecord(part.input)
+        && typeof part.input.resultId === 'string' ? part.input.resultId : undefined;
+      const declared = readId !== undefined ? declarationsForRead(own, producerOutputs.get(readId)) : own;
       if (result && declared) {
         for (const identity of declaredRecordsOf(result.output, declared).values()) {
           if (identity.declaration.type && identity.name) {

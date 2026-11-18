@@ -20,7 +20,7 @@ import {
   type AiSdkToolHooks,
 } from '../../../runtime/ai-sdk/engine.js';
 import { attachmentPlaceholderText } from '../../../contracts/attachments.js';
-import type { EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
+import { declarationsForRead, type EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
 import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 import { withModelFacingToolErrors } from './stream-error-text.js';
@@ -236,11 +236,14 @@ function isCompactable(part: Record<string, unknown>): part is CompactablePart {
  */
 interface HandleProducers {
   producers: Map<string, string>;
+  /** The producing result's value (the overview the model got), by result id. */
+  outputs: Map<string, unknown>;
   readInputs: Map<string, unknown>;
 }
 
 function handleProducersOf(messages: ReadonlyArray<ModelMessageLike>): HandleProducers {
   const producers = new Map<string, string>();
+  const outputs = new Map<string, unknown>();
   const readInputs = new Map<string, unknown>();
   for (const message of messages) {
     if (!Array.isArray(message.content)) continue;
@@ -251,10 +254,13 @@ function handleProducersOf(messages: ReadonlyArray<ModelMessageLike>): HandlePro
       const value = part.type === 'tool-result' ? (part.output as { value?: unknown } | undefined)?.value : undefined;
       const marker = typeof value === 'object' && value !== null ? (value as { _result?: unknown })._result : undefined;
       const id = typeof marker === 'object' && marker !== null ? (marker as { id?: unknown }).id : undefined;
-      if (typeof id === 'string' && typeof part.toolName === 'string' && part.toolName !== READ_RESULT_TOOL_NAME) producers.set(id, part.toolName);
+      if (typeof id === 'string' && typeof part.toolName === 'string' && part.toolName !== READ_RESULT_TOOL_NAME) {
+        producers.set(id, part.toolName);
+        outputs.set(id, value);
+      }
     }
   }
-  return { producers, readInputs };
+  return { producers, outputs, readInputs };
 }
 
 function withCompactedResults(
@@ -284,19 +290,21 @@ function withCompactedResults(
   };
   const options = { maxItems: limits.maxItems, maxStringLength: limits.maxStringLength, keepIdentity: limits.keepIdentity };
   // A `read_result` answer is compacted with the declarations of the tool that produced its handle.
-  const { producers, readInputs } = handles;
-  const producerOf = (part: CompactablePart): unknown => {
-    if (part.toolName !== READ_RESULT_TOOL_NAME || typeof part.toolCallId !== 'string') return part.toolName;
+  const { producers, outputs, readInputs } = handles;
+  const readIdOf = (part: CompactablePart): string | undefined => {
+    if (part.toolName !== READ_RESULT_TOOL_NAME || typeof part.toolCallId !== 'string') return undefined;
     const input = readInputs.get(part.toolCallId);
     const resultId = typeof input === 'object' && input !== null ? (input as { resultId?: unknown }).resultId : undefined;
-    return (typeof resultId === 'string' && producers.get(resultId)) || part.toolName;
+    return typeof resultId === 'string' && producers.has(resultId) ? resultId : undefined;
   };
   /** The options for one part: with its tool's declared entities, when it has any. */
   const optionsOf = (part: CompactablePart) => {
-    const tool = entities ? producerOf(part) : undefined;
-    const declared = typeof tool === 'string' && entities && Object.prototype.hasOwnProperty.call(entities, tool)
-      ? entities[tool]!.output
-      : undefined;
+    if (!entities) return options;
+    const readId = readIdOf(part);
+    const tool = readId !== undefined ? producers.get(readId)! : part.toolName;
+    const own = typeof tool === 'string' && Object.prototype.hasOwnProperty.call(entities, tool) ? entities[tool]!.output : undefined;
+    // A read keeps the path a path-less declaration had in the producing result.
+    const declared = readId !== undefined ? declarationsForRead(own, outputs.get(readId)) : own;
     return declared ? { ...options, entities: declared } : options;
   };
   const compacted: unknown[] = [];

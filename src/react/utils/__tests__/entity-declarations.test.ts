@@ -348,3 +348,27 @@ describe('a mentioned opaque id of other case', () => {
     expect(resolve('AbC-7')).toMatchObject({ status: 'named', name: 'Dokument A', provenance: 'mention' });
   });
 });
+
+describe('reads keep the declared path of the producing result', () => {
+  it('does not take a read of the smaller array for the declared records', () => {
+    const REFS: EntityDeclarationsByTool = {
+      library_get: { output: [{ type: 'track', id: 'n', name: 'title' }] },
+      tracks_delete: { input: [{ type: 'track', args: 'n' }] },
+    };
+    const messages = [
+      tool('library_get', {
+        tracks: Array.from({ length: 5 }, (_, index) => ({ n: index + 1, title: `Track ${index + 1}` })),
+        tags: [{ n: 9, title: 'Tag' }],
+        _result: { id: 'ro_abc12345', arrays: { tracks: 5, tags: 1 }, hint: 'x' },
+      }),
+      { role: 'assistant', parts: [{ type: 'tool-read_result', toolCallId: 'r1', state: 'output-available', input: { resultId: 'ro_abc12345', fields: ['tags'] }, output: { tags: [{ n: 9, title: 'Tag' }] } }] },
+      { role: 'assistant', parts: [{ type: 'tool-read_result', toolCallId: 'r2', state: 'output-available', input: { resultId: 'ro_abc12345', fields: ['tracks[]'] }, output: { tracks: [{ n: 8, title: 'Late track' }] } }] },
+    ];
+    const resolve = (n: number) => resolveApprovalSubjects({ n }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'tracks_delete', inputEntities: REFS.tracks_delete!.input!, userTexts: [], declarations: REFS,
+    })[0];
+    expect(resolve(9)).toMatchObject({ status: 'unknown' });
+    expect(resolve(8)).toMatchObject({ status: 'named', name: 'Late track' });
+    expect(collectKnownEntities(messages as never, [], REFS).map((reference) => reference.label)).not.toContain('Tag');
+  });
+});
