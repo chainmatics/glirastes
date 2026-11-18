@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import {
   registerAiClientAction,
+  type ClientActionEffect,
   type ClientActionHandler,
   type PayloadContract,
 } from '../browser/client-actions.js';
@@ -33,7 +34,16 @@ export interface AiClientActionOptions {
    * chat opens this route first and runs the action once it is registered.
    */
   route?: string;
+  /**
+   * What the handler does, read as a literal by `glirastes tools refresh`
+   * (`read`, `write`, `destructive`, `external` or `financial`). It replaces
+   * the guess behind `ui-action-write-unproven` and can only raise the
+   * tool's risk: `write` makes the chat ask before it runs the action.
+   */
+  effect?: ClientActionEffect;
 }
+
+export type { ClientActionEffect } from '../browser/client-actions.js';
 
 export interface AiClientActionEventDetail {
   actionId: string;

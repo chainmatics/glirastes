@@ -583,6 +583,90 @@ describe('react-actions source', () => {
     }, 120_000);
   });
 
+  describe('declared effect', () => {
+    const codes = (tool: ObservedTool | undefined) => (tool?.findings ?? []).map((finding) => [finding.code, finding.severity]);
+
+    it('lets a declared effect replace the write guess, whatever the code shape', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/lib/api.ts': 'export async function archiveTask(id: string) {\n'
+          + "  await fetch(`/api/tasks/${id}`, { method: 'DELETE' });\n}\n"
+          + 'export function track(id: number) { console.log(id); }\n',
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\nimport { registerAiClientAction } from 'glirastes/browser';\n"
+          + "import { archiveTask, track } from './lib/api';\n"
+          + "const READ = 'read' as const;\n"
+          + 'export function A() {\n'
+          + "  useAiClientAction('tasks.archive', (payload: { taskId: string }) => archiveTask(payload.taskId), undefined, { effect: 'write' });\n"
+          + "  useAiClientAction('rows.track', (payload: { id: number }) => track(payload.id), undefined, { effect: READ });\n"
+          + "  useAiClientAction('rows.purge', (payload: { id: number }) => track(payload.id), undefined, { route: '/rows', effect: 'destructive' });\n"
+          + "  useAiClientAction('rows.guess', (payload: { id: number }) => track(payload.id));\n"
+          + '  return null;\n}\n'
+          + "registerAiClientAction('rows.export', (payload: { id: number }) => track(payload.id), undefined, { effect: 'external' });\n",
+      });
+      const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+      expect(tools.get('ui.tasks.archive')).toMatchObject({ findings: [], evidence: { declaredEffect: 'write' } });
+      expect(tools.get('ui.rows.track')).toMatchObject({ findings: [], evidence: { declaredEffect: 'read' } });
+      expect(tools.get('ui.rows.purge')).toMatchObject({
+        findings: [], evidence: { declaredEffect: 'destructive' }, contract: { uiAction: { route: '/rows' } },
+      });
+      expect(tools.get('ui.rows.export')).toMatchObject({ findings: [], evidence: { declaredEffect: 'external' } });
+      // Nothing declared: the heuristic stays as before.
+      expect(codes(tools.get('ui.rows.guess'))).toEqual([['ui-action-write-unproven', 'warning']]);
+      expect(tools.get('ui.rows.guess')?.evidence).not.toHaveProperty('declaredEffect');
+    }, 120_000);
+
+    it('never lowers proven write evidence and warns about the contradiction', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+          + 'export function A() {\n'
+          + "  useAiClientAction('tasks.archive', async (payload: { taskId: string }) => {\n"
+          + "    await fetch(`/api/tasks/${payload.taskId}`, { method: 'POST' });\n  }, undefined, { effect: 'read' });\n"
+          + '  return null;\n}\n',
+      });
+      const tool = byName((await createReactActionSource().observe(context(app.root))).observations).get('ui.tasks.archive');
+      expect(tool).toMatchObject({ evidence: { uiMutation: true, declaredEffect: 'read' } });
+      expect(codes(tool)).toEqual([['ui-action-effect-contradicted', 'warning']]);
+    }, 120_000);
+
+    it('needs attention for an effect it cannot read and takes the strongest of differing declarations', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+          + 'declare const effect: string;\n'
+          + 'export function A() {\n'
+          + "  useAiClientAction('a.typo', (payload: { id: string }) => {}, undefined, { effect: 'wirte' as never });\n"
+          + "  useAiClientAction('a.dynamic', (payload: { id: string }) => {}, undefined, { effect: effect as never });\n"
+          + "  useAiClientAction('a.split', (payload: { id: string }) => {}, undefined, { effect: 'read' });\n"
+          + '  return null;\n}\n',
+        'src/b.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+          + "export function B() { useAiClientAction('a.split', (payload: { id: string }) => {}, undefined, { effect: 'write' }); return null; }\n",
+      });
+      const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+      expect(codes(tools.get('ui.a.typo'))).toEqual([['ui-action-effect-invalid', 'needs_attention']]);
+      expect(tools.get('ui.a.typo')?.findings[0]?.message).not.toContain('wirte');
+      expect(codes(tools.get('ui.a.dynamic'))).toEqual([['ui-action-effect-invalid', 'needs_attention']]);
+      expect(tools.get('ui.a.typo')?.evidence).not.toHaveProperty('declaredEffect');
+      expect(tools.get('ui.a.split')).toMatchObject({ evidence: { declaredEffect: 'write' } });
+      expect(codes(tools.get('ui.a.split'))).toEqual([['ui-action-effect-conflict', 'warning']]);
+    }, 120_000);
+
+    it('keeps the source fingerprint of an action that declares nothing', async () => {
+      const files = (options: string) => ({
+        'tsconfig.json': TSCONFIG,
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+          + `export function A() { useAiClientAction('rows.pick', (payload: { id: number }) => {}, undefined${options}); return null; }\n`,
+      });
+      const fingerprint = async (options: string) => {
+        const app = await createAppFixture(files(options));
+        return (await createReactActionSource().observe(context(app.root))).observations[0]?.execution.sourceFingerprint;
+      };
+      const plain = await fingerprint('');
+      expect(await fingerprint(', {}')).toBe(plain);
+      expect(await fingerprint(", { effect: 'write' }")).not.toBe(plain);
+    }, 120_000);
+  });
+
   it('produces nothing without registrations', async () => {
     const app = await createAppFixture({ 'src/a.ts': 'export const x = 1;\n' });
     expect(await createReactActionSource().observe(context(app.root)))

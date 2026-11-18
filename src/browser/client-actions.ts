@@ -11,6 +11,13 @@ export interface PayloadContract<T> {
 /** A client action handler; returning `false` reports that the action was not carried out. */
 export type ClientActionHandler<T> = (payload: T) => void | boolean | Promise<void | boolean>;
 
+/**
+ * What a client action does, in the words of an endpoint contract's
+ * `effect`: `read` (shows or selects), `write` (changes data), `destructive`,
+ * `external` or `financial`. Declared, it replaces the generator's guess.
+ */
+export type ClientActionEffect = 'read' | 'write' | 'destructive' | 'external' | 'financial';
+
 export interface ClientActionOptions {
   bus?: UiActionBus;
   /**
@@ -19,6 +26,15 @@ export interface ClientActionOptions {
    * is elsewhere the chat opens this page first and runs the action there.
    */
   route?: string;
+  /**
+   * What the handler does, read as a literal by `glirastes tools refresh`
+   * and ignored at runtime. It replaces the guess behind
+   * `ui-action-write-unproven` and can only raise the tool's risk: `write`
+   * makes the chat ask before it runs the action (like a handler that
+   * provably writes), `destructive`, `external` and `financial` always ask;
+   * `read` never lowers a handler that provably writes.
+   */
+  effect?: ClientActionEffect;
 }
 
 /** Default wait for a page-bound client action to register after navigating to its route. */
