@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  entitiesOf,
   entitySitesOf,
   entityTypeOfName,
   operationEntityDeclarations,
@@ -247,5 +248,13 @@ describe('tools.json identity', () => {
     expect(output).toHaveLength(20);
     expect(output.at(-1)!.path).toBe('group19[]');
     expect(codes(resolved.findings)).toEqual(['entity-declaration-invalid']);
+  });
+});
+
+describe('code-defined tools', () => {
+  it('records schema sites also without a contract.ts declaration, so tools.json identity can apply', () => {
+    const output = { type: 'object', properties: { playlists: { type: 'array', items: { type: 'object', title: 'Playlist', properties: { playlist_id: { type: 'integer' } } } } } };
+    expect(entitiesOf(undefined, output).entities?.sites?.map((site) => [site.path, site.type])).toEqual([['', undefined], ['playlists[]', 'playlist']]);
+    expect(entitiesOf(undefined, undefined)).toEqual({});
   });
 });

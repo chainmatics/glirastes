@@ -372,6 +372,79 @@ function identityAdder(
 }
 
 /**
+ * Adds the declared identity fields to entries of arrays nested below the
+ * outermost one a selected path reads through (`playlists[].items[].duration`
+ * with a declaration at `playlists[].items[]`). Only declared levels: below
+ * the outermost array the guess never added identity, so an app without a
+ * declaration reads as before. Projected entries are matched to the stored
+ * ones by position (the outermost array from `offset`). Changes `value` in place.
+ */
+function nestedDeclaredIdentityAdder(
+  source: Record<string, unknown>,
+  known: ReadonlyArray<ParsedPath>,
+  offset: number,
+  entities: ReadonlyArray<OutputEntityDeclaration> | undefined,
+) {
+  const levels: Array<{ steps: PathStep[]; declared: OutputEntityDeclaration }> = [];
+  const seen = new Set<string>();
+  for (const path of known) {
+    const arrays = path.steps.map((step, index) => (step.kind === 'key' ? -1 : index)).filter((index) => index >= 0);
+    // The deeper array levels a path reads below (not the last step: a whole entry needs no identity).
+    for (const at of arrays.slice(1)) {
+      if (at === path.steps.length - 1) continue;
+      const prefix = path.steps.slice(0, at + 1);
+      const text = prefix.map((step) => (step.kind === 'key' ? `.${step.key}` : '[]')).join('').replace(/^\./, '');
+      const declared = entities?.find((declaration) => declaration.path === text);
+      if (!declared || seen.has(JSON.stringify(prefix))) continue;
+      seen.add(JSON.stringify(prefix));
+      levels.push({ steps: prefix, declared });
+    }
+  }
+  const keysOf = (declared: OutputEntityDeclaration) => declaredIdentityKeys(declared);
+  const enrich = (entry: unknown, original: unknown, declared: OutputEntityDeclaration): unknown => {
+    if (!isPlainRecord(entry) || !isPlainRecord(original)) return entry;
+    const added = keysOf(declared).filter((key) => Object.prototype.hasOwnProperty.call(original, key)
+      && !Object.prototype.hasOwnProperty.call(entry, key)
+      && (original[key] === null || ['string', 'number', 'boolean'].includes(typeof original[key])));
+    if (added.length === 0) return entry;
+    const output: Record<string, unknown> = {};
+    for (const key of added) setOwn(output, key, original[key]);
+    for (const key of Object.keys(entry)) setOwn(output, key, entry[key]);
+    return output;
+  };
+  return (value: Record<string, unknown>): Record<string, unknown> => {
+    for (const { steps, declared } of levels) {
+      const visit = (projected: unknown, original: unknown, index: number, outer: boolean): unknown => {
+        const step = steps[index]!;
+        const last = index === steps.length - 1;
+        if (step.kind === 'key') {
+          if (!isPlainRecord(projected) || !isPlainRecord(original)
+            || !Object.prototype.hasOwnProperty.call(projected, step.key) || !Object.prototype.hasOwnProperty.call(original, step.key)) return projected;
+          const child = visit(projected[step.key], original[step.key], index + 1, outer);
+          if (child !== projected[step.key]) setOwn(projected, step.key, child);
+          return projected;
+        }
+        if (step.kind === 'index') {
+          if (!isPlainRecord(projected) || !Array.isArray(original)) return projected;
+          const key = String(step.index);
+          if (!Object.prototype.hasOwnProperty.call(projected, key)) return projected;
+          const next = last ? enrich(projected[key], original[step.index], declared) : visit(projected[key], original[step.index], index + 1, false);
+          if (next !== projected[key]) setOwn(projected, key, next);
+          return projected;
+        }
+        if (!Array.isArray(projected) || !Array.isArray(original)) return projected;
+        const start = outer ? Math.min(offset, original.length) : 0;
+        return projected.map((entry, position) => (last
+          ? enrich(entry, original[start + position], declared)
+          : visit(entry, original[start + position], index + 1, false)));
+      };
+      visit(value, source, 0, true);
+    }
+    return value;
+  };
+}
+
+/**
  * Projects a handle for one read, bounded by the origin tool's limit. A path
  * whose index is beyond its array answers `index_out_of_range` instead.
  */
@@ -444,7 +517,10 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
    * entry (`cut`, with what reads more of it).
    */
   // Identity fields of the entries read below an array: only when the model chose the fields.
-  const addIdentity = paths ? identityAdder(source, known, offset, handle.entities) : (value: Record<string, unknown>) => value;
+  const outerIdentity = paths ? identityAdder(source, known, offset, handle.entities) : undefined;
+  const nestedIdentity = paths ? nestedDeclaredIdentityAdder(source, known, offset, handle.entities) : undefined;
+  const addIdentity = (value: Record<string, unknown>): Record<string, unknown> => (
+    outerIdentity ? nestedIdentity!(outerIdentity(value)) : value);
   const answer = (limit: number | undefined, detail: 0 | 1 | 2, mode?: { short: true } | { cut: string }, identity = true) => {
     const projection = projectResult(source, known, { offset, ...(limit !== undefined ? { limit } : {}) });
     // They count against the limit like all data: the fit loop below sees them.

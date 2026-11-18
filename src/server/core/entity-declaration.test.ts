@@ -249,3 +249,29 @@ describe('declared paths on unwrapped lists and path-less root records', () => {
     expect(plain.orderNo).toBeUndefined();
   });
 });
+
+describe('read_result names nested declared entries', () => {
+  it('adds the declared id and name of entries of a nested array, from the offset of the outer one', () => {
+    const value = {
+      success: true,
+      playlists: Array.from({ length: 4 }, (_, outer) => ({
+        playlist_id: outer + 1, displayName: `P${outer + 1}`,
+        items: [{ item_id: outer * 10 + 1, displayName: `I${outer}a`, durationSec: 5 }, { item_id: outer * 10 + 2, displayName: `I${outer}b`, durationSec: 6 }],
+      })),
+    };
+    const entities = [
+      { type: 'playlist', id: 'playlist_id', name: 'displayName', path: 'playlists[]' },
+      { type: 'playlist-item', id: 'item_id', name: 'displayName', path: 'playlists[].items[]' },
+    ];
+    const handle = { id: 'ro_abcdefgh', toolName: 't', readOnly: true, maxChars: 16_000, value, entities } as ResultHandle;
+    const field = 'playlists[].items[].durationSec';
+    const answer = readResultHandle(handle, { resultId: handle.id, fields: [field], offset: 2, limit: 1 }, [parseResultPath(field)!]) as Entry;
+    const playlist = (answer.playlists as Entry[])[0]!;
+    expect(playlist).toMatchObject({ playlist_id: 3, displayName: 'P3' });
+    expect(playlist.items).toEqual([{ item_id: 21, displayName: 'I2a', durationSec: 5 }, { item_id: 22, displayName: 'I2b', durationSec: 6 }]);
+    // Without the nested declaration the items carry only the selected field, as before.
+    const plain = readResultHandle({ ...handle, entities: [entities[0]!] } as ResultHandle, { resultId: handle.id, fields: [field], offset: 2, limit: 1 },
+      [parseResultPath(field)!]) as Entry;
+    expect((plain.playlists as Entry[])[0]!.items).toEqual([{ durationSec: 5 }, { durationSec: 6 }]);
+  });
+});

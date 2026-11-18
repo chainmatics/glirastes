@@ -1,4 +1,4 @@
-import { entitySitesOf } from '../entity-declarations.js';
+import { entitiesOf } from '../entity-declarations.js';
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -344,9 +344,8 @@ function toObserved(piece: RoutePiece, definitionId: string): ObservedTool {
     ...(resolved && Object.keys(resolved.prose).length > 0 ? { prose: resolved.prose } : {}),
     ...(resolved?.maxResultChars !== undefined ? { maxResultChars: resolved.maxResultChars } : {}),
     ...outputFieldLists(resolved),
-    ...(resolved?.codeEntities
-      ? { entities: { code: resolved.codeEntities, sites: entitySitesOf(resolved.contract?.output) } }
-      : {}),
+    // Schema sites also without a code declaration: tools.json `identity.entities` applies by their type.
+    ...entitiesOf(resolved?.codeEntities, resolved?.contract?.output),
   };
 }
 

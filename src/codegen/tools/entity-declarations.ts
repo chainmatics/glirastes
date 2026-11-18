@@ -88,6 +88,19 @@ function typesOf(schema: JsonObject): string[] {
  * local `$ref` (and names its component); without it a `$ref` ends the walk.
  * A list or scalar response travels under `data`.
  */
+/**
+ * The entity observation of a code-defined tool (Next.js, NestJS): its
+ * `contract.ts` declarations and the object sites of its output schema;
+ * nothing when it has neither.
+ */
+export function entitiesOf(
+  code: ObservedEntities['code'] | undefined,
+  output: unknown,
+): { entities?: ObservedEntities } {
+  const sites = entitySitesOf(output);
+  return code || sites.length > 0 ? { entities: { ...(code ? { code } : {}), ...(sites.length > 0 ? { sites } : {}) } } : {};
+}
+
 export function entitySitesOf(
   output: unknown,
   resolveRef?: (ref: string) => { schema: unknown; name: string } | undefined,
