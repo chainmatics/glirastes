@@ -14,6 +14,23 @@ const LOCAL_LIMITS = {
 const CREDENTIALS = ['cookie', 'authorization'];
 
 /**
+ * The runtime's own texts in Polish, a language Glirastes has no built-in
+ * texts for. Deliberately partial: every other key falls back to English.
+ */
+export const RUNTIME_LOCALES = {
+  pl: {
+    closing: 'Musiałem tu przerwać: {reason}. Odpowiedź powyżej może być niepełna.',
+    closingWithoutAnswer: 'Nie mogłem dokończyć tego zapytania: {reason}.',
+    silentTurn: 'Nie udało mi się odpowiedzieć. Wyślij proszę zapytanie jeszcze raz, najlepiej dokładniej.',
+  },
+};
+
+/** The UI language the web app sends with every chat request (`?lang=` of the page). */
+export function requestLanguage(request) {
+  return request.headers.get('x-app-language') ?? undefined;
+}
+
+/**
  * Turn limits by profile. `fixture` (the default) keeps the small limits the
  * scripted CI test runs with. `acceptance` gives a real model room for the
  * second acceptance run (docs/acceptance/second-app-vue-fastapi.md);
@@ -47,8 +64,9 @@ async function principalFor(request, apiOrigin) {
  * The chat runtime next to the FastAPI app: the framework-neutral handler,
  * its endpoint tools calling the API with the user's own credentials.
  * Python never runs Glirastes; this Node process does. `limits` names a
- * profile of LIMIT_PROFILES; `locale` sets the language of the texts the
- * handler writes itself (the budget stop notice), e.g. `de-DE`.
+ * profile of LIMIT_PROFILES; `locale` sets the default language of the texts
+ * the handler writes itself (the budget stop notice), e.g. `de-DE`; a request
+ * that names its language (`x-app-language`) gets that one.
  */
 export function createChatRuntime({ apiOrigin, model, tenantId, limits = 'fixture', locale }) {
   const profile = LIMIT_PROFILES[limits];
@@ -63,6 +81,10 @@ export function createChatRuntime({ apiOrigin, model, tenantId, limits = 'fixtur
       resolveTurnSnapshot: (context) => glirastes.source.resolveTurnSnapshot(context),
     },
     loadTools: ({ turnSnapshot }) => materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: glirastes.bindings }),
+    // Tool labels per language (tools.json languages) and the turn's language from the request.
+    ...(generated.toolTexts ? { toolTexts: generated.toolTexts } : {}),
+    requestLocale: requestLanguage,
+    locales: RUNTIME_LOCALES,
     endpointCaller: (request) => createHttpEndpointCaller({ baseUrl: apiOrigin(), request }),
     model: () => model(),
     systemPrompt: 'Use only the available tools; ask when the target is unclear.',
