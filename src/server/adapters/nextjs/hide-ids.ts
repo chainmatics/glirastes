@@ -9,6 +9,7 @@ import {
 } from '../../../contracts/entity-identity.js';
 import {
   declaredRecordsOf,
+  entityIdText,
   type EntityDeclarationsByTool,
   type OutputEntityDeclaration,
 } from '../../../contracts/entity-declaration.js';
@@ -154,15 +155,23 @@ export function collectDeclaredIdLabels(
       }
       continue;
     }
-    for (const raw of identity.idValues) {
-      const id = typeof raw === 'string' ? raw.trim() : String(raw);
-      if (id === identity.name) continue;
-      if (!looksLikeTechnicalId(id) && !labels.has(id)) {
+    // A composite key: the whole key (`abc123456/def123456`) carries the name, its parts are
+    // removed without one (a shared parent is no record of its own).
+    const composite = identity.idValues.length > 1;
+    const learn = (id: string, label: string | undefined, technical = looksLikeTechnicalId(id)) => {
+      if (!id || id === identity.name) return;
+      if (!technical && !labels.has(id)) {
         let set = prefixedOnly.get(labels);
         if (!set) prefixedOnly.set(labels, set = new Set());
         set.add(id);
       }
-      if (identity.name !== undefined || !labels.has(id)) labels.set(id, identity.name ?? labels.get(id));
+      if (label !== undefined || !labels.has(id)) labels.set(id, label ?? labels.get(id));
+    };
+    for (const raw of identity.idValues) learn(typeof raw === 'string' ? raw.trim() : String(raw), composite ? undefined : identity.name);
+    // The whole key is technical when each part is (`abc123456/def123456`), else only removed with a prefix.
+    if (composite) {
+      const parts = identity.idValues.map((raw) => (typeof raw === 'string' ? raw.trim() : String(raw)));
+      learn(entityIdText(identity.idValues), identity.name, parts.every(looksLikeTechnicalId));
     }
   }
 }

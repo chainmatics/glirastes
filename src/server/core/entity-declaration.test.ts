@@ -396,3 +396,15 @@ describe('read_result producers across turns', () => {
     expect(text).toBe('Late is here.');
   });
 });
+
+describe('hideIds and composite keys', () => {
+  it('names the whole composite key, never its parts', () => {
+    const labels: IdLabels = new Map();
+    collectDeclaredIdLabels({ data: [
+      { parent: 'abc123456', child: 'def123456', title: 'Dokument' },
+      { parent: 'abc123456', child: 'ghi123456', title: 'Anhang' },
+    ] }, [{ id: ['parent', 'child'], name: 'title' }], labels);
+    expect(redactIds('See abc123456/def123456 and abc123456/ghi123456, parent abc123456.', labels))
+      .toBe('See Dokument and Anhang, parent.');
+  });
+});
