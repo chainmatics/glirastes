@@ -158,7 +158,9 @@ export function collectDeclaredIdLabels(
     // A composite key: the whole key (`abc123456/def123456`) carries the name, its parts are
     // removed without one (a shared parent is no record of its own).
     const composite = identity.idValues.length > 1;
-    const learn = (id: string, label: string | undefined, technical = looksLikeTechnicalId(id)) => {
+    // A number (also as digits only) is never removed as a bare word: it could be any count.
+    const technicalText = (id: string) => looksLikeTechnicalId(id) && !/^\d+$/.test(id);
+    const learn = (id: string, label: string | undefined, technical = technicalText(id)) => {
       if (!id || id === identity.name) return;
       if (!technical && !labels.has(id)) {
         let set = prefixedOnly.get(labels);
@@ -171,7 +173,7 @@ export function collectDeclaredIdLabels(
     // The whole key is technical when each part is (`abc123456/def123456`), else only removed with a prefix.
     if (composite) {
       const parts = identity.idValues.map((raw) => (typeof raw === 'string' ? raw.trim() : String(raw)));
-      learn(entityIdText(identity.idValues), identity.name, parts.every(looksLikeTechnicalId));
+      learn(entityIdText(identity.idValues), identity.name, parts.every(technicalText));
     }
   }
 }

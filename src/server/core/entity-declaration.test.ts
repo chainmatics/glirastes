@@ -408,3 +408,11 @@ describe('hideIds and composite keys', () => {
       .toBe('See Dokument and Anhang, parent.');
   });
 });
+
+describe('hideIds and long integer ids', () => {
+  it('removes an eight-digit declared integer only with an id prefix', () => {
+    const labels: IdLabels = new Map();
+    collectDeclaredIdLabels({ data: [{ trackNo: 12345678, label_text: 'Long' }] }, [TRACK], labels);
+    expect(redactIds('Long (ID: 12345678) sold 12345678 copies.', labels)).toBe('Long sold 12345678 copies.');
+  });
+});
