@@ -98,7 +98,7 @@ jobs:
         env:
           GLIRASTES_REQUIRE_PYTHON: '1'
           GLIRASTES_TEST_PYTHON: python
-        run: bunx vitest run tests/tool-sync-vue-fastapi.test.ts tests/tool-sync-vue-fastapi-ui.test.ts
+        run: bunx vitest run tests/tool-sync-vue-fastapi.test.ts tests/tool-sync-vue-fastapi-ui.test.ts tests/second-acceptance-vue-fastapi.test.ts
 
   build:
     name: Build
