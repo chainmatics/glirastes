@@ -135,3 +135,11 @@ actions never run, and a page-bound action (`{ route }`) never opens its page.
 It navigates through the navigation bridge, waits up to `routeTimeoutMs`
 (default 5000) for the page to register the handler, and rejects when it does
 not or when a handler returns `false`.
+`runToolResultUiActions(result, bus?, { timeoutMs, routeTimeoutMs })`
+(`RunToolResultUiActionsOptions`) does the same without throwing and resolves
+a `UiActionRunResult` `{ code, dispatched, durationMs, error? }` (`null` when
+`toolResultUiActions(result)` finds no generated UI action):
+the codes are listed in `hooks-and-building-blocks.md`. Run the results of one
+answer one after another in call order, and only results your own running
+request delivered: never results restored from a stored history or results
+that already carry an `outcome`.

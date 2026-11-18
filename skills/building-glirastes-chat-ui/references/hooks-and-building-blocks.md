@@ -11,6 +11,7 @@ them.
 - Components
 - Message layout
 - Tool results and approvals
+- UI action outcomes
 - Sessions
 - Theme and keyboard
 
@@ -126,6 +127,46 @@ Defaults keep today's markup; everything below is opt-in.
   subject without `name` but with `candidates` (`{ label, name? }[]`) is an
   id of different kinds: list every candidate, name none. A card that
   renders only `details` drops the safeguard silently.
+
+## UI action outcomes
+
+`onUiActionOutcome(event)` (type `OnUiActionOutcome`) on the provider fires
+once per tool result with generated UI actions (`glirastes.*`), after they
+ran. The `UiActionOutcomeEvent` is `{ toolName, toolCallId, code, actions:
+[{ type, actionId? }], reported, durationMs, error? }`, no payload. A throw
+inside is caught. `reported` is `false`: the model is not told the outcome
+yet. `code` is a `UiActionRunCode`: a `UiOutcomeCode` of the protocol, or
+`timeout` / `unconfirmed`, which the protocol reports without a code.
+
+| `code` | When |
+| --- | --- |
+| `ok` | every handler resolved (resolve once the effect is visible) |
+| `rejected-contract` | the payload failed the contract, or an unsafe route or target |
+| `rejected-handler` | a handler or the bridge's `push` returned `false` |
+| `failed` | a handler threw |
+| `unavailable` | no handler: no navigation bridge, unknown action, a page-bound action that never registered on its route |
+| `initiated` | a reloading navigation (`registerDocumentNavigation()`, `reloads: true`) started; nothing after it runs on the page |
+| `timeout` | not settled within `uiActionOutcomeTimeoutMs` (default 10000; a page-bound action gets the 5000 ms route wait on top) |
+| `unconfirmed` | a bus of an older SDK copy that does not count handlers |
+
+The results of one answer run one after another in call order; a failed call
+does not stop the next one, and inside one result the first failure stops the
+rest. A UI action runs only from this chat's own running request: results
+restored from a stored history (`session.load`, messages the host or a custom
+transport set, another tab's sync) or carrying an `outcome` never run and do
+not call `onToolResult`. A custom transport must report `submitted` or
+`streaming` while a request runs, or none of its results run. Hand-written
+`defineUiTool` actions with their own types are not classified and stay with
+`onToolResult`.
+
+Handlers refuse with `UiActionRejectedError` (`code` is
+`UI_ACTION_REJECTED_ERROR_CODE`, `glirastes.ui-action-rejected`; a
+`UiActionRejectionReason` of `contract` or `handler`); `registerAiClientAction`
+and the navigation bridge throw it for you. Test with
+`isUiActionRejectedError(error)`, never `instanceof`: several SDK copies may
+share one page. The default timeout is `UI_ACTION_OUTCOME_TIMEOUT_MS`.
+`registerDocumentNavigation(options?: DocumentNavigationOptions)` is the
+bridge of an app without client-side routing.
 
 ## Sessions
 

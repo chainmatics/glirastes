@@ -120,7 +120,12 @@ could not be performed. Use literal registrations in supported JS/TS sources so
 ordinary scanned module; never fake a tool inventory.
 
 A navigation bridge maps execution to the app router; it does not discover
-pages. Only supported explicit route sources can supply that inventory. Keep
+pages. Return `false` from `push` when the navigation did not happen;
+vue-router resolves a failure, so pass `async (href) => !(await
+router.push(href))`. Without client-side routing call
+`registerDocumentNavigation()` (`location.assign`, outcome `initiated`). The
+element emits `glirastes-chat:ui-action` with `{ toolName, toolCallId, code,
+actionIds }` for every outcome. Only supported explicit route sources can supply that inventory. Keep
 manual verification of filter paths where automatic route cross-checking is
 unavailable. Neither UI visibility nor a client action can grant backend access.
 
