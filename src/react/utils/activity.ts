@@ -2,15 +2,21 @@ import { CLARIFICATION_TOOL_NAME } from '../../contracts/clarification.js';
 import { PLAN_TOOL_NAME, readPlanItems, type PlanItem } from '../../contracts/plan.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
+import {
+  ENDPOINT_PATH_NOT_ALLOWED_ERROR,
+  ENDPOINT_PATH_NOT_RELATIVE_ERROR,
+  toolResultFailure,
+} from '../../runtime/tool-failure.js';
 
 /**
  * `declined`: the call did not run because its approval was refused (by the
  * user, or by the server for an expired or reused approval). It is not a
- * failure. `expected`: the call answered with a failure the app classified
- * as an expected outcome (`classifyToolFailure`, e.g. a 404 the model then
- * looks up, a 403); a normal answer, not a failure. `error`: the call threw,
- * or its output is an object with `success: false` and no such
- * classification (a failed backend call, a refused UI action).
+ * failure. `expected`: the call answered with a failure that is a normal
+ * answer: one `classifyToolFailure` marked as expected, or a backend answer
+ * with a 4xx status other than 408 and 429 (e.g. a 404 the model then looks
+ * up, a 403). `error`: the call threw, or its output reports any other
+ * failure (5xx, timeout, network error, a refused UI action, a custom tool's
+ * `success: false`).
  */
 export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting' | 'declined' | 'expected';
 
@@ -45,21 +51,35 @@ function toolPartName(part: Record<string, unknown>): string | null {
 
 /**
  * A tool that reports its own failure answers with an output, not an error:
- * an endpoint tool's failed backend call, a refused UI action, a custom tool.
- * Any object output with `success: false` is a failed step.
+ * an endpoint tool's failed backend call, a refused UI action, a custom tool,
+ * a thrown tool error the server turned into `{ error }`. The same rule the
+ * server counts failures by (`toolResultFailure`): `success: false` or an
+ * `error` text.
  */
 function isFailedOutput(output: unknown): output is Record<string, unknown> {
-  return isRecord(output) && !Array.isArray(output) && output.success === false;
+  return isRecord(output) && !Array.isArray(output) && toolResultFailure(output) !== undefined;
 }
 
 /**
- * The marker the server sets on a failed backend call `classifyToolFailure`
- * returned `'expected'` for (the same rule as `toolResultFailure`). A
- * backend body travels under `body` and cannot set it; an output from a
- * server without a classifier has no marker and stays a failure.
+ * A failure that is a normal answer, not a malfunction, so the step is shown
+ * neutrally. Display only: what the server counts (`maxConsecutiveErrors`,
+ * turn metrics) follows `classifyToolFailure` alone.
+ * - The app's marker `expectedFailure: true` (`classifyToolFailure` returned
+ *   `'expected'`), for any status.
+ * - Without it, a backend answer with a client-class status (400-499, e.g. a
+ *   404 the model then looks up, a 403): the backend understood the call and
+ *   said no. Except 408 and 429 (timeout, rate limit) and a call the SDK's
+ *   endpoint caller refused itself before it reached the backend.
+ * Everything else (5xx, no status: network error, timeout, a refused UI
+ * action, a custom tool) stays a failure.
  */
 function isExpectedFailure(output: Record<string, unknown>): boolean {
-  return output.expectedFailure === true;
+  if (output.success !== false) return false;
+  if (output.expectedFailure === true) return true;
+  const status = output.status;
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 400 || status > 499) return false;
+  if (status === 408 || status === 429) return false;
+  return output.error !== ENDPOINT_PATH_NOT_ALLOWED_ERROR && output.error !== ENDPOINT_PATH_NOT_RELATIVE_ERROR;
 }
 
 function stepStatus(state: unknown, output: unknown): ActivityStepStatus {

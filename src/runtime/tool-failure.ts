@@ -30,6 +30,16 @@ export interface ToolFailureInfo {
 export type ToolFailureClassifier = (failure: ToolFailureInfo) => ToolFailureClassification;
 
 /**
+ * Error texts of the SDK's endpoint caller when it refuses a call itself
+ * (`refusedLocally`: a path off the API's origin, a path outside
+ * `allowedPathPrefixes`). The call never reached the backend, yet its
+ * result carries a 4xx status, so the chat's activity log tells them apart
+ * by these fixed texts and shows them as failed, not as a backend answer.
+ */
+export const ENDPOINT_PATH_NOT_RELATIVE_ERROR = 'Endpoint path must be relative to the API';
+export const ENDPOINT_PATH_NOT_ALLOWED_ERROR = 'Endpoint path is not allowed';
+
+/**
  * The one rule every counting site (budget, turn metrics, direct commands)
  * uses for a tool result: `undefined` for a success, `'error'` for a result
  * with an `error` message or `success: false`, `'expected'` for a failure an

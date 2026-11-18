@@ -492,8 +492,10 @@ increments nor resets the consecutive-error count, and it is no tool error in
 the metric event. The result carries `expectedFailure: true`, so the model
 knows the failure is a known outcome rather than a fault to retry. The
 chat's activity log reads the same marker: such a step is shown neutrally as
-`expected` (`1 without result`), not as failed; an unclassified failure is
-shown as failed.
+`expected` (`1 without result`), not as failed. Without a classifier the log
+also shows a backend 4xx (other than 408 and 429) neutrally; a 5xx, 408, 429,
+timeout or network error is shown as failed. That is display only: without a
+classifier every failure still counts toward `maxConsecutiveErrors`.
 
 Loop detection fingerprints an endpoint failure (a failure result with a
 `status`) by its stable fields only: tool, arguments, `success`, `status`,

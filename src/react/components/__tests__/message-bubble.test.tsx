@@ -156,7 +156,7 @@ describe('MessageBubble tool-result visibility', () => {
     expect(document.querySelector('[data-component="activity-log"]')).not.toBeNull();
   });
 
-  it('shows an expected failure as a neutral step and an unmarked one as failed', () => {
+  it('shows a 4xx answer of the backend as a neutral step, also without a classifier, and a 5xx as failed', () => {
     render(
       <MessageBubble
         message={{
@@ -167,7 +167,7 @@ describe('MessageBubble tool-result visibility', () => {
               type: 'tool-tasks_get',
               toolCallId: 'call-e1',
               state: 'output-available',
-              output: { success: false, error: 'Not found', status: 404, retryable: false, expectedFailure: true },
+              output: { success: false, error: 'Not found', status: 404, retryable: false },
             } as never,
             {
               type: 'tool-tasks_list',

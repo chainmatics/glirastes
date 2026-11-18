@@ -19,7 +19,11 @@ import type {
 } from '../../types.js';
 import { defineTool } from '../../types.js';
 import { zodToCompactDescription } from './zod-compact.js';
-import type { ToolFailureClassifier } from '../../runtime/tool-failure.js';
+import {
+  ENDPOINT_PATH_NOT_ALLOWED_ERROR,
+  ENDPOINT_PATH_NOT_RELATIVE_ERROR,
+  type ToolFailureClassifier,
+} from '../../runtime/tool-failure.js';
 import {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
@@ -1481,7 +1485,7 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
   });
   return async (request) => {
     if (!staysOnOrigin(request.path, base.origin)) {
-      return { ok: false, status: 400, error: 'Endpoint path must be relative to the API', refusedLocally: true };
+      return { ok: false, status: 400, error: ENDPOINT_PATH_NOT_RELATIVE_ERROR, refusedLocally: true };
     }
     if (prefixes) {
       const rawPath = request.path.split(/[?#]/, 1)[0]!;
@@ -1489,7 +1493,7 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
       // Do not let upstream double decoding or encoded separators escape a prefix.
       if (/%(?:2e|2f|5c|25)/i.test(rawPath) || rawPath !== pathname
         || !prefixes.some((prefix) => prefix === '/' || pathname === prefix || pathname.startsWith(`${prefix}/`))) {
-        return { ok: false, status: 403, error: 'Endpoint path is not allowed', refusedLocally: true };
+        return { ok: false, status: 403, error: ENDPOINT_PATH_NOT_ALLOWED_ERROR, refusedLocally: true };
       }
     }
     return call(request);
