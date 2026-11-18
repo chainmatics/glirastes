@@ -74,7 +74,7 @@ second, hand-maintained catalogue.
    Several routes share the runtime when the `createGlirastes` call moves to
    a server-only module such as `src/lib/glirastes.ts`.
    `chatTurn` brings the shared turn guard (`managedRuntime`), the tools of
-   the pinned snapshot, the checked synonyms for `find_tools` and, Connected,
+   the pinned snapshot, the checked synonyms and examples for the tool search and, Connected,
    the content-free metrics sink; Standalone it makes no network call. Use
    `.chat(model)`: `createOpenAI(...)(model)` talks to the Responses API,
    whose usage the handler does not read, so turn costs would stay unknown.
@@ -83,14 +83,17 @@ second, hand-maintained catalogue.
    chat's `@` and `/` list with a GET (`createChatInteractionsHandler`, see
    `building-glirastes-chat-ui`), give it `turn.managedRuntime` of the same
    principal, so the list and the turn decide alike. `toolDiscovery: true`
-   offers `find_tools`; it grants no tool. It also turns on the default
+   offers `find_tools`; it grants no tool, and a fixed note after the system
+   prompt tells the model to search before it says it cannot do something. It also turns on the default
    routing: each turn starts with the tools of the modules the request
    matches (derived from the generated metadata, German and English),
    `ui_navigate`, the tools the previous turn called, and `find_tools`, not
    with every tool. Tune it in the app, not in a routing list: better tool
    descriptions, usage hints and synonyms (`describing-glirastes-tools`),
    `intentRouting: { maxStartTools: 12, alwaysAvailable: ['ui_navigate'] }`,
-   or `examples` per tool in `toolSemantics`. A custom `intentRouter`
+   or `examples` per tool (`tool-semantics.json`, carried by the generated
+   `toolSearchSemantics`). Among equally relevant tools, read tools come
+   first. A custom `intentRouter`
    replaces it; `intentRouting: false` starts every turn with all tools.
    Further defaults, each with an opt-out: `history` sends earlier turns
    compacted (`{ maxTurns, toolTurns, maxTokens, maxItems, maxStringLength,

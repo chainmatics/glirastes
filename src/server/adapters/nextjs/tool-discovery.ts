@@ -22,6 +22,15 @@ export const NON_DOMAIN_TOOL_NAMES = Object.freeze([
   'read_result',
 ] as const);
 
+/**
+ * Appended to the app's system prompt while discovery is on: the tools of a
+ * turn are a start set, so a request none of them fits is not yet one the
+ * app cannot serve.
+ */
+export const FIND_TOOLS_PROMPT = 'The tools you see are only a start set for this turn. '
+  + 'If none of them fits the request, call find_tools with the capability you need '
+  + 'before you tell the user that you cannot do it.';
+
 export interface HybridToolDiscovery {
   readonly turnId: string;
   readonly tool: {

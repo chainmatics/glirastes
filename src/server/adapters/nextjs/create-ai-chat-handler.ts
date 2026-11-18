@@ -126,6 +126,7 @@ import {
 import { toolResultFailure } from '../../../runtime/tool-failure.js';
 import {
   createHybridToolDiscovery,
+  FIND_TOOLS_PROMPT,
   NON_DOMAIN_TOOL_NAMES,
   type HybridToolDiscovery,
 } from './tool-discovery.js';
@@ -571,8 +572,14 @@ async function defaultStreamHandler(
     : vercelTools;
   const promptCaching = ctx.promptCaching !== false;
   const hideIds = ctx.hideIds !== false;
-  const systemPrompt = hideIds && ctx.systemPrompt
-    ? `${ctx.systemPrompt}\n\n${HIDE_IDS_PROMPT}`
+  // Fixed notes after the app's own prompt: no ids in answers, and with
+  // discovery that the offered tools are a start set `find_tools` widens.
+  const systemPrompt = ctx.systemPrompt
+    ? [
+        ctx.systemPrompt,
+        ...(hideIds ? [HIDE_IDS_PROMPT] : []),
+        ...(ctx.toolDiscovery ? [FIND_TOOLS_PROMPT] : []),
+      ].join('\n\n')
     : ctx.systemPrompt;
   const idLabels: IdLabels = new Map();
   if (hideIds) collectIdLabels(ctx.messages, idLabels);

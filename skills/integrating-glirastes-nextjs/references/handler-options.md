@@ -22,10 +22,10 @@ it. The type's JSDoc carries the full detail.
 | `tools` | static `ToolRegistry`; wins over `loadTools` |
 | `loadTools` | `LoadTools` callback that builds the registry per request |
 | `managedRuntime` | `ManagedLocalRuntimeConfig`: verified principal, pinned turn snapshot, local guard per tool call |
-| `toolDiscovery` | local `find_tools` recovery |
+| `toolDiscovery` | local `find_tools` recovery; appends a fixed note to the system prompt to call `find_tools` before saying a request cannot be done |
 | `authorizedToolsOnly` | with `managedRuntime` (default `true`): the model gets only built-ins and the manifest tools the principal may use, checked again before every model step; `false` hands over every registry tool, the guard still refuses the calls |
 | `intentRouting` | start-set routing for `toolDiscovery` (default on); `DefaultIntentRoutingOptions` tunes it |
-| `toolSemantics` | search-only synonyms per model-facing tool name |
+| `toolSemantics` | search-only synonyms and examples per model-facing tool name (`find_tools` and the start set); replaces the map `chatTurn()` hands on |
 | `directCommands` | `/` commands and entity actions run without a model call (default `true`) |
 | `endpointCaller` | `(request) => InternalApiCaller` for an API on another origin or with `Authorization` auth; default `createInternalApiCallerFromRequest` |
 | `trustForwardedHeaders` | take the origin from `x-forwarded-*`; only behind a proxy that sets them |
