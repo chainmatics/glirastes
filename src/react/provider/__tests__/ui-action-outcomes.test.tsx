@@ -568,6 +568,15 @@ describe('AiChatProvider never runs a UI action late', () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  it('still calls onToolResult for a backend result with its own outcome field', async () => {
+    const { onToolResult } = setup();
+    await stream([user, assistant({
+      type: 'tool-approvals_get', toolCallId: 'c1', state: 'output-available', input: {},
+      output: { success: true, outcome: 'approved' },
+    })]);
+    await waitFor(() => expect(onToolResult).toHaveBeenCalledWith('approvals_get', { success: true, outcome: 'approved' }));
+  });
+
   it('does not run results that come back after clear()', async () => {
     const { bus } = setup();
     const push = vi.fn();

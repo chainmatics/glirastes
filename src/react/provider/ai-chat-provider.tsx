@@ -379,6 +379,15 @@ export interface AiChatProviderProps extends AiChatProviderConfig {
 }
 
 /**
+ * A result with generated UI actions that already carries the browser's
+ * `outcome` object: it ran before and never runs again. Other tools may have
+ * an `outcome` field of their own.
+ */
+function carriesUiOutcome(output: Record<string, unknown>): boolean {
+  return isRecord(output.outcome) && toolResultUiActions(output).length > 0;
+}
+
+/**
  * True when `messages` continue the messages a request started from: the
  * same ids in order (a trailing assistant message may be replaced, as a
  * regenerated answer is). Results of a history the host set while the
@@ -980,7 +989,7 @@ export function AiChatProvider({
       for (const result of results) {
         if (processedToolCallsRef.current.has(result.toolCallId)) continue;
         processedToolCallsRef.current.add(result.toolCallId);
-        if ('outcome' in result.output) continue;
+        if (carriesUiOutcome(result.output)) continue;
         onToolResultRef.current?.(result.toolName, result.output);
         runUiActions(result.toolName, result.toolCallId, result.output);
       }
@@ -1060,7 +1069,7 @@ export function AiChatProvider({
           const toolCallId = toolPart.toolCallId || `${lastMessage.id}-${partType}`;
           if (!processedToolCallsRef.current.has(toolCallId)) {
             // A result that already carries an outcome was run before.
-            if (!live || 'outcome' in toolPart.output) {
+            if (!live || carriesUiOutcome(toolPart.output)) {
               processedToolCallsRef.current.add(toolCallId);
               deferredResultsRef.current.delete(toolCallId);
               continue;
