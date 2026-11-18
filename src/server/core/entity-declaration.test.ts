@@ -81,6 +81,16 @@ describe('entity declarations (contracts)', () => {
     expect(declaredRecordsOf({ trackNo: 1, label_text: 'root' }, [{ ...TRACK, path: '' }]).size).toBe(1);
   });
 
+  it('uses the first applicable declaration in list order, in the overview and for records alike', () => {
+    const root = { data: [{ trackNo: 1, label_text: 'a', code: 'x' }, { trackNo: 2, label_text: 'b', code: 'y' }] };
+    const first = { type: 'track', id: 'trackNo', name: 'label_text' };
+    const second = { type: 'track', id: 'code', path: 'data[]' };
+    expect(declarationForEntries([first, second], ['data'], root)).toBe(first);
+    expect([...declaredRecordsOf(root, [first, second]).values()][0]!.declaration).toBe(first);
+    expect(declarationForEntries([second, first], ['data'], root)).toBe(second);
+    expect([...declaredRecordsOf(root, [second, first]).values()][0]!.declaration).toBe(second);
+  });
+
   it('matches a path-less declaration only to the largest array', () => {
     const root = { data: [{ a: 1 }, { a: 2 }], other: [{ b: 1 }] };
     expect(declarationForEntries([TRACK], ['data'], root)).toBe(TRACK);
@@ -286,5 +296,6 @@ describe('bounds and whole ids', () => {
     const labels: IdLabels = new Map();
     collectDeclaredIdLabels(tracks(5), [TRACK], labels);
     expect(redactIds('See ID: 3.14 and ID: 3/7, then ID: 3.', labels)).toBe('See ID: 3.14 and ID: 3/7, then.');
+    expect(redactIds('Wert ID: 3,14 und ID: 3, fertig', labels)).toBe('Wert ID: 3,14 und, fertig');
   });
 });

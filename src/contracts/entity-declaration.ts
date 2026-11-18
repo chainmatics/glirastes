@@ -383,10 +383,11 @@ export function declaredRecordsOf(
 }
 
 /**
- * The declaration that names the entries of the array at `route`: one whose
- * path is that route with `[]`, or one without a path when `route` is the
- * largest array of `root` (where a path-less declaration points). Undefined
- * without one.
+ * The declaration that names the entries of the array at `route`: the first
+ * in list order (the generated list is in precedence order) whose path is
+ * that route with `[]`, or that has no path while `route` is the largest
+ * array of `root` (where a path-less declaration points). The same choice
+ * as {@link declaredRecordsOf}. Undefined without one.
  */
 export function declarationForEntries(
   declarations: ReadonlyArray<OutputEntityDeclaration> | undefined,
@@ -395,12 +396,11 @@ export function declarationForEntries(
 ): OutputEntityDeclaration | undefined {
   if (!declarations || declarations.length === 0) return undefined;
   const wanted = `${route.join('.')}[]`;
-  const explicit = route.length > 0 ? declarations.find((declaration) => declaration.path === wanted) : undefined;
-  if (explicit) return explicit;
-  const pathless = declarations.find((declaration) => declaration.path === undefined);
-  if (!pathless) return undefined;
   const largest = Array.isArray(root) ? [] : largestArrayRoute(root) ?? [];
-  return largest.length === route.length && largest.every((key, index) => key === route[index]) ? pathless : undefined;
+  const isLargest = largest.length === route.length && largest.every((key, index) => key === route[index]);
+  return declarations.find((declaration) => (declaration.path === undefined
+    ? isLargest
+    : route.length > 0 && declaration.path === wanted));
 }
 
 /** The identity fields a declaration keeps on each entry: its id fields, then the name, else the fallback. */
