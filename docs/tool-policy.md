@@ -146,12 +146,46 @@ fails neither `tools check` nor `--strict`.
   description, hints and synonyms find the tool.
 - An `examples` list with fewer than 3 (or more than 5) sentences in a language
   rejects the whole `tool-semantics.json` entry (`tool-semantics-invalid`).
+- Synonyms weigh second only to the name in the search, above the
+  description. A synonym that names a *target* of a collective tool (a
+  navigation tool's destinations, a generic "open object" tool's object
+  kinds, such as `Playlists` on a navigation tool) pulls that tool into every
+  request with the word ("show my playlists"), next to or ahead of the tool
+  that actually lists them. Give a collective tool synonyms for the act only
+  ("go to", "open page", "navigate"); its targets already reach the search
+  through its description and enum.
 - A 404 of a route with path parameters (`/playlists/:id`): the failure
   result carries a fixed `hint` naming the parameters (never a value) that
   says the value may not exist or belong to another kind of record, to look
   it up with a list or search tool first, and to tell the user it was not
   found only when no such tool exists or the lookup finds nothing. Name path
   parameters so the model can tell which record they address.
+
+### Where a tool's description comes from
+
+`glirastes tools refresh` takes the first of these that is non-empty, the
+same way for endpoint tools (`next-app`, `nest`, `openapi`) and UI tools
+(client actions, navigation, filters):
+
+1. `description` of the tool's entry in `.glirastes/tool-policy.json`.
+2. The code comment: the JSDoc above the Next.js handler or NestJS method;
+   for `openapi` the operation's `description`, else its `summary`; for a
+   client action the JSDoc above the registration statement, else above the
+   named handler function.
+3. The contract description: `description` of the `contract.ts` entry; for
+   the generated `ui.navigate` and `ui.filter.<view>` tools a fixed text
+   listing destinations or filters.
+4. The schema description: `.describe()` of the input schema, else of the
+   output schema.
+5. `description` of the tool's entry in `.glirastes/tool-semantics.json`.
+6. A template from method and path or the tool name, with the warning
+   `description-templated`.
+
+So a JSDoc comment currently wins over a description maintained in
+`tool-semantics.json`, also for UI tools; a client action takes neither 3
+nor 4 today. This order between the code comment and `tool-semantics.json`
+is planned to change in the next minor release: a maintained
+`tool-semantics.json` entry will win over the JSDoc.
 
 Without a group, a name with a dot keeps its module (the part before the first
 dot); a name without a dot (`list_tags`) takes the module from the path
