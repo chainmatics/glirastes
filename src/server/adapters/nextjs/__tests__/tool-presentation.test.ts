@@ -60,6 +60,9 @@ describe('the wording per language (toolTexts)', () => {
     // The manifest presentation is German (a Platform revision may have curated it): it wins for German.
     expect(toolPresentationOf(worded, everyTool, { texts, locale: 'de-AT' }))
       .toEqual({ locale: 'de-AT', tools: { list_tasks: { label: 'Aufgaben auflisten' } } });
+    // A long confirmation question stays, as in the part without languages.
+    const long = { list_tasks: { labels: { pl: { singular: 'Zadania', plural: 'Zadania', approval: `${'Czy '.repeat(80)}?` } } } };
+    expect(toolPresentationOf(worded, everyTool, { texts: long, locale: 'pl' })?.tools.list_tasks?.label).toBe('Czy '.repeat(80).trim());
     // No French labels: English.
     expect(toolPresentationOf(worded, everyTool, { texts, locale: 'fr' })?.tools).toEqual({ list_tasks: { label: 'List tasks' } });
   });

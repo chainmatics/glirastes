@@ -72,7 +72,7 @@ export function toolPresentationOf(
     const generated = sameLanguage ? undefined : toolLabelsFor(texts[name], locale);
     const approval = generated?.labels.approval ?? own?.approval;
     const label = approval === undefined ? '' : labelOf(approval);
-    if (label === '' || label.length > 200) continue;
+    if (label === '') continue;
     tools[name] = { label };
   }
   return Object.keys(tools).length === 0 ? null : { locale, tools };
