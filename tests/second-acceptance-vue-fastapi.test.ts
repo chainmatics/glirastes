@@ -195,6 +195,7 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: results the model see
   it('answers a missing playlist with a 404 failure the model can read, and refuses a non-integer id', async () => {
     expect(await call(chatTools(), 'playlists_get', { playlist_id: 9999 })).toEqual({
       success: false, error: 'Playlist 9999 not found', retryable: false, status: 404, body: { detail: 'Playlist 9999 not found' },
+      hint: expect.stringContaining('no record matches the path parameter "playlist_id"'),
     });
     const turn = app.turn({ authorization: `Bearer ${app.token}` });
     await expect(turn.execute('playlists_get', { playlist_id: 'banana' })).rejects.toThrow('Input does not match');
