@@ -20,7 +20,7 @@ import {
   type EntityIdKind,
   type InputEntityRef,
 } from '../../contracts/entity-declaration.js';
-import type { EntitySighting, SeenEntity } from './entity-names.js';
+import { exactEntityKey, type EntitySighting, type SeenEntity } from './entity-names.js';
 
 const MAX_DEPTH = 4;
 /** Id values checked per approval; a call with more ids is rare and the rest are not listed. */
@@ -175,10 +175,10 @@ export function resolveApprovalSubjects(
   };
 
   function subjectFor(
-    path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false, display?: string,
+    path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false, display?: string, exact = false,
   ): ApprovalSubject | undefined {
     const subjects: ApprovalSubject[] = [];
-    resolve(subjects, path, label, raw, kind, strict);
+    resolve(subjects, path, label, raw, kind, strict, exact);
     const subject = subjects[0];
     return subject && display !== undefined ? { ...subject, id: display } : subject;
   }
@@ -188,9 +188,12 @@ export function resolveApprovalSubjects(
    * type exactly, a UUID included; a guessed kind still matches by its last word.
    */
   function resolve(
-    subjects: ApprovalSubject[], path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false,
+    subjects: ApprovalSubject[], path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false, exact = false,
   ): void {
-    const key = entityIdKey(raw);
+    // `exact`: a declared opaque id, looked up case-sensitively under its own key; an id only a
+    // guessed (undeclared) record showed is found under the lower-cased key, held to `exactIds`.
+    const exactKey = exact ? exactEntityKey(raw) : undefined;
+    const key = exactKey !== undefined && (sightings.has(exactKey) || seenIds.has(exactKey)) ? exactKey : entityIdKey(raw);
     if (key === undefined) return;
     // `type`: the exact declared (or mentioned) type behind a kind; compared as it is for a declared argument.
     const sameKind = (known: string, type: string | undefined) => (strict && type !== undefined ? type === kind : kindsMatch(known, kind!));
@@ -270,7 +273,7 @@ export function resolveApprovalSubjects(
       const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? typedRecord?.idKind
         ?? (sighting?.kindType === ref.type ? sighting.idKind : undefined)
         ?? entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) });
-      const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, lookup, ref.type, true, id);
+      const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, lookup, ref.type, true, id, idKind === 'opaque');
       if (!subject) continue;
       let provenance: ApprovalSubject['provenance'];
       if (subject.status !== 'unknown') provenance = sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';

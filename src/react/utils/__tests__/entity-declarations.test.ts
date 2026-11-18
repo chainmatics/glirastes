@@ -268,3 +268,22 @@ describe('opaque ids are case-sensitive', () => {
     expect(subjects('orders_cancel', { orderKey: 'ord-9' })[0]).toMatchObject({ status: 'named', name: 'Ada' });
   });
 });
+
+describe('case-sensitive ids of different types', () => {
+  it('keeps a document AbC-7 and a folder abc-7 apart', () => {
+    const REFS: EntityDeclarationsByTool = {
+      docs_list: { output: [{ type: 'document', id: 'ref', name: 'title', path: 'docs[]' }] },
+      folders_list: { output: [{ type: 'folder', id: 'ref', name: 'title', path: 'folders[]' }] },
+      docs_delete: { input: [{ type: 'document', args: 'ref' }] },
+    };
+    const messages = [
+      tool('docs_list', { docs: [{ ref: 'AbC-7', title: 'Dokument A' }] }),
+      tool('folders_list', { folders: [{ ref: 'abc-7', title: 'Ordner' }] }),
+    ];
+    const resolve = (ref: string) => resolveApprovalSubjects({ ref }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'docs_delete', inputEntities: REFS.docs_delete!.input!, userTexts: [], declarations: REFS,
+    })[0];
+    expect(resolve('abc-7')).toMatchObject({ status: 'unknown' });
+    expect(resolve('AbC-7')).toMatchObject({ status: 'named', name: 'Dokument A' });
+  });
+});

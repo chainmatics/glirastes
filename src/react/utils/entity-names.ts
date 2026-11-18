@@ -34,6 +34,18 @@ const MAX_KINDS_PER_ID = 8;
 const RECOGNISED_KEYS: ReadonlyArray<string> = BROWSER_RECOGNISED_ID_KEYS;
 const INDEX_KEY = /^\d+$/;
 
+/**
+ * The case-sensitive lookup key of a declared opaque id (`AbC-7` and `abc-7`
+ * stay apart): its own namespace next to the lower-cased keys, so a declared
+ * argument looks its record up exactly, per type.
+ */
+export function exactEntityKey(value: unknown): string | undefined {
+  if (typeof value === 'number') return Number.isSafeInteger(value) ? `\u0001${value}` : undefined;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= 200 ? `\u0001${trimmed}` : undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -160,8 +172,8 @@ export function collectEntitySightings(
   let budget = MAX_NODES;
   const tools = producingTools(messages);
 
-  const addKind = (id: unknown, kind: string | undefined, name: string | undefined) => {
-    const key = entityIdKey(id);
+  const addKind = (id: unknown, kind: string | undefined, name: string | undefined, exact = false) => {
+    const key = exact ? exactEntityKey(id) : entityIdKey(id);
     if (!key || !kind) return;
     let byKind = kinds.get(key);
     if (!byKind) kinds.set(key, byKind = new Map());
@@ -177,8 +189,8 @@ export function collectEntitySightings(
   /** Ids a tool result named (not only a mention), and the id kind a declaration gave. */
   const fromTools = new Set<string>();
   const idKinds = new Map<string, EntityIdKind>();
-  const add = (id: unknown, name: string, type?: string, mention = false) => {
-    const key = entityIdKey(id);
+  const add = (id: unknown, name: string, type?: string, mention = false, exact = false) => {
+    const key = exact ? exactEntityKey(id) : entityIdKey(id);
     const trimmed = name.trim();
     if (!key || !trimmed) return;
     if (!mention) fromTools.add(key);
@@ -213,17 +225,21 @@ export function collectEntitySightings(
     if (identity) {
       // A declared record: its declared id, name and type, no guess.
       const id = declaredId(identity);
-      if (identity.name) add(id, identity.name);
-      else if (entityIdKey(id)) fromTools.add(entityIdKey(id)!);
-      addKind(id, identity.declaration.type ?? holder ?? stem, identity.name);
-      const key = entityIdKey(id);
-      if (key && identity.idKind === 'opaque') {
-        const exact = exactIds.get(key) ?? new Set<string>();
-        exact.add(String(id));
-        exactIds.set(key, exact);
+      // An opaque id also under its exact key: a declared argument finds its own record, per type.
+      for (const exact of identity.idKind === 'opaque' ? [false, true] : [false]) {
+        const key = exact ? exactEntityKey(id) : entityIdKey(id);
+        if (!key) continue;
+        if (identity.name) add(id, identity.name, undefined, false, exact);
+        else fromTools.add(key);
+        addKind(id, identity.declaration.type ?? holder ?? stem, identity.name, exact);
+        if (!exact && identity.idKind === 'opaque') {
+          const shown = exactIds.get(key) ?? new Set<string>();
+          shown.add(String(id).trim());
+          exactIds.set(key, shown);
+        }
+        if (identity.declaration.type) declaredKinds.set(`${key}\u0000${identity.declaration.type}`, identity.declaration.type);
+        if (!idKinds.has(key)) idKinds.set(key, identity.idKind);
       }
-      if (key && identity.declaration.type) declaredKinds.set(`${key}\u0000${identity.declaration.type}`, identity.declaration.type);
-      if (key && !idKinds.has(key)) idKinds.set(key, identity.idKind);
       below = true;
     } else {
       const idKey = ID_KEYS.find((key) => entityIdKey(value[key]) !== undefined);
@@ -259,6 +275,13 @@ export function collectEntitySightings(
           const mentioned = entityIdKey(segment.mention.id);
           const mentionKind = kindOfField(segment.mention.type);
           if (declarations && mentioned && mentionKind) declaredKinds.set(`${mentioned}\u0000${mentionKind}`, segment.mention.type);
+          // A picked id is exact: also under its exact key, for a declared argument.
+          const exactMention = declarations ? exactEntityKey(segment.mention.id) : undefined;
+          if (exactMention) {
+            add(segment.mention.id, segment.mention.displayName, segment.mention.type, true, true);
+            addKind(segment.mention.id, mentionKind, segment.mention.displayName, true);
+            if (mentionKind) declaredKinds.set(`${exactMention}\u0000${mentionKind}`, segment.mention.type);
+          }
         }
       }
     }
@@ -331,7 +354,7 @@ export function collectSeenEntityIds(
     const identity = declared?.get(value);
     const idKey = identity ? undefined : ID_KEYS.find((key) => entityIdKey(value[key]) !== undefined);
     if (identity) {
-      const key = entityIdKey(declaredId(identity));
+      for (const key of [entityIdKey(declaredId(identity)), ...(identity.idKind === 'opaque' ? [exactEntityKey(declaredId(identity))] : [])]) {
       if (key) {
         const fallback = identity.fallbackField !== undefined
           ? { fallback: fallbackText(identity.fallbackField, identity.fallbackValue!), fallbackField: identity.fallbackField }
@@ -351,6 +374,7 @@ export function collectSeenEntityIds(
           if (!entry) known.byType[type] = { ...fallback, idKind: identity.idKind };
           else if (!entry.fallback) Object.assign(entry, fallback);
         }
+      }
       }
     } else if (idKey) {
       const key = entityIdKey(value[idKey])!;
