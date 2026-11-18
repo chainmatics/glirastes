@@ -514,3 +514,15 @@ describe('read_result names a declared nested object', () => {
     expect((answer.data as Entry[])[0]!.owner).toEqual({ userNo: 9, nick: 'ada', email: 'a@example.test' });
   });
 });
+
+describe('history compaction and an id that is also the name', () => {
+  it('never clips it, also on the clipped level', () => {
+    const value = { data: Array.from({ length: 60 }, (_, index) => ({ slug: `${'s'.repeat(120)}-${index}`, body: 'b'.repeat(200) })) };
+    const compacted = compactHistoryResult(value, { maxChars: 6_000, entities: [{ id: 'slug', name: 'slug', path: 'data[]' }] }) as Entry;
+    for (const [index, entry] of (compacted.data as Entry[]).entries()) expect(entry.slug).toBe(`${'s'.repeat(120)}-${index}`);
+    // The same bound clips a name that is no id: the clipped level is reached.
+    const named = { data: value.data.map((entry, index) => ({ n: index, ...entry })) };
+    const clipped = compactHistoryResult(named, { maxChars: 6_000, entities: [{ id: 'n', name: 'slug', path: 'data[]' }] }) as Entry;
+    expect((clipped.data as Entry[]).some((entry) => String(entry.slug).endsWith('[clipped]'))).toBe(true);
+  });
+});

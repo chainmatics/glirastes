@@ -186,7 +186,8 @@ function declaredIdentityOf(entry: Record<string, unknown>, level: IdentityLevel
     if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
     const value = entry[key];
     if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) continue;
-    const isName = key === declared.name || key === declared.fallback;
+    // An id field is never clipped, also when it doubles as the name (`{ id: 'slug', name: 'slug' }`).
+    const isName = (key === declared.name || key === declared.fallback) && !entityIdFields(declared).includes(key);
     if (isName && typeof value === 'string'
       && (level === 'clipped' || JSON.stringify(key).length + JSON.stringify(value).length + 2 > MAX_IDENTITY_FIELD_CHARS)) {
       fields.push([key, clipName(value)]);
@@ -198,7 +199,9 @@ function declaredIdentityOf(entry: Record<string, unknown>, level: IdentityLevel
 }
 
 function isClipped(fields: Array<[string, unknown]>, declared?: OutputEntityDeclaration): boolean {
-  const named = (key: string) => (declared ? key === declared.name || key === declared.fallback : NAME_KEYS.has(key));
+  const named = (key: string) => (declared
+    ? (key === declared.name || key === declared.fallback) && !entityIdFields(declared).includes(key)
+    : NAME_KEYS.has(key));
   return fields.some(([key, value]) => named(key) && typeof value === 'string' && value.endsWith(CLIP_SUFFIX));
 }
 
