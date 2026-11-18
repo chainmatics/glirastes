@@ -66,6 +66,15 @@ describe('the wording per language (toolTexts)', () => {
 
   it('keeps the part of before without a turn language or without labels', () => {
     expect(toolPresentationOf(worded, everyTool, { texts })).toEqual(toolPresentationOf(worded, everyTool));
+    // Two tools worded in different locales: each keeps its own manifest label.
+    const mixed = {
+      ...worded,
+      tools: worded.tools.map((tool, index) => (index === 1
+        ? { ...tool, modelName: 'other_tool', presentation: { locale: 'en-US', singular: 'Other', plural: 'Others', approval: 'Run other?' } }
+        : tool)),
+    };
+    const withOther = { ...texts, other_tool: { labels: { de: labels('Anderes') } } };
+    expect(toolPresentationOf(mixed, everyTool, { texts: withOther })).toEqual(toolPresentationOf(mixed, everyTool));
     expect(toolPresentationOf(worded, everyTool, { locale: 'pl' })).toEqual(toolPresentationOf(worded, everyTool));
   });
 });

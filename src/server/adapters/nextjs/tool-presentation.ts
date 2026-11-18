@@ -26,7 +26,7 @@ interface WordedManifest {
 export interface ToolPresentationOptions {
   /** Labels per language (`toolTexts` of the generated module). Without them the part is the manifest's, unchanged. */
   texts?: ToolTextsMap;
-  /** The language of this turn; absent: the manifest's locale. */
+  /** The language of this turn; absent: the manifest's part, unchanged, also with `texts`. */
   locale?: string;
 }
 
@@ -48,7 +48,9 @@ export function toolPresentationOf(
   if (!manifest) return null;
   const allowed = manifest.tools.filter((tool) => allowedToolIds.has(tool.toolId));
   const texts = options.texts;
-  const localized = texts !== undefined && allowed.some((tool) => texts[tool.modelName ?? tool.name]?.labels !== undefined);
+  // Only a stated turn language switches the wording; without one the manifest's part goes out as before.
+  const localized = texts !== undefined && options.locale !== undefined
+    && allowed.some((tool) => texts[tool.modelName ?? tool.name]?.labels !== undefined);
   if (!localized) {
     const tools: ToolPresentationPart['tools'] = {};
     let locale: string | undefined;
@@ -61,18 +63,17 @@ export function toolPresentationOf(
     }
     return locale === undefined ? null : { locale, tools };
   }
-  const locale = options.locale ?? allowed.find((tool) => tool.presentation)?.presentation?.locale;
+  const locale = options.locale!;
   const tools: ToolPresentationPart['tools'] = {};
   for (const tool of allowed) {
     const name = tool.modelName ?? tool.name;
     const own = tool.presentation;
-    const sameLanguage = own !== undefined && locale !== undefined && primaryLanguage(own.locale) === primaryLanguage(locale);
+    const sameLanguage = own !== undefined && primaryLanguage(own.locale) === primaryLanguage(locale);
     const generated = sameLanguage ? undefined : toolLabelsFor(texts[name], locale);
     const approval = generated?.labels.approval ?? own?.approval;
     const label = approval === undefined ? '' : labelOf(approval);
     if (label === '' || label.length > 200) continue;
     tools[name] = { label };
   }
-  const partLocale = locale ?? 'en';
-  return Object.keys(tools).length === 0 ? null : { locale: partLocale, tools };
+  return Object.keys(tools).length === 0 ? null : { locale, tools };
 }
