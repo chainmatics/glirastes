@@ -162,7 +162,8 @@ export function collectDeclaredIdLabels(
     const technicalText = (id: string) => looksLikeTechnicalId(id) && !/^\d+$/.test(id);
     const learn = (id: string, label: string | undefined, technical = technicalText(id)) => {
       if (!id || id === identity.name) return;
-      if (!technical && !labels.has(id)) {
+      // The declaration decides: a number stays a number, also when the guess learnt it as an id.
+      if (!technical) {
         let set = prefixedOnly.get(labels);
         if (!set) prefixedOnly.set(labels, set = new Set());
         set.add(id);

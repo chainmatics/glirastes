@@ -416,3 +416,18 @@ describe('hideIds and long integer ids', () => {
     expect(redactIds('Long (ID: 12345678) sold 12345678 copies.', labels)).toBe('Long sold 12345678 copies.');
   });
 });
+
+describe('declarations meet the guess and indexed reads', () => {
+  it('keeps a declared digits-only string id prefix-only, also after the guess learnt it', () => {
+    const value = { data: [{ id: '12345678', title: 'Long' }] };
+    const labels: IdLabels = new Map();
+    collectIdLabels(value, labels);
+    collectDeclaredIdLabels(value, [{ id: 'id', name: 'title' }], labels);
+    expect(redactIds('Long (ID: 12345678) sold 12345678 copies.', labels)).toBe('Long sold 12345678 copies.');
+  });
+
+  it('finds a path-less declared record in an indexed read_result answer', () => {
+    expect([...declaredRecordsOf({ data: { 2: { trackNo: 3, label_text: 'Track' } } }, [TRACK]).values()].map((identity) => identity.name))
+      .toEqual(['Track']);
+  });
+});

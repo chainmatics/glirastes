@@ -331,9 +331,32 @@ export function largestArrayRoute(root: unknown): string[] | undefined {
 export function entityPathOf(declaration: OutputEntityDeclaration, root: unknown): EntityPathStep[] | undefined {
   if (declaration.path !== undefined) return parseEntityPath(declaration.path);
   if (Array.isArray(root)) return [];
-  const route = largestArrayRoute(root);
+  const route = largestArrayRoute(root) ?? indexedRoute(root);
   if (!route) return [];
   return route.map((key, index) => ({ key, each: index === route.length - 1 }));
+}
+
+/**
+ * Object keys to the first object whose keys are all indices (an indexed
+ * `read_result` answer, `{ data: { "2": { … } } }`): the array the result had
+ * before it was read by index. Undefined without one.
+ */
+function indexedRoute(root: unknown): string[] | undefined {
+  if (!isRecord(root)) return undefined;
+  const visit = (object: Record<string, unknown>, route: string[]): string[] | undefined => {
+    if (route.length > MAX_PATH_STEPS) return undefined;
+    for (const key of Object.keys(object)) {
+      if (route.length === 0 && PROTECTED_TOP_KEYS.has(key)) continue;
+      const value = object[key];
+      if (!isRecord(value)) continue;
+      const keys = Object.keys(value);
+      if (keys.length > 0 && keys.every((index) => /^\d+$/.test(index))) return [...route, key];
+      const deeper = visit(value, [...route, key]);
+      if (deeper) return deeper;
+    }
+    return undefined;
+  };
+  return visit(root, []);
 }
 
 /**
