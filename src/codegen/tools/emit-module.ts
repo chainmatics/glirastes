@@ -98,11 +98,16 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
         ['outputDefaultFields', entry?.outputDefaultFields]] as const)
         .filter((field): field is readonly [typeof field[0], string[]] => field[1] !== undefined)
       : [];
+    // Declared identity (field names only), endpoint results only.
+    const entities = tool.executionKind === 'endpoint'
+      ? ([['outputEntities', entry?.outputEntities], ['inputEntities', entry?.inputEntities]] as Array<[string, unknown[] | undefined]>)
+        .filter((field): field is [string, unknown[]] => field[1] !== undefined)
+      : [];
     if (!contract) throw new Error(`Enabled tool ${tool.name} has no contract to bind.`);
     if (tool.executionKind === 'ui' && !contract.uiAction) {
       throw new Error(`Enabled UI tool ${tool.name} has no UI action to bind.`);
     }
-    return { tool, contract, maxResultChars, outputFields };
+    return { tool, contract, maxResultChars, outputFields, entities };
   });
   // Search-only synonyms and examples of the enabled tools, keyed like `toolSemantics` of createAiChatHandler.
   const searchSemantics = Object.fromEntries(tools
@@ -179,7 +184,7 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
       lines.push(`  const output${index} = ${expression(contract.runtime.output)};`);
     });
     lines.push('  return [');
-    bound.forEach(({ tool, contract, maxResultChars, outputFields }, index) => {
+    bound.forEach(({ tool, contract, maxResultChars, outputFields, entities }, index) => {
       const entry = `toolCatalog[${index}]`;
       const shared = [
         `        id: ${entry}.definitionId,`,
@@ -197,6 +202,7 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
           `        needsApproval: ${entry}.requiresApproval,`,
           ...(maxResultChars !== undefined ? [`        maxResultChars: ${maxResultChars},`] : []),
           ...outputFields.map(([name, paths]) => `        ${name}: ${literal(paths, 8)},`),
+          ...entities.map(([name, list]) => `        ${name}: ${literal(list, 8)},`),
           '      }),',
         ]
         : [

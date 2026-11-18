@@ -126,6 +126,31 @@ describe('schema probe', () => {
     expect(get?.moduleDigest).toBe(del?.moduleDigest);
   }, 30_000);
 
+  it('reads the entity declarations of a contract entry and flags invalid ones without their value', async () => {
+    const app = await createAppFixture({
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  GET: { input: z.object({}), outputEntities: [{ type: 'note', id: 'note_id', name: 'title', path: 'data[]' }],"
+        + " inputEntities: [{ type: 'folder', args: 'folderId', role: 'parent' }] },\n"
+        + "  POST: { input: z.object({}), outputEntities: [{ type: 'Bad SECRETNAME', id: 'x' }], inputEntities: 'nope' },\n"
+        + '  DELETE: { input: z.object({}) },\n};\n',
+    });
+    const entry = (method: string): SchemaProbeItem => ({
+      kind: 'contract-entry', io: 'input', module: 'src/app/api/notes/contract.ts', export: 'contract', property: [method],
+    });
+    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'DELETE'].map(entry));
+    const [get, post, del] = results.map((result) => (
+      result.ok && result.kind === 'contract-entry' ? result : undefined
+    ));
+    expect(get).toMatchObject({
+      outputEntities: [{ type: 'note', id: 'note_id', name: 'title', path: 'data[]' }],
+      inputEntities: [{ type: 'folder', args: 'folderId', role: 'parent' }],
+    });
+    expect(get).not.toHaveProperty('invalidFields');
+    expect(post).toMatchObject({ invalidFields: ['outputEntities', 'inputEntities'] });
+    expect(JSON.stringify(results)).not.toContain('SECRETNAME');
+    expect(get?.moduleDigest).toBe(del?.moduleDigest);
+  }, 30_000);
+
   it('reads maxResultChars of a contract entry and flags an invalid one without its value', async () => {
     const app = await createAppFixture({
       'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"

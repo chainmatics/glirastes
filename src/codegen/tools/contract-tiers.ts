@@ -1,4 +1,5 @@
 import type { DeclaredEffect } from '../../contracts/tool-policy.js';
+import type { InputEntityRef, OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
 import type { EndpointMethod } from '../../types.js';
 import { compareCodeUnits, JsonSchemaCompileError, jsonSchemaDigest, OPAQUE_JSON_SCHEMA } from './canonical.js';
 import { toolFinding } from './findings.js';
@@ -90,6 +91,15 @@ export interface ResolvedEndpointContract {
   /** App-wide patterns the declared output schema names, and case near-misses (not written to outputs). */
   appDeniedHits?: string[];
   appDeniedNearKeys?: string[];
+  /** `outputEntities` / `inputEntities` of the sibling contract module entry (tool code), when valid. */
+  codeEntities?: CodeEntities;
+}
+
+/** Entity declarations of a contract module entry, the highest level. */
+export interface CodeEntities {
+  where: string;
+  output?: OutputEntityDeclaration[];
+  input?: InputEntityRef[];
 }
 
 export const OPAQUE_SCHEMA_DIGEST = jsonSchemaDigest(OPAQUE_JSON_SCHEMA);
@@ -207,6 +217,12 @@ function invalidMetadataFindings(subject: string, module: string, entry: ProbedC
   }
   for (const [field, which] of [['outputAllowedFields', 'allowed'], ['outputDeniedFields', 'denied'], ['outputDefaultFields', 'default']] as const) {
     if (entry.invalidFields?.includes(field)) findings.push(invalidOutputFieldsFinding(subject, module, 'contract', which));
+  }
+  for (const field of ['outputEntities', 'inputEntities'] as const) {
+    if (entry.invalidFields?.includes(field)) {
+      findings.push(toolFinding('entity-declaration-invalid', 'warning', subject,
+        `${module} declares ${field} that are not a list of at most 20 valid declarations; they are ignored and the identity is guessed from field names.`));
+    }
   }
   return findings;
 }
@@ -566,6 +582,15 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     ...(entry?.id ? { explicitId: entry.id } : {}),
     ...(effect ? { declaredEffect: effect } : {}),
     ...(entry?.maxResultChars !== undefined ? { maxResultChars: entry.maxResultChars } : {}),
+    ...(entry && input.contractModule && (entry.outputEntities || entry.inputEntities)
+      ? {
+        codeEntities: {
+          where: input.contractModule.module,
+          ...(entry.outputEntities ? { output: entry.outputEntities } : {}),
+          ...(entry.inputEntities ? { input: entry.inputEntities } : {}),
+        },
+      }
+      : {}),
   };
   // A contract module with secret-looking content or unusable metadata is reported on every path, also when another tier wins.
   const moduleFindings = ((): ToolFinding[] => {

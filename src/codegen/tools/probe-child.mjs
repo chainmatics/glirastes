@@ -127,6 +127,16 @@ async function main() {
       : 'invalid';
   };
 
+  const entityList = (value) => {
+    if (value === undefined) return null;
+    if (!Array.isArray(value) || value.length > 20) return 'invalid';
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return 'invalid';
+    }
+  };
+
   const describeEntry = async (entry) => {
     if (entry === null || typeof entry !== 'object') return { ok: false, reason: 'invalid-entry' };
     const input = await describeSchema(entry.input, 'input');
@@ -159,6 +169,9 @@ async function main() {
       outputAllowedFields: fieldList(entry.outputAllowedFields),
       outputDeniedFields: fieldList(entry.outputDeniedFields),
       outputDefaultFields: fieldList(entry.outputDefaultFields),
+      // Checked in the parent; only a list of at most 20 JSON values goes on, anything else declared is invalid.
+      outputEntities: entityList(entry.outputEntities),
+      inputEntities: entityList(entry.inputEntities),
     };
   };
 

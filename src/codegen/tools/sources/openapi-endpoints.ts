@@ -40,6 +40,15 @@ import { validateResolutionEntry, type ResolutionEntry } from '../resolutions.js
 import type { SchemaProbeItem, SchemaProbeResult } from '../schema-probe.js';
 import { outputFieldLists, type DeclaredOutputFields } from '../output-fields.js';
 import { mergeDeclaredTexts, readDeclaredTexts, type DeclaredTexts } from '../declared-texts.js';
+import {
+  ENTITIES_EXTENSION,
+  entitySitesOf,
+  operationEntityDeclarations,
+  parameterEntityRef,
+  schemaEntityDeclarations,
+  type ObservedEntities,
+} from '../entity-declarations.js';
+import type { InputEntityRef } from '../../../contracts/entity-declaration.js';
 import type {
   ExcludedTool,
   JsonSchemaLike,
@@ -111,6 +120,8 @@ interface OpenapiEntry {
   outputFields?: DeclaredOutputFields;
   /** `x-glirastes-title`, `-description`, `-synonyms`, `-examples`: texts in any language. */
   texts?: DeclaredTexts['hints'];
+  /** Entity declarations of the operation and its response schemas (`x-glirastes-entit*`). */
+  entities?: ObservedEntities;
 }
 
 interface OpenapiPiece {
@@ -196,6 +207,84 @@ function declaresNoContent(document: OpenapiDocument, responses: JsonObject): bo
     const content = isObject(resolved.value) ? resolved.value.content : undefined;
     return resolved.problems.length === 0 && (content === undefined || (isObject(content) && Object.keys(content).length === 0));
   });
+}
+
+/** A local `$ref` of the document, with the name of its component. */
+function refResolver(document: OpenapiDocument) {
+  return (ref: string): { schema: unknown; name: string } | undefined => {
+    if (!ref.startsWith('#/')) return undefined;
+    let value: unknown = document;
+    for (const raw of ref.slice(2).split('/')) {
+      const key = raw.replaceAll('~1', '/').replaceAll('~0', '~');
+      if (!isObject(value) || !(key in value)) return undefined;
+      value = value[key];
+    }
+    return { schema: value, name: ref.split('/').at(-1)!.replaceAll('~1', '/').replaceAll('~0', '~') };
+  };
+}
+
+/** The success response schema as written (its `$ref`s kept, so component names stay known). */
+function rawSuccessSchema(document: OpenapiDocument, operation: JsonObject): unknown {
+  const responses = isObject(operation.responses) ? operation.responses : {};
+  const resolveRef = refResolver(document);
+  for (const status of SUCCESS_STATUSES) {
+    let response: unknown = responses[status];
+    if (response === undefined) continue;
+    if (isObject(response) && typeof response.$ref === 'string') response = resolveRef(response.$ref)?.schema;
+    const content = isObject(response) ? response.content : undefined;
+    const json = isObject(content) ? content['application/json'] : undefined;
+    return isObject(json) ? json.schema : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The entity declarations of one operation: `x-glirastes-entities`, the
+ * `x-glirastes-entity` of its response schemas and the
+ * `x-glirastes-entity-ref` of its parameters and body properties.
+ */
+function readEntities(
+  document: OpenapiDocument,
+  operation: JsonObject,
+  parameters: ReadonlyArray<JsonObject>,
+  body: JsonSchemaLike | undefined,
+  stableKey: string,
+  where: string,
+): { entities?: ObservedEntities; findings: ToolFinding[] } {
+  const findings: ToolFinding[] = [];
+  const sites = entitySitesOf(rawSuccessSchema(document, operation), refResolver(document));
+  const schema = schemaEntityDeclarations(sites, stableKey, where);
+  findings.push(...schema.findings);
+  const declared = operationEntityDeclarations(operation[ENTITIES_EXTENSION], stableKey, where);
+  findings.push(...declared.findings);
+  const input: InputEntityRef[] = [];
+  for (const parameter of parameters) {
+    if (typeof parameter.name !== 'string' || (parameter.in !== 'path' && parameter.in !== 'query')) continue;
+    const read = parameterEntityRef(parameter.name, [parameter, parameter.schema], stableKey, where);
+    findings.push(...read.findings);
+    if (read.ref) input.push(read.ref);
+  }
+  const properties = body && isObject(body.properties) ? body.properties : {};
+  for (const [name, property] of Object.entries(properties)) {
+    const read = parameterEntityRef(name, [property], stableKey, where);
+    findings.push(...read.findings);
+    if (read.ref) input.push(read.ref);
+  }
+  const hasAny = schema.output.length > 0 || declared.output !== undefined || input.length > 0;
+  return {
+    findings,
+    ...(hasAny || sites.length > 0
+      ? {
+        entities: {
+          ...(declared.output || input.length > 0
+            ? { operation: { where, ...(declared.output ? { output: declared.output } : {}), ...(input.length > 0 ? { input } : {}) } }
+            : {}),
+          ...(schema.output.length > 0 ? { schema: { where, output: schema.output } } : {}),
+          ...(sites.length > 0 ? { sites } : {}),
+        },
+      }
+      : {}),
+  };
 }
 
 function successOutput(document: OpenapiDocument, operation: JsonObject): { schema?: JsonSchemaLike; problems: string[] } {
@@ -306,6 +395,8 @@ function readEntry(
     findings.push(toolFinding('tool-texts-invalid', 'warning', stableKey,
       `${where} declares an x-glirastes-${field} that is not one text or one text per language tag within the limits (or looks like a secret); it is ignored.`));
   }
+  const entities = readEntities(document, operation.operation, parameters.list as JsonObject[], body.schema, stableKey, where);
+  findings.push(...entities.findings);
   const description = typeof operation.operation.description === 'string' && operation.operation.description.trim()
     ? operation.operation.description.trim()
     : typeof operation.operation.summary === 'string' && operation.operation.summary.trim()
@@ -333,6 +424,7 @@ function readEntry(
     ...(maxResultChars && 'value' in maxResultChars ? { maxResultChars: maxResultChars.value } : {}),
     ...(outputFields.declared ? { outputFields: outputFields.declared } : {}),
     ...(Object.keys(texts.hints).length > 0 ? { texts: texts.hints } : {}),
+    ...(entities.entities ? { entities: entities.entities } : {}),
   };
 }
 
@@ -432,6 +524,9 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
     ...(entry.roles ? { codeRoles: [...entry.roles] } : {}),
     ...(entry.maxResultChars !== undefined ? { maxResultChars: entry.maxResultChars } : {}),
     ...outputFieldLists(resolved),
+    ...(entry.entities || resolved.codeEntities
+      ? { entities: { ...entry.entities, ...(resolved.codeEntities ? { code: resolved.codeEntities } : {}) } }
+      : {}),
   };
 }
 

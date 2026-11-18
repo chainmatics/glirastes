@@ -155,6 +155,22 @@ export const ToolsConfigSchema = z.object({
    * tool's own `outputDeniedFields`. Local: written into the generated tool
    * contracts, never sent to the Platform. Not for hand-written tools.
    */
+  /**
+   * App-wide object identity: `entities` by type (`{ "channel": { "id":
+   * "key", "name": "title", "idKind": "speaking" } }`, applied to the
+   * response schemas of that type, else to the read routes of that
+   * resource), `tools` by definition id or model name (`{ output, input }`
+   * lists as `outputEntities` / `inputEntities`). The lowest level: code,
+   * OpenAPI operation and schema win. Entries are checked by the refresh
+   * (a finding, never a failure). Local only, never sent to the Platform.
+   */
+  identity: z.object({
+    entities: z.record(z.string().min(1).max(64), z.unknown()).optional(),
+    tools: z.record(z.string().min(1).max(200), z.object({
+      output: z.array(z.unknown()).max(20).optional(),
+      input: z.array(z.unknown()).max(20).optional(),
+    }).strict()).optional(),
+  }).strict().optional(),
   output: z.object({
     deniedFields: z.array(z.string()).max(MAX_OUTPUT_FIELDS)
       .refine((paths) => paths.every((path) => parseAnyDepthKey(path) !== undefined)

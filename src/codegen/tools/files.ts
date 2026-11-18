@@ -1,3 +1,10 @@
+import {
+  entityDeclarationIssue,
+  inputEntityRefIssue,
+  MAX_TOOL_ENTITIES,
+  type InputEntityRef,
+  type OutputEntityDeclaration,
+} from '../../contracts/entity-declaration.js';
 import { z } from 'zod';
 import { isSafeAppHref } from '../../browser/navigation.js';
 import { MAX_MAX_RESULT_CHARS, MIN_MAX_RESULT_CHARS } from '../../runtime/result-limit.js';
@@ -133,6 +140,14 @@ const outputFieldsSchema = (name: OutputFieldsName) => z.array(z.string().min(1)
   .max(MAX_OUTPUT_FIELDS)
   .refine((paths) => isValidOutputFields(paths, name), { message: 'Not a list of output field paths' });
 
+/** Entity declarations (field names and types only; local, never sent to the Platform). */
+const OutputEntitiesSchema = z.array(z.unknown()).max(MAX_TOOL_ENTITIES)
+  .refine((list) => list.every((entry) => entityDeclarationIssue(entry, { output: true }) === undefined), { message: 'Not a list of entity declarations' })
+  .transform((list) => list as OutputEntityDeclaration[]);
+const InputEntitiesSchema = z.array(z.unknown()).max(MAX_TOOL_ENTITIES)
+  .refine((list) => list.every((entry) => inputEntityRefIssue(entry) === undefined), { message: 'Not a list of entity references' })
+  .transform((list) => list as InputEntityRef[]);
+
 const ToolTitleSchema = z.record(z.string().regex(LANGUAGE_TAG_PATTERN).max(35), z.string().min(1).max(200))
   .refine((title) => Object.keys(title).length <= MAX_TEXT_LANGUAGES, { message: `At most ${MAX_TEXT_LANGUAGES} languages` });
 
@@ -166,6 +181,8 @@ export const ToolContractsFileSchema = z.object({
     outputAllowedFields: outputFieldsSchema('outputAllowedFields').optional(),
     outputDeniedFields: outputFieldsSchema('outputDeniedFields').optional(),
     outputDefaultFields: outputFieldsSchema('outputDefaultFields').optional(),
+    outputEntities: OutputEntitiesSchema.optional(),
+    inputEntities: InputEntitiesSchema.optional(),
   }).strict()).max(5_000),
 }).strict();
 
