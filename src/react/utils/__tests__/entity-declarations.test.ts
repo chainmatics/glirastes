@@ -320,3 +320,19 @@ describe('long composite keys', () => {
     expect(resolve('o'.repeat(150))).toMatchObject({ status: 'unknown' });
   });
 });
+
+describe('a mention and a tool result of one declared record', () => {
+  it('are one kind: the record stays named', () => {
+    const REFS: EntityDeclarationsByTool = {
+      versions_list: { output: [{ type: 'playlist-version', id: 'version_id', name: 'label', path: 'versions[]' }] },
+      versions_rollback: { input: [{ type: 'playlist-version', args: 'version_id' }] },
+    };
+    const messages = [
+      tool('versions_list', { versions: [{ version_id: 7, label: 'Version A' }] }),
+      user('Roll back {{mention:playlist-version:7:Version A}}'),
+    ];
+    expect(resolveApprovalSubjects({ version_id: 7 }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'versions_rollback', inputEntities: REFS.versions_rollback!.input!, userTexts: userTextsOf(messages), declarations: REFS,
+    })[0]).toMatchObject({ status: 'named', name: 'Version A' });
+  });
+});

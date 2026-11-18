@@ -271,10 +271,11 @@ export function collectEntitySightings(
         for (const segment of parseMentionSegments(part.text)) {
           if (segment.kind !== 'mention' || segment.mention.type === 'command') continue;
           add(segment.mention.id, segment.mention.displayName, segment.mention.type, true);
-          addKind(segment.mention.id, kindOfField(segment.mention.type), segment.mention.displayName);
-          // A mention names its type explicitly: with declarations it is compared exactly too.
+          // A mention names its type explicitly: with declarations it is that type as written (as a
+          // declared record's kind is, so the two are one kind), compared exactly too.
+          const mentionKind = declarations ? segment.mention.type : kindOfField(segment.mention.type);
+          addKind(segment.mention.id, mentionKind, segment.mention.displayName);
           const mentioned = entityIdKey(segment.mention.id);
-          const mentionKind = kindOfField(segment.mention.type);
           if (declarations && mentioned && mentionKind) declaredKinds.set(`${mentioned}\u0000${mentionKind}`, segment.mention.type);
           // A picked id is exact: also under its exact key, for a declared argument.
           const exactMention = declarations ? exactEntityKey(segment.mention.id) : undefined;
