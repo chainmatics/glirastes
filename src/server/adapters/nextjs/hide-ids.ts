@@ -31,8 +31,19 @@ const MAX_HELD = 80;
 
 export type IdLabels = Map<string, string | undefined>;
 
+/**
+ * Ids a declaration calls speaking (`idKind: 'speaking'`, or a `key`, `slug`
+ * or `code` id): readable keys the user types, never learnt and never removed,
+ * a UUID-shaped one included. Lower-cased.
+ */
+const readable = new WeakMap<IdLabels, Set<string>>();
+
+function isReadable(labels: IdLabels, id: string): boolean {
+  return readable.get(labels)?.has(id.toLowerCase()) ?? false;
+}
+
 function remember(labels: IdLabels, id: string, label: string | undefined): void {
-  if (!looksLikeTechnicalId(id) || label === id) return;
+  if (!looksLikeTechnicalId(id) || label === id || isReadable(labels, id)) return;
   if (label !== undefined || !labels.has(id)) labels.set(id, label ?? labels.get(id));
 }
 
@@ -73,6 +84,23 @@ function idPattern(ids: Iterable<string>): string {
 /** Replaces the ids in a finished piece of text. */
 export function redactIds(text: string, labels: IdLabels): string {
   if (!text) return text;
+  const keep = readable.get(labels);
+  if (keep && keep.size > 0) return redactKeeping(text, labels, keep);
+  return redactAll(text, labels);
+}
+
+/** `redactIds` with declared speaking ids protected: set aside before, put back after. */
+function redactKeeping(text: string, labels: IdLabels, keep: ReadonlySet<string>): string {
+  const kept: string[] = [];
+  const pattern = new RegExp(String.raw`(?<![\w-])(?:${[...keep].sort((a, b) => b.length - a.length).map(escape).join('|')})(?![\w-])`, 'gi');
+  // Letters only between NULs: no id pattern (digits, a prefix) can match inside a placeholder.
+  const token = (index: number) => `\u0000${index.toString(26).replace(/./g, (digit) => String.fromCharCode(97 + parseInt(digit, 26)))}\u0000`;
+  const masked = text.replace(pattern, (found) => token(kept.push(found) - 1));
+  return redactAll(masked, labels).replace(/\u0000([a-z]+)\u0000/g, (_match, letters: string) => (
+    kept[parseInt(letters.replace(/./g, (letter) => (letter.charCodeAt(0) - 97).toString(26)), 26)] ?? ''));
+}
+
+function redactAll(text: string, labels: IdLabels): string {
   const prefix = String.raw`(?:(?:uu)?ids?|kennung)\s*[:=]?\s*`;
   const onlyPrefixed = prefixedOnly.get(labels);
   let wrapped: RegExp;
@@ -112,7 +140,18 @@ export function collectDeclaredIdLabels(
 ): void {
   if (!declarations || declarations.length === 0) return;
   for (const identity of declaredRecordsOf(value, declarations).values()) {
-    if (identity.idKind !== 'opaque') continue;
+    if (identity.idKind !== 'opaque') {
+      // A speaking id stays readable, also when the guess learnt it before.
+      let set = readable.get(labels);
+      if (!set) readable.set(labels, set = new Set());
+      for (const raw of identity.idValues) {
+        const id = typeof raw === 'string' ? raw.trim() : String(raw);
+        set.add(id.toLowerCase());
+        labels.delete(id);
+        prefixedOnly.get(labels)?.delete(id);
+      }
+      continue;
+    }
     for (const raw of identity.idValues) {
       const id = typeof raw === 'string' ? raw.trim() : String(raw);
       if (id === identity.name) continue;

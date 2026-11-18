@@ -218,3 +218,18 @@ describe('declarations travel with the AI tool, never into its output', () => {
       .toBeUndefined();
   });
 });
+
+describe('hideIds keeps declared speaking ids readable', () => {
+  it('neither the guess nor the UUID rule removes a declared speaking id', () => {
+    const UUID = '3f2a9c1e-4b7d-4e2a-9f10-2c3d4e5f6a7b';
+    const value = { data: [{ id: 'ABC123456', title: 'Order' }, { id: UUID, title: 'Coupon' }] };
+    const labels: IdLabels = new Map();
+    collectIdLabels(value, labels);
+    expect(redactIds('ABC123456 and ' + UUID, labels)).toBe('Order and Coupon');
+    collectDeclaredIdLabels(value, [{ id: 'id', name: 'title', idKind: 'speaking' }], labels);
+    // Learnt again later (another result): still readable.
+    collectIdLabels(value, labels);
+    expect(redactIds(`Order ABC123456 (abc123456) and coupon ${UUID}; other ${'9e8d7c6b-5a49-4382-a1b0-c9d8e7f6a5b4'}.`, labels))
+      .toBe(`Order ABC123456 (abc123456) and coupon ${UUID}; other.`);
+  });
+});

@@ -169,20 +169,29 @@ export function resolveApprovalSubjects(
     if (subject) subjects.push(subject);
   };
 
-  function subjectFor(path: string, label: string | undefined, raw: unknown, kind: string | undefined): ApprovalSubject | undefined {
+  function subjectFor(
+    path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false,
+  ): ApprovalSubject | undefined {
     const subjects: ApprovalSubject[] = [];
-    resolve(subjects, path, label, raw, kind);
+    resolve(subjects, path, label, raw, kind, strict);
     return subjects[0];
   }
 
-  function resolve(subjects: ApprovalSubject[], path: string, label: string | undefined, raw: unknown, kind: string | undefined): void {
+  /**
+   * `strict` (a declared argument): a declared kind must equal the argument's
+   * type exactly, a UUID included; a guessed kind still matches by its last word.
+   */
+  function resolve(
+    subjects: ApprovalSubject[], path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false,
+  ): void {
     const key = entityIdKey(raw);
     if (key === undefined) return;
+    const sameKind = (known: string, declared: boolean | undefined) => (strict && declared ? known === kind : kindsMatch(known, kind!));
     const id = typeof raw === 'string' ? raw.trim() : String(raw);
     const seen = sightings.get(key);
-    if (seen?.kinds && seen.kinds.length > 1 && !isUuidLike(id)) {
+    if (seen?.kinds && seen.kinds.length > 1 && (!isUuidLike(id) || (strict && seen.kinds.some((candidate) => candidate.declared)))) {
       const resolvedLabel = label ?? (seen.type ? humanize(seen.type) : undefined);
-      const picked = kind ? seen.kinds.filter((candidate) => kindsMatch(candidate.kind, kind)) : [];
+      const picked = kind ? seen.kinds.filter((candidate) => sameKind(candidate.kind, candidate.declared)) : [];
       const one = picked.length === 1 ? picked[0]! : undefined;
       if (one && one.names.length === 1) {
         subjects.push({ path, id, status: 'named', name: one.names[0]!, ...(resolvedLabel ? { label: resolvedLabel } : {}) });
@@ -203,10 +212,11 @@ export function resolveApprovalSubjects(
       return;
     }
     // A declared record of another kind than the argument's does not name it (user 1 is not playlist 1).
-    const otherKind = (known: string | undefined) => !!known && !!kind && !isUuidLike(id) && !kindsMatch(known, kind);
-    if (!seen || otherKind(seen.kind)) {
+    const otherKind = (known: string | undefined, declared: boolean | undefined) => !!known && !!kind
+      && (!isUuidLike(id) || (strict && !!declared)) && !sameKind(known, declared);
+    if (!seen || otherKind(seen.kind, seen.kindDeclared)) {
       const found = seenIds.get(key);
-      const record = found && !otherKind(found.type) ? found : undefined;
+      const record = found && !otherKind(found.type, true) ? found : undefined;
       subjects.push(record
         ? {
           path, id, status: 'seen', ...(label ? { label } : {}), ...(record.fallback ? { fallback: record.fallback } : {}),
@@ -243,7 +253,7 @@ export function resolveApprovalSubjects(
       const record = key !== undefined ? seenIds.get(key) : undefined;
       const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? sighting?.idKind ?? record?.idKind
         ?? entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) });
-      const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, id, ref.type);
+      const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, id, ref.type, true);
       if (!subject) continue;
       let provenance: ApprovalSubject['provenance'];
       if (subject.status !== 'unknown') provenance = sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';

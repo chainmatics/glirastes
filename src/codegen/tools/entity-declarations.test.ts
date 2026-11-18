@@ -236,4 +236,16 @@ describe('tools.json identity', () => {
     }).success).toBe(true);
     expect(ToolsConfigSchema.safeParse({ ...base, identity: { types: {} } }).success).toBe(false);
   });
+
+  it('keeps at most 20 declarations of one tool, the first in path order, with a finding', () => {
+    const sites = Array.from({ length: 25 }, (_, index) => ({ path: `group${String(index).padStart(2, '0')}[]`, type: 'playlist' }));
+    const resolved = resolveToolEntities({
+      tools: [tool({ entities: { sites } })],
+      identity: { entities: { playlist: { id: 'playlist_id' } } },
+    });
+    const output = resolved.byKey.get('GET /api/playlists')!.outputEntities!;
+    expect(output).toHaveLength(20);
+    expect(output.at(-1)!.path).toBe('group19[]');
+    expect(codes(resolved.findings)).toEqual(['entity-declaration-invalid']);
+  });
 });

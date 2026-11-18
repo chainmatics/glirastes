@@ -519,6 +519,19 @@ export function resolveToolEntities(input: {
       }
     }
     const inputRefs = [...chosenRefs.values()].map(({ ref }) => ref);
+    // Bounded like a hand-written list: the first in path (argument) order stay, deterministic.
+    if (output.length > MAX_TOOL_ENTITIES) {
+      output.sort((left, right) => compareCodeUnits(left.path ?? '', right.path ?? ''));
+      findings.push(toolFinding('entity-declaration-invalid', 'warning', subject,
+        `The tool has ${output.length} entity declarations; the first ${MAX_TOOL_ENTITIES} in path order are kept.`));
+      output.length = MAX_TOOL_ENTITIES;
+    }
+    if (inputRefs.length > MAX_TOOL_ENTITIES) {
+      inputRefs.sort((left, right) => compareCodeUnits(inputRefArgs(left).join(','), inputRefArgs(right).join(',')));
+      findings.push(toolFinding('entity-ref-invalid', 'warning', subject,
+        `The tool has ${inputRefs.length} entity references; the first ${MAX_TOOL_ENTITIES} in argument order are kept.`));
+      inputRefs.length = MAX_TOOL_ENTITIES;
+    }
 
     // One type, one id across tools: a contradiction is an error, each tool keeps its own declaration.
     for (const declaration of output) {

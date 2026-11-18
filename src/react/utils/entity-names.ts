@@ -62,6 +62,8 @@ export interface EntitySighting {
    * named by it.
    */
   kind?: string;
+  /** Set when `kind` is a declared `type`. */
+  kindDeclared?: true;
   /** Set when only an `@` mention of the user named the id, no tool result. */
   mentionedOnly?: true;
 }
@@ -70,6 +72,8 @@ export interface EntitySighting {
 export interface EntityKindSighting {
   /** `user`, `playlist`, `owner`, `playlist version`. */
   kind: string;
+  /** Set when the kind is a declared `type` (compared exactly), not a guess from a field or tool name. */
+  declared?: true;
   /** Their distinct names, newest first (at most five); empty when they had none. */
   names: string[];
 }
@@ -140,6 +144,8 @@ export function collectEntitySightings(
   const sightings = new Map<string, EntitySighting>();
   /** Per id value: the kinds of the records that carried it as their own id, with their names. */
   const kinds = new Map<string, Map<string, string[]>>();
+  /** `id key` + NUL + kind for every kind a declaration gave. */
+  const declaredKinds = new Set<string>();
   let budget = MAX_NODES;
   const tools = producingTools(messages);
 
@@ -200,6 +206,7 @@ export function collectEntitySightings(
       else if (entityIdKey(id)) fromTools.add(entityIdKey(id)!);
       addKind(id, identity.declaration.type ?? holder ?? stem, identity.name);
       const key = entityIdKey(id);
+      if (key && identity.declaration.type) declaredKinds.add(`${key}\u0000${identity.declaration.type}`);
       if (key && !idKinds.has(key)) idKinds.set(key, identity.idKind);
       below = true;
     } else {
@@ -239,10 +246,17 @@ export function collectEntitySightings(
   // Only a collision is recorded: one kind is what every sighting had before.
   for (const [key, sighting] of sightings) {
     const byKind = kinds.get(key);
-    if (byKind && byKind.size > 1) sighting.kinds = [...byKind].map(([kind, names]) => ({ kind, names: [...names] }));
+    if (byKind && byKind.size > 1) {
+      sighting.kinds = [...byKind].map(([kind, names]) => ({
+        kind, names: [...names], ...(declaredKinds.has(`${key}\u0000${kind}`) ? { declared: true as const } : {}),
+      }));
+    }
     // Only with a declaration: an app without one sees the sightings it always had.
     if (declarations) {
-      if (byKind && byKind.size === 1) sighting.kind = [...byKind.keys()][0]!;
+      if (byKind && byKind.size === 1) {
+        sighting.kind = [...byKind.keys()][0]!;
+        if (declaredKinds.has(`${key}\u0000${sighting.kind}`)) sighting.kindDeclared = true;
+      }
       const idKind = idKinds.get(key);
       if (idKind) sighting.idKind = idKind;
       if (!fromTools.has(key)) sighting.mentionedOnly = true;

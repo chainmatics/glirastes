@@ -123,3 +123,21 @@ describe('entity links with declarations (D1–D4)', () => {
     expect(splitEntityText('Lobby Loop', { known: [known[0]!, known[0]!], ambiguousNames: 'text' })[0]).toMatchObject({ kind: 'entity' });
   });
 });
+
+describe('declared types are compared exactly', () => {
+  const VERSIONS: EntityDeclarationsByTool = {
+    playlist_versions: { output: [{ type: 'playlist-version', id: 'version_id', fallback: 'n', path: 'versions[]' }] },
+    channel_versions_rollback: { input: [{ type: 'channel-version', args: 'version_id' }] },
+  };
+  const UUID = '3f2a9c1e-4b7d-4e2a-9f10-2c3d4e5f6a7b';
+
+  it('never names a channel-version after a playlist-version with the same id, a UUID included', () => {
+    for (const id of [7, UUID]) {
+      const messages = [tool('playlist_versions', { versions: [{ version_id: id, n: 3 }] })];
+      const resolved = resolveApprovalSubjects({ version_id: id }, collectEntitySightings(messages, VERSIONS), collectSeenEntityIds(messages, VERSIONS), {
+        toolName: 'channel_versions_rollback', inputEntities: VERSIONS.channel_versions_rollback!.input!, userTexts: [], declarations: VERSIONS,
+      });
+      expect(resolved[0]).toMatchObject({ status: 'unknown', type: 'channel-version' });
+    }
+  });
+});
