@@ -37,7 +37,8 @@ function isIdValue(key: string, value: unknown): boolean {
   } else if (typeof value !== 'string' || value.trim() === '') {
     return false;
   }
-  return JSON.stringify(key).length + 1 + JSON.stringify(value).length <= MAX_ID_LIKE_FIELD_CHARS;
+  // Same measure as the overview's identity fields: `"key":value,`.
+  return JSON.stringify(key).length + 1 + JSON.stringify(value).length + 1 <= MAX_ID_LIKE_FIELD_CHARS;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

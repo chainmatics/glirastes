@@ -166,3 +166,20 @@ describe('entries with a recognised id are unchanged', () => {
     expect(digest).toBe('a0e14617c785b9908329195603b8202de1e126bf4403fc66f1525b5b0ef964fe');
   });
 });
+
+describe('the id-like field length bound is the identity field bound', () => {
+  // `"playlist_id":"…",` is 200 characters with a 183-character value, 201 with 184.
+  const entry = (chars: number): Entry => ({ playlist_id: 'p'.repeat(chars), description: 'text' });
+
+  it('recognises a field of exactly 200 serialized characters and adds it in read_result', () => {
+    expect(idLikeFieldsOf(entry(183))).toEqual(['playlist_id']);
+    const page = read({ data: [entry(183)] }, ['data[].description']);
+    expect((page.data as Entry[])[0]).toHaveProperty('playlist_id');
+  });
+
+  it('treats a longer field the same way everywhere: not id-like, not added', () => {
+    expect(idLikeFieldsOf(entry(184))).toEqual([]);
+    const page = read({ data: [entry(184)] }, ['data[].description']);
+    expect((page.data as Entry[])[0]).not.toHaveProperty('playlist_id');
+  });
+});
