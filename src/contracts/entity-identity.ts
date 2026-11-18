@@ -332,6 +332,11 @@ function fallbackLabel(key: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/** A fallback field and its value as text (`versionNumber`, 3 → `Version number 3`). */
+export function fallbackText(field: string, value: string | number): string {
+  return `${fallbackLabel(field)} ${typeof value === 'string' ? value.trim() : String(value)}`;
+}
+
 /** The first fallback field of a record as text (`Version number 3`), at most 80 characters of value. */
 export function fallbackTextOf(record: Record<string, unknown>): string | undefined {
   for (const key of FALLBACK_KEYS) {
@@ -422,9 +427,10 @@ export function kindOfToolName(toolName: string): string | undefined {
   return all.length > 0 ? all.map(singular).join(' ') : undefined;
 }
 
-/** Whether two kinds can be the same: their last words agree. */
+/** Whether two kinds can be the same: their last words agree (a declared `playlist-version` counts as words). */
 export function kindsMatch(left: string, right: string): boolean {
-  return left.split(' ').at(-1) === right.split(' ').at(-1);
+  const last = (kind: string) => kind.split(/[ _.-]+/).at(-1);
+  return last(left) === last(right);
 }
 
 /** `user` → `User`, `playlist version` → `Playlist version`. */

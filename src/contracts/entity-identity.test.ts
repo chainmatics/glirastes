@@ -115,6 +115,8 @@ describe('one identity heuristic', () => {
       for (const [name, pattern] of GUESS_PATTERNS) {
         if (ALLOWED.some((entry) => entry.file === file && (entry.pattern === '*' || entry.pattern === name))) continue;
         lines.forEach((line, index) => {
+          // Documentation may name the fields; only code guesses.
+          if (/^\s*(?:\*|\/\/|\/\*)/.test(line)) return;
           if (pattern.test(line)) found.push(`${file}:${index + 1} ${name}: ${line.trim()}`);
         });
       }
