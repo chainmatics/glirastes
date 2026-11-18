@@ -545,3 +545,21 @@ describe('hideIds keeps declared speaking input ids', () => {
     expect(text).toBe(`Order ${key} deleted.`);
   });
 });
+
+describe('declared paths of overviews and nested ids in the history', () => {
+  it('takes the overview\'s dominant array for a path-less declaration', () => {
+    const overview = {
+      tracks: [{ n: 1, title: 'Track' }],
+      tags: [{ n: 2, title: 'Tag' }, { n: 3, title: 'Tag 3' }],
+      _result: { id: 'ro_x', arrays: { tracks: 50, tags: 2 }, hint: 'x' },
+    };
+    expect([...declaredRecordsOf(overview, [{ id: 'n', name: 'title' }]).values()].map((identity) => identity.name)).toEqual(['Track']);
+  });
+
+  it('never clips a declared nested id', () => {
+    const value = { data: Array.from({ length: 3 }, (_, index) => ({ id: index, owner: { userNo: `USER-2026-${index}-ALPHA-BRAVO-CHARLIE`, bio: 'b'.repeat(60) } })) };
+    const compacted = compactHistoryResult(value, { maxStringLength: 20, entities: [{ id: 'userNo', path: 'data[].owner' }] }) as Entry;
+    expect(((compacted.data as Entry[])[1]!.owner as Entry).userNo).toBe('USER-2026-1-ALPHA-BRAVO-CHARLIE');
+    expect(((compacted.data as Entry[])[1]!.owner as Entry).bio).not.toBe('b'.repeat(60));
+  });
+});

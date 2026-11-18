@@ -23,9 +23,8 @@ import { dominantArrayRoute, expiredInstruction } from '../../core/result-overvi
 import {
   declarationForEntries,
   declaredIdentityKeys,
+  declaredRecordsOf,
   entityIdFields,
-  entityPathOf,
-  isEntityIdValue,
   type OutputEntityDeclaration,
 } from '../../../contracts/entity-declaration.js';
 
@@ -82,7 +81,12 @@ function orderedKeys(kept: ReadonlySet<string>, idLikeOrder: ReadonlyArray<strin
   ];
 }
 
-type Limits = { maxItems: number; maxStringLength: number };
+type Limits = {
+  maxItems: number;
+  maxStringLength: number;
+  /** Declared ids (`outputEntities`): never clipped. */
+  keep?: ReadonlySet<string>;
+};
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -99,7 +103,7 @@ function serializedLength(value: unknown): number {
 /** The size bound of earlier versions: first `maxItems` entries plus a count, strings cut, nesting cut. */
 function compactValue(current: unknown, depth: number, limits: Limits): unknown {
   if (typeof current === 'string') {
-    return current.length > limits.maxStringLength
+    return current.length > limits.maxStringLength && !limits.keep?.has(current)
       ? `${current.slice(0, limits.maxStringLength)}… [${current.length - limits.maxStringLength} more characters]`
       : current;
   }
@@ -272,102 +276,28 @@ export interface CompactHistoryResultOptions {
  * the caller sends the turn as text.
  */
 export function compactHistoryResult(value: unknown, options: CompactHistoryResultOptions = {}): unknown {
-  const compacted = compactHistoryResultOnce(value, options);
-  if (!options.entities) return compacted;
-  const rooted = withRootIdentity(compacted, value, options.entities, options.maxChars);
-  return withEntryIds(rooted, value, options.entities, options.maxChars, options.maxItems ?? HISTORY_DEFAULTS.maxItems);
+  return compactHistoryResultOnce(value, options);
 }
 
 /**
- * The declared ids of the dominant array's complete leading entries as the
- * tool returned them: string clipping never shortens them (the entries kept
- * as identity only carry them unclipped already). When restoring them would
- * break `maxChars`, the copy stays as it is.
+ * The string ids the declarations name anywhere in `value` (root, entries,
+ * nested objects): string clipping never shortens them, so every size the
+ * plan measures already holds them whole. Ids are at most 200 characters.
  */
-function withEntryIds(
-  compacted: unknown,
-  value: unknown,
-  entities: ReadonlyArray<OutputEntityDeclaration>,
-  maxChars: number | undefined,
-  maxItems: number,
-): unknown {
-  const rootArray = Array.isArray(value);
-  if (!rootArray && !isPlainObject(value)) return compacted;
-  const route = rootArray ? [] : dominantArrayRoute(value as Record<string, unknown>, OWN_MARKERS);
-  if (!route) return compacted;
-  const declared = declarationForEntries(entities, rootArray ? ['data'] : route, rootArray ? { data: value } : value);
-  if (!declared) return compacted;
-  let source: unknown = value;
-  for (const key of route) source = (source as Record<string, unknown>)[key];
-  // The compacted array: at the same route, under `data` for a list answer with a marker, or the list itself.
-  const outputRoute = rootArray ? (isPlainObject(compacted) ? ['data'] : []) : route;
-  let holder: unknown = compacted;
-  for (const key of outputRoute) holder = isPlainObject(holder) ? holder[key] : undefined;
-  if (!Array.isArray(source) || !Array.isArray(holder)) return compacted;
-  const output = holder;
-  // Only the complete leading entries line up with the source; identity entries carry their ids unclipped.
-  const marker = isPlainObject(compacted) ? compacted[HISTORY_MARKER_KEY] : undefined;
-  const complete = isPlainObject(marker) && typeof marker.full === 'number' ? marker.full : maxItems;
-  const restoredIndices: Array<[number, Record<string, unknown>]> = [];
-  for (let index = 0; index < Math.min(output.length, source.length, complete); index += 1) {
-    const entry = output[index];
-    const original = source[index];
-    if (!isPlainObject(entry) || !isPlainObject(original)) continue;
-    let copy: Record<string, unknown> | undefined;
-    for (const key of entityIdFields(declared)) {
-      const id = Object.prototype.hasOwnProperty.call(original, key) ? original[key] : undefined;
-      if (isEntityIdValue(id) && Object.prototype.hasOwnProperty.call(entry, key) && entry[key] !== id) {
-        copy ??= { ...entry };
-        setOwn(copy, key, id);
-      }
-    }
-    if (copy) restoredIndices.push([index, copy]);
+function declaredIdTexts(value: unknown, entities: ReadonlyArray<OutputEntityDeclaration>): Set<string> {
+  const texts = new Set<string>();
+  const root = Array.isArray(value) ? { data: value } : value;
+  for (const identity of declaredRecordsOf(root, entities).values()) {
+    for (const id of identity.idValues) if (typeof id === 'string') texts.add(id);
   }
-  if (restoredIndices.length === 0) return compacted;
-  const before = restoredIndices.map(([index]) => output[index]);
-  for (const [index, copy] of restoredIndices) output[index] = copy;
-  if (maxChars !== undefined && serializedLength(compacted) > maxChars) {
-    restoredIndices.forEach(([index], position) => { output[index] = before[position]; });
-  }
-  return compacted;
-}
-
-/**
- * The declared id of the result itself (`path: ''`, or a path-less
- * declaration of a result without an array) as the tool returned it: string
- * clipping (`maxStringLength`) never shortens it. Id values are at most 200
- * characters; when the restored ids would break `maxChars`, the compacted
- * copy stays as it is.
- */
-function withRootIdentity(
-  compacted: unknown,
-  value: unknown,
-  entities: ReadonlyArray<OutputEntityDeclaration>,
-  maxChars: number | undefined,
-): unknown {
-  if (!isPlainObject(compacted) || !isPlainObject(value)) return compacted;
-  const declared = entities.find((declaration) => {
-    const steps = entityPathOf(declaration, value);
-    return steps !== undefined && steps.length === 0;
-  });
-  if (!declared) return compacted;
-  const restored: Record<string, unknown> = { ...compacted };
-  let changed = false;
-  for (const key of entityIdFields(declared)) {
-    const original = Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
-    if (isEntityIdValue(original) && Object.prototype.hasOwnProperty.call(restored, key) && restored[key] !== original) {
-      setOwn(restored, key, original);
-      changed = true;
-    }
-  }
-  if (!changed) return compacted;
-  return maxChars !== undefined && serializedLength(restored) > maxChars ? compacted : restored;
+  return texts;
 }
 
 function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultOptions): unknown {
   const limits: Limits = {
     maxItems: options.maxItems ?? HISTORY_DEFAULTS.maxItems,
     maxStringLength: options.maxStringLength ?? HISTORY_DEFAULTS.maxStringLength,
+    ...(options.entities?.length ? { keep: declaredIdTexts(value, options.entities) } : {}),
   };
   const maxChars = options.maxChars ?? Number.POSITIVE_INFINITY;
   const legacy = withExpiredHandle(compactValue(value, 0, limits));

@@ -331,7 +331,11 @@ export function largestArrayRoute(root: unknown): string[] | undefined {
 export function entityPathOf(declaration: OutputEntityDeclaration, root: unknown): EntityPathStep[] | undefined {
   if (declaration.path !== undefined) return parseEntityPath(declaration.path);
   if (Array.isArray(root)) return [];
-  const route = largestArrayRoute(root) ?? indexedRoute(root);
+  // An overview names the dominant array of the full result first (`_result.arrays`): that one,
+  // even when cutting entries made another array of the overview larger.
+  const marker = isRecord(root) && isRecord(root._result) ? root._result : undefined;
+  const listed = marker && isRecord(marker.arrays) ? Object.keys(marker.arrays)[0] : undefined;
+  const route = (listed !== undefined ? listed.split('.') : undefined) ?? largestArrayRoute(root) ?? indexedRoute(root);
   if (!route) return [];
   return route.map((key, index) => ({ key, each: index === route.length - 1 }));
 }
