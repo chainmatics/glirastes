@@ -10,6 +10,7 @@ import {
 import { getThemeEffect, getThemeVars } from '../themes.js';
 import { ChatContext, type ChatContextValue } from './chat-context.js';
 import type {
+  ActivityLogConfig,
   AiChatProviderConfig,
   ChatMessage,
   ChatTransport,
@@ -97,6 +98,10 @@ export const DEFAULT_LOCALE: ChatLocale = {
   activityFailedLabel: '{count} failed',
   activityDeclinedLabel: '{count} declined',
   activityExpectedLabel: '{count} without result',
+  activityRunningLabel: '{label}…',
+  activityRunningProgressLabel: '{count} done, {label}…',
+  activityStepCountLabel: '×{count}',
+  activitySummarySeparator: ', ',
   planTitle: 'Plan',
   chatTitle: 'AI Assistant',
   closeChatAriaLabel: 'Close chat',
@@ -411,6 +416,7 @@ export function AiChatProvider({
   onOpenRequest,
   toolRenderers,
   toolResults: userToolResults,
+  activityLog: userActivityLog,
   attachments: userAttachments,
   voice: userVoice,
   session,
@@ -459,6 +465,15 @@ export function AiChatProvider({
     () => resolveToolResultConfig(userToolResults, Boolean(toolRenderers && toolRenderers.length > 0)),
     [userToolResults, toolRenderers],
   );
+  // Keyed on the fields, so an inline `activityLog={{ … }}` does not re-render every message.
+  const activityExpandWhileRunning = userActivityLog?.expandWhileRunning === true;
+  const activityRunningProgress = userActivityLog?.runningProgress === true;
+  const activityNoticePlacement = userActivityLog?.noticePlacement === 'message' ? 'message' : 'log';
+  const activityLogConfig = useMemo<Required<ActivityLogConfig>>(() => ({
+    expandWhileRunning: activityExpandWhileRunning,
+    runningProgress: activityRunningProgress,
+    noticePlacement: activityNoticePlacement,
+  }), [activityExpandWhileRunning, activityRunningProgress, activityNoticePlacement]);
   const toolRendererRegistry = useMemo(
     () => (toolRenderers && toolRenderers.length > 0
       ? createToolResultRendererRegistry(toolRenderers)
@@ -1513,6 +1528,7 @@ export function AiChatProvider({
       suggestions: suggestionsConfig,
       toolLabels,
       toolResults: toolResultConfig,
+      activityLog: activityLogConfig,
       toolRendererRegistry,
       attachments: attachmentOptions,
       voice: voiceConfig,
@@ -1585,6 +1601,7 @@ export function AiChatProvider({
       suggestionsConfig,
       toolLabels,
       toolResultConfig,
+      activityLogConfig,
       toolRendererRegistry,
       attachmentOptions,
       voiceConfig,

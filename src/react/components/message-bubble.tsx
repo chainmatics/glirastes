@@ -6,7 +6,7 @@ import { EntityText, useChatEntityLinks } from '../entity-links/entity-links-rea
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, readClarificationPart } from '../utils/clarification.js';
 import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
-import { ActivityLog } from './activity-log.js';
+import { ActivityLog, TurnNotice as DefaultTurnNotice } from './activity-log.js';
 import { PlanChecklist } from './plan-checklist.js';
 import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
 import { PLAN_TOOL_NAME } from '../../contracts/plan.js';
@@ -17,7 +17,16 @@ import {
 } from '../../contracts/clarification.js';
 import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
-import type { ChatLocale, FilePart, MessageBubbleProps, PipelineState, TextPart } from '../types.js';
+import type {
+  ChatLocale,
+  ChatMessage,
+  FilePart,
+  MessageBubbleProps,
+  MessageParts,
+  PipelineState,
+  TextPart,
+  TurnNoticeStatus,
+} from '../types.js';
 
 // Lazy-load react-markdown — keeps it out of the synchronous import graph so
 // server-only consumers don't pay for it, and gracefully degrades to raw text
@@ -63,14 +72,17 @@ function shouldRenderToolResult(
 }
 
 /** Stop or failure of the latest turn, shown as the last activity line. */
-function pipelineNotice(state: PipelineState | null, locale: ChatLocale): string | undefined {
+function pipelineNotice(
+  state: PipelineState | null,
+  locale: ChatLocale,
+): { text: string; status: TurnNoticeStatus } | undefined {
   switch (state?.status) {
     case 'safety-stop':
-      return locale.pipelineSafetyStopLabel;
+      return { text: locale.pipelineSafetyStopLabel, status: 'safety-stop' };
     case 'aborted':
-      return locale.pipelineAbortedLabel;
+      return { text: locale.pipelineAbortedLabel, status: 'aborted' };
     case 'error':
-      return locale.pipelineErrorLabel;
+      return { text: locale.pipelineErrorLabel, status: 'error' };
     default:
       return undefined;
   }
@@ -145,17 +157,12 @@ function MessageAttachment({ part, locale }: { part: FilePart; locale: ChatLocal
 }
 
 /**
- * Single message bubble.
- *
- * Renders text parts via Markdown component, mention markers as chips,
- * tool results via ToolResultBlock, and handles AI SDK 5.x/6.x tool part
- * format (`type: 'tool-{name}'`).
- *
- * Uses `data-role` attribute for styling (user/assistant/system).
+ * The rendered parts of one message (plan, activity log, turn notice,
+ * attachments, text, tool results), each `null` when absent, for a custom
+ * `MessageBubble` or `components.MessageParts` that arranges them itself.
  */
-export function MessageBubble({ message, className }: MessageBubbleProps) {
+export function useMessageParts(message: ChatMessage): MessageParts {
   const {
-    classNames,
     components,
     toolResults,
     toolRendererRegistry,
@@ -164,11 +171,13 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
     isLoading,
     locale,
     pipelineState,
+    activityLog,
   } = useChatContext();
   const MarkdownComponent = components.Markdown ?? DefaultMarkdown;
   const ToolResultComponent = components.ToolResultBlock ?? DefaultToolResult;
   const MentionChipComponent = components.MentionChip ?? DefaultMentionChip;
   const ClarificationComponent = components.ClarificationCard ?? DefaultClarificationCard;
+  const TurnNoticeComponent = components.TurnNotice ?? DefaultTurnNotice;
   const links = useChatEntityLinks();
   const linkText = links.enabled && message.role === 'assistant';
   const isLatestMessage = messages?.[messages.length - 1]?.id === message.id;
@@ -210,7 +219,12 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const planItems = isAssistant ? readLatestPlan(message.parts) : null;
   const hasPlan = (planItems?.length ?? 0) >= 2;
   const turnActive = isLatestMessage && isLoading;
-  const notice = isLatestMessage ? pipelineNotice(pipelineState, locale) : undefined;
+  // Only an assistant turn carries the notice; a stored turn (not the latest) has none.
+  const notice = isAssistant && isLatestMessage ? pipelineNotice(pipelineState, locale) : undefined;
+  // Inside the log by default; outside it on request, and always when there is no log to hold it.
+  const noticeInLog = notice !== undefined
+    && (activityLog?.noticePlacement ?? 'log') === 'log'
+    && activitySteps.length > 0;
 
   // Extract tool result summaries as fallback text when no text parts exist
   const cleanTextParts = message.parts
@@ -261,8 +275,10 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   }
 
   // Skip truly empty assistant messages
+  let visible = true;
   if (
     message.role === 'assistant'
+    && !notice
     && !hasTextContent
     && !fallbackSummary
     && activitySteps.length === 0
@@ -283,8 +299,150 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         && shouldRenderToolResult(p.toolName, mode, allowlist)
       );
     });
-    if (!hasVisibleToolOutput) return null;
+    if (!hasVisibleToolOutput) visible = false;
   }
+
+  const textNodes = cleanTextParts.map((text, i) => {
+    const segments = parseMentionSegments(text);
+    const hasMention = segments.some((segment) => segment.kind === 'mention');
+
+    if (!hasMention) {
+      if (!text.trim()) return null;
+      return (
+        <MarkdownComponent
+          key={`text-${i}`}
+          content={text}
+        />
+      );
+    }
+
+    return (
+      <div key={`mention-text-${i}`} data-component="message-rich-text">
+        {segments.map((segment, index) => {
+          if (segment.kind === 'text') {
+            if (!segment.text) return null;
+            return (
+              <span key={`segment-text-${index}`} data-component="message-rich-text-part">
+                {linkText ? <EntityText text={segment.text} /> : segment.text}
+              </span>
+            );
+          }
+
+          return (
+            <MentionChipComponent
+              key={`segment-mention-${index}`}
+              mention={segment.mention}
+              inline
+              {...(segment.mention.type !== 'command' && links.canOpen(segment.mention.type)
+                ? {
+                  onOpen: () => links.open({ type: segment.mention.type, id: segment.mention.id, label: segment.mention.displayName }),
+                  openLabel: links.openLabel({ type: segment.mention.type, id: segment.mention.id, label: segment.mention.displayName }),
+                }
+                : {})}
+            />
+          );
+        })}
+      </div>
+    );
+  });
+  const toolResultNodes = message.parts.map((part, i) => {
+    const clarification = readClarificationPart(part);
+    if (clarification) {
+      return (
+        <ClarificationComponent
+          key={`clarification-${clarification.toolCallId}`}
+          toolCallId={clarification.toolCallId}
+          request={clarification.request}
+          interactive={clarification.ready && isLatestMessage && !isLoading}
+          onAnswer={(answer) => send(clarificationAnswerMessage({
+            toolCallId: clarification.toolCallId,
+            answer: answer.text,
+            ...(answer.optionId ? { optionId: answer.optionId } : {}),
+          }))}
+        />
+      );
+    }
+
+    // Standard ToolResultPart
+    if ('toolName' in part && 'result' in part && part.result !== undefined) {
+      if (!shouldRenderToolResult(part.toolName, mode, allowlist)) return null;
+      return renderToolResult(`tool-${i}`, part.toolName, part.result);
+    }
+
+    // AI SDK 5.x/6.x tool-{name} parts with output
+    if (isRecord(part)) {
+      const partType = typeof part.type === 'string' ? part.type : '';
+      if (partType.startsWith('tool-') && part.state === 'output-available' && part.output !== undefined) {
+        const toolName = partType.replace('tool-', '');
+        if (!shouldRenderToolResult(toolName, mode, allowlist)) return null;
+        return renderToolResult(`tool-${i}`, toolName, part.output);
+      }
+    }
+
+    return null;
+  });
+
+  return {
+    visible,
+    plan: hasPlan ? <PlanChecklist items={planItems!} active={turnActive} /> : null,
+    activity: activitySteps.length > 0
+      ? (
+        <ActivityLog
+          steps={activitySteps}
+          active={turnActive}
+          {...(notice && noticeInLog ? { notice: notice.text, noticeStatus: notice.status } : {})}
+        />
+      )
+      : null,
+    notice: notice && !noticeInLog
+      ? <TurnNoticeComponent text={notice.text} status={notice.status} placement="message" />
+      : null,
+    attachments: fileParts.length > 0
+      ? (
+        <div data-element="message-attachments">
+          {fileParts.map((part, i) => <MessageAttachment key={`file-${i}`} part={part} locale={locale} />)}
+        </div>
+      )
+      : null,
+    text: hasTextContent || fallbackSummary
+      ? (
+        <>
+          {textNodes}
+          {/* Fallback summary if no text parts */}
+          {!hasTextContent && fallbackSummary && <MarkdownComponent content={fallbackSummary} />}
+        </>
+      )
+      : null,
+    toolResults: toolResultNodes.some((node) => node !== null) ? <>{toolResultNodes}</> : null,
+  };
+}
+
+/**
+ * Single message bubble.
+ *
+ * Renders text parts via Markdown component, mention markers as chips,
+ * tool results via ToolResultBlock, and handles AI SDK 5.x/6.x tool part
+ * format (`type: 'tool-{name}'`). `components.MessageParts` may arrange the
+ * parts itself; `useMessageParts` gives them to a custom bubble.
+ *
+ * Uses `data-role` attribute for styling (user/assistant/system).
+ */
+export function MessageBubble({ message, className }: MessageBubbleProps) {
+  const { classNames, components } = useChatContext();
+  const { visible, ...nodes } = useMessageParts(message);
+  if (!visible) return null;
+  // The default order, unchanged: plan, log, notice, attachments, text, results.
+  const ordered = (
+    <>
+      {nodes.plan}
+      {nodes.activity}
+      {nodes.notice}
+      {nodes.attachments}
+      {nodes.text}
+      {nodes.toolResults}
+    </>
+  );
+  const Arrange = components.MessageParts;
 
   return (
     <div
@@ -292,102 +450,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
       data-component="message-bubble"
       data-role={message.role}
     >
-      {hasPlan && <PlanChecklist items={planItems!} active={turnActive} />}
-      <ActivityLog steps={activitySteps} active={turnActive} notice={notice} />
-
-      {fileParts.length > 0 && (
-        <div data-element="message-attachments">
-          {fileParts.map((part, i) => <MessageAttachment key={`file-${i}`} part={part} locale={locale} />)}
-        </div>
-      )}
-
-      {/* Render text parts */}
-      {cleanTextParts.map((text, i) => {
-        const segments = parseMentionSegments(text);
-        const hasMention = segments.some((segment) => segment.kind === 'mention');
-
-        if (!hasMention) {
-          if (!text.trim()) return null;
-          return (
-            <MarkdownComponent
-              key={`text-${i}`}
-              content={text}
-            />
-          );
-        }
-
-        return (
-          <div key={`mention-text-${i}`} data-component="message-rich-text">
-            {segments.map((segment, index) => {
-              if (segment.kind === 'text') {
-                if (!segment.text) return null;
-                return (
-                  <span key={`segment-text-${index}`} data-component="message-rich-text-part">
-                    {linkText ? <EntityText text={segment.text} /> : segment.text}
-                  </span>
-                );
-              }
-
-              return (
-                <MentionChipComponent
-                  key={`segment-mention-${index}`}
-                  mention={segment.mention}
-                  inline
-                  {...(segment.mention.type !== 'command' && links.canOpen(segment.mention.type)
-                    ? {
-                      onOpen: () => links.open({ type: segment.mention.type, id: segment.mention.id, label: segment.mention.displayName }),
-                      openLabel: links.openLabel({ type: segment.mention.type, id: segment.mention.id, label: segment.mention.displayName }),
-                    }
-                    : {})}
-                />
-              );
-            })}
-          </div>
-        );
-      })}
-
-      {/* Render fallback summary if no text parts */}
-      {!hasTextContent && fallbackSummary && (
-        <MarkdownComponent content={fallbackSummary} />
-      )}
-
-      {/* Render tool results via ToolResultBlock */}
-      {message.parts.map((part, i) => {
-        const clarification = readClarificationPart(part);
-        if (clarification) {
-          return (
-            <ClarificationComponent
-              key={`clarification-${clarification.toolCallId}`}
-              toolCallId={clarification.toolCallId}
-              request={clarification.request}
-              interactive={clarification.ready && isLatestMessage && !isLoading}
-              onAnswer={(answer) => send(clarificationAnswerMessage({
-                toolCallId: clarification.toolCallId,
-                answer: answer.text,
-                ...(answer.optionId ? { optionId: answer.optionId } : {}),
-              }))}
-            />
-          );
-        }
-
-        // Standard ToolResultPart
-        if ('toolName' in part && 'result' in part && part.result !== undefined) {
-          if (!shouldRenderToolResult(part.toolName, mode, allowlist)) return null;
-          return renderToolResult(`tool-${i}`, part.toolName, part.result);
-        }
-
-        // AI SDK 5.x/6.x tool-{name} parts with output
-        if (isRecord(part)) {
-          const partType = typeof part.type === 'string' ? part.type : '';
-          if (partType.startsWith('tool-') && part.state === 'output-available' && part.output !== undefined) {
-            const toolName = partType.replace('tool-', '');
-            if (!shouldRenderToolResult(toolName, mode, allowlist)) return null;
-            return renderToolResult(`tool-${i}`, toolName, part.output);
-          }
-        }
-
-        return null;
-      })}
+      {Arrange ? <Arrange message={message} {...nodes}>{ordered}</Arrange> : ordered}
     </div>
   );
 }

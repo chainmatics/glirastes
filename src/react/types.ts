@@ -530,6 +530,71 @@ export interface ToolResultDisplayConfig {
   allowlist?: string[];
 }
 
+/** Layout of the work log of an assistant turn (`ActivityLog`). */
+export interface ActivityLogConfig {
+  /**
+   * Open the log while its turn runs and collapse it again when the turn is
+   * over; a log the user toggles keeps the user's choice. Default false
+   * (collapsed until the user opens it).
+   */
+  expandWhileRunning?: boolean;
+  /**
+   * Count the finished steps in the running summary
+   * (`activityRunningProgressLabel`: "2 done, Listing devices…"). Default
+   * false (only the running tool: `activityRunningLabel`).
+   */
+  runningProgress?: boolean;
+  /**
+   * Where the stop or error notice of the latest turn goes: `'log'` (default)
+   * as the last line inside the collapsible log, `'message'` as its own
+   * element (`data-component="turn-notice"`) right after the log, visible
+   * while the log is collapsed. A turn without steps always shows it as its
+   * own element.
+   */
+  noticePlacement?: 'log' | 'message';
+}
+
+/** Pipeline status of a turn that ends with a notice. */
+export type TurnNoticeStatus = 'safety-stop' | 'aborted' | 'error';
+
+export interface TurnNoticeProps {
+  /** Locale text of the status (`pipelineSafetyStopLabel`, `pipelineAbortedLabel`, `pipelineErrorLabel`). */
+  text: string;
+  status: TurnNoticeStatus;
+  /** `'log'` inside the activity log, `'message'` as its own part of the message. */
+  placement: 'log' | 'message';
+}
+
+/**
+ * The rendered parts of one message, each `null` when absent. Order of the
+ * default bubble: plan, activity, notice, attachments, text, toolResults.
+ */
+export interface MessagePartNodes {
+  /** `PlanChecklist` of the latest `update_plan` call. */
+  plan: ReactNode;
+  /** `ActivityLog` of the turn's tool steps. */
+  activity: ReactNode;
+  /** The turn notice when it is shown outside the log (`noticePlacement`, or a turn without steps). */
+  notice: ReactNode;
+  /** Sent files and images. */
+  attachments: ReactNode;
+  /** Text parts (Markdown, mention chips) or the fallback summary of a text-less message. */
+  text: ReactNode;
+  /** Tool result blocks, custom renderers and clarification cards. */
+  toolResults: ReactNode;
+}
+
+export interface MessageParts extends MessagePartNodes {
+  /** False for a message with nothing to show; the default bubble renders nothing then. */
+  visible: boolean;
+}
+
+export interface MessagePartsProps extends MessagePartNodes {
+  message: ChatMessage;
+  /** All parts in the default order. */
+  children: ReactNode;
+}
+
 export interface VoicePushToTalkConfig {
   /**
    * Hold this combo to talk; `mod` is ⌘ on macOS and Ctrl elsewhere.
@@ -639,6 +704,14 @@ export interface ChatComponents {
   CommandArgumentsForm?: ComponentType<CommandArgumentsFormProps>;
   /** Item of the `@`/`/` suggestion list; it must spread `optionProps`. */
   MentionDropdownItem?: ComponentType<MentionDropdownItemProps>;
+  /** Stop or error notice of the latest turn, inside the activity log or outside it (`activityLog.noticePlacement`). */
+  TurnNotice?: ComponentType<TurnNoticeProps>;
+  /**
+   * Arranges the parts of a message inside the bubble root, e.g. the text in
+   * a bubble of its own and the work log beside it. Without it the parts
+   * render in the default order.
+   */
+  MessageParts?: ComponentType<MessagePartsProps>;
 }
 
 export interface CommandArgumentsFormProps {
@@ -700,6 +773,14 @@ export interface ChatLocale {
    * supports `{count}`.
    */
   activityExpectedLabel: string;
+  /** Summary while a tool runs; `{label}` is the tool's label or `activityWorkingLabel` (`{label}…`). */
+  activityRunningLabel: string;
+  /** Running summary with `activityLog.runningProgress`; supports `{count}` (finished steps) and `{label}`. */
+  activityRunningProgressLabel: string;
+  /** Count of a step line folding repeated calls; supports `{count}` (`×{count}`). */
+  activityStepCountLabel: string;
+  /** Joins the parts of the finished summary (`, `). */
+  activitySummarySeparator: string;
   planTitle: string;
   /** Shown when the user sends while an approval card waits for a decision. */
   approvalPendingHint: string;
@@ -851,6 +932,8 @@ export interface AiChatProviderConfig {
    */
   onOpenRequest?: () => void;
   toolResults?: ToolResultDisplayConfig;
+  /** Work log layout: open while running, running progress, notice placement. All off by default. */
+  activityLog?: ActivityLogConfig;
   /**
    * File and image attachments in the composer (paste, drop, picker); off by
    * default. The server handler needs `attachments.enabled` too.

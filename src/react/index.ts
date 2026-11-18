@@ -58,6 +58,13 @@ export type {
   ToolLabelConfig,
   ToolResultDisplayMode,
   ToolResultDisplayConfig,
+  // Message layout
+  ActivityLogConfig,
+  TurnNoticeProps,
+  TurnNoticeStatus,
+  MessagePartNodes,
+  MessageParts,
+  MessagePartsProps,
   VoiceInputConfig,
   VoicePushToTalkConfig,
   // Mention chips
@@ -235,7 +242,7 @@ export { AssistantWorkspace, type AssistantWorkspaceProps } from './assistant/as
 export { AiChatPanel } from './components/ai-chat-panel.js';
 export { FloatingChatUI, type FloatingChatUIProps } from './components/floating-chat-ui.js';
 export { MessageList } from './components/message-list.js';
-export { MessageBubble } from './components/message-bubble.js';
+export { MessageBubble, useMessageParts } from './components/message-bubble.js';
 export { ChatInput } from './components/chat-input.js';
 export { MentionInput } from './components/mention-input.js';
 export { RichMentionInput } from './components/rich-mention-input.js';
@@ -243,7 +250,7 @@ export { ChatWindow } from './components/chat-window.js';
 export { ApprovalCard } from './components/approval-card.js';
 export { BulkApprovalCard } from './components/bulk-approval-card.js';
 export { PipelineTimeline } from './components/pipeline-timeline.js';
-export { ActivityLog, type ActivityLogProps } from './components/activity-log.js';
+export { ActivityLog, TurnNotice, type ActivityLogProps } from './components/activity-log.js';
 export { PlanChecklist, type PlanChecklistProps } from './components/plan-checklist.js';
 export { SuggestionChip } from './components/suggestion-chip.js';
 export { SuggestionBar } from './components/suggestion-bar.js';

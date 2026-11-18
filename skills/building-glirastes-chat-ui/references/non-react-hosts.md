@@ -100,6 +100,10 @@ required APIs. The configured V1 service does not add those routes automatically
   are not automatically a supported route inventory.
 - **Vue/plain JS:** the same detached-element/config/append ordering applies;
   dispose when the view is removed and remount on identity changes.
+- **Layout without React slots:** `config.activityLog` (`expandWhileRunning`,
+  `runningProgress`, `noticePlacement: 'message'`) and the `data-*` hooks of
+  the shadow root cover what `components.TurnNotice`/`MessageParts` do in
+  React; the shadow-root styles carry the same `prefers-reduced-motion` rules.
 
 The matching SDK repository contains `examples/frontend-frameworks`. These
 examples illustrate integration; a generic browser wrapper does not establish

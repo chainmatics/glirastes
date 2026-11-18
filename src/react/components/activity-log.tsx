@@ -1,4 +1,6 @@
+import { useState, type SyntheticEvent } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
+import type { TurnNoticeProps, TurnNoticeStatus } from '../types.js';
 import type { ActivityStep, ActivityStepStatus } from '../utils/activity.js';
 import { StatusIcon, type StatusIconKind } from './status-icon.js';
 
@@ -8,7 +10,23 @@ export interface ActivityLogProps {
   active: boolean;
   /** Pipeline stop or error text shown as the last line. */
   notice?: string;
+  /** Status behind `notice`, handed to a `components.TurnNotice` slot (default `'error'`). */
+  noticeStatus?: TurnNoticeStatus;
   className?: string;
+}
+
+/** Replaces every `{name}` in a locale text. */
+export function fillLocaleText(template: string, values: Readonly<Record<string, string | number>>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in values ? String(values[name]) : match));
+}
+
+/**
+ * Default turn notice: the last line of the log (`data-element="activity-notice"`)
+ * or, outside it, its own element (`data-component="turn-notice"`).
+ */
+export function TurnNotice({ text, status, placement }: TurnNoticeProps) {
+  if (placement === 'log') return <p data-element="activity-notice">{text}</p>;
+  return <p data-component="turn-notice" data-status={status}>{text}</p>;
 }
 
 const STEP_ICONS: Record<ActivityStepStatus, StatusIconKind> = {
@@ -50,8 +68,10 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
  *
  * Keeps styling neutral via `data-*` attributes.
  */
-export function ActivityLog({ steps, active, notice, className }: ActivityLogProps) {
-  const { locale, toolLabels } = useChatContext();
+export function ActivityLog({ steps, active, notice, noticeStatus, className }: ActivityLogProps) {
+  const { locale, toolLabels, components, activityLog } = useChatContext();
+  // The user's own toggle wins over expandWhileRunning; null until the user toggles.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
   if (steps.length === 0) return null;
 
   const label = (toolName: string) => toolLabels.labels?.[toolName]?.singular ?? toolName;
@@ -65,11 +85,17 @@ export function ActivityLog({ steps, active, notice, className }: ActivityLogPro
 
   const state = running || active ? 'running' : waiting ? 'waiting' : failed > 0 ? 'error' : 'done';
 
+  const finished = steps.filter((step) => step.status !== 'running' && step.status !== 'waiting').length;
+  const separator = locale.activitySummarySeparator ?? ', ';
+
   let summaryIcon: StatusIconKind;
   let summaryText: string;
   if (state === 'running') {
     summaryIcon = 'spinner';
-    summaryText = `${running ? label(running.toolName) : locale.activityWorkingLabel}…`;
+    const current = running ? label(running.toolName) : locale.activityWorkingLabel;
+    summaryText = activityLog?.runningProgress && finished > 0
+      ? fillLocaleText(locale.activityRunningProgressLabel ?? '{count} done, {label}…', { count: finished, label: current })
+      : fillLocaleText(locale.activityRunningLabel ?? '{label}…', { label: current });
   } else if (state === 'waiting') {
     summaryIcon = 'pending';
     summaryText = locale.activityWaitingLabel;
@@ -79,18 +105,32 @@ export function ActivityLog({ steps, active, notice, className }: ActivityLogPro
       ? locale.activityDoneOneLabel
       : locale.activityDoneLabel.replace('{count}', String(steps.length));
     if (failed > 0) {
-      summaryText += `, ${locale.activityFailedLabel.replace('{count}', String(failed))}`;
+      summaryText += `${separator}${locale.activityFailedLabel.replace('{count}', String(failed))}`;
     }
     if (declined > 0) {
-      summaryText += `, ${locale.activityDeclinedLabel.replace('{count}', String(declined))}`;
+      summaryText += `${separator}${locale.activityDeclinedLabel.replace('{count}', String(declined))}`;
     }
     if (expected > 0) {
-      summaryText += `, ${locale.activityExpectedLabel.replace('{count}', String(expected))}`;
+      summaryText += `${separator}${locale.activityExpectedLabel.replace('{count}', String(expected))}`;
     }
   }
 
+  const NoticeComponent = components?.TurnNotice ?? TurnNotice;
+  // Only with expandWhileRunning is `open` controlled; otherwise the element stays as before.
+  const controlled = activityLog?.expandWhileRunning === true;
+  const open = userOpen ?? state === 'running';
+  const openProps = controlled
+    ? {
+      open,
+      onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => {
+        // The browser also fires `toggle` for the `open` React sets: only a change of the user counts.
+        if (event.currentTarget.open !== open) setUserOpen(event.currentTarget.open);
+      },
+    }
+    : {};
+
   return (
-    <details className={className} data-component="activity-log" data-state={state}>
+    <details className={className} data-component="activity-log" data-state={state} {...openProps}>
       <summary data-element="activity-summary">
         <StatusIcon icon={summaryIcon} />
         <span data-element="label">{summaryText}</span>
@@ -102,12 +142,14 @@ export function ActivityLog({ steps, active, notice, className }: ActivityLogPro
             <span data-element="label">
               {count > 1 ? toolLabels.labels?.[step.toolName]?.plural ?? label(step.toolName) : label(step.toolName)}
             </span>
-            {count > 1 && <span data-element="count">×{count}</span>}
+            {count > 1 && (
+              <span data-element="count">{fillLocaleText(locale.activityStepCountLabel ?? '×{count}', { count })}</span>
+            )}
             {step.detail && <span data-element="detail">{step.detail}</span>}
           </li>
         ))}
       </ol>
-      {notice && <p data-element="activity-notice">{notice}</p>}
+      {notice && <NoticeComponent text={notice} status={noticeStatus ?? 'error'} placement="log" />}
     </details>
   );
 }

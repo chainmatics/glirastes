@@ -8,20 +8,34 @@ import { PlanChecklist } from '../plan-checklist.js';
 import { DEFAULT_LOCALE } from '../../provider/ai-chat-provider.js';
 import { deChatLocale } from '../../locale-de.js';
 
-vi.mock('../../provider/chat-context.js', () => ({
-  useChatContext: () => ({
+const chatContext = vi.hoisted(() => ({
+  current: {
     classNames: {},
-    locale: deChatLocale,
+    components: {} as Record<string, unknown>,
+    activityLog: {} as Record<string, unknown>,
+    locale: {} as Record<string, string>,
     toolLabels: {
       labels: {
         list_tasks: { singular: 'Aufgaben lesen', plural: 'Aufgaben lesen' },
         create_team: { singular: 'Team anlegen', plural: 'Teams anlegen' },
       },
     },
-  }),
+  },
 }));
 
-afterEach(cleanup);
+vi.mock('../../provider/chat-context.js', () => ({
+  useChatContext: () => chatContext.current,
+}));
+
+// vi.hoisted runs before imports, so the locale is set here.
+chatContext.current.locale = deChatLocale as unknown as Record<string, string>;
+
+afterEach(() => {
+  cleanup();
+  chatContext.current.components = {};
+  chatContext.current.activityLog = {};
+  chatContext.current.locale = deChatLocale as unknown as Record<string, string>;
+});
 
 function root() {
   return document.querySelector('[data-component="activity-log"]') as HTMLDetailsElement | null;
@@ -209,6 +223,118 @@ describe('ActivityLog', () => {
     );
     expect(document.querySelector('[data-element="activity-notice"]')!.textContent)
       .toBe('Sicherheitsstopp');
+  });
+
+  it('stays collapsed while running by default and opens only with expandWhileRunning', () => {
+    const steps = [
+      { id: 'c1', toolName: 'list_tasks', status: 'done' as const },
+      { id: 'c2', toolName: 'create_team', status: 'running' as const },
+    ];
+    render(<ActivityLog active steps={steps} />);
+    expect(root()!.open).toBe(false);
+    expect(root()!.hasAttribute('open')).toBe(false);
+
+    cleanup();
+    chatContext.current.activityLog = { expandWhileRunning: true };
+    const view = render(<ActivityLog active steps={steps} />);
+    expect(root()!.open).toBe(true);
+    // Collapses again when the turn is over.
+    view.rerender(
+      <ActivityLog active={false} steps={[steps[0]!, { ...steps[1]!, status: 'done' }]} />,
+    );
+    expect(root()!.open).toBe(false);
+  });
+
+  it('keeps a log the user closed during the run closed', () => {
+    chatContext.current.activityLog = { expandWhileRunning: true };
+    const steps = [{ id: 'c1', toolName: 'create_team', status: 'running' as const }];
+    const view = render(<ActivityLog active steps={steps} />);
+    expect(root()!.open).toBe(true);
+    root()!.open = false;
+    fireEvent(root()!, new Event('toggle'));
+    view.rerender(<ActivityLog active steps={[...steps, { id: 'c2', toolName: 'list_tasks', status: 'running' as const }]} />);
+    expect(root()!.open).toBe(false);
+  });
+
+  it('shows the progress of a running turn only with runningProgress', () => {
+    const steps = [
+      { id: 'c1', toolName: 'list_tasks', status: 'done' as const },
+      { id: 'c2', toolName: 'list_tasks', status: 'expected' as const },
+      { id: 'c3', toolName: 'create_team', status: 'running' as const },
+    ];
+    render(<ActivityLog active steps={steps} />);
+    const summary = () => document.querySelector('[data-element="activity-summary"]')!.textContent;
+    expect(summary()).toBe('Team anlegen…');
+
+    cleanup();
+    chatContext.current.activityLog = { runningProgress: true };
+    render(<ActivityLog active steps={steps} />);
+    expect(summary()).toBe('2 erledigt, Team anlegen…');
+
+    cleanup();
+    render(<ActivityLog active steps={[{ id: 'c1', toolName: 'create_team', status: 'running' }]} />);
+    // Nothing finished yet: no count.
+    expect(summary()).toBe('Team anlegen…');
+
+    cleanup();
+    render(<ActivityLog active steps={[{ id: 'c1', toolName: 'create_team', status: 'done' }]} />);
+    expect(summary()).toBe('1 erledigt, Arbeitet…');
+  });
+
+  it('takes every text of the summary and the steps from the locale', () => {
+    chatContext.current.locale = {
+      ...deChatLocale,
+      activityRunningLabel: '«{label}»',
+      activityStepCountLabel: '({count})',
+      activitySummarySeparator: ' / ',
+    } as unknown as Record<string, string>;
+    const view = render(<ActivityLog active steps={[{ id: 'c1', toolName: 'create_team', status: 'running' }]} />);
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent).toBe('«Team anlegen»');
+    view.rerender(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'list_tasks', status: 'error' },
+          { id: 'c2', toolName: 'list_tasks', status: 'error' },
+          { id: 'c3', toolName: 'create_team', status: 'declined' },
+        ]}
+      />,
+    );
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
+      .toBe('3 Schritte ausgeführt / 2 fehlgeschlagen / 1 abgelehnt');
+    expect(rows()[0]!.querySelector('[data-element="count"]')!.textContent).toBe('(2)');
+  });
+
+  it('renders the notice through the TurnNotice slot inside the log', () => {
+    const seen: unknown[] = [];
+    chatContext.current.components = {
+      TurnNotice: (props: { text: string; status: string; placement: string }) => {
+        seen.push(props);
+        return <em data-testid="notice">{props.text}</em>;
+      },
+    };
+    render(
+      <ActivityLog
+        active={false}
+        notice="Gestoppt"
+        noticeStatus="aborted"
+        steps={[{ id: 'c1', toolName: 'list_tasks', status: 'done' }]}
+      />,
+    );
+    expect(root()!.querySelector('[data-testid="notice"]')!.textContent).toBe('Gestoppt');
+    expect(root()!.querySelector('[data-element="activity-notice"]')).toBeNull();
+    expect(seen).toEqual([{ text: 'Gestoppt', status: 'aborted', placement: 'log' }]);
+  });
+
+  it('has English and German defaults for the layout texts', () => {
+    expect(DEFAULT_LOCALE.activityRunningLabel).toBe('{label}…');
+    expect(deChatLocale.activityRunningLabel).toBe('{label}…');
+    expect(DEFAULT_LOCALE.activityRunningProgressLabel).toBe('{count} done, {label}…');
+    expect(deChatLocale.activityRunningProgressLabel).toBe('{count} erledigt, {label}…');
+    expect(DEFAULT_LOCALE.activityStepCountLabel).toBe('×{count}');
+    expect(deChatLocale.activityStepCountLabel).toBe('×{count}');
+    expect(DEFAULT_LOCALE.activitySummarySeparator).toBe(', ');
+    expect(deChatLocale.activitySummarySeparator).toBe(', ');
   });
 
   it('has English defaults for every new text', () => {

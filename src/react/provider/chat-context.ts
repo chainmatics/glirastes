@@ -12,6 +12,7 @@ import type {
   SuggestionsConfig,
   TruncationInfo,
   ToolResultDisplayConfig,
+  ActivityLogConfig,
   ToolLabelConfig,
   VoiceInputConfig,
   PipelineStepReport,
@@ -53,6 +54,8 @@ export interface ChatContextValue {
   suggestions: SuggestionsConfig;
   toolLabels: ToolLabelConfig;
   toolResults: ToolResultDisplayConfig;
+  /** Resolved `activityLog` options of the provider. */
+  activityLog: Required<ActivityLogConfig>;
   /** Custom result components; absent when none are configured. */
   toolRendererRegistry?: ToolResultRendererRegistry;
   /** Resolved attachment limits; null while attachments are off. */

@@ -390,6 +390,8 @@ React components and hooks for the chat experience. Styling-neutral (you provide
 
 **Key components**: MessageList, MessageBubble, ChatInput, ApprovalCard, PipelineTimeline, SuggestionBar, VoiceInputButton, AiTriggerButton.
 
+**Message layout** (opt-in, defaults keep the markup): `activityLog` on the provider (`expandWhileRunning`, `runningProgress`, `noticePlacement: 'log' | 'message'`), the slots `components.TurnNotice` and `components.MessageParts`, and `useMessageParts(message)` for a custom bubble. Under `prefers-reduced-motion: reduce` the spinner and the typing dots stand still.
+
 ---
 
 ## Frontend Transport (Do I need Vercel AI SDK on the frontend?)

@@ -101,9 +101,9 @@ styles are variable-driven, inline overrides break under a strict CSP.
 ## Slots
 
 `components` replaces one rendered piece while the rest of the chat keeps
-working: `MessageBubble`, `ChatInput`, `ToolResultBlock`, `Markdown`,
-`InputExtra`, `ApprovalCard`, `BulkApprovalCard`, `PipelineTimeline`,
-`SuggestionChip`, `MentionChip`, `AttachmentTray`, `AttachmentButton`.
+working: `MessageBubble`, `MessageParts`, `TurnNotice` (message layout), `ChatInput`,
+`ToolResultBlock`, `Markdown`, `InputExtra`, `ApprovalCard`, `BulkApprovalCard`,
+`PipelineTimeline`, `SuggestionChip`, `MentionChip`, `AttachmentTray`, `AttachmentButton`.
 
 Replace the narrowest slot: swapping `MessageBubble` to restyle one tool result
 costs the streaming, approval and mention behavior it carries.
