@@ -233,3 +233,19 @@ describe('hideIds keeps declared speaking ids readable', () => {
       .toBe(`Order ABC123456 (abc123456) and coupon ${UUID}; other.`);
   });
 });
+
+describe('declared paths on unwrapped lists and path-less root records', () => {
+  it('reaches the entries of an unwrapped list through data[]', () => {
+    expect(declaredRecordsOf([{ trackNo: 3 }], [{ id: 'trackNo', path: 'data[]' }]).size).toBe(1);
+    expect(declaredRecordsOf([{ trackNo: 3 }], [{ id: 'trackNo' }]).size).toBe(1);
+  });
+
+  it('keeps the identity of a single record declared without a path', () => {
+    const value: Record<string, unknown> = { orderNo: 'ORDER-2026-000001-ALPHA' };
+    for (let index = 0; index < 60; index += 1) value[`f${index}`] = `v${index}`;
+    const declared = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: 1200, readOnly: true, entities: [{ type: 'order', id: 'orderNo' }] }) as Overview;
+    expect(declared.orderNo).toBe('ORDER-2026-000001-ALPHA');
+    const plain = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: 1200, readOnly: true }) as Overview;
+    expect(plain.orderNo).toBeUndefined();
+  });
+});

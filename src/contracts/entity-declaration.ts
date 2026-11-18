@@ -342,7 +342,8 @@ export function entityPathOf(declaration: OutputEntityDeclaration, root: unknown
  * without the `data` wrapper), at most `limit` objects.
  */
 export function objectsAt(root: unknown, steps: ReadonlyArray<EntityPathStep>, limit = 10_000): Array<Record<string, unknown>> {
-  let current: unknown[] = Array.isArray(root) ? root : [root];
+  // A list answer the browser holds unwrapped: `data[]` still addresses its entries.
+  let current: unknown[] = Array.isArray(root) ? (steps[0]?.key === 'data' ? [{ data: root }] : root) : [root];
   for (const step of steps) {
     const next: unknown[] = [];
     for (const holder of current) {

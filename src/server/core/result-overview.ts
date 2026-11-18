@@ -446,7 +446,9 @@ export function buildResultOverview(
     }
   }
   // The result's own declared identity (`path: ''`) stays too.
-  const rootDeclared = options.entities?.find((declaration) => declaration.path === '');
+  // A path-less declaration points at the result itself when it has no array.
+  const rootDeclared = options.entities?.find((declaration) => declaration.path === '')
+    ?? (dominant ? undefined : options.entities?.find((declaration) => declaration.path === undefined));
   const rootKeep = new Set(rootDeclared ? declaredIdentityKeys(rootDeclared) : []);
   if (keep.size === 0 && ownFieldSize.size > 0) {
     const smallest = [...ownFieldSize].sort((left, right) => left[1] - right[1] || (left[0] < right[0] ? -1 : 1))[0]!;
