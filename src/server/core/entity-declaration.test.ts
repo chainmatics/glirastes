@@ -503,3 +503,14 @@ describe('history compaction restores ids only where entries line up', () => {
     expect(ids).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   });
 });
+
+describe('read_result names a declared nested object', () => {
+  it('adds the owner\'s declared id and name when only its email is read', () => {
+    const value = { success: true, data: [{ id: 1, owner: { userNo: 9, nick: 'ada', email: 'a@example.test' } }] };
+    const entities = [{ type: 'user', id: 'userNo', name: 'nick', path: 'data[].owner' }];
+    const handle = { id: 'ro_abcdefgh', toolName: 't', readOnly: true, maxChars: 16_000, value, entities } as ResultHandle;
+    const field = 'data[].owner.email';
+    const answer = readResultHandle(handle, { resultId: handle.id, fields: [field] }, [parseResultPath(field)!]) as Entry;
+    expect((answer.data as Entry[])[0]!.owner).toEqual({ userNo: 9, nick: 'ada', email: 'a@example.test' });
+  });
+});

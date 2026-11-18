@@ -388,10 +388,11 @@ function nestedDeclaredIdentityAdder(
   const levels: Array<{ steps: PathStep[]; declared: OutputEntityDeclaration }> = [];
   const seen = new Set<string>();
   for (const path of known) {
-    const arrays = path.steps.map((step, index) => (step.kind === 'key' ? -1 : index)).filter((index) => index >= 0);
-    // The deeper array levels a path reads below (not the last step: a whole entry needs no identity).
-    for (const at of arrays.slice(1)) {
-      if (at === path.steps.length - 1) continue;
+    const first = path.steps.findIndex((step) => step.kind !== 'key');
+    if (first < 0) continue;
+    // Every deeper level a path reads below the outermost array, an array's entries (`items[]`)
+    // or one object (`owner`); not the last step: a whole entry or object needs no identity.
+    for (let at = first + 1; at < path.steps.length - 1; at += 1) {
       const prefix = path.steps.slice(0, at + 1);
       const text = prefix.map((step) => (step.kind === 'key' ? `.${step.key}` : '[]')).join('').replace(/^\./, '');
       const declared = entities?.find((declaration) => declaration.path === text);
@@ -420,7 +421,9 @@ function nestedDeclaredIdentityAdder(
         if (step.kind === 'key') {
           if (!isPlainRecord(projected) || !isPlainRecord(original)
             || !Object.prototype.hasOwnProperty.call(projected, step.key) || !Object.prototype.hasOwnProperty.call(original, step.key)) return projected;
-          const child = visit(projected[step.key], original[step.key], index + 1, outer);
+          const child = last
+            ? enrich(projected[step.key], original[step.key], declared)
+            : visit(projected[step.key], original[step.key], index + 1, outer);
           if (child !== projected[step.key]) setOwn(projected, step.key, child);
           return projected;
         }
