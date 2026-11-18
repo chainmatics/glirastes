@@ -1018,7 +1018,12 @@ export function AiChatProvider({
           setPendingApprovalsMap(prev => new Map(prev).set(toolPart.approval!.id, pending));
         }
 
-        if (toolPart.state === 'input-streaming' || toolPart.state === 'input-available') {
+        if (
+          toolPart.state === 'input-streaming'
+          || toolPart.state === 'input-available'
+          || toolPart.state === 'approval-requested'
+          || toolPart.state === 'approval-responded'
+        ) {
           earlierCallOpen = true;
           continue;
         }

@@ -296,6 +296,27 @@ describe('AiChatProvider UI action outcomes', () => {
     await waitFor(() => expect(order).toEqual(['second', 'third']));
   });
 
+  it('treats an earlier call awaiting approval as open while the request streams', async () => {
+    const { bus } = setup();
+    const order: string[] = [];
+    cleanups.push(bus.subscribeById('first', () => { order.push('first'); }));
+    cleanups.push(bus.subscribeById('second', () => { order.push('second'); }));
+    await act(async () => { control.set([user], 'submitted'); });
+    await act(async () => {
+      control.set([user, assistant(
+        { ...toolPart('c1', undefined, 'approval-requested'), approval: { id: 'ap-1' } },
+        toolPart('c2', action('second')),
+      )], 'streaming');
+    });
+    await settle();
+    expect(order).toEqual([]);
+    await act(async () => {
+      control.set([user, assistant(toolPart('c1', action('first')), toolPart('c2', action('second')))], 'streaming');
+    });
+    await act(async () => { control.status('ready'); });
+    await waitFor(() => expect(order).toEqual(['first', 'second']));
+  });
+
   it('does not wait for a call that is still open when the request ends', async () => {
     const { bus, outcomes } = setup();
     const seen = vi.fn();
