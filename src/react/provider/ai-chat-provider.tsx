@@ -622,6 +622,10 @@ export function AiChatProvider({
   // Refs for deduplication
   const processedToolCallsRef = useRef<Set<string>>(new Set());
   const handledApprovalIdsRef = useRef<Set<string>>(new Set());
+  // Bumped by clear(), a session switch and unmount: queued actions of the left chat never start.
+  const uiActionGenerationRef = useRef(0);
+  useEffect(() => () => { uiActionGenerationRef.current += 1; }, []);
+
 
   // Stable refs for callbacks to avoid re-creating transport
   const onToolResultRef = useRef(onToolResult);
@@ -747,6 +751,7 @@ export function AiChatProvider({
   useEffect(() => {
     if (approvalSessionRef.current === activeSessionId) return;
     approvalSessionRef.current = activeSessionId;
+    uiActionGenerationRef.current += 1;
     setPendingApprovalsMap(new Map());
   }, [activeSessionId]);
 
@@ -835,8 +840,9 @@ export function AiChatProvider({
   const runUiActions = useCallback((toolName: string, toolCallId: string, output: unknown) => {
     const actions = toolResultUiActions(output);
     if (actions.length === 0) return;
+    const generation = uiActionGenerationRef.current;
     uiActionQueueRef.current = uiActionQueueRef.current.then(async () => {
-      if (pageLeavingRef.current) return;
+      if (pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
       const run = await runToolResultUiActions(
         output,
         uiActionBusRef.current ?? getDefaultUiActionBus(),
@@ -1271,6 +1277,7 @@ export function AiChatProvider({
   }, [transportStop, pipelineSteps.length]);
 
   const clear = useCallback(() => {
+    uiActionGenerationRef.current += 1;
     setMessages([]);
     void Promise.resolve(sessionRef.current?.clear?.(activeSessionId));
     processedToolCallsRef.current.clear();

@@ -356,6 +356,22 @@ describe('AiChatProvider never runs a UI action late', () => {
     expect(outcomes).toEqual([]);
   });
 
+  it.each(['clear', 'unmount'] as const)('drops queued actions on %s while an earlier one still runs', async (how) => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    let release!: () => void;
+    cleanups.push(bus.subscribeById('slow', () => new Promise<void>((resolve) => { release = resolve; })));
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    const view = render(<Host config={{ uiActionBus: bus }} />);
+    await stream([user, assistant(toolPart('c1', action('slow')), toolPart('c2', navigate('/left')))]);
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    if (how === 'clear') await act(async () => { control.clear(); });
+    else view.unmount();
+    release();
+    await settle();
+    expect(push).not.toHaveBeenCalled();
+  });
+
   it('does not run results that come back after clear()', async () => {
     const { bus } = setup();
     const push = vi.fn();
