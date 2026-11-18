@@ -80,8 +80,12 @@ function escape(value: string): string {
 const prefixedOnly = new WeakMap<IdLabels, Set<string>>();
 
 function idPattern(ids: Iterable<string>): string {
-  const known = [...ids].filter((id) => !isUuidLike(id)).sort((a, b) => b.length - a.length).map(escape);
-  return known.length > 0 ? `(?:${UUID_SOURCE}|${known.join('|')})` : UUID_SOURCE;
+  const known = [...ids].filter((id) => !isUuidLike(id)).sort((a, b) => b.length - a.length);
+  if (known.length === 0) return UUID_SOURCE;
+  // A declared composite key (`<uuid>/<uuid>`) is tried before a single UUID can split it.
+  const composite = known.some((id) => id.includes('/'));
+  const alternatives = known.map(escape).join('|');
+  return composite ? `(?:${alternatives}|${UUID_SOURCE})` : `(?:${UUID_SOURCE}|${alternatives})`;
 }
 
 /** Replaces the ids in a finished piece of text. */

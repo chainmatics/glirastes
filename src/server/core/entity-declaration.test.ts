@@ -463,3 +463,13 @@ describe('history compaction keeps a declared root identity', () => {
     expect((compactHistoryResult(value, { maxStringLength: 20 }) as Entry).orderNo).not.toBe(value.orderNo);
   });
 });
+
+describe('hideIds and composite UUID keys', () => {
+  it('names a composite of two UUIDs as a whole', () => {
+    const first = '3f2a9c1e-4b7d-4e2a-9f10-2c3d4e5f6a7b';
+    const second = '9e8d7c6b-5a49-4382-a1b0-c9d8e7f6a5b4';
+    const labels: IdLabels = new Map();
+    collectDeclaredIdLabels({ data: [{ a: first, b: second, title: 'Dokument' }] }, [{ id: ['a', 'b'], name: 'title' }], labels);
+    expect(redactIds(`Siehe ${first}/${second}.`, labels)).toBe('Siehe Dokument.');
+  });
+});
