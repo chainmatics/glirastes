@@ -431,6 +431,21 @@ describe('AiChatProvider never runs a UI action late', () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  it('does not run results a request that was running at clear() delivers afterwards', async () => {
+    const { bus } = setup();
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    await act(async () => { control.set([user], 'streaming'); });
+    await act(async () => { control.clear(); });
+    await act(async () => { control.set([user, assistant(toolPart('old', navigate('/left')))], 'streaming'); });
+    await act(async () => { control.status('ready'); });
+    await settle();
+    expect(push).not.toHaveBeenCalled();
+    await stream([user, { ...assistant(toolPart('new', navigate('/fresh'))), id: 'a2' } as ChatMessage]);
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/fresh'));
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
   it('does not run results that come back after clear()', async () => {
     const { bus } = setup();
     const push = vi.fn();

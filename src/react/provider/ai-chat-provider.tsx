@@ -636,12 +636,18 @@ export function AiChatProvider({
   }>>(new Map());
   // Aborted with each reset so a running result stops before its next action.
   const uiActionAbortRef = useRef(new AbortController());
+  // Whether the previous run of the tool-result effect saw a request of this instance running.
+  const liveRequestRef = useRef(false);
+  // A request that was running when the chat was reset: its later results belong to the left chat.
+  const staleRequestRef = useRef(false);
   // Bumped by clear(), a session switch and unmount: queued actions of the left chat never start.
   const uiActionGenerationRef = useRef(0);
   const resetUiActions = useCallback(() => {
     uiActionGenerationRef.current += 1;
     uiActionAbortRef.current.abort();
     uiActionAbortRef.current = new AbortController();
+    staleRequestRef.current = streamActiveRef.current;
+    liveRequestRef.current = false;
     uiActionQueueRef.current = Promise.resolve();
     pageLeavingRef.current = false;
     deferredResultsRef.current.clear();
@@ -852,8 +858,6 @@ export function AiChatProvider({
     );
   }, [rawMessages, isInitialized, activeSessionId, loadedSessionId]);
 
-  // Whether the previous run of the tool-result effect saw a request of this instance running.
-  const liveRequestRef = useRef(false);
 
   const runUiActions = useCallback((toolName: string, toolCallId: string, output: unknown) => {
     const actions = toolResultUiActions(output);
@@ -899,9 +903,10 @@ export function AiChatProvider({
     // while it streams, or in the render that ends it. A result first seen
     // otherwise (stored history, messages set by the host or a custom
     // transport, another tab) is never run later.
+    if (staleRequestRef.current && !isLoading) staleRequestRef.current = false;
     const wasLive = liveRequestRef.current;
-    liveRequestRef.current = isLoading;
-    const live = isLoading || wasLive;
+    liveRequestRef.current = isLoading && !staleRequestRef.current;
+    const live = liveRequestRef.current || wasLive;
     if (isLoading && !wasLive) pageLeavingRef.current = false;
     const lastMessage = rawMessages[rawMessages.length - 1];
 
