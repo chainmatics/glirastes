@@ -109,7 +109,11 @@ function escapeRegex(value: string): string {
 /** Whether `id` occurs as a whole word in one of the user's texts (case-insensitive for a speaking key). */
 function typedByUser(id: string, texts: ReadonlyArray<string>, speaking: boolean): boolean {
   if (!id || texts.length === 0) return false;
-  const pattern = new RegExp(`(?<![\\p{L}\\p{N}_-])${escapeRegex(id)}(?![\\p{L}\\p{N}_-])`, speaking ? 'iu' : 'u');
+  // A whole token only: not the 12 of `12.5`, `12,5`, `12/34` or `v:12`.
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}_-])(?<![\\p{L}\\p{N}][./:,])${escapeRegex(id)}(?![\\p{L}\\p{N}_-])(?![./:,][\\p{L}\\p{N}])`,
+    speaking ? 'iu' : 'u',
+  );
   return texts.some((text) => pattern.test(text));
 }
 

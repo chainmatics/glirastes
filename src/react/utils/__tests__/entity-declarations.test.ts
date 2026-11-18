@@ -244,3 +244,11 @@ describe('provenance and id kind stay with the type', () => {
     expect(resolved[0]).toMatchObject({ status: 'unknown' });
   });
 });
+
+describe('typed ids are whole tokens', () => {
+  it('does not count 12 of 12.5, 12,5, 12/34 or v:12 as typed, but "album 12." does', () => {
+    const typed = (text: string) => subjects('albums_delete', { albumNo: 12 }, [user(text)])[0]!.status;
+    for (const text of ['make it 12.5', 'make it 12,5', 'pair 12/34', 'v:12']) expect(typed(text), text).toBe('unknown');
+    expect(typed('delete album 12.')).toBe('seen');
+  });
+});
