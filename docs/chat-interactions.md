@@ -191,7 +191,10 @@ command directly when sent alone, like a command picked from the list.
 
 ## Entity chips in answers
 
-`entityLinks` on the provider turns references in assistant text into chips:
+`entityLinks` on the provider turns references in assistant text into chips
+(declared records of any tool result count as known names, and the options
+`knownEntities`, `ambiguousNames`, `resolveAmbiguous`, `scope` and the
+reference's `data` are described in [entity identity](entity-identity.md#entity-link-options)):
 
 ```tsx
 const entityLinks = useMemo(() => ({

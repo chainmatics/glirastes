@@ -69,7 +69,7 @@ component; headless hooks and building blocks for an own chat:
 | `voice` | speech-to-text |
 | `attachments` | image and PDF attachments (section below) |
 | `chatInteractions` | derived `@` entities and `/` commands (section below) |
-| `entityLinks` | entity references in answers as chips |
+| `entityLinks` | entity references in answers as chips (`knownEntities`, `ambiguousNames`, `resolveAmbiguous`, `scope`); `entityDeclarations` sets declared identity by tool name (`docs/entity-identity.md`) |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
 | `onBeforeSend`, `onToolResult`, `onUiActionOutcome` | hooks around a turn; UI action outcomes in `references/hooks-and-building-blocks.md` |
 | `approvalDescription` | human-readable text for an approval request |
