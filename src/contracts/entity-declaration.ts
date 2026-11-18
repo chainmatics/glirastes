@@ -285,7 +285,7 @@ export function entityIdText(values: ReadonlyArray<string | number>): string {
 /**
  * The lookup form of an id: a single id as it is (so it meets the same id
  * elsewhere), a composite key as its marked JSON tuple (`["a/b","c"]` and
- * `["a","b/c"]` stay apart; up to 1,024 characters, see `maxIdLength`).
+ * `["a","b/c"]` stay apart; bounded by `maxIdLength`, escaping included).
  */
 export function entityLookupId(values: ReadonlyArray<string | number>): string | number {
   if (values.length === 1) return typeof values[0] === 'string' ? values[0].trim() : values[0]!;

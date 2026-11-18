@@ -372,3 +372,18 @@ describe('reads keep the declared path of the producing result', () => {
     expect(collectKnownEntities(messages as never, [], REFS).map((reference) => reference.label)).not.toContain('Tag');
   });
 });
+
+describe('composite keys with escaped parts', () => {
+  it('resolves four 200-character parts that JSON escapes', () => {
+    const REFS: EntityDeclarationsByTool = {
+      cells_list: { output: [{ type: 'cell', id: ['a', 'b', 'c', 'd'], name: 'title', path: 'cells[]' }] },
+      cells_delete: { input: [{ type: 'cell', args: ['a', 'b', 'c', 'd'] }] },
+    };
+    const part = '\u0001'.repeat(200);
+    const record = { a: part, b: part, c: part, d: part, title: 'Escaped' };
+    const messages = [tool('cells_list', { cells: [record] })];
+    expect(resolveApprovalSubjects({ a: part, b: part, c: part, d: part }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'cells_delete', inputEntities: REFS.cells_delete!.input!, userTexts: [], declarations: REFS,
+    })[0]).toMatchObject({ status: 'named', name: 'Escaped' });
+  });
+});

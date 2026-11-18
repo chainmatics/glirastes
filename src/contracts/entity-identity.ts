@@ -67,10 +67,13 @@ export function entityIdKey(value: unknown): string | undefined {
 
 /** Marks the lookup form of a declared composite key (`entityLookupId`); never part of a real id. */
 export const COMPOSITE_ID_MARK = '\u0002';
-/** A composite key's lookup form holds up to four ids of 200 characters each. */
-const MAX_COMPOSITE_ID_LENGTH = 1_024;
+/**
+ * A composite key's lookup form: the mark and the JSON tuple of up to four ids
+ * of 200 characters, each character escaped at most to six (`\\u0000`).
+ */
+const MAX_COMPOSITE_ID_LENGTH = 1 + 2 + 4 * (2 + 200 * 6) + 3;
 
-/** The longest id text a key is formed from: 200 characters, a composite key's lookup form 1,024. */
+/** The longest id text a key is formed from: 200 characters, a composite key's lookup form its escaped bound. */
 export function maxIdLength(text: string): number {
   return text.startsWith(COMPOSITE_ID_MARK) ? MAX_COMPOSITE_ID_LENGTH : MAX_ID_LENGTH;
 }
