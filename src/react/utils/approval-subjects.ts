@@ -195,7 +195,10 @@ export function resolveApprovalSubjects(
     // `type`: the exact declared (or mentioned) type behind a kind; compared as it is for a declared argument.
     const sameKind = (known: string, type: string | undefined) => (strict && type !== undefined ? type === kind : kindsMatch(known, kind!));
     const id = typeof raw === 'string' ? raw.trim() : String(raw);
-    const seen = sightings.get(key);
+    // A declared opaque id is case-sensitive: `abc-7` is not the `AbC-7` a result showed.
+    const exactly = (known: { exactIds?: string[] } | undefined) => !known?.exactIds || known.exactIds.includes(id);
+    const shown = sightings.get(key);
+    const seen = exactly(shown) ? shown : undefined;
     if (seen?.kinds && seen.kinds.length > 1 && (!isUuidLike(id) || (strict && seen.kinds.some((candidate) => candidate.type !== undefined)))) {
       const resolvedLabel = label ?? (seen.type ? humanize(seen.type) : undefined);
       const picked = kind ? seen.kinds.filter((candidate) => sameKind(candidate.kind, candidate.type)) : [];
@@ -222,7 +225,8 @@ export function resolveApprovalSubjects(
     const otherKind = (known: string | undefined, type: string | undefined) => !!known && !!kind
       && (!isUuidLike(id) || (strict && type !== undefined)) && !sameKind(known, type);
     if (!seen || otherKind(seen.kind, seen.kindType)) {
-      const found = seenIds.get(key);
+      const listed = seenIds.get(key);
+      const found = exactly(listed) ? listed : undefined;
       // A declared type that carried this id: its own record, whichever came first.
       const typed = found?.byType && kind ? Object.entries(found.byType).find(([type]) => sameKind(type, type)) : undefined;
       const record = typed ? { ...typed[1], type: typed[0] } : found && !otherKind(found.type, found.type) ? found : undefined;

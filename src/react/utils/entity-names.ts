@@ -64,6 +64,12 @@ export interface EntitySighting {
   kind?: string;
   /** Set when `kind` comes from a declared or mentioned type: that type exactly (`playlist-version`). */
   kindType?: string;
+  /**
+   * Set only for declared records with an opaque id: the ids exactly as they
+   * were shown. An opaque id is case-sensitive (`AbC-7` is not `abc-7`);
+   * only a speaking key matches case-insensitively.
+   */
+  exactIds?: string[];
   /** Set when only an `@` mention of the user named the id, no tool result. */
   mentionedOnly?: true;
 }
@@ -147,6 +153,8 @@ export function collectEntitySightings(
   const sightings = new Map<string, EntitySighting>();
   /** Per id value: the kinds of the records that carried it as their own id, with their names. */
   const kinds = new Map<string, Map<string, string[]>>();
+  /** Per lower-cased id: the declared opaque ids exactly as shown. */
+  const exactIds = new Map<string, Set<string>>();
   /** `id key` + NUL + kind → the exact type a declaration or a mention gave for it. */
   const declaredKinds = new Map<string, string>();
   let budget = MAX_NODES;
@@ -209,6 +217,11 @@ export function collectEntitySightings(
       else if (entityIdKey(id)) fromTools.add(entityIdKey(id)!);
       addKind(id, identity.declaration.type ?? holder ?? stem, identity.name);
       const key = entityIdKey(id);
+      if (key && identity.idKind === 'opaque') {
+        const exact = exactIds.get(key) ?? new Set<string>();
+        exact.add(String(id));
+        exactIds.set(key, exact);
+      }
       if (key && identity.declaration.type) declaredKinds.set(`${key}\u0000${identity.declaration.type}`, identity.declaration.type);
       if (key && !idKinds.has(key)) idKinds.set(key, identity.idKind);
       below = true;
@@ -265,6 +278,8 @@ export function collectEntitySightings(
         const kindType = declaredKinds.get(`${key}\u0000${sighting.kind}`);
         if (kindType) sighting.kindType = kindType;
       }
+      const exact = exactIds.get(key);
+      if (exact) sighting.exactIds = [...exact];
       const idKind = idKinds.get(key);
       if (idKind) sighting.idKind = idKind;
       if (!fromTools.has(key)) sighting.mentionedOnly = true;
@@ -287,6 +302,8 @@ export interface SeenEntity {
    * id showed (two nameless records of different types can share an id).
    */
   byType?: Record<string, { fallback?: string; fallbackField?: string; idKind: EntityIdKind }>;
+  /** Set only for declared records with an opaque id: the ids exactly as shown (see `EntitySighting.exactIds`). */
+  exactIds?: string[];
 }
 
 /**
@@ -324,6 +341,10 @@ export function collectSeenEntityIds(
         // The newest record is read first: it wins, an older one only fills a missing fallback of its own type.
         if (!known) seen.set(key, known = { ...fallback, ...(type ? { type } : {}), idKind: identity.idKind });
         else if (!known.fallback && (known.type === undefined || known.type === type)) Object.assign(known, fallback);
+        if (identity.idKind === 'opaque') {
+          const exact = String(declaredId(identity));
+          if (!(known.exactIds ??= []).includes(exact)) known.exactIds.push(exact);
+        }
         if (type) {
           known.byType ??= {};
           const entry = known.byType[type];

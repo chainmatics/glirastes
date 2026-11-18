@@ -252,3 +252,19 @@ describe('typed ids are whole tokens', () => {
     expect(typed('delete album 12.')).toBe('seen');
   });
 });
+
+describe('opaque ids are case-sensitive', () => {
+  it('does not name abc-7 after a listed AbC-7, but a speaking key matches either way', () => {
+    const REFS: EntityDeclarationsByTool = {
+      docs_list: { output: [{ type: 'doc', id: 'ref', name: 'title', path: 'docs[]' }] },
+      docs_delete: { input: [{ type: 'doc', args: 'ref' }] },
+    };
+    const messages = [tool('docs_list', { docs: [{ ref: 'AbC-7', title: 'Upper' }] })];
+    const resolve = (ref: string) => resolveApprovalSubjects({ ref }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'docs_delete', inputEntities: REFS.docs_delete!.input!, userTexts: [], declarations: REFS,
+    })[0];
+    expect(resolve('AbC-7')).toMatchObject({ status: 'named', name: 'Upper' });
+    expect(resolve('abc-7')).toMatchObject({ status: 'unknown' });
+    expect(subjects('orders_cancel', { orderKey: 'ord-9' })[0]).toMatchObject({ status: 'named', name: 'Ada' });
+  });
+});
