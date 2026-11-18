@@ -85,8 +85,17 @@ export interface ProbeFailure {
 
 export type SchemaProbeResult = ProbedSchema | ProbedContractEntry | ProbeFailure;
 
+export interface SchemaProbeOptions {
+  /**
+   * Absolute path of the tsconfig whose path aliases the probed modules use
+   * (the one of the source's program), or null for none. Omitted: the app
+   * root's tsconfig.json, when there is one.
+   */
+  tsconfig?: string | null;
+}
+
 export interface SchemaProbe {
-  probe(root: string, items: ReadonlyArray<SchemaProbeItem>): Promise<SchemaProbeResult[]>;
+  probe(root: string, items: ReadonlyArray<SchemaProbeItem>, options?: SchemaProbeOptions): Promise<SchemaProbeResult[]>;
 }
 
 export const PROBE_TIMEOUT_MS = 10_000;
@@ -223,6 +232,7 @@ function runChunk(
   root: string,
   items: ReadonlyArray<SchemaProbeItem>,
   timeoutMs: number,
+  options: SchemaProbeOptions,
 ): Promise<SchemaProbeResult[]> {
   return new Promise((resolveResults) => {
     let settled = false;
@@ -280,7 +290,12 @@ function runChunk(
     });
     const requestStream = child.stdin as Writable;
     requestStream.on('error', () => failAll('probe-failed'));
-    requestStream.end(JSON.stringify({ appRoot: root, items, ...sdkLocations() }));
+    requestStream.end(JSON.stringify({
+      appRoot: root,
+      ...(options.tsconfig !== undefined ? { tsconfigPath: options.tsconfig } : {}),
+      items,
+      ...sdkLocations(),
+    }));
   });
 }
 
@@ -294,11 +309,11 @@ export function createSchemaProbe(options: { timeoutMs?: number; chunkSize?: num
   const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
   const chunkSize = Math.max(1, options.chunkSize ?? CHUNK_SIZE);
   return {
-    async probe(root, items) {
+    async probe(root, items, probeOptions = {}) {
       const results: SchemaProbeResult[] = [];
       for (let index = 0; index < items.length; index += chunkSize) {
         const chunk = items.slice(index, index + chunkSize);
-        const chunkResults = await runChunk(root, chunk, timeoutMs);
+        const chunkResults = await runChunk(root, chunk, timeoutMs, probeOptions);
         const wholeChunkFailed = chunk.length > 1 && chunkResults.every((result) => (
           !result.ok && (result.reason === 'timeout' || result.reason === 'probe-failed')
         ));
@@ -306,7 +321,7 @@ export function createSchemaProbe(options: { timeoutMs?: number; chunkSize?: num
           results.push(...chunkResults);
           continue;
         }
-        for (const item of chunk) results.push(...await runChunk(root, [item], timeoutMs));
+        for (const item of chunk) results.push(...await runChunk(root, [item], timeoutMs, probeOptions));
       }
       return results;
     },

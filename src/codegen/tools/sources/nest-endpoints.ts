@@ -495,7 +495,7 @@ function toObserved(piece: NestPiece, definitionId: string): ObservedTool {
   };
 }
 
-async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string): Promise<ToolSourceObservation> {
+async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string, tsconfig?: string): Promise<ToolSourceObservation> {
   const scan = await scanAppSources(ctx.root, { srcDir, matches: (source) => NEST_MARKERS.test(source) });
   if (!scan.complete) return incomplete(scan.reason);
   const parsed = scan.files.map((file) => {
@@ -524,7 +524,12 @@ async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string): Pro
   excluded.sort((left, right) => compareCodeUnits(left.stableKey, right.stableKey));
   if (kept.length === 0) return { observations: [], findings, complete: true, excluded };
 
-  const app = createAppProgram({ root: ctx.root, rootNames: [...new Set(kept.map((entry) => entry.absoluteFile))] });
+  const app = createAppProgram({
+    root: ctx.root,
+    rootNames: [...new Set(kept.map((entry) => entry.absoluteFile))],
+    searchFrom: srcDir,
+    ...(tsconfig ? { tsconfig } : {}),
+  });
   const analyzed = kept.map((entry) => {
     const sourceFile = app.sourceFile(entry.absoluteFile);
     const member = sourceFile ? findMethod(sourceFile, entry) : undefined;
@@ -558,7 +563,9 @@ async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string): Pro
     if (resolution?.output?.schemaRef) request(probeItemFor(resolution.output.schemaRef, 'output'));
   }
   const keys = [...items.keys()].sort(compareCodeUnits);
-  const results = keys.length > 0 ? await ctx.probe.probe(ctx.root, keys.map((key) => items.get(key)!)) : [];
+  const results = keys.length > 0
+    ? await ctx.probe.probe(ctx.root, keys.map((key) => items.get(key)!), { tsconfig: app.tsconfigPath ?? null })
+    : [];
   const probes = new Map<string, SchemaProbeResult>(keys.map((key, index) => [
     key,
     results[index] ?? { ok: false, reason: 'probe-failed' },
@@ -590,7 +597,7 @@ async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string): Pro
  * `@nestjs/common`, read from syntax and the app's TypeScript checker. The
  * app is never imported or run.
  */
-export function createNestEndpointSource(options: { srcDir?: string } = {}): ToolSource {
+export function createNestEndpointSource(options: { srcDir?: string; tsconfig?: string } = {}): ToolSource {
   const srcDir = options.srcDir ?? NEST_DEFAULT_SRC_DIR;
-  return { kind: 'nest', observe: (ctx) => observeNestEndpoints(ctx, srcDir) };
+  return { kind: 'nest', observe: (ctx) => observeNestEndpoints(ctx, srcDir, options.tsconfig) };
 }

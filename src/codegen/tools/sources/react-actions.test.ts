@@ -264,6 +264,68 @@ describe('react-actions source', () => {
     expect(indirect('ui.a.empty')).toBeUndefined();
   }, 120_000);
 
+  describe('in a monorepo whose path aliases live in the app tsconfig', () => {
+    const MONOREPO: Record<string, string> = {
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true } }),
+      'apps/web/tsconfig.json': JSON.stringify({
+        compilerOptions: { strict: true, jsx: 'preserve', baseUrl: '.', paths: { '@contracts/*': ['src/contracts/*'] } },
+      }),
+      'apps/web/src/contracts/ui.ts': "import { z } from 'zod';\n"
+        + 'export const openEntity = z.object({ entityId: z.string() }).strict();\n'
+        + 'export interface PinPayload { entityId: string; pinned: boolean }\n',
+      'apps/web/src/panel.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+        + "import { openEntity } from '@contracts/ui';\nimport type { PinPayload } from '@contracts/ui';\n"
+        + 'export function Panel() {\n'
+        + "  useAiClientAction('entity.open', (payload) => console.log(payload), openEntity);\n"
+        + "  useAiClientAction('entity.pin', (payload: PinPayload) => console.log(payload));\n"
+        + '  return null;\n}\n',
+    };
+    const inputs = (observations: ObservedTool[]) => Object.fromEntries(
+      observations.map((tool) => [tool.execution.definitionId, tool.contract?.input]),
+    );
+
+    it('types the payload through the tsconfig nearest to srcDir', async () => {
+      const app = await createAppFixture(MONOREPO);
+      const observed = await createReactActionSource({ srcDir: 'apps/web/src' }).observe(context(app.root));
+      expect(inputs(observed.observations)).toEqual({
+        'ui.entity.open': object({ entityId: { type: 'string' } }, ['entityId']),
+        'ui.entity.pin': object({ entityId: { type: 'string' }, pinned: { type: 'boolean' } }, ['entityId', 'pinned']),
+      });
+      expect(observed.observations.flatMap((tool) => tool.findings)).toEqual([]);
+    }, 120_000);
+
+    it('takes the tsconfig named in tools.json', async () => {
+      const app = await createAppFixture({
+        ...MONOREPO,
+        'apps/web/tsconfig.app.json': MONOREPO['apps/web/tsconfig.json']!,
+        'apps/web/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true } }),
+      });
+      const observed = await createReactActionSource({ srcDir: 'apps/web/src', tsconfig: 'apps/web/tsconfig.app.json' })
+        .observe(context(app.root));
+      expect(observed.observations.flatMap((tool) => tool.findings)).toEqual([]);
+    }, 120_000);
+
+    it('says which import could not be resolved and with which tsconfig, instead of calling the payload untyped', async () => {
+      const app = await createAppFixture({ ...MONOREPO, 'apps/web/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true } }) });
+      const observed = await createReactActionSource({ srcDir: 'apps/web/src' }).observe(context(app.root));
+      const findings = Object.fromEntries(observed.observations.map((tool) => [tool.execution.definitionId, tool.findings]));
+      for (const id of ['ui.entity.open', 'ui.entity.pin']) {
+        expect(findings[id]).toEqual([expect.objectContaining({ code: 'ui-action-import-unresolved', severity: 'needs_attention' })]);
+        expect(findings[id]![0]!.message).toContain('"@contracts/ui"');
+        expect(findings[id]![0]!.message).toContain('apps/web/tsconfig.json');
+      }
+      expect(observed.observations.every((tool) => tool.contract === undefined)).toBe(true);
+    }, 120_000);
+
+    it('names the TypeScript defaults when the app has no tsconfig', async () => {
+      const { 'tsconfig.json': _root, 'apps/web/tsconfig.json': _web, ...withoutTsconfig } = MONOREPO;
+      const app = await createAppFixture(withoutTsconfig);
+      const [open] = (await createReactActionSource({ srcDir: 'apps/web/src' }).observe(context(app.root))).observations;
+      expect(open?.findings).toEqual([expect.objectContaining({ code: 'ui-action-import-unresolved' })]);
+      expect(open?.findings[0]!.message).toContain('no tsconfig');
+    }, 120_000);
+  });
+
   it('produces nothing without registrations', async () => {
     const app = await createAppFixture({ 'src/a.ts': 'export const x = 1;\n' });
     expect(await createReactActionSource().observe(context(app.root)))

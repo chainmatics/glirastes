@@ -175,9 +175,15 @@ export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
   return sources.map((source) => {
     switch (source.kind) {
       case 'next-app':
-        return createNextEndpointSource(source.apiDir ? { apiDir: source.apiDir } : {});
+        return createNextEndpointSource({
+          ...(source.apiDir ? { apiDir: source.apiDir } : {}),
+          ...(source.tsconfig ? { tsconfig: source.tsconfig } : {}),
+        });
       case 'nest':
-        return createNestEndpointSource(source.srcDir ? { srcDir: source.srcDir } : {});
+        return createNestEndpointSource({
+          ...(source.srcDir ? { srcDir: source.srcDir } : {}),
+          ...(source.tsconfig ? { tsconfig: source.tsconfig } : {}),
+        });
       case 'openapi':
         return createOpenapiEndpointSource({
           ...(source.document ? { document: source.document } : {}),
@@ -187,14 +193,18 @@ export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
       case 'next-pages':
         return createNextPagesSource(source);
       case 'react-router':
-        return createReactRouterSource(source.srcDir ? { srcDir: source.srcDir } : {});
+        return createReactRouterSource(source);
       case 'vue-router':
-        return createVueRouterSource(source.srcDir ? { srcDir: source.srcDir } : {});
+        return createVueRouterSource(source);
       case 'url-filters':
         return createUrlFilterSource({
           ...(pages && pages.kind === 'next-pages' ? pages : {}),
           ...(routes && (routes.kind === 'react-router' || routes.kind === 'vue-router')
-            ? { pages: routes.kind, ...(routes.srcDir ? { srcDir: routes.srcDir } : {}) }
+            ? {
+              pages: routes.kind,
+              ...(routes.srcDir ? { srcDir: routes.srcDir } : {}),
+              ...(routes.tsconfig ? { tsconfig: routes.tsconfig } : {}),
+            }
             : {}),
           ...source,
         });

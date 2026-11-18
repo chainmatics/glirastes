@@ -36,6 +36,11 @@ function insideApp(value: string): boolean {
 
 const appPath = z.string().trim().min(1).max(512)
   .refine(insideApp, 'Path must stay inside the app');
+/**
+ * The tsconfig of a source's files, app-relative. Optional: by default the
+ * nearest tsconfig.json from the scanned folder up to the app root is used.
+ */
+const tsconfigPath = appPath.regex(/\.json$/, 'The tsconfig must be a .json file');
 const modulePath = z.string().trim().min(1).max(512)
   .regex(/\.(?:ts|js|mjs)$/, 'The generated module must end in .ts, .js or .mjs')
   .refine(insideApp, 'Path must stay inside the app');
@@ -50,8 +55,8 @@ const folderName = z.string().trim().min(1).max(200)
 
 const SourceSchema = z.union([
   ToolSourceKindSchema,
-  z.object({ kind: z.literal('next-app'), apiDir: appPath.optional() }).strict(),
-  z.object({ kind: z.literal('nest'), srcDir: appPath.optional() }).strict(),
+  z.object({ kind: z.literal('next-app'), apiDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
+  z.object({ kind: z.literal('nest'), srcDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
   z.object({
     kind: z.literal('openapi'),
     /** The exported OpenAPI 3.0 or 3.1 JSON document, app-relative; `openapi.json` by default. */
@@ -74,11 +79,12 @@ const SourceSchema = z.union([
     kind: z.literal('url-filters'),
     appDir: appPath.optional(),
     srcDir: appPath.optional(),
+    tsconfig: tsconfigPath.optional(),
     stripSegments: z.array(folderName).max(20).optional(),
   }).strict(),
-  z.object({ kind: z.literal('react-router'), srcDir: appPath.optional() }).strict(),
-  z.object({ kind: z.literal('vue-router'), srcDir: appPath.optional() }).strict(),
-  z.object({ kind: z.literal('react-actions'), srcDir: appPath.optional() }).strict(),
+  z.object({ kind: z.literal('react-router'), srcDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
+  z.object({ kind: z.literal('vue-router'), srcDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
+  z.object({ kind: z.literal('react-actions'), srcDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
 ]);
 
 /** Sources that each produce app-wide UI tools; a second copy would duplicate them. */
@@ -171,11 +177,12 @@ export const ToolsConfigSchema = z.object({
 
 export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 export type ToolSourceConfig =
-  | { kind: 'next-app'; apiDir?: string }
-  | { kind: 'nest'; srcDir?: string }
+  | { kind: 'next-app'; apiDir?: string; tsconfig?: string }
+  | { kind: 'nest'; srcDir?: string; tsconfig?: string }
   | { kind: 'openapi'; document?: string; fastapi?: string; selection?: 'all' | 'opt-in' }
-  | { kind: 'next-pages' | 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[] }
-  | { kind: 'react-router' | 'vue-router' | 'react-actions'; srcDir?: string };
+  | { kind: 'next-pages'; appDir?: string; srcDir?: string; stripSegments?: string[] }
+  | { kind: 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[]; tsconfig?: string }
+  | { kind: 'react-router' | 'vue-router' | 'react-actions'; srcDir?: string; tsconfig?: string };
 
 function invalidConfig(detail?: string): FoundationDiagnosticError {
   return new FoundationDiagnosticError({

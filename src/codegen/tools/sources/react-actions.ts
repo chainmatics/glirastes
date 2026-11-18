@@ -5,7 +5,7 @@ import { toolFinding } from '../findings.js';
 import { typeToJsonSchema } from '../output-inference.js';
 import { createAppProgram, type AppProgram } from '../program.js';
 import type { JsonSchemaLike, ToolFinding, ToolSource, ToolSourceContext, ToolSourceObservation } from '../types.js';
-import { scanAppSources } from './app-files.js';
+import { defaultSourceDir, scanAppSources } from './app-files.js';
 import { analyzeUiControls, CONTROL_TEXT } from './ui-controls.js';
 import {
   actionStableKey,
@@ -19,6 +19,8 @@ import {
 export interface ReactActionSourceOptions {
   /** Where registrations are searched; `src` when the app has one, else the app root. */
   srcDir?: string;
+  /** The tsconfig of those files; the nearest one from `srcDir` up to the app root by default. */
+  tsconfig?: string;
 }
 
 const REGISTRATION_SPECS = [
@@ -180,6 +182,44 @@ function payloadSchema(app: AppProgram, registration: Registration): JsonSchemaL
   return objectSchema(app, type, parameter);
 }
 
+const MAX_SPECIFIER_CHARS = 200;
+
+/** The import declaration an alias symbol comes from, when it is one. */
+function importOf(declaration: ts.Declaration | undefined): ts.ImportDeclaration | undefined {
+  let current: ts.Node | undefined = declaration;
+  while (current && !ts.isSourceFile(current)) {
+    if (ts.isImportDeclaration(current)) return current;
+    current = current.parent;
+  }
+  return undefined;
+}
+
+/**
+ * Module specifiers the checker cannot resolve that the registration's
+ * contract, handler or handler parameter type is imported from: the reason a
+ * payload is untyped although the code types it. Only specifiers, no source.
+ */
+function unresolvedImports(app: AppProgram, registration: Registration): string[] {
+  const nodes: ts.Node[] = [registration.contract, registration.handler]
+    .filter((node): node is ts.Expression => node !== undefined);
+  const parameter = functionOf(app, registration.handler)?.parameters[0];
+  if (parameter?.type) nodes.push(parameter.type);
+  const found = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) {
+      const symbol = app.checker.getSymbolAtLocation(node);
+      const declaration = symbol && symbol.flags & ts.SymbolFlags.Alias ? importOf(symbol.declarations?.[0]) : undefined;
+      if (declaration && ts.isStringLiteral(declaration.moduleSpecifier)
+        && app.checker.getSymbolAtLocation(declaration.moduleSpecifier) === undefined) {
+        found.add(declaration.moduleSpecifier.text.slice(0, MAX_SPECIFIER_CHARS));
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  for (const node of nodes) visit(node);
+  return [...found];
+}
+
 interface WriteEvidence {
   /** A non-GET `fetch(…, { method })` or an `axios` write: the tool writes. */
   writes: boolean;
@@ -331,7 +371,12 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
   if (!scan.complete) return incompleteUiSource('react-actions', scan.reason);
   const files = scan.files.filter((file) => REGISTRATION_TEXT.test(file.source) || CONTROL_TEXT.test(file.source));
   if (files.length === 0) return { observations: [], findings: [], complete: true, excluded: [] };
-  const app = createAppProgram({ root, rootNames: files.map((file) => file.absolute) });
+  const app = createAppProgram({
+    root,
+    rootNames: files.map((file) => file.absolute),
+    searchFrom: options.srcDir ?? defaultSourceDir(root),
+    ...(options.tsconfig ? { tsconfig: options.tsconfig } : {}),
+  });
   const findings: ToolFinding[] = [];
   const byId = new Map<string, Registration[]>();
   for (const file of files) {
@@ -378,7 +423,14 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
         .map((schema) => [canonicalJson(schema), schema] as const)).values()];
       const handlers = registrations.map((registration) => functionOf(app, registration.handler));
       const toolFindings: ToolFinding[] = [...controls.byStableKey.get(stableKey) ?? []];
-      if (typed.length === 0) {
+      const unresolved = typed.length === 0
+        ? [...new Set(registrations.flatMap((registration) => unresolvedImports(app, registration)))].sort(compareCodeUnits)
+        : [];
+      if (unresolved.length > 0) {
+        toolFindings.push(toolFinding('ui-action-import-unresolved', 'needs_attention', stableKey,
+          `${actionId} has no payload type because the import of ${unresolved.map((specifier) => JSON.stringify(specifier)).join(', ')} `
+          + `cannot be resolved with ${app.tsconfig ?? 'no tsconfig (TypeScript defaults)'}.`));
+      } else if (typed.length === 0) {
         toolFindings.push(toolFinding('ui-action-payload-untyped', 'needs_attention', stableKey,
           `${actionId} has neither a payload contract nor a typed handler parameter.`));
       } else if (typed.length > 1) {

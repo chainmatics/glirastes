@@ -100,6 +100,7 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'handler-unresolved',
   'navigation-bridge-missing',
   'ui-action-payload-untyped',
+  'ui-action-import-unresolved',
   'ui-action-contract-conflict',
   'ui-action-route-invalid',
   'ui-action-route-conflict',
