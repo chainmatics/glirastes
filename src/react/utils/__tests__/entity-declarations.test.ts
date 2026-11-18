@@ -336,3 +336,15 @@ describe('a mention and a tool result of one declared record', () => {
     })[0]).toMatchObject({ status: 'named', name: 'Version A' });
   });
 });
+
+describe('a mentioned opaque id of other case', () => {
+  it('does not name abc-7 after a mention of AbC-7', () => {
+    const REFS: EntityDeclarationsByTool = { docs_delete: { input: [{ type: 'doc', args: 'ref', idKind: 'opaque' }] } };
+    const messages = [user('{{mention:doc:AbC-7:Dokument A}}')];
+    const resolve = (ref: string) => resolveApprovalSubjects({ ref }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'docs_delete', inputEntities: REFS.docs_delete!.input!, userTexts: userTextsOf(messages), declarations: REFS,
+    })[0];
+    expect(resolve('abc-7')).toMatchObject({ status: 'unknown' });
+    expect(resolve('AbC-7')).toMatchObject({ status: 'named', name: 'Dokument A', provenance: 'mention' });
+  });
+});

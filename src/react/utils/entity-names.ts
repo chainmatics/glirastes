@@ -279,6 +279,12 @@ export function collectEntitySightings(
           if (declarations && mentioned && mentionKind) declaredKinds.set(`${mentioned}\u0000${mentionKind}`, segment.mention.type);
           // A picked id is exact: also under its exact key, for a declared argument.
           const exactMention = declarations ? exactEntityKey(segment.mention.id) : undefined;
+          if (exactMention && mentioned) {
+            // Picked exactly: an opaque argument of other case is not this record.
+            const shown = exactIds.get(mentioned) ?? new Set<string>();
+            shown.add(String(segment.mention.id).trim());
+            exactIds.set(mentioned, shown);
+          }
           if (exactMention) {
             add(segment.mention.id, segment.mention.displayName, segment.mention.type, true, true);
             addKind(segment.mention.id, mentionKind, segment.mention.displayName, true);
