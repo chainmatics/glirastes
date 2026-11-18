@@ -270,7 +270,8 @@ export function resolveApprovalSubjects(
       const sighting = key !== undefined ? sightings.get(key) : undefined;
       const record = key !== undefined ? seenIds.get(key) : undefined;
       // Only a record of the reference's own type tells its id kind; another type's record says nothing.
-      const typedRecord = record?.byType?.[ref.type] ?? (record?.type === ref.type ? record : undefined);
+      const ownTyped = record?.byType && Object.prototype.hasOwnProperty.call(record.byType, ref.type) ? record.byType[ref.type] : undefined;
+      const typedRecord = ownTyped ?? (record?.type === ref.type ? record : undefined);
       const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? typedRecord?.idKind
         ?? (sighting?.kindType === ref.type ? sighting.idKind : undefined)
         ?? entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) });

@@ -401,8 +401,9 @@ export function collectSeenEntityIds(
           if (!(known.exactIds ??= []).includes(exact)) known.exactIds.push(exact);
         }
         if (type) {
-          known.byType ??= {};
-          const entry = known.byType[type];
+          // No prototype: a type may be called `constructor`.
+          known.byType ??= Object.create(null) as NonNullable<SeenEntity['byType']>;
+          const entry = Object.prototype.hasOwnProperty.call(known.byType, type) ? known.byType[type] : undefined;
           if (!entry) known.byType[type] = { ...fallback, idKind: identity.idKind };
           else if (!entry.fallback) Object.assign(entry, fallback);
         }

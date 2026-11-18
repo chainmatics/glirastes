@@ -476,7 +476,8 @@ export function validInputEntities(value: unknown): InputEntityRef[] | undefined
 
 /** Tool declarations as the browser and history compaction read them: validated, or left out. */
 export function sanitizeEntityDeclarations(value: unknown): Record<string, ToolEntityDeclarations> {
-  const result: Record<string, ToolEntityDeclarations> = {};
+  // No prototype: a tool may be called `constructor` or `__proto__`.
+  const result = Object.create(null) as Record<string, ToolEntityDeclarations>;
   if (!isRecord(value)) return result;
   for (const [tool, entry] of Object.entries(value)) {
     if (!isRecord(entry) || tool.length > 128) continue;

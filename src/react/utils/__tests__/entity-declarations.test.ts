@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
+import { sanitizeEntityDeclarations, type EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
 import { collectKnownEntities, splitEntityText } from '../../entity-links/entity-links.js';
 import { flaggedApprovalSubjects } from '../../components/approval-card.js';
 import { resolveApprovalSubjects } from '../approval-subjects.js';
@@ -385,5 +385,23 @@ describe('composite keys with escaped parts', () => {
     expect(resolveApprovalSubjects({ a: part, b: part, c: part, d: part }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
       toolName: 'cells_delete', inputEntities: REFS.cells_delete!.input!, userTexts: [], declarations: REFS,
     })[0]).toMatchObject({ status: 'named', name: 'Escaped' });
+  });
+});
+
+describe('type and tool names that are object properties', () => {
+  it('handles a type called constructor and a tool called __proto__', () => {
+    const REFS: EntityDeclarationsByTool = {
+      ctor_list: { output: [{ type: 'constructor', id: 'n', fallback: 'v', path: 'items[]' }] },
+      other_list: { output: [{ type: 'other', id: 'n', fallback: 'w', path: 'items[]' }] },
+      ctor_delete: { input: [{ type: 'constructor', args: 'n' }] },
+    };
+    const messages = [tool('other_list', { items: [{ n: 4, w: 1 }] }), tool('ctor_list', { items: [{ n: 4, v: 2 }] })];
+    expect(resolveApprovalSubjects({ n: 4 }, collectEntitySightings(messages, REFS), collectSeenEntityIds(messages, REFS), {
+      toolName: 'ctor_delete', inputEntities: REFS.ctor_delete!.input!, userTexts: [], declarations: REFS,
+    })[0]).toMatchObject({ status: 'seen', fallback: 'V 2' });
+    expect(typeof Object.prototype.constructor).toBe('function');
+    const sanitized = sanitizeEntityDeclarations(JSON.parse('{"__proto__": {"output": [{"id": "x"}]}}'));
+    expect(Object.getPrototypeOf(sanitized)).toBeNull();
+    expect(Object.keys(sanitized)).toEqual(['__proto__']);
   });
 });
