@@ -664,6 +664,7 @@ export function AiChatProvider({
     uiActionGenerationRef.current += 1;
     uiActionAbortRef.current.abort();
     uiActionAbortRef.current = new AbortController();
+    // A request still running now delivers to the left chat.
     staleRequestRef.current = streamActiveRef.current;
     liveRequestRef.current = false;
     uiActionQueueRef.current = Promise.resolve();
@@ -939,7 +940,14 @@ export function AiChatProvider({
     liveRequestRef.current = isLoading && !staleRequestRef.current;
     // The messages a request starts from; its results come in the last one.
     if (liveRequestRef.current && !wasLive) requestBaseRef.current = rawMessages.map(({ id, role }) => ({ id, role }));
-    const live = (liveRequestRef.current || wasLive) && continuesRequestBase(rawMessages, requestBaseRef.current);
+    // Another history replaced the messages (host, another tab): drop what
+    // the left one queued, and the running request no longer delivers here.
+    const replaced = !continuesRequestBase(rawMessages, requestBaseRef.current);
+    if (replaced) {
+      resetUiActions();
+      requestBaseRef.current = rawMessages.map(({ id, role }) => ({ id, role }));
+    }
+    const live = !replaced && (liveRequestRef.current || wasLive);
     const lastMessage = rawMessages[rawMessages.length - 1];
 
     // Held-back results of a message that is no longer the last one run now, in their order.
@@ -1072,7 +1080,7 @@ export function AiChatProvider({
         }
       }
     }
-  }, [rawMessages, isLoading, runUiActions]);
+  }, [rawMessages, isLoading, runUiActions, resetUiActions]);
 
   // Extract suggestions from suggest_followups tool, with a strict text
   // fallback for models that append a trailing Markdown suggestion section.

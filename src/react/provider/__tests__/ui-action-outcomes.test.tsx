@@ -461,6 +461,22 @@ describe('AiChatProvider never runs a UI action late', () => {
     expect(onToolResult).not.toHaveBeenCalled();
   });
 
+  it('drops queued actions when another history replaces the messages during a handler', async () => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    let release!: () => void;
+    cleanups.push(bus.subscribeById('slow', () => new Promise<void>((resolve) => { release = resolve; })));
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    render(<Host config={{ uiActionBus: bus }} />);
+    await stream([user, assistant(toolPart('c1', action('slow')), toolPart('c2', navigate('/left')))]);
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    const otherUser = { ...user, id: 'u-other' } as ChatMessage;
+    await act(async () => { control.set([otherUser]); });
+    release();
+    await settle();
+    expect(push).not.toHaveBeenCalled();
+  });
+
   it('does not run results loaded through session.load', async () => {
     const bus = new UiActionBus();
     const push = vi.fn();
