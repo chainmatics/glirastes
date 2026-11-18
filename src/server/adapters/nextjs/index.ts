@@ -15,9 +15,15 @@ export {
   createHideIdsTransform,
   redactIds,
   collectIdLabels,
+  collectDeclaredIdLabels,
   HIDE_IDS_PROMPT,
   type IdLabels,
 } from './hide-ids.js';
+export {
+  entityDeclarationsOfTools,
+  TOOL_ENTITIES_PART_TYPE,
+  type ToolEntitiesPart,
+} from './tool-entities.js';
 export {
   DEFAULT_BUDGET_STOP_TEXTS,
   type BudgetStopReason,

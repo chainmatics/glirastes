@@ -54,7 +54,14 @@ import {
   runDirectCommand,
   stripChatCommandMessages,
 } from './direct-command.js';
-import { collectIdLabels, createHideIdsTransform, HIDE_IDS_PROMPT, type IdLabels } from './hide-ids.js';
+import {
+  collectDeclaredIdLabelsFromMessages,
+  collectIdLabels,
+  createHideIdsTransform,
+  HIDE_IDS_PROMPT,
+  type IdLabels,
+} from './hide-ids.js';
+import { entityDeclarationsOfTools, TOOL_ENTITIES_PART_TYPE } from './tool-entities.js';
 import { createToolStreamErrorMask, streamErrorText } from './stream-error-text.js';
 import {
   budgetStopText,
@@ -585,7 +592,12 @@ async function defaultStreamHandler(
       ].join('\n\n')
     : ctx.systemPrompt;
   const idLabels: IdLabels = new Map();
-  if (hideIds) collectIdLabels(ctx.messages, idLabels);
+  // Declared identity of the turn's tools (field names only): history, hideIds and the browser.
+  const toolEntities = entityDeclarationsOfTools(ctx.tools);
+  if (hideIds) {
+    collectIdLabels(ctx.messages, idLabels);
+    collectDeclaredIdLabelsFromMessages(ctx.messages, toolEntities, idLabels);
+  }
   const preparedMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
     ctx.memory?.historyTokens
@@ -597,8 +609,9 @@ async function defaultStreamHandler(
             maxTurns: Number.MAX_SAFE_INTEGER,
             maxTokens: ctx.memory.historyTokens,
           },
+          ...(toolEntities ? { entities: toolEntities } : {}),
         }
-      : { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
+      : { maxContextMessages: ctx.maxContextMessages, history: ctx.history, ...(toolEntities ? { entities: toolEntities } : {}) },
   );
   // User role, not system: memory is background a user could have written.
   const modelMessages = ctx.memory?.preamble
@@ -736,6 +749,10 @@ async function defaultStreamHandler(
       if (presentation) {
         writer.write({ type: 'data-tool-presentation', data: presentation, transient: true });
       }
+      // Only when a tool declares its identity: an app that declares nothing gets no new part.
+      if (toolEntities) {
+        writer.write({ type: TOOL_ENTITIES_PART_TYPE, data: { tools: toolEntities }, transient: true });
+      }
 
       writePipelineState(
         createPipelineState({
@@ -752,7 +769,7 @@ async function defaultStreamHandler(
         model: ctx.model as Parameters<typeof streamText>[0]['model'],
         messages: promptMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
         ...(promptCaching ? {} : { system: systemPrompt }),
-        ...(hideIds ? { experimental_transform: createHideIdsTransform(idLabels) } : {}),
+        ...(hideIds ? { experimental_transform: createHideIdsTransform(idLabels, toolEntities ? { entities: toolEntities } : {}) } : {}),
         tools: orderedTools as Parameters<typeof streamText>[0]['tools'],
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }

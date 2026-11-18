@@ -12,6 +12,7 @@ import {
 } from '../../contracts/result-handle.js';
 import { defineTool, type Tool } from '../../types.js';
 import { identityFieldsOf } from '../../contracts/entity-identity.js';
+import { declarationForEntries, declaredIdentityKeys, type OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
 import { dominantArrayRoute } from './result-overview.js';
 import {
   describeMissingPath,
@@ -299,7 +300,12 @@ function selects(prefix: ReadonlyArray<PathStep>, steps: ReadonlyArray<PathStep>
  * already covers, not for an entry that is no object. Changes `value` (a
  * fresh projection or cut) in place; the identity fields come first.
  */
-function identityAdder(source: Record<string, unknown>, known: ReadonlyArray<ParsedPath>, offset: number) {
+function identityAdder(
+  source: Record<string, unknown>,
+  known: ReadonlyArray<ParsedPath>,
+  offset: number,
+  entities?: ReadonlyArray<OutputEntityDeclaration>,
+) {
   const targets = new Map<string, { route: string[]; step: PathStep }>();
   for (const path of known) {
     const at = path.steps.findIndex((step) => step.kind !== 'key');
@@ -309,9 +315,17 @@ function identityAdder(source: Record<string, unknown>, known: ReadonlyArray<Par
     targets.set(JSON.stringify([route, step]), { route, step });
   }
   const covered = (steps: PathStep[]) => known.some((path) => selects(path.steps, steps));
-  const enrich = (entry: unknown, original: unknown, routeSteps: PathStep[]): unknown => {
+  /** The declared identity fields of an entry, scalars only; the heuristic's without a declaration. */
+  const identityOf = (original: Record<string, unknown>, declared: OutputEntityDeclaration | undefined): Array<[string, unknown]> => {
+    if (!declared) return identityFieldsOf(original);
+    return declaredIdentityKeys(declared)
+      .filter((key) => Object.prototype.hasOwnProperty.call(original, key))
+      .map((key): [string, unknown] => [key, original[key]])
+      .filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value));
+  };
+  const enrich = (entry: unknown, original: unknown, routeSteps: PathStep[], declared?: OutputEntityDeclaration): unknown => {
     if (!isPlainRecord(entry) || !isPlainRecord(original)) return entry;
-    const added = identityFieldsOf(original).filter(([key]) => (
+    const added = identityOf(original, declared).filter(([key]) => (
       !Object.prototype.hasOwnProperty.call(entry, key) && !covered([...routeSteps, { kind: 'key', key }])
     ));
     if (added.length === 0) return entry;
@@ -339,15 +353,16 @@ function identityAdder(source: Record<string, unknown>, known: ReadonlyArray<Par
       }
       if (!holder || !Array.isArray(original)) continue;
       const routeSteps: PathStep[] = route.map((key) => ({ kind: 'key', key }));
+      const declared = declarationForEntries(entities, route, source);
       if (step.kind === 'each' && Array.isArray(projected)) {
         const start = Math.min(offset, original.length);
         const entries = original;
-        setOwn(holder, last, projected.map((entry, index) => enrich(entry, entries[start + index], [...routeSteps, step])));
+        setOwn(holder, last, projected.map((entry, index) => enrich(entry, entries[start + index], [...routeSteps, step], declared)));
       } else if (step.kind === 'index' && isPlainRecord(projected)) {
         const key = String(step.index);
         if (Object.prototype.hasOwnProperty.call(projected, key)) {
           const copy: Record<string, unknown> = { ...projected };
-          setOwn(copy, key, enrich(projected[key], original[step.index], [...routeSteps, step]));
+          setOwn(copy, key, enrich(projected[key], original[step.index], [...routeSteps, step], declared));
           setOwn(holder, last, copy);
         }
       }
@@ -429,7 +444,7 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
    * entry (`cut`, with what reads more of it).
    */
   // Identity fields of the entries read below an array: only when the model chose the fields.
-  const addIdentity = paths ? identityAdder(source, known, offset) : (value: Record<string, unknown>) => value;
+  const addIdentity = paths ? identityAdder(source, known, offset, handle.entities) : (value: Record<string, unknown>) => value;
   const answer = (limit: number | undefined, detail: 0 | 1 | 2, mode?: { short: true } | { cut: string }, identity = true) => {
     const projection = projectResult(source, known, { offset, ...(limit !== undefined ? { limit } : {}) });
     // They count against the limit like all data: the fit loop below sees them.

@@ -18,6 +18,7 @@ import type {
   TelemetrySink,
 } from '../../types.js';
 import { defineTool } from '../../types.js';
+import { assertToolEntities, validInputEntities, validOutputEntities } from '../../contracts/entity-declaration.js';
 import { zodToCompactDescription } from './zod-compact.js';
 import {
   ENDPOINT_PATH_NOT_ALLOWED_ERROR,
@@ -580,6 +581,7 @@ export function endpointToolToTool<TInput extends SchemaLike>(
   assertOutputFields(endpointTool.outputAllowedFields, label, 'outputAllowedFields');
   assertOutputFields(endpointTool.outputDeniedFields, label, 'outputDeniedFields');
   assertOutputFields(endpointTool.outputDefaultFields, label, 'outputDefaultFields');
+  assertToolEntities(endpointTool, label);
   const outputAllowedFields = endpointTool.outputAllowedFields !== undefined
     ? normalizeOutputFields(endpointTool.outputAllowedFields)!
     : undefined;
@@ -608,6 +610,8 @@ export function endpointToolToTool<TInput extends SchemaLike>(
     ...(outputAllowedFields ? { outputAllowedFields } : {}),
     ...(outputDeniedFields ? { outputDeniedFields } : {}),
     ...(outputDefaultFields ? { outputDefaultFields } : {}),
+    ...(endpointTool.outputEntities ? { outputEntities: endpointTool.outputEntities } : {}),
+    ...(endpointTool.inputEntities ? { inputEntities: endpointTool.inputEntities } : {}),
     needsApproval:
       endpointTool.needsApproval ??
       (endpointTool.method === 'GET' || endpointTool.method === 'HEAD' ? false : true),
@@ -992,9 +996,15 @@ export function toolToAiTool(
     ? normalizeOutputFields(tool.outputDefaultFields, 'outputDefaultFields')
     : undefined;
   const defaultTree = defaultFields ? outputFieldTree(defaultFields) : undefined;
+  const outputEntities = validOutputEntities(tool.outputEntities);
+  const inputEntities = validInputEntities(tool.inputEntities);
 
   return {
     _toolId: tool.id,
+    // Declared identity, for history compaction, hideIds and the browser (field names only).
+    ...(outputEntities || inputEntities
+      ? { _entities: { ...(outputEntities ? { output: outputEntities } : {}), ...(inputEntities ? { input: inputEntities } : {}) } }
+      : {}),
     description: tool.description,
     parameters: tool.inputSchema,
     needsApproval: requiresApproval
@@ -1142,6 +1152,7 @@ export function toolToAiTool(
           ? await store.put({
               toolName: name, readOnly, maxChars: resultLimit, value: cleanResult as Record<string, unknown>,
               ...(viewed ? { defaultFields: defaultFields! } : {}),
+              ...(outputEntities ? { entities: outputEntities } : {}),
               ...(capturedOwner ? { owner: capturedOwner } : {}),
             })
           : undefined;

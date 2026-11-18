@@ -7,6 +7,11 @@ import {
   siblingLabelOf,
   UUID_PATTERN_SOURCE,
 } from '../../../contracts/entity-identity.js';
+import {
+  declaredRecordsOf,
+  type EntityDeclarationsByTool,
+  type OutputEntityDeclaration,
+} from '../../../contracts/entity-declaration.js';
 
 /**
  * Keeps technical ids out of the assistant's answers. Tool results teach the
@@ -53,25 +58,92 @@ function escape(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function idPattern(labels: IdLabels): string {
-  const known = [...labels.keys()].filter((id) => !isUuidLike(id)).sort((a, b) => b.length - a.length).map(escape);
+/**
+ * Ids a declaration taught that are no technical id by their shape (an
+ * integer, a short string): removed only together with an id prefix
+ * (`(ID: 3)`, `ID 3`), never as a bare word, which could be any number.
+ */
+const prefixedOnly = new WeakMap<IdLabels, Set<string>>();
+
+function idPattern(ids: Iterable<string>): string {
+  const known = [...ids].filter((id) => !isUuidLike(id)).sort((a, b) => b.length - a.length).map(escape);
   return known.length > 0 ? `(?:${UUID_SOURCE}|${known.join('|')})` : UUID_SOURCE;
 }
 
 /** Replaces the ids in a finished piece of text. */
 export function redactIds(text: string, labels: IdLabels): string {
   if (!text) return text;
-  const id = idPattern(labels);
   const prefix = String.raw`(?:(?:uu)?ids?|kennung)\s*[:=]?\s*`;
-  const wrapped = new RegExp(String.raw`[ \t]*[(\[]\s*(?:${prefix})?\x60?${id}\x60?\s*[)\]]`, 'gi');
-  const prefixed = new RegExp(String.raw`[ \t]*[,;–-]?[ \t]*\b${prefix}\x60?${id}\x60?`, 'gi');
-  const bare = new RegExp(String.raw`(?<![\w-])\x60?(${id})\x60?(?![\w-])`, 'gi');
+  const onlyPrefixed = prefixedOnly.get(labels);
+  let wrapped: RegExp;
+  let prefixed: RegExp;
+  let bare: RegExp;
+  if (!onlyPrefixed || onlyPrefixed.size === 0) {
+    const id = idPattern(labels.keys());
+    wrapped = new RegExp(String.raw`[ \t]*[(\[]\s*(?:${prefix})?\x60?${id}\x60?\s*[)\]]`, 'gi');
+    prefixed = new RegExp(String.raw`[ \t]*[,;–-]?[ \t]*\b${prefix}\x60?${id}\x60?`, 'gi');
+    bare = new RegExp(String.raw`(?<![\w-])\x60?(${id})\x60?(?![\w-])`, 'gi');
+  } else {
+    const all = idPattern(labels.keys());
+    const word = idPattern([...labels.keys()].filter((id) => !onlyPrefixed.has(id)));
+    wrapped = new RegExp(String.raw`[ \t]*[(\[]\s*(?:${prefix}\x60?${all}|\x60?${word})\x60?\s*[)\]]`, 'gi');
+    prefixed = new RegExp(String.raw`[ \t]*[,;–-]?[ \t]*\b${prefix}\x60?${all}\x60?(?![\w-])`, 'gi');
+    bare = new RegExp(String.raw`(?<![\w-])\x60?(${word})\x60?(?![\w-])`, 'gi');
+  }
   return text
     .replace(wrapped, '')
     .replace(prefixed, '')
     .replace(bare, (_match, found: string) => labelFor(labels, found) ?? '')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/[ \t]+([.,;:!?)])/g, '$1');
+}
+
+/**
+ * Records the opaque ids of the records a tool's `outputEntities` declare in
+ * its result (`value`), labelled with their declared name. Speaking ids
+ * (`idKind: 'speaking'`, or a `key`/`slug`/`code` id) stay readable and are
+ * not learnt. An id that is no technical id by its shape (an integer, a short
+ * string) is only removed with an id prefix (`(ID: 3)`).
+ */
+export function collectDeclaredIdLabels(
+  value: unknown,
+  declarations: ReadonlyArray<OutputEntityDeclaration> | undefined,
+  labels: IdLabels,
+): void {
+  if (!declarations || declarations.length === 0) return;
+  for (const identity of declaredRecordsOf(value, declarations).values()) {
+    if (identity.idKind !== 'opaque') continue;
+    for (const raw of identity.idValues) {
+      const id = typeof raw === 'string' ? raw.trim() : String(raw);
+      if (id === identity.name) continue;
+      if (!looksLikeTechnicalId(id) && !labels.has(id)) {
+        let set = prefixedOnly.get(labels);
+        if (!set) prefixedOnly.set(labels, set = new Set());
+        set.add(id);
+      }
+      if (identity.name !== undefined || !labels.has(id)) labels.set(id, identity.name ?? labels.get(id));
+    }
+  }
+}
+
+/** The declared ids of the finished tool parts of UI messages (`tool-<name>`), see {@link collectDeclaredIdLabels}. */
+export function collectDeclaredIdLabelsFromMessages(
+  messages: unknown,
+  entities: EntityDeclarationsByTool | undefined,
+  labels: IdLabels,
+): void {
+  if (!entities || !Array.isArray(messages)) return;
+  for (const message of messages) {
+    const parts = (message as { parts?: unknown } | null)?.parts;
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      const type = (part as { type?: unknown } | null)?.type;
+      if (typeof type !== 'string' || !type.startsWith('tool-')) continue;
+      const name = type.slice('tool-'.length);
+      if (!Object.prototype.hasOwnProperty.call(entities, name)) continue;
+      collectDeclaredIdLabels((part as { output?: unknown }).output, entities[name]!.output, labels);
+    }
+  }
 }
 
 function labelFor(labels: IdLabels, id: string): string | undefined {
@@ -91,7 +163,12 @@ export function holdFrom(text: string): number {
  * `experimental_transform` for `streamText`: holds back the end of each text
  * part until it can no longer grow into an id, and emits it with ids replaced.
  */
-export function createHideIdsTransform(labels: IdLabels = new Map()): StreamTextTransform<ToolSet> {
+export function createHideIdsTransform(
+  labels: IdLabels = new Map(),
+  options: { entities?: EntityDeclarationsByTool } = {},
+): StreamTextTransform<ToolSet> {
+  const declaredOf = (toolName: unknown) => (typeof toolName === 'string' && options.entities
+    && Object.prototype.hasOwnProperty.call(options.entities, toolName) ? options.entities[toolName]!.output : undefined);
   return () => {
     const held = new Map<string, { part: TextDelta; text: string }>();
     const flush = (controller: TransformStreamDefaultController<Part>, id?: string) => {
@@ -117,6 +194,7 @@ export function createHideIdsTransform(labels: IdLabels = new Map()): StreamText
         if (part.type === 'tool-result') {
           collectIdLabels(part.input, labels);
           collectIdLabels(part.output, labels);
+          collectDeclaredIdLabels(part.output, declaredOf(part.toolName), labels);
         }
         flush(controller, part.type === 'text-end' ? part.id : undefined);
         controller.enqueue(part);

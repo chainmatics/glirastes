@@ -12,8 +12,19 @@
  */
 
 import { READ_RESULT_ID_PREFIX, WRITE_RESULT_ID_PREFIX, READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
-import { identityFieldsOf, idLikeFieldsOf, NAME_KEYS as NAME_KEY_PROFILES, OWN_ID_KEYS } from '../../../contracts/entity-identity.js';
+import {
+  identityFieldsOf,
+  idLikeFieldsOf,
+  MAX_IDENTITY_FIELD_CHARS,
+  NAME_KEYS as NAME_KEY_PROFILES,
+  OWN_ID_KEYS,
+} from '../../../contracts/entity-identity.js';
 import { dominantArrayRoute, expiredInstruction } from '../../core/result-overview.js';
+import {
+  declarationForEntries,
+  declaredIdentityKeys,
+  type OutputEntityDeclaration,
+} from '../../../contracts/entity-declaration.js';
 
 export const HISTORY_DEFAULTS = {
   maxTurns: 6,
@@ -141,8 +152,9 @@ type IdentityLevel = 'all' | 'pair' | 'clipped';
  * An entry without a recognised identifier keeps every id-like field
  * (`idLikeFieldsOf`) on every level.
  */
-function identityOf(entry: unknown, level: IdentityLevel): Array<[string, unknown]> {
+function identityOf(entry: unknown, level: IdentityLevel, declared?: OutputEntityDeclaration): Array<[string, unknown]> {
   if (!isPlainObject(entry)) return [];
+  if (declared) return declaredIdentityOf(entry, level, declared);
   const kept = new Map(identityFieldsOf(entry));
   const idLike = new Set(idLikeFieldsOf(entry, IDENTITY_ID_KEYS));
   let fields: Array<[string, unknown]> = [];
@@ -160,8 +172,31 @@ function identityOf(entry: unknown, level: IdentityLevel): Array<[string, unknow
     : fields;
 }
 
-function isClipped(fields: Array<[string, unknown]>): boolean {
-  return fields.some(([key, value]) => NAME_KEYS.has(key) && typeof value === 'string' && value.endsWith(CLIP_SUFFIX));
+/**
+ * The declared identity of an entry (its id fields, then its name, else its
+ * fallback; scalars only) on every level: a name is clipped when its field is
+ * too long to be an identity field, and always on `clipped`.
+ */
+function declaredIdentityOf(entry: Record<string, unknown>, level: IdentityLevel, declared: OutputEntityDeclaration): Array<[string, unknown]> {
+  const fields: Array<[string, unknown]> = [];
+  for (const key of declaredIdentityKeys(declared)) {
+    if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
+    const value = entry[key];
+    if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) continue;
+    const isName = key === declared.name || key === declared.fallback;
+    if (isName && typeof value === 'string'
+      && (level === 'clipped' || JSON.stringify(key).length + JSON.stringify(value).length + 2 > MAX_IDENTITY_FIELD_CHARS)) {
+      fields.push([key, clipName(value)]);
+    } else {
+      fields.push([key, value]);
+    }
+  }
+  return fields;
+}
+
+function isClipped(fields: Array<[string, unknown]>, declared?: OutputEntityDeclaration): boolean {
+  const named = (key: string) => (declared ? key === declared.name || key === declared.fallback : NAME_KEYS.has(key));
+  return fields.some(([key, value]) => named(key) && typeof value === 'string' && value.endsWith(CLIP_SUFFIX));
 }
 
 function objectOf(fields: Array<[string, unknown]>): Record<string, unknown> {
@@ -199,6 +234,12 @@ export interface CompactHistoryResultOptions {
   keepIdentity?: boolean;
   /** Upper bound of the serialized result when it carries a `_history` marker (default: none). */
   maxChars?: number;
+  /**
+   * The producing tool's `outputEntities`: entries of the dominant array a
+   * declaration names keep exactly their declared id fields and name (or
+   * fallback) instead of the guessed identity. Without one, as before.
+   */
+  entities?: ReadonlyArray<OutputEntityDeclaration>;
 }
 
 /**
@@ -245,9 +286,13 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
   const length = source.length;
 
   // Id-like keys of entries without a recognised identifier, in the order they first occur.
+  const declared = declarationForEntries(options.entities, rootArray ? ['data'] : route, rootArray ? { data: value } : value);
   const idLikeSeen = new Set<string>();
-  for (const entry of source) for (const key of idLikeFieldsOf(entry, IDENTITY_ID_KEYS)) idLikeSeen.add(key);
+  if (!declared) for (const entry of source) for (const key of idLikeFieldsOf(entry, IDENTITY_ID_KEYS)) idLikeSeen.add(key);
   const idLikeOrder = [...idLikeSeen];
+  const keysInOrder = (kept: ReadonlySet<string>): string[] => (declared
+    ? declaredIdentityKeys(declared).filter((key) => kept.has(key))
+    : orderedKeys(kept, idLikeOrder));
   // Identity per entry on each level, with prefix sums of their sizes and counts.
   const forms = (['all', 'pair', 'clipped'] as const).map((level) => {
     const sizes = [0];
@@ -255,13 +300,13 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
     const keys = new Set<string>();
     let clipped = false;
     for (const entry of source) {
-      const fields = identityOf(entry, level);
+      const fields = identityOf(entry, level, declared);
       for (const [key] of fields) keys.add(key);
-      clipped ||= isClipped(fields);
+      clipped ||= isClipped(fields, declared);
       sizes.push(sizes.at(-1)! + (fields.length > 0 ? serializedLength(objectOf(fields)) : 0));
       counts.push(counts.at(-1)! + (fields.length > 0 ? 1 : 0));
     }
-    return { level, sizes, counts, clipped, keys: orderedKeys(keys, idLikeOrder) };
+    return { level, sizes, counts, clipped, keys: keysInOrder(keys) };
   });
   if (forms[0]!.counts[length] === 0) return legacy;
   const fullCount = Math.min(limits.maxItems, length);
@@ -322,16 +367,16 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
   const kept = new Set<string>();
   let anyClipped = false;
   for (let index = plan.full; index < plan.end; index += 1) {
-    const fields = identityOf(source[index], plan.form.level);
+    const fields = identityOf(source[index], plan.form.level, declared);
     if (fields.length === 0) continue;
     for (const [key] of fields) kept.add(key);
-    anyClipped ||= isClipped(fields);
+    anyClipped ||= isClipped(fields, declared);
     array.push(objectOf(fields));
   }
   let holder = output;
   for (const key of (rootArray ? ['data'] : route).slice(0, -1)) holder = holder[key] as Record<string, unknown>;
   setOwn(holder, rootArray ? 'data' : route.at(-1)!, array);
-  setOwn(output, HISTORY_MARKER_KEY, markerOf(plan, orderedKeys(kept, idLikeOrder), anyClipped));
+  setOwn(output, HISTORY_MARKER_KEY, markerOf(plan, keysInOrder(kept), anyClipped));
   return output;
 }
 

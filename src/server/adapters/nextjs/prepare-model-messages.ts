@@ -20,6 +20,7 @@ import {
   type AiSdkToolHooks,
 } from '../../../runtime/ai-sdk/engine.js';
 import { attachmentPlaceholderText } from '../../../contracts/attachments.js';
+import type { EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 import { withModelFacingToolErrors } from './stream-error-text.js';
 import {
@@ -64,6 +65,12 @@ export interface PrepareModelMessagesOptions {
    * flat slice-and-prune of earlier versions.
    */
   history?: HistoryOptions | false;
+  /**
+   * Declared identity by model-facing tool name (`Tool.outputEntities`):
+   * compacted results of a tool with a declaration keep exactly its declared
+   * id and name fields. Without it, as before.
+   */
+  entities?: EntityDeclarationsByTool;
   /** Override pruneMessages config (legacy pipeline only). */
   pruneConfig?: {
     /** How to handle reasoning blocks (default: 'none'). */
@@ -113,7 +120,7 @@ export async function prepareModelMessages(
         messages: turnAwareHistory(raw as ModelMessageLike[], maxCtx, {
           ...HISTORY_DEFAULTS,
           ...options?.history,
-        }) as typeof raw,
+        }, options?.entities) as typeof raw,
         reasoning: 'none',
         toolCalls: 'none',
         emptyMessages: (options?.pruneConfig?.emptyMessages ?? 'remove') as 'remove',
@@ -223,8 +230,9 @@ function isCompactable(part: Record<string, unknown>): part is CompactablePart {
 function withCompactedResults(
   turn: ModelMessageLike[],
   limits: Required<HistoryOptions>,
+  entities?: EntityDeclarationsByTool,
 ): ModelMessageLike[] {
-  const withResults = (compact: (value: unknown, index: number) => unknown): ModelMessageLike[] => {
+  const withResults = (compact: (value: unknown, index: number, part: CompactablePart) => unknown): ModelMessageLike[] => {
     let index = 0;
     return turn.map((message) => {
       if (message.role === 'assistant' && Array.isArray(message.content)) {
@@ -238,15 +246,22 @@ function withCompactedResults(
       return {
         ...message,
         content: (message.content as Array<Record<string, unknown>>).map((part) => (isCompactable(part)
-          ? { ...part, output: { ...part.output, value: compact(part.output.value, index++) } }
+          ? { ...part, output: { ...part.output, value: compact(part.output.value, index++, part) } }
           : part)),
       };
     });
   };
   const options = { maxItems: limits.maxItems, maxStringLength: limits.maxStringLength, keepIdentity: limits.keepIdentity };
+  /** The options for one part: with its tool's declared entities, when it has any. */
+  const optionsOf = (part: CompactablePart) => {
+    const declared = typeof part.toolName === 'string' && entities && Object.prototype.hasOwnProperty.call(entities, part.toolName)
+      ? entities[part.toolName]!.output
+      : undefined;
+    return declared ? { ...options, entities: declared } : options;
+  };
   const compacted: unknown[] = [];
-  const first = withResults((value) => {
-    const result = compactHistoryResult(value, options);
+  const first = withResults((value, _index, part) => {
+    const result = compactHistoryResult(value, optionsOf(part));
     compacted.push(result);
     return result;
   });
@@ -268,9 +283,9 @@ function withCompactedResults(
     for (const index of small) left -= sizes[index]!;
     open = open.filter((index) => sizes[index]! > share);
   }
-  return withResults((value, index) => (shares[index] === undefined
+  return withResults((value, index, part) => (shares[index] === undefined
     ? compacted[index]
-    : compactHistoryResult(value, { ...options, maxChars: shares[index]! + 4 })));
+    : compactHistoryResult(value, { ...optionsOf(part), maxChars: shares[index]! + 4 })));
 }
 
 /** Cuts text longer than its share of `maxChars` to head and tail. */
@@ -311,12 +326,13 @@ function turnAwareHistory(
   messages: ModelMessageLike[],
   maxCtx: number,
   limits: Required<HistoryOptions>,
+  entities?: EntityDeclarationsByTool,
 ): ModelMessageLike[] {
   const turns = splitTurns(messages);
   const current = turns.pop() ?? [];
   const kept = turns.slice(-Math.max(0, limits.maxTurns));
   const isToolTurn = (index: number) => index >= kept.length - limits.toolTurns;
-  const earlier = kept.map((turn, index) => (isToolTurn(index) ? withCompactedResults(turn, limits) : textOnly(turn)));
+  const earlier = kept.map((turn, index) => (isToolTurn(index) ? withCompactedResults(turn, limits, entities) : textOnly(turn)));
   // Per earlier turn: sent as text with its tool calls and results left out.
   const dropped = kept.map((turn, index) => !isToolTurn(index) && hasToolContent(turn));
   const previousSource = kept.at(-1);

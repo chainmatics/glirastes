@@ -13,6 +13,7 @@ import {
   WRITE_RESULT_ID_PREFIX,
 } from '../../contracts/result-handle.js';
 import { buildResultOverview } from './result-overview.js';
+import type { OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
 
 /** Default limits of a turn's result store. */
 export const DEFAULT_RESULT_HANDLE_LIMITS = Object.freeze({
@@ -70,6 +71,8 @@ export interface ResultHandle {
   /** The sealed result. Never handed out by reference. */
   readonly value: Record<string, unknown>;
   readonly owner?: ResultHandleOwner;
+  /** The origin tool's `outputEntities`: `read_result` names entries by them. */
+  readonly entities?: ReadonlyArray<OutputEntityDeclaration>;
 }
 
 export interface ResultStorePutInput {
@@ -88,6 +91,8 @@ export interface ResultStorePutInput {
    * whole value stays readable through the handle.
    */
   defaultFields?: ReadonlyArray<string>;
+  /** The tool's `outputEntities` (see `BuildResultOverviewOptions.entities`), kept with the handle. */
+  entities?: ReadonlyArray<OutputEntityDeclaration>;
   /**
    * The owner `captureOwner` returned before the origin tool ran. Required
    * when the store has `owner`: without it, or when it is not the principal
@@ -252,6 +257,7 @@ export function createResultStore(options: ResultStoreOptions = {}): ResultStore
         const overview = buildResultOverview(value, {
           id, maxChars: input.maxChars, readOnly: input.readOnly,
           ...(input.defaultFields ? { defaultFields: input.defaultFields } : {}),
+          ...(input.entities ? { entities: input.entities } : {}),
         });
         if (!overview) {
           release();
@@ -264,6 +270,7 @@ export function createResultStore(options: ResultStoreOptions = {}): ResultStore
           maxChars: input.maxChars,
           value,
           ...(owner ? { owner: { subjectId: owner.subjectId, tenantId: owner.tenantId } } : {}),
+          ...(input.entities ? { entities: input.entities } : {}),
         });
         issued.add(overview);
         return overview;
