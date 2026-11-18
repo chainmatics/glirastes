@@ -206,12 +206,14 @@ export function useGlirastesNavigationBridge(options: NavigationBridgeOptions): 
   const pushRef = useRef(options.push);
   pushRef.current = options.push;
   const bus = options.bus;
+  const reloads = options.reloads === true;
   useEffect(
     () => registerNavigationBridge({
       push: (href) => pushRef.current(href),
+      reloads,
       ...(bus ? { bus } : {}),
     }),
-    [bus],
+    [bus, reloads],
   );
 }
 

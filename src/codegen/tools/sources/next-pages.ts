@@ -73,7 +73,7 @@ function navigationProse(locale: string, pages: ReadonlyArray<PageEntry>): ToolP
 
 export function navigationBridgeMissing(stableKey: string): ToolFinding {
   return toolFinding('navigation-bridge-missing', 'needs_attention', stableKey,
-    'No useGlirastesNavigationBridge or registerNavigationBridge call was found, so the browser cannot run this tool.');
+    'No useGlirastesNavigationBridge, registerNavigationBridge or registerDocumentNavigation call was found, so the browser cannot run this tool.');
 }
 
 export function scanForNavigationBridge(root: string, srcDir: string | undefined): Promise<AppSourceScan> {
