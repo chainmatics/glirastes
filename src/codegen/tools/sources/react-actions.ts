@@ -134,9 +134,13 @@ function effectOf(app: AppProgram, raw: ts.Expression | undefined): EffectRead {
     while (index >= 0 && !isEffect(members[index]!)) index -= 1;
     const property = index >= 0 ? members[index] as ts.PropertyAssignment | ts.ShorthandPropertyAssignment : undefined;
     // A later spread that may carry an effect decides at runtime, so the literal is not the final value.
+    const mayCarryEffect = (type: ts.Type): boolean => {
+      if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return true;
+      if (type.isUnionOrIntersection()) return type.types.some(mayCarryEffect);
+      return checker.getPropertyOfType(type, 'effect') !== undefined || checker.getIndexInfosOfType(type).length > 0;
+    };
     const overridden = property !== undefined && members.slice(index + 1).some((entry) => (
-      ts.isSpreadAssignment(entry)
-      && checker.getPropertyOfType(checker.getTypeAtLocation(entry.expression), 'effect') !== undefined));
+      ts.isSpreadAssignment(entry) && mayCarryEffect(checker.getTypeAtLocation(entry.expression))));
     if (overridden) return { kind: 'invalid' };
     if (property) {
       const expression = ts.isPropertyAssignment(property) ? property.initializer : property.name;
