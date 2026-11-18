@@ -38,12 +38,18 @@ pages upwards through `loadMore`. `PlanChecklist` renders the latest
 `update_plan` call (nothing below two items), `ActivityLog` the collapsible
 work log of one assistant turn; both style through `data-*` attributes.
 `readActivitySteps` gives each step an `ActivityStepStatus`: `running`,
-`done`, `error`, `waiting` or `declined` (an approval refused: shown
-neutrally, not counted as failed). `error` covers a thrown tool error and any
-object output with `success: false` (e.g. a failed backend call of an
-endpoint tool, also one `classifyToolFailure` marks as expected); its detail
-is the output's `error` text. A UI tool's hand-off note is never shown as a
-detail.
+`done`, `error`, `waiting`, `declined` (an approval refused) or `expected`
+(a failure that is a normal answer: `success: false` with
+`expectedFailure: true` from `classifyToolFailure` at any status, or
+without a classifier a backend 4xx other than 408/429, such as a 404 the
+model then looks up or a 403). `declined` and `expected` are shown
+neutrally and counted on their own (`activityDeclinedLabel`,
+`activityExpectedLabel`), never as failed. `error` covers a thrown tool
+error and every other failure output (`success: false` or an `error` text:
+5xx, 408/429, timeout, network, a call the endpoint caller refused locally,
+a refused UI tool, a custom tool). The detail of `error` and `expected` is
+the output's `error` text. Display only: server counting follows
+`classifyToolFailure`. A UI tool's hand-off note is never shown as a detail.
 
 ## Tool results and approvals
 

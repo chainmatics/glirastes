@@ -19,7 +19,11 @@ import type {
 } from '../../types.js';
 import { defineTool } from '../../types.js';
 import { zodToCompactDescription } from './zod-compact.js';
-import type { ToolFailureClassifier } from '../../runtime/tool-failure.js';
+import {
+  ENDPOINT_PATH_NOT_ALLOWED_ERROR,
+  ENDPOINT_PATH_NOT_RELATIVE_ERROR,
+  type ToolFailureClassifier,
+} from '../../runtime/tool-failure.js';
 import {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
@@ -841,9 +845,12 @@ export function uiToolToTool<TInput extends SchemaLike>(
 
       // The server only hands the action to the browser and does not learn
       // whether the app carried it out; an app's own successMessage wins.
+      // Without a uiAction nothing is handed over, so the tool's run on the
+      // server is all there is and the earlier text still holds.
+      const fallback = uiAction ? UI_ACTION_HANDOFF_MESSAGE : 'Action executed.';
       const message = uiTool.successMessage
-        ? (applyUiTemplateValue(uiTool.successMessage, inputPayload) as string) || UI_ACTION_HANDOFF_MESSAGE
-        : UI_ACTION_HANDOFF_MESSAGE;
+        ? (applyUiTemplateValue(uiTool.successMessage, inputPayload) as string) || fallback
+        : fallback;
 
       return {
         success: true,
@@ -1478,7 +1485,7 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
   });
   return async (request) => {
     if (!staysOnOrigin(request.path, base.origin)) {
-      return { ok: false, status: 400, error: 'Endpoint path must be relative to the API', refusedLocally: true };
+      return { ok: false, status: 400, error: ENDPOINT_PATH_NOT_RELATIVE_ERROR, refusedLocally: true };
     }
     if (prefixes) {
       const rawPath = request.path.split(/[?#]/, 1)[0]!;
@@ -1486,7 +1493,7 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
       // Do not let upstream double decoding or encoded separators escape a prefix.
       if (/%(?:2e|2f|5c|25)/i.test(rawPath) || rawPath !== pathname
         || !prefixes.some((prefix) => prefix === '/' || pathname === prefix || pathname.startsWith(`${prefix}/`))) {
-        return { ok: false, status: 403, error: 'Endpoint path is not allowed', refusedLocally: true };
+        return { ok: false, status: 403, error: ENDPOINT_PATH_NOT_ALLOWED_ERROR, refusedLocally: true };
       }
     }
     return call(request);

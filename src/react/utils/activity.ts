@@ -2,14 +2,23 @@ import { CLARIFICATION_TOOL_NAME } from '../../contracts/clarification.js';
 import { PLAN_TOOL_NAME, readPlanItems, type PlanItem } from '../../contracts/plan.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
+import {
+  ENDPOINT_PATH_NOT_ALLOWED_ERROR,
+  ENDPOINT_PATH_NOT_RELATIVE_ERROR,
+  toolResultFailure,
+} from '../../runtime/tool-failure.js';
 
 /**
  * `declined`: the call did not run because its approval was refused (by the
  * user, or by the server for an expired or reused approval). It is not a
- * failure. `error`: the call threw, or its output is an object with
- * `success: false` (a failed backend call, a refused UI action).
+ * failure. `expected`: the call answered with a failure that is a normal
+ * answer: one `classifyToolFailure` marked as expected, or a backend answer
+ * with a 4xx status other than 408 and 429 (e.g. a 404 the model then looks
+ * up, a 403). `error`: the call threw, or its output reports any other
+ * failure (5xx, timeout, network error, a refused UI action, a custom tool's
+ * `success: false`).
  */
-export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting' | 'declined';
+export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting' | 'declined' | 'expected';
 
 export interface ActivityStep {
   id: string;
@@ -42,17 +51,42 @@ function toolPartName(part: Record<string, unknown>): string | null {
 
 /**
  * A tool that reports its own failure answers with an output, not an error:
- * an endpoint tool's failed backend call, a refused UI action, a custom tool.
- * Any object output with `success: false` is a failed step.
+ * an endpoint tool's failed backend call, a refused UI action, a custom tool,
+ * a thrown tool error the server turned into `{ error }`. The same rule the
+ * server counts failures by (`toolResultFailure`): `success: false` or an
+ * `error` text.
  */
 function isFailedOutput(output: unknown): output is Record<string, unknown> {
-  return isRecord(output) && !Array.isArray(output) && output.success === false;
+  return isRecord(output) && !Array.isArray(output) && toolResultFailure(output) !== undefined;
+}
+
+/**
+ * A failure that is a normal answer, not a malfunction, so the step is shown
+ * neutrally. Display only: what the server counts (`maxConsecutiveErrors`,
+ * turn metrics) follows `classifyToolFailure` alone.
+ * - The app's marker `expectedFailure: true` (`classifyToolFailure` returned
+ *   `'expected'`), for any status.
+ * - Without it, a backend answer with a client-class status (400-499, e.g. a
+ *   404 the model then looks up, a 403): the backend understood the call and
+ *   said no. Except 408 and 429 (timeout, rate limit) and a call the SDK's
+ *   endpoint caller refused itself before it reached the backend.
+ * Everything else (5xx, no status: network error, timeout, a refused UI
+ * action, a custom tool) stays a failure.
+ */
+function isExpectedFailure(output: Record<string, unknown>): boolean {
+  if (output.success !== false) return false;
+  if (output.expectedFailure === true) return true;
+  const status = output.status;
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 400 || status > 499) return false;
+  if (status === 408 || status === 429) return false;
+  return output.error !== ENDPOINT_PATH_NOT_ALLOWED_ERROR && output.error !== ENDPOINT_PATH_NOT_RELATIVE_ERROR;
 }
 
 function stepStatus(state: unknown, output: unknown): ActivityStepStatus {
   switch (state) {
     case 'output-available':
-      return isFailedOutput(output) ? 'error' : 'done';
+      if (!isFailedOutput(output)) return 'done';
+      return isExpectedFailure(output) ? 'expected' : 'error';
     case 'output-error':
       return 'error';
     case 'output-denied':
@@ -86,8 +120,8 @@ export function readActivitySteps(
     };
     if (allowDetail(toolName)) {
       let detail: unknown;
-      if (status === 'error') {
-        detail = isFailedOutput(part.output) ? part.output.error : part.errorText;
+      if (status === 'error' || status === 'expected') {
+        detail = isFailedOutput(part.output) && part.state === 'output-available' ? part.output.error : part.errorText;
       } else if (status === 'done' && isRecord(part.output)) {
         // The hand-off note of a UI tool is for the model, not the user.
         detail = isUiActionHandoffMessage(part.output.message) ? undefined : part.output.message;
