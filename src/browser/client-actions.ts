@@ -227,8 +227,9 @@ async function runAction(
       payload: { href: action.route },
     };
     const navigated = dispatchCode(await bus.dispatch(navigation), navigation);
-    // Nothing can open the page, or a full page load ends this page before the action could run.
-    if (navigated === 'unavailable' || navigated === 'initiated') return 'unavailable';
+    if (navigated === 'unavailable') return 'unavailable';
+    // A full page load ends this page before the action could run here.
+    if (navigated === 'initiated') return 'initiated';
     if (!await waitForHandler(bus, action.actionId, routeTimeoutMs)) return 'unavailable';
     if (cancelled()) return 'cancelled';
   }

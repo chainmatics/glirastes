@@ -880,6 +880,9 @@ export function AiChatProvider({
     const lastMessage = rawMessages[rawMessages.length - 1];
     if (lastMessage.role !== 'assistant') return;
 
+    // While the request streams, a result waits for every earlier call of the
+    // message to finish, so UI actions run in call order, not arrival order.
+    let earlierCallOpen = false;
     for (const part of lastMessage.parts) {
       if (!('type' in part)) continue;
       const partType = (part as { type: string }).type;
@@ -934,9 +937,15 @@ export function AiChatProvider({
           setPendingApprovalsMap(prev => new Map(prev).set(toolPart.approval!.id, pending));
         }
 
+        if (toolPart.state === 'input-streaming' || toolPart.state === 'input-available') {
+          earlierCallOpen = true;
+          continue;
+        }
+
         // Tool result available — call onToolResult
         if (toolPart.state === 'output-available' && isRecord(toolPart.output)) {
           const toolCallId = toolPart.toolCallId || `${lastMessage.id}-${partType}`;
+          if (earlierCallOpen && isLoading) continue;
           if (!processedToolCallsRef.current.has(toolCallId)) {
             processedToolCallsRef.current.add(toolCallId);
             // A result that already carries an outcome was run before.

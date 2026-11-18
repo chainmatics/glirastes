@@ -207,6 +207,51 @@ describe('AiChatProvider UI action outcomes', () => {
     expect(outcomes.map((event) => event.code)).toEqual(['failed', 'ok']);
   });
 
+  it('runs results in call order when a later call finishes first', async () => {
+    const { bus, outcomes } = setup();
+    const order: string[] = [];
+    cleanups.push(bus.subscribeById('first', () => { order.push('first'); }));
+    cleanups.push(bus.subscribeById('second', () => { order.push('second'); }));
+    await act(async () => { control.set([user], 'submitted'); });
+    await act(async () => {
+      control.set([user, assistant(toolPart('c1', undefined, 'input-available'), toolPart('c2', action('second')))], 'streaming');
+    });
+    await settle();
+    expect(order).toEqual([]);
+    await act(async () => {
+      control.set([user, assistant(toolPart('c1', action('first')), toolPart('c2', action('second')))], 'streaming');
+    });
+    await act(async () => { control.status('ready'); });
+    await waitFor(() => expect(outcomes).toHaveLength(2));
+    expect(order).toEqual(['first', 'second']);
+  });
+
+  it('does not wait for a call that is still open when the request ends', async () => {
+    const { bus, outcomes } = setup();
+    const seen = vi.fn();
+    cleanups.push(bus.subscribeById('second', seen));
+    await stream([user, assistant(toolPart('c1', undefined, 'input-available'), toolPart('c2', action('second')))]);
+    await waitFor(() => expect(outcomes.map((event) => event.code)).toEqual(['ok']));
+    expect(seen).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports initiated when a page-bound action loads its page and runs nothing after it', async () => {
+    const { bus, outcomes } = setup();
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    const later = vi.fn();
+    cleanups.push(registerDocumentNavigation({ bus }));
+    cleanups.push(bus.subscribeById('toast.show', later));
+    await stream([user, assistant(
+      toolPart('c1', { ...action('template-create-dialog.open'), route: '/templates' }),
+      toolPart('c2', action('toast.show')),
+    )]);
+    await waitFor(() => expect(outcomes.map((event) => event.code)).toEqual(['initiated']));
+    await settle();
+    expect(assign).toHaveBeenCalledWith('/templates');
+    expect(later).not.toHaveBeenCalled();
+  });
+
   it('reports initiated for a reloading navigation and runs no later tool result on the page', async () => {
     const { bus, outcomes } = setup();
     const assign = vi.fn();
