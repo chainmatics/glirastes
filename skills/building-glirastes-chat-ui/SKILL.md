@@ -62,8 +62,7 @@ component; headless hooks and building blocks for an own chat:
 | `theme.colors.primary`, `theme.colors.primarySoft` | accent and gradient stop within a theme override |
 | `classNames` | per-slot class hooks |
 | `components` | replace a rendered component (see *Slots*) |
-| `locale` | override any user-facing string, for every language; omitted keys fall back to the built-in texts |
-| `locales` | texts per BCP-47 tag (`{ pl: {...}, de: { sendButton: 'Los' } }`) to add a language or change one; partial tables fall back per key |
+| `locale`, `locales` | `locale` overrides any string for every language; `locales` per BCP-47 tag (`{ pl: { sendButton: 'Wyślij' } }`, partial tables fall back per key; language = the turn's tool labels, else the page `lang`; server side: `requestLocale`) |
 | `session` | `save` / `load` / `clear` for durable conversations |
 | `mentions` | mention sources and search |
 | `suggestions` | contextual suggestion chips |
@@ -82,26 +81,6 @@ whatever the app already uses:
 const t = useTranslations('chat');
 <VercelAiChat endpoint="/api/chat" locale={{ sendButton: t('send'), placeholder: t('placeholder') }} />
 ```
-
-German and English are built in. For another language pass `locales`: the
-chat's language is the one of the turn's tool labels (the server's
-`data-tool-presentation` part), else the page's `lang`; per key the texts
-fall back to the same language with another region, the built-in text, then
-English. To get tool labels and the server's own texts in the user's
-language too, send the language with every request (transport or
-`<glirastes-chat>` config `headers: () => ({ 'x-app-language': lang })`) and
-read it in the handler's `requestLocale`; labels per language come from
-`languages` in `.glirastes/tools.json` (see `describing-glirastes-tools`).
-
-```tsx
-<VercelAiChat endpoint="/api/chat" locales={{ pl: { sendButton: 'Wyślij', approveButton: 'Wykonaj' } }} />
-```
-
-For the app's own texts, `glirastes/contracts` offers the same fallback:
-`resolveLocalizedText(text, language)` for a `LocalizedText` (a plain string,
-or one string per `LanguageTag`), `pickLanguage(tags, language)` for the tag
-to use, `isLanguageTag(value)` to check one, and `preferredLanguage(header)`
-for the first choice of an `Accept-Language` value.
 
 ## Theming before forking
 

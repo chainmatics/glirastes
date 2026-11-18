@@ -325,16 +325,16 @@ export function semanticsTitle(
   declared?: string | Readonly<Record<string, string>>,
   languages: ReadonlyArray<string> = [],
 ): ToolTitle | undefined {
-  const declaredMap = typeof declared === 'string' ? undefined : declared;
   const title: Record<string, string> = {};
   const add = (language: string, value: string | undefined) => {
     const text = titleText(value);
     const taken = Object.keys(title).some((key) => key.toLowerCase() === language.toLowerCase());
     if (text && !taken) title[language] = text;
   };
-  for (const layer of ordered(entry, 'title', entry?.title, declaredMap)) {
-    for (const [language, value] of Object.entries(layer ?? {})) add(language, value);
+  // In precedence order; a language-free title fills, at its own level, every language still open.
+  for (const layer of ordered<string | Readonly<Record<string, string>>>(entry, 'title', entry?.title, declared)) {
+    if (typeof layer === 'string') for (const language of languages) add(language, layer);
+    else for (const [language, value] of Object.entries(layer ?? {})) add(language, value);
   }
-  if (typeof declared === 'string') for (const language of languages) add(language, declared);
   return Object.keys(title).length > 0 ? title as ToolTitle : undefined;
 }

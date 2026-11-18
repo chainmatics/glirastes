@@ -39,7 +39,7 @@ import {
 import { validateResolutionEntry, type ResolutionEntry } from '../resolutions.js';
 import type { SchemaProbeItem, SchemaProbeResult } from '../schema-probe.js';
 import { outputFieldLists, type DeclaredOutputFields } from '../output-fields.js';
-import { readDeclaredTexts, type DeclaredTexts } from '../declared-texts.js';
+import { mergeDeclaredTexts, readDeclaredTexts, type DeclaredTexts } from '../declared-texts.js';
 import type {
   ExcludedTool,
   JsonSchemaLike,
@@ -387,9 +387,9 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
   const { entry, resolved } = piece;
   const findings = [...entry.findings, ...resolved.findings];
   // Only this source reads x-glirastes-name, so only its names without a dot take their resource from the route.
+  // The operation's own texts win per language over a contract's; the other languages stay.
   const prose: ToolProseHints = {
-    ...resolved.prose,
-    ...entry.texts,
+    ...mergeDeclaredTexts(resolved.prose, entry.texts),
     ...(entry.group ? { module: entry.group } : {}),
     resourceFromRoute: true,
   };

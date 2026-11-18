@@ -86,3 +86,40 @@ export function readDeclaredTexts(values: Partial<Record<DeclaredTextField, unkn
   }
   return { hints, invalid };
 }
+
+function mergeText(lower: LocalizedText | undefined, higher: LocalizedText | undefined): LocalizedText | undefined {
+  if (higher === undefined) return lower;
+  // A language-free text speaks for every language; a lower map beside it would never be read.
+  if (typeof higher === 'string' || lower === undefined || typeof lower === 'string') return higher;
+  return { ...lower, ...higher };
+}
+
+function mergeLists(
+  lower: Readonly<Record<string, ReadonlyArray<string>>> | undefined,
+  higher: Readonly<Record<string, ReadonlyArray<string>>> | undefined,
+): Readonly<Record<string, ReadonlyArray<string>>> | undefined {
+  return lower && higher ? { ...lower, ...higher } : higher ?? lower;
+}
+
+/**
+ * Two code sources of one tool's texts, merged per language: `higher` wins
+ * for the languages it has, `lower` keeps the others. A language-free
+ * `higher` title or description replaces every language.
+ */
+export function mergeDeclaredTexts<T extends Pick<ToolProseHints, 'title' | 'declaredDescription' | 'synonyms' | 'examples'>>(
+  lower: T,
+  higher: DeclaredTexts['hints'] | undefined,
+): T {
+  if (!higher) return lower;
+  const title = mergeText(lower.title, higher.title);
+  const declaredDescription = mergeText(lower.declaredDescription, higher.declaredDescription);
+  const synonyms = mergeLists(lower.synonyms, higher.synonyms);
+  const examples = mergeLists(lower.examples, higher.examples);
+  return {
+    ...lower,
+    ...(title !== undefined ? { title } : {}),
+    ...(declaredDescription !== undefined ? { declaredDescription } : {}),
+    ...(synonyms !== undefined ? { synonyms } : {}),
+    ...(examples !== undefined ? { examples } : {}),
+  };
+}
