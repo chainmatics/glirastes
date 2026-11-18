@@ -509,6 +509,18 @@ describe('AiChatProvider never runs a UI action late', () => {
     expect(push).toHaveBeenCalledTimes(1);
   });
 
+  it('does not start a queued action when the chat unmounts right after the result arrived', async () => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    const view = render(<Host config={{ uiActionBus: bus }} />);
+    await act(async () => { control.set([user], 'submitted'); });
+    act(() => { control.set([user, assistant(toolPart('c1', navigate('/gone')))], 'streaming'); });
+    view.unmount();
+    await settle();
+    expect(push).not.toHaveBeenCalled();
+  });
+
   it('does not run results that come back after clear()', async () => {
     const { bus } = setup();
     const push = vi.fn();

@@ -878,7 +878,7 @@ export function AiChatProvider({
     const generation = uiActionGenerationRef.current;
     const { signal } = uiActionAbortRef.current;
     uiActionQueueRef.current = uiActionQueueRef.current.then(async () => {
-      if (pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
+      if (!mountedRef.current || pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
       const run = await runToolResultUiActions(
         output,
         uiActionBusRef.current ?? getDefaultUiActionBus(),
