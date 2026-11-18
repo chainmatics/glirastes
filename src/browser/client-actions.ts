@@ -206,9 +206,10 @@ type StepCode = 'ok' | 'unconfirmed' | 'unavailable' | 'initiated';
 
 /** Outcome of a dispatch that did not throw: a bus of an older SDK copy resolves `undefined`. */
 function dispatchCode(count: unknown, action: UiAction): StepCode {
+  // A reloading bridge marks the action on any bus, also one that does not count handlers.
+  if (wasUiActionInitiated(action)) return 'initiated';
   if (typeof count !== 'number') return 'unconfirmed';
-  if (count === 0) return 'unavailable';
-  return wasUiActionInitiated(action) ? 'initiated' : 'ok';
+  return count === 0 ? 'unavailable' : 'ok';
 }
 
 async function runAction(

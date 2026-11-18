@@ -114,13 +114,16 @@ function EmbeddedChat({
       emit('glirastes-chat:tool-result', { toolName, result });
     },
     onUiActionOutcome: (event: UiActionOutcomeEvent) => {
-      onUiActionOutcome?.(event);
-      emit('glirastes-chat:ui-action', {
-        toolName: event.toolName,
-        toolCallId: event.toolCallId,
-        code: event.code,
-        actionIds: event.actions.flatMap((action) => (action.actionId ? [action.actionId] : [])),
-      });
+      try {
+        onUiActionOutcome?.(event);
+      } finally {
+        emit('glirastes-chat:ui-action', {
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          code: event.code,
+          actionIds: event.actions.flatMap((action) => (action.actionId ? [action.actionId] : [])),
+        });
+      }
     },
   };
   const body = (

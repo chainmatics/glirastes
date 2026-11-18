@@ -194,6 +194,23 @@ describe('runToolResultUiActions', () => {
     expect(await runToolResultUiActions(result(navigate()), foreign)).toMatchObject({ code: 'unconfirmed', dispatched: 1 });
   });
 
+  it('reports initiated on a bus of an older SDK copy and runs nothing after it', async () => {
+    const real = new UiActionBus();
+    const foreign = {
+      dispatch: async (uiAction: Parameters<UiActionBus['dispatch']>[0]) => { await real.dispatch(uiAction); },
+      subscribeById: real.subscribeById.bind(real),
+      subscribeByType: real.subscribeByType.bind(real),
+    } as unknown as UiActionBus;
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    const after = vi.fn();
+    cleanups.push(registerDocumentNavigation({ bus: foreign }));
+    cleanups.push(foreign.subscribeById('toast.show', after));
+    expect(await runToolResultUiActions(result([navigate('/reports'), action('toast.show')]), foreign))
+      .toMatchObject({ code: 'initiated', dispatched: 1 });
+    expect(after).not.toHaveBeenCalled();
+  });
+
   it('stops a result array at the first failure and reports its code', async () => {
     const bus = new UiActionBus();
     const first = vi.fn();

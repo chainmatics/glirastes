@@ -178,7 +178,8 @@ describe('<glirastes-chat>', () => {
     vi.stubGlobal('fetch', vi.fn(async () => toolStreamResponse('ui_navigate', output)));
     const push = vi.fn();
     const stopBridge = registerNavigationBridge({ push });
-    const onUiActionOutcome = vi.fn();
+    // A throwing host callback does not stop the DOM event.
+    const onUiActionOutcome = vi.fn(() => { throw new Error('host callback'); });
     try {
       const { element, events } = await mount((node) => {
         node.setAttribute('endpoint', '/api/chat');
