@@ -121,11 +121,27 @@ describe('resolveApprovalSubjects', () => {
     ]);
   });
 
-  it('shows the latest name of a renamed UUID without a warning, but flags a short id with different names', () => {
+  it('shows the latest name of a renamed UUID without a warning; a short id of two kinds is named by the kind its key picks', () => {
     const [renamed] = resolveApprovalSubjects({ id: P1 }, seen);
     expect(renamed).toEqual({ path: 'id', id: P1, status: 'named', name: 'Abend-Promos neu' });
-    const [shared] = resolveApprovalSubjects({ userId: 7 }, seen);
-    expect(shared).toEqual({ path: 'userId', id: '7', status: 'ambiguous', name: 'Vertrieb', names: ['Vertrieb', 'Ada'], label: 'User' });
+    // User 7 and group 7: `userId` picks the users.
+    expect(resolveApprovalSubjects({ userId: 7 }, seen)).toEqual([{ path: 'userId', id: '7', status: 'named', name: 'Ada', label: 'User' }]);
+    // `productId` picks neither: no name, every candidate.
+    expect(resolveApprovalSubjects({ productId: 7 }, seen)).toEqual([{
+      path: 'productId', id: '7', status: 'ambiguous', names: ['Vertrieb', 'Ada'], label: 'Product',
+      candidates: [{ label: 'Group', name: 'Vertrieb' }, { label: 'User', name: 'Ada' }],
+    }]);
+  });
+
+  it('flags a short id of one kind shown with different names, as before', () => {
+    const renamed = collectEntitySightings([
+      tool('users_list', { data: [{ id: 7, name: 'Ada' }] }),
+      tool('users_update', { data: { id: 7, name: 'Ada L.' } }),
+    ]);
+    expect(renamed.get('7')).toEqual({ name: 'Ada L.', names: ['Ada L.', 'Ada'] });
+    expect(resolveApprovalSubjects({ userId: 7 }, renamed)).toEqual([
+      { path: 'userId', id: '7', status: 'ambiguous', name: 'Ada L.', names: ['Ada L.', 'Ada'], label: 'User' },
+    ]);
   });
 
   it('labels a bare id by the type of a mention the user picked', () => {
@@ -187,5 +203,92 @@ describe('ids a tool result carried without a name', () => {
     ]);
     expect(seen.get('v1')).toEqual({ fallback: 'Version 1.1' });
     expect(seen.get('d1')).toEqual({});
+  });
+});
+
+describe('an id seen for records of different kinds', () => {
+  /** User 3, playlist 3 (own id `playlist_id`), and a version that refers to playlist 3. */
+  const history = [
+    tool('users_list', { users: [{ id: 1, displayName: 'Ada' }, { id: 3, displayName: 'Linus' }] }),
+    tool('playlists_list', { playlists: [{ playlist_id: 3, displayName: 'Lobby Loop' }], _result: { id: 'ro_aaaaaaaa', hint: '…' } }),
+  ];
+  const resolve = (args: Record<string, unknown>, messages: unknown[] = history, toolName?: string) => resolveApprovalSubjects(
+    args, collectEntitySightings(messages), collectSeenEntityIds(messages), toolName ? { toolName } : {},
+  );
+
+  it('records the kinds of a colliding id only, newest first', () => {
+    const seen = collectEntitySightings(history);
+    expect(seen.get('3')).toEqual({
+      name: 'Linus', names: ['Linus'],
+      kinds: [{ kind: 'playlist', names: ['Lobby Loop'] }, { kind: 'user', names: ['Linus'] }],
+    });
+    expect(seen.get('1')).toEqual({ name: 'Ada', names: ['Ada'] });
+  });
+
+  it('shows no name but every candidate when the argument does not pick a kind', () => {
+    const expected = { status: 'ambiguous', names: ['Lobby Loop', 'Linus'], candidates: [{ label: 'Playlist', name: 'Lobby Loop' }, { label: 'User', name: 'Linus' }] };
+    expect(resolve({ target_id: 3 })).toEqual([{ path: 'target_id', id: '3', label: 'Target', ...expected }]);
+    expect(resolve({ id: 3 })).toEqual([{ path: 'id', id: '3', ...expected }]);
+    expect(resolve({ id: 3 }, history, 'archive')).toEqual([{ path: 'id', id: '3', ...expected }]);
+  });
+
+  it('names the record when the argument picks exactly one kind: key, parent object or tool name', () => {
+    expect(resolve({ playlist_id: 3 })).toEqual([{ path: 'playlist_id', id: '3', status: 'named', name: 'Lobby Loop', label: 'Playlist' }]);
+    expect(resolve({ userId: 3 })).toEqual([{ path: 'userId', id: '3', status: 'named', name: 'Linus', label: 'User' }]);
+    expect(resolve({ user: { id: 3 } })).toEqual([{ path: 'user.id', id: '3', status: 'named', name: 'Linus', label: 'User' }]);
+    expect(resolve({ id: 3 }, history, 'playlists_delete')).toEqual([{ path: 'id', id: '3', status: 'named', name: 'Lobby Loop' }]);
+    expect(resolve({ id: 3 }, history, 'delete_user')).toEqual([{ path: 'id', id: '3', status: 'named', name: 'Linus' }]);
+  });
+
+  it('counts a nested record as its own kind (owner), not as the record that holds it', () => {
+    const nested = [tool('playlists_list', { data: [{ id: 3, name: 'Lobby Loop', owner: { id: 3, displayName: 'Linus' } }] })];
+    expect(collectEntitySightings(nested).get('3')?.kinds).toEqual([{ kind: 'playlist', names: ['Lobby Loop'] }, { kind: 'owner', names: ['Linus'] }]);
+    expect(resolve({ playlistId: 3 }, nested)).toEqual([{ path: 'playlistId', id: '3', status: 'named', name: 'Lobby Loop', label: 'Playlist' }]);
+    expect(resolve({ ownerId: 3 }, nested)).toEqual([{ path: 'ownerId', id: '3', status: 'named', name: 'Linus', label: 'Owner' }]);
+    expect(resolve({ id: 3 }, nested)[0]).toMatchObject({ status: 'ambiguous', names: ['Lobby Loop', 'Linus'] });
+  });
+
+  it('takes the same record from a list, a get and a read_result answer as one kind', () => {
+    const same = [
+      tool('playlists_list', { data: [{ id: 3, name: 'Lobby Loop' }], _result: { id: 'ro_bbbbbbbb', hint: '…' } }),
+      tool('playlists_get', { data: { id: 3, name: 'Lobby Loop', tracks: [{ id: 9, title: 'Intro' }] } }),
+      { role: 'assistant', parts: [{ type: 'tool-read_result', toolCallId: 'r1', state: 'output-available',
+        input: { resultId: 'ro_bbbbbbbb', fields: ['data[0].name'] }, output: { data: { 0: { id: 3, name: 'Lobby Loop' } } } }] },
+      { role: 'user', parts: [{ type: 'text', text: '{{mention:playlist:3:Lobby Loop}}' }] },
+    ];
+    expect(collectEntitySightings(same).get('3')).toEqual({ name: 'Lobby Loop', names: ['Lobby Loop'], type: 'playlist' });
+    expect(resolve({ id: 3 }, same)).toEqual([{ path: 'id', id: '3', status: 'named', name: 'Lobby Loop', label: 'Playlist' }]);
+  });
+
+  it('leaves a UUID seen for two kinds named, as before', () => {
+    const uuids = [
+      tool('users_list', { data: [{ id: P1, name: 'Ada' }] }),
+      tool('playlists_list', { data: [{ id: 'p-1', name: 'Mix', owner: { id: P1, name: 'Ada' } }] }),
+    ];
+    expect(collectEntitySightings(uuids).get(P1)?.kinds).toHaveLength(2);
+    expect(resolve({ assigneeId: P1 }, uuids)).toEqual([{ path: 'assigneeId', id: P1, status: 'named', name: 'Ada', label: 'Assignee' }]);
+  });
+
+  it('treats a short text key that two kinds share the same way', () => {
+    const keys = [
+      tool('teams_list', { teams: [{ id: 'ops', name: 'Operations' }] }),
+      tool('channels_list', { channels: [{ id: 'ops', title: 'Ops alerts' }] }),
+    ];
+    expect(resolve({ channel_id: 'ops' }, keys)).toEqual([{ path: 'channel_id', id: 'ops', status: 'named', name: 'Ops alerts', label: 'Channel' }]);
+    expect(resolve({ ref_id: 'OPS' }, keys)).toEqual([{
+      path: 'ref_id', id: 'OPS', status: 'ambiguous', names: ['Ops alerts', 'Operations'], label: 'Ref',
+      candidates: [{ label: 'Channel', name: 'Ops alerts' }, { label: 'Team', name: 'Operations' }],
+    }]);
+  });
+
+  it('marks the picked kind as seen when its records had no name', () => {
+    const versions = [
+      tool('users_list', { users: [{ id: 303, displayName: 'Grace' }] }),
+      tool('versions_list', { versions: [{ version_id: 303, versionNumber: 3 }] }),
+    ];
+    expect(resolve({ version_id: 303 }, versions)).toEqual([{ path: 'version_id', id: '303', status: 'seen', label: 'Version' }]);
+    expect(resolve({ x_id: 303 }, versions)[0]).toMatchObject({
+      status: 'ambiguous', names: ['Grace'], candidates: [{ label: 'Version' }, { label: 'User', name: 'Grace' }],
+    });
   });
 });

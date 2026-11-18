@@ -94,10 +94,10 @@ run with `ACCEPTANCE_LOCALE=de-DE`.
 | 4 | "Show me the files of Night Loop." | `playlists_get` with `playlist_id: 10` (or `read_result` on `playlists[9].items`) | 64 clip names and durations; no URL, no invented URL | Search for `fileUrl`, `X-Amz` and `https://` in the answer, the activity details and the copied chat text |
 | 5 | "Show playlist 9999." | `playlists_get` once | Says it does not exist; no retry loop | Number of calls; whether it offered a lookup (0.17.2 adds a lookup hint) |
 | 6 | Turn 1: case 1. Turn 2: "Delete entry 14 of that list." | `playlists_delete` with `playlist_id: 14` (after a lookup if needed) | Approval card for "Opening Loop"; decline it | The id sent; whether it re-listed first (SA-01, fixed in 0.17.2: the history keeps `playlist_id`) |
-| 7 | "Delete the playlist Weekend Loop." / DE: "Lösch die Playlist Weekend Loop." | lookup, then `playlists_delete` with `playlist_id: 7` | Card names "Weekend Loop" | Card status and name shown (known gaps SA-04, SA-05) |
+| 7 | "Delete the playlist Weekend Loop." / DE: "Lösch die Playlist Weekend Loop." | lookup, then `playlists_delete` with `playlist_id: 7` | Card names "Weekend Loop" | Card status and name shown (known gap SA-04; SA-05 fixed in 0.17.2) |
 | 8 | "Delete playlist 7." (new chat, no listing) | `playlists_delete` with `playlist_id: 7` | Card status `unknown`, shows id 7 with a warning | Card status |
 | 9 | "Roll Lobby Loop back to version 3." Then: "Roll the lobby channel back to revision 3." | `playlistsVersions_list`, `playlistsVersionsRollback_create` (`playlist_id: 3`, `version_id: 303`); `channelsRevisions_list`, `channelsRevisionsRollback_create` (`key: "lobby"`, `revision_id: 503`) | Card `seen` with "Version number 3"; for the revision a comparable fallback | Card status and fallback of both (known gaps SA-07, SA-08) |
-| 10 | Case 1, then "Delete user 1." | `users_list` (or not), `users_delete` with `user_id: 1` | Card names "Ada Lovelace", never "Morning Loop" | Card status and name (known gap SA-05) |
+| 10 | Case 1, then "Delete user 1." | `users_list` (or not), `users_delete` with `user_id: 1` | Card names "Ada Lovelace", never "Morning Loop" | Card status and name (SA-05, fixed in 0.17.2) |
 | 11 | Case 7, decline the approval | none after the decline | Model acknowledges; no retry; activity shows `declined` | Retries; wording |
 | 12 | Case 7, approve; then "List my playlists again." | `playlists_delete`, then `playlists_list` | Weekend Loop gone, total 59 | Total shown |
 | 13 | "Delete the lobby channel." | `channels_list` (optional), `channels_delete` with `key: "lobby"` | Card that identifies the lobby channel | What the card shows (known gap SA-06) |
@@ -111,7 +111,6 @@ run with `ACCEPTANCE_LOCALE=de-DE`.
 | Id | Finding | SDK code |
 | --- | --- | --- |
 | SA-04 | A listed playlist is `unknown` on the approval card: only `id`, `_id`, `uuid` are record ids | `src/react/utils/entity-names.ts` |
-| SA-05 | Playlist 3 is named after user 3 ("Linus Torvalds") with status `named`, no ambiguity warning | `src/react/utils/entity-names.ts`, `src/react/utils/approval-subjects.ts` |
 | SA-06 | A channel deleted by `key` gets no subject on the card | `src/react/utils/approval-subjects.ts` (`isIdKey`) |
 | SA-07 | A listed version (`version_id`) is `unknown`, not `seen` with its `versionNumber` | `src/react/utils/entity-names.ts` (`collectSeenEntityIds`) |
 | SA-08 | `rev` is no fallback field, even for a record seen under `id` | `src/react/utils/entity-names.ts` (`FALLBACK_KEYS`) |
@@ -124,3 +123,4 @@ Fixed (the tests keep their ids, titled `SA-nn (fixed in 0.17.2)`):
 | SA-01 | History compaction keeps `playlist_id` with `displayName` for entries 11–60; the `_history` marker's `keys` names it | `src/contracts/record-identity.ts` (`idLikeFieldsOf`), `src/server/adapters/nextjs/history-compaction.ts` |
 | SA-02 | Under size pressure the overview keeps `playlist_id`; other fields go first, then trailing entries | `src/server/core/result-overview.ts` |
 | SA-03 | `read_result` adds `playlist_id` with the name to entries read below the array | `src/server/core/result-overview.ts` (`identityFieldsOf`) |
+| SA-05 | Id 3 of user 3, playlist 3 and the versions of playlist 3 is named only for the kind the argument picks (`playlist_id: 3` → "Lobby Loop", `user_id: 3` → "Linus Torvalds"); a bare `id: 3` without a resource tool names none and lists every candidate | `src/react/utils/entity-kinds.ts`, `src/react/utils/entity-names.ts`, `src/react/utils/approval-subjects.ts` |

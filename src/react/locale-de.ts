@@ -22,6 +22,7 @@ export const deChatLocale: ChatLocale = {
   approvalUnknownIdWarning: 'Zu dieser ID ist in dieser Unterhaltung kein Name bekannt. Prüfe sie, bevor du bestätigst.',
   approvalUnknownIdsWarning: 'Zu diesen IDs sind in dieser Unterhaltung keine Namen bekannt. Prüfe sie, bevor du bestätigst.',
   approvalAmbiguousIdWarning: 'Diese ID kam mit verschiedenen Namen vor: {names}. Prüfe sie, bevor du bestätigst.',
+  approvalCollidingIdWarning: 'Diese ID kam bei verschiedenen Arten von Datensätzen vor: {candidates}. Prüfe, welcher gemeint ist, bevor du bestätigst.',
   approvalSeenIdNote: 'kam in dieser Unterhaltung vor',
   moreItemsLabel: 'weitere',
   showAllItemsLabel: 'Alle {count} anzeigen',

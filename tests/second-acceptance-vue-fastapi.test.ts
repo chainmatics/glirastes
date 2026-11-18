@@ -264,9 +264,9 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: approval subjects', (
       ...(withUsers ? [toolPart('users_list', await call(tools, 'users_list', {}))] : []),
     );
   }
-  const subjects = async (args: Json, withUsers = true) => {
+  const subjects = async (args: Json, withUsers = true, toolName?: string) => {
     const messages = await browserHistory(withUsers);
-    return resolveApprovalSubjects(args, collectEntitySightings(messages), collectSeenEntityIds(messages));
+    return resolveApprovalSubjects(args, collectEntitySightings(messages), collectSeenEntityIds(messages), toolName ? { toolName } : {});
   };
 
   it('names a user by its `id` with its displayName', async () => {
@@ -283,13 +283,19 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: approval subjects', (
     expect(collectEntitySightings(messages).size).toBe(0);
   });
 
-  it('KNOWN GAP SA-05: playlist 3 is named after user 3, without an ambiguity warning', async () => {
-    // KNOWN GAP SA-05 (src/react/utils/entity-names.ts:5, src/react/utils/approval-subjects.ts:85):
-    // sightings are keyed by the bare id value, so the only record shown with id 3 (a user)
-    // names the playlist; `ambiguous` needs two names for one id, and playlists add none.
+  it('SA-05 (fixed in 0.17.2): id 3 of a user, a playlist and versions names the kind the call picks, or none', async () => {
+    // Id 3 was the own id of user 3 (`id`), of playlist 3 (`playlist_id`, no recognised id)
+    // and of the versions of playlist 3 (`playlist_id` next to `version_id`, no name): three
+    // kinds (src/react/utils/entity-kinds.ts). The argument picks one, or the card names none.
     expect(await subjects({ playlist_id: 3 })).toEqual([
-      { path: 'playlist_id', id: '3', status: 'named', name: 'Linus Torvalds', label: 'Playlist' },
+      { path: 'playlist_id', id: '3', status: 'named', name: 'Lobby Loop', label: 'Playlist' },
     ]);
+    expect(await subjects({ id: 3 }, true, 'playlists_delete')).toEqual([{ path: 'id', id: '3', status: 'named', name: 'Lobby Loop' }]);
+    expect(await subjects({ user_id: 3 })).toEqual([{ path: 'user_id', id: '3', status: 'named', name: 'Linus Torvalds', label: 'User' }]);
+    expect(await subjects({ id: 3 })).toEqual([{
+      path: 'id', id: '3', status: 'ambiguous', names: ['Linus Torvalds', 'Lobby Loop'],
+      candidates: [{ label: 'User', name: 'Linus Torvalds' }, { label: 'Version' }, { label: 'Playlist', name: 'Lobby Loop' }],
+    }]);
     // Deleting user 1 after only the playlists were shown: no name at all.
     expect(await subjects({ user_id: 1 }, false)).toEqual([{ path: 'user_id', id: '1', status: 'unknown', label: 'User' }]);
   });
@@ -303,8 +309,9 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: approval subjects', (
   it('KNOWN GAP SA-07: a listed version is `unknown`, not `seen` with "Version number 3"', async () => {
     // KNOWN GAP SA-07 (src/react/utils/entity-names.ts:5 ID_KEYS in collectSeenEntityIds):
     // version_id is no record id, so its versionNumber fallback is never used.
+    // (Playlist 3 is named since SA-05 was fixed.)
     expect(await subjects({ playlist_id: 3, version_id: 303 })).toEqual([
-      { path: 'playlist_id', id: '3', status: 'named', name: 'Linus Torvalds', label: 'Playlist' },
+      { path: 'playlist_id', id: '3', status: 'named', name: 'Lobby Loop', label: 'Playlist' },
       { path: 'version_id', id: '303', status: 'unknown', label: 'Version' },
     ]);
     // The same record under `id` would be seen with its fallback.

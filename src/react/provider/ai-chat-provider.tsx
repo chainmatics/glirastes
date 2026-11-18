@@ -25,7 +25,7 @@ import type {
 import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { resolveAttachmentOptions } from '../utils/attachments.js';
-import { collectEntitySightings, collectSeenEntityIds } from '../utils/entity-names.js';
+import { collectEntitySightings, collectSeenEntityIds, isUuidLike } from '../utils/entity-names.js';
 import { resolveApprovalSubjects } from '../utils/approval-subjects.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
 import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
@@ -75,6 +75,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   approvalUnknownIdWarning: 'No name is known for this id in this conversation. Check it before you approve.',
   approvalUnknownIdsWarning: 'No names are known for these ids in this conversation. Check them before you approve.',
   approvalAmbiguousIdWarning: 'This id came up with different names: {names}. Check it before you approve.',
+  approvalCollidingIdWarning: 'This id came up for different kinds of records: {candidates}. Check which one is meant before you approve.',
   approvalSeenIdNote: 'seen in this conversation',
   moreItemsLabel: 'more',
   showAllItemsLabel: 'Show all {count}',
@@ -819,17 +820,33 @@ export function AiChatProvider({
         ) {
           handledApprovalIdsRef.current.add(toolPart.approval.id);
           const sightings = collectEntitySightings(rawMessages);
+          // Display only, from the browser's own history (not a trust boundary):
+          // the approved arguments stay exactly what the call carries.
+          const resolved = resolveApprovalSubjects(toolPart.input, sightings, collectSeenEntityIds(rawMessages), { toolName });
+          const names = new Map([...sightings].map(([id, seen]) => [id, seen.name]));
+          // An id seen for records of different kinds names the record this call picks, or
+          // none (also when the call uses it for two kinds: `nameLabels` look up by id only).
+          const picked = new Map<string, string | undefined>();
+          for (const subject of resolved) {
+            const key = subject.id.toLowerCase();
+            if (!sightings.get(key)?.kinds) continue;
+            const name = subject.status === 'named' ? subject.name : undefined;
+            picked.set(key, picked.has(key) && picked.get(key) !== name ? undefined : name);
+          }
+          for (const [key, seen] of sightings) {
+            // A UUID is one record wherever it occurs: never a collision.
+            if (!seen.kinds || isUuidLike(key)) continue;
+            const name = picked.get(key);
+            if (name) names.set(key, name);
+            else names.delete(key);
+          }
           const described = approvalDescriptionRef.current(
             toolName,
             toolPart.approval.id,
             toolPart.input,
-            { names: new Map([...sightings].map(([id, seen]) => [id, seen.name])) },
+            { names },
           );
-          // Display only, from the browser's own history (not a trust boundary):
-          // the approved arguments stay exactly what the call carries.
-          const subjects = approvalSubjectsRef.current
-            ? resolveApprovalSubjects(toolPart.input, sightings, collectSeenEntityIds(rawMessages))
-            : [];
+          const subjects = approvalSubjectsRef.current ? resolved : [];
           const pending = subjects.length > 0 ? { ...described, subjects } : described;
           setPendingApprovalsMap(prev => new Map(prev).set(toolPart.approval!.id, pending));
         }
