@@ -38,6 +38,22 @@ describe('schema probe', () => {
     expect(json).not.toHaveProperty('$schema');
   }, 30_000);
 
+  it('resolves aliases with the tsconfig the source names, not only the root one', async () => {
+    const app = await createAppFixture({
+      'apps/api/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '#lib/*': ['src/lib/*'] } } }),
+      'apps/api/src/lib/fields.ts': "import { z } from 'zod';\nexport const title = z.string().min(1);\n",
+      'apps/api/src/notes.ts': "import { z } from 'zod';\nimport { title } from '#lib/fields';\n"
+        + 'export const createNote = z.object({ title }).strict();\n',
+    });
+    const item = schemaItem('apps/api/src/notes.ts', 'createNote');
+    const [nested] = await createSchemaProbe().probe(app.root, [item], { tsconfig: app.path('apps/api/tsconfig.json') });
+    expect(nested).toMatchObject({ ok: true, kind: 'schema' });
+    const [rootOnly] = await createSchemaProbe().probe(app.root, [item]);
+    expect(rootOnly).toMatchObject({ ok: false });
+    const [none] = await createSchemaProbe().probe(app.root, [item], { tsconfig: null });
+    expect(none).toMatchObject({ ok: false });
+  }, 30_000);
+
   it('reads contract entries and reports a missing method entry', async () => {
     const app = await createAppFixture({
       'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"

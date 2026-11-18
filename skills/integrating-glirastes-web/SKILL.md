@@ -37,6 +37,17 @@ replace the generator with a hand-written tool list.
 | vue-router routes of `createRouter({ routes: [...] })` | yes | `vue-router` |
 | JSX `<Route>` trees, YAML or Swagger 2.0 exports, `<script>` blocks in another language than ts or js | not yet | report as an open gap |
 
+Every source that reads TypeScript (`next-app`, `nest`, `react-router`,
+`vue-router`, `url-filters`, `react-actions`) resolves imports and path
+aliases with the nearest `tsconfig.json` from its scanned folder (`srcDir`,
+`apiDir` for `next-app`) up to the folder of `.glirastes/` (never above;
+`extends`, `baseUrl` and `paths` as TypeScript reads them; a solution config
+with `references` leads to the referenced project that contains the scanned
+files; no tsconfig: TypeScript defaults). In a monorepo set `srcDir` to the
+app's folder, or name the file with `"tsconfig": "apps/web/tsconfig.app.json"`
+on the source. A client action whose payload contract cannot be imported is
+reported as `ui-action-import-unresolved` with the import and the tsconfig.
+
 If two NestJS controllers declare the same method and path, `glirastes tools refresh` reports one `route-declared-twice` error naming both files, gives that route no enabled tool and still generates every other tool; remove one declaration, or exclude the route with `glirastes tools policy exclude`.
 
 Two reference apps in the SDK show the sources together:

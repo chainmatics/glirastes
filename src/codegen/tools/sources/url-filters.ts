@@ -12,7 +12,7 @@ import type {
   ToolSource,
   ToolSourceObservation,
 } from '../types.js';
-import { scanAppSources } from './app-files.js';
+import { defaultSourceDir, scanAppSources } from './app-files.js';
 import { navigationBridgeMissing, scanForNavigationBridge } from './next-pages.js';
 import { enumeratePages, pathExclusion, type PageEntry, type PageTreeOptions } from './page-tree.js';
 import { componentDeclaration, enumerateRouteConfigPages, type RouterKind } from './route-config.js';
@@ -37,6 +37,8 @@ export interface UrlFilterSourceOptions extends PageTreeOptions {
   srcDir?: string;
   /** Which page list the filters attach to: the Next.js page tree (default) or react-router routes. */
   pages?: 'next' | RouterKind;
+  /** The tsconfig of the pages and filter definitions; the nearest one from the scanned folder by default. */
+  tsconfig?: string;
 }
 
 export type FilterDomain =
@@ -731,6 +733,8 @@ async function observeFilters(
       ...tree.pages.map((page) => programFileName(join(root, page.file))),
       ...defined.files.map((file) => file.absolute),
     ],
+    searchFrom: options.srcDir ?? options.appDir ?? defaultSourceDir(root),
+    ...(options.tsconfig ? { tsconfig: options.tsconfig } : {}),
   });
   const reader = new FilterReader(app);
   const views = new Map<string, View>();

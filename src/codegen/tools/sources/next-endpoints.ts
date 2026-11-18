@@ -346,7 +346,7 @@ function toObserved(piece: RoutePiece, definitionId: string): ObservedTool {
   };
 }
 
-async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Promise<ToolSourceObservation> {
+async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string, tsconfig?: string): Promise<ToolSourceObservation> {
   if (!existsSync(resolve(ctx.root, apiDir))) {
     return { observations: [], findings: [], complete: true, excluded: [] };
   }
@@ -380,6 +380,8 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
   const app = createAppProgram({
     root: ctx.root,
     rootNames: [...new Set([...kept.map((entry) => entry.absoluteFile), ...contractFiles.values()])],
+    searchFrom: apiDir,
+    ...(tsconfig ? { tsconfig } : {}),
   });
   const conventions = ctx.resolutions.conventions;
   const analyzed: AnalyzedRoute[] = kept.map((entry) => {
@@ -420,7 +422,9 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
     if (resolution?.output?.schemaRef) request(probeItemFor(resolution.output.schemaRef, 'output'));
   }
   const keys = [...items.keys()].sort(compareCodeUnits);
-  const results = keys.length > 0 ? await ctx.probe.probe(ctx.root, keys.map((key) => items.get(key)!)) : [];
+  const results = keys.length > 0
+    ? await ctx.probe.probe(ctx.root, keys.map((key) => items.get(key)!), { tsconfig: app.tsconfigPath ?? null })
+    : [];
   const probes = new Map<string, SchemaProbeResult>(keys.map((key, index) => [
     key,
     results[index] ?? { ok: false, reason: 'probe-failed' },
@@ -445,7 +449,7 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
   };
 }
 
-export function createNextEndpointSource(options: { apiDir?: string } = {}): ToolSource {
+export function createNextEndpointSource(options: { apiDir?: string; tsconfig?: string } = {}): ToolSource {
   const apiDir = options.apiDir ?? NEXT_DEFAULT_API_DIR;
-  return { kind: 'next-app', observe: (ctx) => observeNextEndpoints(ctx, apiDir) };
+  return { kind: 'next-app', observe: (ctx) => observeNextEndpoints(ctx, apiDir, options.tsconfig) };
 }

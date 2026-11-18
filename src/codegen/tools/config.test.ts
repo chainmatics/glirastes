@@ -84,6 +84,26 @@ describe('tools config', () => {
     expect(normalizeSources(config)).toEqual([{ kind: 'nest' }, { kind: 'nest', srcDir: 'api/src' }]);
   });
 
+  it('accepts an app-relative tsconfig on the sources that read TypeScript, and nothing else', async () => {
+    const sources = [
+      { kind: 'next-app', apiDir: 'apps/web/src/app/api', tsconfig: 'apps/web/tsconfig.json' },
+      { kind: 'nest', srcDir: 'apps/api/src', tsconfig: 'apps/api/tsconfig.app.json' },
+      { kind: 'react-router', srcDir: 'apps/web/src', tsconfig: 'apps/web/tsconfig.app.json' },
+      { kind: 'url-filters', tsconfig: 'apps/web/tsconfig.app.json' },
+      { kind: 'react-actions', srcDir: 'apps/web/src', tsconfig: 'apps/web/tsconfig.app.json' },
+    ];
+    expect(normalizeSources(loadToolsConfig(await appWith({ ...minimal, sources })))).toEqual(sources);
+    for (const source of [
+      { kind: 'react-actions', tsconfig: '../tsconfig.json' },
+      { kind: 'react-actions', tsconfig: '/abs/tsconfig.json' },
+      { kind: 'react-actions', tsconfig: 'apps/web/tsconfig' },
+      { kind: 'openapi', tsconfig: 'tsconfig.json' },
+      { kind: 'next-pages', tsconfig: 'tsconfig.json' },
+    ]) {
+      expect(ToolsConfigSchema.safeParse({ ...minimal, sources: [source] }).success).toBe(false);
+    }
+  });
+
   it('accepts an OpenAPI export with the FastAPI folder it is counted against', async () => {
     const source = { kind: 'openapi', document: 'api/openapi.json', fastapi: 'api/app' };
     const config = loadToolsConfig(await appWith({ ...minimal, sources: [source, 'vue-router'] }));

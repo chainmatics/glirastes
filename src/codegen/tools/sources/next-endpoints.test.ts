@@ -331,6 +331,27 @@ describe('next-app endpoint source', () => {
     expect(byKey(observed.observations).has('GET /api/admin/tenants')).toBe(false);
   }, 60_000);
 
+  it('reads and probes schemas through the path aliases of the app tsconfig in a monorepo', async () => {
+    const app = await createAppFixture({
+      'apps/web/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      'apps/web/src/lib/fields.ts': "import { z } from 'zod';\nexport const title = z.string().min(1);\n",
+      'apps/web/src/lib/schemas.ts': "import { z } from 'zod';\nimport { title } from '@/lib/fields';\n"
+        + 'export const createTask = z.object({ title }).strict();\n',
+      'apps/web/src/app/api/tasks/route.ts': "import { createTask } from '@/lib/schemas';\n"
+        + 'declare function getSession(): Promise<unknown>;\n'
+        + 'export async function POST(request: Request) {\n  await getSession();\n'
+        + '  const input = createTask.parse(await request.json());\n  return Response.json({ id: \'1\', title: input.title });\n}\n',
+    });
+    const observed = await createNextEndpointSource({ apiDir: 'apps/web/src/app/api' }).observe(context(app.root));
+    const [create] = observed.observations;
+    expect(create?.contract).toMatchObject({
+      source: 'native',
+      params: { body: ['title'] },
+      runtime: { input: { kind: 'module-export', module: 'apps/web/src/lib/schemas.ts', export: 'createTask' } },
+    });
+    expect(create?.findings.filter((finding) => finding.severity === 'needs_attention')).toEqual([]);
+  }, 60_000);
+
   it('keeps a previous definition id and handles apps without an API directory', async () => {
     const app = await createAppFixture({
       'src/app/api/tasks/route.ts': 'export async function GET() { await getSession(); return Response.json([]); }\n'

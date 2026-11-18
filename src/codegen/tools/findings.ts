@@ -74,6 +74,7 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'filter-key-invalid': 'Name the URL parameter with letters, digits, _ or - (starting with a letter or _, at most 64 characters) so the chat can set it; other names are left out of the filter tool.',
   'filter-keys-capped': `A filter tool takes at most ${MAX_FILTER_KEYS} URL parameters per view, the first in code-unit order. Read fewer URL parameters on the page and the components it renders, or move the others to another page, if the chat must set them.`,
   'ui-action-payload-untyped': 'Pass a payload contract (e.g. a Zod object) as the third argument of useAiClientAction or registerAiClientAction, or type the handler parameter.',
+  'ui-action-import-unresolved': 'Make the named import resolvable with the tsconfig the message names: add its path alias (paths/baseUrl) there, or name the tsconfig that has it as "tsconfig" of the source in .glirastes/tools.json (by default the nearest tsconfig.json from srcDir up to the app root is used), then run glirastes tools refresh.',
   'ui-action-contract-conflict': 'Register the action with one payload contract wherever it is handled.',
   'ui-action-id-dynamic': 'Register client actions with a literal id so the chat can call them.',
   'ui-action-id-invalid': 'Use an action id of letters, digits, dots and dashes, e.g. tasks.highlight.',

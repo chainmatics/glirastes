@@ -12,25 +12,27 @@ let appRoot;
 let sdkSourceRoot;
 let compilerOptions;
 
-function readCompilerOptions(root) {
+// `tsconfigPath`: the tsconfig the parent resolved for the probed source (null:
+// none); without it, the app root's tsconfig.json as before.
+function readCompilerOptions(root, tsconfigPath) {
   const fallback = {
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
     target: ts.ScriptTarget.ES2022,
     allowJs: true,
   };
-  const configPath = join(root, 'tsconfig.json');
-  if (!existsSync(configPath)) return fallback;
+  const configPath = tsconfigPath === undefined ? join(root, 'tsconfig.json') : tsconfigPath;
+  if (!configPath || !existsSync(configPath)) return fallback;
   const read = ts.readConfigFile(configPath, ts.sys.readFile);
   if (read.error) return fallback;
-  return { ...ts.parseJsonConfigFileContent(read.config, ts.sys, root, undefined, configPath).options, allowJs: true };
+  return { ...ts.parseJsonConfigFileContent(read.config, ts.sys, dirname(configPath), undefined, configPath).options, allowJs: true };
 }
 
 export async function initialize(data) {
   ts = (await import(data.typescriptUrl)).default;
   appRoot = data.appRoot;
   sdkSourceRoot = data.sdkSourceRoot ?? undefined;
-  compilerOptions = readCompilerOptions(appRoot);
+  compilerOptions = readCompilerOptions(appRoot, data.tsconfigPath);
 }
 
 function inside(base, path) {

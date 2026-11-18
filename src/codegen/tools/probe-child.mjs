@@ -55,6 +55,7 @@ async function main() {
     data: {
       typescriptUrl: request.typescriptUrl,
       appRoot: request.appRoot,
+      tsconfigPath: request.tsconfigPath,
       sdkSourceRoot: request.sdkSourceRoot,
     },
   });
