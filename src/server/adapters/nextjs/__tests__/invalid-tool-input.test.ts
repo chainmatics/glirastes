@@ -7,6 +7,8 @@ import { ToolInputValidationError } from '../../../../runtime/tool-input-error.j
 import { createTurnSnapshot } from '../../../../runtime/turn-snapshot.js';
 import { defineTool, type SchemaLike, type ToolRegistry } from '../../../../types.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
+import { prepareModelMessages } from '../prepare-model-messages.js';
+import { INVALID_TOOL_INPUT_HISTORY_TEXT, INVALID_TOOL_INPUT_TEXT } from '../stream-error-text.js';
 import {
   agentRevision, collectingSink, localLimits, manifestRevision, policyRevision, principal, streamChunks,
 } from './command-fixtures.js';
@@ -30,7 +32,7 @@ const textStep = () => convertArrayToReadableStream([
 ] as never);
 
 const VALUE = 'Abend-Promos';
-const INSTRUCTION = 'Correct the arguments and call the tool again; look up missing ids with a read tool instead of asking the user.';
+const INSTRUCTION = 'Correct the arguments and call the tool again now, in this turn. If a field expects an id or uuid and you only have a name, first find the id with a list or search tool, then call this tool again; do not ask the user for an id.';
 const BROWSER_TEXT = 'The assistant sent invalid input for this tool; it was told what to correct.';
 
 const zodInput = z.object({ playlistId: z.string().uuid(), kind: z.enum(['a', 'b']) }).strict();
@@ -153,6 +155,43 @@ describe.each([
     expect(JSON.stringify(error)).not.toContain(VALUE);
     expect(String((error as Error).message)).not.toContain(VALUE);
     expect((error as Error).cause).toBeUndefined();
+  });
+});
+
+describe('an invalid tool call in a later turn', () => {
+  it('reads as an instruction for the model, not as the chat text the browser kept', async () => {
+    expect(BROWSER_TEXT).toBe(INVALID_TOOL_INPUT_TEXT);
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Show the playlist' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [
+          { type: 'step-start' },
+          { type: 'tool-tasks_list', toolCallId: 'call-1', state: 'output-error', rawInput: { playlistId: VALUE }, errorText: BROWSER_TEXT },
+          { type: 'text', text: 'Which playlist id?' },
+        ],
+      },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'The evening one' }] },
+    ];
+    const prompt = await prepareModelMessages(history as never) as Array<{ role: string; content: unknown }>;
+    const results = prompt.filter((message) => message.role === 'tool')
+      .flatMap((message) => message.content as Array<{ output: { type: string; value: unknown } }>);
+    expect(results.map((result) => result.output)).toEqual([{ type: 'error-text', value: INVALID_TOOL_INPUT_HISTORY_TEXT }]);
+    expect(JSON.stringify(prompt)).not.toContain(BROWSER_TEXT);
+    expect(INVALID_TOOL_INPUT_HISTORY_TEXT).not.toContain(VALUE);
+  });
+
+  it('keeps every other tool error text as the browser holds it', async () => {
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Show tasks' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [
+          { type: 'step-start' },
+          { type: 'tool-tasks_list', toolCallId: 'call-1', state: 'output-error', input: {}, errorText: 'AI request failed' },
+        ],
+      },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'Again' }] },
+    ];
+    expect(JSON.stringify(await prepareModelMessages(history as never))).toContain('AI request failed');
   });
 });
 

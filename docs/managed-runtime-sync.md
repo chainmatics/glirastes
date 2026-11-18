@@ -601,12 +601,17 @@ the schema expects there, at most five issues (the rest counted), never the
 value it wrote, and what to do:
 
 ```text
-Invalid input for tool playlists_get: playlistId: expected format uuid; kind: required. Correct the arguments and call the tool again; look up missing ids with a read tool instead of asking the user.
+Invalid input for tool playlists_get: playlistId: expected format uuid; kind: required. Correct the arguments and call the tool again now, in this turn. If a field expects an id or uuid and you only have a name, first find the id with a list or search tool, then call this tool again; do not ask the user for an id.
 ```
 
 The chat shows `The assistant sent invalid input for this tool; it was told
 what to correct.` for the call (a call of a tool that was not offered: `This
-tool is not available in this chat.`).
+tool is not available in this chat.`). The browser keeps only that chat text with
+the call; in a later request the model reads, for such a call in its history,
+`This call was not executed: its arguments did not match the tool's input
+schema. If it is still needed, correct the arguments and call the tool again;
+if a field expects an id or uuid and you only have a name, first find the id
+with a list or search tool. Do not ask the user for an id.`
 
 #### Budget denials
 

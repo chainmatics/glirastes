@@ -21,6 +21,7 @@ import {
 } from '../../../runtime/ai-sdk/engine.js';
 import { attachmentPlaceholderText } from '../../../contracts/attachments.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
+import { withModelFacingToolErrors } from './stream-error-text.js';
 import {
   compactHistoryResult,
   compactToolOutput,
@@ -83,7 +84,8 @@ const FILE_PART_TOKENS = 1_000;
  * Convert UI messages into sanitized model messages ready for `streamText()`.
  *
  * Pipeline:
- * 1. `convertToModelMessages` (with `ignoreIncompleteToolCalls: true`)
+ * 1. `convertToModelMessages` (with `ignoreIncompleteToolCalls: true`), the
+ *    chat text of an invalid tool call replaced by an instruction for the model
  * 2. Turn-aware history (or the legacy slice + `pruneMessages`)
  * 3. `sanitizeModelMessages` — strip orphaned tool-calls for OpenAI compatibility
  * 4. Strip `uiAction` from tool results
@@ -94,7 +96,8 @@ export async function prepareModelMessages(
 ): Promise<unknown[]> {
   const maxCtx = options?.maxContextMessages ?? 12;
 
-  const raw = await convertToModelMessages(uiMessages, {
+  // A failed call keeps only the chat's text in the browser; the model gets an instruction instead.
+  const raw = await convertToModelMessages(withModelFacingToolErrors(uiMessages), {
     ignoreIncompleteToolCalls: true,
   });
 
