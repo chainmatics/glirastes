@@ -160,7 +160,8 @@ export function collectDeclaredIdLabels(
     // removed without one (a shared parent is no record of its own).
     const composite = identity.idValues.length > 1;
     // A number (also as digits only) is never removed as a bare word: it could be any count.
-    const technicalText = (id: string) => looksLikeTechnicalId(id) && !/^\d+$/.test(id);
+    const technicalText = (id: string) => looksLikeTechnicalId(id) && !/^-?\d+$/.test(id);
+    const technical = (raw: string | number) => typeof raw === 'string' && technicalText(raw.trim());
     const learn = (id: string, label: string | undefined, technical = technicalText(id)) => {
       if (!id || id === identity.name) return;
       // The declaration decides: a number stays a number, also when the guess learnt it as an id.
@@ -171,11 +172,10 @@ export function collectDeclaredIdLabels(
       }
       if (label !== undefined || !labels.has(id)) labels.set(id, label ?? labels.get(id));
     };
-    for (const raw of identity.idValues) learn(typeof raw === 'string' ? raw.trim() : String(raw), composite ? undefined : identity.name);
+    for (const raw of identity.idValues) learn(typeof raw === 'string' ? raw.trim() : String(raw), composite ? undefined : identity.name, technical(raw));
     // The whole key is technical when each part is (`abc123456/def123456`), else only removed with a prefix.
     if (composite) {
-      const parts = identity.idValues.map((raw) => (typeof raw === 'string' ? raw.trim() : String(raw)));
-      learn(entityIdText(identity.idValues), identity.name, parts.every(technicalText));
+      learn(entityIdText(identity.idValues), identity.name, identity.idValues.every(technical));
     }
   }
 }

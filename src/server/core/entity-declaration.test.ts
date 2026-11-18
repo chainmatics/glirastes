@@ -441,3 +441,12 @@ describe('declarationsForRead', () => {
     expect(declarationsForRead([{ id: 'n' }], undefined)).toBeUndefined();
   });
 });
+
+describe('hideIds and negative numbers', () => {
+  it('removes a negative declared integer only with an id prefix', () => {
+    const labels: IdLabels = new Map();
+    collectDeclaredIdLabels({ data: [{ trackNo: -12345678, label_text: 'Neg' }, { trackNo: 5, label_text: '-87654321' }] }, [TRACK], labels);
+    collectDeclaredIdLabels({ data: [{ code: '-12345679', label_text: 'Str' }] }, [{ id: 'code', idKind: 'opaque', name: 'label_text' }], labels);
+    expect(redactIds('Neg (ID: -12345678): balance -12345678, -12345679 left.', labels)).toBe('Neg: balance -12345678, -12345679 left.');
+  });
+});
