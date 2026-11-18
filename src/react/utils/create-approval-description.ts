@@ -1,3 +1,4 @@
+import { approvalNameLookupKey, isUuidLike } from '../../contracts/entity-identity.js';
 import type { PendingApproval, ApprovalDescriptionContext, ApprovalDescriptionFn } from '../types.js';
 
 // ============================================================================
@@ -46,7 +47,6 @@ export interface ApprovalDescriptionConfig {
 // Helpers
 // ============================================================================
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 interface DetailEntry {
   line: string;
   items?: string[];
@@ -151,7 +151,10 @@ export function createApprovalDescriptionGenerator(
       const label = nameLabels[key];
       if (!label) continue;
       const known = (Array.isArray(value) ? value : [value])
-        .map((id) => (typeof id === 'string' ? names.get(id.toLowerCase()) : undefined))
+        .map((id) => {
+          const lookup = approvalNameLookupKey(id);
+          return lookup === undefined ? undefined : names.get(lookup);
+        })
         .filter((name): name is string => !!name);
       if (known.length > 0) result.push([label, known.join(', ')]);
     }
@@ -163,7 +166,7 @@ export function createApprovalDescriptionGenerator(
     for (const [key, value] of Object.entries(obj)) {
       if (value === undefined || value === null || value === '') continue;
       if (hiddenFields.has(key)) continue;
-      if (UUID_REGEX.test(String(value))) continue;
+      if (isUuidLike(String(value))) continue;
 
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         result.push(...collectDetails(value as Record<string, unknown>));
@@ -172,7 +175,7 @@ export function createApprovalDescriptionGenerator(
 
       const label = fieldLabels[key] || key;
       if (Array.isArray(value)) {
-        const filtered = value.filter((v) => !UUID_REGEX.test(String(v)));
+        const filtered = value.filter((v) => !isUuidLike(String(v)));
         if (filtered.length === 0) continue;
         const items = filtered.map((v) => formatValue(key, v));
         result.push({ line: `${label}: ${items.join(', ')}`, items });

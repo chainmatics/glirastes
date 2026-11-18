@@ -9,6 +9,7 @@ import {
   type ChatInteractionsData,
   type ChatText,
 } from '../../contracts/chat-interactions.js';
+import { idParameterStem, isBareIdParameter, NAME_KEYS, searchIdFieldCandidates } from '../../contracts/entity-identity.js';
 import type { AppSetupArtifact } from '../../contracts/index.js';
 import { compareCodeUnits } from './canonical.js';
 import { actionLabel, commandLabel, humanizeIdentifier, singular, type Label } from './chat-labels.js';
@@ -37,7 +38,7 @@ export const CHAT_INTERNAL_ACTION = /^(?:ai-?chat|chat|assistant|command-?palett
 /** Query parameters that make a read endpoint an entity search, best first. */
 const SEARCH_PARAMS = ['search', 'q', 'query', 'term'];
 const LIMIT_PARAMS = ['limit', 'pageSize'];
-const LABEL_FIELDS = ['title', 'name', 'displayName', 'label', 'subject', 'email'];
+const LABEL_FIELDS: ReadonlyArray<string> = NAME_KEYS.search;
 const DESCRIPTION_FIELDS = ['description', 'email', 'status', 'subtitle', 'summary'];
 const FIELD = /^[A-Za-z_][\w-]{0,63}$/;
 const CONTROL = /[\u0000-\u001F]/;
@@ -231,7 +232,7 @@ function searchEntity(tool: BoundTool): SearchCandidate | undefined {
   }
   const fields = properties(items);
   const isText = (name: string) => isRecord(fields[name]) && (fields[name] as Record<string, unknown>).type === 'string';
-  const idField = ['id', 'uuid', `${type}Id`].find((name) => isRecord(fields[name]));
+  const idField = searchIdFieldCandidates(type).find((name) => isRecord(fields[name]));
   const labelField = LABEL_FIELDS.find((name) => name !== idField && isText(name));
   if (!itemsPath || !idField || !labelField) return undefined;
   const descriptionField = DESCRIPTION_FIELDS.find((name) => name !== labelField && isText(name));
@@ -303,8 +304,8 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
     if (!searches.has(candidate.type)) searches.set(candidate.type, candidate);
   }
   const entityOf = (name: string): string | undefined => {
-    const match = /^(?:params\.)?([A-Za-z][A-Za-z0-9]*?)(?:Id|_id)$/.exec(name);
-    const type = match ? entityType(match[1]!) : undefined;
+    const stem = idParameterStem(name);
+    const type = stem ? entityType(stem) : undefined;
     return type && searches.has(type) ? type : undefined;
   };
 
@@ -370,7 +371,7 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
         if (params.length !== 1) continue;
         const segments = path.split('/');
         const index = segments.indexOf(`:${params[0]}`);
-        const type = entityOf(params[0]!) ?? (params[0] === 'id' && index > 0 ? entityType(segments[index - 1]!) : undefined);
+        const type = entityOf(params[0]!) ?? (isBareIdParameter(params[0]!) && index > 0 ? entityType(segments[index - 1]!) : undefined);
         if (!type || !searches.has(type)) continue;
         addAction(type, {
           id: `${type}.open`,

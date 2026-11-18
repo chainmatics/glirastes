@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { assertOutputFields } from './server/core/output-fields.js';
+import { isUuidLike } from './contracts/entity-identity.js';
 
 // ============================================================================
 // Host schema boundary
@@ -249,12 +250,7 @@ export function createUiActionSchema(
         const entity = data.type.split('-')[0];
         const idKey = `${entity}Id`;
         const id = data[idKey];
-        return (
-          typeof id === 'string' &&
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-            id,
-          )
-        );
+        return typeof id === 'string' && isUuidLike(id);
       },
       { message: 'Entity action must include valid {entity}Id (UUID)' },
     );

@@ -1,6 +1,16 @@
 import type { ApprovalSubject } from '../types.js';
-import { kindLabel, kindOfField, kindOfToolName, kindsMatch } from './entity-kinds.js';
-import { entityIdKey, isUuidLike, type EntitySighting, type SeenEntity } from './entity-names.js';
+import {
+  entityIdKey,
+  idArgumentStem,
+  isBareIdArgumentKey,
+  isIdArgumentKey,
+  isUuidLike,
+  kindLabel,
+  kindOfField,
+  kindOfToolName,
+  kindsMatch,
+} from '../../contracts/entity-identity.js';
+import type { EntitySighting, SeenEntity } from './entity-names.js';
 
 const MAX_DEPTH = 4;
 /** Id values checked per approval; a call with more ids is rare and the rest are not listed. */
@@ -10,14 +20,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** `id`, `ids`, `ID`, `IDs`, `_id`. */
-const BARE_ID_KEY = /^(?:id|ids|ID|IDs|Id|Ids|_id)$/;
-/** `playlistId`, `playlist_id`, `playlistID` and their plurals `playlistIds`, `playlist_ids`, `playlistIDs`. */
-const ID_SUFFIX = /^(.+?)(?:Id|_id|ID)(s?)$/;
-
-/** Whether an argument key names an id by its form alone. */
+/** Whether an argument key names an id by its form alone (`id`, `ids`, `_id`, `playlistId`, `track_ids`). */
 export function isIdKey(key: string): boolean {
-  return BARE_ID_KEY.test(key) || ID_SUFFIX.test(key);
+  return isIdArgumentKey(key);
 }
 
 /** `targetFolder` → `Target folder`, `play_list` → `Play list`. */
@@ -32,9 +37,9 @@ function humanize(key: string): string {
 
 /** The entity an id key names (`playlistId` → `Playlist`, `trackIds` → `Tracks`), or undefined for a bare `id`. */
 function labelOfKey(key: string): string | undefined {
-  if (BARE_ID_KEY.test(key)) return undefined;
-  const match = ID_SUFFIX.exec(key);
-  if (match) return humanize(match[1] + match[2]) || undefined;
+  if (isBareIdArgumentKey(key)) return undefined;
+  const match = idArgumentStem(key);
+  if (match) return humanize(match.stem + match.plural) || undefined;
   return humanize(key) || undefined;
 }
 
@@ -49,9 +54,9 @@ export interface ApprovalSubjectOptions {
 
 /** The kind an id argument addresses (`playlist_id` → `playlist`), or undefined when the key does not say. */
 function kindOfKey(key: string): string | undefined {
-  if (BARE_ID_KEY.test(key)) return undefined;
-  const match = ID_SUFFIX.exec(key);
-  return match ? kindOfField(match[1]!) : undefined;
+  if (isBareIdArgumentKey(key)) return undefined;
+  const match = idArgumentStem(key);
+  return match ? kindOfField(match.stem) : undefined;
 }
 
 /**
@@ -158,8 +163,8 @@ export function resolveApprovalSubjects(
       if (value === undefined || value === null) continue;
       const path = prefix ? `${prefix}.${key}` : key;
       // A bare `id` inside `playlist: { id }` takes the label of its object.
-      const label = BARE_ID_KEY.test(key) ? parentLabel : labelOfKey(key);
-      const kind = BARE_ID_KEY.test(key) ? parentKind : kindOfKey(key);
+      const label = isBareIdArgumentKey(key) ? parentLabel : labelOfKey(key);
+      const kind = isBareIdArgumentKey(key) ? parentKind : kindOfKey(key);
       if (Array.isArray(value)) {
         for (const item of value) {
           if (subjects.length >= MAX_IDS) break;

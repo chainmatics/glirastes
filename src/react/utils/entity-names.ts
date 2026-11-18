@@ -1,41 +1,33 @@
-import { idLikeFieldsOf, RECOGNISED_ID_KEYS } from '../../contracts/record-identity.js';
+import {
+  BROWSER_RECOGNISED_ID_KEYS,
+  entityIdKey,
+  fallbackTextOf,
+  idLikeFieldsOf,
+  isGenericWrapper,
+  kindOfField,
+  kindOfToolName,
+  NAME_KEYS as NAME_KEY_PROFILES,
+  OWN_ID_KEYS,
+} from '../../contracts/entity-identity.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
-import { isGenericWrapper, kindOfField, kindOfToolName } from './entity-kinds.js';
 import { parseMentionSegments } from './mention-markup.js';
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** The keys a record carries its own id under (the identity keys of an overview entry). */
-const ID_KEYS = ['id', '_id', 'uuid'] as const;
-const NAME_KEYS = ['title', 'name', 'displayName', 'label'] as const;
+export { entityIdKey, isUuidLike } from '../../contracts/entity-identity.js';
+
+/** The keys a record carries its own id under (the browser profile: `id`, `_id`, `uuid`). */
+const ID_KEYS = OWN_ID_KEYS.browser;
+const NAME_KEYS = NAME_KEY_PROFILES.browser;
 const MAX_DEPTH = 8;
 const MAX_NODES = 20_000;
-const MAX_ID_LENGTH = 200;
 const MAX_NAMES_PER_ID = 5;
 /** Kinds tracked per id value, at most (the newest first). */
 const MAX_KINDS_PER_ID = 8;
 /** An entry without `id`, `_id` or `uuid` and without any key the result overview recognises carries its id-like fields. */
-const RECOGNISED_KEYS: ReadonlyArray<string> = [...new Set<string>([...ID_KEYS, ...RECOGNISED_ID_KEYS])];
+const RECOGNISED_KEYS: ReadonlyArray<string> = BROWSER_RECOGNISED_ID_KEYS;
 const INDEX_KEY = /^\d+$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Whether a string has the shape of a UUID. */
-export function isUuidLike(value: string): boolean {
-  return UUID_REGEX.test(value);
-}
-
-/**
- * The lookup key of an id value: a non-empty string of at most 200 characters
- * or an integer, lower-cased. Anything else is no id.
- */
-export function entityIdKey(value: unknown): string | undefined {
-  if (typeof value === 'number') return Number.isSafeInteger(value) ? String(value) : undefined;
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > MAX_ID_LENGTH) return undefined;
-  return trimmed.toLowerCase();
 }
 
 /** What the conversation showed for one record id. */
@@ -49,7 +41,7 @@ export interface EntitySighting {
   /**
    * Set only when this id value was seen as the own id of records of more
    * than one kind (user 3 and playlist 3), newest first: each kind
-   * (`entity-kinds.ts`) with the names its records carried (none for a
+   * (`contracts/entity-identity.ts`) with the names its records carried (none for a
    * record without a name field). Records count with `id`, `_id` or `uuid`,
    * or, without a recognised id, with every id-like field (`playlist_id`).
    */
@@ -195,34 +187,10 @@ export function collectEntitySightings(
   return sightings;
 }
 
-/**
- * Fields that stand in for a missing name, in this order: a version or a
- * number tells records of one type apart (`versionNumber: 3`). Never a name.
- */
-const FALLBACK_KEYS = ['versionNumber', 'version', 'number', 'code', 'slug'] as const;
-const MAX_FALLBACK_LENGTH = 80;
-
 /** A record id a tool result of this conversation carried, with or without a name. */
 export interface SeenEntity {
   /** A short field of the same record that tells it apart (`Version number 3`), when it has one. */
   fallback?: string;
-}
-
-/** `versionNumber` → `Version number`. */
-function fallbackLabel(key: string): string {
-  const words = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-function fallbackOf(record: Record<string, unknown>): string | undefined {
-  for (const key of FALLBACK_KEYS) {
-    const value = record[key];
-    const text = typeof value === 'number' && Number.isFinite(value)
-      ? String(value)
-      : typeof value === 'string' ? value.trim() : '';
-    if (text && text.length <= MAX_FALLBACK_LENGTH) return `${fallbackLabel(key)} ${text}`;
-  }
-  return undefined;
 }
 
 /**
@@ -250,10 +218,10 @@ export function collectSeenEntityIds(
       const key = entityIdKey(value[idKey])!;
       const known = seen.get(key);
       if (!known) {
-        const fallback = fallbackOf(value);
+        const fallback = fallbackTextOf(value);
         seen.set(key, fallback ? { fallback } : {});
       } else if (!known.fallback) {
-        const fallback = fallbackOf(value);
+        const fallback = fallbackTextOf(value);
         if (fallback) known.fallback = fallback;
       }
     }
