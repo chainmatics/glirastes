@@ -270,7 +270,59 @@ export interface CompactHistoryResultOptions {
  */
 export function compactHistoryResult(value: unknown, options: CompactHistoryResultOptions = {}): unknown {
   const compacted = compactHistoryResultOnce(value, options);
-  return options.entities ? withRootIdentity(compacted, value, options.entities, options.maxChars) : compacted;
+  if (!options.entities) return compacted;
+  const rooted = withRootIdentity(compacted, value, options.entities, options.maxChars);
+  return withEntryIds(rooted, value, options.entities, options.maxChars);
+}
+
+/**
+ * The declared ids of the dominant array's complete leading entries as the
+ * tool returned them: string clipping never shortens them (the entries kept
+ * as identity only carry them unclipped already). When restoring them would
+ * break `maxChars`, the copy stays as it is.
+ */
+function withEntryIds(
+  compacted: unknown,
+  value: unknown,
+  entities: ReadonlyArray<OutputEntityDeclaration>,
+  maxChars: number | undefined,
+): unknown {
+  const rootArray = Array.isArray(value);
+  if (!rootArray && !isPlainObject(value)) return compacted;
+  const route = rootArray ? [] : dominantArrayRoute(value as Record<string, unknown>, OWN_MARKERS);
+  if (!route) return compacted;
+  const declared = declarationForEntries(entities, rootArray ? ['data'] : route, rootArray ? { data: value } : value);
+  if (!declared) return compacted;
+  let source: unknown = value;
+  for (const key of route) source = (source as Record<string, unknown>)[key];
+  // The compacted array: at the same route, under `data` for a list answer with a marker, or the list itself.
+  const outputRoute = rootArray ? (isPlainObject(compacted) ? ['data'] : []) : route;
+  let holder: unknown = compacted;
+  for (const key of outputRoute) holder = isPlainObject(holder) ? holder[key] : undefined;
+  if (!Array.isArray(source) || !Array.isArray(holder)) return compacted;
+  const output = holder;
+  const restoredIndices: Array<[number, Record<string, unknown>]> = [];
+  for (let index = 0; index < Math.min(output.length, source.length); index += 1) {
+    const entry = output[index];
+    const original = source[index];
+    if (!isPlainObject(entry) || !isPlainObject(original)) continue;
+    let copy: Record<string, unknown> | undefined;
+    for (const key of entityIdFields(declared)) {
+      const id = Object.prototype.hasOwnProperty.call(original, key) ? original[key] : undefined;
+      if (isEntityIdValue(id) && Object.prototype.hasOwnProperty.call(entry, key) && entry[key] !== id) {
+        copy ??= { ...entry };
+        setOwn(copy, key, id);
+      }
+    }
+    if (copy) restoredIndices.push([index, copy]);
+  }
+  if (restoredIndices.length === 0) return compacted;
+  const before = restoredIndices.map(([index]) => output[index]);
+  for (const [index, copy] of restoredIndices) output[index] = copy;
+  if (maxChars !== undefined && serializedLength(compacted) > maxChars) {
+    restoredIndices.forEach(([index], position) => { output[index] = before[position]; });
+  }
+  return compacted;
 }
 
 /**

@@ -476,3 +476,16 @@ describe('hideIds and composite UUID keys', () => {
     expect(redactIds(`Siehe ${first}/${second}.`, labels)).toBe('Siehe Dokument.');
   });
 });
+
+describe('history compaction keeps declared entry ids unclipped', () => {
+  it('before and beyond maxItems', () => {
+    const orders = { data: Array.from({ length: 15 }, (_, index) => ({ orderNo: `ORDER-2026-${String(index).padStart(6, '0')}-ALPHA`, note: 'n'.repeat(40) })) };
+    const compacted = compactHistoryResult(orders, { maxStringLength: 20, entities: [{ id: 'orderNo', path: 'data[]' }] }) as Entry;
+    const data = compacted.data as Entry[];
+    expect(data[0]!.orderNo).toBe('ORDER-2026-000000-ALPHA');
+    expect(data[12]!.orderNo).toBe('ORDER-2026-000012-ALPHA');
+    expect(data[0]!.note).not.toBe('n'.repeat(40));
+    const plain = compactHistoryResult(orders, { maxStringLength: 20 }) as Entry;
+    expect((plain.data as Entry[])[0]!.orderNo).not.toBe('ORDER-2026-000000-ALPHA');
+  });
+});
