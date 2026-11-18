@@ -1,5 +1,6 @@
 import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import type { UiActionBus } from '../browser/ui-action-bus.js';
+import type { UiActionRunCode } from '../browser/client-actions.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
 import type { ChatInteractionsConfig, PendingChatCommand } from './interactions/registry.js';
@@ -869,8 +870,35 @@ export interface ChatLocale {
 /** Preprocess message text before sending */
 export type OnBeforeSend = (text: string, mentions: MentionData[]) => string;
 
-/** Called when a tool produces output — useful for app-specific dispatching */
+/**
+ * Called when a tool result of the running request arrives — useful for
+ * app-specific dispatching. Results restored from a stored history (session
+ * load, messages set by the host or a custom transport) do not call it.
+ */
 export type OnToolResult = (toolName: string, result: unknown) => void;
+
+/**
+ * What became of the generated UI actions (`glirastes.*`) of one tool
+ * result. No payload: only the tool, the action ids and the outcome.
+ */
+export interface UiActionOutcomeEvent {
+  toolName: string;
+  toolCallId: string;
+  /**
+   * `ok`, `rejected-contract`, `rejected-handler`, `unavailable`, `failed`,
+   * `initiated` (a reloading navigation started), `timeout` (a handler did
+   * not settle in time) or `unconfirmed` (a bus of an older SDK copy).
+   */
+  code: UiActionRunCode;
+  actions: Array<{ type: string; actionId?: string }>;
+  /** Whether the outcome was written back to the tool result for the model; always `false` for now. */
+  reported: boolean;
+  durationMs: number;
+  /** What a refusing or failing handler threw. */
+  error?: unknown;
+}
+
+export type OnUiActionOutcome = (event: UiActionOutcomeEvent) => void;
 
 /** What the chat knows beyond the arguments of the call to approve. */
 export interface ApprovalDescriptionContext {
@@ -996,6 +1024,18 @@ export interface AiChatProviderConfig {
    * the page-wide bus of `glirastes/browser`.
    */
   uiActionBus?: UiActionBus;
+  /**
+   * Called once per tool result with generated UI actions, after its actions
+   * ran (one tool result after another, in call order), with the outcome:
+   * see `UiActionOutcomeEvent`. A throw inside is caught.
+   */
+  onUiActionOutcome?: OnUiActionOutcome;
+  /**
+   * How long the handlers of one tool result may take before the outcome is
+   * `timeout`; default 10 000 ms. Page-bound client actions get their route
+   * wait (5 000 ms) on top.
+   */
+  uiActionOutcomeTimeoutMs?: number;
   onBeforeSend?: OnBeforeSend;
   approvalDescription?: ApprovalDescriptionFn;
   /**

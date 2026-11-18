@@ -42,7 +42,7 @@ import {
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
-import { dispatchToolResultUiActions } from '../../browser/client-actions.js';
+import { runToolResultUiActions, toolResultUiActions } from '../../browser/client-actions.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
@@ -432,6 +432,8 @@ export function AiChatProvider({
   unstyled = false,
   onToolResult,
   uiActionBus,
+  onUiActionOutcome,
+  uiActionOutcomeTimeoutMs,
   onBeforeSend,
   approvalDescription: userApprovalDescription,
   approvalSubjects = true,
@@ -626,6 +628,10 @@ export function AiChatProvider({
   onToolResultRef.current = onToolResult;
   const uiActionBusRef = useRef(uiActionBus);
   uiActionBusRef.current = uiActionBus;
+  const onUiActionOutcomeRef = useRef(onUiActionOutcome);
+  onUiActionOutcomeRef.current = onUiActionOutcome;
+  const uiActionOutcomeTimeoutRef = useRef(uiActionOutcomeTimeoutMs);
+  uiActionOutcomeTimeoutRef.current = uiActionOutcomeTimeoutMs;
   const approvalDescriptionRef = useRef(approvalDescriptionFn);
   approvalDescriptionRef.current = approvalDescriptionFn;
   const approvalSubjectsRef = useRef(approvalSubjects);
@@ -819,8 +825,56 @@ export function AiChatProvider({
     );
   }, [rawMessages, isInitialized, activeSessionId, loadedSessionId]);
 
+  // UI actions run one tool result after another, in call order.
+  const uiActionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Set once a UI action started a full page load: nothing after it runs on this page.
+  const pageLeavingRef = useRef(false);
+  // Whether the previous run of the tool-result effect saw a request of this instance running.
+  const liveRequestRef = useRef(false);
+
+  const runUiActions = useCallback((toolName: string, toolCallId: string, output: unknown) => {
+    const actions = toolResultUiActions(output);
+    if (actions.length === 0) return;
+    uiActionQueueRef.current = uiActionQueueRef.current.then(async () => {
+      if (pageLeavingRef.current) return;
+      const run = await runToolResultUiActions(
+        output,
+        uiActionBusRef.current ?? getDefaultUiActionBus(),
+        uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {},
+      ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }));
+      if (!run) return;
+      if (run.code === 'initiated') pageLeavingRef.current = true;
+      if (run.code !== 'ok' && run.code !== 'initiated') {
+        console.warn('[glirastes] A generated UI action was not carried out');
+      }
+      try {
+        onUiActionOutcomeRef.current?.({
+          toolName,
+          toolCallId,
+          code: run.code,
+          actions: actions.map((action) => (typeof action.actionId === 'string'
+            ? { type: action.type, actionId: action.actionId }
+            : { type: action.type })),
+          reported: false,
+          durationMs: run.durationMs,
+          ...(run.error !== undefined ? { error: run.error } : {}),
+        });
+      } catch {
+        console.warn('[glirastes] onUiActionOutcome threw');
+      }
+    });
+  }, []);
+
   // Process tool results and approvals from streaming messages
   useEffect(() => {
+    // A tool result runs only in the instance whose request delivered it:
+    // while it streams, or in the render that ends it. A result first seen
+    // otherwise (stored history, messages set by the host or a custom
+    // transport, another tab) is never run later.
+    const wasLive = liveRequestRef.current;
+    liveRequestRef.current = isLoading;
+    const live = isLoading || wasLive;
+    if (isLoading && !wasLive) pageLeavingRef.current = false;
     if (rawMessages.length === 0) return;
 
     const lastMessage = rawMessages[rawMessages.length - 1];
@@ -885,19 +939,16 @@ export function AiChatProvider({
           const toolCallId = toolPart.toolCallId || `${lastMessage.id}-${partType}`;
           if (!processedToolCallsRef.current.has(toolCallId)) {
             processedToolCallsRef.current.add(toolCallId);
+            // A result that already carries an outcome was run before.
+            if (!live || 'outcome' in toolPart.output) continue;
             onToolResultRef.current?.(toolName, toolPart.output);
             // Generated UI tools run in the browser through the app's bridge.
-            void dispatchToolResultUiActions(
-              toolPart.output,
-              uiActionBusRef.current ?? getDefaultUiActionBus(),
-            ).catch(() => {
-              console.warn('[glirastes] A generated UI action failed');
-            });
+            runUiActions(toolName, toolCallId, toolPart.output);
           }
         }
       }
     }
-  }, [rawMessages]);
+  }, [rawMessages, isLoading, runUiActions]);
 
   // Extract suggestions from suggest_followups tool, with a strict text
   // fallback for models that append a trailing Markdown suggestion section.
