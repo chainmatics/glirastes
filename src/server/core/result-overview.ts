@@ -10,6 +10,7 @@
  * then within each class the largest first. Pure and deterministic.
  */
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
+import { idLikeFieldsOf, RECOGNISED_ID_KEYS } from '../../contracts/record-identity.js';
 import { leftOutFields, outputFieldTree, projectOutputFields, type LeftOutField } from './output-fields.js';
 import { formatResultPath, isSelectablePath, setOwn, type PathStep } from './result-paths.js';
 
@@ -92,7 +93,7 @@ const MAX_LISTED_PATH_CHARS = 120;
 const MAX_LISTED_KEYS = 8;
 const MAX_LISTED_KEY_CHARS = 64;
 /** Identity keys that identify an entry (its id), and those that name it for a person. */
-export const IDENTITY_ID_KEYS: ReadonlyArray<string> = ['id', 'uuid', 'key', 'slug', 'code'];
+export const IDENTITY_ID_KEYS: ReadonlyArray<string> = RECOGNISED_ID_KEYS;
 export const IDENTITY_NAME_KEYS: ReadonlyArray<string> = ['name', 'title', 'label', 'displayName'];
 /** An entry's own fields that name it stay as long as they are small. Foreign keys (`folderId`) do not. */
 const IDENTITY_KEY = new RegExp(`^(${[...IDENTITY_ID_KEYS, ...IDENTITY_NAME_KEYS].join('|')})$`);
@@ -101,13 +102,16 @@ const MAX_IDENTITY_FIELD_CHARS = 200;
 /**
  * The identity fields of one entry that name it: an identity key with a
  * scalar value whose field (key and value, serialized) is at most 200
- * characters, in the entry's key order. `read_result` adds them to the
+ * characters, in the entry's key order. An entry without a recognised
+ * identifier (`id`, `uuid`, `key`, `slug`, `code`) adds every id-like field
+ * (`playlist_id`, `ownerId`: `idLikeFieldsOf`). `read_result` adds them to the
  * entries of an array it reads below; the overview keeps the same keys.
  */
 export function identityFieldsOf(entry: Record<string, unknown>): Array<[string, unknown]> {
   const fields: Array<[string, unknown]> = [];
+  const idLike = new Set(idLikeFieldsOf(entry, IDENTITY_ID_KEYS));
   for (const key of Object.keys(entry)) {
-    if (!IDENTITY_KEY.test(key)) continue;
+    if (!IDENTITY_KEY.test(key) && !idLike.has(key)) continue;
     const value = entry[key];
     const scalar = value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
     if (scalar && serializedLength(key) + 1 + serializedLength(value) + 1 <= MAX_IDENTITY_FIELD_CHARS) fields.push([key, value]);
@@ -439,6 +443,14 @@ export function buildResultOverview(
   const keep = new Set([...ownFieldSize].filter(([key, size]) => (
     IDENTITY_KEY.test(key) && size / Math.max(1, objectEntries) <= MAX_IDENTITY_FIELD_CHARS
   )).map(([key]) => key));
+  // An entry without a recognised identifier keeps every id-like field (`playlist_id`, `ownerId`):
+  // rather one field too many than no id for the next call. Kept for the whole array, never
+  // dropped: under size pressure every other field goes first, then trailing entries.
+  if (dominant) {
+    for (const entry of dominant.entries) {
+      for (const key of idLikeFieldsOf(entry, IDENTITY_ID_KEYS)) if (ownFieldSize.has(key)) keep.add(key);
+    }
+  }
   if (keep.size === 0 && ownFieldSize.size > 0) {
     const smallest = [...ownFieldSize].sort((left, right) => left[1] - right[1] || (left[0] < right[0] ? -1 : 1))[0]!;
     keep.add(smallest[0]);

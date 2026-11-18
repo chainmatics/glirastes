@@ -93,7 +93,7 @@ run with `ACCEPTANCE_LOCALE=de-DE`.
 | 3 | "Which versions does Lobby Loop have?" | `playlists_list` (or reuse), `playlistsVersions_list` with `playlist_id: 3` | Versions 1–4 with dates | The `playlist_id` sent (an integer, 3) |
 | 4 | "Show me the files of Night Loop." | `playlists_get` with `playlist_id: 10` (or `read_result` on `playlists[9].items`) | 64 clip names and durations; no URL, no invented URL | Search for `fileUrl`, `X-Amz` and `https://` in the answer, the activity details and the copied chat text |
 | 5 | "Show playlist 9999." | `playlists_get` once | Says it does not exist; no retry loop | Number of calls; whether it offered a lookup (0.17.2 adds a lookup hint) |
-| 6 | Turn 1: case 1. Turn 2: "Delete entry 14 of that list." | `playlists_delete` with `playlist_id: 14` (after a lookup if needed) | Approval card for "Opening Loop"; decline it | The id sent; whether it re-listed first (known gap SA-01) |
+| 6 | Turn 1: case 1. Turn 2: "Delete entry 14 of that list." | `playlists_delete` with `playlist_id: 14` (after a lookup if needed) | Approval card for "Opening Loop"; decline it | The id sent; whether it re-listed first (SA-01, fixed in 0.17.2: the history keeps `playlist_id`) |
 | 7 | "Delete the playlist Weekend Loop." / DE: "Lösch die Playlist Weekend Loop." | lookup, then `playlists_delete` with `playlist_id: 7` | Card names "Weekend Loop" | Card status and name shown (known gaps SA-04, SA-05) |
 | 8 | "Delete playlist 7." (new chat, no listing) | `playlists_delete` with `playlist_id: 7` | Card status `unknown`, shows id 7 with a warning | Card status |
 | 9 | "Roll Lobby Loop back to version 3." Then: "Roll the lobby channel back to revision 3." | `playlistsVersions_list`, `playlistsVersionsRollback_create` (`playlist_id: 3`, `version_id: 303`); `channelsRevisions_list`, `channelsRevisionsRollback_create` (`key: "lobby"`, `revision_id: 503`) | Card `seen` with "Version number 3"; for the revision a comparable fallback | Card status and fallback of both (known gaps SA-07, SA-08) |
@@ -110,12 +110,17 @@ run with `ACCEPTANCE_LOCALE=de-DE`.
 
 | Id | Finding | SDK code |
 | --- | --- | --- |
-| SA-01 | History compaction keeps only `displayName` for entries 11–60: `playlist_id` is no identity key, so a follow-up "entry 14" has no id | `src/server/core/result-overview.ts` (`IDENTITY_ID_KEYS`), `src/server/adapters/nextjs/history-compaction.ts` |
-| SA-02 | Under size pressure the overview drops `playlist_id` first (ranked as a foreign key) and keeps names | `src/server/core/result-overview.ts` (`FOREIGN_KEY`, `valueRank`) |
-| SA-03 | `read_result` adds names but no `playlist_id` to entries read below the array | `src/server/core/read-result-tool.ts` (`identityFieldsOf`) |
 | SA-04 | A listed playlist is `unknown` on the approval card: only `id`, `_id`, `uuid` are record ids | `src/react/utils/entity-names.ts` |
 | SA-05 | Playlist 3 is named after user 3 ("Linus Torvalds") with status `named`, no ambiguity warning | `src/react/utils/entity-names.ts`, `src/react/utils/approval-subjects.ts` |
 | SA-06 | A channel deleted by `key` gets no subject on the card | `src/react/utils/approval-subjects.ts` (`isIdKey`) |
 | SA-07 | A listed version (`version_id`) is `unknown`, not `seen` with its `versionNumber` | `src/react/utils/entity-names.ts` (`collectSeenEntityIds`) |
 | SA-08 | `rev` is no fallback field, even for a record seen under `id` | `src/react/utils/entity-names.ts` (`FALLBACK_KEYS`) |
 | SA-09 | `hideIds` learns no integer ids: "(ID: 3)" stays in the answer | `src/server/adapters/nextjs/hide-ids.ts` |
+
+Fixed (the tests keep their ids, titled `SA-nn (fixed in 0.17.2)`):
+
+| Id | Fixed behaviour | SDK code |
+| --- | --- | --- |
+| SA-01 | History compaction keeps `playlist_id` with `displayName` for entries 11–60; the `_history` marker's `keys` names it | `src/contracts/record-identity.ts` (`idLikeFieldsOf`), `src/server/adapters/nextjs/history-compaction.ts` |
+| SA-02 | Under size pressure the overview keeps `playlist_id`; other fields go first, then trailing entries | `src/server/core/result-overview.ts` |
+| SA-03 | `read_result` adds `playlist_id` with the name to entries read below the array | `src/server/core/result-overview.ts` (`identityFieldsOf`) |

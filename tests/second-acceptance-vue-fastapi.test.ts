@@ -214,41 +214,41 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: results the model see
       .toEqual(expect.arrayContaining([{ id: 5, displayName: 'Alan Turing' }]));
   });
 
-  it('KNOWN GAP SA-01: the history drops playlist_id beyond maxItems, so "entry 14 of that list" has no id', async () => {
-    // KNOWN GAP SA-01 (src/server/core/result-overview.ts:95-98 IDENTITY_ID_KEYS, used by
-    // src/server/adapters/nextjs/history-compaction.ts:134 identityOf): an entry's own id
-    // under `<entity>_id` is no identity key, so entries 11 to 60 keep only their name.
+  it('SA-01 (fixed in 0.17.2): the history keeps playlist_id beyond maxItems, so "entry 14 of that list" has its id', async () => {
+    // An entry without a recognised id (`id`, `uuid`, `key`, `slug`, `code`) keeps every
+    // id-like field (src/contracts/record-identity.ts idLikeFieldsOf).
     const list = await call(chatTools(), 'playlists_list', {});
     const compacted = compactHistoryResult(list) as Json;
     const playlists = compacted.playlists as Entry[];
     expect(playlists[0]).toEqual({ playlist_id: 1, displayName: 'Morning Loop', status: 'published' });
-    expect(playlists[13]).toEqual({ displayName: 'Opening Loop' });
-    expect(compacted._history).toMatchObject({ field: 'playlists', showing: 60, full: 10, total: 60, keys: ['displayName'] });
+    expect(playlists[13]).toEqual({ playlist_id: 14, displayName: 'Opening Loop' });
+    expect(compacted._history).toMatchObject({ field: 'playlists', showing: 60, full: 10, total: 60, keys: ['playlist_id', 'displayName'] });
   });
 
-  it('KNOWN GAP SA-02: an overview under size pressure drops playlist_id first, as a foreign key, and keeps the names', async () => {
-    // KNOWN GAP SA-02 (src/server/core/result-overview.ts:121 FOREIGN_KEY, :249 valueRank,
-    // :439-441 the kept identity keys): `playlist_id` ranks with foreign keys (left out
-    // first), and only id/uuid/key/slug/code count as the entry's own id. 4,000 is a valid
+  it('SA-02 (fixed in 0.17.2): an overview under size pressure keeps playlist_id with the names', async () => {
+    // `playlist_id` still ranks with foreign keys, but an entry without a recognised id keeps
+    // every id-like field: other fields go first, then trailing entries. 4,000 is a valid
     // `x-glirastes-max-result-chars`; at 16,000 the 60 small entries still fit.
     const raw = await api('/api/playlists');
     const overview = buildResultOverview({ success: true, ...raw }, { id: 'ro_abcdefgh', maxChars: 4_000, readOnly: true }) as Json;
-    expect((overview.playlists as Entry[])[0]).toEqual({ displayName: 'Morning Loop', ownerKey: 'ada' });
+    expect(JSON.stringify(overview).length).toBeLessThanOrEqual(4_000);
+    const playlists = overview.playlists as Entry[];
+    for (const [index, entry] of playlists.entries()) expect(entry).toMatchObject({ playlist_id: index + 1, displayName: expect.any(String) });
+    expect(playlists[0]).toEqual({ playlist_id: 1, displayName: 'Morning Loop' });
     expect((overview._result as { omitted: Array<{ path: string }> }).omitted.map((field) => field.path))
-      .toEqual(['playlists[].items', 'playlists[].status', 'playlists[].playlist_id']);
+      .toEqual(['playlists[].items', 'playlists[].status', 'playlists[].ownerKey']);
   });
 
-  it('KNOWN GAP SA-03: read_result names the entries it reads below the array without their playlist_id', async () => {
-    // KNOWN GAP SA-03 (src/server/core/read-result-tool.ts:313 via identityFieldsOf,
-    // src/server/core/result-overview.ts:95-98): only id/uuid/key/slug/code and the name keys
-    // are added, so the items of entry 10 come back with its name and no id.
+  it('SA-03 (fixed in 0.17.2): read_result names the entries it reads below the array with their playlist_id', async () => {
+    // identityFieldsOf adds the id-like fields of an entry without a recognised id.
     const tools = chatTools();
     const list = await call(tools, 'playlists_list', {});
     const resultId = (list._result as { id: string }).id;
     const items = await call(tools, 'read_result', { resultId, fields: ['playlists[].items'], offset: 9, limit: 1 });
-    expect(Object.keys((items.playlists as Entry[])[0]!)).toEqual(['displayName', 'items']);
+    expect(Object.keys((items.playlists as Entry[])[0]!)).toEqual(['playlist_id', 'displayName', 'items']);
+    expect((items.playlists as Entry[])[0]!.playlist_id).toBe(10);
     const names = await call(tools, 'read_result', { resultId, fields: ['playlists[].displayName'] });
-    expect((names.playlists as Entry[])[13]).toEqual({ displayName: 'Opening Loop' });
+    expect((names.playlists as Entry[])[13]).toEqual({ playlist_id: 14, displayName: 'Opening Loop' });
   });
 });
 
