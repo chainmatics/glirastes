@@ -379,6 +379,24 @@ export interface AiChatProviderProps extends AiChatProviderConfig {
 }
 
 /**
+ * True when `messages` continue the messages a request started from: the
+ * same ids in order (a trailing assistant message may be replaced, as a
+ * regenerated answer is). Results of a history the host set while the
+ * request ran (another chat, another tab) do not count as this request's.
+ */
+function continuesRequestBase(
+  messages: ReadonlyArray<{ id: string }>,
+  base: ReadonlyArray<{ id: string; role: string }>,
+): boolean {
+  const kept = base.at(-1)?.role === 'assistant' ? base.length - 1 : base.length;
+  if (messages.length < kept) return false;
+  for (let index = 0; index < kept; index += 1) {
+    if (messages[index]?.id !== base[index]!.id) return false;
+  }
+  return true;
+}
+
+/**
  * Provider component that manages chat state and exposes it to child components.
  *
  * Transport-agnostic: pick a transport hook (Vercel, LangGraph, or your own)
@@ -640,6 +658,8 @@ export function AiChatProvider({
   const liveRequestRef = useRef(false);
   // A request that was running when the chat was reset: its later results belong to the left chat.
   const staleRequestRef = useRef(false);
+  // Message ids when the running request started; a history set meanwhile does not continue them.
+  const requestBaseRef = useRef<Array<{ id: string; role: string }>>([]);
   // Bumped by clear(), a session switch and unmount: queued actions of the left chat never start.
   const uiActionGenerationRef = useRef(0);
   const resetUiActions = useCallback(() => {
@@ -919,7 +939,9 @@ export function AiChatProvider({
     if (staleRequestRef.current && !isLoading) staleRequestRef.current = false;
     const wasLive = liveRequestRef.current;
     liveRequestRef.current = isLoading && !staleRequestRef.current;
-    const live = liveRequestRef.current || wasLive;
+    // The messages a request starts from; its results come in the last one.
+    if (liveRequestRef.current && !wasLive) requestBaseRef.current = rawMessages.map(({ id, role }) => ({ id, role }));
+    const live = (liveRequestRef.current || wasLive) && continuesRequestBase(rawMessages, requestBaseRef.current);
     const lastMessage = rawMessages[rawMessages.length - 1];
 
     // Held-back results of a message that is no longer the last one run now, in their order.

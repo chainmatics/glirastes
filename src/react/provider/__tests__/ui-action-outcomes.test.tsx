@@ -430,6 +430,21 @@ describe('AiChatProvider never runs a UI action late', () => {
     expect(outcomes).toHaveLength(1);
   });
 
+  it('does not run results of another history set while a request runs', async () => {
+    const { bus, onToolResult } = setup();
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    await act(async () => { control.set([user], 'streaming'); });
+    const otherUser = { ...user, id: 'u-other' } as ChatMessage;
+    await act(async () => {
+      control.set([otherUser, { ...assistant(toolPart('foreign', navigate('/foreign'))), id: 'a-other' } as ChatMessage], 'streaming');
+    });
+    await act(async () => { control.status('ready'); });
+    await settle();
+    expect(push).not.toHaveBeenCalled();
+    expect(onToolResult).not.toHaveBeenCalled();
+  });
+
   it('does not run results loaded through session.load', async () => {
     const bus = new UiActionBus();
     const push = vi.fn();
