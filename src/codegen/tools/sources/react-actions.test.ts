@@ -634,7 +634,7 @@ describe('react-actions source', () => {
         'tsconfig.json': TSCONFIG,
         'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
           + 'declare const effect: string;\n'
-          + "declare const indexed: Record<string, 'financial'>;\ndeclare const untyped: any;\n"
+          + "declare const indexed: Record<string, 'financial'>;\ndeclare const untyped: any;\ndeclare const key: string;\n"
           + 'export function A() {\n'
           + "  useAiClientAction('a.typo', (payload: { id: string }) => {}, undefined, { effect: 'wirte' as never });\n"
           + "  useAiClientAction('a.dynamic', (payload: { id: string }) => {}, undefined, { effect: effect as never });\n"
@@ -642,6 +642,8 @@ describe('react-actions source', () => {
           + "  useAiClientAction('a.spread', (payload: { id: string }) => {}, undefined, { effect: 'read', ...(Math.random() > 1 ? { effect: 'write' as const } : {}) });\n"
           + "  useAiClientAction('a.indexed', (payload: { id: string }) => {}, undefined, { effect: 'read', ...indexed });\n"
           + "  useAiClientAction('a.untyped', (payload: { id: string }) => {}, undefined, { effect: 'read', ...untyped });\n"
+          + "  useAiClientAction('a.computed', (payload: { id: string }) => {}, undefined, { effect: 'read', [key]: 'financial' });\n"
+          + "  useAiClientAction('a.keyed', (payload: { id: string }) => {}, undefined, { ['effect']: 'write' });\n"
           + "  useAiClientAction('a.later',(payload: { id: string }) => {}, undefined, { ...{ route: '/a' }, effect: 'write' });\n"
           + '  return null;\n}\n',
         'src/b.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
@@ -656,7 +658,8 @@ describe('react-actions source', () => {
       expect(codes(tools.get('ui.a.split'))).toEqual([['ui-action-effect-conflict', 'warning']]);
       // A later spread that may override the literal leaves no final value to read.
       // (The spread also hides route, as before: `ui-action-route-invalid`.)
-      for (const name of ['ui.a.spread', 'ui.a.indexed', 'ui.a.untyped']) {
+      expect(tools.get('ui.a.keyed')).toMatchObject({ findings: [], evidence: { declaredEffect: 'write' } });
+      for (const name of ['ui.a.spread', 'ui.a.indexed', 'ui.a.untyped', 'ui.a.computed']) {
         expect(codes(tools.get(name))).toContainEqual(['ui-action-effect-invalid', 'needs_attention']);
         expect(tools.get(name)?.evidence).not.toHaveProperty('declaredEffect');
       }

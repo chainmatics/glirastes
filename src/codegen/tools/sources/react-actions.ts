@@ -127,25 +127,34 @@ function effectOf(app: AppProgram, raw: ts.Expression | undefined): EffectRead {
     value !== undefined && DECLARED_EFFECTS.has(value) ? { kind: 'declared', effect: value as DeclaredEffect } : { kind: 'invalid' });
   if (ts.isObjectLiteralExpression(options)) {
     const members = [...options.properties];
-    const isEffect = (entry: ts.ObjectLiteralElementLike): boolean => (
-      (ts.isPropertyAssignment(entry) || ts.isShorthandPropertyAssignment(entry))
-      && (ts.isIdentifier(entry.name) || ts.isStringLiteral(entry.name)) && entry.name.text === 'effect');
-    let index = members.length - 1;
-    while (index >= 0 && !isEffect(members[index]!)) index -= 1;
-    const property = index >= 0 ? members[index] as ts.PropertyAssignment | ts.ShorthandPropertyAssignment : undefined;
-    // A later spread that may carry an effect decides at runtime, so the literal is not the final value.
+    /** The static key of a member: its name, a computed key of literal type, else undefined (unknown). */
+    const keyOf = (entry: ts.ObjectLiteralElementLike): string | undefined => {
+      const name = entry.name;
+      if (!name) return undefined;
+      if (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) return name.text;
+      if (ts.isComputedPropertyName(name)) {
+        const type = checker.getTypeAtLocation(name.expression);
+        return type.isStringLiteral() || type.isNumberLiteral() ? String(type.value) : undefined;
+      }
+      return undefined;
+    };
     const mayCarryEffect = (type: ts.Type): boolean => {
       if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return true;
       if (type.isUnionOrIntersection()) return type.types.some(mayCarryEffect);
       return checker.getPropertyOfType(type, 'effect') !== undefined || checker.getIndexInfosOfType(type).length > 0;
     };
-    const overridden = property !== undefined && members.slice(index + 1).some((entry) => (
-      ts.isSpreadAssignment(entry) && mayCarryEffect(checker.getTypeAtLocation(entry.expression))));
-    if (overridden) return { kind: 'invalid' };
+    let index = members.length - 1;
+    while (index >= 0 && (ts.isSpreadAssignment(members[index]!) || keyOf(members[index]!) !== 'effect')) index -= 1;
+    const property = index >= 0 ? members[index]! : undefined;
     if (property) {
+      // A later member that may also set effect (a spread, an unknown computed key) decides at runtime.
+      const overridden = members.slice(index + 1).some((entry) => (
+        ts.isSpreadAssignment(entry) ? mayCarryEffect(checker.getTypeAtLocation(entry.expression)) : keyOf(entry) === undefined));
+      if (overridden || !(ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))) return { kind: 'invalid' };
       const expression = ts.isPropertyAssignment(property) ? property.initializer : property.name;
       return known(literalId(expression) ?? stringOfType(checker.getTypeAtLocation(expression)));
     }
+    // No literal effect: an unknown computed key reads as undeclared, so the guess stays (nothing is lowered).
   }
   const symbol = checker.getPropertyOfType(checker.getTypeAtLocation(options), 'effect');
   if (!symbol) return { kind: 'none' };
