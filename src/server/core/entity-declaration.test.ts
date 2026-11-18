@@ -23,6 +23,7 @@ import {
   type IdLabels,
 } from '../adapters/nextjs/hide-ids.js';
 import { entityDeclarationsOfTools } from '../adapters/nextjs/tool-entities.js';
+import { prepareModelMessages } from '../adapters/nextjs/prepare-model-messages.js';
 import { endpointToolToTool, toolToAiTool } from './index.js';
 import { readResultHandle } from './read-result-tool.js';
 import { buildResultOverview, type ResultOverviewMarker } from './result-overview.js';
@@ -330,5 +331,28 @@ describe('hideIds reads read_result answers with the producing tool', () => {
       { type: 'tool-read_result', state: 'output-available', input: { resultId: 'ro_abc12345' }, output: { data: [{ trackNo: 42, label_text: 'Late' }] } },
     ] }], entities, labels);
     expect(labels.get('42')).toBe('Late');
+  });
+});
+
+describe('history compaction of read_result answers', () => {
+  it('keeps the producing tool\'s declared identity of entries read later, in the next turn', async () => {
+    const entities = { tracks_list: { output: [{ ...TRACK, path: 'data[]' }] } };
+    const read = { data: Array.from({ length: 30 }, (_, index) => ({ trackNo: index + 100, label_text: `Late ${index}`, albumId: 7, lyrics: 'x'.repeat(50) })) };
+    const messages = [
+      { id: 'u0', role: 'user', parts: [{ type: 'text', text: 'Tracks?' }] },
+      {
+        id: 'a0', role: 'assistant', parts: [
+          { type: 'tool-tracks_list', toolCallId: 'c1', state: 'output-available', input: {}, output: { data: [{ trackNo: 1, label_text: 'One' }], _result: { id: 'ro_abc12345', hint: 'x' } } },
+          { type: 'tool-read_result', toolCallId: 'c2', state: 'output-available', input: { resultId: 'ro_abc12345' }, output: read },
+          { type: 'text', text: 'Read.' },
+        ],
+      },
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'And now?' }] },
+    ];
+    const prepared = await prepareModelMessages(messages as never, { entities });
+    const result = JSON.stringify(prepared);
+    expect(result).toContain('{"trackNo":125,"label_text":"Late 25"}');
+    const plain = JSON.stringify(await prepareModelMessages(messages as never));
+    expect(plain).not.toContain('{"trackNo":125,"label_text":"Late 25"}');
   });
 });

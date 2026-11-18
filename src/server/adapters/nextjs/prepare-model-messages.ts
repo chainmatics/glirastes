@@ -21,6 +21,7 @@ import {
 } from '../../../runtime/ai-sdk/engine.js';
 import { attachmentPlaceholderText } from '../../../contracts/attachments.js';
 import type { EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
+import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 import { withModelFacingToolErrors } from './stream-error-text.js';
 import {
@@ -252,10 +253,34 @@ function withCompactedResults(
     });
   };
   const options = { maxItems: limits.maxItems, maxStringLength: limits.maxStringLength, keepIdentity: limits.keepIdentity };
+  // A `read_result` answer is compacted with the declarations of the tool that produced its handle.
+  const producers = new Map<string, string>();
+  const readInputs = new Map<string, unknown>();
+  if (entities) {
+    for (const message of turn) {
+      if (!Array.isArray(message.content)) continue;
+      for (const part of message.content as Array<Record<string, unknown>>) {
+        if (part.type === 'tool-call' && part.toolName === READ_RESULT_TOOL_NAME && typeof part.toolCallId === 'string') {
+          readInputs.set(part.toolCallId, part.input);
+        }
+        const value = part.type === 'tool-result' ? (part.output as { value?: unknown } | undefined)?.value : undefined;
+        const marker = typeof value === 'object' && value !== null ? (value as { _result?: unknown })._result : undefined;
+        const id = typeof marker === 'object' && marker !== null ? (marker as { id?: unknown }).id : undefined;
+        if (typeof id === 'string' && typeof part.toolName === 'string' && part.toolName !== READ_RESULT_TOOL_NAME) producers.set(id, part.toolName);
+      }
+    }
+  }
+  const producerOf = (part: CompactablePart): unknown => {
+    if (part.toolName !== READ_RESULT_TOOL_NAME || typeof part.toolCallId !== 'string') return part.toolName;
+    const input = readInputs.get(part.toolCallId);
+    const resultId = typeof input === 'object' && input !== null ? (input as { resultId?: unknown }).resultId : undefined;
+    return (typeof resultId === 'string' && producers.get(resultId)) || part.toolName;
+  };
   /** The options for one part: with its tool's declared entities, when it has any. */
   const optionsOf = (part: CompactablePart) => {
-    const declared = typeof part.toolName === 'string' && entities && Object.prototype.hasOwnProperty.call(entities, part.toolName)
-      ? entities[part.toolName]!.output
+    const tool = entities ? producerOf(part) : undefined;
+    const declared = typeof tool === 'string' && entities && Object.prototype.hasOwnProperty.call(entities, tool)
+      ? entities[tool]!.output
       : undefined;
     return declared ? { ...options, entities: declared } : options;
   };
