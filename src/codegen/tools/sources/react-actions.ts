@@ -2,10 +2,14 @@ import ts from 'typescript';
 import { canonicalJson, compareCodeUnits } from '../canonical.js';
 import { isClientActionRoute } from '../files.js';
 import { toolFinding } from '../findings.js';
+import { probeItemFor, probeKey } from '../contract-tiers.js';
+import { isSchemaExpression, resolveSchemaBinding } from '../handler-analysis.js';
 import { typeToJsonSchema } from '../output-inference.js';
 import { createAppProgram, type AppProgram } from '../program.js';
+import type { SchemaProbeItem, SchemaProbeResult } from '../schema-probe.js';
 import type { JsonSchemaLike, ToolFinding, ToolSource, ToolSourceContext, ToolSourceObservation } from '../types.js';
 import { defaultSourceDir, scanAppSources } from './app-files.js';
+import { payloadContradiction, probedPayload } from './ui-action-contract.js';
 import { analyzeUiControls, CONTROL_TEXT } from './ui-controls.js';
 import {
   actionStableKey,
@@ -158,14 +162,15 @@ function objectSchema(app: AppProgram, type: ts.Type, location: ts.Node): JsonSc
   return { ...schema, additionalProperties: false };
 }
 
-/** Contract (`z.infer` via `_output`) first, then the handler's parameter type; undefined when untyped. */
-function payloadSchema(app: AppProgram, registration: Registration): JsonSchemaLike | undefined {
+/** The TypeScript type of the contract's input side (`z.input`), else the handler's parameter type; undefined when untyped. */
+function typedPayloadSchema(app: AppProgram, registration: Registration): JsonSchemaLike | undefined {
   const checker = app.checker;
   if (registration.contract) {
     const contractType = checker.getTypeAtLocation(registration.contract);
-    const output = checker.getPropertyOfType(contractType, '_output');
-    if (output) {
-      const schema = objectSchema(app, checker.getTypeOfSymbolAtLocation(output, registration.contract), registration.contract);
+    // `_input` is what the browser receives before parsing; `_output` only for contract types without it.
+    const side = checker.getPropertyOfType(contractType, '_input') ?? checker.getPropertyOfType(contractType, '_output');
+    if (side) {
+      const schema = objectSchema(app, checker.getTypeOfSymbolAtLocation(side, registration.contract), registration.contract);
       if (schema) return schema;
     }
   }
@@ -227,6 +232,111 @@ function unresolvedImports(app: AppProgram, registration: Registration): string[
   };
   for (const node of nodes) visit(node);
   return [...found];
+}
+
+interface ZodContract {
+  /** Where the probe imports the contract; undefined when it is inline or outside the app. */
+  item?: SchemaProbeItem;
+  /** An inline contract built only from calls the TypeScript type fully describes. */
+  typeOnly?: boolean;
+}
+
+/**
+ * zod calls whose whole meaning is in the TypeScript type: an inline contract
+ * of only these loses nothing when it is typed from TypeScript. Any other
+ * call on a schema or on `z` (`describe`, `uuid`, `min`, `regex`, `meta`, …)
+ * may carry a format, bound or description.
+ */
+const TYPE_ONLY_ZOD_CALLS: ReadonlySet<string> = new Set([
+  'object', 'strictObject', 'looseObject', 'string', 'number', 'boolean', 'bigint', 'null', 'undefined',
+  'literal', 'enum', 'nativeEnum', 'array', 'tuple', 'union', 'discriminatedUnion', 'intersection', 'record',
+  'optional', 'nullable', 'nullish', 'strict', 'passthrough', 'strip', 'partial', 'required', 'extend',
+  'merge', 'pick', 'omit', 'readonly', 'any', 'unknown',
+]);
+
+function isTypeOnlyInline(app: AppProgram, contract: ts.Expression, zodNames: ReadonlySet<string>): boolean {
+  const expression = unwrap(contract);
+  if (!ts.isCallExpression(expression)) return false;
+  let typeOnly = true;
+  const visit = (node: ts.Node): void => {
+    if (!typeOnly) return;
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const receiver = node.expression.expression;
+      const onZod = (ts.isIdentifier(receiver) && zodNames.has(receiver.text)) || isSchemaExpression(app, receiver);
+      if (onZod && !TYPE_ONLY_ZOD_CALLS.has(node.expression.name.text)) typeOnly = false;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(expression);
+  return typeOnly;
+}
+
+/** Local names of the zod namespace (`import { z } from 'zod'`, `import * as z from 'zod/v4'`). */
+function zodNamespaces(source: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (!/^zod(?:\/|$)/.test(statement.moduleSpecifier.text)) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (statement.importClause?.name) names.add(statement.importClause.name.text);
+    if (bindings && ts.isNamespaceImport(bindings)) names.add(bindings.name.text);
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const element of bindings.elements) {
+        if ((element.propertyName ?? element.name).text === 'z') names.add(element.name.text);
+      }
+    }
+  }
+  return names;
+}
+
+interface PayloadResolution {
+  schema?: JsonSchemaLike;
+  /** `.describe()` of the probed contract itself. */
+  description?: string;
+  findings: ToolFinding[];
+}
+
+function isEmptyObject(schema: JsonSchemaLike | undefined): boolean {
+  return schema !== undefined && Object.keys((schema.properties ?? {}) as Record<string, unknown>).length === 0;
+}
+
+/**
+ * The payload schema of one registration. A zod contract the probe can load
+ * wins over the TypeScript type: it carries formats, descriptions, enums and
+ * bounds, and it is what the browser checks. Any other zod contract keeps the
+ * schema read from the TypeScript type and warns, so no tool changes state.
+ */
+function resolvePayload(
+  app: AppProgram,
+  registration: Registration,
+  zod: ZodContract | undefined,
+  probes: ReadonlyMap<string, SchemaProbeResult>,
+): PayloadResolution {
+  const typed = typedPayloadSchema(app, registration);
+  if (!zod) return { ...(typed ? { schema: typed } : {}), findings: [] };
+  const subject = actionStableKey(registration.actionId);
+  const probed = zod.item
+    ? probedPayload(probes.get(probeKey(zod.item)))
+    : { ok: false as const, reason: 'is not exported from a module of this app (inline, or in another package)' };
+  if (!probed.ok) {
+    // An empty object, or an inline contract of type-only calls, has nothing the TypeScript type misses.
+    if (isEmptyObject(typed) || zod.typeOnly) return { ...(typed ? { schema: typed } : {}), findings: [] };
+    const why = zod.item ? `could not be probed (${probed.reason})` : probed.reason;
+    return {
+      ...(typed ? { schema: typed } : {}),
+      findings: [toolFinding('ui-action-contract-unprobed', 'warning', subject,
+        `The zod payload contract of ${registration.actionId} ${why}, so its formats and descriptions are not used; the payload is typed from TypeScript as before.`)],
+    };
+  }
+  const contradiction = typed ? payloadContradiction(probed.schema, typed) : undefined;
+  return {
+    schema: probed.schema,
+    ...(probed.description ? { description: probed.description } : {}),
+    findings: contradiction
+      ? [toolFinding('ui-action-contract-mismatch', 'warning', subject,
+        `The zod payload contract of ${registration.actionId} contradicts its TypeScript type (${contradiction}); the tool follows the zod contract, which the browser checks.`)]
+      : [],
+  };
 }
 
 interface WriteEvidence {
@@ -406,6 +516,35 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
     named.push({ actionId, base });
   }
   const ids = uniqueDefinitionIds(named.map(({ actionId, base }) => ({ stableKey: actionStableKey(actionId), base })));
+  const zodContracts = new Map<Registration, ZodContract>();
+  const items = new Map<string, SchemaProbeItem>();
+  for (const registration of [...byId.values()].flat()) {
+    if (!registration.contract || !isSchemaExpression(app, registration.contract)) continue;
+    const { binding } = resolveSchemaBinding(app, registration.contract.getSourceFile(), registration.contract);
+    const item = binding ? probeItemFor(binding, 'input') : undefined;
+    if (item) items.set(probeKey(item), item);
+    zodContracts.set(registration, item
+      ? { item }
+      : { typeOnly: isTypeOnlyInline(app, registration.contract, zodNamespaces(registration.contract.getSourceFile())) });
+  }
+  // Only apps with zod contracts start the probe; every other app is read as before.
+  const keys = [...items.keys()].sort(compareCodeUnits);
+  const results = keys.length > 0
+    ? await ctx.probe.probe(root, keys.map((key) => items.get(key)!), { tsconfig: app.tsconfigPath ?? null })
+    : [];
+  const probes = new Map<string, SchemaProbeResult>(keys.map((key, index) => [
+    key,
+    results[index] ?? { ok: false, reason: 'probe-failed' },
+  ]));
+  const payloads = new Map<Registration, PayloadResolution>();
+  const payloadOf = (registration: Registration): PayloadResolution => {
+    let resolved = payloads.get(registration);
+    if (!resolved) {
+      resolved = resolvePayload(app, registration, zodContracts.get(registration), probes);
+      payloads.set(registration, resolved);
+    }
+    return resolved;
+  };
   const controls = analyzeUiControls({
     app,
     files,
@@ -414,7 +553,7 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
       actionId,
       stableKey: actionStableKey(actionId),
       handler: registration.handler,
-      schema: payloadSchema(app, registration),
+      schema: payloadOf(registration).schema,
     }))),
     policy: ctx.policy,
     functionOf: (expression) => functionOf(app, expression),
@@ -426,12 +565,17 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
     .map(({ actionId }) => {
       const stableKey = actionStableKey(actionId);
       const registrations = byId.get(actionId)!;
-      const schemas = registrations.map((registration) => payloadSchema(app, registration));
-      const typed = [...new Map(schemas
+      const resolved = registrations.map(payloadOf);
+      const typed = [...new Map(resolved
+        .map((payload) => payload.schema)
         .filter((schema): schema is JsonSchemaLike => schema !== undefined)
         .map((schema) => [canonicalJson(schema), schema] as const)).values()];
       const handlers = registrations.map((registration) => functionOf(app, registration.handler));
-      const toolFindings: ToolFinding[] = [...controls.byStableKey.get(stableKey) ?? []];
+      const toolFindings: ToolFinding[] = [
+        ...controls.byStableKey.get(stableKey) ?? [],
+        ...new Map(resolved.flatMap((payload) => payload.findings)
+          .map((finding) => [`${finding.code}\u0000${finding.message}`, finding] as const)).values(),
+      ];
       const unresolved = typed.length === 0
         ? [...new Set(registrations.flatMap((registration) => unresolvedImports(app, registration)))].sort(compareCodeUnits)
         : [];
@@ -447,6 +591,7 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
           `${actionId} is registered with ${typed.length} different payload contracts.`));
       }
       const input = typed[0];
+      const schemaDescription = resolved.find((payload) => payload.schema === input)?.description;
       const jsDoc = registrations
         .map((registration, index) => {
           const handler = handlers[index];
@@ -500,6 +645,7 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
         files: [...new Set(registrations.map((registration) => registration.file))].sort(compareCodeUnits),
         ...(jsDoc ? { jsDoc } : {}),
         ...(uiMutation ? { uiMutation } : {}),
+        ...(schemaDescription ? { prose: { schemaDescription } } : {}),
       });
     });
   return { observations, findings, complete: true, excluded: [] };

@@ -76,6 +76,8 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'ui-action-payload-untyped': 'Pass a payload contract (e.g. a Zod object) as the third argument of useAiClientAction or registerAiClientAction, or type the handler parameter.',
   'ui-action-import-unresolved': 'Make the named import resolvable with the tsconfig the message names: add its path alias (paths/baseUrl) there, or name the tsconfig that has it as "tsconfig" of the source in .glirastes/tools.json (by default the nearest tsconfig.json from srcDir up to the app root is used), then run glirastes tools refresh.',
   'ui-action-contract-conflict': 'Register the action with one payload contract wherever it is handled.',
+  'ui-action-contract-unprobed': 'Optional: export the zod payload contract from a module of this app that imports nothing but zod (no components, styles or side effects at import time) and pass that export to the registration, then run glirastes tools refresh; the tool keeps the payload type read from TypeScript meanwhile.',
+  'ui-action-contract-mismatch': 'Make the TypeScript type of the payload contract match the zod schema (drop the cast or type annotation, or let z.infer type the handler), then run glirastes tools refresh; the tool follows the zod schema meanwhile.',
   'ui-action-id-dynamic': 'Register client actions with a literal id so the chat can call them.',
   'ui-action-id-invalid': 'Use an action id of letters, digits, dots and dashes, e.g. tasks.highlight.',
   'ui-action-id-reserved': 'Ids starting with glirastes. belong to the SDK; choose another action id.',

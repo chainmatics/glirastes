@@ -170,7 +170,12 @@ second, hand-maintained catalogue.
    navigation bridge and runs the action once the page registered it. Never
    register an action in the app shell that only fires a window event for a
    listener on one page (`ui-action-indirect`). A handler returns `false`
-   when it could not do its work, so the chat does not report it as done. A
+   when it could not do its work, so the chat does not report it as done.
+   Export the zod contract from a module that imports only zod (e.g.
+   `src/lib/ai-actions.ts`) and pass that export: the tool then gets its
+   formats, descriptions, enums and bounds (`z.string().uuid()` is checked
+   on the server); an inline or unimportable contract is typed from
+   TypeScript as before (`ui-action-contract-unprobed`). A
    handler that writes through a helper, a Server Action or a mutation hook is
    flagged (`ui-action-write-unproven`); the developer raises it with
    `glirastes tools policy raise <tool> write`.
