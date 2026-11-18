@@ -166,6 +166,18 @@ on an operation travel in the artifact too and are applied by the container: the
 upper bound before anything is stored or shown, the default view in the first
 answer.
 
+Languages (all optional, section `chat`): `chat.locale` (BCP-47, default
+English) is the language of the texts the runtime writes itself;
+`chat.requestLocaleHeader` names a request header with the turn's language
+(`accept-language` is read by preference, any other header holds one tag,
+e.g. `x-app-language` sent by the chat's transport); `chat.locales` adds or
+changes the runtime's own texts per language (`{"pl": {"closing": "...",
+"silentTurn": "..."}}`, keys of the SDK handler's `locales`; partial tables
+fall back per key, an unknown key fails at start). With `languages` in
+`.glirastes/tools.json` the artifact carries the tool labels per language
+(local, never sent to the Platform), and the approval card and step display
+show them in the turn's language.
+
 For bearer authentication use `"credential": {"type":"bearer"}`. For existing
 backend CSRF middleware set `identity.csrfHeader` to `x-csrf-token` or
 `x-xsrf-token` and send that header from the chat UI. Do not disable CSRF checks.

@@ -25,7 +25,8 @@ it. The type's JSDoc carries the full detail.
 | `toolDiscovery` | local `find_tools` recovery; appends a fixed note to the system prompt to call `find_tools` before saying a request cannot be done |
 | `authorizedToolsOnly` | with `managedRuntime` (default `true`): the model gets only built-ins and the manifest tools the principal may use, checked again before every model step; `false` hands over every registry tool, the guard still refuses the calls |
 | `intentRouting` | start-set routing for `toolDiscovery` (default on); `DefaultIntentRoutingOptions` tunes it |
-| `toolSemantics` | search-only synonyms and examples per model-facing tool name (`find_tools` and the start set); replaces the map `chatTurn()` hands on |
+| `toolSemantics` | search-only synonyms and examples per model-facing tool name (`find_tools` and the start set); replaces the map `chatTurn()` hands on. To add your own instead, pass `mergeToolSearchSemantics(turn.toolSemantics, own)` (`glirastes/runtime`; own entries first, each once, at most 20 synonyms and 10 examples per tool) |
+| `toolTexts` | `ToolTextsMap`: labels per language (`ToolTexts` with `labels`, each a `ToolLabelTexts` of `singular`, `plural`, `approval`) per model-facing tool name; `chatTurn()` hands on `toolTexts` of the generated module, written when `.glirastes/tools.json` names `languages`. The `data-tool-presentation` part then words each tool in the turn's language: the manifest presentation where it is in that language, else these labels (the language, another region of it, English, the first one). Without it the part is unchanged |
 | `directCommands` | `/` commands and entity actions run without a model call (default `true`) |
 | `endpointCaller` | `(request) => InternalApiCaller` for an API on another origin or with `Authorization` auth; default `createInternalApiCallerFromRequest` |
 | `trustForwardedHeaders` | take the origin from `x-forwarded-*`; only behind a proxy that sets them |
@@ -36,7 +37,9 @@ it. The type's JSDoc carries the full detail.
 | --- | --- |
 | `model` | model instance or resolver |
 | `systemPrompt` | string or function of routing, date and pinned `TurnSnapshot` |
-| `locale` | locale of the texts the handler writes itself, e.g. the budget stop notice (`en-US` by default; any `de*` value gives German). Not taken from the chat or the model's answers: a German chat without `locale: 'de-DE'` gets an English stop notice. One value per handler, not per request |
+| `locale` | locale of the texts the handler writes itself, e.g. the budget stop notice (`en-US` by default; any `de*` value gives German, other languages via `locales`). Not taken from the chat or the model's answers: a German chat without `locale: 'de-DE'` gets an English stop notice. The default of every turn; `requestLocale` sets it per request |
+| `requestLocale` | `(request) => string \| undefined` (may be async): the BCP-47 language of one request, e.g. a header the chat transport sends (`headers: { 'x-app-language': lang }`), a cookie or the user's profile; `preferredLanguage(request.headers.get('accept-language'))` from `glirastes/contracts` reads `Accept-Language`. Opt-in. It sets the turn's language of the handler's texts and, with `toolTexts`, of the tool labels; it must not read the body; no language tag or a throw falls back to `locale`. The model still gets one English description per tool |
+| `locales` | `ChatServerLocales`: the handler's own texts per BCP-47 tag, to add a language (`pl`) or change single texts of one. Keys of `ChatServerTexts`: those of `budgetStopTexts` plus `silentTurn` (the answer of a turn that produced nothing). Partial tables fall back per key: the language, another region of it, built-in German or English, English. `budgetStopTexts` stays language-free and wins for every language. An unknown key, empty text or non-tag key throws. Model hints (404 hint, truncation) stay English: only the model reads them |
 | `temperature`, `maxOutputTokens` | passed to the model call |
 | `maxSteps` | hard step cap; without it `safetyMaxSteps` (default 24) is the soft cap |
 | `safetyMaxSteps` | guard against runaway loops when no `maxSteps` is set |

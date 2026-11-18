@@ -8,7 +8,8 @@ where the SDK only fits the pilot's shapes.
 - The live run does **not** gate a release. It is recorded and compared with
   the previous release's record.
 - The model-free part runs in CI (job "Reference app Vue+FastAPI"):
-  `tests/second-acceptance-vue-fastapi.test.ts`.
+  `tests/second-acceptance-vue-fastapi.test.ts`, and for the three UI
+  languages `tests/second-acceptance-vue-fastapi-languages.test.ts`.
 - SDK findings are reported, not silently fixed. Each known gap is a test titled
   `KNOWN GAP SA-nn` that asserts today's behaviour; a fix makes it fail visibly,
   then the test changes to the fixed behaviour and the gap leaves the list below.
@@ -48,6 +49,18 @@ Output fields: `.glirastes/tools.json` denies `**.fileUrl` app-wide; the playlis
 list declares an allow-list (`x-glirastes-output-allowed-fields`) and a default
 view of `playlist_id`, `displayName`, `status` and `total`
 (`x-glirastes-output-default-fields`), see [tool policy](../tool-policy.md).
+
+Languages: `.glirastes/tools.json` names `"languages": ["en", "de", "pl"]`.
+`GET /api/playlists/{playlist_id}` and `DELETE /api/playlists/{playlist_id}`
+declare `x-glirastes-title` in all three, `DELETE /api/channels/{key}` in
+German only (English from the template, Polish falls back to English), and
+`.glirastes/tool-semantics.json` overrides the German title of the first
+(mixing per language). `GET /api/playlists` has Polish
+`x-glirastes-synonyms`. The web app takes `?lang=de` or `?lang=pl`, sends it
+as `x-app-language` with every chat request and has a partial Polish chat
+table (`web/src/chat-config.ts`); the runtime reads the header
+(`requestLocale`) and has a partial Polish table of its own texts
+(`RUNTIME_LOCALES` in `runtime/chat.mjs`).
 
 After changing the routes: `python3 export_openapi.py` in `api/`, then
 `glirastes tools refresh --root examples/vue-fastapi`. The generated outputs
@@ -105,6 +118,14 @@ run with `ACCEPTANCE_LOCALE=de-DE`.
 | 15 | "Show playlist banana." | lookup by name (`playlists_list`), no question back | Says there is no playlist named so, or picks none; does not ask the user for an id | Self-correction path; whether it asked the user |
 | 16 | Cases 1, 7 and 14 in German, `ACCEPTANCE_LOCALE=de-DE` | as the English case | Answers and notices in German | Language of answer, card and notice |
 | 17 | "How many playlists are published?" and "List all names." | `playlists_list` (with `status: "published"` or counting the overview); `read_result` with fields, or none | 36 published; 60 names | Whether it read fields (`playlists[].displayName`) or paged whole entries; number of model calls |
+
+Language checks, once per release with either model (not counted as cases):
+
+- `?lang=pl`, "Usuń playlistę Weekend Loop.": the card and the step display
+  say "Usuń playlistę"; chat buttons are Polish where `web/src/chat-config.ts`
+  has them, English otherwise.
+- `?lang=pl`, "Usuń kanał lobby.": the label is English ("Delete channels",
+  no Polish title declared); with `?lang=de` it is "Kanal löschen".
 
 ## Known gaps (model-free, `tests/second-acceptance-vue-fastapi.test.ts`)
 
