@@ -215,6 +215,10 @@ message; without either it is shown but not clickable. `@` pills in sent
 messages open the same way, also without `entityLinks`. A custom `Markdown`
 component keeps the chips with `useChatEntityLinks().markdownComponents`
 (for `react-markdown`) or `linkify(children)`; `EntityText` renders one string.
+`mentionMarkers: 'markdown'` keeps the Markdown of an answer with
+`{{mention:…}}` markers and draws each marker as a chip inside it, checked
+against the ids the conversation showed by declaration (`verifyMentions`,
+default on); see [entity identity](entity-identity.md#entity-link-options).
 
 ## Custom composers
 

@@ -15,9 +15,12 @@ import { GLIRASTES_NAVIGATE_ACTION_ID } from '../../browser/navigation.js';
 import { getDefaultUiActionBus, type UiActionBus } from '../../browser/ui-action-bus.js';
 import { MentionChip as DefaultMentionChip } from '../components/mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
+import type { Mention } from '../types.js';
 import {
   collectKnownEntities,
+  collectSeenReferenceKeys,
   entityNavigationHref,
+  isSeenReference,
   splitEntityText,
   type ChatEntityLinksConfig,
   type ChatEntityReference,
@@ -43,6 +46,10 @@ export interface ChatEntityLinks {
   linkify(children: ReactNode): ReactNode;
   /** `react-markdown` `components` that linkify paragraphs, list items, cells and emphasis. */
   readonly markdownComponents: Record<string, (props: Record<string, unknown>) => ReactNode>;
+  /** `entityLinks.mentionMarkers`: `'markdown'` keeps Markdown for assistant text with markers. */
+  readonly mentionMarkers?: 'plain' | 'markdown';
+  /** Whether a marker of the assistant becomes a chip (`entityLinks.verifyMentions`). */
+  showsMention(mention: Mention): boolean;
 }
 
 const ChatEntityLinksContext = createContext<ChatEntityLinks | null>(null);
@@ -94,6 +101,28 @@ export function ChatEntityLinksProvider({
     }
     return [...found, ...extra.filter((reference) => reference && typeof reference.id === 'string' && typeof reference.label === 'string')];
   }, [knownEnabled, messages, searches, entityDeclarations, knownHook]);
+
+  const verify = !!config && config.mentionMarkers === 'markdown' && config.verifyMentions !== false;
+  const seenKeys = useMemo(
+    () => (verify ? collectSeenReferenceKeys(messages, searches ?? [], entityDeclarations) : undefined),
+    [verify, messages, searches, entityDeclarations],
+  );
+  // Strict names (`ambiguousNames: 'text'`, `resolveAmbiguous`): every reference by its name, for markers too.
+  const strictNames = !!config && config.mentionMarkers === 'markdown'
+    && (config.ambiguousNames === 'text' || config.resolveAmbiguous !== undefined);
+  // Only independently shown records compete for a name: an assistant's own markers do not.
+  const namedReferences = useMemo(
+    () => (strictNames
+      ? collectKnownEntities(
+        messages.map((message) => (message.role === 'assistant'
+          ? { ...message, parts: message.parts.filter((part) => (part as { type?: unknown }).type !== 'text') }
+          : message)),
+        searches ?? [],
+        entityDeclarations,
+      )
+      : undefined),
+    [strictNames, messages, searches, entityDeclarations],
+  );
 
   const canOpen = useCallback((type: string) => {
     const current = configRef.current;
@@ -159,13 +188,29 @@ export function ChatEntityLinksProvider({
       },
       linkify: (children) => linkifyChildren(children, links),
       markdownComponents: {},
+      ...(config?.mentionMarkers ? { mentionMarkers: config.mentionMarkers } : {}),
+      showsMention: (mention) => {
+        if (mention.type === 'command') return true;
+        if (seenKeys && !isSeenReference(seenKeys, mention.type, mention.id)) return false;
+        if (!namedReferences) return true;
+        // A name several records share: as for known names, text, or the one `resolveAmbiguous` picks.
+        const label = mention.displayName.trim();
+        const candidates: ChatEntityReference[] = [];
+        for (const reference of namedReferences) {
+          if (reference.label.trim() !== label) continue;
+          if (!candidates.some((known) => known.type === reference.type && known.id === reference.id)) candidates.push(reference);
+        }
+        if (candidates.length < 2) return true;
+        const picked = config?.resolveAmbiguous?.(label, candidates);
+        return picked !== undefined && picked.type === mention.type && picked.id === mention.id;
+      },
     };
     (links as { markdownComponents: ChatEntityLinks['markdownComponents'] }).markdownComponents = Object.fromEntries(
       LINKIFIED_TAGS.map((tag) => [tag, ({ node: _node, children, ...props }: Record<string, unknown>) =>
         createElement(tag, props, linkifyChildren(children as ReactNode, links))]),
     );
     return links;
-  }, [config, known, canOpen, open, locale.openEntityLabel]);
+  }, [config, known, seenKeys, namedReferences, canOpen, open, locale.openEntityLabel]);
 
   return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
 }
@@ -180,6 +225,7 @@ const DISABLED_LINKS: ChatEntityLinks = {
   cachedMatch: () => undefined,
   linkify: (children) => children,
   markdownComponents: {},
+  showsMention: () => true,
 };
 
 /**
@@ -194,6 +240,8 @@ function linkifyChildren(children: ReactNode, links: ChatEntityLinks): ReactNode
   if (!links.enabled) return children;
   return Children.map(children, (child) => {
     if (typeof child !== 'string') return child;
+    // A marker kept inside Markdown (`mentionMarkers: 'markdown'`).
+    if (child.includes(MARKER_EDGE)) return <MarkerText text={child} />;
     const segments = links.split(child);
     if (segments.length === 1 && segments[0]!.kind === 'text') return child;
     return <EntityTextSegments segments={segments} />;
@@ -250,6 +298,97 @@ export function EntityLinkChip({ reference, text }: { reference: ChatEntityRefer
       mention={{ id: reference.id, type: reference.type, displayName: text ?? reference.label, prefix: '', label: reference.label }}
       inline
       {...(openable ? { onOpen: () => links.open(reference), openLabel: links.openLabel(reference) } : {})}
+    />
+  );
+}
+
+/**
+ * A marker kept in Markdown text: `\u2060`, its index in zero-width digits
+ * (`\u200B` 0, `\u200C` 1), `\u2063`, its label, `\u2060`. Invisible where
+ * nothing renders a chip; the index keeps markers with one label apart.
+ */
+const MARKER_EDGE = '\u2060';
+const MARKER_SPAN = /\u2060([\u200B\u200C]+)\u2063([^\u2060]*)\u2060/g;
+const MARKER_CHARS = /[\u2060\u2063]/g;
+
+function markerIndexText(index: number): string {
+  return index.toString(2).replace(/0/g, '\u200B').replace(/1/g, '\u200C');
+}
+
+function markerIndexOf(text: string): number {
+  return Number.parseInt(text.replace(/\u200B/g, '0').replace(/\u200C/g, '1'), 2);
+}
+const MARKDOWN_PUNCTUATION = /[\\`*_{}[\]()#+\-.!<>|~]/g;
+
+/** The markers of one text part, in the order they occur. */
+const MentionMarkersContext = createContext<ReadonlyArray<Mention> | null>(null);
+
+/**
+ * The text of a part with markers for Markdown (`mentionMarkers:
+ * 'markdown'`): each marker becomes its label between word joiners (its
+ * Markdown characters escaped), so a Markdown renderer keeps the label as
+ * one plain text and `markdownComponents` turn it into a chip.
+ */
+export function markdownWithMentionMarkers(
+  segments: ReadonlyArray<{ kind: 'text'; text: string } | { kind: 'mention'; mention: Mention }>,
+): { content: string; mentions: Mention[] } {
+  const mentions: Mention[] = [];
+  let content = '';
+  for (const segment of segments) {
+    if (segment.kind === 'text') {
+      content += segment.text.replace(MARKER_CHARS, '');
+      continue;
+    }
+    const index = mentions.push(segment.mention) - 1;
+    const label = segment.mention.displayName.replace(MARKER_CHARS, '').replace(MARKDOWN_PUNCTUATION, (char) => `\\${char}`);
+    content += `${MARKER_EDGE}${markerIndexText(index)}\u2063${label}${MARKER_EDGE}`;
+  }
+  return { content, mentions };
+}
+
+/** Gives the markers of a text part to the chips Markdown renders inside it. */
+export function MentionMarkers({ mentions, children }: { mentions: ReadonlyArray<Mention>; children: ReactNode }) {
+  return <MentionMarkersContext.Provider value={mentions}>{children}</MentionMarkersContext.Provider>;
+}
+
+/** A Markdown text with marker labels: each one a chip (when shown), the rest linked as before. */
+function MarkerText({ text }: { text: string }) {
+  const links = useChatEntityLinks();
+  const mentions = useContext(MentionMarkersContext) ?? [];
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  const plain = (value: string, key: string) => {
+    if (!value) return;
+    const segments = links.split(value);
+    nodes.push(segments.length === 1 && segments[0]!.kind === 'text'
+      ? <Fragment key={key}>{value}</Fragment>
+      : <EntityTextSegments key={key} segments={segments} />);
+  };
+  for (const found of text.matchAll(MARKER_SPAN)) {
+    plain(text.slice(cursor, found.index), `t${cursor}`);
+    const label = found[2] ?? '';
+    const mention = mentions[markerIndexOf(found[1] ?? '')];
+    nodes.push(mention && links.showsMention(mention)
+      ? <MarkerChip key={`m${found.index}`} mention={mention} />
+      : <Fragment key={`m${found.index}`}>{label}</Fragment>);
+    cursor = found.index + found[0].length;
+  }
+  plain(text.slice(cursor), `t${cursor}`);
+  return <>{nodes}</>;
+}
+
+function MarkerChip({ mention }: { mention: Mention }) {
+  const links = useChatEntityLinks();
+  const { components } = useChatContext();
+  const Chip = components.MentionChip ?? DefaultMentionChip;
+  const reference = { type: mention.type, id: mention.id, label: mention.displayName };
+  return (
+    <Chip
+      mention={mention}
+      inline
+      {...(mention.type !== 'command' && links.canOpen(mention.type)
+        ? { onOpen: () => links.open(reference), openLabel: links.openLabel(reference) }
+        : {})}
     />
   );
 }
