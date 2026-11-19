@@ -2,7 +2,9 @@ import {
   DEFAULT_ATTACHMENT_MAX_FILE_BYTES,
   DEFAULT_ATTACHMENT_MAX_FILES,
   DEFAULT_ATTACHMENT_MEDIA_TYPES,
+  attachmentIdOf,
   attachmentPlaceholderText,
+  createChatAttachmentId,
   isOmittedAttachmentUrl,
 } from '../../contracts/attachments.js';
 import type { ChatAttachment, ChatAttachmentOptions, ChatMessage, FilePart, MessagePart } from '../types.js';
@@ -68,8 +70,6 @@ export function fileToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-let nextAttachmentId = 0;
-
 /** Checks, prepares and reads files into composer attachments. */
 export async function readAttachments(
   files: ReadonlyArray<File>,
@@ -94,9 +94,8 @@ export async function readAttachments(
       continue;
     }
     const mediaType = (prepared.type || file.type).toLowerCase();
-    nextAttachmentId += 1;
     attachments.push({
-      id: `attachment-${Date.now().toString(36)}-${nextAttachmentId}`,
+      id: createChatAttachmentId(),
       name: file.name,
       mediaType,
       size: prepared.size,
@@ -108,14 +107,19 @@ export async function readAttachments(
 }
 
 export function toFilePart(attachment: ChatAttachment): FilePart {
-  return { type: 'file', mediaType: attachment.mediaType, url: attachment.url, filename: attachment.name };
+  return {
+    type: 'file',
+    mediaType: attachment.mediaType, url: attachment.url,
+    filename: attachment.name,
+    providerMetadata: { glirastes: { attachmentId: attachment.id } },
+  };
 }
 
 const isFilePart = (part: MessagePart | Record<string, unknown>): part is FilePart =>
   (part as { type?: unknown }).type === 'file';
 
 const placeholder = (part: FilePart): MessagePart =>
-  ({ type: 'text', text: attachmentPlaceholderText(part.filename) });
+  ({ type: 'text', text: attachmentPlaceholderText(part.filename, attachmentIdOf(part)) });
 
 /**
  * The messages as sent: file data only in the `keepUserTurns` most recent

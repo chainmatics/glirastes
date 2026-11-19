@@ -7,6 +7,8 @@ import { AiChatProvider } from '../ai-chat-provider.js';
 import { useChatContext } from '../chat-context.js';
 import { SessionSwitcher } from '../../components/session-switcher.js';
 import { createLocalSessionStore } from '../../utils/local-session-store.js';
+import { getChatAttachment } from '../../utils/chat-attachment-registry.js';
+import { createMemoryAttachmentStore } from '../../utils/attachment-blob-store.js';
 import { ChatInput } from '../../components/chat-input.js';
 
 const history = (id: string): ChatMessage[] => [{
@@ -200,5 +202,17 @@ describe('session persistence ownership', () => {
     fireEvent.click(screen.getByText('Send'));
     expect(onSend).not.toHaveBeenCalled();
     await act(async () => pending.resolve());
+  });
+
+  it('resolves an attachment only within the active chat', async () => {
+    const id = 'att_abcdefghijklmnop';
+    const attachments = createMemoryAttachmentStore();
+    await attachments.put('a', id, { blob: new Blob(['x'], { type: 'text/plain' }), name: 'a.txt', mediaType: 'text/plain' });
+    render(<Harness session={{ defaultActiveId: 'a', load: () => [], save: vi.fn(), attachments }} />);
+    await waitFor(() => expect(screen.getByTestId('session').textContent).toBe('a'));
+    await waitFor(async () => expect(await getChatAttachment(id)).not.toBeNull());
+    fireEvent.click(screen.getByText('B'));
+    await waitFor(() => expect(screen.getByTestId('session').textContent).toBe('b'));
+    await waitFor(async () => expect(await getChatAttachment(id)).toBeNull());
   });
 });

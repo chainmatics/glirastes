@@ -6,6 +6,7 @@ import type { UiActionRunCode } from '../browser/client-actions.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
 import type { ChatInteractionsConfig, PendingChatCommand } from './interactions/registry.js';
+import type { AttachmentBlobStore } from './utils/attachment-blob-store.js';
 import type { ChatEntityLinksConfig } from './entity-links/entity-links.js';
 
 export type {
@@ -206,6 +207,8 @@ export interface FilePart {
   /** A `data:` URL. */
   url: string;
   filename?: string;
+  /** `glirastes.attachmentId` names the file for the model and the app. */
+  providerMetadata?: { glirastes?: { attachmentId?: string } } & Record<string, unknown>;
 }
 
 // ============================================================================
@@ -521,6 +524,9 @@ export interface SessionConfig {
   defaultActiveId?: string;
   /** Fires when the active session changes (both controlled and uncontrolled). */
   onActiveIdChange?: (id: string) => void;
+
+  /** Attachment files kept next to the chats, so the provider can reuse them. */
+  attachments?: AttachmentBlobStore;
 }
 
 // ============================================================================

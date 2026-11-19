@@ -10,7 +10,7 @@
 
 import { useCallback, useMemo, useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses, type FileUIPart } from 'ai';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import type {
   ChatTransport,
@@ -198,7 +198,9 @@ export function useVercelAiChatTransport(
   const send = useCallback(
     ({ text, files }: { text: string; files?: FilePart[] }) => {
       if (!files || files.length === 0) return sendMessage({ text });
-      return text === '' ? sendMessage({ parts: files }) : sendMessage({ text, files });
+      // Only the open metadata record differs from the SDK's JSON-typed one.
+      const uiFiles = files as FileUIPart[];
+      return text === '' ? sendMessage({ parts: uiFiles }) : sendMessage({ text, files: uiFiles });
     },
     [sendMessage],
   );

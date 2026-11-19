@@ -1,9 +1,11 @@
 import type { ChatMessage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
-import { omitAttachmentData } from './attachments.js';
+import { attachmentIdOf } from '../../contracts/attachments.js';
+import { fileToDataUrl, omitAttachmentData } from './attachments.js';
+import { createIndexedDbAttachmentStore, dataUrlToBlob, type AttachmentBlobStore } from './attachment-blob-store.js';
 import { sanitizeStoredMessages } from './sanitize-stored-messages.js';
 import { parseMentionSegments } from './mention-markup.js';
 
-type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & Partial<Pick<Storage, 'length' | 'key'>>;
 
 export interface LocalSessionStoreOptions {
   /**
@@ -17,6 +19,11 @@ export interface LocalSessionStoreOptions {
   newTitle?: string;
   /** Chats kept; the one used longest ago goes first. Default: 30. */
   maxSessions?: number;
+  /**
+   * Where attachment files live (IndexedDB). Default: IndexedDB when `storage`
+   * is set; `null` keeps no files.
+   */
+  attachmentStore?: AttachmentBlobStore | null;
   now?: () => number;
   createId?: () => string;
 }
@@ -77,6 +84,32 @@ function isSummary(value: unknown): value is SessionSummary & { createdAt: numbe
     && typeof entry.createdAt === 'number' && typeof entry.updatedAt === 'number';
 }
 
+/** Forgets every chat of this `storageKey` (every key starting with `${storageKey}:`), files included, e.g. on sign-out. */
+export async function clearLocalSessionStore(options: {
+  storageKey: string;
+  storage?: KeyValueStorage | null;
+  attachmentStore?: AttachmentBlobStore | null;
+}): Promise<void> {
+  const storage = options.storage === undefined ? browserStorage() : options.storage;
+  const prefix = `${options.storageKey}:`;
+  try {
+    if (storage?.length !== undefined && storage.key) {
+      const keys: string[] = [];
+      for (let index = 0; index < storage.length; index++) {
+        const key = storage.key(index);
+        if (key?.startsWith(prefix)) keys.push(key);
+      }
+      for (const key of keys) storage.removeItem(key);
+    }
+  } catch {
+    // storage blocked: nothing to remove
+  }
+  const files = options.attachmentStore === undefined
+    ? createIndexedDbAttachmentStore({ storageKey: options.storageKey })
+    : options.attachmentStore;
+  await files?.deleteAll();
+}
+
 /**
  * Several chats per user, kept in the browser: pass the result as `session`
  * to the chat provider and the session switcher lists them, with new, rename
@@ -94,6 +127,29 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   const maxSessions = Math.max(1, options.maxSessions ?? 30);
   const now = options.now ?? (() => Date.now());
   const createId = options.createId ?? randomId;
+  const files = options.attachmentStore === undefined
+    ? (storage ? createIndexedDbAttachmentStore({ storageKey: options.storageKey }) : null)
+    : options.attachmentStore;
+  const written = new Set<string>();
+  const failures = new Map<string, number>();
+  // A permanently failing IndexedDB must not re-decode every file on every save.
+  const MAX_WRITE_ATTEMPTS = 2;
+  const pending = new Map<string, Set<Promise<void>>>();
+  // A put must not land after its chat's delete, so the delete waits for it.
+  const deleteFiles = async (conversationId: string): Promise<void> => {
+    if (!files) return;
+    for (const marker of [...written, ...failures.keys()]) {
+      if (!marker.startsWith(`${conversationId}\u0000`)) continue;
+      written.delete(marker);
+      failures.delete(marker);
+    }
+    await Promise.allSettled([...(pending.get(conversationId) ?? [])]);
+    try {
+      await files.deleteConversation(conversationId);
+    } catch {
+      // files stay until the next delete
+    }
+  };
   const activeKey = `${options.storageKey}:active`;
   const indexKey = `${options.storageKey}:sessions`;
   const messagesKey = (id: string) => `${options.storageKey}:messages:${id}`;
@@ -137,14 +193,40 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   };
   const persist = (list: Entry[]): Entry[] => {
     const ordered = sorted(list);
-    for (const removed of ordered.slice(maxSessions)) drop(messagesKey(removed.id));
+    for (const removed of ordered.slice(maxSessions)) {
+      drop(messagesKey(removed.id));
+      void deleteFiles(removed.id);
+    }
     const kept = ordered.slice(0, maxSessions);
     write(indexKey, kept);
     return kept;
   };
   const summary = ({ named: _named, ...entry }: Entry): SessionSummary => entry;
 
+  const rehydrate = async (conversationId: string, messages: Array<ChatMessage | WireChatMessage>) => {
+    if (!files) return messages;
+    return Promise.all(messages.map(async (message) => {
+      const parts = (message as { parts?: unknown }).parts;
+      if (!Array.isArray(parts)) return message;
+      const next = await Promise.all(parts.map(async (part: unknown) => {
+        const file = part as { type?: unknown; url?: unknown };
+        const id = attachmentIdOf(part);
+        if (file?.type !== 'file' || file.url !== '' || !id) return part;
+        try {
+          const stored = await files.get(conversationId, id);
+          if (!stored) return part;
+          written.add(`${conversationId}\u0000${id}`);
+          return { ...file, url: await fileToDataUrl(stored.blob) };
+        } catch {
+          return part;
+        }
+      }));
+      return { ...message, parts: next } as ChatMessage;
+    }));
+  };
+
   return {
+    ...(files ? { attachments: files } : {}),
     get defaultActiveId() {
       const active = read(activeKey);
       const list = entries();
@@ -165,6 +247,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       const remaining = entries().filter((entry) => entry.id !== conversationId);
       if (remaining.length === 0) drop(indexKey);
       else persist(remaining);
+      await deleteFiles(conversationId);
     },
     async rename(conversationId, title) {
       const next = title.trim();
@@ -184,17 +267,55 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       };
       // Base64 attachments would fill the storage quota within a few images.
       write(messagesKey(conversationId), omitAttachmentData(messages));
+      if (files) {
+        for (const message of messages) {
+          for (const part of message.parts ?? []) {
+            const url = (part as { url?: unknown }).url;
+            const id = attachmentIdOf(part);
+            if (part.type !== 'file' || typeof url !== 'string' || !id) continue;
+            const marker = `${conversationId}\u0000${id}`;
+            const blob = written.has(marker) ? null : dataUrlToBlob(url);
+            if (!blob) continue;
+            written.add(marker);
+            const filename = (part as { filename?: string }).filename;
+            const task = (async () => {
+              let ok = false;
+              try {
+                ok = (await files.put(conversationId, id, { blob, name: filename ?? 'file', mediaType: blob.type })) !== false;
+              } catch {
+                // counted as a failed attempt below
+              }
+              if (ok) {
+                failures.delete(marker);
+                return;
+              }
+              const attempts = (failures.get(marker) ?? 0) + 1;
+              failures.set(marker, attempts);
+              if (attempts < MAX_WRITE_ATTEMPTS) written.delete(marker);
+            })();
+            const set = pending.get(conversationId) ?? new Set<Promise<void>>();
+            pending.set(conversationId, set);
+            set.add(task);
+            void task.then(() => {
+              set.delete(task);
+              if (set.size === 0 && pending.get(conversationId) === set) pending.delete(conversationId);
+            });
+          }
+        }
+      }
       persist([...list.filter((other) => other.id !== conversationId), entry]);
     },
     load(conversationId) {
       const stored = read(messagesKey(conversationId));
       if (!Array.isArray(stored) || stored.length === 0) return null;
-      return sanitizeStoredMessages(stored) as Array<ChatMessage | WireChatMessage>;
+      const messages = sanitizeStoredMessages(stored) as Array<ChatMessage | WireChatMessage>;
+      return files ? rehydrate(conversationId, messages) : messages;
     },
-    clear(conversationId) {
+    async clear(conversationId) {
       const id = conversationId ?? DEFAULT_ID;
       drop(messagesKey(id));
       persist(entries().map((entry) => (entry.id === id ? { ...entry, messageCount: 0 } : entry)));
+      await deleteFiles(id);
     },
   };
 }

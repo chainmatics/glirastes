@@ -28,6 +28,7 @@ import type {
 import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { resolveAttachmentOptions } from '../utils/attachments.js';
+import { clearChatAttachmentSource, setActiveChatAttachmentSource } from '../utils/chat-attachment-registry.js';
 import { sanitizeEntityDeclarations, type EntityDeclarationsByTool } from '../../contracts/entity-declaration.js';
 import { describeApprovalCall } from '../utils/describe-approval.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
@@ -866,6 +867,19 @@ export function AiChatProvider({
   rawMessagesRef.current = rawMessages;
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
+  const attachmentStore = session?.attachments ?? null;
+  // Messages of a previous chat stay in the transport until the new one has loaded.
+  const attachmentMessagesReadyRef = useRef(true);
+  attachmentMessagesReadyRef.current = !sessionNotReady;
+  useEffect(() => {
+    const source = {
+      conversationId: activeSessionId,
+      messages: () => (attachmentMessagesReadyRef.current ? (rawMessagesRef.current as unknown as ChatMessage[]) : []),
+      store: attachmentStore,
+    };
+    setActiveChatAttachmentSource(source);
+    return () => clearChatAttachmentSource(source);
+  }, [activeSessionId, attachmentStore]);
   const reportsUiOutcomes = uiActionOutcomes !== false && typeof resolvedTransport.addToolOutput === 'function';
   const reportsUiOutcomesRef = useRef(reportsUiOutcomes);
   reportsUiOutcomesRef.current = reportsUiOutcomes;

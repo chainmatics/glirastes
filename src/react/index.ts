@@ -391,7 +391,14 @@ export {
 } from './utils/activity.js';
 export type { PlanItem, PlanItemStatus } from '../contracts/plan.js';
 export { sanitizeStoredMessages } from './utils/sanitize-stored-messages.js';
-export { createLocalSessionStore, type LocalSessionStoreOptions } from './utils/local-session-store.js';
+export { createLocalSessionStore, clearLocalSessionStore, type LocalSessionStoreOptions } from './utils/local-session-store.js';
+export {
+  createIndexedDbAttachmentStore,
+  createMemoryAttachmentStore,
+  type AttachmentBlobStore,
+  type StoredAttachment,
+} from './utils/attachment-blob-store.js';
+export { getChatAttachment, chatAttachmentFormData } from './utils/chat-attachment-registry.js';
 export {
   createLocalMemoryStore,
   type BrowserMemoryStore,

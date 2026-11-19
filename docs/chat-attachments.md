@@ -49,7 +49,8 @@ is refused too.
 
 Audit, telemetry and metrics never carry file data. History trimming counts
 a file part as about 1,000 tokens, and older turns that it keeps as text only
-carry a placeholder (`[attachment: name]`) instead of the file.
+carry a placeholder (`[attachment <id>: name]`) instead of the file, see
+"Attachment ids".
 
 ## PII shield
 
@@ -78,13 +79,97 @@ example by drawing the image onto a canvas and returning
 `canvas.toBlob(..., 'image/jpeg', 0.85)`.
 
 A request keeps the file data only in the two most recent user messages;
-older files reach the server as `[attachment: name]` text. Chats stored with
-`createLocalSessionStore` keep no file data: those files show as "No longer
-available".
+older files reach the server as `[attachment <id>: name]` text. Chats stored
+with `createLocalSessionStore` keep the files in the browser, see "Keeping
+attachments".
 
 The LangGraph transport does not support attachments and throws when a
 message carries files. `/` commands cannot carry attachments; the composer
 refuses that send and keeps text and files.
+
+## Attachment ids
+
+Every attachment has an id like `att_k3J9...`, matching
+`^att_[A-Za-z0-9_-]{16,64}$`. It travels in
+`providerMetadata.glirastes.attachmentId` on the file part.
+
+The server writes `[attachment <id>: <filename>]` next to every user file
+part the model receives, and uses the same text as the placeholder of every
+file whose data was dropped. Control characters (including tab and line
+breaks), U+2028/U+2029, bidi controls and `[`, `]` are stripped from file
+names, which are cut at 120 characters (`…`). On file parts, only the
+validated id reaches the provider as provider options; any other provider
+metadata the client set on a file part is dropped. The allowlist applies to
+file parts only.
+
+## Keeping attachments
+
+`createLocalSessionStore` keeps the file blobs in IndexedDB (database
+`glirastes-chat-attachments`, store `files`) and restores them when a chat
+loads. localStorage keeps only `url: ''` for a file, never base64. With a
+store, `load` returns a promise.
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `attachmentStore` | IndexedDB when `storage` is set | `AttachmentBlobStore` for the blobs; `null` keeps none |
+
+Lifetime: Blobs are deleted when, and only when, their chat goes: `remove(id)`,
+`clear(id)`, eviction by `maxSessions`, and `clearLocalSessionStore()`. No
+expiry, no total-size eviction. Deletion waits for the chat's pending
+writes. On the first stored blob the store calls `navigator.storage.persist()`
+once, so the browser is less likely to drop the files under storage pressure.
+Firefox desktop can show a permission prompt for this request.
+
+Without IndexedDB (private windows, blocked storage) nothing throws. The
+files live in memory for the page's lifetime.
+
+Call `clearLocalSessionStore` on sign-out. It removes every key starting
+with `${storageKey}:` and all stored files:
+
+```ts
+import { clearLocalSessionStore } from 'glirastes/react';
+
+await clearLocalSessionStore({ storageKey: 'my-app-chat' });
+```
+
+Limits: it does not wait for a file write that a live store started in the same
+moment, so call it after the chat is idle. It removes files by the exact
+`storageKey`, but localStorage keys by the `${storageKey}:` prefix, so a
+nested key such as `my-app-chat:team` keeps its files.
+
+It takes `{ storageKey, storage?, attachmentStore? }`. Also exported:
+`createIndexedDbAttachmentStore`, `createMemoryAttachmentStore` and the types
+`AttachmentBlobStore` and `StoredAttachment`. `SessionConfig.attachments`
+takes an `AttachmentBlobStore` for a custom session config. In a custom store,
+`put` resolves `true` once the file is written and `false` when the write
+failed; the session store then tries again on the next `save`.
+
+## Handing attachments to the app
+
+`getChatAttachment(id)` resolves to a `StoredAttachment` or `null`.
+`chatAttachmentFormData(id, field = 'file')` resolves to a `FormData` with the
+file under `field`, or `null`. Both work only within the active conversation:
+they look in the in-memory messages first, then the store. An id of another
+chat, an unknown id or a malformed id gives `null`.
+
+The model sees `[attachment <id>: name]`, so it can pass the id to a client
+action, and the action uploads the file with the user's own session:
+
+```ts
+useAiClientAction('tasks.attachChatFile', async ({ taskId, attachmentId }) => {
+  const form = await chatAttachmentFormData(attachmentId);
+  if (!form) return false;
+  const response = await fetch(`/api/tasks/${taskId}/attachments`, { method: 'POST', body: form });
+  return response.ok;
+}, attachChatFilePayload, { effect: 'write' });
+```
+
+Returning `false` reports failure to the model through the UI outcome
+protocol (`docs/ui-action-outcomes.md`).
+
+A derived server tool for a multipart upload route cannot work: the model
+cannot produce file bytes, and the executor sends JSON. Disable that tool
+with `glirastes tools policy` and use the client action instead.
 
 ## Custom composers
 

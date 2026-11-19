@@ -28,7 +28,8 @@ const commands = [
 const PILL = '[data-component="mention-chip"]';
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const png = () => new File([PNG], 'shot.png', { type: 'image/png' });
-const pngPart = { type: 'file', mediaType: 'image/png', url: `data:image/png;base64,${btoa(String.fromCharCode(...PNG))}`, filename: 'shot.png' };
+const pngPart = { type: 'file', mediaType: 'image/png', url: `data:image/png;base64,${btoa(String.fromCharCode(...PNG))}`, filename: 'shot.png',
+  providerMetadata: { glirastes: { attachmentId: expect.stringMatching(/^att_/) } } };
 
 function transport(): ChatTransport & { sendMessage: ReturnType<typeof vi.fn> } {
   return {

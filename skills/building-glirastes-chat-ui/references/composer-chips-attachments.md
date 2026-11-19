@@ -102,14 +102,29 @@ Server, `attachments` on `createAiChatHandler`:
 - Every file in the history is checked (base64, declared type, magic bytes;
   400 `invalid_attachment`). `maxBodyBytes` becomes 50 MB; an explicit value
   wins.
+- Every file has an id `att_...` (`providerMetadata.glirastes.attachmentId`);
+  the model sees `[attachment <id>: name]`.
 - The model must read the allowed types: images need a vision model, PDFs a
   provider that reads PDF file parts.
 - Client: `attachments` is `true` or `{ mediaTypes, maxFiles, maxFileBytes,
   prepare }`; `prepare(file)` returns a `File` or `Blob` and runs before the
   size check. Keep client limits in line with the server's.
 - Only the two most recent user messages carry file data; older files go as
-  `[attachment: name]`. `createLocalSessionStore` keeps no file data (shown
-  as no longer available).
+  `[attachment <id>: name]`. `createLocalSessionStore` keeps the blobs in
+  IndexedDB (`attachmentStore`, `null` keeps none) and restores them on load;
+  `load` then returns a promise. Blobs go only with their chat (`remove`,
+  `clear`, `maxSessions` eviction, `clearLocalSessionStore`), no expiry. Call
+  `clearLocalSessionStore({ storageKey })` on sign-out. Without IndexedDB the
+  files stay in memory. A custom store implements `AttachmentBlobStore` (items
+  are `StoredAttachment`; `put` resolves `true` when written, `false` when it
+  failed, and the next `save` retries); `createIndexedDbAttachmentStore` and
+  `createMemoryAttachmentStore` are the two shipped ones.
+- To hand a file to the app (an upload route), a client action calls
+  `chatAttachmentFormData(attachmentId)` (or `getChatAttachment(id)`; `null`
+  for an id outside the active chat), posts the form and returns
+  `response.ok`; `false` reports failure to the model. A derived server tool
+  for a multipart route cannot work: disable it with `glirastes tools policy`.
+  Recipe: `docs/chat-attachments.md`, "Handing attachments to the app".
 - The LangGraph transport throws on a message with files. `/` commands carry
   no files; the composer refuses that send and keeps text and files.
 - Custom composer on `useChatComposerInput()`: `attachments`,
