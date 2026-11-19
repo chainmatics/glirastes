@@ -19,6 +19,7 @@ import type {
 } from '../../types.js';
 import { defineTool } from '../../types.js';
 import { assertToolEntities, validInputEntities, validOutputEntities } from '../../contracts/entity-declaration.js';
+import { assertApprovalSubjectDeclarations } from '../../contracts/approval-subject.js';
 import { zodToCompactDescription } from './zod-compact.js';
 import {
   ENDPOINT_PATH_NOT_ALLOWED_ERROR,
@@ -52,6 +53,7 @@ import {
 } from './tool-failure-result.js';
 import type { ResultStore } from './result-store.js';
 import { isResultReader } from './read-result-tool.js';
+import { cleanToolResult } from './clean-tool-result.js';
 export {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
@@ -582,6 +584,7 @@ export function endpointToolToTool<TInput extends SchemaLike>(
   assertOutputFields(endpointTool.outputDeniedFields, label, 'outputDeniedFields');
   assertOutputFields(endpointTool.outputDefaultFields, label, 'outputDefaultFields');
   assertToolEntities(endpointTool, label);
+  assertApprovalSubjectDeclarations(endpointTool, label);
   const outputAllowedFields = endpointTool.outputAllowedFields !== undefined
     ? normalizeOutputFields(endpointTool.outputAllowedFields)!
     : undefined;
@@ -612,6 +615,9 @@ export function endpointToolToTool<TInput extends SchemaLike>(
     ...(outputDefaultFields ? { outputDefaultFields } : {}),
     ...(endpointTool.outputEntities ? { outputEntities: endpointTool.outputEntities } : {}),
     ...(endpointTool.inputEntities ? { inputEntities: endpointTool.inputEntities } : {}),
+    ...(endpointTool.entityLookup ? { entityLookup: endpointTool.entityLookup } : {}),
+    ...(endpointTool.approvalSubject !== undefined ? { approvalSubject: endpointTool.approvalSubject } : {}),
+    ...(endpointTool.lookupEffect ? { lookupEffect: endpointTool.lookupEffect } : {}),
     needsApproval:
       endpointTool.needsApproval ??
       (endpointTool.method === 'GET' || endpointTool.method === 'HEAD' ? false : true),
@@ -927,25 +933,6 @@ export interface ToolToAiToolOptions {
   resultStore?: ResultStore;
 }
 
-/** What the model gets for a successful result whose details may not be shown. */
-/**
- * The `uiAction` of a withheld result under an output bound: the any-depth
- * deny keys are removed as in every other result, and an action that cannot
- * be serialized (so cannot be checked) is left out.
- */
-function boundedUiAction(uiAction: unknown, bound: OutputBound | undefined): unknown {
-  if (!bound || !uiAction) return uiAction;
-  return applyOutputBound({ success: true, uiAction }, bound)?.uiAction;
-}
-
-function withheldResult(uiAction: unknown): Record<string, unknown> {
-  return {
-    success: true,
-    outputWithheld: true,
-    message: 'The tool ran, but its result did not match its declared output, so the details are withheld. Do not call it again for the same request.',
-    ...(uiAction ? { uiAction } : {}),
-  };
-}
 
 /** Whether `value` serializes to more than `limit` characters (false when it cannot be serialized). */
 function exceedsLimit(value: unknown, limit: number): boolean {
@@ -955,6 +942,7 @@ function exceedsLimit(value: unknown, limit: number): boolean {
     return false;
   }
 }
+
 
 /**
  * Convert a Tool to an AI SDK-compatible tool object.
@@ -1062,75 +1050,9 @@ export function toolToAiTool(
           },
         });
 
-        // Output schema: parse to strip extra fields, re-attach uiAction for client
-        let cleanResult: unknown = result;
-        // A successful result of the declared shape (not a failure, not withheld): output fields apply to it.
-        let successful = !(isRecord(result) && result.success === false);
-        if (isRecord(result) && result.success === false) {
-          cleanResult = boundedToolFailure(result, bound);
-        } else if (
-          tool.outputSchema &&
-          isRecord(result)
-        ) {
-          const rec = result as Record<string, unknown>;
-          let parsed = tool.outputSchema.safeParse(result);
-          if (
-            !parsed.success
-            && rec.uiAction !== undefined
-          ) {
-            const {
-              uiAction: _transportUiAction,
-              ...payloadWithoutUiAction
-            } = rec;
-            parsed = tool.outputSchema.safeParse(payloadWithoutUiAction);
-          }
-          if (!parsed.success && rec.success !== undefined) {
-            const {
-              success: _transportSuccess,
-              uiAction: _transportUiAction,
-              ...declaredPayload
-            } = rec;
-            parsed = tool.outputSchema.safeParse(declaredPayload);
-          }
-          const carriedUnderData = !parsed.success
-            && rec.data !== undefined
-            && (!isRecord(rec.data) || Array.isArray(rec.data));
-          if (carriedUnderData) parsed = tool.outputSchema.safeParse(rec.data);
-          if (parsed.success) {
-            // Use parsed data (extra fields stripped by Zod)
-            cleanResult = {
-              ...(carriedUnderData ? { data: parsed.data } : parsed.data as Record<string, unknown>),
-              // Preserve success flag
-              ...(rec.success !== undefined ? { success: rec.success } : {}),
-              // Re-attach uiAction for client stream (stripped by schema parse)
-              ...(rec.uiAction ? { uiAction: rec.uiAction } : {}),
-            };
-          } else {
-            // Schema mismatch — retain bounded diagnostics locally, but never
-            // expose an undeclared backend payload to the model.
-            // Validation paths and messages may embed backend data (including
-            // object keys and custom validator messages). Keep diagnostics
-            // technical; never print those values from a runtime process.
-            console.warn(`[glirastes] Output schema mismatch for tool "${name}": ${parsed.error.issues.length} issue(s).`);
-            // The tool ran, and a write may already have happened: report it
-            // as done, so the model neither claims a failure nor calls again.
-            cleanResult = withheldResult(boundedUiAction(rec.uiAction, bound));
-            successful = false;
-          }
-        }
-
-        // The upper bound comes first: nothing outside outputAllowedFields, and
-        // nothing in outputDeniedFields, reaches the PII shield, the store, the
-        // overview, the cut or the browser.
-        if (bound && successful) {
-          const bounded = applyOutputBound(cleanResult, bound);
-          if (bounded) cleanResult = bounded;
-          else {
-            // Not serializable, so it cannot be bounded: withheld.
-            cleanResult = withheldResult(boundedUiAction(isRecord(cleanResult) ? cleanResult.uiAction : undefined, bound));
-            successful = false;
-          }
-        }
+        const cleaned = cleanToolResult(tool, result, bound, name);
+        let cleanResult: unknown = cleaned.value;
+        const successful = cleaned.successful;
         const fromStore = store?.isIssued(result) === true;
         // The default view needs the record form: a list or scalar result travels
         // under `data`, as it does under a bound (which has normalized it already).
