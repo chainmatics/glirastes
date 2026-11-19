@@ -249,6 +249,26 @@ function sameLabels(left: Labels, right: Labels): boolean {
   return left.singular === right.singular && left.plural === right.plural && left.approval === right.approval;
 }
 
+/**
+ * Leaves out a region variant (`de-DE`) whose labels equal those of its
+ * nearest shorter tag (`de`): every lookup falls back from the variant to
+ * that tag, so it would only repeat it. A variant that differs (`pt-BR`
+ * next to `pt`) or has no shorter tag stays.
+ */
+function withoutRedundantRegions(labels: Record<string, Labels>): void {
+  const longestFirst = Object.keys(labels).sort((left, right) => right.split('-').length - left.split('-').length);
+  for (const tag of longestFirst) {
+    const parts = tag.toLowerCase().split('-');
+    for (let length = parts.length - 1; length > 0; length -= 1) {
+      const shorter = parts.slice(0, length).join('-');
+      const base = Object.keys(labels).find((key) => key.toLowerCase() === shorter);
+      if (base === undefined) continue;
+      if (sameLabels(labels[tag]!, labels[base]!)) delete labels[tag];
+      break;
+    }
+  }
+}
+
 export interface ToolProse {
   /** The one description the model gets (see `MODEL_LANGUAGE`). */
   description: string;
@@ -454,6 +474,7 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
       // The template speaks English and German; any other language needs a declaration of its own.
       if (found?.level !== 'request') missingLabelLanguages.push(wanted);
     }
+    withoutRedundantRegions(labels);
   }
   return {
     description,
