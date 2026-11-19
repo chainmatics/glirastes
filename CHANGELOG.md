@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - How an app whose user language is stored in its database gets tool labels, the approval card and built-in texts in that language: `requestLocale` on the handler (`chat.requestLocaleHeader` in the container), `language` on the provider; and that a fixed `locale` wins over the page language the chat sends (`sendLanguage`, `clientLanguage`, `Content-Language`).
 
+## [0.18.1] - 2026-11-19
+
+0.18.0 was tagged but never published to npm: its publish run failed on this ordering race. 0.18.1 is the first published 0.18 release and contains everything listed under 0.18.0.
+
+### Fixed
+
+- `createAiChatHandler`: the parts the handler writes from the model's step and finish callbacks no longer land wherever the scheduler puts them. A `data-step-report` now comes right before the `finish-step` of its step, after every chunk of that step (its approval requests included), and never before the step's own tool parts. The final `data-pipeline-state` comes right before `finish` or `abort` (and before the stop notice or silent-turn text), so the terminal part is always last. Before, both were written beside the merged model stream, and the order changed with the runtime and the number of stream transforms: `finish` could arrive before the final state.
+
 ## [0.18.0] - 2026-11-19
 
 ### Changed
@@ -1048,3 +1056,4 @@ No code changes — patch-level docs release.
 [0.17.2]: https://github.com/chainmatics/glirastes/compare/v0.17.1...v0.17.2
 [0.17.3]: https://github.com/chainmatics/glirastes/compare/v0.17.2...v0.17.3
 [0.18.0]: https://github.com/chainmatics/glirastes/compare/v0.17.3...v0.18.0
+[0.18.1]: https://github.com/chainmatics/glirastes/compare/v0.18.0...v0.18.1

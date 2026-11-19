@@ -110,6 +110,7 @@ import {
   type ModelInputBreakdown,
 } from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
+import { createSidePartOrder } from './side-part-order.js';
 import {
   isSilentTurn,
   resumesToolApprovals,
@@ -829,6 +830,8 @@ async function defaultStreamHandler(
       // Cost of the running model step, read from its raw stream chunks.
       let stepRawCostUsd: number | null = null;
 
+      const sideParts = createSidePartOrder<Parameters<typeof writer.write>[0]>((part) => writer.write(part));
+
       const memoryUpdates = ctx.memory?.connect((part) => {
         writer.write(part as Parameters<typeof writer.write>[0]);
       });
@@ -842,6 +845,9 @@ async function defaultStreamHandler(
           data: state,
           transient,
         });
+      };
+      const writeFinalPipelineState = (state: PipelineStreamState) => {
+        sideParts.beforeEnd({ type: 'data-pipeline-state', data: state, transient: false });
       };
 
       // Ahead of the first chunk, so the UI can name a tool the moment it is called.
@@ -918,59 +924,60 @@ async function defaultStreamHandler(
           reportError(error);
         },
         onStepFinish: async (event) => {
-          if (finalSummary && event.stepNumber === finalSummary.stepNumber && event.text.trim() !== '') {
-            finalSummary.answered = true;
-          }
-          const inputTokens = event.usage.inputTokens ?? 0;
-          const outputTokens = event.usage.outputTokens ?? 0;
-          const model = stepModelId(event);
-          const rawCostUsd = stepRawCostUsd;
-          stepRawCostUsd = null;
-          const cost = resolveStepCost({
-            model,
-            inputTokens,
-            outputTokens,
-            providerMetadata: event.providerMetadata,
-            usageRaw: event.usage.raw,
-            rawChunkCostUsd: rawCostUsd,
-          }, ctx.modelPricing);
-          // A known cost counts against maxEstimatedCostUsd; an unknown one
-          // is never recorded as 0.
-          await ctx.managedTurn?.afterModelStep({
-            inputTokens,
-            outputTokens,
-            ...(cost.usd !== null ? { estimatedCostUsd: cost.usd } : {}),
-          });
-          ctx.turnMetrics?.recordStep({
-            model,
-            inputTokens,
-            outputTokens,
-            cost,
-            toolNames: event.toolCalls.map((call) => call.toolName),
-            failedToolNames: failedToolNames(event.content),
-          });
-          const report = buildStepReport({
-            stepNumber: event.stepNumber,
-            finishReason: event.finishReason,
-            toolCalls: event.toolCalls.map((call) => ({
-              toolName: call.toolName,
-            })),
-            toolResults: event.toolResults,
-            text: event.text,
-            usage: {
-              inputTokens: event.usage.inputTokens,
-              outputTokens: event.usage.outputTokens,
-              totalTokens: event.usage.totalTokens,
-            },
-          });
-          totalSteps = Math.max(totalSteps, report.stepNumber + 1);
-          if (ctx.emitStepReports) {
-            writer.write({
-              type: 'data-step-report',
-              data: report,
+          // Exactly once per step, also when the callback fails: the step's finish-step waits for it.
+          let stepParts: Array<Parameters<typeof writer.write>[0]> = [];
+          try {
+            if (finalSummary && event.stepNumber === finalSummary.stepNumber && event.text.trim() !== '') {
+              finalSummary.answered = true;
+            }
+            const inputTokens = event.usage.inputTokens ?? 0;
+            const outputTokens = event.usage.outputTokens ?? 0;
+            const model = stepModelId(event);
+            const rawCostUsd = stepRawCostUsd;
+            stepRawCostUsd = null;
+            const cost = resolveStepCost({
+              model,
+              inputTokens,
+              outputTokens,
+              providerMetadata: event.providerMetadata,
+              usageRaw: event.usage.raw,
+              rawChunkCostUsd: rawCostUsd,
+            }, ctx.modelPricing);
+            // A known cost counts against maxEstimatedCostUsd; an unknown one
+            // is never recorded as 0.
+            await ctx.managedTurn?.afterModelStep({
+              inputTokens,
+              outputTokens,
+              ...(cost.usd !== null ? { estimatedCostUsd: cost.usd } : {}),
             });
+            ctx.turnMetrics?.recordStep({
+              model,
+              inputTokens,
+              outputTokens,
+              cost,
+              toolNames: event.toolCalls.map((call) => call.toolName),
+              failedToolNames: failedToolNames(event.content),
+            });
+            const report = buildStepReport({
+              stepNumber: event.stepNumber,
+              finishReason: event.finishReason,
+              toolCalls: event.toolCalls.map((call) => ({
+                toolName: call.toolName,
+              })),
+              toolResults: event.toolResults,
+              text: event.text,
+              usage: {
+                inputTokens: event.usage.inputTokens,
+                outputTokens: event.usage.outputTokens,
+                totalTokens: event.usage.totalTokens,
+              },
+            });
+            totalSteps = Math.max(totalSteps, report.stepNumber + 1);
+            if (ctx.emitStepReports) stepParts = [{ type: 'data-step-report', data: report }];
+            ctx.onStepReport?.(report);
+          } finally {
+            sideParts.stepFinished(stepParts);
           }
-          ctx.onStepReport?.(report);
         },
         onAbort: (event) => {
           // Distinguish request cancellation from a runtime budget stop.
@@ -984,7 +991,7 @@ async function defaultStreamHandler(
           );
           if (finalStateWritten) return;
           totalSteps = Math.max(totalSteps, event.steps.length);
-          writePipelineState(
+          writeFinalPipelineState(
             createPipelineState({
               status: 'aborted',
               totalSteps,
@@ -1034,7 +1041,7 @@ async function defaultStreamHandler(
           });
 
           if (!finalStateWritten) {
-            writePipelineState(
+            writeFinalPipelineState(
               createPipelineState({
                 status,
                 totalSteps,
@@ -1078,18 +1085,23 @@ async function defaultStreamHandler(
         },
       });
 
-      const answerStream = withStopNotice(result.toUIMessageStream({ onError: maskToolStreamError }), stopNotice);
+      // Settles once the turn has written its final state, the error state included.
+      let settleTurn!: () => void;
+      const turnSettled = new Promise<void>((resolve) => { settleTurn = resolve; });
+      const modelStream = sideParts.sequence(result.toUIMessageStream({ onError: maskToolStreamError }), turnSettled);
+      const answerStream = withStopNotice(modelStream, stopNotice);
       const uiStream = resumedApprovals
         ? answerStream
         : withSilentTurnFallback(answerStream, silentTurnText ?? silentTurnFallbackText(ctx.locale));
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
+        settleTurn();
         await memoryUpdates?.done();
       } catch (error) {
         ctx.turnMetrics?.finish({ status: 'error', errorCode: 'model_error' });
         if (finalStateWritten) return;
-        writePipelineState(
+        writeFinalPipelineState(
           createPipelineState({
             status: 'error',
             totalSteps,
@@ -1101,6 +1113,8 @@ async function defaultStreamHandler(
         );
         finalStateWritten = true;
         if (!providerErrorReported) throw error;
+      } finally {
+        settleTurn();
       }
     },
   });
