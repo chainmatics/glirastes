@@ -101,7 +101,9 @@ required APIs. The configured V1 service does not add those routes automatically
 - **Vue/plain JS:** the same detached-element/config/append ordering applies;
   dispose when the view is removed and remount on identity changes.
 - **Layout without React slots:** `config.activityLog` (`expandWhileRunning`,
-  `runningProgress`, `noticePlacement: 'message'`, `details`, `grouping`) and the `data-*` hooks of
+  `runningProgress`, `noticePlacement: 'message'`, `details`, `grouping`),
+  `config.approvalDisplay` (`decided: 'entry'`, `open: 'inline'`),
+  `config.entityLinks.mentionMarkers` and the `data-*` hooks of
   the shadow root cover what `components.TurnNotice`/`MessageParts` do in
   React; the shadow-root styles carry the same `prefers-reduced-motion` rules.
 
