@@ -41,6 +41,18 @@ describe('applyServerSubjectNames', () => {
     expect(names.has('3')).toBe(false);
     expect(names.get('4')).toBe('History name');
   });
+
+  it('names no id another argument of the call carries too (playlist 3 checked, user 3 only a reference)', () => {
+    const names = new Map<string, string>();
+    applyServerSubjectNames(names, server([{ ...found, id: '3', ids: { playlist_id: '3' }, name: 'Lobby Loop' }]), [
+      { path: 'playlist_id', id: '3' },
+      { path: 'user_id', id: '3' },
+    ]);
+    expect(names.has('3')).toBe(false);
+    const alone = new Map<string, string>();
+    applyServerSubjectNames(alone, server([{ ...found, id: '3', ids: { playlist_id: '3' }, name: 'Lobby Loop' }]), [{ path: 'playlist_id', id: '3' }]);
+    expect(alone.get('3')).toBe('Lobby Loop');
+  });
 });
 
 describe('findApprovalSubjectsPart', () => {

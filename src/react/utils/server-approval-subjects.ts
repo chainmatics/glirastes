@@ -148,11 +148,21 @@ export function applyServerApprovalSubjects(described: PendingApproval, merged: 
  * status, and gets the server's name where it has exactly one; an unchecked
  * id keeps the history name as its fallback.
  */
-export function applyServerSubjectNames(names: Map<string, string>, part: ApprovalSubjectsPartData | undefined): void {
+export function applyServerSubjectNames(
+  names: Map<string, string>,
+  part: ApprovalSubjectsPartData | undefined,
+  /** Every subject the call has from the history: an id another argument also carries names none. */
+  history: ReadonlyArray<Pick<ApprovalSubject, 'path' | 'id'>> = [],
+): void {
+  const serverPaths = new Set((part?.subjects ?? []).flatMap((subject) => [subject.path, ...subject.path.split(',')]));
+  const elsewhere = new Set(history.filter((subject) => !serverPaths.has(subject.path)).map((subject) => subject.id.toLowerCase()));
   for (const subject of part?.subjects ?? []) {
     if (subject.check === 'found') names.delete(subject.id.toLowerCase());
   }
-  for (const [key, name] of serverSubjectNames(part)) names.set(key, name);
+  for (const [key, name] of serverSubjectNames(part)) {
+    if (elsewhere.has(key)) names.delete(key);
+    else names.set(key, name);
+  }
 }
 
 export function serverSubjectNames(part: ApprovalSubjectsPartData | undefined): Map<string, string> {

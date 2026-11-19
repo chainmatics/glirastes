@@ -1080,7 +1080,7 @@ export function AiChatProvider({
           }
           // What the server looked up through the tool's declared read source (only with a declaration).
           const serverPart = findApprovalSubjectsPart(lastMessage.parts, toolPart.toolCallId);
-          applyServerSubjectNames(names, serverPart);
+          applyServerSubjectNames(names, serverPart, resolved);
           const described = approvalDescriptionRef.current(
             toolName,
             toolPart.approval.id,
