@@ -118,6 +118,13 @@ describe('seen-objects memo', () => {
     expect(small.length).toBeLessThanOrEqual(200 * 4);
   });
 
+  it('never clips an id whose field is also the declared name', () => {
+    const key = `release-${'x'.repeat(80)}`;
+    const objects = collectSeenObjects([{ value: { data: [{ key }] }, declarations: [{ type: 'release', id: 'key', name: 'key', path: 'data[]' }] }]);
+    expect(objects).toEqual([{ type: 'release', id: [['key', key]] }]);
+    expect(renderSeenObjects(objects)!.text).toContain(`release: {"key":"${key}"}`);
+  });
+
   it('an object seen again moves to the front', () => {
     const declarations = entities.playlists_list!.output!;
     const objects = collectSeenObjects([

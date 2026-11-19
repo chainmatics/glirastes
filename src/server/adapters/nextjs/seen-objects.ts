@@ -74,10 +74,12 @@ function objectOf(identity: DeclaredRecordIdentity): SeenObject | undefined {
       : undefined;
   // Without a name or fallback an id tells the model nothing it could match to the user's words.
   if (!label) return undefined;
+  // A field that is both id and name (`{ id: 'key', name: 'key' }`) shows once, as the exact id.
+  const ownLabel = identity.idFields.includes(label[0]) ? undefined : label;
   return {
     ...(identity.declaration.type !== undefined ? { type: identity.declaration.type } : {}),
     id: identity.idFields.map((field, index) => [field, identity.idValues[index]!]),
-    label,
+    ...(ownLabel ? { label: ownLabel } : {}),
   };
 }
 
