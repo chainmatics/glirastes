@@ -114,6 +114,21 @@ describe('<glirastes-chat>', () => {
     document.documentElement.removeAttribute('lang');
   });
 
+  it('follows a lang the page sets after the element mounted, with English for the keys a partial table lacks', async () => {
+    document.documentElement.setAttribute('lang', 'de');
+    const { element } = await mount((node) => {
+      node.transport = transport();
+      node.config = { locales: { pl: { placeholder: 'Napisz wiadomość' } } };
+    });
+    const textarea = () => element.shadowRoot!.querySelector('textarea')!;
+    const send = () => element.shadowRoot!.querySelector('button[data-action="send"]')!;
+    expect(textarea().getAttribute('placeholder')).toBe('Nachricht eingeben…');
+    await act(async () => { document.documentElement.setAttribute('lang', 'pl'); });
+    await waitFor(() => expect(textarea().getAttribute('placeholder')).toBe('Napisz wiadomość'));
+    expect(send().textContent).toBe('Send');
+    document.documentElement.removeAttribute('lang');
+  });
+
   it("keeps the server's tool wording first with languageSource: 'server'", async () => {
     document.documentElement.setAttribute('lang', 'en');
     const handlers = new Set<(part: { type: string; data: unknown }) => void>();

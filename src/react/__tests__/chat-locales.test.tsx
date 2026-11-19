@@ -78,6 +78,37 @@ describe('the chat texts per language (locales)', () => {
     expect(german.activitySummarySeparator).toBe(', ');
   });
 
+  // An i18n library sets <html lang> in an effect of a parent (it runs after the chat's) or on a switch.
+  async function textsAfterSwitch(from: string, to: string, props: Partial<React.ComponentProps<typeof AiChatProvider>>) {
+    await textsFor(from, props);
+    act(() => { document.documentElement.lang = to; });
+    await new Promise((settled) => setTimeout(settled, 0));
+    return seen!;
+  }
+
+  it('follows a page language set after the chat mounted: a partial Polish table, English for the rest', async () => {
+    const texts = await textsAfterSwitch('de', 'pl', { locales: { pl } });
+    expect(texts.sendButton).toBe('Wyślij');
+    expect(texts.approveButton).toBe('Approve');
+    expect(texts.activityAbortedLabel).toBe('{count} stopped');
+    cleanup();
+    const unset = await textsAfterSwitch('', 'pl', { locales: { pl } });
+    expect(unset.approveButton).toBe('Approve');
+  });
+
+  it('follows a page language set after the chat mounted with a language-free override as well', async () => {
+    const texts = await textsAfterSwitch('de', 'pl', { locale: { sendButton: 'Wyślij' } });
+    expect(texts.sendButton).toBe('Wyślij');
+    expect(texts.approveButton).toBe('Approve');
+  });
+
+  it('keeps German for a German chat language (de-AT) with a partial Polish table', async () => {
+    const texts = await textsAfterSwitch('en', 'de-AT', { locales: { pl } });
+    expect(texts.sendButton).toBe('Senden');
+    expect(texts.approveButton).toBe('Ausführen');
+    expect(texts.activityAbortedLabel).toBe('{count} abgebrochen');
+  });
+
   it('is the chat of before without locales', async () => {
     const german = await textsFor('de', {});
     expect(german.approveButton).toBe('Ausführen');
