@@ -64,6 +64,7 @@ describe('release workflows', () => {
     expect(jobRuns(read('.github/workflows/publish.yml'), 'publish')).toEqual([
       'npm install -g npm@11',
       '|',
+      '|',
       'bun install --frozen-lockfile',
       'bun run typecheck',
       'bun run typecheck:tests',
@@ -73,6 +74,17 @@ describe('release workflows', () => {
       'bun run test',
       `npm publish --access public --provenance --tag "$(node -p "['latest', 'next'][Number(require('./package.json').version.includes('-'))]")"`,
     ]);
+  });
+
+  it('refuses to publish while upgrade notes are unreleased or missing for the version', () => {
+    const workflow = read('.github/workflows/publish.yml');
+    const guard = workflow.indexOf('- name: Verify upgrade notes are released for this version');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(workflow.indexOf('- name: Publish to npm with provenance'));
+    const step = workflow.slice(guard, workflow.indexOf('- name: Install dependencies', guard));
+    expect(step).toContain('ls upgrade-notes/unreleased/*.json');
+    expect(step).toContain('[ ! -f "upgrade-notes/$PKG_VERSION.json" ]');
+    expect(step.match(/exit 1/g)).toHaveLength(2);
   });
 });
 
