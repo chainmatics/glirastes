@@ -562,4 +562,14 @@ describe('declared paths of overviews and nested ids in the history', () => {
     expect(((compacted.data as Entry[])[1]!.owner as Entry).userNo).toBe('USER-2026-1-ALPHA-BRAVO-CHARLIE');
     expect(((compacted.data as Entry[])[1]!.owner as Entry).bio).not.toBe('b'.repeat(60));
   });
+
+  it('applies a path-less declaration to the overview\'s dominant array only, also in history compaction', () => {
+    const overview = {
+      tracks: [{ n: 1, title: 'Track 1' }],
+      tags: Array.from({ length: 30 }, (_, index) => ({ n: 100 + index, title: 'x'.repeat(30) })),
+      _result: { id: 'ro_x', arrays: { tracks: 50, tags: 30 }, hint: 'x' },
+    };
+    expect(declarationForEntries([{ id: 'n', name: 'title' }], ['tags'], overview)).toBeUndefined();
+    expect(declarationForEntries([{ id: 'n', name: 'title' }], ['tracks'], overview)).toBeDefined();
+  });
 });

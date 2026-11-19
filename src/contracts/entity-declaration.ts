@@ -327,15 +327,22 @@ export function largestArrayRoute(root: unknown): string[] | undefined {
   return best?.route;
 }
 
+/**
+ * The array a path-less declaration points at: the largest one, but for an
+ * overview the dominant array of the full result it names first in
+ * `_result.arrays`, even when cutting entries made another array larger.
+ */
+export function defaultEntityRoute(root: unknown): string[] | undefined {
+  const marker = isRecord(root) && isRecord(root._result) ? root._result : undefined;
+  const listed = marker && isRecord(marker.arrays) ? Object.keys(marker.arrays)[0] : undefined;
+  return listed !== undefined ? listed.split('.') : largestArrayRoute(root);
+}
+
 /** The steps a declaration addresses, resolving the default path against `root`. */
 export function entityPathOf(declaration: OutputEntityDeclaration, root: unknown): EntityPathStep[] | undefined {
   if (declaration.path !== undefined) return parseEntityPath(declaration.path);
   if (Array.isArray(root)) return [];
-  // An overview names the dominant array of the full result first (`_result.arrays`): that one,
-  // even when cutting entries made another array of the overview larger.
-  const marker = isRecord(root) && isRecord(root._result) ? root._result : undefined;
-  const listed = marker && isRecord(marker.arrays) ? Object.keys(marker.arrays)[0] : undefined;
-  const route = (listed !== undefined ? listed.split('.') : undefined) ?? largestArrayRoute(root) ?? indexedRoute(root);
+  const route = defaultEntityRoute(root) ?? indexedRoute(root);
   if (!route) return [];
   return route.map((key, index) => ({ key, each: index === route.length - 1 }));
 }
@@ -461,7 +468,7 @@ export function declarationForEntries(
 ): OutputEntityDeclaration | undefined {
   if (!declarations || declarations.length === 0) return undefined;
   const wanted = `${route.join('.')}[]`;
-  const largest = Array.isArray(root) ? [] : largestArrayRoute(root) ?? [];
+  const largest = Array.isArray(root) ? [] : defaultEntityRoute(root) ?? [];
   const isLargest = largest.length === route.length && largest.every((key, index) => key === route[index]);
   return declarations.find((declaration) => (declaration.path === undefined
     ? isLargest
