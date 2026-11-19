@@ -1,8 +1,10 @@
-import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { SDK_VERSION } from '../../runtime/sdk-version.js';
+import { readBaseline } from './upgrade/baseline.js';
 import { installSkills } from './install-skills.js';
 import {
   MANIFEST_RELATIVE_PATH,
@@ -385,5 +387,77 @@ describe('foundation agent skills', () => {
 
     expect(described.filter((entry) => !entry.described).map((e) => e.name))
       .toEqual([]);
+  });
+});
+
+describe('upgrade baseline and hook on install', () => {
+  it('fresh install writes baseline at SDK_VERSION', async () => {
+    const rootDir = await nextAppRoot();
+    await installSkills({ rootDir, host: 'claude', quiet: true });
+    expect((await readBaseline(rootDir))!.reviewedThrough).toBe(SDK_VERSION);
+  });
+
+  it('writes no baseline on a dry run', async () => {
+    const rootDir = await nextAppRoot();
+    await installSkills({ rootDir, host: 'claude', quiet: true, dryRun: true });
+    expect(await readBaseline(rootDir)).toBeUndefined();
+  });
+
+  it('--with-upgrade-hook writes a SessionStart hook running "glirastes upgrade report --brief" into .claude/settings.json and keeps existing hooks', async () => {
+    const rootDir = await nextAppRoot();
+    await mkdir(join(rootDir, '.claude'), { recursive: true });
+    const existing = {
+      permissions: { allow: ['Bash(ls)'] },
+      hooks: {
+        PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo pre' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: 'echo hello' }] }],
+      },
+    };
+    await writeFile(join(rootDir, '.claude/settings.json'), JSON.stringify(existing));
+
+    await installSkills({ rootDir, host: 'claude', quiet: true, withUpgradeHook: true });
+    await installSkills({ rootDir, host: 'claude', quiet: true, withUpgradeHook: true, force: true });
+
+    const settings = JSON.parse(await readFile(join(rootDir, '.claude/settings.json'), 'utf8'));
+    expect(settings.permissions).toEqual(existing.permissions);
+    expect(settings.hooks.PreToolUse).toEqual(existing.hooks.PreToolUse);
+    expect(settings.hooks.SessionStart).toEqual([
+      ...existing.hooks.SessionStart,
+      { hooks: [{ type: 'command', command: 'npx --no-install glirastes upgrade report --brief' }] },
+    ]);
+  });
+
+  it('creates the settings file when there is none', async () => {
+    const rootDir = await nextAppRoot();
+    await installSkills({ rootDir, host: 'claude', quiet: true, withUpgradeHook: true });
+    expect(JSON.parse(await readFile(join(rootDir, '.claude/settings.json'), 'utf8'))).toEqual({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'npx --no-install glirastes upgrade report --brief' }] }] },
+    });
+  });
+
+  it('without the flag no settings file is touched', async () => {
+    const rootDir = await nextAppRoot();
+    await installSkills({ rootDir, host: 'claude', quiet: true });
+    await expect(access(join(rootDir, '.claude/settings.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await mkdir(join(rootDir, '.claude'), { recursive: true });
+    await writeFile(join(rootDir, '.claude/settings.json'), '{"a":1}');
+    await installSkills({ rootDir, host: 'claude', quiet: true, force: true });
+    expect(await readFile(join(rootDir, '.claude/settings.json'), 'utf8')).toBe('{"a":1}');
+  });
+
+  it('never overwrites an invalid settings file and still installs', async () => {
+    const rootDir = await nextAppRoot();
+    await mkdir(join(rootDir, '.claude'), { recursive: true });
+    await writeFile(join(rootDir, '.claude/settings.json'), '{ not json');
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((line: unknown) => { errors.push(String(line)); });
+    try {
+      await installSkills({ rootDir, host: 'claude', quiet: true, withUpgradeHook: true });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await readFile(join(rootDir, '.claude/settings.json'), 'utf8')).toBe('{ not json');
+    expect(errors.join('\n')).toContain('.claude/settings.json is not valid JSON');
+    expect(await readInstalledSkillsManifest(rootDir)).not.toBeNull();
   });
 });

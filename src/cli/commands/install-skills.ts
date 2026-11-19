@@ -1,9 +1,11 @@
-import { mkdir, readdir, copyFile, readFile, stat, symlink, lstat, unlink, rm } from 'node:fs/promises';
+import { mkdir, readdir, copyFile, readFile, stat, symlink, lstat, unlink, rm, writeFile } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, relative, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { colors, header, separator } from '../../codegen/format.js';
+import { SDK_VERSION } from '../../runtime/sdk-version.js';
+import { ensureBaseline } from './upgrade/baseline.js';
 import {
   classifyInstalledSkill,
   hashSkillDirectory,
@@ -49,6 +51,8 @@ export interface InstallSkillsOptions {
   dryRun?: boolean;
   /** Project root — defaults to cwd */
   rootDir?: string;
+  /** Add a Claude Code SessionStart hook that runs `glirastes upgrade report --brief`; opt-in. */
+  withUpgradeHook?: boolean;
   /** Suppress installer progress when embedded in a machine-readable workflow. */
   quiet?: boolean;
 }
@@ -240,6 +244,8 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   let overwritten = 0;
   let manifest = await readInstalledSkillsManifest(rootDir);
   const sdkVersion = await readSdkVersion();
+  // A reinstall keeps what the app last reviewed: its baseline starts at the version already installed.
+  const baselineVersion = manifest?.sdkVersion ?? SDK_VERSION;
 
   for (const host of hosts) {
     const hostTargets = HOST_SKILL_TARGETS[host];
@@ -340,7 +346,14 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
         skills: recorded,
       }, sdkVersion);
       await writeInstalledSkillsManifest(rootDir, manifest);
+      if (!opts.global) await ensureBaseline(rootDir, baselineVersion);
     }
+  }
+
+  if (opts.withUpgradeHook && !opts.dryRun) {
+    const outcome = await addUpgradeHook(rootDir);
+    if (outcome === 'added') log(`  ${dim('Hook:')}    SessionStart runs "${UPGRADE_HOOK_COMMAND}" (.claude/settings.json)`);
+    else if (outcome !== 'present') console.error(outcome);
   }
 
   log('');
@@ -354,6 +367,44 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
     log('');
     log(`  ${dim('Re-run with --force to overwrite skipped skills.')}`);
   }
+}
+
+export const UPGRADE_HOOK_COMMAND = 'npx --no-install glirastes upgrade report --brief';
+
+/**
+ * Merges the SessionStart hook into `.claude/settings.json`: other keys and
+ * hooks stay, a second run adds nothing. A settings file that is not valid
+ * JSON is never overwritten; the returned text says why nothing was written.
+ */
+async function addUpgradeHook(rootDir: string): Promise<'added' | 'present' | string> {
+  const path = join(rootDir, '.claude/settings.json');
+  let settings: Record<string, unknown> = {};
+  if (await pathExists(path)) {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('not an object');
+      settings = parsed as Record<string, unknown>;
+    } catch {
+      return `glirastes install: .claude/settings.json is not valid JSON, so the upgrade hook was not added. Fix the file and run the install again with --with-upgrade-hook.`;
+    }
+  }
+  const hooks = (typeof settings.hooks === 'object' && settings.hooks !== null && !Array.isArray(settings.hooks)
+    ? settings.hooks
+    : {}) as Record<string, unknown>;
+  const sessionStart = Array.isArray(hooks.SessionStart) ? hooks.SessionStart as unknown[] : [];
+  const present = sessionStart.some((entry) => Array.isArray((entry as { hooks?: unknown })?.hooks)
+    && ((entry as { hooks: unknown[] }).hooks).some((hook) => (hook as { command?: unknown })?.command === UPGRADE_HOOK_COMMAND));
+  if (present) return 'present';
+  const next = {
+    ...settings,
+    hooks: {
+      ...hooks,
+      SessionStart: [...sessionStart, { hooks: [{ type: 'command', command: UPGRADE_HOOK_COMMAND }] }],
+    },
+  };
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  return 'added';
 }
 
 /** One host stays the default; `hosts` accepts several without repeating work. */

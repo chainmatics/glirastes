@@ -12,6 +12,7 @@ import {
   readInstalledSkillsManifest,
   writeInstalledSkillsManifest,
 } from './installed-skills-manifest.js';
+import { BASELINE_PATH, readBaseline } from './upgrade/baseline.js';
 import { planSkillsUpdate } from './skills-auto-update.js';
 import { runToolsCommand } from './tools/index.js';
 
@@ -263,5 +264,22 @@ describe('skills in doctor', () => {
 
     const bare = await createDoctorReport({ rootDir: await nextApp(), env: {} });
     expect(bare.checks.some((item) => item.name === 'agent-skills')).toBe(false);
+  });
+});
+
+describe('baseline on skills auto-update', () => {
+  it('creates the baseline with the previous manifest version before bumping', async () => {
+    const root = await installedByOlderSdk();
+    await rm(join(root, BASELINE_PATH), { force: true });
+    expect(await readBaseline(root)).toBeUndefined();
+
+    await runToolsCommand(['refresh'], io(root).deps);
+
+    expect((await readBaseline(root))!.reviewedThrough).toBe('0.0.1');
+    expect((await readInstalledSkillsManifest(root))!.sdkVersion).toBe(SDK_VERSION);
+
+    // A later refresh never moves it.
+    await runToolsCommand(['refresh'], io(root).deps);
+    expect((await readBaseline(root))!.reviewedThrough).toBe('0.0.1');
   });
 });

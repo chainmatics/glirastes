@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { loadToolsConfig } from '../../../codegen/tools/config.js';
 import { parseToolArgs } from './args.js';
 import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
+import { computeUpgradeHint, printUpgradeHint, withUpgradeJson } from './refresh.js';
 import { inspectSkillsStaleness, skillsAutoUpdateDisabled, type SkillsStaleness } from '../skills-auto-update.js';
 
 export const CHECK_ARGS = { flags: ['--strict', '--integrity-only', '--json', '--no-skills'], values: ['--root'] } as const;
@@ -29,13 +30,17 @@ export async function runToolsCheck(argv: ReadonlyArray<string>, io: ToolsIo): P
   const skills = integrityOnly || args.flags.has('--no-skills') || skillsAutoUpdateDisabled(io.env)
     ? null
     : await checkSkills(root);
+  // A deploy (--integrity-only) does not depend on the SDK follow-ups either.
+  const upgrade = integrityOnly ? null : await computeUpgradeHint(root, io);
   if (json) {
-    io.log(skills
+    const raw = skills
       ? JSON.stringify({ ...(JSON.parse(formatToolsJson(result)) as Record<string, unknown>), skills })
-      : formatToolsJson(result));
+      : formatToolsJson(result);
+    io.log(upgrade ? withUpgradeJson(raw, upgrade) : raw);
   } else {
     io.log(formatToolsHuman(result));
     for (const line of [...skills?.lines ?? [], ...skills?.warnings ?? []]) io.log(line);
+    if (upgrade) printUpgradeHint(upgrade, io);
   }
   if (skills?.stale) return 1;
   const attention = result.findings.filter((finding) => finding.severity === 'needs_attention');

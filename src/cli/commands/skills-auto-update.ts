@@ -18,6 +18,7 @@ import {
   type InstalledHostRecord,
   type InstalledSkillsManifest,
 } from './installed-skills-manifest.js';
+import { ensureBaseline } from './upgrade/baseline.js';
 import { selectionOfInstalledSkills } from './installer-parts.js';
 
 /** `GLIRASTES_SKILLS_AUTO_UPDATE=0` keeps `tools refresh` and `tools check` away from the installed skills. */
@@ -218,6 +219,9 @@ export async function applySkillsUpdate(rootDir: string, plan: SkillsUpdatePlan)
     if (change.mode === 'symlink') await symlink(change.source!, change.dest, 'dir');
     else await copyDirRecursive(change.source!, change.dest);
   }
+  // The first auto-update of an app that never had a baseline: what it last
+  // reviewed is what the skills were installed for, before the manifest moves on.
+  if (plan.fromVersion) await ensureBaseline(resolve(rootDir), plan.fromVersion);
   if (plan.manifestChanged) await writeInstalledSkillsManifest(resolve(rootDir), plan.next);
 }
 

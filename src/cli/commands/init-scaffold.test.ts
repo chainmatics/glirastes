@@ -1,9 +1,9 @@
-import { chmod, lstat, readFile, readlink, stat, symlink } from 'node:fs/promises';
+import { chmod, lstat, writeFile, readFile, readlink, stat, symlink } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAppFixture, removeAppFixtures } from '../../codegen/tools/__tests__/app-fixture.js';
 import { ToolsConfigSchema } from '../../codegen/tools/config.js';
 import { LocalPromptBundleSchema } from './validate-build.js';
-import { AGENT_HINT_START, scaffoldToolsInputs } from './init-scaffold.js';
+import { AGENT_HINT_START, scaffoldToolsInputs, updateAgentHint } from './init-scaffold.js';
 import { runToolsPipeline } from '../../codegen/tools/pipeline.js';
 import { runToolsCommand } from './tools/index.js';
 
@@ -161,5 +161,47 @@ describe('glirastes init scaffold', () => {
       expect(scaffold.written).not.toContain('.glirastes/tools.json');
       expect(scaffold.notes).toEqual(['No Next.js app: integrating-glirastes-web describes .glirastes/tools.json for this stack.']);
     }, 60_000);
+  });
+});
+
+describe('agent block update', () => {
+  const OLD_BLOCK = `${AGENT_HINT_START}\n## Glirastes tools\n\nOld text.\n<!-- /glirastes:tools -->`;
+
+  it('updates an outdated block in place and leaves text outside the markers untouched', async () => {
+    const before = '# Mine\r\n\nIntro   with trailing spaces  \n\n';
+    const after = '\n\n## Later\nTail without newline';
+    const app = await freshApp({ 'AGENTS.md': `${before}${OLD_BLOCK}${after}` });
+
+    expect(await updateAgentHint(app.root, {})).toEqual(['AGENTS.md']);
+
+    const text = await app.read('AGENTS.md');
+    expect(text.startsWith(before)).toBe(true);
+    expect(text.endsWith(after)).toBe(true);
+    expect(text).not.toContain('Old text.');
+    expect(text).toContain('run `glirastes upgrade report` (skill `upgrading-glirastes`)');
+    expect(text).toContain('Record the developer\'s choice with `glirastes upgrade decide <id> adopted|declined|deferred`.');
+    expect(await updateAgentHint(app.root, {})).toEqual([]);
+  });
+
+  it('does nothing when GLIRASTES_SKILLS_AUTO_UPDATE=0', async () => {
+    const app = await freshApp({ 'AGENTS.md': OLD_BLOCK });
+    expect(await updateAgentHint(app.root, { GLIRASTES_SKILLS_AUTO_UPDATE: '0' })).toEqual([]);
+    expect(await app.read('AGENTS.md')).toBe(OLD_BLOCK);
+  });
+
+  it('never inserts a block into a file without one', async () => {
+    const app = await freshApp({ 'AGENTS.md': '# Mine\n', 'CLAUDE.md': '# Other\n' });
+    expect(await updateAgentHint(app.root, {})).toEqual([]);
+    expect(await app.read('AGENTS.md')).toBe('# Mine\n');
+  });
+
+  it('refresh brings the block up to date in write mode only', async () => {
+    const app = await freshApp({ 'AGENTS.md': OLD_BLOCK });
+    const deps = (env: NodeJS.ProcessEnv) => ({ cwd: app.root, env, log: () => undefined, error: () => undefined,
+      runPipeline: async () => ({ mode: 'write', changes: { added: [], changed: [], removed: [], unchanged: [] }, findings: [], excluded: [], outputs: {}, driftPaths: [], wrote: false } as never) });
+    await runToolsCommand(['refresh', '--mode', 'frozen'], deps({}));
+    expect(await app.read('AGENTS.md')).toBe(OLD_BLOCK);
+    await runToolsCommand(['refresh', '--mode', 'write'], deps({}));
+    expect(await app.read('AGENTS.md')).toContain('glirastes upgrade report');
   });
 });

@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { TOOLS_PATHS } from '../../codegen/tools/config.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import { writeArtifactSetAtomically } from './atomic-artifact-write.js';
+import { skillsAutoUpdateDisabled } from './skills-auto-update.js';
 import { detectWorkspaceSources } from './workspace-sources.js';
 
 /**
@@ -24,6 +25,7 @@ export interface InitScaffold {
 }
 
 export const AGENT_HINT_START = '<!-- glirastes:tools -->';
+export const AGENT_HINT_END = '<!-- /glirastes:tools -->';
 const AGENT_HINT = [
   AGENT_HINT_START,
   '## Glirastes tools',
@@ -33,7 +35,10 @@ const AGENT_HINT = [
   '`glirastes tools describe --print` (skill `describing-glirastes-tools`), then run',
   '`glirastes tools refresh` and `glirastes tools eval` again and commit `.glirastes` with the code.',
   'Never edit `.glirastes/tool-policy.json` or generated files yourself; Glirastes never calls a model.',
-  '<!-- /glirastes:tools -->',
+  'Before changing code that uses glirastes, run `glirastes upgrade report` (skill `upgrading-glirastes`).',
+  "Propose must and should items with reasons, offer optional items only, and change nothing without the developer's consent.",
+  "Record the developer's choice with `glirastes upgrade decide <id> adopted|declined|deferred`.",
+  AGENT_HINT_END,
   '',
 ].join('\n');
 
@@ -192,17 +197,9 @@ export async function scaffoldToolsInputs(options: {
   // The host's instruction file, plus the other one when it exists; a link
   // (CLAUDE.md -> AGENTS.md) is followed so its target gets the hint once.
   const hostFile = options.host === 'claude' ? 'CLAUDE.md' : 'AGENTS.md';
-  const hintTargets = new Set<string>();
-  for (const file of [hostFile, 'AGENTS.md', 'CLAUDE.md']) {
-    const absolute = join(root, file);
-    if (!existsSync(absolute) && file !== hostFile) continue;
-    const target = existsSync(absolute) ? relative(root, await realpath(absolute)) : file;
-    if (target.startsWith('..') || isAbsolute(target)) {
-      notes.push(`${file} points outside the app; add the Glirastes tools hint there yourself.`);
-      continue;
-    }
-    hintTargets.add(target);
-  }
+  const hint = await resolveHintTargets(root, [hostFile, 'AGENTS.md', 'CLAUDE.md'], hostFile);
+  notes.push(...hint.notes);
+  const hintTargets = hint.targets;
   for (const target of hintTargets) {
     const current = await readText(join(root, target)) ?? '';
     if (current.includes(AGENT_HINT_START)) continue;
@@ -238,4 +235,58 @@ export async function scaffoldToolsInputs(options: {
     })));
   }
   return { appId, written: writes.map((write) => write.path).sort(), notes };
+}
+
+/**
+ * The instruction files that carry the hint: the host's own file, plus the
+ * others when they exist. A link (CLAUDE.md -> AGENTS.md) is followed so its
+ * target gets the hint once.
+ */
+async function resolveHintTargets(
+  root: string,
+  files: ReadonlyArray<string>,
+  hostFile: string | undefined,
+): Promise<{ targets: Set<string>; notes: string[] }> {
+  const targets = new Set<string>();
+  const notes: string[] = [];
+  for (const file of files) {
+    const absolute = join(root, file);
+    if (!existsSync(absolute) && file !== hostFile) continue;
+    const target = existsSync(absolute) ? relative(root, await realpath(absolute)) : file;
+    if (target.startsWith('..') || isAbsolute(target)) {
+      notes.push(`${file} points outside the app; add the Glirastes tools hint there yourself.`);
+      continue;
+    }
+    targets.add(target);
+  }
+  return { targets, notes };
+}
+
+/**
+ * Brings an existing Glirastes block in AGENTS.md / CLAUDE.md up to this SDK
+ * (`tools refresh`). Only the text between the markers changes; a file without
+ * the block is left alone, init inserts it. Returns the changed app-relative
+ * files. `GLIRASTES_SKILLS_AUTO_UPDATE=0` switches it off.
+ */
+export async function updateAgentHint(
+  root: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string[]> {
+  if (skillsAutoUpdateDisabled(env)) return [];
+  const block = AGENT_HINT.slice(0, AGENT_HINT.lastIndexOf(AGENT_HINT_END) + AGENT_HINT_END.length);
+  const { targets } = await resolveHintTargets(root, ['AGENTS.md', 'CLAUDE.md'], undefined);
+  const writes: Array<{ path: string; content: string; preserveMode: true }> = [];
+  for (const target of targets) {
+    const current = await readText(join(root, target));
+    if (current === undefined) continue;
+    const start = current.indexOf(AGENT_HINT_START);
+    if (start < 0) continue;
+    const endMarker = current.indexOf(AGENT_HINT_END, start);
+    if (endMarker < 0) continue;
+    const end = endMarker + AGENT_HINT_END.length;
+    if (current.slice(start, end) === block) continue;
+    writes.push({ path: join(root, target), content: `${current.slice(0, start)}${block}${current.slice(end)}`, preserveMode: true });
+  }
+  if (writes.length > 0) await writeArtifactSetAtomically(writes);
+  return writes.map((write) => relative(root, write.path)).sort();
 }

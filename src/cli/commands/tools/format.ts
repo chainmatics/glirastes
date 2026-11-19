@@ -6,6 +6,7 @@ import type { ToolsPipelineOptions, ToolsPipelineResult } from '../../../codegen
 import type { DescriptionOrigin } from '../../../codegen/tools/prose.js';
 import type { ContractSource, ToolFinding } from '../../../codegen/tools/types.js';
 import { buildResolveWorklist, describeGaps } from '../../../codegen/tools/worklist.js';
+import type { UpgradeReportOptions } from '../upgrade/report.js';
 import type { ToolsWatchFactory } from './watch.js';
 import { AppSetupArtifactSchema, type ToolRiskClass } from '../../../contracts/index.js';
 import { riskTier } from '../../../contracts/tool-policy.js';
@@ -19,6 +20,8 @@ export interface ToolsIo {
   /** `tools refresh --watch`: file watching and the stop signal (tests inject both). */
   watch?: ToolsWatchFactory;
   signal?: AbortSignal;
+  /** Tests point the upgrade hint at fixture notes and a fixed SDK version. */
+  upgrade?: Pick<UpgradeReportOptions, 'sdkVersion' | 'notesDir' | 'changelogPath' | 'skillsDir'>;
 }
 
 export interface ToolStatusEntry {
