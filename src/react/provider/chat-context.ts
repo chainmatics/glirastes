@@ -104,6 +104,13 @@ export interface ChatContextValue {
   approve: (id: string) => void;
   reject: (id: string) => void;
   isProcessingApproval: boolean;
+  /**
+   * Whether the chat will still send an answered approval by itself: the
+   * user approved it in this chat, no request started since, and the chat
+   * continues automatically. Between the answer and that request the entry
+   * keeps showing the call as running.
+   */
+  isApprovalResendPending?: (approvalId: string) => boolean;
   approvalDescription: ApprovalDescriptionFn;
   /** `approvalSubjects` of the provider (default true). */
   approvalSubjects?: boolean;

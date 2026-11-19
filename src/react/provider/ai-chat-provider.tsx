@@ -58,7 +58,7 @@ import {
 } from '../../browser/ui-action-signals.js';
 import type { UiAction } from '../../browser/ui-action-bus.js';
 import type { UiOutcome } from '../../contracts/ui-outcome.js';
-import { continuesAfterPageLoad, waitingToolCallIds } from '../utils/ui-outcome-continuation.js';
+import { continuesAfterPageLoad, shouldContinueChat, waitingToolCallIds } from '../utils/ui-outcome-continuation.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
@@ -139,6 +139,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   approvalEntryExpectedLabel: 'Approved, without result',
   approvalEntryDeclinedLabel: 'Declined',
   approvalEntryNotRunLabel: 'Approved, not run',
+  approvalEntryAbortedLabel: 'Approved, stopped',
   planTitle: 'Plan',
   chatTitle: 'AI Assistant',
   closeChatAriaLabel: 'Close chat',
@@ -637,6 +638,8 @@ export function AiChatProvider({
     if (pendingApprovalsMap.size === 0) setApprovalReminder(false);
   }, [pendingApprovalsMap]);
   const [processingApprovalIds, setProcessingApprovalIds] = useState<Set<string>>(new Set());
+  // Approved in this chat, no request started since: the automatic resend is still to come.
+  const [resendApprovalIds, setResendApprovalIds] = useState<ReadonlySet<string>>(new Set());
   const [approvalError, setApprovalError] = useState<Error | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   // A completed load belongs to one session, not to the provider forever.
@@ -1893,10 +1896,19 @@ export function AiChatProvider({
     setVisibleMessageCount(prev => prev + 10);
   }, []);
 
+  // A request started: every answer before it was sent.
+  useEffect(() => {
+    if (isLoading) setResendApprovalIds((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [isLoading]);
+  const isApprovalResendPending = useCallback((approvalId: string) => (
+    resendApprovalIds.has(approvalId) && shouldContinueChat({ messages: rawMessages })
+  ), [resendApprovalIds, rawMessages]);
+
   // Approval handlers
   const approve = useCallback(async (id: string) => {
     setApprovalError(null);
     setProcessingApprovalIds((prev) => new Set(prev).add(id));
+    setResendApprovalIds((prev) => new Set(prev).add(id));
     try {
       await addToolApprovalResponse({ id, approved: true });
       setPendingApprovalsMap((prev) => {
@@ -2071,6 +2083,7 @@ export function AiChatProvider({
       approve,
       reject,
       isProcessingApproval: processingApprovalIds.size > 0,
+      isApprovalResendPending,
       approvalDescription: approvalDescriptionRef.current,
       approvalSubjects,
       approvalDisplay: approvalDisplayConfig,
@@ -2156,6 +2169,7 @@ export function AiChatProvider({
       approve,
       reject,
       processingApprovalIds,
+      isApprovalResendPending,
       truncation,
       continueTruncation,
       dismissTruncation,

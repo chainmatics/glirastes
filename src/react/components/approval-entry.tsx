@@ -13,6 +13,7 @@ const OUTCOME_ICONS: Record<ApprovalOutcome, StatusIconKind> = {
   expected: 'notice',
   declined: 'declined',
   'not-run': 'notice',
+  aborted: 'aborted',
 };
 
 /** The locale text of an outcome. */
@@ -30,6 +31,8 @@ export function approvalOutcomeText(outcome: ApprovalOutcome, locale: ChatLocale
       return locale.approvalEntryExpectedLabel;
     case 'declined':
       return locale.approvalEntryDeclinedLabel;
+    case 'aborted':
+      return locale.approvalEntryAbortedLabel ?? 'Approved, stopped';
     default:
       return locale.approvalEntryNotRunLabel;
   }

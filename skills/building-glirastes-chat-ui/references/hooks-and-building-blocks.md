@@ -106,8 +106,12 @@ Defaults keep today's markup; everything below is opt-in.
   `{ approvalId, toolCallId?, toolName, state: 'open' | 'decided',
   decision?: ApprovalDecision, outcome: ApprovalOutcome, label, details?,
   subjects?, pending? }`; `outcome` is `open`, `running`, `done`, `failed`,
-  `expected`, `declined` or `not-run` (approved, but the server did not run
-  it). A decided one is described again from the part's input and the
+  `expected`, `declined`, `not-run` (approved, but the server did not run
+  it) or `aborted` (approved, no result, and the turn no longer runs:
+  stopped, failed, a stored history; `approvalEntryAbortedLabel`, "Approved,
+  stopped"). An approved call stays `running` while another approval of the
+  message is open and between the answer and the chat's automatic resend
+  (`isApprovalResendPending` of the context). A decided one is described again from the part's input and the
   conversation the browser holds, also after a reload; read when accessed,
   local only, nothing is sent.
 - `approvalDisplay` on the provider (`ApprovalDisplayConfig`, defaults as

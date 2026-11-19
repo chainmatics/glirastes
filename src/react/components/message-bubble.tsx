@@ -286,6 +286,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     approve,
     reject,
     isProcessingApproval,
+    isApprovalResendPending,
     approvalDescription,
     approvalSubjects,
     approvalDisplay,
@@ -540,12 +541,25 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     return null;
   }
 
+  /**
+   * An approved call without a result, once the turn no longer runs: stopped, unless the chat still sends it by
+   * itself (another approval of the message is open, or the automatic resend after this answer is to come).
+   */
+  function settled(approval: ToolPartApproval | undefined): ToolPartApproval | undefined {
+    if (!approval || approval.outcome !== 'running' || isLatestMessage && isLoading) return approval;
+    const resendPending = isLatestMessage && (
+      message.parts.some((part) => isRecord(part) && part.state === 'approval-requested')
+      || isApprovalResendPending?.(approval.approvalId) === true
+    );
+    return resendPending ? approval : { ...approval, outcome: 'aborted' };
+  }
+
   function approvalAt(i: number): ToolPartApproval | undefined {
     if (!approvals.has(i)) {
       const part = message.parts[i];
       const toolName = isRecord(part) ? toolPartName(part) : null;
       approvals.set(i, toolName && isAssistant
-        ? readToolPartApproval(part, {
+        ? settled(readToolPartApproval(part, {
           toolName,
           pending: pendingApprovals ?? [],
           messages: messages ?? [message],
@@ -553,7 +567,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
           describe: approvalDescription ?? ((name, id, args) => ({ id, toolName: name, args: isRecord(args) ? args : {}, messageId: message.id })),
           withSubjects: approvalSubjects !== false,
           ...(language ? { language } : {}),
-        })
+        }))
         : undefined);
     }
     return approvals.get(i);

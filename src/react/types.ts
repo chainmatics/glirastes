@@ -682,9 +682,11 @@ export type ApprovalDecision = 'approved' | 'declined';
  * user; `running` approved, no result yet; `done`, `failed`, `expected` (a
  * neutral failure, as in the activity log) its result; `declined` the user
  * said no; `not-run` the user approved, but the server did not run it (an
- * expired or already used approval).
+ * expired or already used approval); `aborted` the user approved, but the
+ * turn ended without a result (stopped, the request failed, a stored
+ * history) and no automatic resend is pending.
  */
-export type ApprovalOutcome = 'open' | 'running' | 'done' | 'failed' | 'expected' | 'declined' | 'not-run';
+export type ApprovalOutcome = 'open' | 'running' | 'done' | 'failed' | 'expected' | 'declined' | 'not-run' | 'aborted';
 
 /**
  * The approval of one tool part, open or decided, as the browser can still
@@ -962,6 +964,8 @@ export interface ChatLocale {
   approvalEntryDeclinedLabel: string;
   /** Approved, but the server did not run it (expired or already used approval). */
   approvalEntryNotRunLabel: string;
+  /** Approved, but the turn ended without a result (stopped, the request failed, a stored history). */
+  approvalEntryAbortedLabel: string;
   planTitle: string;
   /** Shown when the user sends while an approval card waits for a decision. */
   approvalPendingHint: string;

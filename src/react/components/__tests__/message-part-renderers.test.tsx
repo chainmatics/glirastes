@@ -121,7 +121,8 @@ describe('approvals at their tool part (W3)', () => {
     ['failed', deletion('output-available', { id: 'ap1', approved: true }, { output: { success: false, error: 'Locked', status: 500 } }), 'approved', 'failed'],
     ['declined', deletion('output-denied', { id: 'ap1', approved: false, reason: 'Rejected by user.' }), 'declined', 'declined'],
     ['not run', deletion('output-denied', { id: 'ap1', approved: true }), 'approved', 'not-run'],
-    ['running', deletion('approval-responded', { id: 'ap1', approved: true }), 'approved', 'running'],
+    // Approved, no result, the turn no longer runs and nothing resends it: stopped (was: running forever).
+    ['stopped', deletion('approval-responded', { id: 'ap1', approved: true }), 'approved', 'aborted'],
   ])('describes a decided approval after a reload: %s', async (_label, part, decision, outcome) => {
     const seen = approvalsOf(conversation(part));
     await waitFor(() => expect(seen.at(-1)).toBeDefined());

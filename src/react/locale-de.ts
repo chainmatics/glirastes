@@ -67,6 +67,7 @@ export const deChatLocale: ChatLocale = {
   approvalEntryExpectedLabel: 'Freigegeben, ohne Ergebnis',
   approvalEntryDeclinedLabel: 'Abgelehnt',
   approvalEntryNotRunLabel: 'Freigegeben, nicht ausgeführt',
+  approvalEntryAbortedLabel: 'Freigegeben, abgebrochen',
   planTitle: 'Plan',
   chatTitle: 'KI-Assistent',
   closeChatAriaLabel: 'Chat schließen',
