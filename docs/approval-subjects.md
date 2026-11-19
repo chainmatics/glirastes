@@ -212,8 +212,12 @@ no reference, invalid `inputEntities`) the tool keeps its v2 ids,
 `onUnavailable: 'block'` refuses every call and a `recheck` refuses the
 approved call; an `approvalSubject` that does not validate counts as
 `block`. `defineEndpointTool` and `endpointToolToTool` throw for `refs` that
-match no reference; `glirastes tools refresh` reports it as the blocking
-error `approval-subject-refs-unmatched`.
+match no reference. `glirastes tools refresh` reports an `approvalSubject`
+that does not validate (at any level, tools.json included) or names an
+unknown ref as the blocking error `approval-subject-unenforceable` and, with
+`--keep-going`, writes it as `{ refs: [], onUnavailable: 'block' }`: the tool
+refuses every call it would ask approval for until the declaration is fixed,
+never a partial or weaker check.
 
 "Not checkable" is shown on the card with its own text
 (`approvalSubjectUncheckedWarning`), different from the "id unknown" warning

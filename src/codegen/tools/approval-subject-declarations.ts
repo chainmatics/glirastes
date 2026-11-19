@@ -135,6 +135,14 @@ function readLookups(value: unknown, name: string): { lookups?: EntityLookup[]; 
  * an OpenAPI operation): the valid ones, and an issue per invalid one (in
  * words without its values). Pure; never throws.
  */
+/**
+ * What an explicit `approvalSubject` that cannot be enforced as declared is
+ * written as: no reference to look up and `block`, so the runtime refuses
+ * every call of the tool (fail closed) until the declaration is fixed. Always
+ * reported as the blocking error `approval-subject-unenforceable`.
+ */
+export const FAIL_CLOSED_SUBJECT: ApprovalSubjectDeclaration = Object.freeze({ refs: Object.freeze([]) as unknown as string[], onUnavailable: 'block' });
+
 export function readApprovalDeclarations(
   raw: { entityLookup?: unknown; approvalSubject?: unknown; lookupEffect?: unknown },
   names: ApprovalFieldNames,
@@ -149,8 +157,13 @@ export function readApprovalDeclarations(
   if (raw.approvalSubject !== undefined) {
     const issue = approvalSubjectIssue(raw.approvalSubject)
       ?? (findSensitiveStringPath(raw.approvalSubject) ? SECRET_ISSUE : undefined);
-    if (issue) issues.push(`${names.approvalSubject} that ${issue}`);
-    else declarations.approvalSubject = raw.approvalSubject as ApprovalSubjectOption;
+    if (issue) {
+      // Never dropped: a declaration that cannot be read refuses every call until it is fixed.
+      issues.push(`${names.approvalSubject} that ${issue}`);
+      declarations.approvalSubject = FAIL_CLOSED_SUBJECT;
+    } else {
+      declarations.approvalSubject = raw.approvalSubject as ApprovalSubjectOption;
+    }
   }
   if (raw.lookupEffect !== undefined) {
     if (raw.lookupEffect === 'read') declarations.lookupEffect = 'read';
@@ -251,6 +264,9 @@ export function resolveApprovalSubjects(input: {
   }
   const invalid = (subject: string, message: string) => findings.push(toolFinding('approval-subject-invalid', 'error', subject, message));
   const unused = (subject: string, message: string) => findings.push(toolFinding('approval-subject-unused', 'warning', subject, message));
+  /** A blocking error: an explicit approvalSubject that cannot be enforced as declared (the tool then refuses every call). */
+  const unenforceable = (subject: string, message: string) => findings.push(toolFinding('approval-subject-unenforceable', 'error', subject,
+    `${message} Until it is fixed the tool refuses every call it would ask approval for (fail closed); refresh fails without --keep-going.`));
 
   // tools.json identity.lookups: `<type>: { tool, params, const?, result?, complete? }`.
   const appLookups = new Map<string, Array<{ key: string; lookup: EntityLookup }>>();
@@ -296,17 +312,20 @@ export function resolveApprovalSubjects(input: {
     const label = `${config} approvalSubjects.tools.${key.slice(0, 200)}`;
     const raw = appSubjectTools[key];
     const issue = approvalSubjectIssue(raw) ?? (findSensitiveStringPath(raw) ? SECRET_ISSUE : undefined);
-    if (issue) {
-      invalid(config, `${label} ${issue}; it is ignored.`);
-      continue;
-    }
     const target = byName.get(key);
     if (!target) {
-      unused(config, `${label} names no generated endpoint tool.`);
+      if (issue) invalid(config, `${label} ${issue}; it is ignored.`);
+      else unused(config, `${label} names no generated endpoint tool.`);
       continue;
     }
     if (appSubjects.has(target.stableKey)) {
       unused(config, `${label} names a tool another entry already configures (by its definition id or model name); it is ignored.`);
+      continue;
+    }
+    if (issue) {
+      // Never dropped: the tool refuses every call until the entry is fixed.
+      unenforceable(target.stableKey, `${label} ${issue}.`);
+      appSubjects.set(target.stableKey, FAIL_CLOSED_SUBJECT);
       continue;
     }
     appSubjects.set(target.stableKey, raw as ApprovalSubjectOption);
@@ -318,7 +337,12 @@ export function resolveApprovalSubjects(input: {
     const observed = tool.declarations ?? {};
     for (const level of [observed.code, observed.operation]) {
       for (const issue of level?.issues ?? []) {
-        invalid(tool.stableKey, `${level!.where} declares an ${issue}; it is ignored, the tool stays enabled.`);
+        const aboutSubject = issue.startsWith(`${CODE_FIELD_NAMES.approvalSubject} `) || issue.startsWith(`${APPROVAL_SUBJECT_EXTENSION} `);
+        if (level!.approvalSubject === FAIL_CLOSED_SUBJECT && aboutSubject) {
+          unenforceable(tool.stableKey, `${level!.where} declares an ${issue}.`);
+        } else {
+          invalid(tool.stableKey, `${level!.where} declares an ${issue}; it is ignored, the tool stays enabled.`);
+        }
       }
     }
     const app = appLookups.get(tool.stableKey);
@@ -424,11 +448,9 @@ export function resolveApprovalSubjects(input: {
     const refArgs = new Set((tool.inputEntities ?? []).map((ref) => inputRefArgs(ref).join(',')));
     const unknownRefs = (option.refs ?? []).filter((ref) => !refArgs.has(ref));
     if (unknownRefs.length > 0) {
-      // Never dropped silently, never fail-open: a blocking error, and the declaration stays in force as `block`.
-      findings.push(toolFinding('approval-subject-refs-unmatched', 'error', subject,
-        `The approvalSubject names the refs ${unknownRefs.join(', ')}, which no inputEntities of the tool declare. `
-        + 'Until it is fixed the tool keeps its declaration without them and refuses a call it cannot check (onUnavailable: block).'));
-      declared.approvalSubject = { ...option, refs: option.refs!.filter((ref) => refArgs.has(ref)), onUnavailable: 'block' };
+      // Never dropped, never partly enforced: a blocking error, and the tool refuses every call until it is fixed.
+      unenforceable(subject, `The approvalSubject names the refs ${unknownRefs.join(', ')}, which no inputEntities of the tool declare.`);
+      declared.approvalSubject = FAIL_CLOSED_SUBJECT;
       continue;
     }
     if (!option.preview) continue;

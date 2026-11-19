@@ -56,7 +56,7 @@ describe('reading the declarations of one level', () => {
       approvalSubject: { recheck: 'SECRETVALUE' },
       lookupEffect: 'write',
     }, OPENAPI_FIELD_NAMES);
-    expect(read.declarations).toEqual({ entityLookup: [LOOKUP] });
+    expect(read.declarations).toEqual({ entityLookup: [LOOKUP], approvalSubject: { refs: [], onUnavailable: 'block' } });
     expect(read.issues).toHaveLength(4);
     expect(read.issues.join(' ')).toContain('x-glirastes-entity-lookup[1]');
     expect(read.issues.join(' ')).toContain('a second time');
@@ -123,13 +123,15 @@ describe('resolving approval subjects', () => {
       approvalSubjects: { tools: { nope: false, 'playlists.delete': { recheck: 'always' } } },
     });
     expect(codes(resolved.findings)).toEqual([
-      'approval-subject-invalid', 'approval-subject-invalid', 'approval-subject-invalid', 'approval-subject-invalid',
+      'approval-subject-invalid', 'approval-subject-invalid', 'approval-subject-invalid',
       // No lookup applies, so the GET route with the same path is suggested.
       'approval-subject-suggested',
+      // The invalid entry of an existing tool is never dropped: the tool refuses every call (fail closed).
+      'approval-subject-unenforceable',
       'approval-subject-unused', 'approval-subject-unused',
     ]);
     expect(resolved.findings.find((finding) => finding.code === 'approval-subject-invalid')!.severity).toBe('error');
-    expect(resolved.byKey.size).toBe(0);
+    expect([...resolved.byKey.values()]).toEqual([{ approvalSubject: { refs: [], onUnavailable: 'block' } }]);
   });
 
   it('rejects a source that is not provably read-only, and accepts a POST with lookupEffect read', () => {
@@ -271,13 +273,32 @@ describe('resolving approval subjects', () => {
     const resolved = resolveApprovalSubjects({
       tools: [
         getPlaylist({ declarations: { operation: operation({ entityLookup: LOOKUP }) } }),
-        deletePlaylist({ declarations: { code: code({ approvalSubject: { refs: ['owner_id'], recheck: 'exists' } }) } }),
+        deletePlaylist({ declarations: { code: code({ approvalSubject: { refs: ['playlist_id', 'owner_id'], recheck: 'exists' } }) } }),
       ],
     });
-    expect(codes(resolved.findings)).toEqual(['approval-subject-refs-unmatched']);
+    expect(codes(resolved.findings)).toEqual(['approval-subject-unenforceable']);
     expect(resolved.findings[0]!.severity).toBe('error');
-    // Never dropped: no ref, onUnavailable block, recheck kept (the runtime refuses what it cannot check).
-    expect(resolved.byKey.get('DELETE /playlists/{playlist_id}')?.approvalSubject).toEqual({ refs: [], recheck: 'exists', onUnavailable: 'block' });
+    // Never dropped, never partly enforced (playlist_id alone would pass): no ref and block, every call refused.
+    expect(resolved.byKey.get('DELETE /playlists/{playlist_id}')?.approvalSubject).toEqual({ refs: [], onUnavailable: 'block' });
+  });
+
+  it('keeps an approvalSubject that does not validate as fail-closed, at every level, with a blocking error', () => {
+    for (const declarations of [
+      { code: code({ approvalSubject: { onUnavailable: 'block', recheck: 'exists', preview: { tool: 'x', params: {}, fields: [] } } }) },
+      { operation: operation({ approvalSubject: { recheck: 'sometimes' } }) },
+    ]) {
+      const resolved = resolveApprovalSubjects({
+        tools: [getPlaylist({ declarations: { operation: operation({ entityLookup: LOOKUP }) } }), deletePlaylist({ declarations })],
+      });
+      expect(codes(resolved.findings)).toEqual(['approval-subject-unenforceable']);
+      expect(resolved.byKey.get('DELETE /playlists/{playlist_id}')?.approvalSubject).toEqual({ refs: [], onUnavailable: 'block' });
+    }
+    const app = resolveApprovalSubjects({
+      tools: [getPlaylist({ declarations: { operation: operation({ entityLookup: LOOKUP }) } }), deletePlaylist({})],
+      approvalSubjects: { tools: { 'playlists.delete': { onUnavailable: 'never' } } },
+    });
+    expect(codes(app.findings)).toEqual(['approval-subject-unenforceable']);
+    expect(app.byKey.get('DELETE /playlists/{playlist_id}')?.approvalSubject).toEqual({ refs: [], onUnavailable: 'block' });
   });
 
   it('refuses lookupEffect read on a DELETE, PUT or PATCH and never uses it as a source', () => {
