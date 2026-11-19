@@ -211,7 +211,10 @@ declaration is never dropped:** with nothing it can look up (`refs` that match
 no reference, invalid `inputEntities`) the tool keeps its v2 ids,
 `onUnavailable: 'block'` refuses every call and a `recheck` refuses the
 approved call; an `approvalSubject` that does not validate counts as
-`block`. `defineEndpointTool` and `endpointToolToTool` throw for `refs` that
+`block`. A planned reference the call carries no id for (absent, `null`, a
+list) is never a passed check: `block` refuses the call and a `recheck`
+refuses the approved call; with `warn` the card asks without a server
+subject for it. `defineEndpointTool` and `endpointToolToTool` throw for `refs` that
 match no reference. `glirastes tools refresh` reports an `approvalSubject`
 that does not validate (at any level, tools.json included) or names an
 unknown ref as the blocking error `approval-subject-unenforceable` and, with

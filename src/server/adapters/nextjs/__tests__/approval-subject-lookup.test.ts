@@ -475,6 +475,26 @@ describe('approval subject lookups', () => {
     expect(backend.calls).toHaveLength(0);
   });
 
+  it('never lets a missing or null id pass block or a recheck; with warn the card asks as before', async () => {
+    const withOptional = (approvalSubject: Record<string, unknown>) => {
+      const registry = referenceTools();
+      Object.assign(registry.delete_playlist!, { approvalSubject, inputSchema: z.object({ playlist_id: z.number().nullable().optional() }).strict() });
+      return registry;
+    };
+    for (const input of [{}, { playlist_id: null }]) {
+      const block = resolverFor(playlist, { registry: withOptional({ onUnavailable: 'block' }) });
+      expect((await block.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input }))?.deny)
+        .toMatchObject({ code: 'approval_subject_unavailable' });
+      for (const recheck of ['exists', 'unchanged'] as const) {
+        const again = resolverFor(playlist, { registry: withOptional({ recheck }) });
+        expect(await again.resolver.recheck({ toolName: 'delete_playlist', input, digestOf: () => 'x', subjectDigest: 'x' }))
+          .toBe('approval_subject_unavailable');
+      }
+      const warn = resolverFor(playlist, { registry: withOptional({}) });
+      expect(await warn.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input })).toBeUndefined();
+    }
+  });
+
   it('validates its limits', () => {
     expect(resolveApprovalSubjectLimits(undefined)).toEqual({ maxLookupsPerTurn: 32, maxSubjectsPerCall: 4, lookupTimeoutMs: 3000, maxLookupTimePerTurnMs: 10_000 });
     expect(() => resolveApprovalSubjectLimits({ maxLookupsPerTurn: 0 })).toThrow(RangeError);

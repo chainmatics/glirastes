@@ -926,8 +926,11 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   /** Looks up every planned subject of a call (parallel within the call) and its preview. */
   const subjectsOf = async (plan: ToolPlan, input: unknown, forDisplay: boolean): Promise<{
     outcomes: SubjectOutcome[];
+    /** Planned references the call carries no id value for (absent, null, a list): never a passed check. */
+    missing: number;
     preview?: ApprovalPreviewData;
   }> => {
+    let missing = 0;
     const startedAt = now();
     const deadline = startedAt + lookupTimeout();
     // The model's values are pseudonyms under a PII shield: the backend is asked, and its answer
@@ -942,7 +945,10 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       const order = item.fieldArgs ?? item.args;
       const values = order.map((arg) => valueAt(input, arg));
       // An argument without an id value (absent, a list) has no subject.
-      if (!values.every(isEntityIdValue)) continue;
+      if (!values.every(isEntityIdValue)) {
+        missing += 1;
+        continue;
+      }
       const ids = values as Array<string | number>;
       if (slots <= 0) {
         tasks.push(Promise.resolve(unchecked(item, ids, 'limit')));
@@ -972,7 +978,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       : undefined;
     try {
       const [outcomes, preview] = await Promise.all([Promise.all(tasks), previewTask]);
-      return { outcomes, ...(preview ? { preview } : {}) };
+      return { outcomes, missing, ...(preview ? { preview } : {}) };
     } finally {
       spentMs += Math.max(0, now() - startedAt);
     }
@@ -990,10 +996,14 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       if (plan.items.length === 0 && !plan.preview && plan.onUnavailable === 'block') {
         return { deny: new ApprovalSubjectRefusedError('approval_subject_unavailable', plan.refs[0]?.type ?? 'record') };
       }
-      const { outcomes, preview } = await subjectsOf(plan, input, true);
+      const { outcomes, missing, preview } = await subjectsOf(plan, input, true);
       const denied = outcomes.find((outcome): outcome is Extract<SubjectOutcome, { kind: 'deny' }> => outcome.kind === 'deny');
       if (denied) return { deny: new ApprovalSubjectRefusedError(denied.code, denied.type) };
       const subjects = outcomes.map((outcome) => (outcome as Extract<SubjectOutcome, { kind: 'subject' }>));
+      // `block`: a planned reference the call names no checkable id for (absent, null, a list) is not checked either.
+      if (plan.onUnavailable === 'block' && missing > 0) {
+        return { deny: new ApprovalSubjectRefusedError('approval_subject_unavailable', plan.items[0]?.ref.type ?? 'record') };
+      }
       if (plan.onUnavailable === 'block') {
         const blocked = subjects.find((outcome) => blocks(outcome.subject));
         if (blocked) return { deny: new ApprovalSubjectRefusedError('approval_subject_unavailable', blocked.subject.type) };
@@ -1024,8 +1034,10 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       // The same validated input the approval was decided on (defaults, transforms): the history holds the model's raw one.
       const parsed = options.registry[toolName]?.inputSchema.safeParse(input);
       if (!parsed?.success) return 'approval_subject_unavailable';
-      const { outcomes } = await subjectsOf({ ...plan, preview: undefined } as ToolPlan, parsed.data, false);
+      const { outcomes, missing } = await subjectsOf({ ...plan, preview: undefined } as ToolPlan, parsed.data, false);
       if (outcomes.some((outcome) => outcome.kind === 'deny')) return 'approval_subject_gone';
+      // A planned reference without an id value was never checked: no passed recheck.
+      if (missing > 0) return 'approval_subject_unavailable';
       const subjects = outcomes as Array<Extract<SubjectOutcome, { kind: 'subject' }>>;
       if (plan.onUnavailable === 'block' && subjects.some((outcome) => blocks(outcome.subject))) {
         return 'approval_subject_unavailable';
