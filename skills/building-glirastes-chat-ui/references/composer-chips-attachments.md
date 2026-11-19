@@ -114,7 +114,7 @@ Server, `attachments` on `createAiChatHandler`:
   `[attachment <id>: name]`. `createLocalSessionStore` keeps the blobs in
   IndexedDB (`attachmentStore`, `null` keeps none) and restores them on load;
   `load` then returns a promise. Blobs go only with their chat (`remove`,
-  `clear`, `maxSessions` eviction, `clearLocalSessionStore`), no expiry. Call
+  `clear`, `maxSessions` eviction, `clearLocalSessionStore`), no expiry. `maxMessagesPerSession` (default unlimited) keeps only the newest messages, starting at a user message; blobs of dropped messages stay until their chat goes. Call
   `clearLocalSessionStore({ storageKey })` on sign-out. Without IndexedDB the
   files stay in memory. A custom store implements `AttachmentBlobStore` (items
   are `StoredAttachment`; `put` resolves `true` when written, `false` when it

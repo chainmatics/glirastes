@@ -367,3 +367,58 @@ describe('attachment files kept as long as their chat', () => {
     expect(chats.attachments).toBeUndefined();
   });
 });
+
+describe('maxMessagesPerSession', () => {
+  const capped = (max: number | undefined, extra: Record<string, unknown> = {}) => {
+    const { storage } = memory();
+    return createLocalSessionStore({ storageKey: 'app:u1', storage, maxMessagesPerSession: max, ...extra });
+  };
+  const ids = async (s: ReturnType<typeof capped>) => (await s.load!('default'))!.map((m) => (m as ChatMessage).id);
+
+  it('keeps the last N messages', async () => {
+    const s = capped(2);
+    await s.save!('default', [user('a'), assistant('b'), user('c'), assistant('d')]);
+    expect(await ids(s)).toEqual(['u-c', 'a-d']);
+  });
+
+  it('is unlimited by default and clamps values below 1 to 1', async () => {
+    const all = [user('a'), assistant('b'), user('c')];
+    const open = capped(undefined);
+    await open.save!('default', all);
+    expect(await ids(open)).toHaveLength(3);
+    const one = capped(0);
+    await one.save!('default', all);
+    expect(await ids(one)).toEqual(['u-c']);
+  });
+
+  it('the kept tail starts with a user message', async () => {
+    const s = capped(3);
+    await s.save!('default', [user('a'), assistant('b'), assistant('c'), assistant('d')]);
+    expect(await ids(s)).toEqual(['u-a', 'a-b', 'a-c', 'a-d']);
+    await s.save!('default', [user('a'), assistant('b'), user('c'), assistant('d'), assistant('e')]);
+    expect(await ids(s)).toEqual(['u-c', 'a-d', 'a-e']);
+    await s.save!('default', [user('a'), assistant('b'), assistant('c'), user('d'), assistant('e')]);
+    expect(await ids(s)).toEqual(['u-d', 'a-e']);
+  });
+
+  it('title still comes from the first user message ever, messageCount is the stored count', async () => {
+    const s = capped(2);
+    await s.save!('default', [user('Erste Frage'), assistant('b'), user('c'), assistant('d')]);
+    const [entry] = await s.list!();
+    expect(entry!.title).toBe('Erste Frage');
+    expect(entry!.messageCount).toBe(2);
+  });
+
+  it('writes no blobs for dropped messages', async () => {
+    const files = createMemoryAttachmentStore();
+    const put = vi.spyOn(files, 'put');
+    const withFile = (id: string): ChatMessage => ({
+      id, role: 'user',
+      parts: [{ type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAAA', filename: 'a.png', providerMetadata: { glirastes: { attachmentId: id === 'old' ? 'att_oooooooooooooooooooooooo' : 'att_nnnnnnnnnnnnnnnnnnnnnnnn' } } }],
+    }) as unknown as ChatMessage;
+    const s = capped(1, { attachmentStore: files });
+    await s.save!('default', [withFile('old'), assistant('x'), withFile('new')]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(put.mock.calls.map((call) => call[1])).toEqual(['att_nnnnnnnnnnnnnnnnnnnnnnnn']);
+  });
+});
