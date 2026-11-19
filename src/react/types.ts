@@ -698,7 +698,12 @@ export interface ToolPartApproval {
   /** The card's description (`approvalDescription`), else the tool name. */
   label: string;
   details?: string[];
+  /** The server's subjects (`source: 'server'`, `check`, `reason`) where the call has them, else the history's. */
   subjects?: ApprovalSubject[];
+  /** The server's preview of the call, as on the card (`PendingApproval.preview`). */
+  preview?: ApprovalPreviewItem[];
+  /** `unchecked`: the server could not load the preview. */
+  previewCheck?: 'found' | 'unchecked';
   /** The open approval as the card gets it; only while `state` is `open`. */
   pending?: PendingApproval;
 }

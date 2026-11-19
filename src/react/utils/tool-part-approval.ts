@@ -77,6 +77,8 @@ export function readToolPartApproval(part: unknown, options: ReadToolPartApprova
     label: described.description ?? options.toolName,
     ...(described.details && described.details.length > 0 ? { details: described.details } : {}),
     ...(described.subjects && described.subjects.length > 0 ? { subjects: described.subjects } : {}),
+    ...(described.preview && described.preview.length > 0 ? { preview: described.preview } : {}),
+    ...(described.previewCheck ? { previewCheck: described.previewCheck } : {}),
   };
   if (outcome === 'open') {
     return { ...base, state: 'open', outcome, ...card, ...(open ? { pending: open } : {}) };

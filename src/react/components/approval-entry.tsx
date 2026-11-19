@@ -1,6 +1,7 @@
 import { useChatContext } from '../provider/chat-context.js';
-import type { ApprovalEntryProps, ApprovalOutcome, ChatLocale } from '../types.js';
-import { approvalSubjectLines } from './approval-card.js';
+import { sanitizeSubjectText } from '../../contracts/approval-subject.js';
+import type { ApprovalEntryProps, ApprovalOutcome, ApprovalSubject, ChatLocale } from '../types.js';
+import { approvalSubjectLines, previewValueText } from './approval-card.js';
 import { StatusIcon, type StatusIconKind } from './status-icon.js';
 
 const OUTCOME_ICONS: Record<ApprovalOutcome, StatusIconKind> = {
@@ -40,11 +41,16 @@ export function approvalOutcomeText(outcome: ApprovalOutcome, locale: ChatLocale
  * `data-component="approval-entry"`, `data-decision` and `data-outcome`.
  */
 export function ApprovalEntry({ approval }: ApprovalEntryProps) {
-  const { locale } = useChatContext();
+  const { locale, language } = useChatContext();
   const lines = approvalSubjectLines(
     { id: approval.approvalId, toolName: approval.toolName, args: {}, messageId: '', ...(approval.details ? { details: approval.details } : {}), ...(approval.subjects ? { subjects: approval.subjects } : {}) },
     locale,
   );
+  // The server's view of the call (only with a declaration): what it could not check, and its preview.
+  const unchecked = (approval.subjects ?? []).filter((subject) => subject.check === 'unchecked');
+  const labelOf = (subject: ApprovalSubject) => sanitizeSubjectText(subject.label ?? locale.approvalTargetLabel) ?? '';
+  const idOf = (subject: ApprovalSubject) => sanitizeSubjectText(subject.id) ?? '';
+  const preview = (approval.preview ?? []).slice(0, 3);
   return (
     <div
       data-component="approval-entry"
@@ -61,6 +67,22 @@ export function ApprovalEntry({ approval }: ApprovalEntryProps) {
           <span data-element="detail-value">{line.names.join(', ')}</span>
         </span>
       ))}
+      {unchecked.length > 0 && (
+        <span data-element="detail-line" data-check="unchecked">
+          {unchecked.length === 1
+            ? locale.approvalSubjectUncheckedWarning.replace('{label}', labelOf(unchecked[0]!)).replace('{id}', idOf(unchecked[0]!))
+            : locale.approvalSubjectsUncheckedWarning.replace('{ids}', unchecked.map((subject) => `${labelOf(subject)} ${idOf(subject)}`.trim()).join(', '))}
+        </span>
+      )}
+      {preview.map((item, i) => (
+        <span key={`preview-${i}`} data-element="detail-line" data-preview="">
+          <span data-element="detail-label">{sanitizeSubjectText(item.label) ?? item.key}</span>
+          <span data-element="detail-value">{previewValueText(item, language)}</span>
+        </span>
+      ))}
+      {approval.previewCheck === 'unchecked' && (
+        <span data-element="detail-line" data-preview="unchecked">{locale.approvalPreviewUncheckedNote}</span>
+      )}
       <span data-element="outcome">{approvalOutcomeText(approval.outcome, locale)}</span>
     </div>
   );
