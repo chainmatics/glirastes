@@ -9,6 +9,7 @@ import { ChatInput } from '../components/chat-input.js';
 import { ChatQueue, useChatQueue } from '../components/chat-queue.js';
 import { MentionInput } from '../components/mention-input.js';
 import { UiActionBus } from '../../browser/ui-action-bus.js';
+import { defineChatCommand } from '../interactions/definitions.js';
 import { useChatContext, type ChatContextValue } from '../provider/chat-context.js';
 import type {
   AiChatProviderConfig,
@@ -18,6 +19,7 @@ import type {
   ChatTransport,
   ChatTransportDataHandler,
   FilePart,
+  MentionData,
   QueuedMessage,
 } from '../types.js';
 
@@ -486,6 +488,27 @@ describe('chat queue enabled', () => {
     expect(texts(chat)[1]).not.toBe('the second');
     await act(async () => { chat.finish(); });
     await waitFor(() => expect(texts(chat)[2]).toBe('queued one'));
+  });
+
+  it('queues a message sent while a command form is open, and sends it once the form is done', async () => {
+    const budget = defineChatCommand({
+      id: 'tasks.budget',
+      label: 'Budget',
+      args: [{ name: 'amount', label: 'Cost', required: true }],
+      run: { kind: 'tool', tool: 'tasks.budget' },
+    });
+    const chatInteractions = { commands: [budget] };
+    const picked: MentionData = { id: 'tasks.budget', type: 'command', label: 'Budget', prefix: '/', slug: 'budget' };
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ ...enabled, chatInteractions }} />);
+    await act(async () => { ctx.submit('/budget', { mentions: [picked] }); });
+    expect(ctx.pendingCommand).not.toBeNull();
+    let result = '';
+    await act(async () => { result = ctx.submit('meanwhile'); });
+    expect(result).toBe('queued');
+    expect(texts(chat)).toEqual([]);
+    await act(async () => { ctx.cancelPendingCommand(); });
+    await waitFor(() => expect(texts(chat)).toEqual(['meanwhile']));
   });
 
   it('processes a queued message when it is sent (onBeforeSend, mentions)', async () => {

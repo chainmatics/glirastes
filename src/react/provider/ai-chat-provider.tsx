@@ -1805,7 +1805,7 @@ export function AiChatProvider({
     // An open clarification is answered by what the user sends now, ahead of the queue (which waits for it).
     // While the stored queue is read, a new message queues behind what it brings.
     const busy = queueBusy || sendInFlightRef.current || pendingUiWorkRef.current > 0
-      || queueStore.restoringRef.current || (queued.length > 0 && !clarificationOpen);
+      || queueStore.restoringRef.current || pendingCommand !== null || (queued.length > 0 && !clarificationOpen);
     if (!busy) {
       // Idle: sent at once, so an open clarification is answered as before.
       resetComposer();
@@ -1829,7 +1829,7 @@ export function AiChatProvider({
     return 'queued';
   }, [
     queueEnabled, sendDirect, sessionNotReady, activeMentions, attachmentOptions, interactionRegistry,
-    queueStore, queueBusy, dispatchSend, queueConfig.maxSize, approvalWaiting, clarificationOpen,
+    queueStore, queueBusy, dispatchSend, queueConfig.maxSize, approvalWaiting, clarificationOpen, pendingCommand,
   ]);
 
   const send = useCallback((

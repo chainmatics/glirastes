@@ -72,7 +72,7 @@ not paused (except for the one `sendNow` message).
 | Truncation (continue banner) | Paused; resuming sends the next message, which replaces the continue prompt. |
 | Clarification open after a run | Held: a queued text is never turned into a clarification answer by itself. A message the user sends now (or the card's answer) answers it at once, ahead of the queue. |
 | A queued `/` command that needs arguments | Its form opens when it is sent; the queue waits for the form. |
-| A command form is open | Further queued messages wait. A command or entity action is refused while the chat is busy. |
+| A command form is open | A message sent meanwhile is queued; queued messages wait until the form is run or cancelled. A command or entity action is refused while the chat is busy. |
 | UI actions of the last result still running | Held until they finished. |
 | Conversation not loaded yet, or a session change in progress | `submit` refuses (`'rejected'`), as `send` did before; the composer is locked (`canCompose` false). |
 | `clear()`, switching, creating or removing the active conversation, the host changing `session.activeId` | The in-memory queue is emptied (`'cleared'`); with `storage` the new conversation's queue is loaded. |
