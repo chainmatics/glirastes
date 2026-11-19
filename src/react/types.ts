@@ -916,6 +916,11 @@ export interface ChatLocale {
    * supports `{count}`.
    */
   activityExpectedLabel: string;
+  /**
+   * Calls still running when their turn ended without them (stopped, the
+   * request failed, a stored history): not counted as failed; supports `{count}`.
+   */
+  activityAbortedLabel: string;
   /** Summary while a tool runs; `{label}` is the tool's label or `activityWorkingLabel` (`{label}…`). */
   activityRunningLabel: string;
   /** Running summary with `activityLog.runningProgress`; supports `{count}` (done steps, as `activityDoneLabel`) and `{label}`. */

@@ -593,7 +593,8 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
       <ActivityLog
         key={`activity-${i}-${section.steps[0]!.id}`}
         steps={section.steps}
-        active={turnActive && last}
+        // An earlier section with a call still running is part of the running turn too (not stopped).
+        active={turnActive && (last || section.steps.some((step) => step.status === 'running'))}
         {...(last && notice && noticeInLog ? { notice: notice.text, noticeStatus: notice.status } : {})}
       />
     );

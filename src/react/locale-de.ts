@@ -48,6 +48,7 @@ export const deChatLocale: ChatLocale = {
   activityFailedLabel: '{count} fehlgeschlagen',
   activityDeclinedLabel: '{count} abgelehnt',
   activityExpectedLabel: '{count} ohne Ergebnis',
+  activityAbortedLabel: '{count} abgebrochen',
   activityRunningLabel: '{label}…',
   activityRunningProgressLabel: '{count} erledigt, {label}…',
   activityStepCountLabel: '×{count}',

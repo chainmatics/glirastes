@@ -120,6 +120,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   activityFailedLabel: '{count} failed',
   activityDeclinedLabel: '{count} declined',
   activityExpectedLabel: '{count} without result',
+  activityAbortedLabel: '{count} stopped',
   activityRunningLabel: '{label}…',
   activityRunningProgressLabel: '{count} done, {label}…',
   activityStepCountLabel: '×{count}',

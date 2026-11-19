@@ -17,9 +17,12 @@ import {
  * with a 4xx status other than 408 and 429 (e.g. a 404 the model then looks
  * up, a 403). `error`: the call threw, or its output reports any other
  * failure (5xx, timeout, network error, a refused UI action, a custom tool's
- * `success: false`).
+ * `success: false`). `aborted`: the call was still running when its turn
+ * ended without it (the user stopped, the request failed, a stored history
+ * whose last call never got a result); neutral, not a failure. Set by the
+ * log for a turn that no longer runs, never by `readActivitySteps`.
  */
-export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting' | 'declined' | 'expected';
+export type ActivityStepStatus = 'running' | 'done' | 'error' | 'waiting' | 'declined' | 'expected' | 'aborted';
 
 export interface ActivityStep {
   id: string;
