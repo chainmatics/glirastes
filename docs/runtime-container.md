@@ -177,6 +177,16 @@ result is stored, shown or cut, and the first answer shows the default view. An
 invalid allow- or deny-list disables the tool at build time; an artifact whose
 lists are not valid field paths is refused when it is loaded.
 
+Approval subjects ([approval-subjects.md](approval-subjects.md)): declared
+`entityLookup`, `approvalSubject` and `lookupEffect` travel in the artifact's
+local tool contracts; the artifact carries the exact SDK version, so rebuild
+it after declaring. The container looks the records up through the declared
+read tool with the forwarded user credentials and the pinned tenant and user
+headers. `limits.approvalLookups` sets its local limits (`maxLookupsPerTurn`
+32, `maxSubjectsPerCall` 4, `lookupTimeoutMs` 3000, `maxLookupTimePerTurnMs`
+10000) or `false` turns the lookups off. They never count against
+`limits.maxToolCalls`, which means calls made by the model.
+
 Languages (all optional, section `chat`): `chat.locale` (BCP-47, default
 English) is the language of the texts the runtime writes itself;
 `chat.requestLocaleHeader` names a request header with the turn's language

@@ -147,3 +147,15 @@ Fixed (the tests keep their ids, titled `SA-nn (fixed in <version>)`):
 | SA-02 | Under size pressure the overview keeps `playlist_id`; other fields go first, then trailing entries | `src/server/core/result-overview.ts` |
 | SA-03 | `read_result` adds `playlist_id` with the name to entries read below the array | `src/server/core/result-overview.ts` (`identityFieldsOf`) |
 | SA-05 | Id 3 of user 3, playlist 3 and the versions of playlist 3 is named only for the kind the argument picks (`playlist_id: 3` → "Lobby Loop", `user_id: 3` → "Linus Torvalds"); a bare `id: 3` without a resource tool names none and lists every candidate | `src/contracts/entity-identity.ts`, `src/react/utils/entity-names.ts`, `src/react/utils/approval-subjects.ts` |
+
+Through the server ([approval-subjects.md](../approval-subjects.md)): the app
+declares `x-glirastes-entity-lookup` on `GET /api/playlists/{playlist_id}`,
+the versions and revisions lists (by `{ ref }` to the parent, `complete`),
+`GET /api/channels` (`complete`) and `GET /api/users` (one page of
+`limit: 2`). The tests titled `… through the server` run SA-04 to SA-08
+through the built-in chat handler against the real app: the card names come
+from the backend (`data-approval-subjects`, `glirastes-approval.v2.` ids), a
+playlist or channel that does not exist gets no card (`approval_subject_not_found`),
+and user 3, who is not on the one page of users, is "not checkable"
+(`not_in_page`), never "does not exist". The history tests above stay as the
+tests of the browser fallback.
