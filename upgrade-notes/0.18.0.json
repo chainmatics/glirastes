@@ -5,7 +5,7 @@
       "id": "chat-locale-new-required-keys",
       "kind": "breaking",
       "summary": "ChatLocale gained required keys. A hand-written full ChatLocale object no longer compiles and misses texts at runtime until it has them. Partial<ChatLocale> overrides are unaffected.",
-      "howTo": "Add these keys to every full ChatLocale object: activityAbortedLabel, activityRunningLabel, activityRunningProgressLabel, activityStepCountLabel, activitySummarySeparator, activityUiPendingLabel, activityUiRejectedContract, activityUiRejectedHandler, activityUiUnavailable, activityUiFailed, activityUiInitiated, activityUiUnconfirmed, activityApprovalNotUsedDetail, approvalEntryRunningLabel, approvalEntryDoneLabel, approvalEntryFailedLabel, approvalEntryExpectedLabel, approvalEntryDeclinedLabel, approvalEntryNotRunLabel, approvalEntryAbortedLabel. The locale and locales props of AiChatProvider take Partial<ChatLocale>, so partial tables and overrides need no change.",
+      "howTo": "Add these keys to every full ChatLocale object: activityAbortedLabel, activityApprovalNotUsedDetail, activityRunningLabel, activityRunningProgressLabel, activityStepCountLabel, activitySummarySeparator, activityUiFailed, activityUiInitiated, activityUiPendingLabel, activityUiRejectedContract, activityUiRejectedHandler, activityUiUnavailable, activityUiUnconfirmed, approvalEntryAbortedLabel, approvalEntryDeclinedLabel, approvalEntryDoneLabel, approvalEntryExpectedLabel, approvalEntryFailedLabel, approvalEntryNotRunLabel, approvalEntryRunningLabel, approvalPreviewUncheckedNote, approvalReferenceIdNote, approvalSubjectUncheckedWarning, approvalSubjectsUncheckedWarning. The locale and locales props of AiChatProvider take Partial<ChatLocale>, so partial tables and overrides need no change.",
       "skill": "building-glirastes-chat-ui#configuration",
       "affectedWhen": {
         "imports": [
@@ -23,7 +23,7 @@
       "id": "ui-action-outcome-protocol",
       "kind": "recommended",
       "summary": "A backend that validates the chat body strictly (e.g. extra='forbid') now rejects every chat request: the provider sends glirastesUiOutcomes: 1 by default. Allow the field or set uiActionOutcomes={false}. UI turns take two POSTs.",
-      "howTo": "Check three things. 1) A proxy or backend that validates the chat request body strictly (Pydantic extra='forbid', JSON schema additionalProperties:false) must allow glirastesUiOutcomes, or every chat request fails until you pass uiActionOutcomes={false} to AiChatProvider (or uiActionOutcomes: 'off' on createAiChatHandler). 2) Code that counts turns in onFinish or turnMetrics: count requests without `continuation`, or by turnId. 3) A UI turn can cost up to four times the per-request budgets. Switch it off with uiActionOutcomes={false} on AiChatProvider or uiActionOutcomes: 'off' on createAiChatHandler.",
+      "howTo": "Check three things. 1) A proxy or backend that validates the chat request body strictly (Pydantic extra='forbid', JSON schema additionalProperties:false) must allow glirastesUiOutcomes, or every chat request fails until you pass uiActionOutcomes={false} to AiChatProvider (or uiActionOutcomes: 'off' on createAiChatHandler). 2) Code that counts turns in onFinish or turnMetrics: count requests without `continuation`, or by turnId. 3) A UI turn can cost up to four times the per-request budgets.",
       "skill": "building-glirastes-chat-ui#ui-action-outcomes",
       "affectedWhen": {
         "imports": [
