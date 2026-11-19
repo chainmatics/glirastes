@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { FIXTURES, measureAll, renderSummary, renderTable, type Measurement } from './support/history-measurement.js';
+import { FIXTURES, measure, measureAll, renderSummary, renderTable, scenarios, VARIANTS, type Measurement } from './support/history-measurement.js';
 
 /**
  * The measurement behind `docs/history-measurement.md`: deterministic and
@@ -42,7 +42,20 @@ describe('history measurement', () => {
     if (update) writeFileSync(DOC, doc);
   }, 60_000);
 
-  it('the default loses the list after one turn without tools; tool-turns keeps it', async () => {
+  it('the 0.18 defaults (no history options) measure exactly as tool-turns + memo', async () => {
+    const all = await allRows();
+    const memo = VARIANTS.find((variant) => variant.label === 'tool-turns + memo')!;
+    expect(memo).toMatchObject({ toolTurnCounting: 'tool-turns', seenObjects: true });
+    for (const scenario of scenarios()) {
+      for (const maxContextMessages of [12, 60]) {
+        const byDefault = await measure(scenario, 'defaults', 1, 4_000, maxContextMessages);
+        const row = find(all, { scenario: scenario.name, followUps: scenario.followUps, variant: memo.label, toolTurns: 1, maxTokens: 4_000, maxContextMessages });
+        expect({ ...byDefault, variant: memo.label }).toEqual(row);
+      }
+    }
+  }, 60_000);
+
+  it('the 0.17 default (all-turns) loses the list after one turn without tools; tool-turns keeps it', async () => {
     const all = await allRows();
     for (const fixture of FIXTURES) {
       const base = { scenario: fixture.name, followUps: 1, toolTurns: 1, maxTokens: 4_000, maxContextMessages: 12 };

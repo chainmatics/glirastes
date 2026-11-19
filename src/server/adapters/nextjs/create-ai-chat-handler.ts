@@ -216,7 +216,7 @@ export interface StreamHandlerContext {
   /** The debug hook `AiChatHandlerConfig.onModelInput` (carries content; local only). */
   onModelInput?: (event: ModelInputEvent) => void;
   /**
-   * Set with `history.seenObjects` only: the UI messages ahead of `messages`
+   * Set with `history.seenObjects` (default on) and a tool that declares its identity: the UI messages ahead of `messages`
    * that the message window or the chat memory left out. Pass them on as
    * `prepareModelMessages`' `earlierMessages`; only their tool results are read.
    */
@@ -1243,15 +1243,20 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
   const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
   /**
-   * With `history.seenObjects`: the messages the window or the chat memory
+   * With `history.seenObjects` (default on): the messages the window or the chat memory
    * left out ahead of `recent` (a suffix of `all`), for the memo; else none.
    * They get the same PII treatment as the window (`anonymizeMessages`). The
    * memo reads only their tool results, which the shield sealed when the
    * tool ran (`wrapToolsWithShield`), exactly like the tool results the
    * window sends; shielding them again would map a pseudonym once more.
    */
-  const seenObjectsSource = (all: unknown[], recent: unknown[]): unknown[] | undefined => (
-    history && history.seenObjects && recent.length < all.length ? all.slice(0, all.length - recent.length) : undefined
+  const seenObjectsSource = (all: unknown[], recent: unknown[], tools: Readonly<Record<string, unknown>>): unknown[] | undefined => (
+    // On by default (`false` turns it off), and only for a turn with a tool that declares its identity:
+    // without one the memo lists nothing, so the window's messages are not prepared for it at all.
+    history !== false && history?.seenObjects !== false && recent.length < all.length
+      && entityDeclarationsOfTools(tools) !== undefined
+      ? all.slice(0, all.length - recent.length)
+      : undefined
   );
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
   if (attachments?.enabled && piiShield && attachments.allowWithPiiShield !== true) {
@@ -2193,7 +2198,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxContextMessages;
         const memory = await prepareMemory(processedMessages, model, sessionId);
         let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
-        let earlierMessages = seenObjectsSource(processedMessages, recentMessages);
+        let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
 
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
@@ -2403,7 +2408,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
       const memory = await prepareMemory(processedMessages, model, legacySessionId);
       let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
-      let earlierMessages = seenObjectsSource(processedMessages, recentMessages);
+      let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
 
       // PII Shield: anonymize message history + wrap tools (legacy mode)
       if (piiShield) {

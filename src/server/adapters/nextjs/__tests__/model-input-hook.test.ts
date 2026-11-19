@@ -79,7 +79,7 @@ describe('onModelInput', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       stepNumber: 0,
-      breakdown: { pipeline: 'turn-aware', toolTurnCounting: 'all-turns', turns: [{ mode: 'text' }, { mode: 'text' }] },
+      breakdown: { pipeline: 'turn-aware', toolTurnCounting: 'tool-turns', turns: [{ mode: 'compacted' }, { mode: 'text' }] },
     });
     expect(events[0]!.estimatedTokens).toBeGreaterThan(0);
     expect(JSON.stringify(events[0]!.messages)).toContain('Rename Morning Mix');
@@ -151,6 +151,50 @@ describe('onModelInput', () => {
     expect(promptText(plainPrompts)).toContain('Morning Mix');
     expect(promptText(plainPrompts)).toContain('"playlist_id":17');
     expect(promptText(plainPrompts)).not.toContain('seen-objects');
+  });
+});
+
+describe('history defaults (0.18.0)', () => {
+  const listed = 'playlist: {\\"playlist_id\\":17,\\"displayName\\":\\"Morning Mix\\"}';
+  const undeclared = defineTool({
+    id: 'playlists.list', description: 'List playlists.', inputSchema: z.object({}), method: 'GET', execute: async () => ({ data: [] }),
+  });
+
+  async function promptsOf(config: Record<string, unknown>, chats = 3): Promise<string> {
+    const { model: chatModel, prompts } = model();
+    const handler = createAiChatHandler({
+      tools: { playlists_list: playlists }, model: chatModel, systemPrompt: 'A.', intentRouting: false, ...config,
+    } as never);
+    await (await handler(request(chats))).text();
+    return promptText(prompts);
+  }
+
+  it('lists the declared records a window left out without any history option (seenObjects on by default)', async () => {
+    const sent = await promptsOf({ maxContextMessages: 4 });
+    expect(sent).toContain(listed);
+    expect(sent).toBe(await promptsOf({ maxContextMessages: 4, history: { seenObjects: true } }));
+  });
+
+  it('history.seenObjects: false is the way back', async () => {
+    const sent = await promptsOf({ maxContextMessages: 4, history: { seenObjects: false } });
+    expect(sent).not.toContain('seen-objects');
+    expect(sent).not.toContain('playlist_id');
+  });
+
+  it('keeps a list through turns without tools by default (tool-turns), all-turns is the way back', async () => {
+    const byDefault = await promptsOf({ maxContextMessages: 60, history: { seenObjects: false } });
+    expect(byDefault).toContain('"playlist_id":17');
+    const allTurns = await promptsOf({ maxContextMessages: 60, history: { toolTurnCounting: 'all-turns', seenObjects: false } });
+    expect(allTurns).not.toContain('"playlist_id":17');
+  });
+
+  it('golden: an app without declarations sends byte-identical model input with and without seenObjects', async () => {
+    for (const maxContextMessages of [4, 60]) {
+      const base = { tools: { playlists_list: undeclared }, maxContextMessages };
+      const byDefault = await promptsOf(base);
+      expect(byDefault).toBe(await promptsOf({ ...base, history: { seenObjects: false } }));
+      expect(byDefault).not.toContain('seen-objects');
+    }
   });
 });
 

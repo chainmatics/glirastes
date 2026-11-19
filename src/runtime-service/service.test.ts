@@ -325,6 +325,16 @@ describe("runtime context and cleanup", () => {
     expect(state.handler!.uiActionOutcomes).toBe("report-only");
   });
 
+  it("hands chat.history to the chat handler and leaves the SDK's history defaults otherwise", async () => {
+    await started();
+    expect(state.handler!.history).toBeUndefined();
+    const base = config();
+    const service = await startRuntimeService({ ...base, chat: { history: { toolTurnCounting: "all-turns", seenObjects: false } } });
+    cleanups.push(service.stop);
+    await state.host!.handleChat(request());
+    expect(state.handler!.history).toEqual({ toolTurnCounting: "all-turns", seenObjects: false });
+  });
+
   it("emits no exception content in its handler error callback", async () => {
     await started();
     const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);

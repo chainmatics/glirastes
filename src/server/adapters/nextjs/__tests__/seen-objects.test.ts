@@ -27,6 +27,13 @@ const playlistResult = (ids: number[]) => ({
   data: ids.map((n) => ({ playlist_id: n, displayName: `Playlist ${n}`, durationSeconds: 1800 })),
 });
 
+/**
+ * With `'all-turns'` (the counting up to 0.17) the "thanks" turn takes the
+ * only tool slot, so the list's results leave the history and the memo lists
+ * them; under the default `'tool-turns'` the list would stay in the history.
+ */
+const ALL_TURNS = { toolTurnCounting: 'all-turns' } as const;
+
 /** A list turn, then a turn without tools, then the current question. */
 function afterThanks(list: Part): UIMessage[] {
   return [
@@ -43,17 +50,44 @@ const memoText = (messages: unknown[]): string | undefined => {
 };
 
 describe('seen-objects memo', () => {
-  it('is off by default: the model input is unchanged', async () => {
+  it('is on by default for declared tools: the same input as an explicit seenObjects: true', async () => {
     const messages = afterThanks(toolPart('playlists_list', 'c0', {}, playlistResult([1, 2, 3])));
-    const off = await prepareModelMessages(messages, { entities });
+    // all-turns, so the list leaves the history and the memo lists it.
+    const implicit = await prepareModelMessages(messages, { entities, history: { toolTurnCounting: 'all-turns' } });
+    const explicit = await prepareModelMessages(messages, { entities, history: { toolTurnCounting: 'all-turns', seenObjects: true } });
+    expect(memoText(implicit)).toContain('Playlist 3');
+    expect(JSON.stringify(implicit)).toBe(JSON.stringify(explicit));
+  });
+
+  it('seenObjects: false is the way back: the model input has no memo', async () => {
+    const messages = afterThanks(toolPart('playlists_list', 'c0', {}, playlistResult([1, 2, 3])));
+    const off = await prepareModelMessages(messages, { entities, history: { toolTurnCounting: 'all-turns', seenObjects: false } });
     expect(memoText(off)).toBeUndefined();
     expect(JSON.stringify(off)).not.toContain('seen-objects');
+  });
+
+  it('golden: without declarations the default model input is byte-identical to seenObjects: false', async () => {
+    const undeclared = [
+      afterThanks(toolPart('playlists_list', 'c0', {}, playlistResult([1, 2, 3]))),
+      afterThanks(toolPart('tasks_list', 'c0', {}, { success: true, tasks: [{ id: uuid(1), name: 'Release' }] })),
+    ];
+    for (const messages of undeclared) {
+      for (const toolTurnCounting of ['all-turns', 'tool-turns'] as const) {
+        const off = await prepareModelMessages(messages, { history: { toolTurnCounting, seenObjects: false } });
+        const byDefault = await prepareModelMessages(messages, { history: { toolTurnCounting } });
+        // An empty declaration table (no tool declares identity) is no declaration.
+        const empty = await prepareModelMessages(messages, { entities: {}, history: { toolTurnCounting } });
+        expect(JSON.stringify(byDefault)).toBe(JSON.stringify(off));
+        expect(JSON.stringify(empty)).toBe(JSON.stringify(off));
+        expect(JSON.stringify(byDefault)).not.toContain('seen-objects');
+      }
+    }
   });
 
   it('lists declared objects of results the history left out, with declared field names and number ids', async () => {
     const messages = afterThanks(toolPart('playlists_list', 'c0', {}, playlistResult([1, 2, 3])));
     let breakdown: ModelInputBreakdown | undefined;
-    const sent = await prepareModelMessages(messages, { entities, history: { seenObjects: true }, onBreakdown: (value) => { breakdown = value; } });
+    const sent = await prepareModelMessages(messages, { entities, history: { ...ALL_TURNS, seenObjects: true }, onBreakdown: (value) => { breakdown = value; } });
     const memo = memoText(sent)!;
     expect(memo).toContain(SEEN_OBJECTS_HEADER);
     expect(memo).toContain('may be outdated or deleted');
@@ -68,9 +102,9 @@ describe('seen-objects memo', () => {
 
   it('a tool or a record without declaration contributes nothing, whatever its field names', async () => {
     const undeclared = toolPart('tracks_list', 'c0', {}, { success: true, data: [{ id: uuid(1), name: 'Intro' }] });
-    const sent = await prepareModelMessages(afterThanks(undeclared), { entities, history: { seenObjects: true } });
+    const sent = await prepareModelMessages(afterThanks(undeclared), { entities, history: { ...ALL_TURNS, seenObjects: true } });
     expect(memoText(sent)).toBeUndefined();
-    const noEntities = await prepareModelMessages(afterThanks(toolPart('playlists_list', 'c0', {}, playlistResult([1]))), { history: { seenObjects: true } });
+    const noEntities = await prepareModelMessages(afterThanks(toolPart('playlists_list', 'c0', {}, playlistResult([1]))), { history: { ...ALL_TURNS, seenObjects: true } });
     expect(memoText(noEntities)).toBeUndefined();
   });
 
@@ -80,7 +114,7 @@ describe('seen-objects memo', () => {
       user('u1', 'and more'), assistant('a1', [{ type: 'step-start' }, toolPart('playlists_list', 'c1', {}, playlistResult([2, 3])), { type: 'text', text: 'Two.' }]),
       user('uq', 'rename 1'),
     ];
-    const sent = await prepareModelMessages(messages, { entities, history: { seenObjects: true } });
+    const sent = await prepareModelMessages(messages, { entities, history: { ...ALL_TURNS, seenObjects: true } });
     const memo = memoText(sent)!;
     expect(memo).toContain('"playlist_id":1');
     expect(memo).not.toContain('"playlist_id":2');
@@ -90,7 +124,7 @@ describe('seen-objects memo', () => {
   it('keeps composite and speaking keys exactly, and a fallback for nameless records', async () => {
     const messages = afterThanks(toolPart('revisions_list', 'c0', {}, { revisions: [{ channelKey: 'lobby', rev: 503 }, { channelKey: 'lobby/x', rev: 1 }] }));
     messages.splice(2, 0, user('ux', 'channels'), assistant('ax', [{ type: 'step-start' }, toolPart('channels_list', 'cx', {}, { channels: [{ key: 'LOBBY-1', title: 'Lobby' }] })]));
-    const memo = memoText(await prepareModelMessages(messages, { entities, maxContextMessages: 60, history: { seenObjects: true } }))!;
+    const memo = memoText(await prepareModelMessages(messages, { entities, maxContextMessages: 60, history: { ...ALL_TURNS, seenObjects: true } }))!;
     expect(memo).toContain('channel-revision: {"channelKey":"lobby","rev":503}');
     expect(memo).toContain('channel-revision: {"channelKey":"lobby/x","rev":1}');
     expect(memo).toContain('channel: {"key":"LOBBY-1","title":"Lobby"}');
@@ -98,7 +132,7 @@ describe('seen-objects memo', () => {
 
   it('copies values as the history has them: pseudonyms stay pseudonyms, a removed name stays removed', async () => {
     const result = { success: true, data: [{ playlist_id: 7, displayName: '<PERSON_1>' }, { playlist_id: 8 }] };
-    const memo = memoText(await prepareModelMessages(afterThanks(toolPart('playlists_list', 'c0', {}, result)), { entities, history: { seenObjects: true } }))!;
+    const memo = memoText(await prepareModelMessages(afterThanks(toolPart('playlists_list', 'c0', {}, result)), { entities, history: { ...ALL_TURNS, seenObjects: true } }))!;
     expect(memo).toContain('"displayName":"<PERSON_1>"');
     // Without its (denied or absent) name the record has nothing to match the user's words: not listed.
     expect(memo).not.toContain('"playlist_id":8');
@@ -108,13 +142,13 @@ describe('seen-objects memo', () => {
     const ids = Array.from({ length: 60 }, (_, index) => index + 1);
     const messages = afterThanks(toolPart('playlists_list', 'c0', {}, playlistResult(ids)));
     let breakdown: ModelInputBreakdown | undefined;
-    const memo = memoText(await prepareModelMessages(messages, { entities, history: { seenObjects: { maxEntries: 5 } }, onBreakdown: (value) => { breakdown = value; } }))!;
+    const memo = memoText(await prepareModelMessages(messages, { entities, history: { ...ALL_TURNS, seenObjects: { maxEntries: 5 } }, onBreakdown: (value) => { breakdown = value; } }))!;
     expect(memo).toContain('"playlist_id":60');
     expect(memo).toContain('"playlist_id":56');
     expect(memo).not.toContain('"playlist_id":55,');
     expect(memo).toContain('[55 less recently seen objects left out]');
     expect(breakdown!.seenObjects!.omitted).toBe(55);
-    const small = memoText(await prepareModelMessages(messages, { entities, history: { seenObjects: { maxTokens: 200 } } }))!;
+    const small = memoText(await prepareModelMessages(messages, { entities, history: { ...ALL_TURNS, seenObjects: { maxTokens: 200 } } }))!;
     expect(small.length).toBeLessThanOrEqual(200 * 4);
   });
 
@@ -150,7 +184,7 @@ describe('seen-objects memo', () => {
     const read = { success: true, data: { 1: { playlist_id: 2, displayName: 'Playlist 2' } } };
     const messages = afterThanks(toolPart('playlists_list', 'c0', {}, overview));
     (messages[1] as { parts: Part[] }).parts.splice(2, 0, { type: 'step-start' }, toolPart('read_result', 'r0', { resultId: 'ro_abcd1234', path: 'data[1]' }, read));
-    const memo = memoText(await prepareModelMessages(messages, { entities, history: { seenObjects: true } }))!;
+    const memo = memoText(await prepareModelMessages(messages, { entities, history: { ...ALL_TURNS, seenObjects: true } }))!;
     expect(memo).toContain('"playlist_id":1');
     expect(memo).toContain('playlist: {"playlist_id":2,"displayName":"Playlist 2"}');
     expect(memo).not.toContain('ro_abcd1234');
