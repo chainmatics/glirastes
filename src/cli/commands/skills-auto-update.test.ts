@@ -282,4 +282,18 @@ describe('baseline on skills auto-update', () => {
     await runToolsCommand(['refresh'], io(root).deps);
     expect((await readBaseline(root))!.reviewedThrough).toBe('0.0.1');
   });
+
+  it('a corrupt baseline never keeps the manifest from moving on', async () => {
+    const root = await installedByOlderSdk();
+    await ageSkill(root, 'maintaining-glirastes-tools');
+    await writeFile(join(root, BASELINE_PATH), '<<<<<<< HEAD\n');
+    const h = io(root);
+
+    expect(await runToolsCommand(['refresh'], h.deps)).toBe(0);
+
+    expect((await readInstalledSkillsManifest(root))!.sdkVersion).toBe(SDK_VERSION);
+    expect(h.err.join('\n')).not.toContain('not updated');
+    expect(h.err.join('\n')).toContain('sdk-baseline.json');
+    expect(await runToolsCommand(['check'], io(root).deps)).toBe(0);
+  });
 });

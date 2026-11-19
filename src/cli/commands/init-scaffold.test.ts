@@ -204,4 +204,36 @@ describe('agent block update', () => {
     await runToolsCommand(['refresh', '--mode', 'write'], deps({}));
     expect(await app.read('AGENTS.md')).toContain('glirastes upgrade report');
   });
+
+  it('normalizes line endings for the comparison and writes the block in the file\'s own', async () => {
+    const crlfOld = OLD_BLOCK.replace(/\n/g, '\r\n');
+    const app = await freshApp({ 'AGENTS.md': `# Mine\r\n\r\n${crlfOld}\r\ntail\r\n` });
+    expect(await updateAgentHint(app.root, {})).toEqual(['AGENTS.md']);
+    const text = await app.read('AGENTS.md');
+    expect(text.startsWith('# Mine\r\n\r\n')).toBe(true);
+    expect(text.endsWith('\r\ntail\r\n')).toBe(true);
+    expect(text.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(await updateAgentHint(app.root, {})).toEqual([]);
+  });
+
+  it('updates every block and warns about a start marker without an end', async () => {
+    const app = await freshApp({ 'AGENTS.md': `${OLD_BLOCK}\nmiddle\n${OLD_BLOCK}\n${AGENT_HINT_START}\nbroken` });
+    const warnings: string[] = [];
+    expect(await updateAgentHint(app.root, {}, (line) => { warnings.push(line); })).toEqual(['AGENTS.md']);
+    const text = await app.read('AGENTS.md');
+    expect(text).not.toContain('Old text.');
+    expect(text.split('glirastes upgrade report').length - 1).toBe(2);
+    expect(text.endsWith(`${AGENT_HINT_START}\nbroken`)).toBe(true);
+    expect(warnings).toEqual([expect.stringContaining('without')]);
+  });
+
+  it('re-running init refreshes an old block', async () => {
+    const app = await freshApp({ 'AGENTS.md': `# Mine\n\n${OLD_BLOCK}\n` });
+    const scaffold = await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
+    expect(scaffold.written).toContain('AGENTS.md');
+    const text = await app.read('AGENTS.md');
+    expect(text).not.toContain('Old text.');
+    expect(text).toContain('glirastes upgrade report');
+    expect(text.split(AGENT_HINT_START).length - 1).toBe(1);
+  }, 60_000);
 });

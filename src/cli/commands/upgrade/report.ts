@@ -14,7 +14,7 @@ import {
   type SdkBaseline,
   type UpgradeDecision,
 } from './baseline.js';
-import { evaluateNote, scanApp } from './detect.js';
+import { evaluateNote, scanApp, type AppScan } from './detect.js';
 import {
   compareVersions,
   findPackageUpgradeNotesDir,
@@ -61,6 +61,10 @@ export interface UpgradeReportOptions {
   all?: boolean;
   /** Where shipped skills come from (tests). */
   skillsDir?: string;
+  /** Edited skills already planned by the caller (`tools refresh`); spares a second hash pass. */
+  keptSkills?: ReadonlyArray<KeptSkill>;
+  /** Replaces the app scan (tests). */
+  scan?: (root: string) => Promise<AppScan>;
 }
 
 const HEADING = /^## \[(\d+\.\d+\.\d+)\]/;
@@ -126,11 +130,12 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
   const notes = (await loadUpgradeNotes(notesDir, to)).filter(
     (note) => compareVersions(note.version, from) > 0 && compareVersions(note.version, to) <= 0,
   );
-  const scan = await scanApp(options.rootDir);
+  // Reading the whole app tree is only worth it when a note could match.
+  const scan = notes.length > 0 ? await (options.scan ?? scanApp)(options.rootDir) : undefined;
 
   const report: UpgradeReport = { ...empty };
   for (const note of notes) {
-    const { status, evidence } = evaluateNote(note, scan);
+    const { status, evidence } = evaluateNote(note, scan!);
     const decision = decisions[note.id]?.decision;
     if (!options.all && (decision === 'adopted' || decision === 'declined')) continue;
     const item: ReportItem = {
@@ -159,7 +164,9 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
     )
     .map(({ version, heading }) => ({ version, changelogHeading: heading }));
 
-  report.keptSkills = await keptEditedSkills(options, to);
+  report.keptSkills = options.keptSkills
+    ? options.keptSkills.filter((kept) => kept.reason === 'behind')
+    : await keptEditedSkills(options, to);
   report.upToDate =
     report.must.length + report.should.length + report.recommended.length + report.offer.length === 0 &&
     report.keptSkills.length === 0 &&

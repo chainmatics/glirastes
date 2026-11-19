@@ -10,7 +10,7 @@ import {
   createSetupPlan,
 } from './setup-plan.js';
 import { createUpgradeReport, type UpgradeReportOptions } from './upgrade/report.js';
-import { upgradeHintDisabled } from './tools/refresh.js';
+import { upgradeHintDisabled } from './upgrade/hint.js';
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 import { inspectSkillsStaleness, skillsAutoUpdateDisabled } from './skills-auto-update.js';
 export { formatDoctorReport } from './doctor-presentation.js';

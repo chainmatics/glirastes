@@ -460,4 +460,47 @@ describe('upgrade baseline and hook on install', () => {
     expect(errors.join('\n')).toContain('.claude/settings.json is not valid JSON');
     expect(await readInstalledSkillsManifest(rootDir)).not.toBeNull();
   });
+
+  it('refuses a settings file whose hooks have the wrong shape', async () => {
+    for (const bad of [{ hooks: [] }, { hooks: { SessionStart: {} } }]) {
+      const rootDir = await nextAppRoot();
+      await mkdir(join(rootDir, '.claude'), { recursive: true });
+      const raw = JSON.stringify(bad);
+      await writeFile(join(rootDir, '.claude/settings.json'), raw);
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await installSkills({ rootDir, host: 'claude', quiet: true, withUpgradeHook: true });
+        expect(spy).toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await readFile(join(rootDir, '.claude/settings.json'), 'utf8')).toBe(raw);
+    }
+  });
+
+  it('adds no project hook for another host or a global install', async () => {
+    const rootDir = await nextAppRoot();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await installSkills({ rootDir, host: 'codex', quiet: true, withUpgradeHook: true });
+      expect(String(spy.mock.calls[0]?.[0])).toContain('--with-upgrade-hook');
+    } finally {
+      spy.mockRestore();
+    }
+    await expect(access(join(rootDir, '.claude/settings.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('a corrupt baseline warns once and does not abort the other hosts', async () => {
+    const rootDir = await nextAppRoot();
+    await mkdir(join(rootDir, '.glirastes'), { recursive: true });
+    await writeFile(join(rootDir, '.glirastes/sdk-baseline.json'), '<<<<<<< HEAD\n');
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await installSkills({ rootDir, hosts: ['claude', 'codex'], quiet: true });
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await readInstalledSkillsManifest(rootDir))!.installs.map((install) => install.host).sort()).toEqual(['claude', 'codex']);
+  });
 });

@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { loadToolsConfig } from '../../../codegen/tools/config.js';
 import { parseToolArgs } from './args.js';
 import { formatToolsHuman, formatToolsJson, type ToolsIo } from './format.js';
-import { computeUpgradeHint, printUpgradeHint, withUpgradeJson } from './refresh.js';
+import { computeUpgradeHint, printUpgradeHint, withUpgradeJson } from '../upgrade/hint.js';
 import { inspectSkillsStaleness, skillsAutoUpdateDisabled, type SkillsStaleness } from '../skills-auto-update.js';
 
 export const CHECK_ARGS = { flags: ['--strict', '--integrity-only', '--json', '--no-skills'], values: ['--root'] } as const;

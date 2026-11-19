@@ -211,7 +211,9 @@ export async function planSkillsUpdate(options: SkillsUpdateOptions): Promise<Sk
 }
 
 /** Apply a plan: replace, add and remove unedited skills, then write the manifest. Never prompts. */
-export async function applySkillsUpdate(rootDir: string, plan: SkillsUpdatePlan): Promise<void> {
+/** Returns warnings; a problem with the upgrade baseline never keeps the manifest from moving on. */
+export async function applySkillsUpdate(rootDir: string, plan: SkillsUpdatePlan): Promise<string[]> {
+  const warnings: string[] = [];
   for (const change of plan.changes as PlannedOp[]) {
     if (change.kind !== 'add') await removeAtomic(change.dest);
     if (change.kind === 'remove') continue;
@@ -221,8 +223,15 @@ export async function applySkillsUpdate(rootDir: string, plan: SkillsUpdatePlan)
   }
   // The first auto-update of an app that never had a baseline: what it last
   // reviewed is what the skills were installed for, before the manifest moves on.
-  if (plan.fromVersion) await ensureBaseline(resolve(rootDir), plan.fromVersion);
+  if (plan.fromVersion) {
+    try {
+      await ensureBaseline(resolve(rootDir), plan.fromVersion);
+    } catch (error) {
+      warnings.push(`glirastes upgrade: ${(error instanceof Error ? error.message : String(error)).split('\n')[0]}`);
+    }
+  }
   if (plan.manifestChanged) await writeInstalledSkillsManifest(resolve(rootDir), plan.next);
+  return warnings;
 }
 
 function plural(count: number, one: string, many: string): string {

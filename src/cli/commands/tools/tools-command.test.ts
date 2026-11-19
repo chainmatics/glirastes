@@ -287,12 +287,24 @@ describe('upgrade hint in tools refresh', () => {
     expect(lines).toEqual(['Glirastes 0.18.0 → 0.19.0: 1 must, 0 should, 0 recommended, 0 optional. Run `glirastes upgrade report`.']);
   });
 
-  it('prints nothing when up to date', async () => {
+  it('prints nothing when up to date, and the same fixture prints the line when a note is pending', async () => {
     const { root, notesDir } = await app('0.19.0');
     const h = harness();
     await runToolsCommand(['refresh', '--root', root], { ...h.deps(), upgrade: upgradeOf(notesDir, root) });
     expect(h.out.join('\n')).not.toContain('Glirastes 0.');
     expect(h.err).toEqual([]);
+
+    await writeFile(join(root, '.glirastes/sdk-baseline.json'), JSON.stringify({ schemaVersion: 1, reviewedThrough: '0.18.0', decisions: {} }));
+    const pending = harness();
+    await runToolsCommand(['refresh', '--root', root], { ...pending.deps(), upgrade: upgradeOf(notesDir, root) });
+    expect(pending.out.join('\n')).toContain('1 must');
+  });
+
+  it('skips the hint in integrity mode', async () => {
+    const { root, notesDir } = await app();
+    const h = harness();
+    await runToolsCommand(['refresh', '--mode', 'integrity', '--root', root], { ...h.deps(), upgrade: upgradeOf(notesDir, root) });
+    expect(h.out.join('\n')).not.toContain('1 must');
   });
 
   it('GLIRASTES_UPGRADE_HINT=0 suppresses it', async () => {
@@ -313,12 +325,18 @@ describe('upgrade hint in tools refresh', () => {
   it('shows the hint in check mode too, without writing a baseline', async () => {
     const { root, notesDir } = await app();
     const h = harness(emptyResult({ mode: 'frozen' }));
-    await mkdir(join(root, '.glirastes'), { recursive: true });
+    const baselinePath = join(root, '.glirastes/sdk-baseline.json');
+    const baselineText = await readFile(baselinePath, 'utf8');
+    await rm(baselinePath);
     await writeFile(join(root, '.glirastes/tools.json'), JSON.stringify({
       schemaVersion: 1, appId: '019fa9a9-d5f7-7ec3-a3c7-8899de500001', targetAppKey: 'fixture', locale: 'en', sources: ['next-app'],
     }));
     expect(await runToolsCommand(['check', '--root', root], { ...h.deps(), upgrade: upgradeOf(notesDir, root) })).toBe(0);
-    expect(h.out.join('\n')).toContain('1 must');
+    await expect(readFile(baselinePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await writeFile(baselinePath, baselineText);
+    const again = harness(emptyResult({ mode: 'frozen' }));
+    await runToolsCommand(['check', '--root', root], { ...again.deps(), upgrade: upgradeOf(notesDir, root) });
+    expect(again.out.join('\n')).toContain('1 must');
   });
 
   it('a report error never fails refresh', async () => {

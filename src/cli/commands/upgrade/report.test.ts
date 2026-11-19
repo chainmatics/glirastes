@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BASELINE_PATH, readBaseline, writeBaseline } from './baseline.js';
 import {
   createUpgradeReport,
@@ -318,5 +318,26 @@ describe('runUpgradeCommand', () => {
     const a = io();
     expect(await runUpgradeCommand(['frobnicate'], a.io)).toBe(2);
     expect(await runUpgradeCommand(['report', '--wat'], a.io)).toBe(2);
+  });
+});
+
+describe('app scan cost', () => {
+  it('does not scan the app when no note is in range, and scans when one is', async () => {
+    await baseline('0.19.0');
+    await writeNotes('0.19.0', [note('break-one', 'breaking')]);
+    const scan = vi.fn(async () => ({ files: [] }) as never);
+    const none = await createUpgradeReport(opts({ scan }));
+    expect(none.upToDate).toBe(true);
+    expect(scan).not.toHaveBeenCalled();
+
+    await baseline('0.18.0');
+    await createUpgradeReport(opts({ scan }));
+    expect(scan).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the kept skills the caller already planned', async () => {
+    await baseline('0.19.0');
+    const report = await createUpgradeReport(opts({ keptSkills: [{ host: 'claude', name: 'x', reason: 'behind' }] }));
+    expect(report.keptSkills).toEqual([{ host: 'claude', name: 'x', reason: 'behind' }]);
   });
 });

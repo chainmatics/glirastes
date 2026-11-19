@@ -14,7 +14,7 @@ import {
   type SkillsUpdatePlan,
 } from '../skills-auto-update.js';
 import { updateAgentHint } from '../init-scaffold.js';
-import { createUpgradeReport, summarizeUpgradeReport } from '../upgrade/report.js';
+import { computeUpgradeHint, printUpgradeHint, withUpgradeJson } from '../upgrade/hint.js';
 
 export const REFRESH_ARGS = {
   flags: ['--keep-going', '--json', '--watch', '--no-skills'],
@@ -68,7 +68,7 @@ async function updateInstalledSkills(root: string, io: ToolsIo, json: boolean): 
   try {
     const plan = await planSkillsUpdate({ rootDir: root });
     if (!plan) return null;
-    await applySkillsUpdate(root, plan);
+    for (const warning of await applySkillsUpdate(root, plan)) io.error(warning);
     if (!json) for (const line of formatSkillsUpdate(plan)) io.log(line);
     return plan;
   } catch (error) {
@@ -77,51 +77,10 @@ async function updateInstalledSkills(root: string, io: ToolsIo, json: boolean): 
   }
 }
 
-/** `GLIRASTES_UPGRADE_HINT=0` keeps the upgrade summary out of `tools refresh` and `tools check`. */
-export const UPGRADE_HINT_ENV = 'GLIRASTES_UPGRADE_HINT';
-
-export function upgradeHintDisabled(env: NodeJS.ProcessEnv): boolean {
-  const value = env[UPGRADE_HINT_ENV]?.trim().toLowerCase();
-  return value === '0' || value === 'false' || value === 'off' || value === 'no';
-}
-
-export interface UpgradeHint {
-  line: string | null;
-  error?: string;
-}
-
-/**
- * One line about pending SDK follow-ups, from the app at `root` (never from
- * cwd). Read-only; a report problem is returned, never thrown, so the hint
- * can not fail a refresh or a build.
- */
-export async function computeUpgradeHint(root: string, io: ToolsIo): Promise<UpgradeHint> {
-  if (upgradeHintDisabled(io.env)) return { line: null };
-  try {
-    const report = await createUpgradeReport({ rootDir: root, ...io.upgrade });
-    return { line: summarizeUpgradeReport(report) };
-  } catch (error) {
-    return { line: null, error: (error instanceof Error ? error.message : String(error)).split('\n')[0]! };
-  }
-}
-
-/** Prints the hint (or its error) for humans; `--json` callers embed it instead. */
-export function printUpgradeHint(hint: UpgradeHint, io: ToolsIo): void {
-  if (hint.error) io.error(`glirastes upgrade: ${hint.error}`);
-  else if (hint.line) io.log(hint.line);
-}
-
-export function withUpgradeJson(raw: string, hint: UpgradeHint): string {
-  return JSON.stringify({
-    ...(JSON.parse(raw) as Record<string, unknown>),
-    upgrade: { line: hint.line, ...(hint.error ? { error: hint.error } : {}) },
-  });
-}
-
 /** Rewrites an outdated Glirastes block in AGENTS.md / CLAUDE.md; never fails the refresh. */
 async function updateAgentInstructions(root: string, io: ToolsIo, json: boolean): Promise<void> {
   try {
-    const changed = await updateAgentHint(root, io.env);
+    const changed = await updateAgentHint(root, io.env, io.error);
     if (!json && changed.length > 0) io.log(`Updated the Glirastes block in ${changed.join(', ')}.`);
   } catch (error) {
     io.error(`The agent instructions were not updated: ${(error instanceof Error ? error.message : String(error)).split('\n')[0]}`);
@@ -158,7 +117,10 @@ export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo):
     ...(keepGoing ? { keepGoing } : {}),
     ...(adoptInventoryPath ? { adoptInventoryPath } : {}),
   });
-  const upgrade = await computeUpgradeHint(root, io);
+  // Integrity (Docker builds) depends on nothing but the committed outputs.
+  const upgrade = mode === 'integrity'
+    ? { line: null }
+    : await computeUpgradeHint(root, io, skillsPlan ? { keptSkills: skillsPlan.kept } : {});
   if (json) {
     const raw = skillsPlan ? withSkillsJson(formatToolsJson(result), skillsPlan) : formatToolsJson(result);
     io.log(withUpgradeJson(raw, upgrade));

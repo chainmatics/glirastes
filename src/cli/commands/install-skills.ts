@@ -1,4 +1,4 @@
-import { mkdir, readdir, copyFile, readFile, stat, symlink, lstat, unlink, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, copyFile, readFile, stat, symlink, lstat, unlink, rm, writeFile, rename } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, relative, sep, posix } from 'node:path';
@@ -246,6 +246,7 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   const sdkVersion = await readSdkVersion();
   // A reinstall keeps what the app last reviewed: its baseline starts at the version already installed.
   const baselineVersion = manifest?.sdkVersion ?? SDK_VERSION;
+  let manifestWritten = false;
 
   for (const host of hosts) {
     const hostTargets = HOST_SKILL_TARGETS[host];
@@ -346,14 +347,27 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
         skills: recorded,
       }, sdkVersion);
       await writeInstalledSkillsManifest(rootDir, manifest);
-      if (!opts.global) await ensureBaseline(rootDir, baselineVersion);
+      manifestWritten = true;
+    }
+  }
+
+  // Once, after every host: a corrupt baseline must not abort the other hosts.
+  if (manifestWritten && !opts.global) {
+    try {
+      await ensureBaseline(rootDir, baselineVersion);
+    } catch (error) {
+      console.error(`glirastes upgrade: ${(error instanceof Error ? error.message : String(error)).split('\n')[0]}`);
     }
   }
 
   if (opts.withUpgradeHook && !opts.dryRun) {
-    const outcome = await addUpgradeHook(rootDir);
-    if (outcome === 'added') log(`  ${dim('Hook:')}    SessionStart runs "${UPGRADE_HOOK_COMMAND}" (.claude/settings.json)`);
-    else if (outcome !== 'present') console.error(outcome);
+    if (opts.global || !hosts.includes('claude')) {
+      console.error('glirastes install: --with-upgrade-hook writes the project .claude/settings.json and needs a project install for the claude host; no hook was added.');
+    } else {
+      const outcome = await addUpgradeHook(rootDir);
+      if (outcome === 'added') log(`  ${dim('Hook:')}    SessionStart runs "${UPGRADE_HOOK_COMMAND}" (.claude/settings.json)`);
+      else if (outcome !== 'present') console.error(outcome);
+    }
   }
 
   log('');
@@ -378,22 +392,28 @@ export const UPGRADE_HOOK_COMMAND = 'npx --no-install glirastes upgrade report -
  */
 async function addUpgradeHook(rootDir: string): Promise<'added' | 'present' | string> {
   const path = join(rootDir, '.claude/settings.json');
+  const refused = (why: string) => `glirastes install: .claude/settings.json ${why}, so the upgrade hook was not added. Fix the file and run the install again with --with-upgrade-hook.`;
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
   let settings: Record<string, unknown> = {};
   if (await pathExists(path)) {
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('not an object');
-      settings = parsed as Record<string, unknown>;
+      parsed = JSON.parse(await readFile(path, 'utf8'));
     } catch {
-      return `glirastes install: .claude/settings.json is not valid JSON, so the upgrade hook was not added. Fix the file and run the install again with --with-upgrade-hook.`;
+      return refused('is not valid JSON');
     }
+    if (!isObject(parsed)) return refused('is not a JSON object');
+    settings = parsed;
   }
-  const hooks = (typeof settings.hooks === 'object' && settings.hooks !== null && !Array.isArray(settings.hooks)
-    ? settings.hooks
-    : {}) as Record<string, unknown>;
-  const sessionStart = Array.isArray(hooks.SessionStart) ? hooks.SessionStart as unknown[] : [];
-  const present = sessionStart.some((entry) => Array.isArray((entry as { hooks?: unknown })?.hooks)
-    && ((entry as { hooks: unknown[] }).hooks).some((hook) => (hook as { command?: unknown })?.command === UPGRADE_HOOK_COMMAND));
+  if (settings.hooks !== undefined && !isObject(settings.hooks)) return refused('has a "hooks" value that is not an object');
+  const hooks = (settings.hooks ?? {}) as Record<string, unknown>;
+  if (hooks.SessionStart !== undefined && !Array.isArray(hooks.SessionStart)) {
+    return refused('has a "hooks.SessionStart" value that is not an array');
+  }
+  const sessionStart = (hooks.SessionStart ?? []) as unknown[];
+  const present = sessionStart.some((entry) => isObject(entry) && Array.isArray(entry.hooks)
+    && entry.hooks.some((hook) => isObject(hook) && hook.command === UPGRADE_HOOK_COMMAND));
   if (present) return 'present';
   const next = {
     ...settings,
@@ -403,7 +423,9 @@ async function addUpgradeHook(rootDir: string): Promise<'added' | 'present' | st
     },
   };
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  const temporary = `${path}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  await rename(temporary, path);
   return 'added';
 }
 

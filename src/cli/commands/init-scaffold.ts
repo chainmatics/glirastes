@@ -202,9 +202,8 @@ export async function scaffoldToolsInputs(options: {
   const hintTargets = hint.targets;
   for (const target of hintTargets) {
     const current = await readText(join(root, target)) ?? '';
-    if (current.includes(AGENT_HINT_START)) continue;
-    const separator = current === '' || current.endsWith('\n\n') ? '' : current.endsWith('\n') ? '\n' : '\n\n';
-    add(target, `${current}${separator}${AGENT_HINT}`);
+    const next = withAgentHint(current, { insert: true });
+    if (next.text !== current) add(target, next.text);
   }
 
   if (packageRaw !== undefined) {
@@ -262,8 +261,41 @@ async function resolveHintTargets(
   return { targets, notes };
 }
 
+const LF_BLOCK = AGENT_HINT.slice(0, AGENT_HINT.lastIndexOf(AGENT_HINT_END) + AGENT_HINT_END.length);
+
 /**
- * Brings an existing Glirastes block in AGENTS.md / CLAUDE.md up to this SDK
+ * The instruction text with the current Glirastes block: every marker span
+ * that differs is replaced (compared without line-ending differences, written
+ * in the file's own line ending), text outside the markers stays byte for
+ * byte. Without any block, `insert` appends one (init); a start marker
+ * without an end marker is left alone and counted.
+ */
+function withAgentHint(current: string, options: { insert: boolean }): { text: string; unterminated: number } {
+  const eol = current.includes('\r\n') ? '\r\n' : '\n';
+  const block = LF_BLOCK.split('\n').join(eol);
+  if (!current.includes(AGENT_HINT_START)) {
+    if (!options.insert) return { text: current, unterminated: 0 };
+    const separator = current === '' || current.endsWith(`${eol}${eol}`) ? '' : current.endsWith('\n') ? eol : `${eol}${eol}`;
+    return { text: `${current}${separator}${block}${eol}`, unterminated: 0 };
+  }
+  let text = '';
+  let cursor = 0;
+  let unterminated = 0;
+  for (;;) {
+    const start = current.indexOf(AGENT_HINT_START, cursor);
+    if (start < 0) break;
+    const endMarker = current.indexOf(AGENT_HINT_END, start);
+    if (endMarker < 0) { unterminated += 1; break; }
+    const end = endMarker + AGENT_HINT_END.length;
+    const same = current.slice(start, end).replace(/\r\n/g, '\n') === LF_BLOCK;
+    text += current.slice(cursor, start) + (same ? current.slice(start, end) : block);
+    cursor = end;
+  }
+  return { text: text + current.slice(cursor), unterminated };
+}
+
+/**
+ * Brings existing Glirastes blocks in AGENTS.md / CLAUDE.md up to this SDK
  * (`tools refresh`). Only the text between the markers changes; a file without
  * the block is left alone, init inserts it. Returns the changed app-relative
  * files. `GLIRASTES_SKILLS_AUTO_UPDATE=0` switches it off.
@@ -271,21 +303,17 @@ async function resolveHintTargets(
 export async function updateAgentHint(
   root: string,
   env: NodeJS.ProcessEnv = process.env,
+  warn: (line: string) => void = (line) => { console.error(line); },
 ): Promise<string[]> {
   if (skillsAutoUpdateDisabled(env)) return [];
-  const block = AGENT_HINT.slice(0, AGENT_HINT.lastIndexOf(AGENT_HINT_END) + AGENT_HINT_END.length);
   const { targets } = await resolveHintTargets(root, ['AGENTS.md', 'CLAUDE.md'], undefined);
   const writes: Array<{ path: string; content: string; preserveMode: true }> = [];
   for (const target of targets) {
     const current = await readText(join(root, target));
     if (current === undefined) continue;
-    const start = current.indexOf(AGENT_HINT_START);
-    if (start < 0) continue;
-    const endMarker = current.indexOf(AGENT_HINT_END, start);
-    if (endMarker < 0) continue;
-    const end = endMarker + AGENT_HINT_END.length;
-    if (current.slice(start, end) === block) continue;
-    writes.push({ path: join(root, target), content: `${current.slice(0, start)}${block}${current.slice(end)}`, preserveMode: true });
+    const next = withAgentHint(current, { insert: false });
+    if (next.unterminated > 0) warn(`${target} has a "${AGENT_HINT_START}" marker without "${AGENT_HINT_END}"; the block was not updated there.`);
+    if (next.text !== current) writes.push({ path: join(root, target), content: next.text, preserveMode: true });
   }
   if (writes.length > 0) await writeArtifactSetAtomically(writes);
   return writes.map((write) => relative(root, write.path)).sort();
