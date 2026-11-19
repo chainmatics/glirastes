@@ -225,8 +225,8 @@ export interface StreamHandlerContext {
   earlierMessages?: unknown[];
   /** Max output tokens */
   maxOutputTokens: number;
-  /** Temperature */
-  temperature: number;
+  /** Temperature; null sends none */
+  temperature: number | null;
   /** Max context messages for model-message preparation */
   maxContextMessages: number;
   /** Model tier from intent routing or pipeline */
@@ -904,7 +904,7 @@ async function defaultStreamHandler(
           return { activeTools: permitted ? active.filter((name) => permitted.has(name)) : active };
         }),
         maxOutputTokens: ctx.maxOutputTokens,
-        temperature: ctx.temperature,
+        ...(ctx.temperature === null ? {} : { temperature: ctx.temperature }),
         timeout: resolveTurnTimeout(
           ctx.managedTurn?.snapshot.budget.totalTimeoutMs,
         ),
@@ -1269,7 +1269,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     }
   };
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
-  const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
+  const chatMemory = memoryConfig ? createChatMemory(memoryConfig, process.env, { temperature }) : null;
   /**
    * With `history.seenObjects` (default on): the messages the window or the chat memory
    * left out ahead of `recent` (a suffix of `all`), for the memo; else none.

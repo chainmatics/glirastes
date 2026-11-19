@@ -404,7 +404,12 @@ export interface AiChatHandlerConfig {
   streamErrorTexts?: Partial<StreamErrorTexts>;
   uiActionSchema?: SchemaLike;
   maxOutputTokens?: number;
-  temperature?: number;
+  /**
+   * Sampling temperature (default 0.2). `null` sends no `temperature` to the
+   * model, for models that reject it (reasoning models); this includes the
+   * memory summary calls.
+   */
+  temperature?: number | null;
   /**
    * Explicit hard cap for reasoning steps.
    *
