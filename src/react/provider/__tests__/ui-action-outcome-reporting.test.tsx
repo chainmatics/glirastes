@@ -319,6 +319,27 @@ describe('a UI action that loads a new page', () => {
     expect(last.find((part) => part.toolCallId === 'c1')?.output?.outcome).toMatchObject({ code: 'initiated' });
   });
 
+  it('keeps initiated when preparing the page load outlasts the outcome timeout', async () => {
+    const session: SessionConfig = {
+      load: async () => [],
+      save: () => new Promise<void>((resolve) => { setTimeout(resolve, 200); }),
+    };
+    const { bus, outcomes } = setup({ session, uiActionOutcomeTimeoutMs: 50 });
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    cleanups.push(registerDocumentNavigation({ bus }));
+    await settle();
+    const open = { type: 'tool-tasks_list', toolCallId: 'c2', state: 'input-available', input: {} };
+    await act(async () => { control.set([user], 'submitted'); });
+    // The parallel call never finishes within the timeout.
+    await act(async () => { control.set([user, assistant(uiPart('c1', { awaitsOutcome: true }, navigate('/reports')), open)], 'streaming'); });
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1), { timeout: 2_000 });
+    await settle(50);
+    expect(written.map((entry) => entry.output.outcome)).toEqual([expect.objectContaining({ code: 'initiated' })]);
+    expect(outcomes[0]).toMatchObject({ code: 'initiated', reported: true });
+    expect(continued).not.toHaveBeenCalled();
+  });
+
   it('runs the later results and writes their own codes when a reloading bridge refuses the navigation', async () => {
     const { bus } = setup();
     cleanups.push(registerNavigationBridge({ bus, push: () => false, reloads: true }));

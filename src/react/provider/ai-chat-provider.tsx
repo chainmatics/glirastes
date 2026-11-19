@@ -1116,6 +1116,13 @@ export function AiChatProvider({
             ...(uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {}),
           },
         ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }))
+          .then((result) => (
+            // A page load was being prepared when the run timed out: it still goes ahead, so the result stays `initiated`.
+            result && (result.code === 'timeout' || result.code === 'unconfirmed')
+              && reportedOutcomesRef.current.get(toolCallId)?.code === 'initiated'
+              ? { ...result, code: 'initiated' as const }
+              : result
+          ))
           .finally(() => { currentUiRunRef.current = null; });
         if (!run || uiActionGenerationRef.current !== generation) return;
         if (run.code === 'initiated') pageLeavingRef.current = true;
