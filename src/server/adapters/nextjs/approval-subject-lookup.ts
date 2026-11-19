@@ -214,7 +214,9 @@ function isReadSource(tool: Tool): boolean {
 
 function resultOf(lookup: EntityLookup, declaration: OutputEntityDeclaration): 'one' | 'list' {
   if (lookup.result) return lookup.result;
-  return declaration.path !== undefined && !declaration.path.includes('[]') ? 'one' : 'list';
+  // As the generator decides it: entries (`[]`) are a list, anything else one record; `complete` is a list's.
+  if (lookup.complete === true) return 'list';
+  return declaration.path?.includes('[]') ? 'list' : 'one';
 }
 
 function compareCodeUnits(left: string, right: string): number {

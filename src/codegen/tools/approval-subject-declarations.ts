@@ -225,7 +225,7 @@ function paramNames(params: ToolContract['params'] | undefined): Set<string> | u
 
 /** The lookups' result kind: explicit, else `list` when the entity's declared path reads entries. */
 function lookupResult(lookup: EntityLookup, declaration: OutputEntityDeclaration): 'one' | 'list' {
-  return lookup.result ?? (declaration.path?.includes('[]') ? 'list' : 'one');
+  return lookup.result ?? (lookup.complete === true || declaration.path?.includes('[]') ? 'list' : 'one');
 }
 
 /**

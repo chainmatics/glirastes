@@ -283,6 +283,14 @@ describe('approval subject lookups', () => {
     expect(backend.calls).toHaveLength(0);
   });
 
+  it('reads a source whose entity has no path as one record (mismatch, never not_in_page)', async () => {
+    const { resolver } = resolverFor({ 'GET /playlists/7': () => ok({ playlist_id: 8, displayName: 'Other' }) }, {
+      registry: referenceTools({ getPlaylist: { outputEntities: [{ type: 'playlist', id: 'playlist_id', name: 'displayName' }] } }),
+    });
+    await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+    expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ reason: 'mismatch' });
+  });
+
   it('validates its limits', () => {
     expect(resolveApprovalSubjectLimits(undefined)).toEqual({ maxLookupsPerTurn: 32, maxSubjectsPerCall: 4, lookupTimeoutMs: 3000, maxLookupTimePerTurnMs: 10_000 });
     expect(() => resolveApprovalSubjectLimits({ maxLookupsPerTurn: 0 })).toThrow(RangeError);
