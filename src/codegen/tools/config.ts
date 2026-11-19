@@ -101,13 +101,16 @@ export const ToolsConfigSchema = z.object({
     .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/),
   /**
    * The languages of the app's UI as BCP-47 tags (e.g. `["en", "de", "pl"]`).
-   * Optional; with it, every tool gets its chat labels per language (from
-   * its presentation, else its title, else the English or German template)
-   * in the generated module, `describe` asks for texts in these languages,
-   * and a language without an own label is reported. Local only: the setup
-   * artifact keeps one presentation in `locale`.
+   * Every tool gets its chat labels per language (from its presentation,
+   * else its title, else the English or German template, else English) in
+   * the generated module. Optional: without it the labels cover `en`, `de`
+   * and every language a tool's presentation or title is declared in. With
+   * it, `describe` asks for texts in these languages and a language without
+   * an own label is reported. `[]` turns labels per language off: one label
+   * in `locale`, titles not used as labels (the output before 0.18.0).
+   * Local only: the setup artifact keeps one presentation in `locale`.
    */
-  languages: z.array(z.string().regex(LANGUAGE_TAG_PATTERN).max(35)).min(1).max(MAX_TEXT_LANGUAGES)
+  languages: z.array(z.string().regex(LANGUAGE_TAG_PATTERN).max(35)).max(MAX_TEXT_LANGUAGES)
     .refine((tags) => new Set(tags.map((tag) => tag.toLowerCase())).size === tags.length, { message: 'Each language once' })
     .optional(),
   sources: z.array(SourceSchema).min(1).max(20),

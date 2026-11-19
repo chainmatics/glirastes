@@ -302,6 +302,26 @@ function overrideFinding(stableKey: string, field: string): ToolFinding {
     `The ${field} in tool-semantics.json differs from the code's and is used: a maintained semantics entry beats the code since 0.18.0.`);
 }
 
+/** The template labels speak these languages; labels per language always cover them. */
+export const TEMPLATE_LABEL_LANGUAGES = ['de', 'en'] as const;
+
+/**
+ * The languages a tool's people-facing texts are declared in: the tags of
+ * its presentations and titles (code and tool-semantics.json). Language-free
+ * texts name none.
+ */
+export function declaredLabelLanguages(hints: ToolProseHints | undefined, entry: ToolSemanticsEntry | undefined): string[] {
+  const layers = [
+    presentationLayer(entry?.presentation),
+    titleLayer(entry?.title),
+    presentationLayer(hints?.presentations ?? hints?.presentation),
+    presentationLayer(hints?.presentation),
+    titleLayer(hints?.title),
+    titleLayer(hints?.contractTitle),
+  ];
+  return layers.flatMap((layer) => Object.keys(layer?.byLanguage ?? {}));
+}
+
 /**
  * Prose without a model; templates are the visible floor, never a blocker.
  *

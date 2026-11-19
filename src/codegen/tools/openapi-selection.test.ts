@@ -34,10 +34,10 @@ const OUTPUTS = [
   TOOLS_PATHS.setupArtifact,
 ];
 
-async function outputDigests(document: string, source: unknown): Promise<Record<string, string>> {
+async function outputDigests(document: string, source: unknown, config: Record<string, unknown> = { languages: [] }): Promise<Record<string, string>> {
   const fixture = await createAppFixture(
     { 'openapi.json': await readFile(join(SDK_ROOT, document), 'utf8') },
-    { toolsConfig: { sources: [source] } },
+    { toolsConfig: { sources: [source], ...config } },
   );
   const result = await runToolsPipelineWith({ root: fixture.root, mode: 'write', keepGoing: true }, { now: NOW });
   const module = generatedModulePath(loadToolsConfig(fixture.root));
@@ -56,6 +56,7 @@ describe('the openapi source without the opt-in extensions', () => {
       digests[document] = bare;
     }
     // Pinned from 0.14.0 plus OpenAPI 3.0 support, before `selection` and the x-glirastes-* extensions existed.
+    // `languages: []` is the way back to the one label of before 0.18.0, byte for byte.
     expect(digests).toMatchInlineSnapshot(`
       {
         "examples/openapi-3.0.tasks.json": {
@@ -88,6 +89,17 @@ describe('the openapi source without the opt-in extensions', () => {
         },
       }
     `);
+  }, 60_000);
+
+  it('adds the labels per language by default, without touching the setup artifact, the inventory or the report', async () => {
+    for (const document of COMMITTED_DOCUMENTS) {
+      const single = await outputDigests(document, 'openapi');
+      const perLanguage = await outputDigests(document, 'openapi', {});
+      for (const path of [TOOLS_PATHS.inventory, TOOLS_PATHS.setupArtifact, TOOLS_PATHS.report]) {
+        expect(perLanguage[path], `${document} ${path}`).toBe(single[path]);
+      }
+      expect(perLanguage[TOOLS_PATHS.contracts], document).not.toBe(single[TOOLS_PATHS.contracts]);
+    }
   }, 60_000);
 });
 

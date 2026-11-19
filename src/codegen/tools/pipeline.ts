@@ -44,6 +44,7 @@ import {
   type ToolReportTool,
 } from './artifact.js';
 import { compareCodeUnits } from './canonical.js';
+import { MAX_TEXT_LANGUAGES } from '../../contracts/localized-text.js';
 import {
   generatedModulePath,
   loadToolsConfig,
@@ -57,7 +58,14 @@ import { sortFindings, toolFinding, TRANSIENT_FINDING_CODES } from './findings.j
 import { readPromptBundle, readToolInputs, type PromptBundleInput } from './inputs.js';
 import { checkMcpNames } from './mcp-names.js';
 import type { ToolsMode } from './mode.js';
-import { lookupSemantics, resolveToolProse, type DescriptionOrigin, type ToolSemantics } from './prose.js';
+import {
+  declaredLabelLanguages,
+  lookupSemantics,
+  resolveToolProse,
+  TEMPLATE_LABEL_LANGUAGES,
+  type DescriptionOrigin,
+  type ToolSemantics,
+} from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
 import {
@@ -623,6 +631,14 @@ async function generate(
   const contractEntries: ToolContractsEntry[] = [];
   const reportTools: ToolReportTool[] = [];
   const languages = requiredLanguages(config.locale, config.languages);
+  // Labels per language: tools.json `languages`; without it every language a tool's texts are declared in plus the
+  // template languages (en, de); `languages: []` keeps one label in `locale` (the output before 0.18.0).
+  const labelLanguages = config.languages !== undefined
+    ? (config.languages.length > 0 ? config.languages : undefined)
+    : defaultLabelLanguages(inventory.executions.map((execution) => ({
+      hints: observedByKey.get(execution.stableKey)?.prose,
+      entry: lookupSemantics(inputs.semantics, execution.stableKey, execution.definitionId),
+    })));
   const usedSemantics = new Set<ToolSemanticsEntry>();
   const missingLabels = new Map<string, string[]>();
 
@@ -723,7 +739,7 @@ async function generate(
       ...(execution.executionKind === 'endpoint' ? { method: execution.method, path: execution.path } : {}),
       operationGroup: defaults.operationGroup,
       locale: config.locale,
-      ...(config.languages ? { languages: config.languages } : {}),
+      ...(labelLanguages ? { languages: labelLanguages } : {}),
       ...(tool.evidence.jsDoc ? { jsDoc: tool.evidence.jsDoc } : {}),
       ...(tool.prose ? { hints: tool.prose } : {}),
       semantics: inputs.semantics,
@@ -746,7 +762,8 @@ async function generate(
         schemaSource: schemaQuality,
       },
     });
-    for (const language of prose.missingLabelLanguages ?? []) {
+    // Only the languages the app named are reported; the derived ones fall back to English silently.
+    for (const language of config.languages?.length ? prose.missingLabelLanguages ?? [] : []) {
       const list = missingLabels.get(language) ?? [];
       list.push(execution.definitionId);
       missingLabels.set(language, list);
@@ -1084,4 +1101,19 @@ export async function runToolsPipelineWith(
 /** Derives the app's tools from code: write, frozen (check) or integrity (deploy) mode. */
 export async function runToolsPipeline(options: ToolsPipelineOptions): Promise<ToolsPipelineResult> {
   return runToolsPipelineWith(options, {});
+}
+
+/**
+ * The label languages of an app without tools.json `languages`: the template
+ * languages and every language a tool's presentation or title is declared
+ * in, each once (case-insensitive), in code-unit order.
+ */
+function defaultLabelLanguages(
+  tools: ReadonlyArray<{ hints: Parameters<typeof declaredLabelLanguages>[0]; entry: Parameters<typeof declaredLabelLanguages>[1] }>,
+): string[] {
+  const byLower = new Map<string, string>();
+  for (const tag of [...TEMPLATE_LABEL_LANGUAGES, ...tools.flatMap((tool) => declaredLabelLanguages(tool.hints, tool.entry))]) {
+    if (!byLower.has(tag.toLowerCase())) byLower.set(tag.toLowerCase(), tag);
+  }
+  return [...byLower.values()].sort(compareCodeUnits).slice(0, MAX_TEXT_LANGUAGES);
 }
