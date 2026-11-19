@@ -50,7 +50,7 @@ function transactionDone(tx: IDBTransaction): Promise<void> {
   });
 }
 
-function openDb(factory: IDBFactory): Promise<IDBDatabase> {
+function openDb(factory: IDBFactory, onClosed: () => void): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = factory.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
@@ -60,9 +60,16 @@ function openDb(factory: IDBFactory): Promise<IDBDatabase> {
       store.createIndex('byConversation', ['storageKey', 'conversationId']);
       store.createIndex('byStorageKey', 'storageKey');
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const handle = req.result;
+      handle.onversionchange = () => {
+        handle.close();
+        onClosed();
+      };
+      handle.onclose = onClosed;
+      resolve(handle);
+    };
     req.onerror = () => reject(req.error);
-    req.onblocked = () => reject(new Error('blocked'));
   });
 }
 
@@ -70,9 +77,14 @@ export function createIndexedDbAttachmentStore(options: {
   storageKey: string;
   indexedDB?: IDBFactory;
 }): AttachmentBlobStore | null {
-  const factory =
-    options.indexedDB ??
-    (typeof indexedDB === 'undefined' ? undefined : indexedDB);
+  let factory: IDBFactory | undefined;
+  try {
+    factory =
+      options.indexedDB ??
+      (typeof indexedDB === 'undefined' ? undefined : indexedDB);
+  } catch {
+    return null;
+  }
   if (!factory) return null;
   const { storageKey } = options;
 
@@ -80,12 +92,16 @@ export function createIndexedDbAttachmentStore(options: {
   const db = (): Promise<IDBDatabase> => {
     if (!dbPromise) {
       try {
-        dbPromise = openDb(factory);
+        const opened = openDb(factory, () => {
+          if (dbPromise === opened) dbPromise = null;
+        });
+        dbPromise = opened;
       } catch (error) {
         dbPromise = Promise.reject(error);
       }
-      dbPromise.catch(() => {
-        dbPromise = null;
+      const current = dbPromise;
+      current.catch(() => {
+        if (dbPromise === current) dbPromise = null;
       });
     }
     return dbPromise;
@@ -167,22 +183,21 @@ export function createIndexedDbAttachmentStore(options: {
 }
 
 export function createMemoryAttachmentStore(): AttachmentBlobStore {
-  const files = new Map<string, StoredAttachment>();
-  const key = (conversationId: string, id: string) =>
-    JSON.stringify([conversationId, id]);
+  const conversations = new Map<string, Map<string, StoredAttachment>>();
   return {
     async put(conversationId, id, file) {
-      files.set(key(conversationId, id), file);
+      let files = conversations.get(conversationId);
+      if (!files) conversations.set(conversationId, (files = new Map()));
+      files.set(id, file);
     },
     async get(conversationId, id) {
-      return files.get(key(conversationId, id)) ?? null;
+      return conversations.get(conversationId)?.get(id) ?? null;
     },
     async deleteConversation(conversationId) {
-      const prefix = `["${conversationId.replace(/[\\"]/g, (c) => `\\${c}`)}",`;
-      for (const k of [...files.keys()]) if (k.startsWith(prefix)) files.delete(k);
+      conversations.delete(conversationId);
     },
     async deleteAll() {
-      files.clear();
+      conversations.clear();
     },
   };
 }

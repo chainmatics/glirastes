@@ -3,6 +3,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createIndexedDbAttachmentStore,
+  createMemoryAttachmentStore,
   dataUrlToBlob,
   type AttachmentBlobStore,
 } from '../attachment-blob-store.js';
@@ -78,6 +79,47 @@ describe('IndexedDB attachment store', () => {
     }
   });
 
+  it('returns null when reading the global indexedDB throws', () => {
+    Object.defineProperty(globalThis, 'indexedDB', {
+      configurable: true,
+      get() {
+        throw new DOMException('denied', 'SecurityError');
+      },
+    });
+    try {
+      expect(createIndexedDbAttachmentStore({ storageKey: 'k' })).toBeNull();
+    } finally {
+      delete (globalThis as { indexedDB?: unknown }).indexedDB;
+    }
+  });
+
+  it('does not block a version upgrade and stays non-throwing afterwards', async () => {
+    const factory = new IDBFactory();
+    const store = makeStore(factory);
+    await store.put('c', 'f', file('x'));
+    await new Promise<void>((resolve, reject) => {
+      const req = factory.open('glirastes-chat-attachments', 2);
+      req.onsuccess = () => {
+        req.result.close();
+        resolve();
+      };
+      req.onerror = () => reject(req.error);
+    });
+    await expect(store.get('c', 'f')).resolves.toBeNull();
+    await expect(store.put('c', 'g', file('y'))).resolves.toBeUndefined();
+  });
+
+  it('deleteConversation leaves the same conversation id under another storageKey', async () => {
+    const factory = new IDBFactory();
+    const one = makeStore(factory, 'one');
+    const two = makeStore(factory, 'two');
+    await one.put('c', 'f', file('1'));
+    await two.put('c', 'f', file('2'));
+    await one.deleteConversation('c');
+    expect(await one.get('c', 'f')).toBeNull();
+    expect(await two.get('c', 'f')).not.toBeNull();
+  });
+
   it('never rejects when open throws', async () => {
     const broken = {
       open() {
@@ -103,6 +145,21 @@ describe('IndexedDB attachment store', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('memory attachment store', () => {
+  it('puts, gets and deletes', async () => {
+    const store = createMemoryAttachmentStore();
+    await store.put('A', 'f', file('a'));
+    await store.put('B', 'f', file('b'));
+    expect(await store.get('A', 'f')).not.toBeNull();
+    expect(await store.get('A', 'x')).toBeNull();
+    await store.deleteConversation('A');
+    expect(await store.get('A', 'f')).toBeNull();
+    expect(await store.get('B', 'f')).not.toBeNull();
+    await store.deleteAll();
+    expect(await store.get('B', 'f')).toBeNull();
   });
 });
 
