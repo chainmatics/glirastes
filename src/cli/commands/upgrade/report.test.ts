@@ -283,6 +283,19 @@ describe('runUpgradeCommand', () => {
     expect((await readBaseline(root))!.reviewedThrough).toBe('0.19.0');
   });
 
+  it('a deferred breaking item stays under must after ack moves past its version', async () => {
+    await seedAllKinds();
+    await baseline('0.18.0');
+    const a = io();
+    expect(await runUpgradeCommand(['decide', 'break-one', 'deferred'], a.io)).toBe(0);
+    expect(await runUpgradeCommand(['ack'], a.io)).toBe(0);
+    expect((await readBaseline(root))!.reviewedThrough).toBe('0.19.0');
+    const report = await createUpgradeReport(opts());
+    expect(report.must.map((i) => [i.id, i.decision])).toEqual([['break-one', 'deferred']]);
+    expect(report.recommended).toEqual([]);
+    expect(report.upToDate).toBe(false);
+  });
+
   it('ack never moves reviewedThrough backwards', async () => {
     await seedAllKinds();
     await baseline('0.20.0');

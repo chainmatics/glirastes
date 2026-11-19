@@ -127,8 +127,13 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
   const notesDir = options.notesDir ?? findPackageUpgradeNotesDir();
   const changelogPath = options.changelogPath ?? join(dirname(notesDir), 'CHANGELOG.md');
   const decisions = baseline?.decisions ?? {};
-  const notes = (await loadUpgradeNotes(notesDir, to)).filter(
-    (note) => compareVersions(note.version, from) > 0 && compareVersions(note.version, to) <= 0,
+  const allNotes = await loadUpgradeNotes(notesDir, to);
+  const inRange = (version: string) => compareVersions(version, from) > 0 && compareVersions(version, to) <= 0;
+  // A deferred note stays visible after ack moved reviewedThrough past it.
+  const notes = allNotes.filter(
+    (note) =>
+      inRange(note.version) ||
+      (decisions[note.id]?.decision === 'deferred' && compareVersions(note.version, to) <= 0),
   );
   // Reading the whole app tree is only worth it when a note could match.
   const scan = notes.length > 0 ? await (options.scan ?? scanApp)(options.rootDir) : undefined;
@@ -156,7 +161,7 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
     else if (note.kind === 'optional' && status !== 'adopted') report.offer.push(item);
   }
 
-  const classified = new Set(notes.map((note) => note.version));
+  const classified = new Set(allNotes.map((note) => note.version));
   report.unclassified = (await changelogHeadings(changelogPath))
     .filter(
       ({ version }) =>
