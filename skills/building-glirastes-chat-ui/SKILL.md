@@ -344,13 +344,13 @@ Use the SDK STT controller as the only recording state machine:
 - retry permission, provider, and reconnect failures explicitly;
 - close MediaStream tracks, sockets, timers, and audio resources on every exit.
 
-`voice.pushToTalk` adds hold-to-talk on the mic button and a hold hotkey
-(default `mod+shift+space`) next to tap-to-toggle. Pass `voice.routeKey` (for
-example the pathname) so navigation stops recording and keeps the speech as
-draft; back/forward, session switches and unmount release the microphone as
-well. `voice.adapter` plugs in another provider (an `SttProviderAdapter`;
-`DeepgramSttAdapter` and `RecordedSttAdapter` ship in `glirastes/stt`); keep
-its identity stable.
+`voice.getToken` and chat `headers` may be async. `voice.pushToTalk` adds
+hold-to-talk on the mic button and a hotkey (default `mod+shift+space`) next to
+tap-to-toggle. Pass `voice.routeKey` (for example the pathname) so navigation
+stops recording and keeps the speech as draft; back/forward, session switches and
+unmount release the microphone as well. `voice.adapter` plugs in another provider
+(an `SttProviderAdapter`; `DeepgramSttAdapter` and `RecordedSttAdapter` ship in
+`glirastes/stt`); keep its identity stable.
 
 A finished recording (`RecordedSttAdapter`, `audio/wav` to
 `/api/ai/speech-recognize`) needs one route; the app's transcription service

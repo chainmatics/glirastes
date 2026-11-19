@@ -18,7 +18,7 @@ import {
   parseHoldCombo,
   usePushToTalkHotkey,
 } from '../hooks/use-push-to-talk-hotkey.js';
-import type { VoicePushToTalkConfig } from '../types.js';
+import type { MaybePromise, VoicePushToTalkConfig } from '../types.js';
 import { RecordingBar } from './recording-bar.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
 
@@ -78,7 +78,7 @@ interface VoiceInputAddonProps {
   language: string;
   baseUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   /** Speech provider; defaults to the Deepgram speech-stream adapter. */
   adapter?: SttProviderAdapter;
   onTranscript: (text: string) => void;

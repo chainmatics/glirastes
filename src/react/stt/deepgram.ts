@@ -3,6 +3,7 @@ import type {
   SttProviderConnection,
 } from './controller.js';
 import type { SttSegment } from './segments.js';
+import type { MaybePromise } from '../types.js';
 
 interface DeepgramMessage {
   type?: string;
@@ -48,7 +49,7 @@ export function createDeepgramSegmentParser(): (
 
 export interface DeepgramSttAdapterOptions {
   baseUrl?: string;
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   connectTimeoutMs?: number;
   finalizeGraceMs?: number;
 }
@@ -99,7 +100,8 @@ export class DeepgramSttAdapter implements SttProviderAdapter {
   constructor(private readonly options: DeepgramSttAdapterOptions = {}) {}
 
   async connect(input: Parameters<SttProviderAdapter['connect']>[0]): Promise<SttProviderConnection> {
-    const token = this.options.getToken?.();
+    const token = await this.options.getToken?.();
+    if (input.signal.aborted) throw new Error('Speech provider connection cancelled');
     const url = resolveWebSocketUrl(this.options.baseUrl, input.language, token);
     const socket = new WebSocket(url);
     const parser = createDeepgramSegmentParser();

@@ -1,0 +1,11 @@
+{
+  "id": "async-chat-auth",
+  "kind": "optional",
+  "summary": "The chat `headers` function and `voice.getToken` may now return a Promise, so a short-lived token or ticket can be fetched per request.",
+  "howTo": "Drop any cast that forced an async function into `headers` or `getToken`; pass the async function directly.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "imports": ["glirastes/react"]
+  },
+  "surface": []
+}

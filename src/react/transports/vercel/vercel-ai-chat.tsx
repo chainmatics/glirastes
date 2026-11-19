@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import { FloatingChatUI, type FloatingChatUIProps } from '../../components/floating-chat-ui.js';
 import { useVercelAiChatTransport } from '../vercel.js';
-import type { AiChatProviderConfig, SessionConfig } from '../../types.js';
+import type { AiChatProviderConfig, MaybePromise, SessionConfig } from '../../types.js';
 
 export interface VercelAiChatProps extends AiChatProviderConfig, FloatingChatUIProps {
   /** Chat API endpoint URL (e.g. `/api/chat`). */
   endpoint: string;
   /** Static headers or a function that returns headers per request. */
-  headers?: Record<string, string> | (() => Record<string, string>);
+  headers?: Record<string, string> | (() => MaybePromise<Record<string, string>>);
   /** Auto-resume generation after all pending approvals are provided. Default: true. */
   autoResumeOnApproval?: boolean;
   /** Extra fields merged into every outgoing request body. */

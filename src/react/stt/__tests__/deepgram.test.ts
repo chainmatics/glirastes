@@ -239,3 +239,61 @@ describe('Deepgram segment parser', () => {
     await connection.close();
   });
 });
+
+describe('Deepgram token', () => {
+  function stubBrowser(urls: string[]) {
+    class CapturingWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      readonly close = vi.fn();
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(url: string) {
+        urls.push(url);
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { protocol: 'https:', host: 'example.test', href: 'https://example.test/' } },
+    });
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: CapturingWebSocket });
+  }
+
+  const connectWith = (getToken: () => Promise<string | null | undefined>, signal?: AbortSignal) =>
+    new DeepgramSttAdapter({ getToken }).connect({
+      stream: {} as MediaStream,
+      language: 'de',
+      signal: signal ?? new AbortController().signal,
+      events: { onSegment: vi.fn(), onError: vi.fn(), onClosed: vi.fn() },
+    });
+
+  it('connect awaits an async getToken', async () => {
+    const urls: string[] = [];
+    stubBrowser(urls);
+    await expect(connectWith(async () => 'abc')).rejects.toThrow('Speech provider connection failed');
+    expect(new URL(urls[0]!).searchParams.get('token')).toBe('abc');
+  });
+
+  it('connect omits token when getToken resolves null', async () => {
+    const urls: string[] = [];
+    stubBrowser(urls);
+    await expect(connectWith(async () => null)).rejects.toThrow('Speech provider connection failed');
+    expect(new URL(urls[0]!).searchParams.has('token')).toBe(false);
+  });
+
+  it('connect opens no socket when aborted while the token is pending', async () => {
+    const urls: string[] = [];
+    stubBrowser(urls);
+    const controller = new AbortController();
+    const connect = connectWith(async () => {
+      controller.abort();
+      return 'abc';
+    }, controller.signal);
+    await expect(connect).rejects.toThrow('Speech provider connection cancelled');
+    expect(urls).toEqual([]);
+  });
+});

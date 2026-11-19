@@ -15,6 +15,9 @@ export type {
   ClarificationTarget,
 } from '../contracts/clarification.js';
 
+/** A value or a promise of it. @internal */
+export type MaybePromise<T> = T | Promise<T>;
+
 // ============================================================================
 // Chat Transport — transport-agnostic interface for chat backends
 // ============================================================================
@@ -126,7 +129,7 @@ export interface UseDeepgramTranscriptionOptions {
   language?: string;
   baseUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   /**
    * The app's own speech provider instead of the Deepgram stream, for example
    * a `RecordedSttAdapter`. `baseUrl` and `getToken` are then unused. Keep
@@ -159,7 +162,7 @@ export interface VoiceInputButtonProps {
   language?: string;
   baseUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   onError?: (error: string) => void;
 }
 
@@ -823,7 +826,7 @@ export interface VoiceInputConfig {
   language?: string;
   baseUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   /**
    * Speech provider adapter; defaults to the Deepgram speech-stream adapter.
    * Keep its identity stable: a new adapter restarts the controller.
