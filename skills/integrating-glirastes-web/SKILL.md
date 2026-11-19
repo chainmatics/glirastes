@@ -251,6 +251,13 @@ is in the package's `docs/tool-policy.md`.
    tool's result only says the action was handed to the app, so the model
    reports it as requested, not done.
 
+   Export the zod payload contract from a module that imports only zod and
+   pass that export: the generated tool then takes formats, descriptions,
+   enums and bounds from it (input side), so `z.string().uuid()` is checked
+   on the server and the model corrects a name into an id in the same turn.
+   An inline or unimportable contract is typed from TypeScript as before
+   (`ui-action-contract-unprobed`, warning).
+
    Literal ids and literal filter definitions only: the generator reads them
    from code, in `.ts` modules and in the `<script lang="ts">` or
    `<script setup lang="ts">` blocks of `.vue` files (a `src` attribute is

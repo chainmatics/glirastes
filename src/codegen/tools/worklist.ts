@@ -102,6 +102,8 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'ui-action-payload-untyped',
   'ui-action-import-unresolved',
   'ui-action-contract-conflict',
+  'ui-action-contract-unprobed',
+  'ui-action-contract-mismatch',
   'ui-action-route-invalid',
   'ui-action-route-conflict',
   'ui-action-indirect',

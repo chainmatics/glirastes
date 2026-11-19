@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToolPolicyFileSchema } from '../../../contracts/tool-policy.js';
+import { createJsonSchemaLike } from '../../../runtime/json-schema.js';
 import { createAppFixture, removeAppFixtures } from '../__tests__/app-fixture.js';
 import { loadToolsConfig } from '../config.js';
 import { EMPTY_CONVENTIONS } from '../resolutions.js';
-import { createSchemaProbe } from '../schema-probe.js';
+import { createSchemaProbe, type SchemaProbeOptions } from '../schema-probe.js';
 import type { ObservedTool, ToolSourceContext } from '../types.js';
 import { createReactActionSource } from './react-actions.js';
 
@@ -67,7 +69,8 @@ describe('react-actions source', () => {
         params: { path: [], query: [], body: ['taskId'] },
       },
       evidence: { jsDoc: 'Highlights a task in the visible list.' },
-      findings: [],
+      // The contract lives in a component module the probe cannot import here: typed from TypeScript, as before.
+      findings: [expect.objectContaining({ code: 'ui-action-contract-unprobed', severity: 'warning' })],
     });
     expect(tools.get('ui.dialogs.close')?.contract?.input).toEqual(object({}));
     expect(tools.get('ui.tasks.archive')).toMatchObject({
@@ -340,12 +343,243 @@ describe('react-actions source', () => {
       expect(open?.findings[0]!.message).toContain('"@missing/handlers"');
     }, 120_000);
 
+    it('hands the probe of a zod contract the tsconfig nearest to srcDir', async () => {
+      const app = await createAppFixture(MONOREPO);
+      const probe = vi.fn(async (_root: string, items: ReadonlyArray<unknown>, _options?: SchemaProbeOptions) => items
+        .map(() => ({ ok: false as const, reason: 'probe-failed' as const })));
+      await createReactActionSource({ srcDir: 'apps/web/src' }).observe({ ...context(app.root), probe: { probe } });
+      expect(probe).toHaveBeenCalledTimes(1);
+      expect(probe.mock.calls[0]![2]).toEqual({ tsconfig: join(app.root, 'apps/web/tsconfig.json') });
+    }, 120_000);
+
     it('names the TypeScript defaults when the app has no tsconfig', async () => {
       const { 'tsconfig.json': _root, 'apps/web/tsconfig.json': _web, ...withoutTsconfig } = MONOREPO;
       const app = await createAppFixture(withoutTsconfig);
       const [open] = (await createReactActionSource({ srcDir: 'apps/web/src' }).observe(context(app.root))).observations;
       expect(open?.findings).toEqual([expect.objectContaining({ code: 'ui-action-import-unresolved' })]);
       expect(open?.findings[0]!.message).toContain('no tsconfig');
+    }, 120_000);
+  });
+
+  describe('zod payload contracts', () => {
+    const findingsOf = (tool: ObservedTool | undefined, code: string) => (tool?.findings ?? [])
+      .filter((finding) => finding.code === code);
+
+    it('merges an exported and an identical inline contract of one action, and flags two differing probed ones', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/lib/contracts.ts': "import { z } from 'zod';\n"
+          + 'export const openEntity = z.object({ id: z.string().uuid() });\n'
+          + "export const pickA = z.object({ id: z.string().describe('first') });\n"
+          + "export const pickB = z.object({ id: z.string().describe('second') });\n",
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\nimport { z } from 'zod';\n"
+          + "import { openEntity, pickA, pickB } from './lib/contracts';\n"
+          + 'export function A() {\n'
+          + "  useAiClientAction('entity.open', (payload) => console.log(payload), openEntity);\n"
+          + "  useAiClientAction('rows.pick', (payload) => console.log(payload), pickA);\n"
+          + '  return null;\n}\n'
+          + 'export function B() {\n'
+          + "  useAiClientAction('entity.open', (payload) => console.log(payload), z.object({ id: z.string().uuid() }));\n"
+          + "  useAiClientAction('rows.pick', (payload) => console.log(payload), pickB);\n"
+          + '  return null;\n}\n',
+      });
+      const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+      const open = tools.get('ui.entity.open');
+      expect(findingsOf(open, 'ui-action-contract-conflict')).toEqual([]);
+      expect(findingsOf(open, 'ui-action-contract-unprobed')).toHaveLength(1);
+      expect(open?.contract?.input).toMatchObject({ properties: { id: { type: 'string', format: 'uuid' } } });
+      expect(findingsOf(tools.get('ui.rows.pick'), 'ui-action-contract-conflict')).toHaveLength(1);
+    }, 120_000);
+
+    it('derives formats, descriptions, enums and bounds from an exported zod contract, input side', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/lib/contracts.ts': "import { z } from 'zod';\n"
+          + 'export const openEntity = z.object({\n'
+          + "  entityId: z.string().uuid().describe('Id of the entity, never its name'),\n"
+          + "  kind: z.enum(['task', 'note']),\n"
+          + '  limit: z.number().int().min(1).max(50).optional(),\n'
+          + "  mode: z.string().default('view'),\n"
+          + '  count: z.string().transform(Number),\n'
+          + '  page: z.coerce.number().int().min(1).optional(),\n'
+          + "}).describe('Open an entity');\n"
+          + 'export const contracts = { pick: z.object({ id: z.number().int().positive() }) };\n',
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+          + "import { contracts, openEntity } from './lib/contracts';\n"
+          + 'export function A() {\n'
+          + "  useAiClientAction('entity.open', (payload) => console.log(payload), openEntity);\n"
+          + "  useAiClientAction('rows.pick', (payload) => console.log(payload.id), contracts.pick);\n"
+          + '  return null;\n}\n',
+      });
+      const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+      const open = tools.get('ui.entity.open');
+      expect(open?.findings).toEqual([]);
+      expect(open?.contract?.input).toEqual({
+        type: 'object',
+        description: 'Open an entity',
+        properties: {
+          count: { type: 'string' },
+          entityId: expect.objectContaining({ type: 'string', format: 'uuid', description: 'Id of the entity, never its name' }),
+          kind: { type: 'string', enum: ['task', 'note'] },
+          limit: { type: 'integer', minimum: 1, maximum: 50 },
+          mode: { type: 'string', default: 'view' },
+          page: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+        },
+        required: ['entityId', 'kind', 'count'],
+        additionalProperties: false,
+      });
+      expect(open?.contract?.runtime.input).toEqual({ kind: 'json', schema: open?.contract?.input });
+      expect(open?.prose?.schemaDescription).toBe('Open an entity');
+      // The runtime validates the generated JSON Schema with formats: a name instead of a UUID is rejected.
+      const validator = createJsonSchemaLike(open!.contract!.input);
+      const rejected = validator.safeParse({ entityId: 'Quarterly report', kind: 'task', count: '1' });
+      expect(rejected.success).toBe(false);
+      expect(rejected.success ? [] : rejected.error.issues.map((issue) => (issue as { keyword?: string }).keyword))
+        .toContain('format');
+      expect(validator.safeParse({ entityId: '0198c0de-1111-7000-8000-000000000001', kind: 'task', count: '1' }).success)
+        .toBe(true);
+      // Numeric ids keep their integer type and bounds.
+      expect(tools.get('ui.rows.pick')).toMatchObject({
+        findings: [],
+        contract: { input: { type: 'object', properties: { id: { type: 'integer', exclusiveMinimum: 0 } }, required: ['id'] } },
+      });
+    }, 120_000);
+
+    it('warns when the zod contract contradicts its TypeScript type and follows the zod contract', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/lib/contracts.ts': "import { z } from 'zod';\n"
+          + 'export const pick = z.object({ id: z.string() }) as unknown as z.ZodType<{ id: number }, { id: number }>;\n',
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\nimport { pick } from './lib/contracts';\n"
+          + "export function A() { useAiClientAction('rows.pick', (payload) => console.log(payload), pick); return null; }\n",
+      });
+      const tool = byName((await createReactActionSource().observe(context(app.root))).observations).get('ui.rows.pick');
+      expect(findingsOf(tool, 'ui-action-contract-mismatch')).toEqual([expect.objectContaining({
+        severity: 'warning',
+        subjectRef: 'UI action rows.pick',
+        message: expect.stringContaining('id'),
+      })]);
+      expect(tool?.contract?.input).toEqual(object({ id: { type: 'string' } }, ['id']));
+    }, 120_000);
+
+    it('falls back to the TypeScript input type when the zod contract cannot be probed', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/lib/v3.ts': "import { z } from 'zod-v3';\nexport const search = z.object({ q: z.string().uuid(), page: z.number().default(1) });\n",
+        'src/lib/broken.ts': "import { z } from 'zod';\nthrow new Error('no import-time side effects allowed');\n"
+          + 'export const broken = z.object({ id: z.string().uuid() });\n',
+        'src/a.tsx': "import { z } from 'zod';\nimport { useAiClientAction } from 'glirastes/react';\n"
+          + "import { search } from './lib/v3';\nimport { broken } from './lib/broken';\n"
+          + 'const idSchema = z.string().uuid();\n'
+          + 'export function A() {\n'
+          + "  useAiClientAction('rows.search', (payload) => console.log(payload), search);\n"
+          + "  useAiClientAction('rows.broken', (payload) => console.log(payload), broken);\n"
+          + "  useAiClientAction('rows.inline', (payload) => console.log(payload), z.object({ id: z.string().uuid(), tag: z.string().default('') }));\n"
+          + "  useAiClientAction('rows.empty', () => {}, z.object({}));\n"
+          + "  useAiClientAction('rows.sort', (payload) => console.log(payload), z.object({ by: z.enum(['name', 'date']).optional() }).strict());\n"
+          + "  useAiClientAction('rows.ref', (payload) => console.log(payload), z.object({ id: idSchema }));\n"
+          + '  return null;\n}\n',
+      });
+      const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+      for (const [name, reason] of [
+        ['ui.rows.broken', 'import-failed'],
+        ['ui.rows.inline', 'export'],
+        // An inline contract that reuses a schema held elsewhere may lose its format: flagged too.
+        ['ui.rows.ref', 'export'],
+      ] as const) {
+        const tool = tools.get(name);
+        expect(findingsOf(tool, 'ui-action-contract-unprobed')).toEqual([expect.objectContaining({
+          severity: 'warning', message: expect.stringContaining(reason),
+        })]);
+        // The tool stays as before: typed from the TypeScript type, never disabled.
+        expect(tool?.findings.every((finding) => finding.severity === 'warning')).toBe(true);
+      }
+      // zod v3 is probed where the app can convert it (zod-to-json-schema); either way the input side counts.
+      const search = tools.get('ui.rows.search');
+      const searchUnprobed = findingsOf(search, 'ui-action-contract-unprobed');
+      if (searchUnprobed.length > 0) {
+        expect(searchUnprobed[0]?.message).toContain('JSON Schema');
+        expect(search?.contract?.input).toEqual(object({ page: { type: 'number' }, q: { type: 'string' } }, ['q']));
+      } else {
+        expect(search?.findings).toEqual([]);
+        expect(search?.contract?.input).toMatchObject({ properties: { q: { format: 'uuid' } }, required: ['q'] });
+      }
+      // Input side of the TypeScript type: a field with a default is optional for the model.
+      expect(tools.get('ui.rows.inline')?.contract?.input)
+        .toEqual(object({ id: { type: 'string' }, tag: { type: 'string' } }, ['id']));
+      // Nothing to lose: an empty contract, or an inline one the TypeScript type fully describes.
+      expect(tools.get('ui.rows.empty')).toMatchObject({ findings: [], contract: { input: object({}) } });
+      expect(tools.get('ui.rows.sort')).toMatchObject({
+        findings: [], contract: { input: object({ by: { type: 'string', enum: ['date', 'name'] } }) },
+      });
+    }, 120_000);
+
+    it('keeps the TypeScript schema when the probe returns no JSON Schema or one the runtime cannot compile', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/lib/contracts.ts': "import { z } from 'zod';\nexport const a = z.object({ q: z.string() });\n"
+          + 'export const b = z.object({ q: z.string() });\n',
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\nimport { a, b } from './lib/contracts';\n"
+          + 'export function A() {\n'
+          + "  useAiClientAction('rows.a', (payload) => console.log(payload), a);\n"
+          + "  useAiClientAction('rows.b', (payload) => console.log(payload), b);\n"
+          + '  return null;\n}\n',
+      });
+      const probe = vi.fn(async (_root: string, items: ReadonlyArray<{ export: string }>) => items.map((item) => ({
+        ok: true as const,
+        kind: 'schema' as const,
+        digest: 'sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        jsonSchema: item.export === 'a' ? null : { type: 'object', properties: { q: { type: 'string', pattern: '(' } } },
+        description: null,
+      })));
+      const tools = byName((await createReactActionSource().observe({ ...context(app.root), probe: { probe } })).observations);
+      expect(probe).toHaveBeenCalledTimes(1);
+      expect(findingsOf(tools.get('ui.rows.a'), 'ui-action-contract-unprobed')[0]?.message).toContain('no JSON Schema');
+      expect(findingsOf(tools.get('ui.rows.b'), 'ui-action-contract-unprobed')[0]?.message).toContain('cannot compile');
+      for (const name of ['ui.rows.a', 'ui.rows.b']) {
+        expect(tools.get(name)?.contract?.input).toEqual(object({ q: { type: 'string' } }, ['q']));
+      }
+    }, 120_000);
+
+    it('probes a contract imported through a path alias and leaves one outside the app as before', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, jsx: 'preserve', baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+        'src/contracts/open.ts': "import { z } from 'zod';\nexport const open = z.object({ id: z.string().uuid() });\n",
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\nimport { open } from '@/contracts/open';\n"
+          + "export function A() { useAiClientAction('rows.open', (payload) => console.log(payload), open); return null; }\n",
+      });
+      await app.write('../' + `${app.root.split('/').at(-1)}-shared/contract.ts`,
+        "import { z } from 'zod';\nexport const shared = z.object({ id: z.string().uuid() });\n");
+      await app.write('src/b.tsx', "import { useAiClientAction } from 'glirastes/react';\n"
+        + `import { shared } from '../../${app.root.split('/').at(-1)}-shared/contract';\n`
+        + "export function B() { useAiClientAction('rows.shared', (payload) => console.log(payload), shared); return null; }\n");
+      try {
+        const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+        expect(tools.get('ui.rows.open')).toMatchObject({
+          findings: [],
+          contract: { input: { properties: { id: { type: 'string', format: 'uuid' } } } },
+        });
+        expect(findingsOf(tools.get('ui.rows.shared'), 'ui-action-contract-unprobed')).toHaveLength(1);
+        expect(tools.get('ui.rows.shared')?.contract?.input).toEqual(object({ id: { type: 'string' } }, ['id']));
+      } finally {
+        await app.remove(`../${app.root.split('/').at(-1)}-shared`);
+      }
+    }, 120_000);
+
+    it('never probes an app without zod contracts', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\n"
+          + "export function A() { useAiClientAction('rows.pick', (payload: { id: number }) => console.log(payload.id)); return null; }\n",
+      });
+      const probe = vi.fn(async () => []);
+      const observed = await createReactActionSource().observe({ ...context(app.root), probe: { probe } });
+      expect(probe).not.toHaveBeenCalled();
+      expect(observed.observations[0]).toMatchObject({
+        findings: [],
+        contract: { input: object({ id: { type: 'number' } }, ['id']) },
+      });
+      expect(observed.observations[0]).not.toHaveProperty('prose');
     }, 120_000);
   });
 
