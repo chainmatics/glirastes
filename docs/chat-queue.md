@@ -1,0 +1,190 @@
+# Chat message queue
+
+With `queue.enabled` the chat composer is never locked by a running turn.
+A message sent while a run is busy, or while an approval is open, waits in a
+queue and is sent once the chat is idle, one run at a time. Glirastes provides
+the state and the behaviour; the app renders the queue itself or uses the
+default `ChatQueue` component.
+
+The queue is off by default. Without `queue`, or with `enabled: false`, the
+chat behaves exactly as before: the composers lock while loading, `send`
+refuses while an approval is open, and the markup is unchanged.
+
+Everything stays in the browser. Queued texts, `onQueueChange` events and the
+storage adapter are local; nothing goes to the Platform.
+
+## Contents
+
+- Options and defaults
+- What happens when
+- Context API and `useChatQueue`
+- `ChatQueue` component
+- Persistence adapter
+- Limits
+
+## Options and defaults
+
+```tsx
+<AiChatProvider transport={transport} queue={{ enabled: true }}>
+  <AiChatPanel />
+</AiChatProvider>
+```
+
+`<glirastes-chat>` takes the same object in `config.queue`.
+
+| Option | Default | Why |
+| --- | --- | --- |
+| `enabled` | `false` | Opt-in: an app that does not set it sees no change. |
+| `autoFlush` | `true` | Send the next message once idle (FIFO, one run at a time, wait for idle again before the next). `false` keeps them until `sendNow`. |
+| `sendNowBehavior` | `'next'` | Non-destructive: `sendNow` moves the message to the head; it goes as soon as the chat is idle, also when the queue is paused or `autoFlush` is off. `'abort'` stops the running run first (`stop()`); that stop does not pause the queue. |
+| `maxSize` | `10` | Every queued message is a model call nobody watches start. A full queue refuses the message (`'rejected'`, the composer keeps the draft). `Infinity` or `null` lifts the limit. |
+| `pauseOn` | `['error', 'aborted', 'safety-stop', 'truncation']` | A run that ended badly should not be followed by unattended runs. `truncation` covers a run that left a continue prompt: a flush would discard it. |
+| `sendNowDuringApproval` | `'refuse'` | The chat never treats a typed message as an approval decision. `'refuse'`: `sendNow` returns false and shows the approval hint. `'reject-approval'`: the open approvals are rejected through the normal reject path, then the message is sent. |
+| `storage` | none | Optional persistence per conversation (below). |
+| `onQueueChange(event)` | none | `{ queued, paused, reason }` after every change. A throw from it is ignored. |
+
+`reason` is one of `added`, `removed`, `edited`, `reordered` (`sendNow` moved
+a message to the head), `sent`, `cleared`, `paused`, `resumed`, `restored`.
+
+## What happens when
+
+"Idle" for sending a queued message means all of: no request running, no UI
+action of the last result still running or waiting for its outcome, no
+page-load continuation running, no open approval (read from the message parts,
+also in the render before the approval card exists), no answered approval the
+transport is about to send on by itself, no open clarification, no open
+command form, the conversation loaded and not being switched, and the queue
+not paused (except for the one `sendNow` message).
+
+| Situation | With the queue |
+| --- | --- |
+| Send while a run is loading | Queued (`submit` returns `'queued'`, `send` true, the composer clears its draft). |
+| Send while idle and the queue is empty | Sent at once (`'sent'`). |
+| Send while idle and messages are queued | Queued behind them (order is kept). |
+| Send while an approval is open | Queued; the approval hint (`approvalReminder`) shows for the first queued message. Held until every approval is decided. |
+| Approval decided, transport continues by itself | Held until that continuation ended. |
+| Approval decided, transport does not continue (`autoResumeOnApproval: false`) | Sent 1.5 s after the answer: the queue never waits forever. |
+| `sendNow` while an approval is open | `'refuse'` (default): false and the hint. `'reject-approval'`: rejects them, then sends. |
+| Run ends with an error | Paused until `resumeQueue()` (`pauseOn`). |
+| User stops the run (`stop()`) | Paused (`'aborted'`). |
+| `sendNow` with `'abort'` | Stops the run, sends the message; not paused. |
+| Safety stop (`pipelineState.status: 'safety-stop'`) | Paused. |
+| Truncation (continue banner) | Paused; resuming sends the next message, which replaces the continue prompt. |
+| Clarification open after a run | Held: a queued text is never turned into a clarification answer by itself. A message the user sends now (or the card's answer) answers it at once, ahead of the queue. |
+| A queued `/` command that needs arguments | Its form opens when it is sent; the queue waits for the form. |
+| A command form is open | Further queued messages wait. A command or entity action is refused while the chat is busy. |
+| UI actions of the last result still running | Held until they finished. |
+| Conversation not loaded yet, or a session change in progress | `submit` refuses (`'rejected'`), as `send` did before; the composer is locked (`canCompose` false). |
+| `clear()`, switching, creating or removing the active conversation, the host changing `session.activeId` | The in-memory queue is emptied (`'cleared'`); with `storage` the new conversation's queue is loaded. |
+| Language or locale change | The queue is kept (texts are the user's own and are processed when sent). |
+| Provider unmounts | The queue is dropped. |
+| `onBeforeSend` throws for a queued message | The queue pauses; the message stays. |
+| An emptied queue | No longer paused. |
+
+Processing happens when a queued message is sent, through the same path as a
+typed one: `/` commands, mention serialization, `onBeforeSend` and the
+clarification check. The mentions active when the message was queued (or the
+`mentions` passed to `send`) are captured with it, and the active mentions are
+cleared as a normal send does. Files are validated as on `send`: refused while
+attachments are off, and refused with a direct command.
+
+## Context API and `useChatQueue`
+
+`useChatContext()` adds:
+
+| Member | Effect |
+| --- | --- |
+| `send(text, options?)` | Unchanged signature; with the queue true when sent or queued, false when refused. |
+| `submit(text, options?)` | `'sent'`, `'queued'` or `'rejected'`; also without the queue (`'sent'`/`'rejected'`). |
+| `queue` | `{ enabled, items, paused }`. |
+| `canCompose` | Whether a composer takes input: without the queue `!isLoading`; with it false only while the conversation loads or changes. |
+| `sendNow(id)`, `removeQueued(id)`, `editQueued(id, text)` | `boolean`: false for an unknown id (or an empty text). |
+| `clearQueue()`, `resumeQueue()`, `pauseQueue()` | |
+
+`useChatQueue()` returns just the queue state and those actions, for a
+headless UI:
+
+```tsx
+import { useChatQueue } from 'glirastes/react';
+
+function MyQueue() {
+  const queue = useChatQueue();
+  if (queue.items.length === 0) return null;
+  return (
+    <ul>
+      {queue.paused && <li><button onClick={queue.resumeQueue}>Resume</button></li>}
+      {queue.items.map((item) => (
+        <li key={item.id}>
+          {item.text}
+          <button onClick={() => queue.sendNow(item.id)}>Send now</button>
+          <button onClick={() => queue.removeQueued(item.id)}>Remove</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+The built-in composers (`ChatInput`, `MentionInput`, `useChatComposerInput`)
+stay usable while loading when the queue is on and show both send and stop.
+A custom composer uses `canCompose` instead of `isLoading` to lock itself.
+
+## `ChatQueue` component
+
+`AiChatPanel` renders `ChatQueue` above the composer when the queue is on.
+`components.ChatQueue` replaces it; `components.ChatQueue: null` hides it
+(render the queue elsewhere with `useChatQueue`).
+
+- Root `data-component="chat-queue"`, `data-state="waiting" | "paused"`,
+  class `classNames.chatQueue`, `data-unstyled` with `unstyled`.
+- `data-element="title"`, `"paused"` (with `data-action="resume"`),
+  `"items"`, `"item"` (`data-queue-id`, `data-state="queued" | "editing"`),
+  `"text"`, `"files"`, `"actions"` with `data-action="send-now"`, `"edit"`,
+  `"remove"`; while editing `"edit"` with `data-action="save"`, `"cancel"`.
+- Renders nothing while the queue is empty. `<ChatQueue>{(queue) => …}</ChatQueue>`
+  renders it yourself.
+- Texts: `queueTitle` (`{count}`), `queueSendNowLabel`, `queueEditLabel`,
+  `queueRemoveLabel`, `queuePausedLabel`, `queueResumeLabel`,
+  `queueSaveLabel`, `queueCancelLabel`, `queueFilesLabel` (`{count}`);
+  English defaults, German in `deChatLocale`.
+
+## Persistence adapter
+
+```ts
+import type { ChatQueueStorage, QueuedMessage } from 'glirastes/react';
+
+const queueStorage: ChatQueueStorage = {
+  load: (sessionId) => {
+    const raw = localStorage.getItem(`chat-queue:${sessionId}`);
+    return raw ? (JSON.parse(raw) as QueuedMessage[]) : [];
+  },
+  save: (sessionId, items) => {
+    if (items.length === 0) localStorage.removeItem(`chat-queue:${sessionId}`);
+    else localStorage.setItem(`chat-queue:${sessionId}`, JSON.stringify(items));
+  },
+};
+
+<AiChatProvider transport={transport} queue={{ enabled: true, storage: queueStorage }} />
+```
+
+- `load` runs per active conversation; a result that arrives after another
+  conversation became active is discarded. Nothing is saved for a
+  conversation before its `load` answered.
+- Messages with files are never saved (file data and object URLs do not
+  survive a reload) and are skipped when loaded.
+- A restored queue starts paused (`'restored'`): nothing is sent after a
+  reload until the user resumes or sends one with `sendNow`.
+- Switching conversations keeps the stored queue of the one left;
+  `clear()` saves an empty queue for the cleared one. A removed conversation's
+  stored queue is the adapter's to delete.
+- Queued texts are user content: store them where the conversation itself is
+  allowed to be stored, and clear them on sign-out.
+
+## Limits
+
+- One message per run: the queue never merges messages.
+- The approval resend wait (1.5 s) is a guard for transports that do not send
+  an answered approval on; the AI SDK transport continues at once.
+- `sendNow` with `'abort'` only stops a request that is running; while the
+  chat waits for something else (an approval, a UI action) it behaves like
+  `'next'`.

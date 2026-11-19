@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Message queue in the chat** (`docs/chat-queue.md`), opt-in: `queue: { enabled: true }` on `AiChatProvider` (and `config.queue` on `<glirastes-chat>`). A message sent while a run is busy or an approval is open is queued instead of refused and sent once the chat is fully idle (FIFO, one run at a time, processed like a typed message when sent; never as a clarification answer or approval decision). Options `autoFlush` (true), `sendNowBehavior` (`'next'` / `'abort'`), `maxSize` (10, `null` lifts it), `pauseOn` (`error`, `aborted`, `safety-stop`, `truncation`), `sendNowDuringApproval` (`'refuse'` / `'reject-approval'`), `storage` (file items are not persisted; a restored queue starts paused), `onQueueChange`. Context: `submit()` (`'sent' | 'queued' | 'rejected'`), `queue`, `canCompose`, `sendNow`, `removeQueued`, `editQueued`, `clearQueue`, `resumeQueue`, `pauseQueue`; `useChatQueue()`; default `ChatQueue` component (slot `components.ChatQueue`, `null` hides it; `classNames.chatQueue`). With the queue on, the built-in composers stay usable while loading and show send and stop. Without `queue` nothing changes. New locale keys `queueTitle`, `queueSendNowLabel`, `queueEditLabel`, `queueRemoveLabel`, `queuePausedLabel`, `queueResumeLabel`, `queueSaveLabel`, `queueCancelLabel`, `queueFilesLabel` (English, German): a custom full `ChatLocale` object needs them. Local only; nothing goes to the Platform.
+
 ## [0.18.0] - 2026-11-19
 
 ### Changed

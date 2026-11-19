@@ -24,7 +24,13 @@ import type {
   PipelineState,
   PipelineStepReport,
   SessionSummary,
+  ChatQueueApi,
+  ChatQueuePauseTrigger,
+  ChatQueueState,
+  ChatSubmitResult,
+  QueuedMessage,
 } from '../types.js';
+import { createQueuedMessage, useMessageQueueStore, useResolvedQueueConfig } from './use-message-queue.js';
 import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { resolveAttachmentOptions } from '../utils/attachments.js';
@@ -186,6 +192,15 @@ export const DEFAULT_LOCALE: ChatLocale = {
   attachmentReadFailed: '{name} could not be read.',
   attachmentCommandRefused: 'Commands cannot carry attachments. Remove them or write a message.',
   attachmentUnsupported: 'This chat cannot send attachments.',
+  queueTitle: 'Queued ({count})',
+  queueSendNowLabel: 'Send now',
+  queueEditLabel: 'Edit',
+  queueRemoveLabel: 'Remove',
+  queuePausedLabel: 'The queue is paused.',
+  queueResumeLabel: 'Resume',
+  queueSaveLabel: 'Save',
+  queueCancelLabel: 'Cancel',
+  queueFilesLabel: '{count} files',
 };
 
 // ============================================================================
@@ -448,6 +463,22 @@ function continuesRequestBase(
   return true;
 }
 
+/** A message after commands, mentions, `onBeforeSend` and the clarification answer. */
+type PreparedSend =
+  | { kind: 'needs-args'; request: PendingChatCommand }
+  | { kind: 'command'; text: string }
+  | { kind: 'message'; text: string; files?: FilePart[] };
+
+/** How long the queue waits after an answered approval for the transport to send it on by itself. */
+const APPROVAL_RESEND_GRACE_MS = 1500;
+
+/** The last assistant message still asks for an approval (before the approval map has it). */
+function lastStepAwaitsApproval(messages: ReadonlyArray<{ role: string; parts: ReadonlyArray<unknown> }>): boolean {
+  const last = messages.at(-1);
+  if (!last || last.role !== 'assistant') return false;
+  return last.parts.some((part) => isRecord(part) && part.state === 'approval-requested');
+}
+
 /**
  * Provider component that manages chat state and exposes it to child components.
  *
@@ -516,6 +547,7 @@ export function AiChatProvider({
   approvalDisplay: userApprovalDisplay,
   entityDeclarations,
   continueMessage = 'Please continue.',
+  queue: userQueue,
   toolLabels: userToolLabels,
   pipelineMessageTranslator,
   stepSummaryFormatter,
@@ -677,6 +709,34 @@ export function AiChatProvider({
   // without re-binding on every render.
   const sessionRef = useRef(session);
   sessionRef.current = session;
+
+  // Message queue (`queue`): off by default; without it nothing below changes.
+  const queueConfig = useResolvedQueueConfig(userQueue);
+  const queueEnabled = queueConfig.enabled;
+  const queueEnabledRef = useRef(queueEnabled);
+  queueEnabledRef.current = queueEnabled;
+  const queueStore = useMessageQueueStore(userQueue, queueEnabled, activeSessionId);
+  // A send of this chat (direct or from the queue) whose request has not ended yet.
+  const sendInFlightRef = useRef(false);
+  // `sendNow` with `'abort'` stopped the run: that stop does not pause the queue.
+  const selfAbortRef = useRef(false);
+  // UI actions and page-load continuations still running (queue only): the queue waits for them.
+  const pendingUiWorkRef = useRef(0);
+  const [pendingUiWork, setPendingUiWork] = useState(0);
+  const trackUiWork = useCallback(() => {
+    pendingUiWorkRef.current += 1;
+    setPendingUiWork(pendingUiWorkRef.current);
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      // One tick later: the transport has started a continuation by then.
+      setTimeout(() => {
+        pendingUiWorkRef.current = Math.max(0, pendingUiWorkRef.current - 1);
+        if (mountedRef.current) setPendingUiWork(pendingUiWorkRef.current);
+      }, 0);
+    };
+  }, []);
 
   // Truncation
   const [truncation, setTruncation] = useState<TruncationInfo | null>(null);
@@ -1195,10 +1255,11 @@ export function AiChatProvider({
     } catch {
       // Without storage the in-memory guard holds for this page.
     }
+    const untrack = queueEnabledRef.current ? trackUiWork() : undefined;
     void Promise.resolve(continueTurn.call(transportRef.current)).catch(() => {
       console.warn('[glirastes] The turn could not be continued after the page load');
-    });
-  }, [rawMessages, loadedSessionId, activeSessionId]);
+    }).finally(() => untrack?.());
+  }, [rawMessages, loadedSessionId, activeSessionId, trackUiWork]);
 
   // Save messages to session on change (scoped to the active session).
   useEffect(() => {
@@ -1222,6 +1283,7 @@ export function AiChatProvider({
     // The model answers once this outcome is written: keep the composer locked until then.
     const awaited = reportsUiOutcomesRef.current && record.awaitsOutcome === true;
     if (awaited) setAwaitedOutcomes((count) => count + 1);
+    const untrack = queueEnabledRef.current ? trackUiWork() : undefined;
     uiActionQueueRef.current = uiActionQueueRef.current.then(async () => {
       try {
         if (!mountedRef.current || pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
@@ -1282,9 +1344,10 @@ export function AiChatProvider({
       } finally {
         // One tick later: the transport has started the continuation by then.
         if (awaited) setTimeout(() => { if (mountedRef.current) setAwaitedOutcomes((count) => Math.max(0, count - 1)); }, 0);
+        untrack?.();
       }
     });
-  }, [reportUiOutcome]);
+  }, [reportUiOutcome, trackUiWork]);
 
   // Process tool results and approvals from streaming messages
   useEffect(() => {
@@ -1544,12 +1607,18 @@ export function AiChatProvider({
 
   // Actions
   // The shared tail of every send: transport hygiene, then the transport.
-  const deliver = useCallback(async (processedMessage: string, files?: FilePart[]) => {
+  // `keepComposer`: the composer state was handled already (queued and direct sends with the queue on),
+  // so a request that ends later does not wipe what the user is composing meanwhile.
+  const deliver = useCallback(async (
+    processedMessage: string,
+    files?: FilePart[],
+    deliverOptions?: { keepComposer?: boolean },
+  ): Promise<boolean> => {
     // An open approval is decided on its card. A typed "yes" must not count as
     // approval, and rejecting it on send dropped requests the user wanted.
     if (pendingApprovalsMap.size > 0) {
       setApprovalReminder(true);
-      return;
+      return false;
     }
 
     // Clear truncation and suggestion chips on new message
@@ -1570,11 +1639,13 @@ export function AiChatProvider({
     }
 
     await sendMessage(files && files.length > 0 ? { text: processedMessage, files } : { text: processedMessage });
+    if (deliverOptions?.keepComposer) return true;
     setActiveMentions([]);
     setMentionQuery('');
     setMentionTrigger(null);
     setMentionResults([]);
     setIsMentionSearching(false);
+    return true;
   }, [
     rawMessages,
     setMessages,
@@ -1582,23 +1653,22 @@ export function AiChatProvider({
     pendingApprovalsMap,
   ]);
 
-  const dispatchSend = useCallback(async (
+  // Everything a send does before the transport, synchronously: commands, mentions,
+  // `onBeforeSend` and the clarification answer. Queued messages run through it when sent.
+  const prepareSend = useCallback((
     message: string,
     sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
-  ) => {
+  ): PreparedSend => {
     const mentionsForSend = sendOptions?.mentions ?? activeMentions;
     const files = sendOptions?.files;
 
     // A `/` command alone runs without the model; missing arguments open its form.
     const plan = interactionRegistry?.planMessage(message, mentionsForSend);
     if (plan?.status === 'needs-args') {
-      setPendingCommand(plan.request);
-      return;
+      return { kind: 'needs-args', request: plan.request };
     }
     if (plan?.status === 'send') {
-      setPendingCommand(null);
-      await deliver(plan.text);
-      return;
+      return { kind: 'command', text: plan.text };
     }
 
     // Preprocess message
@@ -1632,19 +1702,36 @@ export function AiChatProvider({
       });
     }
 
-    await deliver(processedMessage, files);
+    return { kind: 'message', text: processedMessage, ...(files ? { files } : {}) };
   }, [
     rawMessages,
-    deliver,
     interactionRegistry,
     mentions,
     onBeforeSend,
     activeMentions,
   ]);
 
+  const dispatchSend = useCallback(async (
+    message: string,
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
+    deliverOptions?: { keepComposer?: boolean },
+  ): Promise<void> => {
+    const prepared = prepareSend(message, sendOptions);
+    if (prepared.kind === 'needs-args') {
+      setPendingCommand(prepared.request);
+      return;
+    }
+    if (prepared.kind === 'command') {
+      setPendingCommand(null);
+      await deliver(prepared.text, undefined, deliverOptions);
+      return;
+    }
+    await deliver(prepared.text, prepared.files, deliverOptions);
+  }, [prepareSend, deliver]);
+
   // Decides synchronously whether the message is taken, so any composer can
   // keep the typed text when it is not.
-  const send = useCallback((
+  const sendDirect = useCallback((
     message: string,
     sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
   ): boolean => {
@@ -1663,20 +1750,108 @@ export function AiChatProvider({
     return true;
   }, [sessionNotReady, pendingApprovalsMap, dispatchSend, attachmentOptions, interactionRegistry, activeMentions]);
 
+  // ---------------------------------------------------------------------------
+  // Message queue (`queue.enabled`): what keeps a message from being sent now.
+  // ---------------------------------------------------------------------------
+  // The approval map is filled a render after the stream ends; the parts say it already.
+  const approvalWaiting = pendingApprovalsMap.size > 0
+    || (queueEnabled && lastStepAwaitsApproval(rawMessages));
+  // An answered approval (approved or rejected) the transport may send on by itself.
+  const [decisionResend, setDecisionResend] = useState(false);
+  useEffect(() => {
+    if (isLoading && decisionResend) setDecisionResend(false);
+  }, [isLoading, decisionResend]);
+  useEffect(() => {
+    // A transport that does not continue by itself (`autoResumeOnApproval: false`) never
+    // starts that request: the queue goes on shortly after the answer instead of waiting forever.
+    if (!decisionResend || isLoading || processingApprovalIds.size > 0) return undefined;
+    const timer = setTimeout(() => setDecisionResend(false), APPROVAL_RESEND_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [decisionResend, isLoading, processingApprovalIds]);
+  const resendPending = processingApprovalIds.size > 0
+    || (queueEnabled && decisionResend && shouldContinueChat({ messages: rawMessages }));
+  const transportBusy = isLoading || awaitedOutcomes > 0 || pendingUiWork > 0;
+  /** A message sent now waits in the queue. */
+  const queueBusy = transportBusy || approvalWaiting || resendPending;
+  const clarificationOpen = queueEnabled
+    && findOpenClarification(rawMessages as unknown as Array<{ role: string; parts: unknown[] }>) !== undefined;
+  /** Also holds a queued message: it never answers a clarification or a command form by itself. */
+  const flushHeld = queueBusy || clarificationOpen || pendingCommand !== null || sessionNotReady || isSessionMutating;
+  const [flushTick, setFlushTick] = useState(0);
+
+  const submit = useCallback((
+    message: string,
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
+  ): ChatSubmitResult => {
+    if (!queueEnabled) return sendDirect(message, sendOptions) ? 'sent' : 'rejected';
+    if (sessionNotReady || sessionMutationRef.current) return 'rejected';
+    const mentionsForSend = sendOptions?.mentions ?? activeMentions;
+    const files = sendOptions?.files;
+    if (files?.length) {
+      if (!attachmentOptions) return 'rejected';
+      // A direct command runs without the model, which would silently drop the files.
+      const plan = interactionRegistry?.planMessage(message, mentionsForSend);
+      if (plan?.status === 'send' || plan?.status === 'needs-args') return 'rejected';
+    }
+    const queued = queueStore.itemsRef.current;
+    const resetComposer = () => {
+      setActiveMentions([]);
+      setMentionQuery('');
+      setMentionTrigger(null);
+      setMentionResults([]);
+      setIsMentionSearching(false);
+    };
+    // An open clarification is answered by what the user sends now, ahead of the queue (which waits for it).
+    const busy = queueBusy || sendInFlightRef.current || pendingUiWorkRef.current > 0
+      || (queued.length > 0 && !clarificationOpen);
+    if (!busy) {
+      // Idle: sent at once, so an open clarification is answered as before.
+      resetComposer();
+      sendInFlightRef.current = true;
+      void dispatchSend(message, { mentions: [...mentionsForSend], ...(files ? { files } : {}) }, { keepComposer: true })
+        .finally(() => {
+          sendInFlightRef.current = false;
+          if (mountedRef.current) setFlushTick((tick) => tick + 1);
+        });
+      return 'sent';
+    }
+    if (queued.length >= queueConfig.maxSize) return 'rejected';
+    // The hint shows for the message that starts waiting for the card, not for every one after it.
+    if (approvalWaiting && queued.length === 0) setApprovalReminder(true);
+    queueStore.commit(
+      [...queued, createQueuedMessage(message, { mentions: mentionsForSend, ...(files ? { files } : {}) })],
+      queueStore.pausedRef.current,
+      'added',
+    );
+    resetComposer();
+    return 'queued';
+  }, [
+    queueEnabled, sendDirect, sessionNotReady, activeMentions, attachmentOptions, interactionRegistry,
+    queueStore, queueBusy, dispatchSend, queueConfig.maxSize, approvalWaiting, clarificationOpen,
+  ]);
+
+  const send = useCallback((
+    message: string,
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
+  ): boolean => (queueEnabled ? submit(message, sendOptions) !== 'rejected' : sendDirect(message, sendOptions)),
+  [queueEnabled, submit, sendDirect]);
+
   const submitPendingCommand = useCallback((
     values: Readonly<Record<string, string>>,
     valueLabels?: Readonly<Record<string, string>>,
   ): boolean => {
     if (!pendingCommand || !interactionRegistry || sessionNotReady || sessionMutationRef.current) return false;
+    // With the queue the composer stays usable during a run; a command still waits for it.
+    if (queueEnabled && (queueBusy || sendInFlightRef.current)) return false;
     const plan = interactionRegistry.completeCommand(pendingCommand, values, valueLabels);
     if (plan.status !== 'send') {
       setPendingCommand(plan.status === 'needs-args' ? plan.request : null);
       return plan.status !== 'needs-args';
     }
     setPendingCommand(null);
-    void deliver(plan.text);
+    void deliver(plan.text, undefined, queueEnabled ? { keepComposer: true } : undefined);
     return true;
-  }, [pendingCommand, interactionRegistry, sessionNotReady, deliver]);
+  }, [pendingCommand, interactionRegistry, sessionNotReady, deliver, queueEnabled, queueBusy]);
 
   const cancelPendingCommand = useCallback(() => setPendingCommand(null), []);
 
@@ -1685,6 +1860,7 @@ export function AiChatProvider({
     actionId: string,
   ) => {
     if (sessionNotReady || sessionMutationRef.current) return;
+    if (queueEnabled && (queueBusy || sendInFlightRef.current)) return;
     const plan = interactionRegistry?.planAction(entity, actionId);
     if (!plan) return;
     if (plan.status === 'needs-args') {
@@ -1692,8 +1868,8 @@ export function AiChatProvider({
       return;
     }
     setPendingCommand(null);
-    void deliver(plan.text);
-  }, [interactionRegistry, sessionNotReady, deliver]);
+    void deliver(plan.text, undefined, queueEnabled ? { keepComposer: true } : undefined);
+  }, [interactionRegistry, sessionNotReady, deliver, queueEnabled, queueBusy]);
 
   const mentionEntity = useCallback(async (type: string, id: string): Promise<boolean> => {
     const entity = interactionRegistry?.entity(type);
@@ -1720,6 +1896,13 @@ export function AiChatProvider({
   const consumeComposerMentions = useCallback(() => setComposerMentions([]), []);
 
   const stop = useCallback(() => {
+    // The user stopped the run: what is queued waits (unless `sendNow` stopped it to go next).
+    if (
+      queueEnabledRef.current && !selfAbortRef.current && queueConfig.pauseOn.has('aborted')
+      && queueStore.itemsRef.current.length > 0 && !queueStore.pausedRef.current
+    ) {
+      queueStore.commit(queueStore.itemsRef.current, true, 'paused');
+    }
     setPipelineState((prev) => ({
       status: 'aborted',
       totalSteps: prev?.totalSteps ?? pipelineSteps.length,
@@ -1730,7 +1913,7 @@ export function AiChatProvider({
       message: 'Stopped by user.',
     }));
     transportStop();
-  }, [transportStop, pipelineSteps.length]);
+  }, [transportStop, pipelineSteps.length, queueConfig.pauseOn, queueStore]);
 
   const clear = useCallback(() => {
     resetUiActions();
@@ -1750,7 +1933,9 @@ export function AiChatProvider({
     setIsMentionSearching(false);
     setPendingCommand(null);
     setSuggestionChips(suggestionsConfig.staticChips ?? []);
-  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions]);
+    // The queue belonged to the cleared conversation.
+    if (queueStore.itemsRef.current.length > 0 || queueStore.pausedRef.current) queueStore.commit([], false, 'cleared');
+  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions, queueStore]);
 
   // ---------------------------------------------------------------------------
   // Multi-session actions
@@ -1923,6 +2108,7 @@ export function AiChatProvider({
     setApprovalError(null);
     setProcessingApprovalIds((prev) => new Set(prev).add(id));
     setResendApprovalIds((prev) => new Set(prev).add(id));
+    if (queueEnabledRef.current) setDecisionResend(true);
     try {
       await addToolApprovalResponse({ id, approved: true });
       setPendingApprovalsMap((prev) => {
@@ -1944,6 +2130,7 @@ export function AiChatProvider({
   const reject = useCallback(async (id: string) => {
     setApprovalError(null);
     setProcessingApprovalIds((prev) => new Set(prev).add(id));
+    if (queueEnabledRef.current) setDecisionResend(true);
     try {
       await addToolApprovalResponse({
         id,
@@ -1965,6 +2152,138 @@ export function AiChatProvider({
       });
     }
   }, [addToolApprovalResponse]);
+
+  // ---------------------------------------------------------------------------
+  // Message queue: pause on a run's end, send the next message once idle.
+  // ---------------------------------------------------------------------------
+  const queueRunLoadingRef = useRef(false);
+  useEffect(() => {
+    const wasLoading = queueRunLoadingRef.current;
+    queueRunLoadingRef.current = isLoading;
+    if (!queueEnabled || !wasLoading || isLoading) return;
+    // A run ended: an error, a stop, a safety stop or a continue prompt holds what is queued.
+    const selfAbort = selfAbortRef.current;
+    selfAbortRef.current = false;
+    const trigger: ChatQueuePauseTrigger | null = status === 'error' || transportError
+      ? 'error'
+      : pipelineState?.status === 'aborted' && !selfAbort
+        ? 'aborted'
+        : pipelineState?.status === 'safety-stop'
+          ? 'safety-stop'
+          : truncation ? 'truncation' : null;
+    if (
+      trigger && queueConfig.pauseOn.has(trigger)
+      && queueStore.itemsRef.current.length > 0 && !queueStore.pausedRef.current
+    ) {
+      queueStore.commit(queueStore.itemsRef.current, true, 'paused');
+    }
+  }, [isLoading, queueEnabled, status, transportError, pipelineState, truncation, queueConfig.pauseOn, queueStore]);
+
+  useEffect(() => {
+    if (!queueEnabled || flushHeld || sendInFlightRef.current || pendingUiWorkRef.current > 0) return;
+    const queued = queueStore.itemsRef.current;
+    if (queued.length === 0) return;
+    const priorityId = queueStore.priorityRef.current;
+    const head = (priorityId ? queued.find((item) => item.id === priorityId) : undefined) ?? queued[0]!;
+    const priority = head.id === priorityId;
+    if (!priority && (queueStore.pausedRef.current || !queueConfig.autoFlush)) return;
+    const files = head.files && head.files.length > 0 ? [...head.files] : undefined;
+    let prepared: PreparedSend;
+    try {
+      // Processed now, like a typed message: commands, mentions, `onBeforeSend`.
+      prepared = prepareSend(head.text, { mentions: [...(head.mentions ?? [])], ...(files ? { files } : {}) });
+    } catch {
+      console.warn('[glirastes] A queued message could not be prepared');
+      queueStore.commit(queued, true, 'paused');
+      return;
+    }
+    queueStore.priorityRef.current = null;
+    queueStore.commit(queued.filter((item) => item !== head), queueStore.pausedRef.current, 'sent');
+    if (prepared.kind === 'needs-args') {
+      // Its command form opens; the queue waits for it.
+      setPendingCommand(prepared.request);
+      return;
+    }
+    if (prepared.kind === 'command') setPendingCommand(null);
+    sendInFlightRef.current = true;
+    void deliver(
+      prepared.text,
+      prepared.kind === 'message' ? prepared.files : undefined,
+      { keepComposer: true },
+    ).then((delivered) => {
+      // Not taken after all (an approval opened): it goes first again.
+      if (!delivered && mountedRef.current) {
+        queueStore.commit([head, ...queueStore.itemsRef.current], queueStore.pausedRef.current, 'added');
+      }
+    }).catch(() => {
+      console.warn('[glirastes] A queued message could not be sent');
+    }).finally(() => {
+      sendInFlightRef.current = false;
+      if (mountedRef.current) setFlushTick((tick) => tick + 1);
+    });
+  }, [
+    queueEnabled, flushHeld, pendingUiWork, flushTick, queueStore, queueConfig.autoFlush, prepareSend, deliver,
+  ]);
+
+  const sendNow = useCallback((id: string): boolean => {
+    if (!queueEnabled) return false;
+    const queued = queueStore.itemsRef.current;
+    const item = queued.find((entry) => entry.id === id);
+    if (!item) return false;
+    if (approvalWaiting) {
+      // A typed message never decides an approval, unless the app chose so.
+      if (queueConfig.sendNowDuringApproval === 'refuse') {
+        setApprovalReminder(true);
+        return false;
+      }
+      for (const approval of pendingApprovalsMap.values()) void reject(approval.id);
+    }
+    queueStore.priorityRef.current = id;
+    queueStore.commit([item, ...queued.filter((entry) => entry !== item)], queueStore.pausedRef.current, 'reordered');
+    if (queueConfig.sendNowBehavior === 'abort' && isLoading) {
+      selfAbortRef.current = true;
+      stop();
+    }
+    return true;
+  }, [queueEnabled, queueStore, approvalWaiting, queueConfig, pendingApprovalsMap, reject, isLoading, stop]);
+
+  const removeQueued = useCallback((id: string): boolean => {
+    const queued = queueStore.itemsRef.current;
+    if (!queued.some((item) => item.id === id)) return false;
+    queueStore.commit(queued.filter((item) => item.id !== id), queueStore.pausedRef.current, 'removed');
+    return true;
+  }, [queueStore]);
+
+  const editQueued = useCallback((id: string, text: string): boolean => {
+    const queued = queueStore.itemsRef.current;
+    if (text.trim() === '' || !queued.some((item) => item.id === id)) return false;
+    queueStore.commit(
+      queued.map((item) => (item.id === id ? { ...item, text } : item)),
+      queueStore.pausedRef.current,
+      'edited',
+    );
+    return true;
+  }, [queueStore]);
+
+  const clearQueue = useCallback(() => {
+    if (queueStore.itemsRef.current.length === 0 && !queueStore.pausedRef.current) return;
+    queueStore.commit([], false, 'cleared');
+  }, [queueStore]);
+
+  const resumeQueue = useCallback(() => {
+    if (!queueStore.pausedRef.current) return;
+    queueStore.commit(queueStore.itemsRef.current, false, 'resumed');
+  }, [queueStore]);
+
+  const pauseQueue = useCallback(() => {
+    if (!queueEnabled || queueStore.pausedRef.current) return;
+    queueStore.commit(queueStore.itemsRef.current, true, 'paused');
+  }, [queueEnabled, queueStore]);
+
+  const queueState = useMemo<ChatQueueState>(
+    () => ({ enabled: queueEnabled, items: queueStore.items, paused: queueStore.paused }),
+    [queueEnabled, queueStore.items, queueStore.paused],
+  );
 
   // Truncation
   const continueTruncation = useCallback(async () => {
@@ -2086,6 +2405,17 @@ export function AiChatProvider({
       isSessionChangeBlocked: isLoading || awaitedOutcomes > 0 || isSessionMutating,
       error: error ?? approvalError,
       send,
+      submit,
+      canCompose: queueEnabled
+        ? !(isSessionMutating || sessionNotReady)
+        : !(isLoading || awaitedOutcomes > 0 || isSessionMutating || sessionNotReady),
+      queue: queueState,
+      sendNow,
+      removeQueued,
+      editQueued,
+      clearQueue,
+      resumeQueue,
+      pauseQueue,
       stop,
       clear,
       loadMore,
@@ -2172,6 +2502,15 @@ export function AiChatProvider({
       error,
       approvalError,
       send,
+      submit,
+      queueEnabled,
+      queueState,
+      sendNow,
+      removeQueued,
+      editQueued,
+      clearQueue,
+      resumeQueue,
+      pauseQueue,
       stop,
       clear,
       loadMore,

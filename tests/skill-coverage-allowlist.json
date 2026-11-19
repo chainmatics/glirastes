@@ -100,7 +100,6 @@
   "ChatInteractionRegistry": "Chat interactions wire type or parser; createChatInteractionsHandler, defineChatEntity and defineChatCommand cover it.",
   "ChatInteractionsConfig": "Chat interactions wire type or parser; createChatInteractionsHandler, defineChatEntity and defineChatCommand cover it.",
   "ChatInteractionsData": "Chat interactions wire type or parser; createChatInteractionsHandler, defineChatEntity and defineChatCommand cover it.",
-  "ChatLocale": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "ChatLocaleCode": "Chat interactions wire type or parser; createChatInteractionsHandler, defineChatEntity and defineChatCommand cover it.",
   "ChatSendPlan": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "ChatShortcutAction": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",

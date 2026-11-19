@@ -26,7 +26,9 @@ export function ChatInput(props: ChatInputProps) {
 
 function PlainChatInput({ className, onSubmit }: ChatInputProps) {
   const visible = useContext(ChatWindowVisibilityContext);
-  const { send, stop, isLoading, classNames, locale, components, voice } = useChatContext();
+  const { send, stop, isLoading, canCompose: composable, queue, classNames, locale, components, voice } = useChatContext();
+  // A hand-built context without `canCompose` locks while loading, as before.
+  const canCompose = composable ?? !isLoading;
   const [value, setValue] = useState('');
   const InputExtra = components.InputExtra;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -51,7 +53,7 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
     (e: FormEvent) => {
       e.preventDefault();
       const trimmed = value.trim();
-      if (!trimmed || isLoading) return;
+      if (!trimmed || !canCompose) return;
       if (onSubmit) {
         onSubmit(trimmed);
       } else if (!send(trimmed)) {
@@ -59,7 +61,7 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
       }
       setValue('');
     },
-    [value, isLoading, onSubmit, send],
+    [value, canCompose, onSubmit, send],
   );
 
   const handleKeyDown = useCallback(
@@ -85,13 +87,13 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={locale.placeholder}
-        disabled={isLoading}
+        disabled={!canCompose}
         rows={1}
         data-state={isLoading ? 'loading' : 'idle'}
       />
       {voice.enabled && (
         <VoiceInputAddon
-          disabled={isLoading}
+          disabled={!canCompose}
           language={voice.language ?? 'de'}
           baseUrl={voice.baseUrl}
           getToken={voice.getToken}
@@ -107,12 +109,13 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
         />
       )}
       {InputExtra && <InputExtra />}
-      {isLoading ? (
+      {isLoading && (
         <button type="button" onClick={stop} data-action="stop">
           {locale.stopButton}
         </button>
-      ) : (
-        <button type="submit" disabled={!value.trim()} data-action="send">
+      )}
+      {(!isLoading || queue?.enabled) && (
+        <button type="submit" disabled={!value.trim() || !canCompose} data-action="send">
           {locale.sendButton}
         </button>
       )}

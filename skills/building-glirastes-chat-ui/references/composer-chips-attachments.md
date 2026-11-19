@@ -8,6 +8,7 @@ All names below come from `glirastes/react` unless noted.
 - Starting a chat from the app (`useChatComposer`)
 - Entity chips in answers (`entityLinks`)
 - Attachments
+- Message queue
 - A chat without the SDK provider
 
 ## Pills
@@ -141,6 +142,35 @@ Server, `attachments` on `createAiChatHandler`:
   Next.js 16 `experimental.proxyClientMaxBodySize`, or keep the route out of
   the matcher); NestJS/Express JSON parsers default to 100 kB
   (`json({ limit: '50mb' })`); reverse proxies need the same headroom.
+
+## Message queue
+
+Off by default; `queue={{ enabled: true }}` on the provider (`config.queue` on
+`<glirastes-chat>`). Without it nothing changes. Full behaviour table:
+`docs/chat-queue.md`.
+
+- A message sent while a run loads or an approval is open is queued
+  (`QueuedMessage`: `id`, `text`, `createdAt`, captured `mentions`, `files`)
+  and sent once idle, FIFO, one run at a time; commands, mentions and
+  `onBeforeSend` apply when it is sent. Never sent as a clarification answer
+  by itself; never decides an approval.
+- `ChatQueueConfig`: `autoFlush` (true), `sendNowBehavior` (`'next'` /
+  `'abort'`), `maxSize` (10; `null`/`Infinity` lifts it), `pauseOn`
+  (`ChatQueuePauseTrigger[]`, default `error`, `aborted`, `safety-stop`,
+  `truncation`), `sendNowDuringApproval` (`'refuse'` / `'reject-approval'`),
+  `storage` (`ChatQueueStorage` `{ load, save }`; file items are never saved;
+  a restored queue starts paused), `onQueueChange` (`ChatQueueChangeEvent`
+  `{ queued, paused, reason }`, `ChatQueueChangeReason`).
+- Context: `submit(text, options?)` returns `ChatSubmitResult`
+  (`'sent' | 'queued' | 'rejected'`); `send` keeps its boolean; `queue`
+  (`ChatQueueState` `{ enabled, items, paused }`), `canCompose`, `sendNow`,
+  `removeQueued`, `editQueued`, `clearQueue`, `resumeQueue`, `pauseQueue`.
+  `useChatQueue()` returns `ChatQueueApi` (state plus actions).
+- `ChatQueue` (`ChatQueueProps`: `className`, `children(queue)`) renders above
+  the composer in `AiChatPanel`; `components.ChatQueue` replaces it, `null`
+  hides it. A custom composer locks on `!canCompose`, not on `isLoading`.
+- `clear()` and another active conversation empty the queue; a language
+  change keeps it. A full `ChatLocale` object needs the `queue*` keys.
 
 ## A chat without the SDK provider
 

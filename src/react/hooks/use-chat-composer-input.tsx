@@ -36,6 +36,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     send,
     stop,
     isLoading,
+    canCompose: composable,
     locale,
     components,
     completionSearch,
@@ -48,6 +49,8 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     attachments: attachmentOptions,
     interactions,
   } = useChatContext();
+  // A hand-built context without `canCompose` locks while loading, as before.
+  const canCompose = composable ?? !isLoading;
   const { onSubmit, initialValue } = options;
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -109,7 +112,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   const submitText = useCallback((text: string, mentions: MentionData[]) => {
     const trimmed = text.trim();
     const pending = attachmentsRef.current;
-    if ((!trimmed && pending.length === 0) || isLoading) return false;
+    if ((!trimmed && pending.length === 0) || !canCompose) return false;
     const files = pending.map(toFilePart);
     if (files.length > 0) {
       const plan = interactions?.planMessage(trimmed, mentions);
@@ -130,7 +133,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     }
     setAttachmentProblem(null);
     return true;
-  }, [isLoading, onSubmit, send, interactions]);
+  }, [canCompose, onSubmit, send, interactions]);
 
   const submit = useCallback(() => {
     const handle = inputRef.current;
@@ -161,7 +164,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     onSubmit: (text, mentions) => submitText(text, mentions),
     onSearch: completionSearch,
     placeholder: locale.placeholder,
-    disabled: isLoading,
+    disabled: !canCompose,
     onEntityAction: (result, actionId) => runEntityAction(
       { type: result.type, id: result.id, label: result.label },
       actionId,
@@ -177,7 +180,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
           allowEmptySubmit: attachments.length > 0,
         }
       : {}),
-  }), [completionSearch, isLoading, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
+  }), [completionSearch, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
 
   const attachmentInputProps = useMemo<ChatComposerInput['attachmentInputProps']>(() => ({
     ref: fileInputRef,
@@ -214,7 +217,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   return {
     value,
     isLoading,
-    canSend: (value.trim().length > 0 || attachments.length > 0) && !isLoading,
+    canSend: (value.trim().length > 0 || attachments.length > 0) && canCompose,
     attachments,
     attachmentError: attachmentProblem ? describeProblem(attachmentProblem, locale) : null,
     attachmentsEnabled: attachmentOptions !== null,
