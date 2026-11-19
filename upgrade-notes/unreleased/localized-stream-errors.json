@@ -1,0 +1,20 @@
+{
+  "id": "localized-stream-errors",
+  "kind": "recommended",
+  "summary": "The handler now shows its fixed failure texts in the chat language: a German chat gets `KI-Anfrage fehlgeschlagen` instead of `AI request failed`, and the German text for invalid tool input.",
+  "howTo": "Nothing to change for a German UI. Tests or log checks that assert on `AI request failed` in a `de*` chat now see the German text. Override single texts with the `streamErrorTexts` handler option (`generic`, `invalidToolInput`).",
+  "skill": "integrating-glirastes-nextjs",
+  "affectedWhen": {
+    "patterns": [
+      "AI request failed"
+    ]
+  },
+  "surface": [
+    "glirastes/adapter/nextjs#AiChatHandlerConfig.streamErrorTexts",
+    "glirastes/adapter/nextjs#AiChatHandlerFullConfig.streamErrorTexts",
+    "glirastes/server/http#AiChatHandlerConfig.streamErrorTexts",
+    "glirastes/server/http#AiChatHandlerFullConfig.streamErrorTexts",
+    "glirastes/server/nextjs#AiChatHandlerConfig.streamErrorTexts",
+    "glirastes/server/nextjs#AiChatHandlerFullConfig.streamErrorTexts"
+  ]
+}

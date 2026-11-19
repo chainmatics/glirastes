@@ -5,10 +5,56 @@ import { ToolInputValidationError } from '../../../runtime/tool-input-error.js';
 import type { AiChatErrorInfo } from './types.js';
 import { APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS, ApprovalSubjectRefusedError } from './approval-subject-lookup.js';
 
+/** The chat's German texts, for a `de*` chat language. */
+export const GENERIC_STREAM_ERROR_TEXT_DE = 'KI-Anfrage fehlgeschlagen';
+export const INVALID_TOOL_INPUT_TEXT_DE = 'Der Assistent hat ungültige Eingaben für dieses Werkzeug gesendet; er wurde zur Korrektur aufgefordert.';
+
 /** What the chat shows for any failure the SDK does not name itself. */
 export const GENERIC_STREAM_ERROR_TEXT = 'AI request failed';
 /** The chat's text for a model tool call whose arguments do not match the schema. */
 export const INVALID_TOOL_INPUT_TEXT = 'The assistant sent invalid input for this tool; it was told what to correct.';
+/** The fixed failure texts the chat shows, per chat language. */
+export interface StreamErrorTexts {
+  /** Any failure the SDK does not name itself. */
+  generic: string;
+  /** A model tool call whose arguments do not match the schema. */
+  invalidToolInput: string;
+}
+
+const EN_STREAM_ERROR_TEXTS: StreamErrorTexts = Object.freeze({
+  generic: GENERIC_STREAM_ERROR_TEXT,
+  invalidToolInput: INVALID_TOOL_INPUT_TEXT,
+});
+const DE_STREAM_ERROR_TEXTS: StreamErrorTexts = Object.freeze({
+  generic: GENERIC_STREAM_ERROR_TEXT_DE,
+  invalidToolInput: INVALID_TOOL_INPUT_TEXT_DE,
+});
+const STREAM_ERROR_KEYS: ReadonlySet<string> = new Set(Object.keys(EN_STREAM_ERROR_TEXTS));
+
+/**
+ * The texts for `locale` (German for `de*`, else English) with `overrides`
+ * replacing single keys. Throws for an unknown key or a value that is no
+ * non-empty string.
+ */
+export function resolveStreamErrorTexts(
+  locale: string | undefined,
+  overrides?: Partial<StreamErrorTexts>,
+  label = 'createAiChatHandler',
+): StreamErrorTexts {
+  const base = locale?.toLowerCase().startsWith('de') ? DE_STREAM_ERROR_TEXTS : EN_STREAM_ERROR_TEXTS;
+  if (overrides === undefined) return base;
+  if (typeof overrides !== 'object' || overrides === null || Array.isArray(overrides)) {
+    throw new Error(`${label}: streamErrorTexts must be an object of texts`);
+  }
+  for (const [key, value] of Object.entries(overrides)) {
+    if (!STREAM_ERROR_KEYS.has(key)) throw new Error(`${label}: streamErrorTexts.${key} is not a text key`);
+    if (value !== undefined && (typeof value !== 'string' || value.trim() === '')) {
+      throw new Error(`${label}: streamErrorTexts.${key} must be a non-empty string`);
+    }
+  }
+  return Object.freeze({ ...base, ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)) });
+}
+
 /**
  * What the model reads in a later request for a call the chat shows with
  * `INVALID_TOOL_INPUT_TEXT`. The browser keeps only the chat text as the
@@ -52,7 +98,7 @@ export function withModelFacingToolErrors<T>(messages: ReadonlyArray<T>): T[] {
       if (typeof part !== 'object' || part === null) return part;
       const record = part as Record<string, unknown>;
       if (record.state !== 'output-error') return part;
-      const historyText = record.errorText === INVALID_TOOL_INPUT_TEXT
+      const historyText = record.errorText === INVALID_TOOL_INPUT_TEXT || record.errorText === INVALID_TOOL_INPUT_TEXT_DE
         ? INVALID_TOOL_INPUT_HISTORY_TEXT
         : typeof record.errorText === 'string' ? APPROVAL_SUBJECT_HISTORY_TEXTS.get(record.errorText) : undefined;
       if (historyText === undefined) return part;
@@ -73,11 +119,11 @@ export const UNAVAILABLE_TOOL_TEXT = 'This tool is not available in this chat.';
  * tool. Every other error keeps the generic text, because its message can
  * carry backend, provider or request content.
  */
-export function streamErrorText(error: unknown): string {
+export function streamErrorText(error: unknown, texts: StreamErrorTexts = EN_STREAM_ERROR_TEXTS): string {
   if (error instanceof ToolExecutionDeniedError) return toolDenialDisplayText(error);
-  if (InvalidToolInputError.isInstance(error)) return INVALID_TOOL_INPUT_TEXT;
+  if (InvalidToolInputError.isInstance(error)) return texts.invalidToolInput;
   if (NoSuchToolError.isInstance(error)) return UNAVAILABLE_TOOL_TEXT;
-  return GENERIC_STREAM_ERROR_TEXT;
+  return texts.generic;
 }
 
 export interface MaskedToolError {
@@ -96,11 +142,11 @@ export interface MaskedToolError {
  * carries only that error's message as a string; the string gets the same
  * text and is not reported again.
  */
-export function createToolStreamErrorMask(): (error: unknown) => MaskedToolError {
+export function createToolStreamErrorMask(texts: StreamErrorTexts = EN_STREAM_ERROR_TEXTS): (error: unknown) => MaskedToolError {
   const invalidCallTexts = new Map<string, string>();
   return (error) => {
     if (typeof error === 'string') {
-      return { text: invalidCallTexts.get(error) ?? GENERIC_STREAM_ERROR_TEXT };
+      return { text: invalidCallTexts.get(error) ?? texts.generic };
     }
     if (error instanceof ToolExecutionDeniedError) {
       const text = toolDenialDisplayText(error);
@@ -113,17 +159,17 @@ export function createToolStreamErrorMask(): (error: unknown) => MaskedToolError
       return { text: UNAVAILABLE_TOOL_TEXT };
     }
     if (InvalidToolInputError.isInstance(error)) {
-      invalidCallTexts.set(error.message, INVALID_TOOL_INPUT_TEXT);
+      invalidCallTexts.set(error.message, texts.invalidToolInput);
       // The AI SDK error holds the model's arguments; the app gets fields and expectations only.
       const cause = error.cause instanceof ModelFacingInputError ? error.cause : undefined;
       return {
-        text: INVALID_TOOL_INPUT_TEXT,
+        text: texts.invalidToolInput,
         report: {
           error: new ToolInputValidationError(error.toolName, cause?.inputIssues ?? [], cause?.omittedIssues ?? 0),
           info: { source: 'tool-call', kind: 'invalid-input' },
         },
       };
     }
-    return { text: GENERIC_STREAM_ERROR_TEXT, report: { error, info: { source: 'tool-call', kind: 'failed' } } };
+    return { text: texts.generic, report: { error, info: { source: 'tool-call', kind: 'failed' } } };
   };
 }

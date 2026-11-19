@@ -69,7 +69,7 @@ import {
   type IdLabels,
 } from './hide-ids.js';
 import { entityDeclarationsOfTools, TOOL_ENTITIES_PART_TYPE } from './tool-entities.js';
-import { createToolStreamErrorMask, streamErrorText } from './stream-error-text.js';
+import { createToolStreamErrorMask, resolveStreamErrorTexts, streamErrorText, type StreamErrorTexts } from './stream-error-text.js';
 import {
   budgetStopText,
   resolveBudgetStopTexts,
@@ -600,6 +600,7 @@ async function defaultStreamHandler(
   budgetStopTexts: BudgetStopTexts = resolveBudgetStopTexts(ctx.locale, undefined),
   silentTurnText?: string,
   request: RequestTurnState = {},
+  streamErrorTexts: StreamErrorTexts = resolveStreamErrorTexts(ctx.locale),
 ): Promise<Response> {
   const uiOutcomes = request.uiOutcomes;
   // SDK built-ins the handler created itself are not manifest tools, so the
@@ -778,7 +779,7 @@ async function defaultStreamHandler(
   };
   // Failed tool calls pass the UI stream's error mask: the chat gets a fixed
   // text, the app's callback the cause (see createToolStreamErrorMask).
-  const toolErrorMask = createToolStreamErrorMask();
+  const toolErrorMask = createToolStreamErrorMask(streamErrorTexts);
   const maskToolStreamError = (error: unknown) => {
     const masked = toolErrorMask(error);
     if (masked.report) reportError(error, masked.report.info, masked.report.error);
@@ -822,7 +823,7 @@ async function defaultStreamHandler(
         providerErrorReported = true;
         reportError(error);
       }
-      return streamErrorText(error);
+      return streamErrorText(error, streamErrorTexts);
     },
     execute: async ({ writer }) => {
       let totalSteps = 0;
@@ -1215,6 +1216,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     attachments,
     memory: memoryConfig,
     budgetStopTexts: budgetStopTextsConfig,
+    streamErrorTexts: streamErrorTextsConfig,
     uiActionOutcomes = 'confirm',
     uiToolResultShape = 'auto',
   } = config;
@@ -1229,6 +1231,17 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
   const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
   assertChatServerLocales(localesConfig);
+  resolveStreamErrorTexts(configuredLocale, streamErrorTextsConfig);
+  const streamErrorTextsByLocale = new Map<string, StreamErrorTexts>();
+  const streamErrorTextsFor = (turnLocale: string | undefined): StreamErrorTexts => {
+    const key = turnLocale ?? configuredLocale;
+    let texts = streamErrorTextsByLocale.get(key);
+    if (!texts) {
+      texts = resolveStreamErrorTexts(key, streamErrorTextsConfig);
+      if (streamErrorTextsByLocale.size < 100) streamErrorTextsByLocale.set(key, texts);
+    }
+    return texts;
+  };
   const explicitLocale = config.locale;
   if (requestLocale !== undefined && typeof requestLocale !== 'function') {
     throw new Error('createAiChatHandler: requestLocale must be a function of the request');
@@ -1371,6 +1384,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         texts.budgetStop,
         texts.silentTurn,
         requestState,
+        streamErrorTextsFor(ctx.locale),
       );
     };
   }
