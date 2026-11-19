@@ -61,6 +61,8 @@ export function shouldContinueChat(
     if (!isRecord(output.outcome)) return false;
     if (readUiOutcomeCode(output.outcome) === 'initiated') return false;
   }
+  // A clarification waits for the user, also next to approvals (a step without UI outcomes keeps the AI SDK's rule).
+  if (waiting.length > 0 && tools.some((part) => toolNameOf(part) === CLARIFICATION_TOOL_NAME)) return false;
   // Answered approvals: the AI SDK's own rule (`lastAssistantMessageIsCompleteWithApprovalResponses`).
   if (tools.some((part) => part.state === 'approval-responded')) {
     return options.approvals && tools.every((part) => (

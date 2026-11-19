@@ -49,7 +49,12 @@ import {
   UI_ACTION_OUTCOME_TIMEOUT_MS,
   type UiActionRunCode,
 } from '../../browser/client-actions.js';
-import { onBeforeUiActionPageLoad } from '../../browser/ui-action-signals.js';
+import {
+  onBeforeUiActionPageLoad,
+  onUiActionPageLoadResult,
+  type UiActionPageLoadResult,
+} from '../../browser/ui-action-signals.js';
+import type { UiAction } from '../../browser/ui-action-bus.js';
 import type { UiOutcome } from '../../contracts/ui-outcome.js';
 import { continuesAfterPageLoad, waitingToolCallIds } from '../utils/ui-outcome-continuation.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
@@ -833,6 +838,13 @@ export function AiChatProvider({
   const currentUiRunRef = useRef<{ toolName: string; toolCallId: string; output: Record<string, unknown> } | null>(null);
   // Results that wait for their outcome before the model answers: the composer stays locked meanwhile.
   const [awaitedOutcomes, setAwaitedOutcomes] = useState(0);
+  // A page load a reloading bridge prepares for the running result, until its push settled.
+  const pageLoadRef = useRef<{
+    toolCallId: string;
+    action: UiAction;
+    done: Promise<UiActionPageLoadResult>;
+    resolve: (result: UiActionPageLoadResult) => void;
+  } | null>(null);
   // The session whose history was just loaded, until the page-load continuation was checked.
   const loadedHistoryRef = useRef<string | null>(null);
 
@@ -923,8 +935,18 @@ export function AiChatProvider({
     const ours = actions.includes(action)
       // A page-bound action first opens its route through a navigation of its own.
       || (action.type === 'glirastes.navigate' && actions.some((candidate) => candidate.route === href));
-    if (ours) await settleForPageLoad(current, true);
+    if (!ours) return;
+    let resolve!: (result: UiActionPageLoadResult) => void;
+    const done = new Promise<UiActionPageLoadResult>((settle) => { resolve = settle; });
+    pageLoadRef.current = { toolCallId: current.toolCallId, action, done, resolve };
+    await settleForPageLoad(current, true);
   }), [settleForPageLoad]);
+
+  // What the bridge's push made of a page load this chat prepared.
+  useEffect(() => onUiActionPageLoadResult((action, result) => {
+    const pageLoad = pageLoadRef.current;
+    if (pageLoad?.action === action) pageLoad.resolve(result);
+  }), []);
 
   // A bridge that loads a page without saying so: the page goes while the action runs.
   useEffect(() => {
@@ -1116,14 +1138,20 @@ export function AiChatProvider({
             ...(uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {}),
           },
         ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }))
-          .then((result) => (
-            // A page load was being prepared when the run timed out: it still goes ahead, so the result stays `initiated`.
-            result && (result.code === 'timeout' || result.code === 'unconfirmed')
-              && reportedOutcomesRef.current.get(toolCallId)?.code === 'initiated'
-              ? { ...result, code: 'initiated' as const }
-              : result
-          ))
-          .finally(() => { currentUiRunRef.current = null; });
+          .then(async (result) => {
+            // The run timed out while its page load was being prepared: the bridge's push decides.
+            const pageLoad = pageLoadRef.current;
+            if (!result || (result.code !== 'timeout' && result.code !== 'unconfirmed') || pageLoad?.toolCallId !== toolCallId) {
+              return result;
+            }
+            const navigation = await pageLoad.done;
+            const code = navigation === 'started' ? 'initiated' as const : navigation === 'refused' ? 'rejected-handler' as const : 'failed' as const;
+            return { ...result, code };
+          })
+          .finally(() => {
+            currentUiRunRef.current = null;
+            if (pageLoadRef.current?.toolCallId === toolCallId) pageLoadRef.current = null;
+          });
         if (!run || uiActionGenerationRef.current !== generation) return;
         if (run.code === 'initiated') pageLeavingRef.current = true;
         if (run.code !== 'ok' && run.code !== 'initiated') {

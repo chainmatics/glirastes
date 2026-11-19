@@ -1,5 +1,10 @@
 import { getDefaultUiActionBus, type UiAction, type UiActionBus } from './ui-action-bus.js';
-import { beforeUiActionPageLoad, markUiActionInitiated, UiActionRejectedError } from './ui-action-signals.js';
+import {
+  beforeUiActionPageLoad,
+  markUiActionInitiated,
+  UiActionRejectedError,
+  uiActionPageLoadResult,
+} from './ui-action-signals.js';
 
 /** Action id of every generated navigation and filter tool (`ui.navigate`, `ui.filter.<view>`). */
 export const GLIRASTES_NAVIGATE_ACTION_ID = 'glirastes.navigate';
@@ -100,10 +105,21 @@ export function registerNavigationBridge(options: NavigationBridgeOptions): () =
     const reloads = typeof options.reloads === 'function' ? options.reloads(href) : options.reloads === true;
     // The chat saves the outcome while this page still runs.
     if (reloads) await beforeUiActionPageLoad(action);
-    if (await options.push(href) === false) {
+    let pushed: unknown;
+    try {
+      pushed = await options.push(href);
+    } catch (error) {
+      if (reloads) uiActionPageLoadResult(action, 'failed');
+      throw error;
+    }
+    if (pushed === false) {
+      if (reloads) uiActionPageLoadResult(action, 'refused');
       throw new UiActionRejectedError('handler', `Navigation to ${href} was not carried out`);
     }
-    if (reloads) markUiActionInitiated(action);
+    if (reloads) {
+      markUiActionInitiated(action);
+      uiActionPageLoadResult(action, 'started');
+    }
   });
 }
 

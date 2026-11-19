@@ -52,6 +52,8 @@ describe('shouldContinueChat', () => {
     expect(continues([user, assistant(approvalPart('approval-requested'), uiPart('c1', ok))])).toBe(false);
     expect(continues([user, assistant(approvalPart('approval-responded'), uiPart('c1'))])).toBe(false);
     expect(continues([user, assistant(approvalPart('approval-responded'), uiPart('c1', ok))])).toBe(true);
+    const clarification = { type: 'tool-ask_clarification', toolCallId: 'c9', state: 'output-available', input: {}, output: {} };
+    expect(continues([user, assistant(approvalPart('approval-responded'), uiPart('c1', ok), clarification)])).toBe(false);
   });
 
   it('looks only at the last step', () => {

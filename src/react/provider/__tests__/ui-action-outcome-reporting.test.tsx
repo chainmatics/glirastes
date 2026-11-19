@@ -340,6 +340,28 @@ describe('a UI action that loads a new page', () => {
     expect(continued).not.toHaveBeenCalled();
   });
 
+  it('writes the refusal of a push that comes after the outcome timeout, and keeps running later results', async () => {
+    const session: SessionConfig = {
+      load: async () => [],
+      save: () => new Promise<void>((resolve) => { setTimeout(resolve, 200); }),
+    };
+    const { bus } = setup({ session, uiActionOutcomeTimeoutMs: 50 });
+    cleanups.push(registerNavigationBridge({ bus, push: () => false, reloads: true }));
+    const later = vi.fn();
+    cleanups.push(bus.subscribeById('toast.show', later));
+    await settle();
+    await stream([user, assistant(
+      uiPart('c1', { awaitsOutcome: true }, navigate('/reports')),
+      uiPart('c2', { awaitsOutcome: true }, { type: 'glirastes.action', actionId: 'toast.show', payload: {} }),
+    )]);
+    await waitFor(() => expect(later).toHaveBeenCalledTimes(1), { timeout: 2_000 });
+    await waitFor(() => {
+      const final = new Map(written.map((entry) => [entry.toolCallId, entry.output.outcome]));
+      expect(final.get('c1')).toEqual({ v: 1, code: 'rejected-handler' });
+      expect(final.get('c2')).toEqual({ v: 1, code: 'ok' });
+    });
+  });
+
   it('runs the later results and writes their own codes when a reloading bridge refuses the navigation', async () => {
     const { bus } = setup();
     cleanups.push(registerNavigationBridge({ bus, push: () => false, reloads: true }));

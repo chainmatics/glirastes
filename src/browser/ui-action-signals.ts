@@ -114,6 +114,40 @@ export function onBeforeUiActionPageLoad(listener: BeforePageLoad): () => void {
   return () => { listeners.delete(listener); };
 }
 
+const PAGE_LOAD_RESULT_KEY = Symbol.for('glirastes.uiActionPageLoadResult');
+
+/** What became of a page load a reloading bridge prepared: started, refused (`push` returned `false`) or failed (threw). */
+export type UiActionPageLoadResult = 'started' | 'refused' | 'failed';
+
+type PageLoadResultListener = (action: UiAction, result: UiActionPageLoadResult) => void;
+
+function pageLoadResultListeners(): Set<PageLoadResultListener> {
+  const scope = globalThis as Record<symbol, unknown>;
+  const existing = scope[PAGE_LOAD_RESULT_KEY];
+  if (existing instanceof Set) return existing as Set<PageLoadResultListener>;
+  const created = new Set<PageLoadResultListener>();
+  scope[PAGE_LOAD_RESULT_KEY] = created;
+  return created;
+}
+
+/** Called once a reloading bridge called `push` for a prepared page load. @internal */
+export function onUiActionPageLoadResult(listener: PageLoadResultListener): () => void {
+  const listeners = pageLoadResultListeners();
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** @internal */
+export function uiActionPageLoadResult(action: UiAction, result: UiActionPageLoadResult): void {
+  for (const listener of [...pageLoadResultListeners()]) {
+    try {
+      listener(action, result);
+    } catch {
+      // A listener's failure does not stop the navigation.
+    }
+  }
+}
+
 /** Runs the listeners, at most `BEFORE_PAGE_LOAD_TIMEOUT_MS`; a listener that throws is skipped. @internal */
 export async function beforeUiActionPageLoad(action: UiAction): Promise<void> {
   const listeners = [...beforePageLoadListeners()];
