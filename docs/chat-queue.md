@@ -172,6 +172,8 @@ const queueStorage: ChatQueueStorage = {
 - `load` runs per active conversation; a result that arrives after another
   conversation became active is discarded. Nothing is saved for a
   conversation before its `load` answered.
+- Writes run one at a time per conversation; while one runs, only the latest
+  state is written after it (an older write never lands after a newer one).
 - Messages with files are never saved (file data and object URLs do not
   survive a reload) and are skipped when loaded.
 - A restored queue starts paused (`'restored'`): nothing is sent after a

@@ -130,16 +130,30 @@ export function useMessageQueueStore(
   // Bumped by `clearAll`: a load that started before it must not bring the cleared queue back.
   const clearGenerationRef = useRef(0);
 
+  // One write at a time per conversation, the latest state last: an older write never lands after a newer one.
+  const writesRef = useRef(new Map<string, { running: boolean; next?: QueuedMessage[] }>());
   const save = useCallback((id: string, next: ReadonlyArray<QueuedMessage>) => {
     const storage = storageRef.current;
     if (!storage || loadedForRef.current !== id) return;
-    try {
-      void Promise.resolve(storage.save(id, persistable(next))).catch(() => {
-        console.warn('[glirastes] queue.storage.save failed');
-      });
-    } catch {
-      console.warn('[glirastes] queue.storage.save failed');
-    }
+    const writes = writesRef.current;
+    const slot = writes.get(id) ?? { running: false };
+    slot.next = persistable(next);
+    writes.set(id, slot);
+    if (slot.running) return;
+    slot.running = true;
+    void (async () => {
+      while (slot.next) {
+        const items = slot.next;
+        slot.next = undefined;
+        try {
+          await Promise.resolve(storage.save(id, items));
+        } catch {
+          console.warn('[glirastes] queue.storage.save failed');
+        }
+      }
+      slot.running = false;
+      writes.delete(id);
+    })();
   }, []);
 
   const commit = useCallback((

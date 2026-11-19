@@ -627,6 +627,27 @@ describe('chat queue enabled', () => {
     warn.mockRestore();
   });
 
+  it('writes the stored queue one at a time, the latest state last', async () => {
+    const writes: Array<{ items: string[]; done: () => void }> = [];
+    const storage: ChatQueueStorage = {
+      load: () => [],
+      save: vi.fn((_id, items) => new Promise<void>((resolve) => {
+        writes.push({ items: items.map((item) => item.text), done: resolve });
+      })),
+    };
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true, storage } }} />);
+    await act(async () => { await Promise.resolve(); });
+    await startRun(chat);
+    await act(async () => { ctx.submit('a'); });
+    await act(async () => { ctx.submit('b'); ctx.clearQueue(); });
+    // The first write is still running: nothing else started.
+    expect(writes.map((write) => write.items)).toEqual([['a']]);
+    await act(async () => { writes[0]!.done(); await Promise.resolve(); await Promise.resolve(); });
+    // Only the latest state follows.
+    expect(writes.map((write) => write.items)).toEqual([['a'], []]);
+  });
+
   it('never saves file items', async () => {
     const storage: ChatQueueStorage = { load: () => [], save: vi.fn() };
     const chat = new FakeChat();
