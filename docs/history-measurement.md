@@ -6,8 +6,11 @@ without a model (`prepareModelMessages` only), deterministically, by
 `tests/history-measurement.test.ts` over the fixtures of
 `tests/support/history-measurement.ts`; the test fails when these tables no
 longer match the code (`UPDATE_HISTORY_MEASUREMENT=1 bunx vitest run
-tests/history-measurement.test.ts` rewrites them). These numbers inform a
-later default decision; no default has changed.
+tests/history-measurement.test.ts` rewrites them). These numbers led to the
+0.18.0 defaults `toolTurnCounting: 'tool-turns'` and `seenObjects` on (column
+"0.18 default"); the test pins that the defaults measure exactly as
+`tool-turns + memo`. The way back is `history: { toolTurnCounting:
+'all-turns', seenObjects: false }` (column "0.17 default").
 
 How it is measured:
 
@@ -31,14 +34,15 @@ How it is measured:
   speaking `key`, `title`), long UUID lists (60 and 200 entries), and the
   pilot list without any declaration. All but the last declare their
   identity (`outputEntities`).
-- Modes: `all-turns` (the default) and `tool-turns` of
+- Modes: `all-turns` (the default up to 0.17) and `tool-turns` (the default
+  since 0.18.0) of
   `history.toolTurnCounting`, each without and with `history.seenObjects`
-  (default bounds: 40 entries, 800 tokens).
+  (default bounds: 40 entries, 800 tokens; on by default since 0.18.0).
 
 ## Summary
 
 <!-- summary:start -->
-| List | Follow-ups | default (all-turns, toolTurns 1, 4000, window 12) | tool-turns, toolTurns 1 | all-turns + memo, toolTurns 1 | tool-turns + memo, toolTurns 1 | pilot (all-turns, toolTurns 4, 16000, window 60) | tool-turns, toolTurns 4, 16000, window 60 |
+| List | Follow-ups | 0.17 default (all-turns, toolTurns 1, 4000, window 12) | tool-turns, toolTurns 1 | all-turns + memo, toolTurns 1 | 0.18 default (tool-turns + memo, toolTurns 1) | pilot (all-turns, toolTurns 4, 16000, window 60) | tool-turns, toolTurns 4, 16000, window 60 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | pilot uuid list 20 | 1 | 0/20 ~186 | 20/20 ~1348 | 20/20 ~824 | 20/20 ~1348 | 20/20 ~1348 | 20/20 ~1348 |
 | pilot uuid list 20 | 3 | 0/20 ~290 | 20/20 ~1451 | 20/20 ~928 | 20/20 ~1451 | 20/20 ~1451 | 20/20 ~1451 |
@@ -65,9 +69,19 @@ How it is measured:
 
 Reading it:
 
-- With the defaults, one turn without tools after a list removes every id of
-  that list from the model input (`0/n`), whatever the list's shape. That
-  is the pilot finding.
+- With the 0.17 defaults, one turn without tools after a list removes every
+  id of that list from the model input (`0/n`), whatever the list's shape.
+  That is the pilot finding.
+- The 0.18 defaults keep id and name of every entry of the declared lists
+  up to 20 entries through 1 to 6 turns without tools; of longer lists all
+  entries while the list turn still fits the history (60 entries after 1 and
+  3 follow-ups, 200 after 1), otherwise the memo's cap (30 of 60, 29 of 200). They cost more input tokens per request
+  than the 0.17 defaults whenever the earlier result is kept: about
+  +1,160 tokens for the 20-entry pilot list after 1 to 3 follow-ups
+  (~186 to ~1,348), +640 for it after 6 (memo only), +160 to +1,130 for the
+  reference app's lists, and up to about +3,800 for a 200-entry list
+  (~4,003). An app without declarations pays only the `tool-turns` part
+  (no memo); an earlier turn without kept results costs nothing extra.
 - `tool-turns` with `toolTurns: 1` keeps the list through any number of
   turns without tools, until `maxTurns` (6) or the message window drops the
   list turn itself (6 follow-ups: the list turn is the 7th earlier turn, and

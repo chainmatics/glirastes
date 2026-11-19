@@ -216,7 +216,7 @@ export interface StreamHandlerContext {
   /** The debug hook `AiChatHandlerConfig.onModelInput` (carries content; local only). */
   onModelInput?: (event: ModelInputEvent) => void;
   /**
-   * Set with `history.seenObjects` only: the UI messages ahead of `messages`
+   * Set with `history.seenObjects` (default on) and a tool that declares its identity: the UI messages ahead of `messages`
    * that the message window or the chat memory left out. Pass them on as
    * `prepareModelMessages`' `earlierMessages`; only their tool results are read.
    */
@@ -1200,7 +1200,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     memory: memoryConfig,
     budgetStopTexts: budgetStopTextsConfig,
     uiActionOutcomes = 'confirm',
-    uiToolResultShape,
+    uiToolResultShape = 'auto',
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
   // Server lookups behind approval cards: only the built-in stream handler makes them.
@@ -1208,8 +1208,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     ? undefined
     : resolveApprovalSubjectLimits(approvalSubjectsConfig);
   assertUiActionOutcomesOption(uiActionOutcomes, 'createAiChatHandler');
-  if (uiToolResultShape !== undefined && uiToolResultShape !== 'handoff' && uiToolResultShape !== 'legacy') {
-    throw new Error("createAiChatHandler: uiToolResultShape must be 'handoff' or 'legacy'");
+  if (uiToolResultShape !== 'auto' && uiToolResultShape !== 'handoff' && uiToolResultShape !== 'legacy') {
+    throw new Error("createAiChatHandler: uiToolResultShape must be 'auto', 'handoff' or 'legacy'");
   }
   const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
   assertChatServerLocales(localesConfig);
@@ -1243,15 +1243,20 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
   const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
   /**
-   * With `history.seenObjects`: the messages the window or the chat memory
+   * With `history.seenObjects` (default on): the messages the window or the chat memory
    * left out ahead of `recent` (a suffix of `all`), for the memo; else none.
    * They get the same PII treatment as the window (`anonymizeMessages`). The
    * memo reads only their tool results, which the shield sealed when the
    * tool ran (`wrapToolsWithShield`), exactly like the tool results the
    * window sends; shielding them again would map a pseudonym once more.
    */
-  const seenObjectsSource = (all: unknown[], recent: unknown[]): unknown[] | undefined => (
-    history && history.seenObjects && recent.length < all.length ? all.slice(0, all.length - recent.length) : undefined
+  const seenObjectsSource = (all: unknown[], recent: unknown[], tools: Readonly<Record<string, unknown>>): unknown[] | undefined => (
+    // On by default (`false` turns it off), and only for a turn with a tool that declares its identity:
+    // without one the memo lists nothing, so the window's messages are not prepared for it at all.
+    history !== false && history?.seenObjects !== false && recent.length < all.length
+      && entityDeclarationsOfTools(tools) !== undefined
+      ? all.slice(0, all.length - recent.length)
+      : undefined
   );
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
   if (attachments?.enabled && piiShield && attachments.allowWithPiiShield !== true) {
@@ -1819,7 +1824,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         traceId: sessionId || undefined,
         telemetry,
         ...(maxResultChars !== undefined ? { maxResultChars } : {}),
-        ...(uiToolResultShape ? { uiToolResultShape } : {}),
+        // `'auto'`: the hand-off shape only for a client that reads it (it sends the outcome flag);
+        // every other request gets the shape a 0.17 browser runs.
+        uiToolResultShape: uiToolResultShape === 'auto'
+          ? (readUiOutcomesFlag(body.value) ? 'handoff' : 'legacy')
+          : uiToolResultShape,
       };
       /**
        * The result handles and `read_result` of a model turn (not of a direct
@@ -2189,7 +2198,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxContextMessages;
         const memory = await prepareMemory(processedMessages, model, sessionId);
         let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
-        let earlierMessages = seenObjectsSource(processedMessages, recentMessages);
+        let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
 
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
@@ -2399,7 +2408,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
       const memory = await prepareMemory(processedMessages, model, legacySessionId);
       let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
-      let earlierMessages = seenObjectsSource(processedMessages, recentMessages);
+      let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
 
       // PII Shield: anonymize message history + wrap tools (legacy mode)
       if (piiShield) {

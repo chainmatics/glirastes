@@ -1,0 +1,724 @@
+{
+  "sdk": "glirastes@0.17.3",
+  "ai": "6.0.161",
+  "zod": "4.4.3",
+  "records": {
+    "generated navigation": {
+      "chunks": [
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "running",
+            "totalSteps": 0,
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": true
+        },
+        {
+          "type": "start"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "tool-input-available",
+          "toolCallId": "call-1",
+          "toolName": "ui_navigate",
+          "input": {
+            "destination": "/tasks"
+          }
+        },
+        {
+          "type": "tool-output-available",
+          "toolCallId": "call-1",
+          "output": {
+            "success": true,
+            "message": "Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+            "uiAction": {
+              "type": "glirastes.navigate",
+              "actionId": "glirastes.navigate",
+              "payload": {
+                "href": "/tasks",
+                "destination": "/tasks"
+              }
+            }
+          }
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 0,
+            "finishReason": "tool-calls",
+            "toolCalls": [
+              "ui_navigate"
+            ],
+            "toolResults": 1,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Executed tools: ui_navigate",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "text-start",
+          "id": "t1"
+        },
+        {
+          "type": "text-delta",
+          "id": "t1",
+          "delta": "Done."
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 1,
+            "finishReason": "stop",
+            "toolCalls": [],
+            "toolResults": 0,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Done.",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "text-end",
+          "id": "t1"
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "completed",
+            "totalSteps": 2,
+            "finishReason": "stop",
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": false
+        },
+        {
+          "type": "finish",
+          "finishReason": "stop"
+        }
+      ],
+      "modelToolResults": [
+        [
+          {
+            "type": "tool-result",
+            "toolCallId": "call-1",
+            "toolName": "ui_navigate",
+            "output": {
+              "type": "json",
+              "value": {
+                "success": true,
+                "message": "Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+                "uiAction": {
+                  "type": "glirastes.navigate",
+                  "actionId": "glirastes.navigate",
+                  "payload": {
+                    "href": "/tasks",
+                    "destination": "/tasks"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      ]
+    },
+    "generated filter": {
+      "chunks": [
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "running",
+            "totalSteps": 0,
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": true
+        },
+        {
+          "type": "start"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "tool-input-available",
+          "toolCallId": "call-1",
+          "toolName": "ui_filter_tasks",
+          "input": {
+            "status": "open"
+          }
+        },
+        {
+          "type": "tool-output-available",
+          "toolCallId": "call-1",
+          "output": {
+            "success": true,
+            "message": "Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+            "uiAction": {
+              "type": "glirastes.navigate",
+              "actionId": "glirastes.navigate",
+              "payload": {
+                "href": "/tasks?status=open",
+                "destination": "/tasks",
+                "query": {
+                  "status": "open"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 0,
+            "finishReason": "tool-calls",
+            "toolCalls": [
+              "ui_filter_tasks"
+            ],
+            "toolResults": 1,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Executed tools: ui_filter_tasks",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "text-start",
+          "id": "t1"
+        },
+        {
+          "type": "text-delta",
+          "id": "t1",
+          "delta": "Done."
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 1,
+            "finishReason": "stop",
+            "toolCalls": [],
+            "toolResults": 0,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Done.",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "text-end",
+          "id": "t1"
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "completed",
+            "totalSteps": 2,
+            "finishReason": "stop",
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": false
+        },
+        {
+          "type": "finish",
+          "finishReason": "stop"
+        }
+      ],
+      "modelToolResults": [
+        [
+          {
+            "type": "tool-result",
+            "toolCallId": "call-1",
+            "toolName": "ui_filter_tasks",
+            "output": {
+              "type": "json",
+              "value": {
+                "success": true,
+                "message": "Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+                "uiAction": {
+                  "type": "glirastes.navigate",
+                  "actionId": "glirastes.navigate",
+                  "payload": {
+                    "href": "/tasks?status=open",
+                    "destination": "/tasks",
+                    "query": {
+                      "status": "open"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      ]
+    },
+    "generated client action, offered by the open page": {
+      "chunks": [
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "running",
+            "totalSteps": 0,
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": true
+        },
+        {
+          "type": "start"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "tool-input-available",
+          "toolCallId": "call-1",
+          "toolName": "ui_refresh_tasks",
+          "input": {}
+        },
+        {
+          "type": "tool-output-available",
+          "toolCallId": "call-1",
+          "output": {
+            "success": true,
+            "message": "Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+            "uiAction": {
+              "type": "glirastes.action",
+              "actionId": "tasks.refresh",
+              "payload": {}
+            }
+          }
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 0,
+            "finishReason": "tool-calls",
+            "toolCalls": [
+              "ui_refresh_tasks"
+            ],
+            "toolResults": 1,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Executed tools: ui_refresh_tasks",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "text-start",
+          "id": "t1"
+        },
+        {
+          "type": "text-delta",
+          "id": "t1",
+          "delta": "Done."
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 1,
+            "finishReason": "stop",
+            "toolCalls": [],
+            "toolResults": 0,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Done.",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "text-end",
+          "id": "t1"
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "completed",
+            "totalSteps": 2,
+            "finishReason": "stop",
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": false
+        },
+        {
+          "type": "finish",
+          "finishReason": "stop"
+        }
+      ],
+      "modelToolResults": [
+        [
+          {
+            "type": "tool-result",
+            "toolCallId": "call-1",
+            "toolName": "ui_refresh_tasks",
+            "output": {
+              "type": "json",
+              "value": {
+                "success": true,
+                "message": "Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+                "uiAction": {
+                  "type": "glirastes.action",
+                  "actionId": "tasks.refresh",
+                  "payload": {}
+                }
+              }
+            }
+          }
+        ]
+      ]
+    },
+    "generated page-bound client action, handed off to its route": {
+      "chunks": [
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "running",
+            "totalSteps": 0,
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": true
+        },
+        {
+          "type": "start"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "tool-input-available",
+          "toolCallId": "call-1",
+          "toolName": "ui_archive_task",
+          "input": {
+            "taskId": "t1"
+          }
+        },
+        {
+          "type": "tool-output-available",
+          "toolCallId": "call-1",
+          "output": {
+            "success": true,
+            "message": "Handed to the app, which opens /tasks to run the action there. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+            "uiAction": {
+              "type": "glirastes.action",
+              "actionId": "tasks.archive",
+              "payload": {
+                "taskId": "t1"
+              },
+              "route": "/tasks"
+            }
+          }
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 0,
+            "finishReason": "tool-calls",
+            "toolCalls": [
+              "ui_archive_task"
+            ],
+            "toolResults": 1,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Executed tools: ui_archive_task",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "text-start",
+          "id": "t1"
+        },
+        {
+          "type": "text-delta",
+          "id": "t1",
+          "delta": "Done."
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 1,
+            "finishReason": "stop",
+            "toolCalls": [],
+            "toolResults": 0,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Done.",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "text-end",
+          "id": "t1"
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "completed",
+            "totalSteps": 2,
+            "finishReason": "stop",
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": false
+        },
+        {
+          "type": "finish",
+          "finishReason": "stop"
+        }
+      ],
+      "modelToolResults": [
+        [
+          {
+            "type": "tool-result",
+            "toolCallId": "call-1",
+            "toolName": "ui_archive_task",
+            "output": {
+              "type": "json",
+              "value": {
+                "success": true,
+                "message": "Handed to the app, which opens /tasks to run the action there. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+                "uiAction": {
+                  "type": "glirastes.action",
+                  "actionId": "tasks.archive",
+                  "payload": {
+                    "taskId": "t1"
+                  },
+                  "route": "/tasks"
+                }
+              }
+            }
+          }
+        ]
+      ]
+    },
+    "hand-written defineUiTool with a uiAction": {
+      "chunks": [
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "running",
+            "totalSteps": 0,
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": true
+        },
+        {
+          "type": "start"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "tool-input-available",
+          "toolCallId": "call-1",
+          "toolName": "ui_open_task",
+          "input": {
+            "taskId": "t1"
+          }
+        },
+        {
+          "type": "tool-output-available",
+          "toolCallId": "call-1",
+          "output": {
+            "success": true,
+            "message": "Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+            "uiAction": {
+              "type": "open-dialog",
+              "dialog": "task",
+              "taskId": "t1"
+            }
+          }
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 0,
+            "finishReason": "tool-calls",
+            "toolCalls": [
+              "ui_open_task"
+            ],
+            "toolResults": 1,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Executed tools: ui_open_task",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "start-step"
+        },
+        {
+          "type": "text-start",
+          "id": "t1"
+        },
+        {
+          "type": "text-delta",
+          "id": "t1",
+          "delta": "Done."
+        },
+        {
+          "type": "data-step-report",
+          "data": {
+            "stepNumber": 1,
+            "finishReason": "stop",
+            "toolCalls": [],
+            "toolResults": 0,
+            "requiresApproval": false,
+            "pendingApprovals": 0,
+            "summary": "Done.",
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "totalTokens": 2
+            },
+            "createdAt": "<time>"
+          }
+        },
+        {
+          "type": "text-end",
+          "id": "t1"
+        },
+        {
+          "type": "finish-step"
+        },
+        {
+          "type": "data-pipeline-state",
+          "data": {
+            "status": "completed",
+            "totalSteps": 2,
+            "finishReason": "stop",
+            "maxSteps": 24,
+            "stepLimitSource": "safety",
+            "updatedAt": "<time>"
+          },
+          "transient": false
+        },
+        {
+          "type": "finish",
+          "finishReason": "stop"
+        }
+      ],
+      "modelToolResults": [
+        [
+          {
+            "type": "tool-result",
+            "toolCallId": "call-1",
+            "toolName": "ui_open_task",
+            "output": {
+              "type": "json",
+              "value": {
+                "success": true,
+                "message": "Handed to the app. Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.",
+                "uiAction": {
+                  "type": "open-dialog",
+                  "dialog": "task",
+                  "taskId": "t1"
+                }
+              }
+            }
+          }
+        ]
+      ]
+    }
+  }
+}

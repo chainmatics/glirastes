@@ -206,15 +206,23 @@ function hasPair(serialized: string, entry: ListFixture['entries'][number], name
   return pair(`${id},"${nameField}":${JSON.stringify(entry.name)}`);
 }
 
-export async function measure(scenario: Scenario, variant: Variant, toolTurns: number, maxTokens: number, maxContextMessages: number): Promise<Measurement> {
+/**
+ * `variant` `'defaults'`: no `toolTurnCounting` and no `seenObjects`, the
+ * window's earlier messages passed as the built-in handler passes them by
+ * default (only when a tool declares its identity).
+ */
+export async function measure(scenario: Scenario, variant: Variant | 'defaults', toolTurns: number, maxTokens: number, maxContextMessages: number): Promise<Measurement> {
   const entities = Object.assign({}, ...scenario.lists.map((list) => list.entities)) as EntityDeclarationsByTool;
   const window = scenario.messages.slice(-maxContextMessages);
   const earlierMessages = scenario.messages.slice(0, scenario.messages.length - window.length);
+  const memo = variant === 'defaults' ? Object.keys(entities).length > 0 : variant.seenObjects;
   const sent = await prepareModelMessages(window, {
     maxContextMessages,
     entities,
-    ...(variant.seenObjects && earlierMessages.length > 0 ? { earlierMessages } : {}),
-    history: { toolTurns, maxTokens, toolTurnCounting: variant.toolTurnCounting, seenObjects: variant.seenObjects },
+    ...(memo && earlierMessages.length > 0 ? { earlierMessages } : {}),
+    history: variant === 'defaults'
+      ? { toolTurns, maxTokens }
+      : { toolTurns, maxTokens, toolTurnCounting: variant.toolTurnCounting, seenObjects: variant.seenObjects },
   });
   const serialized = JSON.stringify(sent);
   let ids = 0;
@@ -233,7 +241,7 @@ export async function measure(scenario: Scenario, variant: Variant, toolTurns: n
   return {
     scenario: scenario.name,
     followUps: scenario.followUps,
-    variant: variant.label,
+    variant: variant === 'defaults' ? 'defaults' : variant.label,
     toolTurns,
     maxTokens,
     maxContextMessages,
@@ -287,12 +295,12 @@ export function renderTable(rows: ReadonlyArray<Measurement>): string {
   return lines.join('\n');
 }
 
-/** The settings of the summary table: the default, the two opt-ins alone, the pilot's settings. */
+/** The settings of the summary table: the 0.17 default, each option alone, the 0.18 default, the pilot's settings. */
 export const SUMMARY_COLUMNS: ReadonlyArray<{ label: string; match: Pick<Measurement, 'variant' | 'toolTurns' | 'maxTokens' | 'maxContextMessages'> }> = [
-  { label: 'default (all-turns, toolTurns 1, 4000, window 12)', match: { variant: 'all-turns', toolTurns: 1, maxTokens: 4_000, maxContextMessages: 12 } },
+  { label: '0.17 default (all-turns, toolTurns 1, 4000, window 12)', match: { variant: 'all-turns', toolTurns: 1, maxTokens: 4_000, maxContextMessages: 12 } },
   { label: 'tool-turns, toolTurns 1', match: { variant: 'tool-turns', toolTurns: 1, maxTokens: 4_000, maxContextMessages: 12 } },
   { label: 'all-turns + memo, toolTurns 1', match: { variant: 'all-turns + memo', toolTurns: 1, maxTokens: 4_000, maxContextMessages: 12 } },
-  { label: 'tool-turns + memo, toolTurns 1', match: { variant: 'tool-turns + memo', toolTurns: 1, maxTokens: 4_000, maxContextMessages: 12 } },
+  { label: '0.18 default (tool-turns + memo, toolTurns 1)', match: { variant: 'tool-turns + memo', toolTurns: 1, maxTokens: 4_000, maxContextMessages: 12 } },
   { label: 'pilot (all-turns, toolTurns 4, 16000, window 60)', match: { variant: 'all-turns', toolTurns: 4, maxTokens: 16_000, maxContextMessages: 60 } },
   { label: 'tool-turns, toolTurns 4, 16000, window 60', match: { variant: 'tool-turns', toolTurns: 4, maxTokens: 16_000, maxContextMessages: 60 } },
 ];

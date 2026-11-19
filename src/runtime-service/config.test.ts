@@ -83,6 +83,27 @@ describe("runtime service trust configuration", () => {
       expect(() => parseRuntimeConfig({ ...raw(), chat: { uiActionOutcomes: wrong } })).toThrow();
     }
   });
+  it("accepts chat.history with the two history defaults' way back, strictly", () => {
+    for (const history of [
+      { toolTurnCounting: "all-turns" },
+      { toolTurnCounting: "tool-turns" },
+      { seenObjects: false },
+      { seenObjects: true },
+      { toolTurnCounting: "all-turns", seenObjects: false },
+      {},
+    ]) {
+      expect(parseRuntimeConfig({ ...raw(), chat: { history } }).chat).toEqual({ history });
+    }
+    for (const wrong of [
+      { toolTurnCounting: "every-turn" },
+      { seenObjects: "off" },
+      { seenObjects: { maxEntries: 5 } },
+      { maxTokens: 8000 },
+      false,
+    ]) {
+      expect(() => parseRuntimeConfig({ ...raw(), chat: { history: wrong } })).toThrow();
+    }
+  });
   it("reads the turn language from the configured header", () => {
     const request = (headers: Record<string, string>) => new Request("https://app.test/glirastes/chat", { headers });
     expect(requestLocaleOf(request({ "accept-language": "pl-PL,pl;q=0.9,en;q=0.8" }), "accept-language")).toBe("pl-PL");
