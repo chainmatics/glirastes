@@ -70,6 +70,17 @@ describe('unresolved mention markers (onBreakdown / onModelInput)', () => {
     expect((await breakdownOf(messages, { entities, earlierMessages: earlier })).unresolvedMentionMarkers).toBe(1);
   });
 
+  it('takes a user @ mention outside the window as seen, also without declarations', async () => {
+    const earlier = [user('e0', 'Open {{mention:playlist:pl-7:Morning}}'), assistant('e1', [{ type: 'text', text: 'Opened.' }])];
+    const messages = [
+      user('u0', 'And again?'),
+      assistant('a0', [{ type: 'text', text: 'Yes, {{mention:playlist:pl-7:Morning}}.' }]),
+      user('u1', 'ok'),
+    ];
+    expect((await breakdownOf(messages, { earlierMessages: earlier })).unresolvedMentionMarkers).toBe(0);
+    expect((await breakdownOf(messages)).unresolvedMentionMarkers).toBe(1);
+  });
+
   it('counts every marker without declarations (the browser keeps them as text by default) and 0 without markers', async () => {
     const withMarker = [
       user('u0', 'Show my playlists'),

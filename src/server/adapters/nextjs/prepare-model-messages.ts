@@ -332,12 +332,13 @@ async function unresolvedMarkerCount(
     .flatMap((message) => textsOf(message).flatMap((text) => [...text.matchAll(MENTION_MARKER)]))
     .filter((match) => match[1] !== 'command');
   if (markers.length === 0) return 0;
-  const earlier = entities && earlierMessages && earlierMessages.length > 0
+  const earlier = earlierMessages && earlierMessages.length > 0
     ? await convertToModelMessages(withModelFacingToolErrors(withoutApprovalSubjectParts(earlierMessages)), { ignoreIncompleteToolCalls: true }) as ModelMessageLike[]
     : [];
   const all = [...earlier, ...raw];
   const seen = entities ? seenReferenceKeys(seenSourcesOf(all, entities, handleProducersOf(all))) : new Set<string>();
-  for (const message of raw) {
+  // The user's `@` mentions of the whole conversation, also those the window already left out.
+  for (const message of all) {
     if (message.role !== 'user') continue;
     for (const text of textsOf(message)) {
       for (const [, type, id] of text.matchAll(MENTION_MARKER)) seen.add(mentionReferenceKey(type!, id!));
