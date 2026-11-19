@@ -74,8 +74,9 @@ export function shouldContinueChat(
 
 /**
  * Whether a history loaded on a new page continues its turn once: the last
- * step of the assistant waited for UI outcomes, every one of them has a
- * code, at least one started the page load (`initiated`) at most
+ * step of the assistant waited for UI outcomes, every one of them has an
+ * outcome (a code, or none for one the page load cut off), at least one
+ * started the page load (`initiated`) at most
  * `UI_OUTCOME_RELOAD_CONTINUATION_MS` ago, and no text follows them. Nothing
  * runs again: the continuation is only a model call.
  */
@@ -90,8 +91,9 @@ export function continuesAfterPageLoad(messages: ReadonlyArray<unknown>, now: nu
   let started = false;
   for (const part of waiting) {
     const outcome = (part.output as Record<string, unknown>).outcome;
+    // Every waiting result is settled; one the page load cut off is "not confirmed" (`{ v: 1 }`).
+    if (!isRecord(outcome)) return false;
     const code = readUiOutcomeCode(outcome);
-    if (code === undefined) return false;
     if (code === 'initiated') {
       const at = (outcome as { at?: unknown }).at;
       if (typeof at === 'number' && at <= now && now - at <= UI_OUTCOME_RELOAD_CONTINUATION_MS) started = true;

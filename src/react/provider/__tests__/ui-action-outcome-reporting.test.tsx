@@ -273,6 +273,45 @@ describe('a UI action that loads a new page', () => {
     expect(continued).not.toHaveBeenCalled();
   });
 
+  it('cuts off a later waiting result of the same step as not confirmed when the page loads', async () => {
+    const saved: ChatMessage[][] = [];
+    const session: SessionConfig = { load: async () => [], save: async (_id, messages) => { saved.push(messages); } };
+    const { bus } = setup({ session });
+    vi.stubGlobal('location', { assign: vi.fn() });
+    cleanups.push(registerDocumentNavigation({ bus }));
+    const later = vi.fn();
+    cleanups.push(bus.subscribeById('toast.show', later));
+    await settle();
+    await stream([user, assistant(
+      uiPart('c1', { awaitsOutcome: true }, navigate('/reports')),
+      uiPart('c2', { awaitsOutcome: true }, { type: 'glirastes.action', actionId: 'toast.show', payload: {} }),
+    )]);
+    await waitFor(() => expect(written.map((entry) => entry.toolCallId).sort()).toEqual(['c1', 'c2']));
+    expect(written.find((entry) => entry.toolCallId === 'c2')!.output.outcome).toEqual({ v: 1 });
+    const outcomes = (saved.at(-1)!.at(-1)!.parts as Array<{ toolCallId?: string; output?: { outcome?: { code?: string } } }>)
+      .filter((part) => part.toolCallId).map((part) => part.output?.outcome);
+    expect(outcomes).toEqual([expect.objectContaining({ code: 'initiated' }), { v: 1 }]);
+    await settle();
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  it("does not answer another chat's page load for its own running result", async () => {
+    const { bus } = setup();
+    let release!: () => void;
+    cleanups.push(registerNavigationBridge({ bus, push: () => new Promise<void>((resolve) => { release = resolve; }) }));
+    await stream([user, assistant(uiPart('c1'))]);
+    await settle();
+    // Another chat's bridge loads a page for an action of its own.
+    const other = new UiActionBus();
+    vi.stubGlobal('location', { assign: vi.fn() });
+    cleanups.push(registerDocumentNavigation({ bus: other }));
+    await act(async () => { await other.dispatch(navigate('/elsewhere')); });
+    expect(written).toEqual([]);
+    await act(async () => { release(); });
+    await waitFor(() => expect(written).toHaveLength(1));
+    expect(written[0]!.output.outcome).toEqual({ v: 1, code: 'ok' });
+  });
+
   it('writes initiated when the page goes while an action runs (a bridge that reloads without saying so)', async () => {
     const { bus } = setup();
     cleanups.push(registerNavigationBridge({ bus, push: () => new Promise(() => {}) }));

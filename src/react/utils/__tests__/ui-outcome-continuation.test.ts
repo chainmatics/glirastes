@@ -72,7 +72,8 @@ describe('continuesAfterPageLoad', () => {
     expect(continuesAfterPageLoad([user, assistant(uiPart('c1', at(now - UI_OUTCOME_RELOAD_CONTINUATION_MS - 1)))], now)).toBe(false);
     expect(continuesAfterPageLoad([user, assistant(uiPart('c1', at(now + 5_000)))], now)).toBe(false);
     expect(continuesAfterPageLoad([user, assistant(uiPart('c1', at(now)), uiPart('c2'))], now)).toBe(false);
-    expect(continuesAfterPageLoad([user, assistant(uiPart('c1', at(now)), uiPart('c2', { outcome: { v: 1 } }))], now)).toBe(false);
+    // A later result the page load cut off counts as settled once it says "not confirmed".
+    expect(continuesAfterPageLoad([user, assistant(uiPart('c1', at(now)), uiPart('c2', { outcome: { v: 1 } }))], now)).toBe(true);
     expect(continuesAfterPageLoad([user, assistant(uiPart('c1', at(now)), { type: 'text', text: 'Opened.' })], now)).toBe(false);
     expect(continuesAfterPageLoad([user, assistant(uiPart('c1', ok))], now)).toBe(false);
     expect(continuesAfterPageLoad([user, assistant(uiPart('c1', { outcome: { v: 1, code: 'initiated' } }))], now)).toBe(false);

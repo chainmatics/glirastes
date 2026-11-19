@@ -857,29 +857,51 @@ export function AiChatProvider({
     return outcome;
   }, []);
 
-  /** Saves the history with this outcome in place now: the page is about to be left. */
-  const saveWithOutcome = useCallback(async (toolCallId: string, outcome: UiOutcome) => {
+  /**
+   * The page is about to be left for the running result: it is `initiated`,
+   * and every other result of the message still waiting for its outcome is
+   * cut off ("not confirmed", it never runs later). Writes them and saves
+   * the history with them in place now.
+   */
+  const settleForPageLoad = useCallback(async (current: { toolName: string; toolCallId: string; output: Record<string, unknown> }) => {
+    const initiated = reportUiOutcome(current.toolName, current.toolCallId, current.output, 'initiated');
+    if (!initiated) return;
+    const outcomes = new Map<string, UiOutcome>([[current.toolCallId, initiated]]);
+    const last = rawMessagesRef.current.at(-1);
+    for (const part of last?.role === 'assistant' ? last.parts : []) {
+      const toolPart = part as { type?: unknown; toolCallId?: unknown; output?: unknown };
+      if (typeof toolPart.toolCallId !== 'string' || toolPart.toolCallId === current.toolCallId) continue;
+      if (!isRecord(toolPart.output) || toolPart.output.awaitsOutcome !== true || toolPart.output.outcome !== undefined) continue;
+      if (reportedOutcomesRef.current.has(toolPart.toolCallId) || typeof toolPart.type !== 'string') continue;
+      const cut = reportUiOutcome(toolPart.type.replace(/^tool-/, ''), toolPart.toolCallId, toolPart.output, 'unconfirmed');
+      if (cut) outcomes.set(toolPart.toolCallId, cut);
+    }
     const save = sessionRef.current?.save;
     if (!save) return;
     const messages = rawMessagesRef.current.map((message, index, all) => (index !== all.length - 1 ? message : {
       ...message,
       parts: message.parts.map((part) => {
         const toolPart = part as { toolCallId?: unknown; output?: unknown };
-        return toolPart.toolCallId === toolCallId && isRecord(toolPart.output)
-          ? { ...part, output: { ...toolPart.output, outcome } }
-          : part;
+        const outcome = typeof toolPart.toolCallId === 'string' ? outcomes.get(toolPart.toolCallId) : undefined;
+        return outcome && isRecord(toolPart.output) ? { ...part, output: { ...toolPart.output, outcome } } : part;
       }),
     })) as ChatMessage[];
     await Promise.resolve(save(activeSessionIdRef.current, messages));
-  }, []);
+  }, [reportUiOutcome]);
 
-  // A reloading bridge (registerDocumentNavigation, `reloads`) waits for this before it loads the next page.
-  useEffect(() => onBeforeUiActionPageLoad(async () => {
+  // A reloading bridge (registerDocumentNavigation, `reloads`) waits for this
+  // before it loads the next page. Only the chat whose running result the
+  // navigation belongs to answers it.
+  useEffect(() => onBeforeUiActionPageLoad(async (action) => {
     const current = currentUiRunRef.current;
     if (!current) return;
-    const outcome = reportUiOutcome(current.toolName, current.toolCallId, current.output, 'initiated');
-    if (outcome) await saveWithOutcome(current.toolCallId, outcome);
-  }), [reportUiOutcome, saveWithOutcome]);
+    const actions = toolResultUiActions(current.output);
+    const href = isRecord(action.payload) ? action.payload.href : undefined;
+    const ours = actions.includes(action)
+      // A page-bound action first opens its route through a navigation of its own.
+      || (action.type === 'glirastes.navigate' && actions.some((candidate) => candidate.route === href));
+    if (ours) await settleForPageLoad(current);
+  }), [settleForPageLoad]);
 
   // A bridge that loads a page without saying so: the page goes while the action runs.
   useEffect(() => {
@@ -888,12 +910,11 @@ export function AiChatProvider({
       const current = currentUiRunRef.current;
       if (!current) return;
       pageLeavingRef.current = true;
-      const outcome = reportUiOutcome(current.toolName, current.toolCallId, current.output, 'initiated');
-      if (outcome) void saveWithOutcome(current.toolCallId, outcome).catch(() => {});
+      void settleForPageLoad(current).catch(() => {});
     };
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);
-  }, [reportUiOutcome, saveWithOutcome]);
+  }, [settleForPageLoad]);
   const error = transportError ?? (sessionLoadFailure?.id === activeSessionId ? sessionLoadFailure.error : null);
 
   useEffect(() => {
