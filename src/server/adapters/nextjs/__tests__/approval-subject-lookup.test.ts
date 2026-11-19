@@ -249,6 +249,22 @@ describe('approval subject lookups', () => {
     expect(second.take('c2')!.part.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'invalid_response' });
   });
 
+  it('runs a transforming output schema of a list answer once', async () => {
+    const registry = referenceTools();
+    registry.list_channels = defineTool({
+      id: 'channels.list', description: 'List channels.', inputSchema: z.object({}).strict(),
+      // Not idempotent: a second run fails (the title is no string any more).
+      outputSchema: z.array(z.object({ key: z.string(), title: z.string().transform((title) => ({ text: title })) }))
+        .transform((entries) => entries.map((entry) => ({ key: entry.key, title: entry.title.text }))),
+      outputEntities: [{ type: 'channel', id: 'key', name: 'title', path: 'data[]' }],
+      entityLookup: { type: 'channel', params: {}, complete: true },
+      execute: async () => [{ key: 'lobby', title: 'Lobby screens' }],
+    });
+    const { resolver } = resolverFor({}, { registry });
+    await resolver.resolve({ toolName: 'delete_channel', toolCallId: 'c1', input: { key: 'lobby' } });
+    expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ status: 'named', name: 'Lobby screens' });
+  });
+
   it('validates its limits', () => {
     expect(resolveApprovalSubjectLimits(undefined)).toEqual({ maxLookupsPerTurn: 32, maxSubjectsPerCall: 4, lookupTimeoutMs: 3000, maxLookupTimePerTurnMs: 10_000 });
     expect(() => resolveApprovalSubjectLimits({ maxLookupsPerTurn: 0 })).toThrow(RangeError);

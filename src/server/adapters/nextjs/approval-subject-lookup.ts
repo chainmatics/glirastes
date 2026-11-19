@@ -546,7 +546,10 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         return { kind: 'unchecked', reason: 'unavailable' };
       }
       let answer: unknown = result;
+      // The schema runs once: the shared core path for a record, here for a list or scalar.
+      let schemaTool: Pick<Tool, 'outputSchema'> = tool;
       if (!isRecordValue(answer)) {
+        schemaTool = {};
         // A list or scalar answer: its output schema applies too (the shared core path checks records only),
         // and it travels under `data`, as a list answer does for the model.
         if (tool.outputSchema) {
@@ -556,7 +559,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         }
         answer = { data: answer };
       }
-      const cleaned = cleanToolResult(tool, answer, outputBoundOf(tool), name);
+      const cleaned = cleanToolResult(schemaTool, answer, outputBoundOf(tool), name);
       if (!cleaned.successful) return { kind: 'unchecked', reason: cleaned.withheld ? 'invalid_response' : 'unavailable' };
       return { kind: 'ok', value: cleaned.value };
     } catch {
