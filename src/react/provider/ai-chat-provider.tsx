@@ -43,7 +43,12 @@ import {
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
-import { runToolResultUiActions, toolResultUiActions, type UiActionRunCode } from '../../browser/client-actions.js';
+import {
+  runToolResultUiActions,
+  toolResultUiActions,
+  UI_ACTION_OUTCOME_TIMEOUT_MS,
+  type UiActionRunCode,
+} from '../../browser/client-actions.js';
 import { onBeforeUiActionPageLoad } from '../../browser/ui-action-signals.js';
 import type { UiOutcome } from '../../contracts/ui-outcome.js';
 import { continuesAfterPageLoad, waitingToolCallIds } from '../utils/ui-outcome-continuation.js';
@@ -388,6 +393,9 @@ export interface AiChatProviderProps extends AiChatProviderConfig {
   transport: ChatTransport;
   children: ReactNode;
 }
+
+/** Longest the chat waits for `session.save` before a UI action loads the next page. */
+const PAGE_LOAD_SAVE_TIMEOUT_MS = 500;
 
 /** Turns this page continued after a page load, by the ids of their results (also across providers). */
 const CONTINUED_TURNS = new Set<string>();
@@ -863,18 +871,29 @@ export function AiChatProvider({
    * cut off ("not confirmed", it never runs later). Writes them and saves
    * the history with them in place now.
    */
-  const settleForPageLoad = useCallback(async (current: { toolName: string; toolCallId: string; output: Record<string, unknown> }) => {
+  const settleForPageLoad = useCallback(async (
+    current: { toolName: string; toolCallId: string; output: Record<string, unknown> },
+    waitForStep: boolean,
+  ) => {
     const initiated = reportUiOutcome(current.toolName, current.toolCallId, current.output, 'initiated');
     if (!initiated) return;
+    // The other results of the step may still arrive: hold the page load until the stream ended.
+    if (waitForStep) {
+      const deadline = Date.now() + (uiActionOutcomeTimeoutRef.current ?? UI_ACTION_OUTCOME_TIMEOUT_MS);
+      while (streamActiveRef.current && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      // One more render, so the last results are in the messages.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    // Cut off only in the saved copy: should the page stay (the bridge refused), they still run here.
     const outcomes = new Map<string, UiOutcome>([[current.toolCallId, initiated]]);
     const last = rawMessagesRef.current.at(-1);
     for (const part of last?.role === 'assistant' ? last.parts : []) {
-      const toolPart = part as { type?: unknown; toolCallId?: unknown; output?: unknown };
+      const toolPart = part as { toolCallId?: unknown; output?: unknown };
       if (typeof toolPart.toolCallId !== 'string' || toolPart.toolCallId === current.toolCallId) continue;
       if (!isRecord(toolPart.output) || toolPart.output.awaitsOutcome !== true || toolPart.output.outcome !== undefined) continue;
-      if (reportedOutcomesRef.current.has(toolPart.toolCallId) || typeof toolPart.type !== 'string') continue;
-      const cut = reportUiOutcome(toolPart.type.replace(/^tool-/, ''), toolPart.toolCallId, toolPart.output, 'unconfirmed');
-      if (cut) outcomes.set(toolPart.toolCallId, cut);
+      if (!reportedOutcomesRef.current.has(toolPart.toolCallId)) outcomes.set(toolPart.toolCallId, { v: 1 });
     }
     const save = sessionRef.current?.save;
     if (!save) return;
@@ -886,7 +905,11 @@ export function AiChatProvider({
         return outcome && isRecord(toolPart.output) ? { ...part, output: { ...toolPart.output, outcome } } : part;
       }),
     })) as ChatMessage[];
-    await Promise.resolve(save(activeSessionIdRef.current, messages));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.resolve(save(activeSessionIdRef.current, messages)),
+      new Promise((resolve) => { timer = setTimeout(resolve, PAGE_LOAD_SAVE_TIMEOUT_MS); }),
+    ]).finally(() => clearTimeout(timer));
   }, [reportUiOutcome]);
 
   // A reloading bridge (registerDocumentNavigation, `reloads`) waits for this
@@ -900,7 +923,7 @@ export function AiChatProvider({
     const ours = actions.includes(action)
       // A page-bound action first opens its route through a navigation of its own.
       || (action.type === 'glirastes.navigate' && actions.some((candidate) => candidate.route === href));
-    if (ours) await settleForPageLoad(current);
+    if (ours) await settleForPageLoad(current, true);
   }), [settleForPageLoad]);
 
   // A bridge that loads a page without saying so: the page goes while the action runs.
@@ -910,7 +933,7 @@ export function AiChatProvider({
       const current = currentUiRunRef.current;
       if (!current) return;
       pageLeavingRef.current = true;
-      void settleForPageLoad(current).catch(() => {});
+      void settleForPageLoad(current, false).catch(() => {});
     };
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);

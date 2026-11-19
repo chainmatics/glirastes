@@ -76,8 +76,12 @@ handles (`read_result`) of the first request are gone in the continuation
 ## App without client-side routing
 
 `registerDocumentNavigation()` (or a bridge with `reloads`) loads the next page
-with `location.assign`. Before it does, the chat writes `initiated` and calls
-`session.save` (at most 500 ms). On the new page, `session.load` restores the
+with `location.assign`. Before it does, the chat writes `initiated`, waits
+until the running step has all its results (at most the outcome timeout),
+marks every other result of the step that still waits as "not confirmed" in
+the saved copy (it never runs later) and calls `session.save` (at most
+500 ms). Should the bridge refuse the navigation, the page stays and the other
+results run as usual. On the new page, `session.load` restores the
 history without running anything, and the chat continues the turn once
 (`continueTurn`, no new message) when the last step waited for outcomes, all
 have a code, one is `initiated` at most 60 s ago and no text follows. The

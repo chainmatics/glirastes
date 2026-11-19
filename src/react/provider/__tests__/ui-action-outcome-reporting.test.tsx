@@ -286,13 +286,51 @@ describe('a UI action that loads a new page', () => {
       uiPart('c1', { awaitsOutcome: true }, navigate('/reports')),
       uiPart('c2', { awaitsOutcome: true }, { type: 'glirastes.action', actionId: 'toast.show', payload: {} }),
     )]);
-    await waitFor(() => expect(written.map((entry) => entry.toolCallId).sort()).toEqual(['c1', 'c2']));
-    expect(written.find((entry) => entry.toolCallId === 'c2')!.output.outcome).toEqual({ v: 1 });
-    const outcomes = (saved.at(-1)!.at(-1)!.parts as Array<{ toolCallId?: string; output?: { outcome?: { code?: string } } }>)
+    const outcomesOf = (messages: ChatMessage[]) => (messages.at(-1)!.parts as Array<{ toolCallId?: string; output?: { outcome?: unknown } }>)
       .filter((part) => part.toolCallId).map((part) => part.output?.outcome);
-    expect(outcomes).toEqual([expect.objectContaining({ code: 'initiated' }), { v: 1 }]);
+    await waitFor(() => expect(saved.some((messages) => outcomesOf(messages)[1] !== undefined)).toBe(true));
+    const kept = saved.find((messages) => outcomesOf(messages)[1] !== undefined)!;
+    expect(outcomesOf(kept)).toEqual([expect.objectContaining({ code: 'initiated' }), { v: 1 }]);
+    // Only the saved copy is cut off; in this page only the navigation's outcome was written.
+    expect(written.map((entry) => entry.toolCallId)).toEqual(['c1']);
     await settle();
     expect(later).not.toHaveBeenCalled();
+  });
+
+  it('holds the page load until a parallel call of the step has its result, and saves it', async () => {
+    const saved: ChatMessage[][] = [];
+    const session: SessionConfig = { load: async () => [], save: async (_id, messages) => { saved.push(messages); } };
+    const { bus } = setup({ session });
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    cleanups.push(registerDocumentNavigation({ bus }));
+    await settle();
+    const open = { type: 'tool-tasks_list', toolCallId: 'c2', state: 'input-available', input: {} };
+    const done = { ...open, state: 'output-available', output: { success: true, tasks: [] } };
+    await act(async () => { control.set([user], 'submitted'); });
+    await act(async () => { control.set([user, assistant(uiPart('c1', { awaitsOutcome: true }, navigate('/reports')), open)], 'streaming'); });
+    await settle(60);
+    expect(assign).not.toHaveBeenCalled();
+    await act(async () => { control.set([user, assistant(uiPart('c1', { awaitsOutcome: true }, navigate('/reports')), done)], 'streaming'); });
+    await act(async () => { control.status('ready'); });
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    const last = saved.at(-1)!.at(-1)!.parts as Array<{ toolCallId?: string; state?: string; output?: { outcome?: { code?: string } } }>;
+    expect(last.find((part) => part.toolCallId === 'c2')?.state).toBe('output-available');
+    expect(last.find((part) => part.toolCallId === 'c1')?.output?.outcome).toMatchObject({ code: 'initiated' });
+  });
+
+  it('runs the later results and writes their own codes when a reloading bridge refuses the navigation', async () => {
+    const { bus } = setup();
+    cleanups.push(registerNavigationBridge({ bus, push: () => false, reloads: true }));
+    cleanups.push(bus.subscribeById('toast.show', () => {}));
+    await stream([user, assistant(
+      uiPart('c1', { awaitsOutcome: true }, navigate('/reports')),
+      uiPart('c2', { awaitsOutcome: true }, { type: 'glirastes.action', actionId: 'toast.show', payload: {} }),
+    )]);
+    await waitFor(() => expect(written.filter((entry) => entry.output.outcome && (entry.output.outcome as { code?: string }).code !== 'initiated')).toHaveLength(2));
+    const final = new Map(written.map((entry) => [entry.toolCallId, entry.output.outcome]));
+    expect(final.get('c1')).toEqual({ v: 1, code: 'rejected-handler' });
+    expect(final.get('c2')).toEqual({ v: 1, code: 'ok' });
   });
 
   it("does not answer another chat's page load for its own running result", async () => {

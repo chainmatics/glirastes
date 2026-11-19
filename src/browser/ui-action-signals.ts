@@ -86,8 +86,11 @@ export function wasUiActionInitiated(action: UiAction): boolean {
 
 const BEFORE_LOAD_KEY = Symbol.for('glirastes.beforeUiActionPageLoad');
 
-/** Longest a bridge waits for the chat to save its history before it loads the next page. */
-export const BEFORE_PAGE_LOAD_TIMEOUT_MS = 500;
+/**
+ * Longest a bridge waits for the chat before it loads the next page: the end
+ * of the running step (at most the 10 s outcome timeout) plus 500 ms to save.
+ */
+export const BEFORE_PAGE_LOAD_TIMEOUT_MS = 10_500;
 
 type BeforePageLoad = (action: UiAction) => void | Promise<void>;
 
