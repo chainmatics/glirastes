@@ -119,7 +119,7 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     .map((tool) => [catalogEntry(tool).modelName as string, toolSearchSemanticsOf(contractsById.get(tool.toolId)?.search)] as const)
     .filter((entry): entry is readonly [string, ToolSearchSemantics] => entry[1] !== undefined)
     .sort(([left], [right]) => compareCodeUnits(left, right)));
-  // Labels per language (tools.json languages), keyed like toolSearchSemantics; absent for an app without languages.
+  // Labels per language (tools.json languages, by default en, de and every declared one), keyed like toolSearchSemantics; absent with `languages: []`.
   const toolTexts = Object.fromEntries(tools
     .map((tool) => [catalogEntry(tool).modelName as string, contractsById.get(tool.toolId)?.labels] as const)
     .filter((entry): entry is readonly [string, NonNullable<ToolContractsEntry['labels']>] => entry[1] !== undefined)

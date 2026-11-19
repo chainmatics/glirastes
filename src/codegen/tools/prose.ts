@@ -258,7 +258,7 @@ export interface ToolProse {
   usageHints: string[];
   /** The labels in the app's locale, for the setup artifact. */
   presentation: ToolPresentation;
-  /** Labels per language of tools.json `languages`; absent without it. Local only. */
+  /** Labels per language of `languages` (the pipeline passes the derived ones without tools.json `languages`); absent without it. Local only. */
   labels?: Record<string, Labels>;
   /** Languages of `languages` without an own label (they show a fallback). */
   missingLabelLanguages?: string[];
@@ -443,7 +443,9 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
   } else {
     const layers = [...declaredLabels, templateLayer];
     const forLocale = resolveLayeredEntry(layers, input.locale);
-    const tag = forLocale?.level === 'request' || forLocale?.language === undefined ? input.locale : forLocale.language;
+    // A template label keeps the app's locale, as without languages (the setup artifact stays as it was).
+    const templated = forLocale?.layer === layers.length - 1;
+    const tag = forLocale?.level === 'request' || forLocale?.language === undefined || templated ? input.locale : forLocale.language;
     presentation = { locale: tag, ...(forLocale?.value ?? labelsOf(label)) };
     labels = {};
     for (const wanted of input.languages!) {
