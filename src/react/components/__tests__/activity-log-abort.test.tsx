@@ -52,7 +52,7 @@ function Harness({ status, messages, error = null, stop = () => {}, session, exp
     error,
     sendMessage: vi.fn(async () => {}),
     stop,
-    setMessages: (next) => setCurrent(typeof next === 'function' ? next(current) : next),
+    setMessages: (next) => setCurrent(next),
     addToolApprovalResponse: vi.fn(async () => {}),
   }), [current, status, error, stop]);
   return (
