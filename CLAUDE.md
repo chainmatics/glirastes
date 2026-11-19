@@ -65,6 +65,10 @@ Release flow:
 5. Commit all of it together with the version bump via `/commit` and push to `main`
 6. Tag: `git tag v<version> && git push origin v<version>` — CI builds and publishes to npm
 
+The `release-preflight` job in `publish.yml` refuses a tag before the image push or npm publish while
+`upgrade-notes/unreleased/*.json` exists or `upgrade-notes/<version>.json` is missing. Every prerelease
+tag also needs its own `upgrade-notes/<rc-version>.json` (e.g. `0.19.0-rc.1.json`; `notes: []` is fine).
+
 The SDK package lives on public npm. Release CI also tests and publishes the
 public Linux amd64 image `ghcr.io/chainmatics/glirastes-runtime:<version>`.
 Pin its digest and match artifact SDK versions. A green publish job, registry

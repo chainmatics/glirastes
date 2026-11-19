@@ -44,6 +44,37 @@ function jobRuns(workflow: string, job: string): string[] {
   return runs;
 }
 
+function jobLines(workflow: string, job: string): string[] {
+  const lines = workflow.split('\n');
+  const start = lines.findIndex((line) => line === `  ${job}:`);
+  expect(start, `job ${job}`).toBeGreaterThan(-1);
+  const end = lines.findIndex((line, i) => i > start && /^ {2}\S/.test(line));
+  return lines.slice(start + 1, end === -1 ? undefined : end);
+}
+
+/** The `- name:` of each step of one job, in order. */
+function jobStepNames(workflow: string, job: string): string[] {
+  return jobLines(workflow, job)
+    .map((line) => /^ {6}- name: (.+)$/.exec(line)?.[1]?.trim())
+    .filter((name): name is string => name !== undefined);
+}
+
+/** The text of one named step of one job. */
+function jobStep(workflow: string, job: string, name: string): string {
+  const lines = jobLines(workflow, job);
+  const start = lines.findIndex((line) => line === `      - name: ${name}`);
+  expect(start, `step ${name}`).toBeGreaterThan(-1);
+  const end = lines.findIndex((line, i) => i > start && /^ {6}- /.test(line));
+  return lines.slice(start, end === -1 ? undefined : end).join('\n');
+}
+
+/** A job's `needs:` as a list (`needs: a` or `needs: [a, b]`). */
+function jobNeeds(workflow: string, job: string): string[] {
+  const line = jobLines(workflow, job).find((l) => /^ {4}needs: /.test(l));
+  if (!line) return [];
+  return line.replace(/^ {4}needs: /, '').replace(/[[\]]/g, '').split(',').map((n) => n.trim());
+}
+
 describe('release workflows', () => {
   it('type-checks the tests against the sources, not a built dist', () => {
     const config = JSON.parse(read('tsconfig.test.json')) as {
@@ -64,7 +95,6 @@ describe('release workflows', () => {
     expect(jobRuns(read('.github/workflows/publish.yml'), 'publish')).toEqual([
       'npm install -g npm@11',
       '|',
-      '|',
       'bun install --frozen-lockfile',
       'bun run typecheck',
       'bun run typecheck:tests',
@@ -76,12 +106,16 @@ describe('release workflows', () => {
     ]);
   });
 
-  it('refuses to publish while upgrade notes are unreleased or missing for the version', () => {
+  it('checks the upgrade notes in a preflight job before the image push and the npm publish', () => {
     const workflow = read('.github/workflows/publish.yml');
-    const guard = workflow.indexOf('- name: Verify upgrade notes are released for this version');
-    expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(workflow.indexOf('- name: Publish to npm with provenance'));
-    const step = workflow.slice(guard, workflow.indexOf('- name: Install dependencies', guard));
+    expect(jobStepNames(workflow, 'release-preflight')).toEqual([
+      'Checkout',
+      'Verify upgrade notes are released for this version',
+    ]);
+    // The image is pushed inside runtime-container, so it must wait for the preflight too.
+    expect(jobNeeds(workflow, 'runtime-container')).toEqual(['release-preflight']);
+    expect(jobNeeds(workflow, 'publish')).toEqual(['release-preflight', 'runtime-container']);
+    const step = jobStep(workflow, 'release-preflight', 'Verify upgrade notes are released for this version');
     expect(step).toContain('ls upgrade-notes/unreleased/*.json');
     expect(step).toContain('[ ! -f "upgrade-notes/$PKG_VERSION.json" ]');
     expect(step.match(/exit 1/g)).toHaveLength(2);
