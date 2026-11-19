@@ -131,6 +131,8 @@ second, hand-maintained catalogue.
    middleware or `proxy` on `/api/chat` buffers only 10 MB: raise
    `experimental.middlewareClientMaxBodySize` (Next.js 16:
    `experimental.proxyClientMaxBodySize`) or keep the route out of its matcher.
+   To keep chat files across reloads or hand them to an upload route, see
+   `docs/chat-attachments.md`, "Keeping attachments" and "Handing attachments to the app".
 4. Mount the navigation bridge once in the root layout, as a client component,
    so `ui.navigate` and the `ui.filter.*` tools can run:
 
