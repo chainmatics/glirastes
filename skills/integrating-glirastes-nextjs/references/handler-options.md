@@ -49,6 +49,31 @@ it. The type's JSDoc carries the full detail.
 | `maxResultChars` | upper bound of a serialized successful tool result for the model, integer from `MIN_MAX_RESULT_CHARS` (1,000) to `MAX_MAX_RESULT_CHARS` (200,000), default `DEFAULT_MAX_RESULT_CHARS` (16,000); larger results are cut by `truncateToolResult(result, maxChars, TruncateToolResultOptions)` (largest array first, then long fields) with a `_truncated` marker (`TruncatedMarker`: `field`, `showing`, `total`, `compacted`, `omittedKeys`, `hint`; for GET/HEAD and approval-free method-less tools the hint offers filtering or the next page with the tool's `PAGINATION_PARAMETER_NAMES`, for other tools it says not to call again just to see more); a tool's own `maxResultChars` (endpoint tool definition, `contract.ts`, OpenAPI `x-glirastes-max-result-chars`) wins; an invalid value throws at creation (`assertMaxResultChars`, `isValidMaxResultChars`); also on `createGlirastes` and as `application.maxResultChars` in the runtime container |
 | `attachments` | `ChatAttachmentsConfig`; off by default |
 
+### The user's language from the app's database
+
+The turn language decides the tool labels (with `toolTexts`), the approval
+card's wording and the handler's own texts (with `locales`); the order is
+`requestLocale` > `locale` > the language the chat UI sends
+(`Content-Language`, `clientLanguage`) > the manifest's locale.
+
+- **A fixed `locale` wins over the page language the client sends.** With
+  `locale: 'de-DE'` every turn is German, whatever `language`, the page's
+  `lang` or `sendLanguage` say; the sent language is used only when neither
+  `requestLocale` nor `locale` is set. Use `locale` alone only for a
+  single-language app.
+- **Language stored per user:** read it in `requestLocale`, which may be
+  async and gets the request (headers and cookies; never the body):
+  `requestLocale: async (request) => (await userOf(request))?.language`.
+  Return a BCP-47 tag (`pl-PL`); `undefined`, a value that is no tag or a
+  throw falls back to `locale`, so `locale` can stay as the default for
+  users without a stored language.
+- **The chat's built-in texts** follow the browser, not the server: pass the
+  same stored language as `language` on `AiChatProvider` (or
+  `<glirastes-chat lang>`), which wins over the page's `lang`; `locales`
+  adds a language the built-in German and English tables lack. With
+  `sendLanguage` (default on) the chat then also sends it, which only
+  matters for a handler without `requestLocale` and `locale`.
+
 ## History and answers
 
 | Key | What it does |
@@ -103,7 +128,7 @@ it. The type's JSDoc carries the full detail.
 | `onFinish` | steps, finish reason, token usage, truncation, `StepLimitSource` and the local `expectedToolFailureCount`; once per request, with `continuation: 'approval' \| 'ui-outcome'` for a request that continued a turn and `awaitingUiOutcome: true` for one that ended to wait for a UI outcome |
 | `emitStepReports` | `data-step-report` stream parts (default on) |
 | `onStepReport` | one `PipelineStepReport` per step |
-| `onModelInput` | opt-in local debug hook: before every model step a `ModelInputEvent` (`stepNumber`, the step's `messages`, `system`, `estimatedTokens`, `breakdown`: a `ModelInputBreakdown` with each earlier turn's `HistoryTurnMode` `compacted` / `text` / `left-out` and the memo). CARRIES CONTENT (prompts, tool results, ids, names): keep it out of production logs; never sent to the stream, the browser or the Platform; server config only. Built-in stream handler only (custom ones pass `onBreakdown` / `earlierMessages` to `prepareModelMessages`); not in the runtime container |
+| `onModelInput` | opt-in local debug hook: before every model step a `ModelInputEvent` (`stepNumber`, the step's `messages`, `system`, `estimatedTokens`, `breakdown`: a `ModelInputBreakdown` with each earlier turn's `HistoryTurnMode` `compacted` / `text` / `left-out`, the memo and `unresolvedMentionMarkers`, the count of assistant mention markers no declared record or user `@` mention carries, which the chat shows as plain text). CARRIES CONTENT (prompts, tool results, ids, names): keep it out of production logs; never sent to the stream, the browser or the Platform; server config only. Built-in stream handler only (custom ones pass `onBreakdown` / `earlierMessages` to `prepareModelMessages`); not in the runtime container |
 | `onPipelineResult` | intent, module, model and tools chosen by `pipeline` |
 | `onAudit` | `AuditEmitter` for all audit events; forward to logs or a SIEM |
 | `metrics` | content-free turn metrics, e.g. from `createGlirastes(...).chatTurn()`; a continuation is a `turn.continued` event (`TurnContinuedEvent`, `TurnContinuedEventSchema`, `TurnContinuation`, `TurnContinuationSchema`) instead of `turn.finished`, in batches of its own, with an opaque `turnId` (HMAC keyed by the approval secret, never the client's message id) shared by every continuation of the turn |
