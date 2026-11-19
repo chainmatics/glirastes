@@ -61,6 +61,23 @@ describe('the chat texts per language (locales)', () => {
     expect(texts.sendButton).toBe('Send it');
   });
 
+  it('carries the activity log keys too, per key with the built-in fallback', async () => {
+    const activity = {
+      activityRunningLabel: '{label} trwa',
+      activityRunningProgressLabel: '{count} gotowe, {label} trwa',
+      activityStepCountLabel: '{count} razy',
+      activitySummarySeparator: ' · ',
+    };
+    const polish = await textsFor('pl', { locales: { pl: activity } });
+    expect(polish).toMatchObject(activity);
+    cleanup();
+    const german = await textsFor('de', { locales: { de: { activityRunningProgressLabel: '{count} fertig, {label}…' } } });
+    expect(german.activityRunningProgressLabel).toBe('{count} fertig, {label}…');
+    expect(german.activityRunningLabel).toBe('{label}…');
+    expect(german.activityStepCountLabel).toBe('×{count}');
+    expect(german.activitySummarySeparator).toBe(', ');
+  });
+
   it('is the chat of before without locales', async () => {
     const german = await textsFor('de', {});
     expect(german.approveButton).toBe('Ausführen');

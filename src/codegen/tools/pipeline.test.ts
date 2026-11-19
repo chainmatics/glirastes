@@ -513,6 +513,35 @@ describe('runToolsPipeline (client actions)', () => {
     });
     expect(result.findings.filter((finding) => finding.code === 'ui-action-write-unproven')).toEqual([]);
   }, 120_000);
+
+  it('ranks the top-level .describe() of a probed client action contract as code: below a maintained entry, above an agent one', async () => {
+    const fixture = await createAppFixture({
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, jsx: 'preserve' } }),
+      'src/lib/contracts.ts': "import { z } from 'zod';\n"
+        + "export const highlightTask = z.object({ taskId: z.string() }).describe('Highlight one task in the list.');\n",
+      'src/components/task-list.tsx': "'use client';\nimport { useAiClientAction } from 'glirastes/react';\n"
+        + "import { highlightTask } from '../lib/contracts';\n"
+        + 'export function TaskList() {\n'
+        + "  useAiClientAction('tasks.highlight', (payload) => console.log(payload.taskId), highlightTask);\n  return null;\n}\n",
+    }, { toolsConfig: { sources: ['react-actions'] } });
+    const describe = async (entry?: Record<string, unknown>) => {
+      if (entry) {
+        await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({ schemaVersion: 1, tools: [{ name: 'ui.tasks.highlight', ...entry }] })}\n`);
+      }
+      const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+      const tool = (await artifactOf(fixture)).tools.find((candidate) => candidate.name === 'ui.tasks.highlight');
+      return {
+        description: tool?.description,
+        origin: result.tools?.find((view) => view.definitionId === 'ui.tasks.highlight')?.descriptionOrigin,
+        overrides: result.findings.filter((finding) => finding.code === 'semantics-overrides-code').length,
+      };
+    };
+    expect(await describe()).toEqual({ description: 'Highlight one task in the list.', origin: 'code', overrides: 0 });
+    expect(await describe({ description: 'Agent text.', origin: { description: 'agent' } }))
+      .toEqual({ description: 'Highlight one task in the list.', origin: 'code', overrides: 0 });
+    expect(await describe({ description: 'Maintained text.' }))
+      .toEqual({ description: 'Maintained text.', origin: 'human', overrides: 1 });
+  }, 120_000);
 });
 
 describe('runToolsPipeline (stage-2 semantics)', () => {
