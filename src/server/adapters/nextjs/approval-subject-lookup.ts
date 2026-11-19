@@ -318,7 +318,13 @@ type RawOutcome =
   | { readonly kind: 'unchecked'; readonly reason: ApprovalSubjectUncheckedReason };
 
 type SubjectOutcome =
-  | { readonly kind: 'subject'; readonly subject: ServerApprovalSubject; readonly canonical: unknown }
+  | {
+    readonly kind: 'subject';
+    readonly subject: ServerApprovalSubject;
+    readonly canonical: unknown;
+    /** The identified records as the read tool's result holds them, for the PII shield (never sent). */
+    readonly found?: { readonly declaration: OutputEntityDeclaration; readonly records: ReadonlyArray<Record<string, unknown>> };
+  }
   | { readonly kind: 'deny'; readonly code: ApprovalSubjectRefusalCode; readonly type: string };
 
 function valueAt(root: unknown, path: string): unknown {
@@ -676,25 +682,27 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     values: Array<string | number>,
     deadline: number,
   ): Promise<SubjectOutcome> => {
-    if (outcome.kind !== 'subject' || !options.shield || outcome.subject.check !== 'found') return outcome;
+    if (outcome.kind !== 'subject' || !options.shield || outcome.subject.check !== 'found' || !outcome.found) return outcome;
     const { subject } = outcome;
-    const raw: Record<string, unknown> = {
-      ...(subject.name !== undefined ? { name: subject.name } : {}),
-      ...(subject.fallbackValue !== undefined ? { fallbackValue: subject.fallbackValue } : {}),
-      ...(subject.candidates ? { candidates: [...subject.candidates] } : {}),
-    };
-    if (Object.keys(raw).length === 0) return outcome;
-    const shown = await guarded(options.shield.shield.anonymizeResult(raw, options.shield.sessionId()), deadline);
+    const { declaration, records } = outcome.found;
+    // Each identified record whole, with its own field names and raw text, as the shield sees a tool result.
+    const shown = await guarded(
+      Promise.all(records.map((record) => options.shield!.shield.anonymizeResult(record, options.shield!.sessionId()))),
+      deadline,
+    );
     if (shown === SHIELD_TIMEOUT || shown === SHIELD_FAILED) {
       const failed = unchecked(item, values, shown === SHIELD_TIMEOUT ? 'timeout' : 'unavailable') as Extract<SubjectOutcome, { kind: 'subject' }>;
       // The digest stays the raw record's: only the card could not get its values.
       return { ...failed, canonical: outcome.canonical };
     }
-    const shownRecord = isRecordValue(shown) ? shown : {};
-    const name = sanitizeSubjectText(shownRecord.name);
-    const fallbackValue = typeof shownRecord.fallbackValue === 'number' ? shownRecord.fallbackValue : sanitizeSubjectText(shownRecord.fallbackValue);
-    const candidates = Array.isArray(shownRecord.candidates)
-      ? shownRecord.candidates.map(sanitizeSubjectText).filter((text): text is string => text !== undefined)
+    const field = (record: unknown, key: string | undefined) => (key !== undefined && isRecordValue(record) ? record[key] : undefined);
+    const nameOf = (record: unknown) => sanitizeSubjectText(field(record, declaration.name));
+    const first = shown[0];
+    const name = subject.status === 'named' ? nameOf(first) : undefined;
+    const rawFallback = field(first, declaration.fallback);
+    const fallbackValue = typeof rawFallback === 'number' && Number.isFinite(rawFallback) ? rawFallback : sanitizeSubjectText(rawFallback);
+    const candidates = subject.status === 'ambiguous'
+      ? shown.map(nameOf).filter((text): text is string => text !== undefined)
       : [];
     const { name: _name, fallbackField, fallbackValue: _fallback, candidates: _candidates, ...rest } = subject;
     const status = subject.status === 'named' && name === undefined ? 'seen' : subject.status;
@@ -742,6 +750,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     const records = steps ? objectsAt(outcome.value, steps, MAX_LOOKUP_LIST_ENTRIES + 1) : [];
     const overflow = records.length > MAX_LOOKUP_LIST_ENTRIES;
     const identities = records.slice(0, MAX_LOOKUP_LIST_ENTRIES).map((record) => ({
+      record,
       identity: declaredIdentityOf(record, declaration),
     }));
     const known = identities.filter((entry) => entry.identity !== undefined);
@@ -774,14 +783,16 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         kind: 'subject',
         subject: { ...subject, ...(candidates.length > 0 ? { candidates } : {}) },
         canonical: canonicalSubject(subject, { status: 'ambiguous', name: JSON.stringify(hits.map((entry) => entry.identity!.name ?? null)) }),
+        found: { declaration, records: hits.slice(0, 10).map((entry) => entry.record) },
       };
     }
     const hit = hits[0]!;
+    const found = { declaration, records: [hit.record] };
     const display = shownIdentity(hit);
     const name = sanitizeSubjectText(display?.name);
     if (name !== undefined) {
       const subject = { ...baseSubject(item, values, 'named', 'found'), name };
-      return { kind: 'subject', subject, canonical: canonicalSubject(subject, rawOf(hit.identity!)) };
+      return { kind: 'subject', subject, canonical: canonicalSubject(subject, rawOf(hit.identity!)), found };
     }
     const fallbackValue = display?.fallbackValue === undefined
       ? undefined
@@ -794,6 +805,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       kind: 'subject',
       subject,
       canonical: canonicalSubject(subject, rawOf(hit.identity!)),
+      found,
     };
   };
 
