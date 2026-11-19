@@ -19,6 +19,7 @@ import {
   compareVersions,
   findPackageUpgradeNotesDir,
   loadUpgradeNotes,
+  loadUpgradeNoteSet,
   type UpgradeNoteKind,
 } from './notes.js';
 
@@ -130,7 +131,7 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
   const notesDir = options.notesDir ?? findPackageUpgradeNotesDir();
   const changelogPath = options.changelogPath ?? join(dirname(notesDir), 'CHANGELOG.md');
   const decisions = baseline?.decisions ?? {};
-  const allNotes = await loadUpgradeNotes(notesDir, to);
+  const { notes: allNotes, releasedVersions } = await loadUpgradeNoteSet(notesDir, to);
   const inRange = (version: string) => compareVersions(version, from) > 0 && compareVersions(version, to) <= 0;
   // A deferred note stays visible after ack moved reviewedThrough past it.
   const notes = allNotes.filter(
@@ -165,7 +166,7 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
     else if (note.kind === 'breaking' && status === 'not-affected') report.checkedNotAffected.push(item);
   }
 
-  const classified = new Set(allNotes.map((note) => note.version));
+  const classified = new Set([...releasedVersions, ...allNotes.map((note) => note.version)]);
   report.unclassified = (await changelogHeadings(changelogPath))
     .filter(
       ({ version }) =>
@@ -218,8 +219,13 @@ export function formatUpgradeReport(report: UpgradeReport, options: { brief?: bo
       (kept) => `- [skill:${kept.name}] edited ${kept.host} skill is behind this SDK; merge the shipped changes by hand`,
     ),
   ]);
-  if (!options.brief) {
-    section('Recommended', report.recommended.map(line));
+  section('Recommended', report.recommended.map(line));
+  if (options.brief) {
+    const counts: string[] = [];
+    if (report.offer.length > 0) counts.push(`${report.offer.length} optional item(s)`);
+    if (report.unclassified.length > 0) counts.push(`${report.unclassified.length} version(s) without notes`);
+    if (counts.length > 0) lines.push('', `Also ${counts.join(' and ')}. Run \`glirastes upgrade report\` for details.`);
+  } else {
     section('Optional, only if wanted', report.offer.map(line));
     section(
       'Unclassified (no upgrade notes, read the changelog)',
@@ -237,9 +243,13 @@ export function formatUpgradeReport(report: UpgradeReport, options: { brief?: bo
 export function summarizeUpgradeReport(report: UpgradeReport): string | null {
   if (report.upToDate) return null;
   const should = report.should.length + report.keptSkills.length;
+  const unclassified =
+    report.unclassified.length > 0
+      ? `, ${report.unclassified.length} ${report.unclassified.length === 1 ? 'version' : 'versions'} without notes`
+      : '';
   return (
     `Glirastes ${report.from} → ${report.to}: ${report.must.length} must, ${should} should, ` +
-    `${report.recommended.length} recommended, ${report.offer.length} optional. Run \`glirastes upgrade report\`.`
+    `${report.recommended.length} recommended, ${report.offer.length} optional${unclassified}. Run \`glirastes upgrade report\`.`
   );
 }
 
@@ -255,7 +265,7 @@ export interface UpgradeIo {
 
 export const UPGRADE_USAGE = [
   'Usage: glirastes upgrade report [--json] [--all] [--brief] [--from <version>] [--fail-on breaking] [--root <dir>]',
-  '         show what changed in the SDK since this app was last reviewed (never changes your code; --brief lists only must and should items)',
+  '         show what changed in the SDK since this app was last reviewed (never changes your code; --brief lists must, should and recommended items and counts the rest)',
   '       glirastes upgrade decide <note-id> <adopted|declined|deferred> [--root <dir>]',
   '         record what you decided for one note in .glirastes/sdk-baseline.json',
   '       glirastes upgrade ack [--force] [--root <dir>]',

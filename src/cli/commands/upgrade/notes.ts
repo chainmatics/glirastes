@@ -94,6 +94,15 @@ export async function loadUpgradeNotes(
   notesDir: string,
   sdkVersion: string,
 ): Promise<Array<UpgradeNote & { version: string }>> {
+  return (await loadUpgradeNoteSet(notesDir, sdkVersion)).notes;
+}
+
+/** All notes plus every released version that has a notes file (even `notes: []`). */
+export async function loadUpgradeNoteSet(
+  notesDir: string,
+  sdkVersion: string,
+): Promise<{ notes: Array<UpgradeNote & { version: string }>; releasedVersions: string[] }> {
+  const releasedVersions: string[] = [];
   const result: Array<UpgradeNote & { version: string }> = [];
   const seen = new Map<string, string>();
 
@@ -137,6 +146,7 @@ export async function loadUpgradeNotes(
         `Invalid upgrade note. ${file}: version: "${parsed.data.version}" does not match the file name`,
       );
     }
+    releasedVersions.push(parsed.data.version);
     for (const note of parsed.data.notes) add(note, parsed.data.version, file);
   }
 
@@ -152,7 +162,7 @@ export async function loadUpgradeNotes(
       add(parsed.data, sdkVersion, rel);
     }
   }
-  return result;
+  return { notes: result, releasedVersions };
 }
 
 /** Locate the `upgrade-notes/` directory shipped with this package. */

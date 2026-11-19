@@ -135,6 +135,15 @@ describe('createUpgradeReport', () => {
     expect(report.unclassified).toEqual([{ version: '0.18.5', changelogHeading: '## [0.18.5] - 2026-11-25' }]);
   });
 
+  it('a version with an empty notes file counts as classified', async () => {
+    await writeNotes('0.18.5', []);
+    await writeNotes('0.19.0', [note('new-break', 'breaking')]);
+    await writeFile(changelogPath, '## [0.19.0] - x\n\n## [0.18.5] - y\n\n## [0.18.0] - z\n');
+    await baseline('0.18.0');
+    const report = await createUpgradeReport(opts());
+    expect(report.unclassified).toEqual([]);
+  });
+
   it('kept edited skills appear under should', async () => {
     await writeNotes('0.19.0', []);
     await baseline('0.19.0');
@@ -182,6 +191,27 @@ describe('createUpgradeReport', () => {
   });
 });
 
+describe('--brief', () => {
+  it('lists must, should and recommended items, optional only as a count', async () => {
+    await seedAllKinds();
+    await baseline('0.18.0');
+    const text = formatUpgradeReport(await createUpgradeReport(opts()), { brief: true });
+    expect(text).toContain('[break-one]');
+    expect(text).toContain('[deprecate-one]');
+    expect(text).toContain('[recommend-one]');
+    expect(text).not.toContain('[optional-one]');
+    expect(text).toContain('1 optional item');
+  });
+
+  it('prints recommended items when they are the only ones', async () => {
+    await writeNotes('0.19.0', [note('recommend-one', 'recommended')]);
+    await baseline('0.18.0');
+    const text = formatUpgradeReport(await createUpgradeReport(opts()), { brief: true });
+    expect(text).toContain('Recommended:');
+    expect(text).toContain('[recommend-one]');
+  });
+});
+
 describe('checked, not affected', () => {
   const guarded = () =>
     writeNotes('0.19.0', [
@@ -224,6 +254,16 @@ describe('summarizeUpgradeReport', () => {
     const report = await createUpgradeReport(opts());
     expect(summarizeUpgradeReport(report)).toBe(
       'Glirastes 0.17.3 → 0.19.0: 1 must, 1 should, 1 recommended, 1 optional. Run `glirastes upgrade report`.',
+    );
+  });
+
+  it('counts versions without notes when present', async () => {
+    await seedAllKinds();
+    await writeFile(changelogPath, '## [0.19.0] - a\n\n## [0.18.2] - b\n\n## [0.18.1] - c\n\n## [0.17.3] - d\n');
+    await baseline('0.17.3');
+    const report = await createUpgradeReport(opts());
+    expect(summarizeUpgradeReport(report)).toBe(
+      'Glirastes 0.17.3 → 0.19.0: 1 must, 1 should, 1 recommended, 1 optional, 2 versions without notes. Run `glirastes upgrade report`.',
     );
   });
 
