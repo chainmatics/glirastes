@@ -363,6 +363,23 @@ describe('server approval subjects in the chat handler', () => {
     expect(promptText(prompts)).toContain('no longer exists');
   });
 
+  it('rechecks the validated input (schema defaults), not the raw one of the history', async () => {
+    let gone = false;
+    const backend = fakeBackend({
+      'GET /playlists/7': () => (gone ? failure(404) : ok({ playlist_id: 7, displayName: 'Lobby Loop' })),
+      'DELETE /playlists/7': () => ok({}),
+    });
+    const { model } = callingModel([{ toolName: 'delete_playlist', input: {} }]);
+    const tools = referenceTools({
+      deletePlaylist: { inputSchema: z.object({ playlist_id: z.number().int().default(7) }).strict(), approvalSubject: { recheck: 'exists' } },
+    });
+    const first = await turn({ tools, model, systemPrompt: 'A', approvalSecret: SECRET, endpointCaller: backend.endpointCaller });
+    expect(subjectsPart(first.chunks)!.data.subjects[0]).toMatchObject({ name: 'Lobby Loop' });
+    gone = true;
+    await streamChunks(await first.handler(post([user, answered(first.message, true)])));
+    expect(writes(backend.calls)).toHaveLength(0);
+  });
+
   it('refuses an approved call whose record changed with recheck: unchanged, and runs an unchanged one', async () => {
     let name = 'Lobby Loop';
     const { config, backend, prompts } = deletePlaylist(() => ok({ playlist_id: 7, displayName: name }), {

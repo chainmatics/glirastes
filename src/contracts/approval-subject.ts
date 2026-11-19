@@ -24,7 +24,7 @@
  *
  * @module
  */
-import { ENTITY_TYPE_PATTERN } from './entity-declaration.js';
+import { ENTITY_TYPE_PATTERN, MAX_TOOL_ENTITIES } from './entity-declaration.js';
 import { isLanguageTag, MAX_TEXT_LANGUAGES, type LocalizedText } from './localized-text.js';
 
 // ============================================================================
@@ -402,8 +402,8 @@ export interface ApprovalSubjectsPartData {
 
 /** Longest looked-up text on the card. */
 export const MAX_SUBJECT_TEXT_LENGTH = 200;
-/** Subjects per part, at most (the server sends no more than its per-call limit). */
-export const MAX_PART_SUBJECTS = 16;
+/** Subjects per part, at most: one per declared reference of a tool (`MAX_TOOL_ENTITIES`). */
+export const MAX_PART_SUBJECTS = MAX_TOOL_ENTITIES;
 
 /**
  * Control characters (C0, DEL, C1), bidirectional overrides and isolates

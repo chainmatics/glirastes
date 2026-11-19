@@ -30,7 +30,6 @@
 import {
   APPROVAL_SUBJECTS_PART_TYPE,
   APPROVAL_SUBJECTS_PART_VERSION,
-  MAX_PART_SUBJECTS,
   sanitizeSubjectText,
   validApprovalSubject,
   validEntityLookups,
@@ -290,8 +289,6 @@ export function approvalSubjectPlans(registry: ToolRegistry): Map<string, ToolPl
         }
       : undefined;
     if (items.length === 0 && !preview) continue;
-    // The browser reads at most 16 subjects per part; more would drop the whole part there.
-    items.length = Math.min(items.length, MAX_PART_SUBJECTS);
     plans.set(name, {
       items,
       refs,
@@ -786,7 +783,10 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     async recheck({ toolName, input, subjectDigest, digestOf }) {
       const plan = plans.get(toolName);
       if (!plan || plan.recheck === 'none' || plan.items.length === 0) return undefined;
-      const { outcomes } = await subjectsOf({ ...plan, preview: undefined } as ToolPlan, input, false);
+      // The same validated input the approval was decided on (defaults, transforms): the history holds the model's raw one.
+      const parsed = options.registry[toolName]?.inputSchema.safeParse(input);
+      if (!parsed?.success) return 'approval_subject_unavailable';
+      const { outcomes } = await subjectsOf({ ...plan, preview: undefined } as ToolPlan, parsed.data, false);
       if (outcomes.some((outcome) => outcome.kind === 'deny')) return 'approval_subject_gone';
       const subjects = outcomes as Array<Extract<SubjectOutcome, { kind: 'subject' }>>;
       if (subjects.some((outcome) => outcome.subject.check === 'unchecked')) {
