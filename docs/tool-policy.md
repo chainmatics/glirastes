@@ -98,7 +98,7 @@ string) or `opt-in`. The extensions are read on the operation object only
 | `x-glirastes-output-allowed-fields` | string array of field paths (`data[].name`, `meta`; no index; at most 200 of at most 200 characters) | Upper bound: a successful result shows only these fields (and `success`, `uiAction`), on every channel, before the PII shield, result handles and the size limit; new backend fields stay hidden until listed. Reduces the output contract. Local only, never sent to the Platform. See [concepts](concepts.md#output-fields-upper-bound-and-default-view) | `output-allowed-fields-invalid` (needs attention): the tool stays disabled (fail closed). A path the response schema does not have: `output-field-unknown` (warning) |
 | `x-glirastes-output-denied-fields` | string array of field paths, or `**.<key>` (any depth); app-wide patterns from `output.deniedFields` of `.glirastes/tools.json` are joined in | Part of the same upper bound: these fields (and everything below them) are never shown; wins over allowed and default fields. `**.fileUrl` removes every `fileUrl` at any depth, also at the top level | `output-denied-fields-invalid` (needs attention): the tool stays disabled. Unknown path: `output-field-unknown` (warning: a misspelt path excludes nothing) |
 | `x-glirastes-output-default-fields` | string array of field paths | The fields the first answer shows, also below the limit; the rest stays readable with `read_result` (without a result store: not readable, the answer says so) | `output-default-fields-invalid` (warning); ignored. Outside the allow-list: `output-default-fields-outside-allowed`; denied: `output-default-fields-denied` (warnings; not shown) |
-| `x-glirastes-title` | string, or one string per BCP-47 tag (`{"en": "Delete playlist", "pl": "Usuń playlistę"}`), at most 200 characters each | The tool's title people read: the label of its `/` command or entity action, and with `languages` in `.glirastes/tools.json` its label on approval cards and in the step display, per language. A plain string has no language and is used for all. See [texts and languages](#texts-and-languages) | `tool-texts-invalid` (warning); ignored |
+| `x-glirastes-title` | string, or one string per BCP-47 tag (`{"en": "Delete playlist", "pl": "Usuń playlistę"}`), at most 200 characters each | The tool's title people read: the label of its `/` command or entity action, and (unless `.glirastes/tools.json` sets `"languages": []`) its label on approval cards and in the step display, per language. A plain string has no language and is used for all. See [texts and languages](#texts-and-languages) | `tool-texts-invalid` (warning); ignored |
 | `x-glirastes-description` | string, or one per tag, at most 1,000 characters each | The description for the model, above the operation's own `description`/`summary`. The model gets one, in English (else the fallback order) | `tool-texts-invalid` (warning); ignored |
 | `x-glirastes-synonyms`, `x-glirastes-examples` | one string array per tag (synonyms: at most 20 of 100 characters; examples: at most 10 of 200) | Search only (`find_tools`, the start set); every language is indexed, none is shown to the model | `tool-texts-invalid` (warning); ignored |
 | `x-glirastes-entities` | list of entity declarations with `path` (`{ type?, id, name?, fallback?, idKind?, path? }`) | The records a result holds and their id, name and fallback fields, for the overview, history, `read_result`, `hideIds`, the approval card and entity links. Local only. See [entity identity](entity-identity.md) | `entity-declaration-invalid` (warning); ignored. Others: `entity-id-conflict` (error, non-blocking), `entity-field-unknown`, `entity-field-denied`, `entity-declaration-overridden` (warnings) |
@@ -282,15 +282,20 @@ What goes where:
   shown to the model, so a tool is found by Polish words even when its
   description is English, and by its name and description when a language
   has no synonyms.
-- **People** (`title`, `presentation`): with `"languages": ["en", "de", "pl"]`
-  in `.glirastes/tools.json` every tool gets a label per language (its
-  presentation, else its title, else the English or German template), local
-  in `tool-contracts.json` and as `toolTexts` in the generated module; a
-  language without an own label is reported as `label-translation-missing`
-  (warning, one per language). The runtime words the chat in the turn's
-  language (`requestLocale` of the chat handler). Without `languages`
-  nothing changes: one presentation in `locale`, titles in the chat's
-  command labels only.
+- **People** (`title`, `presentation`): every tool gets a label per
+  language (its presentation, else its title, else the English or German
+  template, else English), local in `tool-contracts.json` and as
+  `toolTexts` in the generated module. The languages are
+  `"languages": ["en", "de", "pl"]` in `.glirastes/tools.json`; without it
+  (since 0.18.0) `en`, `de` and every language a tool's presentation or
+  title is declared in (at most 50: en, de and the first others in
+  code-unit order; more is reported as `label-languages-limited`). Only a
+  named language without an own label is reported as
+  `label-translation-missing` (warning, one per language). The
+  runtime words the chat in the turn's language (the chat handler's
+  `requestLocale`, else `locale`, else the language the chat UI sends).
+  `"languages": []` keeps the output of before 0.18.0: one presentation in
+  `locale`, titles in the chat's command labels only.
 
 The setup artifact the Platform receives keeps one `presentation` in
 `locale`; translations, titles and synonyms never leave the app (the

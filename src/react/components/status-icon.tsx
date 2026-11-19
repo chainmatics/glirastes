@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 
-export type StatusIconKind = 'check' | 'spinner' | 'pending' | 'error' | 'declined' | 'notice';
+export type StatusIconKind = 'check' | 'spinner' | 'pending' | 'error' | 'declined' | 'notice' | 'aborted';
 
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 
@@ -58,6 +58,7 @@ export function StatusIcon({ icon }: { icon: StatusIconKind }) {
       {icon === 'error' && <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />}
       {icon === 'declined' && <path d="M4.5 8h7" />}
       {icon === 'notice' && <path d="M8 4.5v4.5M8 11.5v.01" />}
+      {icon === 'aborted' && <rect x="5" y="5" width="6" height="6" rx="1" />}
       {icon === 'pending' && <circle cx="8" cy="8" r="5.5" strokeWidth="1.5" opacity="0.5" />}
       {icon === 'spinner' && (
         <path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5">

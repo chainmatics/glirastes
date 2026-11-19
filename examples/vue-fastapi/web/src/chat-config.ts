@@ -9,13 +9,13 @@ export function pageLanguage(): string {
 }
 
 /**
- * The chat element's configuration: every request names the page's language
- * (the runtime words tool labels and its own texts in it), and the chat has
+ * The chat element's configuration. No code for the language: the element
+ * names the page's `lang` in every request by itself (`Content-Language`),
+ * and the runtime words tool labels and its own texts in it. The chat has
  * Polish texts of its own, deliberately partial: every other key falls back
  * to English. German and English are built in.
  */
 export const chatConfig: GlirastesChatElementConfig = {
-  headers: () => ({ 'x-app-language': document.documentElement.lang || 'en' }),
   locales: {
     en: { placeholder: 'Ask about your tasks' },
     de: { placeholder: 'Frag nach deinen Aufgaben' },

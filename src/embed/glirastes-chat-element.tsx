@@ -178,6 +178,9 @@ export class GlirastesChatElement extends BaseElement {
   #interactions: ChatInteractionsData | undefined;
   #interactionsFromProperty = false;
   #interactionsLoad: AbortController | null = null;
+  // The nearest `lang` the last render used; a page (or a region of it) may set or change it later.
+  #renderedLang: string | null = null;
+  #langObserver: MutationObserver | null = null;
 
   readonly #emit: Emit = (name, detail) => {
     this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
@@ -254,6 +257,12 @@ export class GlirastesChatElement extends BaseElement {
       this.#style = style;
       this.#root = createRoot(mount);
     }
+    if (!this.#langObserver && typeof MutationObserver !== 'undefined') {
+      this.#langObserver = new MutationObserver(() => {
+        if (this.#nearestLang() !== this.#renderedLang) this.#render();
+      });
+      this.#langObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'], subtree: true });
+    }
     this.#render();
   }
 
@@ -263,6 +272,8 @@ export class GlirastesChatElement extends BaseElement {
     queueMicrotask(() => {
       if (!this.#pendingUnmount || this.isConnected) return;
       this.#pendingUnmount = false;
+      this.#langObserver?.disconnect();
+      this.#langObserver = null;
       const root = this.#root;
       this.#root = null;
       this.#style = null;
@@ -278,9 +289,14 @@ export class GlirastesChatElement extends BaseElement {
     this.#render();
   }
 
+  /** The nearest `lang` attribute, trimmed, `_` as `-`; empty without one. */
+  #nearestLang(): string {
+    return (this.closest('[lang]')?.getAttribute('lang') ?? '').trim().replace(/_/g, '-');
+  }
+
   /** The nearest `lang` as a BCP-47 tag (`pl-PL`); English without one. Texts fall back per `chatText`. */
   #locale(): ChatLocaleCode {
-    const lang = (this.closest('[lang]')?.getAttribute('lang') ?? '').trim().replace(/_/g, '-');
+    const lang = this.#nearestLang();
     return isLanguageTag(lang) ? lang : 'en';
   }
 
@@ -342,7 +358,8 @@ export class GlirastesChatElement extends BaseElement {
     const chatInteractions = this.#chatInteractions();
     // The nearest `lang` is the UI language of this element (a region of the page may have its own);
     // `languageSource: 'server'` keeps the order before 0.18.0, so it is not stated then.
-    const nearestLang = (this.closest('[lang]')?.getAttribute('lang') ?? '').trim().replace(/_/g, '-');
+    const nearestLang = this.#nearestLang();
+    this.#renderedLang = nearestLang;
     const statesLanguage = isLanguageTag(nearestLang) && this.#config.languageSource !== 'server';
     const config: GlirastesChatElementConfig = {
       ...(statesLanguage ? { language: nearestLang } : {}),

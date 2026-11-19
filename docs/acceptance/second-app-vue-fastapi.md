@@ -62,11 +62,13 @@ declare `x-glirastes-title` in all three, `DELETE /api/channels/{key}` in
 German only (English from the template, Polish falls back to English), and
 `.glirastes/tool-semantics.json` overrides the German title of the first
 (mixing per language). `GET /api/playlists` has Polish
-`x-glirastes-synonyms`. The web app takes `?lang=de` or `?lang=pl`, sends it
-as `x-app-language` with every chat request and has a partial Polish chat
-table (`web/src/chat-config.ts`); the runtime reads the header
-(`requestLocale`) and has a partial Polish table of its own texts
-(`RUNTIME_LOCALES` in `runtime/chat.mjs`).
+`x-glirastes-synonyms`. The web app takes `?lang=de` or `?lang=pl` as the
+page's `lang`; `<glirastes-chat>` names it in every chat request by itself
+(`Content-Language`) and the app has a partial Polish chat table
+(`web/src/chat-config.ts`). The runtime takes the header as the turn's
+language without any code of its own (no `requestLocale`, no `locale`) and has
+a partial Polish table of its own texts (`RUNTIME_LOCALES` in
+`runtime/chat.mjs`).
 
 After changing the routes: `python3 export_openapi.py` in `api/`, then
 `glirastes tools refresh --root examples/vue-fastapi`. The generated outputs

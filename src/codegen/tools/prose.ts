@@ -258,7 +258,7 @@ export interface ToolProse {
   usageHints: string[];
   /** The labels in the app's locale, for the setup artifact. */
   presentation: ToolPresentation;
-  /** Labels per language of tools.json `languages`; absent without it. Local only. */
+  /** Labels per language of `languages` (the pipeline passes the derived ones without tools.json `languages`); absent without it. Local only. */
   labels?: Record<string, Labels>;
   /** Languages of `languages` without an own label (they show a fallback). */
   missingLabelLanguages?: string[];
@@ -300,6 +300,26 @@ export function lookupSemantics(
 function overrideFinding(stableKey: string, field: string): ToolFinding {
   return toolFinding('semantics-overrides-code', 'warning', stableKey,
     `The ${field} in tool-semantics.json differs from the code's and is used: a maintained semantics entry beats the code since 0.18.0.`);
+}
+
+/** The template labels speak these languages; labels per language always cover them. */
+export const TEMPLATE_LABEL_LANGUAGES = ['de', 'en'] as const;
+
+/**
+ * The languages a tool's people-facing texts are declared in: the tags of
+ * its presentations and titles (code and tool-semantics.json). Language-free
+ * texts name none.
+ */
+export function declaredLabelLanguages(hints: ToolProseHints | undefined, entry: ToolSemanticsEntry | undefined): string[] {
+  const layers = [
+    presentationLayer(entry?.presentation),
+    titleLayer(entry?.title),
+    presentationLayer(hints?.presentations ?? hints?.presentation),
+    presentationLayer(hints?.presentation),
+    titleLayer(hints?.title),
+    titleLayer(hints?.contractTitle),
+  ];
+  return layers.flatMap((layer) => Object.keys(layer?.byLanguage ?? {}));
 }
 
 /**
@@ -423,7 +443,9 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
   } else {
     const layers = [...declaredLabels, templateLayer];
     const forLocale = resolveLayeredEntry(layers, input.locale);
-    const tag = forLocale?.level === 'request' || forLocale?.language === undefined ? input.locale : forLocale.language;
+    // A template label keeps the app's locale, as without languages (the setup artifact stays as it was).
+    const templated = forLocale?.layer === layers.length - 1;
+    const tag = forLocale?.level === 'request' || forLocale?.language === undefined || templated ? input.locale : forLocale.language;
     presentation = { locale: tag, ...(forLocale?.value ?? labelsOf(label)) };
     labels = {};
     for (const wanted of input.languages!) {

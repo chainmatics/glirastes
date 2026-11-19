@@ -50,6 +50,7 @@ const STEP_ICONS: Record<ActivityStepStatus, StatusIconKind> = {
   waiting: 'pending',
   declined: 'declined',
   expected: 'notice',
+  aborted: 'aborted',
 };
 
 /**
@@ -86,10 +87,11 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
  */
 export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, className }: ActivityLogProps) {
   const { locale, toolLabels, components, activityLog } = useChatContext();
-  // A UI action still waiting once its turn ended was never confirmed.
+  // Once the turn no longer runs: a UI action still waiting was never confirmed, a call still running was stopped
+  // (a step waiting for approval stays waiting).
   const steps = active ? allSteps : allSteps.map((step) => (step.uiOutcome === 'pending'
     ? { ...step, status: 'done' as const, uiOutcome: 'unconfirmed' as const }
-    : step));
+    : step.status === 'running' ? { ...step, status: 'aborted' as const } : step));
   // The user's own toggle wins over expandWhileRunning; null until the user toggles.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   if (steps.length === 0) return null;
@@ -101,6 +103,8 @@ export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, cla
   const declined = steps.filter((step) => step.status === 'declined').length;
   // An expected failure (classifyToolFailure) is a normal answer: counted on its own as well.
   const expected = steps.filter((step) => step.status === 'expected').length;
+  // A call stopped with its turn is neither done nor failed.
+  const aborted = steps.filter((step) => step.status === 'aborted').length;
   const waiting = steps.some((step) => step.status === 'waiting');
   // Counted on their own too, so the summary is true for every mix ("1 step done, 1 declined", "2 declined").
   const done = steps.filter((step) => step.status === 'done').length;
@@ -129,6 +133,7 @@ export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, cla
     if (failed > 0) counts.push(fillLocaleText(locale.activityFailedLabel, { count: failed }));
     if (declined > 0) counts.push(fillLocaleText(locale.activityDeclinedLabel, { count: declined }));
     if (expected > 0) counts.push(fillLocaleText(locale.activityExpectedLabel, { count: expected }));
+    if (aborted > 0) counts.push(fillLocaleText(locale.activityAbortedLabel ?? '{count} stopped', { count: aborted }));
     summaryText = counts.join(separator);
   }
 

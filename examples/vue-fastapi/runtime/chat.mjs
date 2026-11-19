@@ -25,11 +25,6 @@ export const RUNTIME_LOCALES = {
   },
 };
 
-/** The UI language the web app sends with every chat request (`?lang=` of the page). */
-export function requestLanguage(request) {
-  return request.headers.get('x-app-language') ?? undefined;
-}
-
 /**
  * Turn limits by profile. `fixture` (the default) keeps the small limits the
  * scripted CI test runs with. `acceptance` gives a real model room for the
@@ -65,8 +60,9 @@ async function principalFor(request, apiOrigin) {
  * its endpoint tools calling the API with the user's own credentials.
  * Python never runs Glirastes; this Node process does. `limits` names a
  * profile of LIMIT_PROFILES; `locale` sets the default language of the texts
- * the handler writes itself (the budget stop notice), e.g. `de-DE`; a request
- * that names its language (`x-app-language`) gets that one.
+ * the handler writes itself (the budget stop notice), e.g. `de-DE`. Without
+ * it a request gets the language the chat names (`Content-Language`, sent by
+ * `<glirastes-chat>` by itself).
  */
 export function createChatRuntime({ apiOrigin, model, tenantId, limits = 'fixture', locale }) {
   const profile = LIMIT_PROFILES[limits];
@@ -81,9 +77,8 @@ export function createChatRuntime({ apiOrigin, model, tenantId, limits = 'fixtur
       resolveTurnSnapshot: (context) => glirastes.source.resolveTurnSnapshot(context),
     },
     loadTools: ({ turnSnapshot }) => materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: glirastes.bindings }),
-    // Tool labels per language (tools.json languages) and the turn's language from the request.
+    // Tool labels per language (tools.json languages); the turn's language is the one the chat sends.
     ...(generated.toolTexts ? { toolTexts: generated.toolTexts } : {}),
-    requestLocale: requestLanguage,
     locales: RUNTIME_LOCALES,
     endpointCaller: (request) => createHttpEndpointCaller({ baseUrl: apiOrigin(), request }),
     model: () => model(),

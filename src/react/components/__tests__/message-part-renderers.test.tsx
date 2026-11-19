@@ -121,7 +121,8 @@ describe('approvals at their tool part (W3)', () => {
     ['failed', deletion('output-available', { id: 'ap1', approved: true }, { output: { success: false, error: 'Locked', status: 500 } }), 'approved', 'failed'],
     ['declined', deletion('output-denied', { id: 'ap1', approved: false, reason: 'Rejected by user.' }), 'declined', 'declined'],
     ['not run', deletion('output-denied', { id: 'ap1', approved: true }), 'approved', 'not-run'],
-    ['running', deletion('approval-responded', { id: 'ap1', approved: true }), 'approved', 'running'],
+    // Approved, no result, the turn no longer runs and nothing resends it: stopped (was: running forever).
+    ['stopped', deletion('approval-responded', { id: 'ap1', approved: true }), 'approved', 'aborted'],
   ])('describes a decided approval after a reload: %s', async (_label, part, decision, outcome) => {
     const seen = approvalsOf(conversation(part));
     await waitFor(() => expect(seen.at(-1)).toBeDefined());
@@ -282,31 +283,59 @@ describe('mention markers inside Markdown (W6)', () => {
     expect(open).toHaveBeenCalledWith({ type: 'playlist', id: 'pl_8', label: 'Lobby Loop' });
   });
 
-  it("follows ambiguousNames: 'text' and resolveAmbiguous for a name two records share", async () => {
-    const twinsListed = [
-      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Which playlist?' }] },
-      {
-        id: 'a1', role: 'assistant', parts: [
-          { ...listed, output: { playlists: [{ id: 'pl_7', name: 'Lobby Loop' }, { id: 'pl_8', name: 'Lobby Loop' }] } },
-          { type: 'text', text: '**Found:** {{mention:playlist:pl_7:Lobby Loop}}' },
-        ],
-      },
-    ] as unknown as ChatMessage[];
-    const strong = () => bubble().querySelector('[data-component="markdown"] strong');
-    render(<Chat messages={twinsListed} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown' }} />);
-    expect(await screen.findAllByRole('button', { name: 'Open Lobby Loop' })).toHaveLength(1);
-    cleanup();
-    render(<Chat messages={twinsListed} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown', ambiguousNames: 'text' }} />);
-    await waitFor(() => expect(strong()).not.toBeNull());
-    expect(screen.queryByRole('button', { name: 'Open Lobby Loop' })).toBeNull();
-    cleanup();
+  const twinsWith = (text: string) => [
+    { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Which playlist?' }] },
+    {
+      id: 'a1', role: 'assistant', parts: [
+        { ...listed, output: { playlists: [{ id: 'pl_7', name: 'Lobby Loop' }, { id: 'pl_8', name: 'Lobby Loop' }] } },
+        { type: 'text', text },
+      ],
+    },
+  ] as unknown as ChatMessage[];
+
+  it('links a marker by its id although another shown record has the same name, in every ambiguousNames setting', async () => {
     const pick = (id: string) => (_label: string, candidates: ReadonlyArray<{ id: string }>) => candidates.find((c) => c.id === id) as never;
-    render(<Chat messages={twinsListed} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown', resolveAmbiguous: pick('pl_7') }} />);
-    expect(await screen.findAllByRole('button', { name: 'Open Lobby Loop' })).toHaveLength(1);
-    cleanup();
-    render(<Chat messages={twinsListed} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown', resolveAmbiguous: pick('pl_8'), known: false }} />);
-    await waitFor(() => expect(strong()).not.toBeNull());
+    const settings = [
+      {},
+      { ambiguousNames: 'text' as const },
+      { ambiguousNames: 'first' as const },
+      { resolveAmbiguous: pick('pl_7') },
+      // The hook decides names only: a marker that names pl_7 stays pl_7.
+      { resolveAmbiguous: pick('pl_8'), known: false },
+      { resolveAmbiguous: () => undefined },
+    ];
+    for (const setting of settings) {
+      const open = vi.fn();
+      render(<Chat messages={twinsWith('**Found:** {{mention:playlist:pl_7:Lobby Loop}}')} entityLinks={{ open, mentionMarkers: 'markdown', ...setting }} />);
+      const chips = await screen.findAllByRole('button', { name: 'Open Lobby Loop' });
+      expect(chips).toHaveLength(1);
+      fireEvent.click(chips[0]!);
+      expect(open).toHaveBeenCalledWith({ type: 'playlist', id: 'pl_7', label: 'Lobby Loop' });
+      cleanup();
+    }
+  });
+
+  it('still checks a marker with an id against the records the conversation showed (verifyMentions)', async () => {
+    render(<Chat messages={twinsWith('**Found:** {{mention:playlist:pl_999:Lobby Loop}}')} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown' }} />);
+    await waitFor(() => expect(bubble().querySelector('[data-component="markdown"] strong')).not.toBeNull());
     expect(screen.queryByRole('button', { name: 'Open Lobby Loop' })).toBeNull();
+  });
+
+  it("leaves a name two shown records share as text by default, and links the first with ambiguousNames: 'first'", async () => {
+    const twinsNamed = twinsWith('Lobby Loop is live.');
+    render(<Chat messages={twinsNamed} entityLinks={{ open: vi.fn() }} />);
+    await screen.findByText(/is live/);
+    expect(screen.queryByRole('button', { name: 'Open Lobby Loop' })).toBeNull();
+    cleanup();
+    const open = vi.fn();
+    render(<Chat messages={twinsNamed} entityLinks={{ open, ambiguousNames: 'first' }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Lobby Loop' }));
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ type: 'playlist', id: 'pl_7' }));
+    cleanup();
+    const picked = vi.fn();
+    render(<Chat messages={twinsNamed} entityLinks={{ open: picked, resolveAmbiguous: (_label, candidates) => candidates[1] }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Lobby Loop' }));
+    expect(picked).toHaveBeenCalledWith(expect.objectContaining({ type: 'playlist', id: 'pl_8' }));
   });
 
   it("does not let an invented marker make a shown record's name ambiguous", async () => {

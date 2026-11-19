@@ -44,6 +44,7 @@ import {
   type ToolReportTool,
 } from './artifact.js';
 import { compareCodeUnits } from './canonical.js';
+import { MAX_TEXT_LANGUAGES } from '../../contracts/localized-text.js';
 import {
   generatedModulePath,
   loadToolsConfig,
@@ -57,7 +58,14 @@ import { sortFindings, toolFinding, TRANSIENT_FINDING_CODES } from './findings.j
 import { readPromptBundle, readToolInputs, type PromptBundleInput } from './inputs.js';
 import { checkMcpNames } from './mcp-names.js';
 import type { ToolsMode } from './mode.js';
-import { lookupSemantics, resolveToolProse, type DescriptionOrigin, type ToolSemantics } from './prose.js';
+import {
+  declaredLabelLanguages,
+  lookupSemantics,
+  resolveToolProse,
+  TEMPLATE_LABEL_LANGUAGES,
+  type DescriptionOrigin,
+  type ToolSemantics,
+} from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
 import {
@@ -623,6 +631,22 @@ async function generate(
   const contractEntries: ToolContractsEntry[] = [];
   const reportTools: ToolReportTool[] = [];
   const languages = requiredLanguages(config.locale, config.languages);
+  // Labels per language: tools.json `languages`; without it every language a tool's texts are declared in plus the
+  // template languages (en, de); `languages: []` keeps one label in `locale` (the output before 0.18.0).
+  const derivedLabels = config.languages === undefined
+    ? defaultLabelLanguages(inventory.executions.map((execution) => ({
+      hints: observedByKey.get(execution.stableKey)?.prose,
+      entry: lookupSemantics(inputs.semantics, execution.stableKey, execution.definitionId),
+    })))
+    : undefined;
+  const labelLanguages = config.languages !== undefined
+    ? (config.languages.length > 0 ? config.languages : undefined)
+    : derivedLabels!.languages;
+  if (derivedLabels && derivedLabels.dropped.length > 0) {
+    findings.push(toolFinding('label-languages-limited', 'warning', `${TOOLS_PATHS.config}#languages`,
+      `The tools declare texts in more than ${MAX_TEXT_LANGUAGES} languages; labels are generated for en, de and the first others in code-unit order, not for: `
+      + `${derivedLabels.dropped.slice(0, 10).join(', ')}${derivedLabels.dropped.length > 10 ? `, and ${derivedLabels.dropped.length - 10} more` : ''}.`));
+  }
   const usedSemantics = new Set<ToolSemanticsEntry>();
   const missingLabels = new Map<string, string[]>();
 
@@ -723,7 +747,7 @@ async function generate(
       ...(execution.executionKind === 'endpoint' ? { method: execution.method, path: execution.path } : {}),
       operationGroup: defaults.operationGroup,
       locale: config.locale,
-      ...(config.languages ? { languages: config.languages } : {}),
+      ...(labelLanguages ? { languages: labelLanguages } : {}),
       ...(tool.evidence.jsDoc ? { jsDoc: tool.evidence.jsDoc } : {}),
       ...(tool.prose ? { hints: tool.prose } : {}),
       semantics: inputs.semantics,
@@ -746,7 +770,8 @@ async function generate(
         schemaSource: schemaQuality,
       },
     });
-    for (const language of prose.missingLabelLanguages ?? []) {
+    // Only the languages the app named are reported; the derived ones fall back to English silently.
+    for (const language of config.languages?.length ? prose.missingLabelLanguages ?? [] : []) {
       const list = missingLabels.get(language) ?? [];
       list.push(execution.definitionId);
       missingLabels.set(language, list);
@@ -1084,4 +1109,26 @@ export async function runToolsPipelineWith(
 /** Derives the app's tools from code: write, frozen (check) or integrity (deploy) mode. */
 export async function runToolsPipeline(options: ToolsPipelineOptions): Promise<ToolsPipelineResult> {
   return runToolsPipelineWith(options, {});
+}
+
+/**
+ * The label languages of an app without tools.json `languages`: the template
+ * languages and every language a tool's presentation or title is declared
+ * in, each once (case-insensitive), in code-unit order. At most
+ * `MAX_TEXT_LANGUAGES`: en and de always, then the others in code-unit
+ * order; the rest is `dropped` (reported, the app can name its languages).
+ */
+function defaultLabelLanguages(
+  tools: ReadonlyArray<{ hints: Parameters<typeof declaredLabelLanguages>[0]; entry: Parameters<typeof declaredLabelLanguages>[1] }>,
+): { languages: string[]; dropped: string[] } {
+  const byLower = new Map<string, string>(TEMPLATE_LABEL_LANGUAGES.map((tag) => [tag, tag]));
+  for (const tag of tools.flatMap((tool) => declaredLabelLanguages(tool.hints, tool.entry))) {
+    if (!byLower.has(tag.toLowerCase())) byLower.set(tag.toLowerCase(), tag);
+  }
+  const others = [...byLower.values()].slice(TEMPLATE_LABEL_LANGUAGES.length).sort(compareCodeUnits);
+  const room = MAX_TEXT_LANGUAGES - TEMPLATE_LABEL_LANGUAGES.length;
+  return {
+    languages: [...TEMPLATE_LABEL_LANGUAGES, ...others.slice(0, room)].sort(compareCodeUnits),
+    dropped: others.slice(room),
+  };
 }

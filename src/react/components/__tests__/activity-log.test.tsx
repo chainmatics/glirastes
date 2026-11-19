@@ -400,6 +400,8 @@ describe('ActivityLog', () => {
     expect(deChatLocale.activityDeclinedLabel).toBe('{count} abgelehnt');
     expect(DEFAULT_LOCALE.activityExpectedLabel).toBe('{count} without result');
     expect(deChatLocale.activityExpectedLabel).toBe('{count} ohne Ergebnis');
+    expect(DEFAULT_LOCALE.activityAbortedLabel).toBe('{count} stopped');
+    expect(deChatLocale.activityAbortedLabel).toBe('{count} abgebrochen');
   });
 });
 

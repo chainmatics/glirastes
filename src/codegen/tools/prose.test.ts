@@ -234,6 +234,13 @@ describe('tool prose', () => {
       expect(prose.presentation).toEqual({ locale: 'en-US', singular: 'Create tasks', plural: 'Create tasks', approval: 'Create tasks' });
     });
 
+    it('keeps the presentation of a templated tool in the app locale, also for a locale without a template', () => {
+      for (const locale of ['fr-FR', 'de-DE', 'en-US']) {
+        expect(resolveToolProse({ ...base, locale, languages: ['de', 'en'] }).presentation)
+          .toEqual(resolveToolProse({ ...base, locale }).presentation);
+      }
+    });
+
     it('mixes the semantics entry and the endpoint per language, the maintained entry first', async () => {
       const { semantics } = await semanticsFile(JSON.stringify({
         schemaVersion: 1, tools: [{ name: 'tasks.create', title: { de: 'Neue Aufgabe' } }],

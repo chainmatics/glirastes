@@ -85,6 +85,19 @@ export function preferredLanguage(header: string | null | undefined): string | u
   return best?.tag;
 }
 
+/**
+ * The request header the chat UI names its language in (`pl-PL`), with
+ * every request of the React/Vercel transport and `<glirastes-chat>`. A
+ * CORS-safelisted header: a cross-origin embed needs no extra allowed header.
+ */
+export const CHAT_LANGUAGE_HEADER = 'content-language';
+
+/** The chat language of a `CHAT_LANGUAGE_HEADER` value: exactly one language tag, else undefined (a list, `*`). */
+export function chatLanguageOf(value: string | null | undefined): string | undefined {
+  const tag = value?.trim();
+  return tag && isLanguageTag(tag) ? tag : undefined;
+}
+
 /** The text of `value` for `requested`; a plain string serves every language. */
 export function resolveLocalizedText(value: LocalizedText | undefined, requested: string | undefined): string | undefined {
   if (value === undefined) return undefined;

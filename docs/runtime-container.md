@@ -191,13 +191,17 @@ Languages (all optional, section `chat`): `chat.locale` (BCP-47, default
 English) is the language of the texts the runtime writes itself;
 `chat.requestLocaleHeader` names a request header with the turn's language
 (`accept-language` is read by preference, any other header holds one tag,
-e.g. `x-app-language` sent by the chat's transport); `chat.locales` adds or
+e.g. `x-app-language` sent by the chat's transport). With neither set, the
+turn's language is the one the chat UI names in each request
+(`Content-Language`, sent by the React/Vercel transport and
+`<glirastes-chat>`; one BCP-47 tag, anything else ignored), else English;
+`chat.locale` or `chat.requestLocaleHeader` replaces it. `chat.locales` adds or
 changes the runtime's own texts per language (`{"pl": {"closing": "...",
 "silentTurn": "..."}}`, keys of the SDK handler's `locales`; partial tables
-fall back per key, an unknown key fails at start). With `languages` in
-`.glirastes/tools.json` the artifact carries the tool labels per language
-(local, never sent to the Platform), and the approval card and step display
-show them in the turn's language.
+fall back per key, an unknown key fails at start). The artifact carries the
+tool labels per language (`.glirastes/tools.json` `languages`, by default
+en, de and every declared language; local, never sent to the Platform), and
+the approval card and step display show them in the turn's language.
 
 UI action outcomes (optional): `chat.uiActionOutcomes` is `confirm` (default),
 `report-only` or `off`, the handler's `uiActionOutcomes` (see

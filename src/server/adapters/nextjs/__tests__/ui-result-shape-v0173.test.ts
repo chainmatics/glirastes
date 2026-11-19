@@ -68,6 +68,17 @@ describe('UI tool results for a client without the outcome flag (0.17.3 compatib
     }
   });
 
+  it('golden: a request without the flag that names its language (Content-Language) keeps the 0.17.3 shape', async () => {
+    // The language is no outcome flag: the result shape follows glirastesUiOutcomes alone. These turns carry no
+    // language-dependent text (no tool labels, no handler text), so the stream stays byte-identical in every language.
+    for (const language of ['pl', 'de-AT', 'en']) {
+      const records = await runAll(sdk, {}, { 'content-language': language });
+      for (const entry of CASES) {
+        expect(comparable(records[entry.name]!), `${language} ${entry.name}`).toBe(comparable(golden.records[entry.name]!));
+      }
+    }
+  });
+
   it("golden: uiToolResultShape: 'legacy' gives the same stream", async () => {
     const records = await runAll(sdk, { uiToolResultShape: 'legacy' });
     for (const entry of CASES) {

@@ -62,8 +62,11 @@ export interface ChatEntityLinksConfig {
   knownEntities?(context: ChatEntityLinksContext): ReadonlyArray<ChatEntityReference>;
   /**
    * When two known references share a name (two playlists "Lobby Loop"):
-   * `first` (default) links the first one found, `text` leaves the name as
-   * text. `resolveAmbiguous` decides instead when given.
+   * `text` (default since 0.18.0) leaves the name as text, `first` links the
+   * first one found (the default before). `resolveAmbiguous` decides instead
+   * when given. Name matches only: a `{{mention:type:id:label}}` marker or a
+   * `@` mention carries its id and becomes a chip by that id, whatever other
+   * record has the same name (`verifyMentions` still applies).
    */
   readonly ambiguousNames?: 'first' | 'text';
   /** Picks the reference for a name several known references share; `undefined` leaves it as text. */
@@ -84,7 +87,8 @@ export interface ChatEntityLinksConfig {
    * `outputEntities`, a `@` mention the user picked, an entity search hit);
    * otherwise its label stays text. Never a field-name guess, so without
    * declarations every marker stays text. Default true; `false` turns the
-   * check off. Names several records share follow `ambiguousNames`.
+   * check off. A checked marker links by its id, also where another record
+   * has the same name.
    */
   readonly verifyMentions?: boolean;
   /**
@@ -134,7 +138,8 @@ export function splitEntityText(
 ): ChatEntityTextSegment[] {
   const minLength = options.minLabelLength ?? 4;
   const byLabel = new Map<string, ChatEntityReference>();
-  const decide = options.resolveAmbiguous !== undefined || options.ambiguousNames === 'text';
+  // Since 0.18.0 a name several records share stays text unless `ambiguousNames: 'first'` (the behaviour before).
+  const decide = options.resolveAmbiguous !== undefined || options.ambiguousNames !== 'first';
   const candidates = new Map<string, ChatEntityReference[]>();
   for (const reference of options.known ?? []) {
     const label = reference.label.trim();

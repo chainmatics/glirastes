@@ -59,9 +59,14 @@ describe("runtime container artifact", () => {
     const name = Object.keys(loaded.toolTexts ?? {})[0]!;
     expect(loaded.toolTexts?.[name]?.labels?.pl?.approval).toBe("Pokaż zadania");
     expect(JSON.stringify(loaded.setupArtifact)).not.toContain("Pokaż zadania");
+    // Without languages: the template languages (en, de) by default, none with `languages: []`.
     const plain = await fixture();
     await buildRuntimeArtifact({ projectRoot: plain.root, outputDirectory: plain.path("artifact") });
-    expect((await loadRuntimeArtifact(plain.path("artifact"))).toolTexts).toBeUndefined();
+    const texts = (await loadRuntimeArtifact(plain.path("artifact"))).toolTexts ?? {};
+    expect(Object.values(texts).map((entry) => Object.keys(entry.labels ?? {}))).toEqual([["de", "en"]]);
+    const single = await fixture(undefined, { languages: [] });
+    await buildRuntimeArtifact({ projectRoot: single.root, outputDirectory: single.path("artifact") });
+    expect((await loadRuntimeArtifact(single.path("artifact"))).toolTexts).toBeUndefined();
   }, 60_000);
 
   it("rejects required bodies that can be empty because the caller omits an empty object", async () => {

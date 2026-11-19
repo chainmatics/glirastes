@@ -97,6 +97,11 @@ export interface ChatTransport {
   continueTurn?(): void | PromiseLike<void>;
   /** Called by the provider: whether it reports outcomes through this transport. */
   setUiOutcomeReporting?(enabled: boolean): void;
+  /**
+   * Called by the provider with the chat language to name in each request
+   * (`Content-Language`), or null for none (`sendLanguage: false`, unknown).
+   */
+  setRequestLanguage?(language: string | null): void;
 }
 
 /**
@@ -677,9 +682,11 @@ export type ApprovalDecision = 'approved' | 'declined';
  * user; `running` approved, no result yet; `done`, `failed`, `expected` (a
  * neutral failure, as in the activity log) its result; `declined` the user
  * said no; `not-run` the user approved, but the server did not run it (an
- * expired or already used approval).
+ * expired or already used approval); `aborted` the user approved, but the
+ * turn ended without a result (stopped, the request failed, a stored
+ * history) and no automatic resend is pending.
  */
-export type ApprovalOutcome = 'open' | 'running' | 'done' | 'failed' | 'expected' | 'declined' | 'not-run';
+export type ApprovalOutcome = 'open' | 'running' | 'done' | 'failed' | 'expected' | 'declined' | 'not-run' | 'aborted';
 
 /**
  * The approval of one tool part, open or decided, as the browser can still
@@ -916,6 +923,11 @@ export interface ChatLocale {
    * supports `{count}`.
    */
   activityExpectedLabel: string;
+  /**
+   * Calls still running when their turn ended without them (stopped, the
+   * request failed, a stored history): not counted as failed; supports `{count}`.
+   */
+  activityAbortedLabel: string;
   /** Summary while a tool runs; `{label}` is the tool's label or `activityWorkingLabel` (`{label}…`). */
   activityRunningLabel: string;
   /** Running summary with `activityLog.runningProgress`; supports `{count}` (done steps, as `activityDoneLabel`) and `{label}`. */
@@ -952,6 +964,8 @@ export interface ChatLocale {
   approvalEntryDeclinedLabel: string;
   /** Approved, but the server did not run it (expired or already used approval). */
   approvalEntryNotRunLabel: string;
+  /** Approved, but the turn ended without a result (stopped, the request failed, a stored history). */
+  approvalEntryAbortedLabel: string;
   planTitle: string;
   /** Shown when the user sends while an approval card waits for a decision. */
   approvalPendingHint: string;
@@ -1191,7 +1205,8 @@ export interface AiChatProviderConfig {
    * - `'server'`: the language of the tool labels first, then the page's
    *   `lang` (the order before 0.18.0).
    * The tool labels themselves come from the server in its turn language
-   * (`requestLocale`); `toolLabels` overrides them.
+   * (`requestLocale`, else the language this chat sends, see
+   * `sendLanguage`); `toolLabels` overrides them.
    */
   languageSource?: 'page' | 'server';
   /**
@@ -1200,6 +1215,16 @@ export interface AiChatProviderConfig {
    * `languageSource`. `<glirastes-chat>` passes its nearest `lang`.
    */
   language?: string;
+  /**
+   * Names the chat language (`language`, else the page's `lang`) in each
+   * request as the `Content-Language` header (one BCP-47 tag), through a
+   * transport that supports it (`useVercelAiChatTransport`, `VercelAiChat`,
+   * `<glirastes-chat>`). The handler uses it as the turn language unless the
+   * app set `requestLocale` or `locale` there (`clientLanguage`). Default
+   * true; `false` sends none. Not sent with `languageSource: 'server'` or
+   * without a known language. A header the app's `headers` set wins.
+   */
+  sendLanguage?: boolean;
   /**
    * Theme for the floating widget: a preset name (autocompleted by your
    * editor) or an override object. Defaults to `'professional-lightblue'`.

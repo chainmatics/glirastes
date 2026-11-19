@@ -30,7 +30,8 @@ import { artifactOf, chatBody, passingCheck, toolNamed } from './support/tool-sy
  * tests check the generated labels per language, the fallback, that the
  * Platform-bound setup artifact carries no translation, that the search
  * finds a tool by Polish words, and that the runtime words the chat in the
- * language a request names.
+ * language the chat names in a request (`Content-Language`), with no
+ * language code in the app.
  */
 const PYTHON_READY = pythonReady();
 
@@ -146,7 +147,8 @@ async function turnIn(language: string | undefined): Promise<{ presentation: { l
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${app.token}`,
-        ...(language ? { 'x-app-language': language } : {}),
+        // What <glirastes-chat> sends by itself for the page's lang.
+        ...(language ? { 'content-language': language } : {}),
       },
       body: chatBody('Hello'),
     });

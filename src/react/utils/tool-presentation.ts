@@ -40,12 +40,20 @@ export function isGerman(language: string | null | undefined): boolean {
 
 /**
  * The `lang` of the page, read after mount so the server render and the first
- * client render agree; null until then and for a page without one.
+ * client render agree; null until then and for a page without one. Follows
+ * every later change: an i18n library often sets `<html lang>` in an effect
+ * of a parent (which runs after the chat's own) or on a language switch.
  */
 export function usePageLanguage(): string | null {
   const [language, setLanguage] = useState<string | null>(null);
   useEffect(() => {
-    setLanguage(document.documentElement.lang || null);
+    const root = document.documentElement;
+    const read = () => setLanguage(root.lang || null);
+    read();
+    if (typeof MutationObserver === 'undefined') return undefined;
+    const observer = new MutationObserver(read);
+    observer.observe(root, { attributes: true, attributeFilter: ['lang'] });
+    return () => observer.disconnect();
   }, []);
   return language;
 }

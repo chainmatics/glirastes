@@ -128,7 +128,12 @@ async function chunksOf(response: Response): Promise<Json[]> {
     .map((chunk) => (chunk.type === 'start' ? { type: 'start' } : chunk));
 }
 
-export async function runCase(sdk: ScenarioSdk, call: ScenarioCase, config: Json = {}): Promise<CaseRecord> {
+export async function runCase(
+  sdk: ScenarioSdk,
+  call: ScenarioCase,
+  config: Json = {},
+  headers: Record<string, string> = {},
+): Promise<CaseRecord> {
   const model = scriptedModel(sdk, call);
   const handler = sdk.createAiChatHandler({ tools: registry(sdk), systemPrompt: 'Assistant', model, ...config });
   const body: Json = {
@@ -137,7 +142,7 @@ export async function runCase(sdk: ScenarioSdk, call: ScenarioCase, config: Json
   };
   const response = await handler(new Request('https://app.example/api/chat', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
   }));
   const chunks = await chunksOf(response);
@@ -145,8 +150,12 @@ export async function runCase(sdk: ScenarioSdk, call: ScenarioCase, config: Json
   return { chunks, modelToolResults: (second ?? []).filter((message) => message.role === 'tool').map((message) => message.content) };
 }
 
-export async function runAll(sdk: ScenarioSdk, config: Json = {}): Promise<Record<string, CaseRecord>> {
+export async function runAll(
+  sdk: ScenarioSdk,
+  config: Json = {},
+  headers: Record<string, string> = {},
+): Promise<Record<string, CaseRecord>> {
   const records: Record<string, CaseRecord> = {};
-  for (const call of CASES) records[call.name] = await runCase(sdk, call, config);
+  for (const call of CASES) records[call.name] = await runCase(sdk, call, config, headers);
   return records;
 }

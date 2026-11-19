@@ -128,8 +128,8 @@ per tool), e.g. for a server that is not `createAiChatHandler`.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `knownEntities(context)` | none | Further references the app derives from the messages (`context.messages`) |
-| `ambiguousNames` | `'first'` | Two references with one name: `first` links the first found (as before), `text` leaves the name as text |
-| `resolveAmbiguous(label, candidates)` | none | Picks the reference for a shared name; `undefined` leaves it as text |
+| `ambiguousNames` | `'text'` | Two references with one name: `text` leaves the name as text (default since 0.18.0), `first` links the first found (the default before). Name matches only: a `{{mention:type:id:label}}` marker or `@` mention carries its id and becomes a chip by that id although another record has the same name (`verifyMentions` still applies) |
+| `resolveAmbiguous(label, candidates)` | none | Picks the reference for a shared name (name matches only, as `ambiguousNames`); `undefined` leaves it as text |
 | `scope` | `'all'` | `assistant`: only the assistant's text is linked, never a user's message |
 | `ChatEntityReference.data` | none | Free data from `resolve`, `knownEntities` or `resolveAmbiguous`, passed to `open` |
 | `mentionMarkers` | `'plain'` | `{{mention:type:id:label}}` markers in an assistant's text: `plain` renders such a text part without Markdown, each marker a chip (as before); `markdown` keeps the Markdown and puts each marker as an inline chip inside it (a custom `Markdown` keeps them through `markdownComponents`; without them it shows the label) |

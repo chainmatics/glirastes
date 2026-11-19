@@ -672,6 +672,84 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
   }, 120_000);
 });
 
+describe('runToolsPipeline (labels per language by default)', () => {
+  const SEMANTICS = `${JSON.stringify({
+    schemaVersion: 1,
+    tools: [{ stableKey: 'GET /api/tasks', title: { de: 'Aufgaben zeigen', pl: 'Pokaż zadania' } }],
+  })}\n`;
+  const label = (text: string) => ({ singular: text, plural: text, approval: text });
+
+  async function refreshed(languages?: string[]) {
+    const fixture = await app();
+    if (languages) {
+      const config = JSON.parse(await fixture.read(TOOLS_PATHS.config)) as Record<string, unknown>;
+      await fixture.write(TOOLS_PATHS.config, JSON.stringify({ ...config, languages }));
+    }
+    await fixture.write(TOOLS_PATHS.semantics, SEMANTICS);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const tools = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts))).tools;
+    return {
+      result,
+      list: tools.find((tool) => tool.stableKey === 'GET /api/tasks'),
+      create: tools.find((tool) => tool.stableKey === 'POST /api/tasks'),
+      module: await fixture.read(DEFAULT_GENERATED_MODULE),
+      artifact: await fixture.read(TOOLS_PATHS.setupArtifact),
+      fixture,
+    };
+  }
+
+  it('labels every tool in en, de and each declared language, English where a translation is missing, silently', async () => {
+    const { result, list, create, module, fixture } = await refreshed();
+    expect(list?.labels).toEqual({ de: label('Aufgaben zeigen'), en: label('List tasks'), pl: label('Pokaż zadania') });
+    // No Polish declaration: English (the template), reported nowhere since the app named no languages.
+    expect(Object.keys(create?.labels ?? {})).toEqual(['de', 'en', 'pl']);
+    expect(create?.labels?.pl).toEqual(create?.labels?.en);
+    expect(result.findings.filter((finding) => finding.code === 'label-translation-missing')).toEqual([]);
+    expect(module).toContain('export const toolTexts = {');
+    expect(module).toContain('"Pokaż zadania"');
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+  }, 120_000);
+
+  it('keeps the output of before 0.18.0 with languages: [] (one label in locale, no titles as labels)', async () => {
+    const { list, module, artifact } = await refreshed([]);
+    expect(list?.labels).toBeUndefined();
+    expect(module).not.toContain('toolTexts');
+    expect(artifact).not.toContain('Aufgaben zeigen');
+    const withDefault = await refreshed();
+    expect(withDefault.list?.title).toEqual(list?.title);
+  }, 120_000);
+
+  it('keeps en and de and reports the rest when the tools declare more languages than one table holds', async () => {
+    const fixture = await app();
+    const tags = Array.from({ length: 60 }, (_, index) => `q${String.fromCharCode(97 + Math.floor(index / 26))}${String.fromCharCode(97 + (index % 26))}`);
+    const titles = (part: string[]) => Object.fromEntries(part.map((tag) => [tag, `Title ${tag}`]));
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'GET /api/tasks', title: titles(tags.slice(0, 30)) },
+        { stableKey: 'POST /api/tasks', title: titles(tags.slice(30)) },
+      ],
+    })}\n`);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const list = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts))).tools
+      .find((tool) => tool.stableKey === 'GET /api/tasks');
+    const emitted = Object.keys(list?.labels ?? {});
+    expect(emitted).toHaveLength(50);
+    expect(emitted).toEqual(expect.arrayContaining(['de', 'en', 'qaa']));
+    expect(emitted).not.toContain('qch');
+    const limited = result.findings.filter((finding) => finding.code === 'label-languages-limited');
+    expect(limited.map((finding) => [finding.severity, finding.subjectRef])).toEqual([['warning', '.glirastes/tools.json#languages']]);
+    expect(limited[0]!.message).toContain('qbw, qbx');
+  }, 120_000);
+
+  it('emits only the named languages and reports the missing ones with an explicit list', async () => {
+    const { list, result } = await refreshed(['en', 'pl']);
+    expect(list?.labels).toEqual({ en: label('List tasks'), pl: label('Pokaż zadania') });
+    expect(result.findings.filter((finding) => finding.code === 'label-translation-missing').map((finding) => finding.subjectRef))
+      .toEqual(['.glirastes/tools.json#languages.pl']);
+  }, 120_000);
+});
+
 describe('runToolsPipeline (stale tool-resolutions.json entries)', () => {
   const memo = (route: string, keys: string) => [
     `src/app/api/${route}/route.ts`,

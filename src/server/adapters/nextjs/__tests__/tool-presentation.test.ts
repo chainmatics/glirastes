@@ -246,3 +246,85 @@ describe('a managed chat turn', () => {
     expect(await (await handler(request())).text()).not.toContain('data-tool-presentation');
   });
 });
+
+describe('the turn language the chat UI sends (Content-Language)', () => {
+  const labels = (text: string) => ({ singular: text, plural: text, approval: `${text}?` });
+  const threeLanguages = { list_tasks: { labels: { en: labels('List tasks'), de: labels('Aufgaben zeigen'), pl: labels('Pokaż zadania') } } };
+  const twoLanguages = { list_tasks: { labels: { en: labels('List tasks'), de: labels('Aufgaben zeigen') } } };
+  const model = () => new MockLanguageModelV3({
+    doStream: async () => ({
+      stream: convertArrayToReadableStream([
+        { type: 'stream-start', warnings: [] },
+        { type: 'text-start', id: 't' },
+        { type: 'text-delta', id: 't', delta: 'Hi' },
+        { type: 'text-end', id: 't' },
+        {
+          type: 'finish',
+          finishReason: { unified: 'stop', raw: undefined },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined },
+          },
+        },
+      ]),
+    }),
+  });
+  const tools = {
+    list_tasks: defineTool({
+      id: agentRevision.toolAllowlist[0]!,
+      description: 'List tasks.',
+      inputSchema: z.object({}),
+      execute: async () => ({ tasks: [] }),
+    }),
+  };
+  /** The `data-tool-presentation` of one turn whose request carries `headers`. */
+  async function presentation(headers: Record<string, string>, options: Record<string, unknown> = {}) {
+    const handler = createAiChatHandler({
+      tools,
+      model: model(),
+      systemPrompt: 'Assistant',
+      toolTexts: threeLanguages,
+      managedRuntime: {
+        resolvePrincipal: async () => principal,
+        resolveTurnSnapshot: async ({ turnId }) => createTurnSnapshot({
+          turnId, agentRevision, manifestRevision: worded, policyRevision, principal, localLimits,
+        }),
+      },
+      ...options,
+    });
+    const body = await (await handler(new Request('https://tasks.example/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ messages: [{ id: 'message-1', role: 'user', parts: [{ type: 'text', text: 'Hi' }] }] }),
+    }))).text();
+    const line = body.split('\n').find((entry) => entry.includes('"data-tool-presentation"'));
+    return (JSON.parse(line!.replace(/^data: /, '')) as { data: { locale: string; tools: Record<string, { label: string }> } }).data;
+  }
+
+  it('words the tools in the sent language without any app code', async () => {
+    expect(await presentation({ 'content-language': 'pl' })).toEqual({ locale: 'pl', tools: { list_tasks: { label: 'Pokaż zadania' } } });
+    expect(await presentation({ 'content-language': 'pl-PL' })).toEqual({ locale: 'pl-PL', tools: { list_tasks: { label: 'Pokaż zadania' } } });
+  });
+
+  it('falls back to English where the labels have no Polish', async () => {
+    expect(await presentation({ 'content-language': 'pl' }, { toolTexts: twoLanguages }))
+      .toEqual({ locale: 'pl', tools: { list_tasks: { label: 'List tasks' } } });
+  });
+
+  it('keeps the manifest wording without a sent language and for an invalid one', async () => {
+    const before = { locale: 'de-DE', tools: { list_tasks: { label: 'Aufgaben auflisten' } } };
+    expect(await presentation({})).toEqual(before);
+    for (const value of ['pl, en', '*', 'pl_PL', 'x'.repeat(40), '']) {
+      expect(await presentation({ 'content-language': value })).toEqual(before);
+    }
+  });
+
+  it("puts the app's requestLocale and an explicit locale first, and clientLanguage: false ignores it", async () => {
+    const header = { 'content-language': 'pl' };
+    expect((await presentation(header, { requestLocale: () => 'en' })).tools.list_tasks).toEqual({ label: 'List tasks' });
+    // requestLocale without an answer falls back to the configured locale, not to the sent language.
+    expect((await presentation(header, { requestLocale: () => undefined })).locale).toBe('de-DE');
+    expect(await presentation(header, { locale: 'en-US' })).toEqual({ locale: 'en-US', tools: { list_tasks: { label: 'List tasks' } } });
+    expect((await presentation(header, { clientLanguage: false })).locale).toBe('de-DE');
+  });
+});

@@ -108,22 +108,6 @@ export function ChatEntityLinksProvider({
     () => (verify ? collectSeenReferenceKeys(messages, searches ?? [], entityDeclarations) : undefined),
     [verify, messages, searches, entityDeclarations],
   );
-  // Strict names (`ambiguousNames: 'text'`, `resolveAmbiguous`): every reference by its name, for markers too.
-  const strictNames = !!config && config.mentionMarkers === 'markdown'
-    && (config.ambiguousNames === 'text' || config.resolveAmbiguous !== undefined);
-  // Only independently shown records compete for a name: an assistant's own markers do not.
-  const namedReferences = useMemo(
-    () => (strictNames
-      ? collectKnownEntities(
-        messages.map((message) => (message.role === 'assistant'
-          ? { ...message, parts: message.parts.filter((part) => (part as { type?: unknown }).type !== 'text') }
-          : message)),
-        searches ?? [],
-        entityDeclarations,
-      )
-      : undefined),
-    [strictNames, messages, searches, entityDeclarations],
-  );
 
   const canOpen = useCallback((type: string) => {
     const current = configRef.current;
@@ -190,20 +174,11 @@ export function ChatEntityLinksProvider({
       linkify: (children) => linkifyChildren(children, links),
       markdownComponents: {},
       ...(config?.mentionMarkers ? { mentionMarkers: config.mentionMarkers } : {}),
+      // A marker names its record by id: another record with the same name does not matter (`ambiguousNames`
+      // and `resolveAmbiguous` decide name matches only); `verifyMentions` still applies.
       showsMention: (mention) => {
         if (mention.type === 'command') return true;
-        if (seenKeys && !isSeenReference(seenKeys, mention.type, mention.id)) return false;
-        if (!namedReferences) return true;
-        // A name several records share: as for known names, text, or the one `resolveAmbiguous` picks.
-        const label = mention.displayName.trim();
-        const candidates: ChatEntityReference[] = [];
-        for (const reference of namedReferences) {
-          if (reference.label.trim() !== label) continue;
-          if (!candidates.some((known) => known.type === reference.type && known.id === reference.id)) candidates.push(reference);
-        }
-        if (candidates.length < 2) return true;
-        const picked = config?.resolveAmbiguous?.(label, candidates);
-        return picked !== undefined && picked.type === mention.type && picked.id === mention.id;
+        return !seenKeys || isSeenReference(seenKeys, mention.type, mention.id);
       },
     };
     (links as { markdownComponents: ChatEntityLinks['markdownComponents'] }).markdownComponents = Object.fromEntries(
@@ -211,7 +186,7 @@ export function ChatEntityLinksProvider({
         createElement(tag, props, linkifyChildren(children as ReactNode, links))]),
     );
     return links;
-  }, [config, known, seenKeys, namedReferences, canOpen, open, locale.openEntityLabel]);
+  }, [config, known, seenKeys, canOpen, open, locale.openEntityLabel]);
 
   return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
 }

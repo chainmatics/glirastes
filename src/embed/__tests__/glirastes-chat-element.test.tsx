@@ -114,6 +114,21 @@ describe('<glirastes-chat>', () => {
     document.documentElement.removeAttribute('lang');
   });
 
+  it('follows a lang the page sets after the element mounted, with English for the keys a partial table lacks', async () => {
+    document.documentElement.setAttribute('lang', 'de');
+    const { element } = await mount((node) => {
+      node.transport = transport();
+      node.config = { locales: { pl: { placeholder: 'Napisz wiadomość' } } };
+    });
+    const textarea = () => element.shadowRoot!.querySelector('textarea')!;
+    const send = () => element.shadowRoot!.querySelector('button[data-action="send"]')!;
+    expect(textarea().getAttribute('placeholder')).toBe('Nachricht eingeben…');
+    await act(async () => { document.documentElement.setAttribute('lang', 'pl'); });
+    await waitFor(() => expect(textarea().getAttribute('placeholder')).toBe('Napisz wiadomość'));
+    expect(send().textContent).toBe('Send');
+    document.documentElement.removeAttribute('lang');
+  });
+
   it("keeps the server's tool wording first with languageSource: 'server'", async () => {
     document.documentElement.setAttribute('lang', 'en');
     const handlers = new Set<(part: { type: string; data: unknown }) => void>();
@@ -272,6 +287,23 @@ describe('<glirastes-chat>', () => {
     await waitFor(() => expect(element.shadowRoot!.textContent).toContain('Hallo zurück'));
     await waitFor(() => expect(events.filter((event) => event.type === 'glirastes-chat:status').pop())
       .toMatchObject({ detail: { state: 'idle' } }));
+  });
+
+  it('names its nearest lang in each request (Content-Language), and none with sendLanguage: false', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Cześć'));
+    vi.stubGlobal('fetch', fetchMock);
+    document.documentElement.setAttribute('lang', 'pl-PL');
+    const { element } = await mount((node) => { node.setAttribute('endpoint', '/api/chat'); });
+    await act(async () => { expect(element.send('Cześć')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(new Headers(fetchMock.mock.calls[0]![1]?.headers).get('content-language')).toBe('pl-PL');
+    await waitFor(() => expect(element.shadowRoot!.textContent).toContain('Cześć'));
+    element.config = { sendLanguage: false };
+    await act(async () => {});
+    await act(async () => { expect(element.send('Jeszcze raz')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(new Headers(fetchMock.mock.calls[1]![1]?.headers).get('content-language')).toBeNull();
+    document.documentElement.removeAttribute('lang');
   });
 
   it('maps the voice and voice-language attributes onto the composer microphone', async () => {
