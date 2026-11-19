@@ -843,7 +843,10 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       // A page that may not hold every record says nothing about one that is not on it.
       // Only a page whose every entry has the declared identity proves that the record does not exist.
       const entries = steps ? rawEntryCount(outcome.value, steps) : Number.POSITIVE_INFINITY;
-      if (source.lookup.complete === true && !overflow && entries <= MAX_LOOKUP_LIST_ENTRIES && known.length === entries) {
+      // Only one list reached through plain objects proves absence; nested lists (`groups[].items[]`) never do.
+      const singleList = steps !== undefined && steps.slice(0, -1).every((step) => !step.each)
+        && (steps.length === 0 || objectsAt(outcome.value, steps.slice(0, -1)).length === 1);
+      if (source.lookup.complete === true && singleList && !overflow && entries <= MAX_LOOKUP_LIST_ENTRIES && known.length === entries) {
         return { kind: 'deny', code: 'approval_subject_not_found', type };
       }
       if (known.length !== identities.length || (entries <= MAX_LOOKUP_LIST_ENTRIES && known.length !== entries)) {

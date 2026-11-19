@@ -299,6 +299,17 @@ describe('server approval subjects in the chat handler', () => {
     expect(promptText(missing.prompts)).toContain('approval_subject_not_found');
   });
 
+  it('never proves absence through nested lists, also with an empty part next to a broken one', async () => {
+    const backend = fakeBackend({ 'GET /channels': () => ok({ groups: [{ items: [] }, null] }) });
+    const { model, prompts } = callingModel([{ toolName: 'delete_channel', input: { key: 'garage' } }]);
+    const tools = referenceTools();
+    Object.assign(tools.list_channels!, { outputEntities: [{ type: 'channel', id: 'key', name: 'title', path: 'groups[].items[]' }] });
+    const { chunks } = await turn({ tools, model, systemPrompt: 'A', approvalSecret: SECRET, endpointCaller: backend.endpointCaller });
+    expect(chunks.some((chunk) => chunk.type === 'tool-approval-request')).toBe(true);
+    expect(subjectsPart(chunks)!.data.subjects[0]).toMatchObject({ check: 'unchecked' });
+    expect(promptText(prompts)).not.toContain('approval_subject_not_found');
+  });
+
   it('never refuses on a complete list with an entry without the declared id (invalid_response)', async () => {
     for (const answer of [[{ key: 'lobby', title: 'Lobby screens' }, { title: 'No key' }], [null], ['lobby']]) {
       const backend = fakeBackend({ 'GET /channels': () => ok(answer) });
