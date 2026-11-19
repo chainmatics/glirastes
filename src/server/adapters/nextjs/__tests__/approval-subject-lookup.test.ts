@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAiSdkTools } from '../../../../runtime/ai-sdk/engine.js';
 import type { ManagedTurnGuard } from '../../../../runtime/managed-turn.js';
 import { ToolExecutionDeniedError } from '../../../../runtime/tool-denial.js';
-import type { ToolContext } from '../../../../types.js';
+import { z } from 'zod';
+import { parseApprovalSubjectsPart } from '../../../../contracts/approval-subject.js';
+import { defineEndpointTool, type PiiShield, type ToolContext } from '../../../../types.js';
+import { endpointToolsToRegistry } from '../../../core/index.js';
 import {
   ApprovalSubjectRefusedError,
   createApprovalSubjectResolver,
@@ -108,6 +111,42 @@ describe('approval subject lookups', () => {
     await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c2', input: { playlist_id: 2 } });
     expect(resolver.take('c2')!.part.subjects[0]).toMatchObject({ reason: 'limit' });
     expect(backend.calls).toHaveLength(1);
+  });
+
+  it('bounds the authorization of a lookup by the lookup time, and a cancelled request ends it', async () => {
+    const { guard } = guardStub({ lookup: () => new Promise(() => {}) });
+    const { resolver } = resolverFor(playlist, { guard, limits: { ...DEFAULT_APPROVAL_SUBJECT_LIMITS, lookupTimeoutMs: 100 } });
+    await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+    expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ reason: 'timeout' });
+
+    const controller = new AbortController();
+    const hanging = resolverFor({ 'GET /playlists/7': () => new Promise(() => {}) }, { signal: controller.signal });
+    const running = hanging.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c2', input: { playlist_id: 7 } });
+    controller.abort(new Error('cancelled'));
+    await expect(running).rejects.toThrow('cancelled');
+  });
+
+  it('bounds a PII shield that does not answer', async () => {
+    const shield = { anonymizeResult: () => new Promise(() => {}) } as unknown as PiiShield;
+    const { resolver } = resolverFor(playlist, {
+      shield: { shield, sessionId: () => 's' }, limits: { ...DEFAULT_APPROVAL_SUBJECT_LIMITS, lookupTimeoutMs: 100 },
+    });
+    await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+    expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ reason: 'timeout' });
+  });
+
+  it('keeps a readable subject for a nested argument without a read source', async () => {
+    const tools = endpointToolsToRegistry([defineEndpointTool({
+      id: 'playlists.archive', toolName: 'archive_playlist', description: 'Archive.', method: 'POST', path: '/playlists/archive',
+      inputSchema: z.object({ playlist: z.object({ id: z.number() }) }),
+      inputEntities: [{ type: 'playlist', args: 'playlist.id' }], approvalSubject: {},
+    })]);
+    const { resolver } = resolverFor({}, { registry: tools });
+    await resolver.resolve({ toolName: 'archive_playlist', toolCallId: 'c1', input: { playlist: { id: 7 } } });
+    const part = resolver.take('c1')!.part;
+    expect(parseApprovalSubjectsPart(JSON.parse(JSON.stringify(part)))!.subjects).toEqual([
+      expect.objectContaining({ path: 'playlist.id', ids: { id: '7' }, check: 'unchecked', reason: 'source_unavailable' }),
+    ]);
   });
 
   it('validates its limits', () => {

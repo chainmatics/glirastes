@@ -89,6 +89,9 @@ export const DEFAULT_APPROVAL_SUBJECT_LIMITS: Readonly<ApprovalSubjectLimits> = 
   maxLookupTimePerTurnMs: 10_000,
 });
 
+/** Marks a PII shield that did not answer within the lookup time. */
+const SHIELD_TIMEOUT: unique symbol = Symbol('shield-timeout');
+
 /** Entries of one list page that are searched, at most. */
 export const MAX_LOOKUP_LIST_ENTRIES = 200;
 
@@ -434,6 +437,22 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     return undefined;
   };
 
+  /** A rejection once the request is cancelled. */
+  const abortion = (signal: AbortSignal): Promise<never> => new Promise<never>((_resolve, reject) => {
+    if (signal.aborted) reject(signal.reason ?? new Error('aborted'));
+    else signal.addEventListener('abort', () => reject(signal.reason ?? new Error('aborted')), { once: true });
+  });
+
+  /** `work`, or `fallback` after `ms`; rejects when the request is cancelled. */
+  const bounded = <T, F>(work: Promise<T>, ms: number, fallback: F): Promise<T | F> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([
+      work,
+      new Promise<F>((resolve) => { timer = setTimeout(() => resolve(fallback), Math.max(0, ms)); }),
+      ...(options.signal ? [abortion(options.signal)] : []),
+    ]).finally(() => { if (timer) clearTimeout(timer); });
+  };
+
   /** Runs the source once: its result as the tool would show it (schema, bound, shield), or why not. */
   const execute = async (name: string, tool: Tool, input: unknown, timeoutMs: number): Promise<RawOutcome> => {
     const timeout = new AbortController();
@@ -463,6 +482,8 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
             reject(error);
           }, timeoutMs);
         }),
+        // A source that ignores its signal still does not hold up a cancelled request.
+        ...(options.signal ? [abortion(options.signal)] : []),
       ]);
       if (isRecordValue(result) && result.success === false) {
         // A refusal of the local transport (a path outside the allowed ones) is no answer of the backend.
@@ -492,10 +513,13 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
 
   /** One lookup through a source: validated input, authorization, cache, limits. */
   const lookUp = async (name: string, tool: Tool, params: Record<string, unknown>, timeoutMs: number): Promise<RawOutcome> => {
+    options.signal?.throwIfAborted();
     const parsed = tool.inputSchema.safeParse(params);
     if (!parsed.success) return { kind: 'invalid' };
     if (rateLimited.has(name)) return { kind: 'unchecked', reason: 'rate_limited' };
-    const denial = await sourceDenial(name, tool, parsed.data);
+    if (timeoutMs <= 0) return { kind: 'unchecked', reason: 'limit' };
+    // The authorization is part of the lookup: bounded by its time and the request.
+    const denial = await bounded(sourceDenial(name, tool, parsed.data), timeoutMs, 'timeout' as const);
     if (denial) return { kind: 'unchecked', reason: denial };
     let key: string;
     try {
@@ -541,8 +565,8 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     status: ServerApprovalSubject['status'],
     check: ServerApprovalSubject['check'],
   ): ServerApprovalSubject => {
-    // Without a source the argument paths stand in for the id fields.
-    const fields = item.source ? entityIdFields(item.source.declaration) : item.args;
+    // Without a source the argument names stand in for the id fields (the last step of a path: `playlist.id` → `id`).
+    const fields = item.source ? entityIdFields(item.source.declaration) : item.args.map((arg) => arg.split('.').at(-1)!);
     const ids: Record<string, string> = Object.create(null);
     fields.forEach((field, index) => {
       ids[field] = sanitizeSubjectText(values[index]) ?? '';
@@ -694,7 +718,8 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     if (outcome.kind === 'unchecked') return none(outcome.reason);
     if (outcome.kind === 'forbidden') return none('forbidden');
     if (outcome.kind !== 'ok') return none('unavailable');
-    const displayed = await displayOf(outcome);
+    const displayed = await bounded(displayOf(outcome), timeoutMs, SHIELD_TIMEOUT);
+    if (displayed === SHIELD_TIMEOUT) return none('timeout');
     const fields: ApprovalPreviewValue[] = [];
     for (const field of preview.declaration.fields) {
       const raw = valueAt(displayed, field.path);
@@ -732,11 +757,14 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       const params = source ? paramsFor(source, ids, plan.refs, input) : undefined;
       tasks.push(source === undefined || params === undefined
         ? Promise.resolve(unchecked(item, ids, 'source_unavailable'))
-        : lookUp(source.name, source.tool, params, timeoutMs).then(async (outcome) => match(
-          item, source, ids, outcome, plan,
-          // Only what reaches the browser is shielded; a recheck compares the raw values.
-          outcome.kind === 'ok' ? (forDisplay ? await displayOf(outcome) : outcome.value) : undefined,
-        )));
+        : lookUp(source.name, source.tool, params, timeoutMs).then(async (outcome) => {
+          // Only what reaches the browser is shielded (bounded like the lookup); a recheck compares the raw values.
+          const displayed = outcome.kind === 'ok' && forDisplay
+            ? await bounded(displayOf(outcome), timeoutMs, SHIELD_TIMEOUT)
+            : outcome.kind === 'ok' ? outcome.value : undefined;
+          if (displayed === SHIELD_TIMEOUT) return unchecked(item, ids, 'timeout');
+          return match(item, source, ids, outcome, plan, displayed);
+        }));
     }
     const previewTask = plan.preview ? previewOf(plan, input, timeoutMs, slots <= 0) : undefined;
     try {
