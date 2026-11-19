@@ -257,6 +257,22 @@ describe('approval subject lookups', () => {
     expect(part.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'unavailable' });
   });
 
+  it('treats a shield that throws synchronously like a failing one (subject and preview not checkable)', async () => {
+    const shield = {
+      rehydrateArgs: (args: unknown) => args,
+      anonymizeResult: () => { throw new Error('shield down'); },
+    } as unknown as PiiShield;
+    const registry = referenceTools();
+    (registry.delete_playlist as { approvalSubject?: unknown }).approvalSubject = {
+      preview: { tool: 'get_playlist', params: { playlist_id: 'playlist_id' }, fields: [{ path: 'displayName', label: 'Name' }] },
+    };
+    const { resolver } = resolverFor(playlist, { registry, shield: { shield, sessionId: () => 's' } });
+    expect(await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } })).toBeUndefined();
+    const part = resolver.take('c1')!.part;
+    expect(part.preview).toEqual({ check: 'unchecked', reason: 'unavailable', fields: [] });
+    expect(part.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'unavailable' });
+  });
+
   it('keeps a readable subject for a nested argument without a read source', async () => {
     const tools = endpointToolsToRegistry([defineEndpointTool({
       id: 'playlists.archive', toolName: 'archive_playlist', description: 'Archive.', method: 'POST', path: '/playlists/archive',

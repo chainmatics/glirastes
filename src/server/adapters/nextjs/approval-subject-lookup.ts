@@ -502,9 +502,10 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
    * A shield step of a lookup: its value, `SHIELD_TIMEOUT` past the deadline,
    * `SHIELD_FAILED` when it throws. A cancelled request still rejects.
    */
-  const guarded = async <T,>(work: Promise<T>, deadline: number): Promise<T | typeof SHIELD_TIMEOUT | typeof SHIELD_FAILED> => {
+  const guarded = async <T,>(work: () => Promise<T> | T, deadline: number): Promise<T | typeof SHIELD_TIMEOUT | typeof SHIELD_FAILED> => {
     try {
-      return await bounded(work, deadline - now(), SHIELD_TIMEOUT);
+      // Started inside: a shield that throws synchronously is a failed step too.
+      return await bounded(Promise.resolve().then(work), deadline - now(), SHIELD_TIMEOUT);
     } catch (error) {
       if (options.signal?.aborted) throw error;
       return SHIELD_FAILED;
@@ -716,7 +717,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     const { declaration, records } = outcome.found;
     // Each identified record whole, with its own field names and raw text, as the shield sees a tool result.
     const shown = await guarded(
-      Promise.all(records.map((record) => options.shield!.shield.anonymizeResult(record, options.shield!.sessionId()))),
+      () => Promise.all(records.map((record) => options.shield!.shield.anonymizeResult(record, options.shield!.sessionId()))),
       deadline,
     );
     if (shown === SHIELD_TIMEOUT || shown === SHIELD_FAILED) {
@@ -856,7 +857,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     if (outcome.kind === 'unchecked') return none(outcome.reason);
     if (outcome.kind === 'forbidden') return none('forbidden');
     if (outcome.kind !== 'ok') return none('unavailable');
-    const displayed = await guarded(displayOf(outcome), deadline);
+    const displayed = await guarded(() => displayOf(outcome), deadline);
     if (displayed === SHIELD_TIMEOUT) return none('timeout');
     if (displayed === SHIELD_FAILED) return none('unavailable');
     const fields: ApprovalPreviewValue[] = [];
@@ -882,7 +883,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     const deadline = startedAt + lookupTimeout();
     // The model's values are pseudonyms under a PII shield: the backend is asked, and its answer
     // compared, with the originals of the same shield session, as for the tool call itself.
-    const restoredInput = isRecordValue(input) && options.shield ? await guarded(rehydrate(input), deadline) : input;
+    const restoredInput = isRecordValue(input) && options.shield ? await guarded(() => rehydrate(input), deadline) : input;
     const shieldFailure = restoredInput === SHIELD_TIMEOUT ? 'timeout' : restoredInput === SHIELD_FAILED ? 'unavailable' : undefined;
     const backendInput = shieldFailure ? input : restoredInput;
     let slots = limits.maxSubjectsPerCall;
