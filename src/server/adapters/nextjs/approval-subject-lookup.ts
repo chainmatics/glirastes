@@ -30,6 +30,7 @@
 import {
   APPROVAL_SUBJECTS_PART_TYPE,
   APPROVAL_SUBJECTS_PART_VERSION,
+  MAX_PART_SUBJECTS,
   sanitizeSubjectText,
   validApprovalSubject,
   validEntityLookups,
@@ -282,6 +283,8 @@ export function approvalSubjectPlans(registry: ToolRegistry): Map<string, ToolPl
         }
       : undefined;
     if (items.length === 0 && !preview) continue;
+    // The browser reads at most 16 subjects per part; more would drop the whole part there.
+    items.length = Math.min(items.length, MAX_PART_SUBJECTS);
     plans.set(name, {
       items,
       refs,

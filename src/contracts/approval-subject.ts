@@ -403,7 +403,7 @@ export interface ApprovalSubjectsPartData {
 /** Longest looked-up text on the card. */
 export const MAX_SUBJECT_TEXT_LENGTH = 200;
 /** Subjects per part, at most (the server sends no more than its per-call limit). */
-const MAX_PART_SUBJECTS = 16;
+export const MAX_PART_SUBJECTS = 16;
 
 /**
  * Control characters (C0, DEL, C1), bidirectional overrides and isolates
