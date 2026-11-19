@@ -49,7 +49,7 @@ export interface ChatEntityLinks {
   /** `entityLinks.mentionMarkers`: `'markdown'` keeps Markdown for assistant text with markers. */
   readonly mentionMarkers?: 'plain' | 'markdown';
   /** Whether a marker of the assistant becomes a chip (`entityLinks.verifyMentions`). */
-  showsMention(mention: Pick<Mention, 'type' | 'id' | 'displayName'>): boolean;
+  showsMention(mention: Mention): boolean;
 }
 
 const ChatEntityLinksContext = createContext<ChatEntityLinks | null>(null);
