@@ -19,7 +19,7 @@ import {
   createAiSdkTools,
   type AiSdkToolHooks,
 } from '../../../runtime/ai-sdk/engine.js';
-import { attachmentPlaceholderText } from '../../../contracts/attachments.js';
+import { attachmentIdOf, attachmentPlaceholderText } from '../../../contracts/attachments.js';
 import { declarationsForRead, type EntityDeclarationsByTool, type OutputEntityDeclaration } from '../../../contracts/entity-declaration.js';
 import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
@@ -181,7 +181,7 @@ export async function prepareModelMessages(
   // A failed call keeps only the chat's text in the browser; the model gets an instruction instead.
   // A UI result of the outcome protocol becomes the fixed text of its code; approval subjects
   // are for the browser only: never model input, whatever the AI SDK's defaults.
-  const raw = await convertToModelMessages(withModelFacingToolErrors(withModelFacingUiOutcomes(withoutApprovalSubjectParts(uiMessages))), {
+  const raw = await convertToModelMessages(withModelFacingToolErrors(withModelFacingUiOutcomes(withAttachmentReferences(withoutApprovalSubjectParts(uiMessages)))), {
     ignoreIncompleteToolCalls: true,
   });
 
@@ -288,7 +288,34 @@ interface ModelMessageLike {
   content: unknown;
 }
 
-function isFilePart(value: unknown): value is { type: 'file'; filename?: unknown } {
+/** Inserts the reference text after each user file part with a valid id, unless it is already there. */
+export function withAttachmentReferences(messages: UIMessage[]): UIMessage[] {
+  return messages.map((message) => {
+    if (message.role !== 'user' || !message.parts.some((part) => part.type === 'file' && part.providerMetadata?.glirastes)) return message;
+    const parts: UIMessage['parts'] = [];
+    message.parts.forEach((part, index) => {
+      if (part.type !== 'file') {
+        parts.push(part);
+        return;
+      }
+      const id = attachmentIdOf(part);
+      if (!id) {
+        // An invalid id must not reach the provider as options either.
+        const { glirastes: _dropped, ...rest } = part.providerMetadata ?? {};
+        parts.push({ ...part, providerMetadata: Object.keys(rest).length > 0 ? (rest as typeof part.providerMetadata) : undefined });
+        return;
+      }
+      parts.push(part);
+      const text = attachmentPlaceholderText(part.filename, id);
+      const next = message.parts[index + 1];
+      if (next?.type === 'text' && next.text === text) return;
+      parts.push({ type: 'text', text });
+    });
+    return { ...message, parts };
+  });
+}
+
+function isFilePart(value: unknown): value is { type: 'file'; filename?: unknown; providerOptions?: unknown } {
   return typeof value === 'object' && value !== null
     && (value as { type?: unknown }).type === 'file' && 'data' in value;
 }
@@ -310,11 +337,19 @@ function estimateTokens(messages: ReadonlyArray<unknown>): number {
 
 function withoutFiles(message: ModelMessageLike): ModelMessageLike {
   if (!Array.isArray(message.content) || !message.content.some(isFilePart)) return message;
+  const parts = message.content as unknown[];
   return {
     ...message,
-    content: (message.content as unknown[]).map((part) => (isFilePart(part)
-      ? { type: 'text', text: attachmentPlaceholderText(typeof part.filename === 'string' ? part.filename : undefined) }
-      : part)),
+    content: parts.flatMap((part, index) => {
+      if (!isFilePart(part)) return [part];
+      const text = attachmentPlaceholderText(
+        typeof part.filename === 'string' ? part.filename : undefined,
+        attachmentIdOf({ providerMetadata: part.providerOptions }),
+      );
+      const next = parts[index + 1] as { type?: unknown; text?: unknown } | undefined;
+      // `withAttachmentReferences` already put this text after the file part.
+      return next?.type === 'text' && next.text === text ? [] : [{ type: 'text', text }];
+    }),
   };
 }
 

@@ -201,6 +201,8 @@ export interface FilePart {
   /** A `data:` URL. */
   url: string;
   filename?: string;
+  /** `glirastes.attachmentId` names the file for the model and the app. */
+  providerMetadata?: { glirastes?: { attachmentId?: string } } & Record<string, unknown>;
 }
 
 // ============================================================================

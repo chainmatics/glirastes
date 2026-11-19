@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '../../types.js';
+import { CHAT_ATTACHMENT_ID_PATTERN } from '../../../contracts/attachments.js';
 import {
   fileToDataUrl,
   limitRequestAttachments,
   omitAttachmentData,
   readAttachments,
   resolveAttachmentOptions,
+  toFilePart,
   validateFiles,
 } from '../attachments.js';
 
@@ -90,6 +92,26 @@ const fileMessage = (id: string, url: string, filename = `${id}.png`): ChatMessa
   id, role: 'user', parts: [{ type: 'text', text: id }, { type: 'file', mediaType: 'image/png', url, filename }],
 });
 const reply = (id: string): ChatMessage => ({ id, role: 'assistant', parts: [{ type: 'text', text: 'ok' }] });
+
+describe('attachment ids', () => {
+  it('gives each attachment a chat attachment id that its file part carries', async () => {
+    const { attachments } = await readAttachments([png()], 0, options);
+    const attachment = attachments[0]!;
+    expect(attachment.id).toMatch(CHAT_ATTACHMENT_ID_PATTERN);
+    expect(toFilePart(attachment).providerMetadata).toEqual({ glirastes: { attachmentId: attachment.id } });
+  });
+
+  it('names the id in the placeholder of a dropped part and keeps the metadata when omitting data', () => {
+    const id = 'att_0123456789abcdef0123456789abcdef';
+    const message: ChatMessage = {
+      id: 'u1', role: 'user',
+      parts: [{ type: 'file', mediaType: 'image/png', url: '', filename: 'z.png', providerMetadata: { glirastes: { attachmentId: id } } }],
+    };
+    expect(limitRequestAttachments([message])[0]!.parts).toEqual([{ type: 'text', text: `[attachment ${id}: z.png]` }]);
+    const full = { ...message, parts: [{ ...message.parts[0]!, url: 'data:x' }] } as ChatMessage;
+    expect(omitAttachmentData([full])[0]!.parts[0]).toEqual({ ...message.parts[0], url: '' });
+  });
+});
 
 describe('limitRequestAttachments', () => {
   it('keeps files only in the two most recent user messages', () => {
