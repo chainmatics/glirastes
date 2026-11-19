@@ -8,6 +8,7 @@ import {
   registerDocumentNavigation,
   registerNavigationBridge,
   runToolResultUiActions,
+  toolResultUiActions,
   UI_ACTION_OUTCOME_TIMEOUT_MS,
   UI_ACTION_REJECTED_ERROR_CODE,
   UiActionBus,
@@ -317,5 +318,35 @@ describe('navigation bridge outcomes', () => {
     cleanups.push(registerDocumentNavigation({ bus }));
     expect(await runToolResultUiActions(result(navigate('//evil.example')), bus)).toMatchObject({ code: 'rejected-contract' });
     expect(assign).not.toHaveBeenCalled();
+  });
+});
+
+describe('the hand-off shape of 0.18 (handedOff instead of success)', () => {
+  const handedOff = (uiAction: unknown, extra: Record<string, unknown> = {}) => ({
+    handedOff: true, message: 'Handed to the app.', uiAction, ...extra,
+  });
+
+  it('runs and dispatches its Glirastes actions like a successful result', async () => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ push, bus }));
+    expect(toolResultUiActions(handedOff(navigate()))).toHaveLength(1);
+    expect(await runToolResultUiActions(handedOff(navigate()), bus)).toMatchObject({ code: 'ok', dispatched: 1 });
+    expect(await dispatchToolResultUiActions(handedOff(navigate()), bus)).toBe(1);
+    expect(push).toHaveBeenCalledTimes(2);
+    // Neither handed off nor successful: nothing runs.
+    expect(toolResultUiActions({ message: 'x', uiAction: navigate() })).toEqual([]);
+    expect(toolResultUiActions({ success: false, handedOff: false, uiAction: navigate() })).toEqual([]);
+  });
+
+  it("runs the app's own actions only of a result the server marked for the outcome protocol", async () => {
+    const own = { type: 'open-dialog', dialog: 'delete' };
+    expect(toolResultUiActions(handedOff(own))).toEqual([]);
+    expect(toolResultUiActions(handedOff(own, { awaitsOutcome: true }))).toEqual([own]);
+    expect(toolResultUiActions(handedOff([own, navigate()], { awaitsOutcome: false }))).toEqual([own, navigate()]);
+    const bus = new UiActionBus();
+    expect(await runToolResultUiActions(handedOff(own, { awaitsOutcome: true }), bus)).toMatchObject({ code: 'unavailable' });
+    cleanups.push(bus.subscribeByType('open-dialog', () => {}));
+    expect(await runToolResultUiActions(handedOff(own, { awaitsOutcome: true }), bus)).toMatchObject({ code: 'ok' });
   });
 });

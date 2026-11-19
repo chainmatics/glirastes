@@ -315,6 +315,16 @@ describe("runtime context and cleanup", () => {
     expect(JSON.stringify(init?.headers)).not.toContain("ADMIN");
   });
 
+  it("hands chat.uiActionOutcomes to the chat handler and leaves its default otherwise", async () => {
+    await started();
+    expect(state.handler!.uiActionOutcomes).toBeUndefined();
+    const base = config();
+    const service = await startRuntimeService({ ...base, chat: { uiActionOutcomes: "report-only" } });
+    cleanups.push(service.stop);
+    await state.host!.handleChat(request());
+    expect(state.handler!.uiActionOutcomes).toBe("report-only");
+  });
+
   it("emits no exception content in its handler error callback", async () => {
     await started();
     const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);

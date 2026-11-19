@@ -193,6 +193,15 @@ export interface Tool {
    */
   inputEntities?: InputEntityRef[];
 
+  /**
+   * Set on UI tools (`uiToolToTool`, the generated UI tools): a successful
+   * result with a `uiAction` only hands the action to the browser, so it
+   * travels as `{ handedOff: true, message, uiAction }` (see
+   * `uiToolResultShape`). `outcome: 'confirm'` lets the browser report what
+   * became of the tool's own (non-`glirastes.*`) actions too.
+   */
+  uiTool?: { outcome?: 'confirm' };
+
   /** The actual implementation */
   execute: (input: unknown, context: ToolContext) => Promise<unknown>;
 }
@@ -515,6 +524,14 @@ export interface AiUiToolDefinition<
    * Pass an array for compound actions (e.g., toast + refresh).
    */
   uiPattern?: UiPattern | UiPattern[];
+  /**
+   * Opt-in to the outcome protocol of UI actions. With `'confirm'` the chat
+   * runs this tool's actions through the UI action bus (register them with
+   * `useAiClientActionByType`), reports what became of them, and the model
+   * answers only after that report. Without it the actions stay with the
+   * app's `onToolResult`, as before, and nothing is reported.
+   */
+  outcome?: 'confirm';
 }
 
 export function defineUiTool<

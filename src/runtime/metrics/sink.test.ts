@@ -131,6 +131,29 @@ describe('createRuntimeMetricsSink', () => {
     expect(drops).toEqual([{ reason: 'send-failed', count: 1 }]);
   });
 
+  it('keeps finished turns when an older Platform refuses turn.continued', async () => {
+    const calls: Array<{ events: Array<{ eventType: string }> }> = [];
+    // An older Platform knows only turn.finished: its strict batch schema refuses any other type.
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { events: Array<{ eventType: string }> };
+      calls.push(body);
+      return new Response(null, { status: body.events.every((entry) => entry.eventType === 'turn.finished') ? 202 : 400 });
+    }) as unknown as typeof globalThis.fetch;
+    const { sink, drops } = sinkWith(fetch);
+
+    sink.record({ ...event(), eventType: 'turn.continued', continuation: 'ui-outcome' } as never);
+    sink.record(event());
+    sink.record({ ...event(), eventType: 'turn.continued', continuation: 'approval' } as never);
+    sink.record(event());
+    await sink.flush();
+
+    expect(calls.map((call) => call.events.map((entry) => entry.eventType))).toEqual([
+      ['turn.finished', 'turn.finished'],
+      ['turn.continued', 'turn.continued'],
+    ]);
+    expect(drops).toEqual([{ reason: 'send-failed', count: 2 }]);
+  });
+
   it('splits large queues into batches of at most 50 events', async () => {
     const http = recordingFetch();
     const { sink } = sinkWith(http.fetch);

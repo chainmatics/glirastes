@@ -804,7 +804,7 @@ export function uiToolToTool<TInput extends SchemaLike>(
     description += `\n\nReturns: ${zodToCompactDescription(uiTool.outputSchema)}`;
   }
 
-  return defineTool({
+  const tool = defineTool({
     id: uiTool.id,
     description,
     inputSchema: uiTool.inputSchema,
@@ -863,6 +863,7 @@ export function uiToolToTool<TInput extends SchemaLike>(
       };
     },
   });
+  return { ...tool, uiTool: uiTool.outcome === 'confirm' ? { outcome: 'confirm' } : {} };
 }
 
 /**
@@ -925,6 +926,29 @@ export interface ToolToAiToolOptions {
    * creates one per turn (`resultHandles`); without it nothing changes.
    */
   resultStore?: ResultStore;
+  /**
+   * Shape of a UI tool result that hands a `uiAction` to the browser.
+   * `'handoff'` (default): `{ handedOff: true, message, uiAction }`, without
+   * `success`, because the server does not know whether the app carried it
+   * out. `'legacy'`: `{ success: true, message, uiAction }` as up to 0.17.
+   * A UI tool without a `uiAction` keeps `{ success: true, message }`.
+   */
+  uiToolResultShape?: UiToolResultShape;
+}
+
+/** See `ToolToAiToolOptions.uiToolResultShape`. */
+export type UiToolResultShape = 'handoff' | 'legacy';
+
+/**
+ * A successful UI tool result that hands a `uiAction` to the browser, in
+ * the hand-off shape: `success` gives way to `handedOff: true`.
+ */
+function asHandedOff(result: unknown): unknown {
+  if (!isRecord(result) || Array.isArray(result) || result.success !== true) return result;
+  const action = result.uiAction;
+  if (action === undefined || action === null || (Array.isArray(action) && action.length === 0)) return result;
+  const { success: _success, ...rest } = result;
+  return { handedOff: true, ...rest };
 }
 
 /** What the model gets for a successful result whose details may not be shown. */
@@ -1001,6 +1025,8 @@ export function toolToAiTool(
 
   return {
     _toolId: tool.id,
+    // A UI tool whose own actions take part in the outcome protocol (`defineUiTool({ outcome: 'confirm' })`).
+    ...(tool.uiTool?.outcome === 'confirm' ? { _uiOutcome: 'confirm' as const } : {}),
     // Declared identity, for history compaction, hideIds and the browser (field names only).
     ...(outputEntities || inputEntities
       ? { _entities: { ...(outputEntities ? { output: outputEntities } : {}), ...(inputEntities ? { input: inputEntities } : {}) } }
@@ -1163,9 +1189,10 @@ export function toolToAiTool(
         cleanResult = overview ?? unreadableView
           ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
 
-        const output = options?.uiActionSchema
+        const normalized = options?.uiActionSchema
           ? normalizeResultUiAction(cleanResult, options.uiActionSchema)
           : cleanResult;
+        const output = tool.uiTool && options?.uiToolResultShape !== 'legacy' ? asHandedOff(normalized) : normalized;
         // Cut from the sealed copy in the store: the PII shield must not seal it again.
         if (overview || fromStore) store!.markIssued(output);
         return output;

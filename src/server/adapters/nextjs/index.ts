@@ -56,6 +56,11 @@ export {
   DEFAULT_RECORDING_LANGUAGES,
   type RecordingTranscriptionHandlerConfig,
 } from './recording-transcription-handler.js';
+export {
+  withModelFacingUiOutcomes,
+  type UiActionOutcomeMode,
+  type UiActionOutcomesOption,
+} from './ui-outcomes.js';
 export type { ApprovalStore, ApprovalDenialCode } from './approval-binding.js';
 export type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 export type { HistoryOptions } from './prepare-model-messages.js';

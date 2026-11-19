@@ -65,10 +65,14 @@ export {
   TechnicalRuntimeEventV2Schema,
   TOOL_CONTRACT_REJECTED_STATUSES,
   ToolContractRejectedEventSchema,
+  TurnContinuationSchema,
+  TurnContinuedEventSchema,
 } from './events.js';
 export type {
   RuntimeCostSource,
   RuntimeMetricEvent,
+  TurnContinuation,
+  TurnContinuedEvent,
   ToolContractRejectedEvent,
   RuntimeTurnCost,
   RuntimeTurnErrorCode,
@@ -182,10 +186,16 @@ export type { LanguageTag, LocalizedText } from './localized-text.js';
 
 export {
   isUiOutcomeCode,
+  MAX_UI_OUTCOME_CONTINUATIONS,
+  readUiOutcomeCode,
   UI_OUTCOME_CODES,
+  UI_OUTCOME_MODEL_TEXTS,
   UI_OUTCOME_PROTOCOL_VERSION,
+  UI_OUTCOME_SYSTEM_NOTE,
+  UI_OUTCOMES_REQUEST_FIELD,
   UiOutcomeCodeSchema,
   UiOutcomeSchema,
+  uiOutcomeModelResult,
 } from './ui-outcome.js';
 export type {
   UiOutcome,

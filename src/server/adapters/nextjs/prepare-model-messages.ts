@@ -24,6 +24,7 @@ import { declarationsForRead, type EntityDeclarationsByTool } from '../../../con
 import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 import { withModelFacingToolErrors } from './stream-error-text.js';
+import { withModelFacingUiOutcomes } from './ui-outcomes.js';
 import {
   compactHistoryResult,
   compactToolOutput,
@@ -105,7 +106,8 @@ export async function prepareModelMessages(
   const maxCtx = options?.maxContextMessages ?? 12;
 
   // A failed call keeps only the chat's text in the browser; the model gets an instruction instead.
-  const raw = await convertToModelMessages(withModelFacingToolErrors(uiMessages), {
+  // A UI result of the outcome protocol becomes the fixed text of its code.
+  const raw = await convertToModelMessages(withModelFacingToolErrors(withModelFacingUiOutcomes(uiMessages)), {
     ignoreIncompleteToolCalls: true,
   });
 
