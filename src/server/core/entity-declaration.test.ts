@@ -575,6 +575,30 @@ describe('declared paths of overviews and nested ids in the history', () => {
     expect((plain.data as Entry[])[0]!.owner).toBeUndefined();
   });
 
+  it('drops a name the guess gave another id field of a declared record', () => {
+    const value = { data: [{ recordNo: 'OWN123456', id: 'OTHER123456', title: 'Dokument A' }] };
+    const labels: IdLabels = new Map();
+    collectIdLabels(value, labels);
+    collectDeclaredIdLabels(value, [{ id: 'recordNo', name: 'title' }], labels);
+    expect(redactIds('OWN123456 and OTHER123456.', labels)).toBe('Dokument A and.');
+  });
+
+  it('keeps a deeper declared record of entries beyond maxItems', () => {
+    const value = { data: Array.from({ length: 30 }, (_, index) => ({
+      id: index, text: 't'.repeat(80),
+      meta: { owner: { userNo: 900 + index, nick: `nick ${index}` }, editor: { userNo: 500 + index, nick: 'e' }, note: 'n'.repeat(40) },
+    })) };
+    const compacted = compactHistoryResult(value, {
+      entities: [
+        { type: 'user', id: 'userNo', name: 'nick', path: 'data[].meta.owner' },
+        { type: 'user', id: 'userNo', name: 'nick', path: 'data[].meta.editor' },
+      ],
+    }) as Entry;
+    expect((compacted.data as Entry[])[20]).toEqual({
+      id: 20, meta: { owner: { userNo: 920, nick: 'nick 20' }, editor: { userNo: 520, nick: 'e' } },
+    });
+  });
+
   it('drops a guessed name of a composite key part', () => {
     const value = { data: [{ id: 'abc123456', revision: 'def123456', title: 'Dokument' }] };
     const labels: IdLabels = new Map();

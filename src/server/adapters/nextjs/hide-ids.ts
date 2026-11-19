@@ -193,7 +193,15 @@ export function collectDeclaredIdLabels(
   labels: IdLabels,
 ): void {
   if (!declarations || declarations.length === 0) return;
-  for (const identity of declaredRecordsOf(value, declarations).values()) {
+  for (const [record, identity] of declaredRecordsOf(value, declarations)) {
+    // The guess may have named another id field of this record (`id` next to a declared `recordNo`)
+    // after it: that id belongs to another record, so it keeps no label.
+    const own = new Set(identity.idValues.map((raw) => (typeof raw === 'string' ? raw.trim() : String(raw))));
+    for (const [key, field] of Object.entries(record)) {
+      if (typeof field !== 'string' || own.has(field.trim()) || !isTechnicalIdKey(key)) continue;
+      const guessed = labels.get(field.trim());
+      if (guessed !== undefined && (guessed === ownLabelOf(record) || guessed === identity.name)) labels.set(field.trim(), undefined);
+    }
     if (identity.idKind !== 'opaque') {
       keepReadable(labels, identity.idValues);
       continue;

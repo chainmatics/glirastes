@@ -25,6 +25,8 @@ import {
   declaredIdentityKeys,
   declaredRecordsOf,
   entityIdFields,
+  parseEntityPath,
+  type EntityPathStep,
   type OutputEntityDeclaration,
 } from '../../../contracts/entity-declaration.js';
 
@@ -319,15 +321,39 @@ function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultO
   const idLikeSeen = new Set<string>();
   if (!declared) for (const entry of source) for (const key of idLikeFieldsOf(entry, IDENTITY_ID_KEYS)) idLikeSeen.add(key);
   const idLikeOrder = [...idLikeSeen];
-  // Declared records one level below an entry (`data[].owner`, `data[].items[]`) keep their identity too.
+  // Declared records below an entry (`data[].owner`, `data[].items[]`, `data[].meta.owner`) keep their
+  // identity too: the path to them is kept, nothing else on it.
   const entryPath = `${rootArray ? 'data' : route.join('.')}[]`;
   const nested = (options.entities ?? []).flatMap((declaration) => {
-    const match = declaration.path?.startsWith(`${entryPath}.`)
-      ? /^([A-Za-z_$][\w$-]{0,63})(\[\])?$/.exec(declaration.path.slice(entryPath.length + 1))
-      : null;
-    return match ? [{ key: match[1]!, each: match[2] === '[]', declared: declaration }] : [];
+    const steps = declaration.path?.startsWith(`${entryPath}.`) ? parseEntityPath(declaration.path.slice(entryPath.length + 1)) : undefined;
+    return steps && steps.length > 0 ? [{ steps, declared: declaration }] : [];
   });
-  const nestedKeys = nested.map(({ key }) => key);
+  const nestedKeys = nested.map(({ steps }) => steps[0]!.key);
+  /** The declared identity at `steps` below `value`, with the objects and lists on the way; undefined for none. */
+  const project = (value: unknown, steps: ReadonlyArray<EntityPathStep>, inner: OutputEntityDeclaration, level: IdentityLevel): unknown => {
+    if (steps.length === 0) {
+      if (!isPlainObject(value)) return undefined;
+      const object = objectOf(declaredIdentityOf(value, level, inner));
+      return Object.keys(object).length > 0 ? object : undefined;
+    }
+    if (!isPlainObject(value)) return undefined;
+    const [step, ...rest] = steps;
+    const child = value[step!.key];
+    const below = step!.each
+      ? (Array.isArray(child) ? child.map((item) => project(item, rest, inner, level)).filter((item) => item !== undefined) : [])
+      : project(child, rest, inner, level);
+    if (below === undefined || (Array.isArray(below) && below.length === 0)) return undefined;
+    return { [step!.key]: below };
+  };
+  /** Joins two projections of one entry (`meta.owner` and `meta.editor`). */
+  const merge = (left: unknown, right: unknown): unknown => {
+    if (isPlainObject(left) && isPlainObject(right)) {
+      const output: Record<string, unknown> = { ...left };
+      for (const key of Object.keys(right)) setOwn(output, key, key in output ? merge(output[key], right[key]) : right[key]);
+      return output;
+    }
+    return left;
+  };
   const keysInOrder = (kept: ReadonlySet<string>): string[] => [
     ...(declared
       ? declaredIdentityKeys(declared).filter((key) => kept.has(key))
@@ -337,18 +363,14 @@ function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultO
   const identityWithNested = (entry: unknown, level: IdentityLevel): Array<[string, unknown]> => {
     const fields = identityOf(entry, level, declared);
     if (nested.length === 0 || !isPlainObject(entry)) return fields;
-    for (const { key, each, declared: inner } of nested) {
+    let extra: Record<string, unknown> = {};
+    for (const { steps, declared: inner } of nested) {
+      const key = steps[0]!.key;
       if (fields.some(([kept]) => kept === key)) continue;
-      const value = entry[key];
-      if (each && Array.isArray(value)) {
-        const list = value.filter(isPlainObject).map((item) => objectOf(declaredIdentityOf(item, level, inner)))
-          .filter((item) => Object.keys(item).length > 0);
-        if (list.length > 0) fields.push([key, list]);
-      } else if (!each && isPlainObject(value)) {
-        const object = objectOf(declaredIdentityOf(value, level, inner));
-        if (Object.keys(object).length > 0) fields.push([key, object]);
-      }
+      const projected = project(entry, steps, inner, level);
+      if (isPlainObject(projected)) extra = merge(extra, projected) as Record<string, unknown>;
     }
+    for (const key of Object.keys(extra)) fields.push([key, extra[key]]);
     return fields;
   };
   // Identity per entry on each level, with prefix sums of their sizes and counts.
