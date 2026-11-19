@@ -278,6 +278,7 @@
     "codegen",
     "skills",
     "upgrade-notes",
+    "!upgrade-notes/api-surface.released.json",
     "docs/README.md",
     "docs/approval-subjects.md",
     "docs/chat-attachments.md",
