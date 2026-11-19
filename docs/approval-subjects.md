@@ -167,6 +167,13 @@ and before the approval request is sent. For each looked-up reference:
 | Different id in the answer (`mismatch`) | card with warning, never named | `block` | as above |
 | Not on the one page of a list that is not `complete` (`not_in_page`) | card with warning, never "does not exist" | `block` | as above |
 | Source not in the tool set, not for this role, revoked, asks for approval (`source_unavailable`) | card with warning | `block` | as above |
+
+The tool set of a request decides what is declared: a write tool that only
+has `inputEntities` is looked up when a read source of the type is in this
+request's tools, and keeps the history fallback (and v1 ids) when none is.
+A write tool that declares `approvalSubject` itself is always looked up: a
+missing source is then `source_unavailable`, so `block` and `recheck` hold
+also for a role whose tools leave the read tool out.
 | A limit reached (`limit`) | card with warning | `block` | as above |
 
 "Not checkable" is shown on the card with its own text
