@@ -7,19 +7,39 @@ what the browser made of it before it answers.
 
 ## Who gets what
 
-| Setup | Effect |
-| --- | --- |
-| `AiChatProvider` + `useVercelAiChatTransport`, `VercelAiChat`, `<glirastes-chat>` | protocol on (default) |
-| Server `uiActionOutcomes: 'off'`, provider `uiActionOutcomes={false}`, transport `uiActionOutcomes: false` | fallback |
-| Client without the flag (glirastes 0.17 or older, own client on `/server/http`, Slack bot, SSR) | fallback |
-| Custom `ChatTransport` without `addToolOutput` | fallback |
-| Custom `streamHandler`, direct commands | fallback (never marked) |
-| Runtime container | same handler; `chat.uiActionOutcomes` in the configuration |
+The result shape follows the request flag `glirastesUiOutcomes: 1`, not the
+mode: a client that sends it reads `handedOff`; a client without it (a 0.17
+browser runs an action only with `success: true`) gets exactly the 0.17.3
+result. `createAiChatHandler({ uiToolResultShape })` decides:
 
-Fallback: the result is `{ handedOff: true, message, uiAction }`, the model
-answers in the same request and is told the action was handed over, not that
-it happened. `uiToolResultShape: 'legacy'` on `createAiChatHandler` keeps the
-0.17 shape `{ success: true, message, uiAction }`.
+| `uiToolResultShape` | Request with the flag | Request without the flag |
+| --- | --- | --- |
+| `'auto'` (default) | `{ handedOff: true, message, uiAction }` | `{ success: true, message, uiAction }` (0.17.3, byte-identical) |
+| `'handoff'` | `{ handedOff: true, message, uiAction }` | `{ handedOff: true, message, uiAction }` (a 0.17 browser runs nothing) |
+| `'legacy'` | `{ success: true, message, uiAction }` | `{ success: true, message, uiAction }` |
+
+`message` is the hand-off note of 0.17.3 (the page-bound variant names the
+route; a `defineUiTool` keeps its `successMessage`). A UI tool without a
+`uiAction` always returns `{ success: true, message }`. The marker
+(`awaitsOutcome`) is added on top, only with the flag:
+
+| Path | Shape under `'auto'` | Marker |
+| --- | --- | --- |
+| Built-in stream handler, flag, mode `confirm` (default) | hand-off | `awaitsOutcome: true`, the request ends after the step |
+| Built-in stream handler, flag, mode `report-only` | hand-off | `awaitsOutcome: false`, the model writes on |
+| Built-in stream handler, flag, `uiActionOutcomes: 'off'` (server) | hand-off | none |
+| Flag, after `MAX_UI_OUTCOME_CONTINUATIONS` stops in the turn | hand-off | none (`awaitsOutcome: false` for a `defineUiTool` with `outcome: 'confirm'`) |
+| No flag: glirastes 0.17 or older, provider `uiActionOutcomes={false}`, transport `uiActionOutcomes: false`, own client on `/server/http`, Slack bot, SSR | 0.17.3 (`success: true`) | none |
+| Custom `streamHandler` | by the flag | never |
+| Direct commands (`/command`) | by the flag | never |
+| Custom `ChatTransport` (only `useVercelAiChatTransport` sends the flag) | by the flag it sends; none: 0.17.3 | only with the flag; send it only when the client does steps 3 and 4 below |
+| `toolsToAiTools` / `toolToAiTool` called directly (no request) | `success: true` (option default `'legacy'`; `'handoff'` on request) | never |
+| Runtime container | same handler, `'auto'` (not configurable) | `chat.uiActionOutcomes` |
+
+Without a marker the model answers in the same request; with the hand-off
+shape it is told the action was handed over, not that it happened (the
+0.17.3 note says the same). `uiActionOutcomes: 'off'` plus
+`uiToolResultShape: 'legacy'` restores 0.17.3 for every client.
 
 ## Wire format
 
@@ -116,7 +136,9 @@ with `awaitsOutcome` there to not run them twice.
   navigation reports `unavailable`.
 - Handlers return `false` (or throw) instead of failing silently, and resolve
   once the effect is visible.
-- Code that reads `success` on UI tool results reads `handedOff` too.
+- Code that reads `success` on UI tool results reads `handedOff` too (it
+  gets `handedOff` only for requests with the flag, or with
+  `uiToolResultShape: 'handoff'`).
 - Strict body validation in front of the chat endpoint allows
   `glirastesUiOutcomes`.
 - Count turns by requests without `continuation` (or by `turnId`), not by

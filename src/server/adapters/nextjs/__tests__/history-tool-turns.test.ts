@@ -37,17 +37,23 @@ function toolResultCount(messages: unknown[]): number {
 }
 
 describe('history.toolTurnCounting', () => {
-  it('all-turns (default): a turn without tools uses up the only slot, the list ids are gone', async () => {
-    const messages = await prepareModelMessages(conversation(1));
+  it("all-turns (the way back): a turn without tools uses up the only slot, the list ids are gone", async () => {
+    const messages = await prepareModelMessages(conversation(1), { history: { toolTurnCounting: 'all-turns' } });
     expect(JSON.stringify(messages)).not.toContain(uuid(3));
     expect(JSON.stringify(messages)).toContain(JSON.stringify(HISTORY_TEXT_ONLY_NOTE).slice(1, -1));
     expect(toolResultCount(messages)).toBe(0);
   });
 
-  it('the default is byte-identical to an explicit all-turns', async () => {
+  it('tool-turns is the default: a turn without tools in between keeps the list ids', async () => {
+    const messages = await prepareModelMessages(conversation(1));
+    expect(JSON.stringify(messages)).toContain(uuid(3));
+    expect(toolResultCount(messages)).toBe(1);
+  });
+
+  it('the default is byte-identical to an explicit tool-turns', async () => {
     for (const chats of [0, 1, 3]) {
       const implicit = await prepareModelMessages(conversation(chats));
-      const explicit = await prepareModelMessages(conversation(chats), { history: { toolTurnCounting: 'all-turns' } });
+      const explicit = await prepareModelMessages(conversation(chats), { history: { toolTurnCounting: 'tool-turns' } });
       expect(JSON.stringify(explicit)).toBe(JSON.stringify(implicit));
     }
   });
@@ -58,6 +64,20 @@ describe('history.toolTurnCounting', () => {
     expect(text).toContain(uuid(3));
     expect(toolResultCount(messages)).toBe(1);
     expect(text).toContain('thanks 3');
+  });
+
+  it('tool-turns equals all-turns when no earlier turn called a tool: the previous turn keeps its files', async () => {
+    const image = 'data:image/png;base64,AAAA';
+    const messages: UIMessage[] = [
+      user('u0', 'hello'), assistant('a0', [{ type: 'text', text: 'Hi.' }]),
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'What does it show?' }, { type: 'file', mediaType: 'image/png', url: image, filename: 'a.png' }] } as UIMessage,
+      assistant('a1', [{ type: 'text', text: 'A chart.' }]),
+      user('uq', 'And the axes?'),
+    ];
+    const toolTurns = await prepareModelMessages(messages, { history: { toolTurnCounting: 'tool-turns' } });
+    const allTurns = await prepareModelMessages(messages, { history: { toolTurnCounting: 'all-turns' } });
+    expect(JSON.stringify(toolTurns)).toBe(JSON.stringify(allTurns));
+    expect(JSON.stringify(toolTurns)).toContain('"type":"file"');
   });
 
   it('tool-turns equals all-turns when every earlier turn called a tool', async () => {
@@ -112,10 +132,10 @@ describe('history.toolTurnCounting', () => {
     });
     expect(breakdown!.turns.map((turn) => turn.mode)).toEqual(['text', 'compacted']);
     expect(JSON.stringify(sent)).toContain('first list');
-    // all-turns, as before: the turn that does not fit is left out as a whole.
+    // all-turns, as up to 0.17: the turn that does not fit is left out as a whole.
     await prepareModelMessages(messages, {
       maxContextMessages: 60,
-      history: { toolTurns: 2, maxTokens: 2_000 },
+      history: { toolTurns: 2, toolTurnCounting: 'all-turns', maxTokens: 2_000 },
       onBreakdown: (value) => { breakdown = value; },
     });
     expect(breakdown!.turns.map((turn) => turn.mode)).toEqual(['left-out', 'compacted']);
@@ -127,8 +147,8 @@ describe('history.toolTurnCounting', () => {
     await prepareModelMessages(conversation(1), { history: false, onBreakdown: (value) => breakdowns.push(value) });
     expect(breakdowns[0]).toMatchObject({
       pipeline: 'turn-aware',
-      toolTurnCounting: 'all-turns',
-      turns: [{ index: 0, mode: 'text', hadToolCalls: true }, { index: 1, mode: 'text', hadToolCalls: false }],
+      toolTurnCounting: 'tool-turns',
+      turns: [{ index: 0, mode: 'compacted', hadToolCalls: true }, { index: 1, mode: 'text', hadToolCalls: false }],
       earlierMessages: 0,
     });
     expect(breakdowns[0]!.estimatedTokens).toBeGreaterThan(0);

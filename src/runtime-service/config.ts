@@ -124,6 +124,15 @@ export const RuntimeConfigSchema = z
           .optional(),
         // Outcome protocol of UI actions (createAiChatHandler uiActionOutcomes); `confirm` when absent.
         uiActionOutcomes: z.enum(["confirm", "report-only", "off"]).optional(),
+        // How earlier turns reach the model (createAiChatHandler history). Absent: the SDK defaults
+        // (`tool-turns`, seen-objects memo on); `all-turns` and `seenObjects: false` are the way back.
+        history: z
+          .object({
+            toolTurnCounting: z.enum(["all-turns", "tool-turns"]).optional(),
+            seenObjects: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

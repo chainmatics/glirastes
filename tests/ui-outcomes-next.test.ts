@@ -108,13 +108,13 @@ describe('outcome protocol on the Next reference app', () => {
     expect(textOf(chunks)).toBe('Reference response complete.');
   }, 60_000);
 
-  it('without the flag: the hand-off shape without marker, the model writes on in the same request', async () => {
+  it('without the flag: the 0.17.3 shape without marker, the model writes on in the same request', async () => {
     const chunks = await chat({ messages: [user()] });
     const outputs = outputsOf(chunks);
     expect(outputs).toHaveLength(1);
     const output = outputs[0]!.output as Json;
-    expect(Object.keys(output).sort()).toEqual(['handedOff', 'message', 'uiAction']);
-    expect(output).toMatchObject({ handedOff: true, uiAction: { type: 'glirastes.navigate', payload: { href: '/overview' } } });
+    expect(Object.keys(output).sort()).toEqual(['message', 'success', 'uiAction']);
+    expect(output).toMatchObject({ success: true, uiAction: { type: 'glirastes.navigate', payload: { href: '/overview' } } });
     expect(stepsOf(chunks)).toBe(2);
     expect(textOf(chunks)).toBe('Reference response complete.');
   }, 60_000);

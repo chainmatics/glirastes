@@ -182,6 +182,16 @@ show them in the turn's language.
 action outcome protocol: with `confirm` a turn with a UI action takes two
 POSTs (up to four with retries, so up to four times the per-request budgets);
 a strict proxy in front must allow the body field `glirastesUiOutcomes`.
+Only a request with that field gets the hand-off result shape
+(`{ handedOff: true, … }`); every other request gets the 0.17.3 shape
+`{ success: true, … }` (SDK default `uiToolResultShape: 'auto'`, not
+configurable in the container).
+
+`chat.history` (optional, strict: `toolTurnCounting` `all-turns` or
+`tool-turns`, `seenObjects` `true` or `false`) changes how earlier turns reach
+the model. Absent: the 0.18 SDK defaults (`tool-turns`, seen-objects memo on
+for tools with `outputEntities`); `{"toolTurnCounting": "all-turns",
+"seenObjects": false}` restores the 0.17 model input.
 
 For bearer authentication use `"credential": {"type":"bearer"}`. For existing
 backend CSRF middleware set `identity.csrfHeader` to `x-csrf-token` or
