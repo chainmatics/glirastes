@@ -96,6 +96,7 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
           disabled={!canCompose}
           language={voice.language ?? 'de'}
           baseUrl={voice.baseUrl}
+          workletUrl={voice.workletUrl}
           getToken={voice.getToken}
           onTranscript={(text) => {
             setValue((prev) => (prev.length > 0 ? `${prev} ${text}` : text));

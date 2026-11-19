@@ -3,14 +3,26 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SttProviderAdapter as SttAdapter } from '../../stt/controller.js';
 
-const boundary = vi.hoisted(() => ({ connect: vi.fn() }));
-vi.mock('../../stt/deepgram.js', () => ({ DeepgramSttAdapter: class { connect = boundary.connect; } }));
+const boundary = vi.hoisted(() => ({ connect: vi.fn(), options: vi.fn() }));
+vi.mock('../../stt/deepgram.js', () => ({
+  DeepgramSttAdapter: class {
+    constructor(options: unknown) { boundary.options(options); }
+    connect = boundary.connect;
+  },
+}));
 import { ChatWindow } from '../chat-window.js';
 import { VoiceInputAddon } from '../voice-input-addon.js';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); boundary.connect.mockReset(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); boundary.connect.mockReset(); boundary.options.mockClear(); });
 
 describe('built-in voice in a retained window', () => {
+  it('voice.workletUrl reaches the adapter', () => {
+    render(<ChatWindow open keepMounted>
+      <VoiceInputAddon disabled={false} language="en" workletUrl="/static/pcm.js" onTranscript={vi.fn()} />
+    </ChatWindow>);
+    expect(boundary.options).toHaveBeenCalledWith(expect.objectContaining({ workletUrl: '/static/pcm.js' }));
+  });
+
   it('reports a failed hidden finalization without an unhandled rejection', async () => {
     const stopTrack = vi.fn();
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {

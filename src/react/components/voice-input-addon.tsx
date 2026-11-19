@@ -77,6 +77,8 @@ interface VoiceInputAddonProps {
   disabled: boolean;
   language: string;
   baseUrl?: string;
+  /** URL of the audio worklet file; default `/audio-worklet-processor.js`. */
+  workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
   getToken?: () => MaybePromise<string | null | undefined>;
   /** Speech provider; defaults to the Deepgram speech-stream adapter. */
@@ -102,6 +104,7 @@ export function VoiceInputAddon({
   disabled,
   language,
   baseUrl,
+  workletUrl,
   getToken,
   adapter,
   onTranscript,
@@ -123,9 +126,10 @@ export function VoiceInputAddon({
   const resolvedAdapter = useMemo<SttProviderAdapter>(
     () => adapter ?? new DeepgramSttAdapter({
       baseUrl,
+      workletUrl,
       getToken: () => getTokenRef.current?.(),
     }),
-    [adapter, baseUrl],
+    [adapter, baseUrl, workletUrl],
   );
   const {
     phase,

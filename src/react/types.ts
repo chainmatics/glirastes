@@ -128,6 +128,8 @@ export interface ChatTransportConfig {
 export interface UseDeepgramTranscriptionOptions {
   language?: string;
   baseUrl?: string;
+  /** URL of the audio worklet file; default `/audio-worklet-processor.js`. */
+  workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
   getToken?: () => MaybePromise<string | null | undefined>;
   /**
@@ -161,6 +163,8 @@ export interface VoiceInputButtonProps {
   className?: string;
   language?: string;
   baseUrl?: string;
+  /** URL of the audio worklet file; default `/audio-worklet-processor.js`. */
+  workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
   getToken?: () => MaybePromise<string | null | undefined>;
   onError?: (error: string) => void;
@@ -825,6 +829,8 @@ export interface VoiceInputConfig {
   enabled?: boolean;
   language?: string;
   baseUrl?: string;
+  /** URL of the audio worklet file; default `/audio-worklet-processor.js`. */
+  workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
   getToken?: () => MaybePromise<string | null | undefined>;
   /**

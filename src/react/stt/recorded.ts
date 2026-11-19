@@ -15,6 +15,8 @@ export interface RecordedSttAdapterOptions {
   maxSeconds?: number;
   /** For tests and non-browser hosts. */
   fetch?: typeof fetch;
+  /** URL of the audio worklet file for the default capture. Default: `/audio-worklet-processor.js`. */
+  workletUrl?: string;
   /** Audio capture as 16 kHz mono PCM chunks; returns its stop function. */
   capture?: (
     stream: MediaStream,
@@ -70,7 +72,12 @@ export class RecordedSttAdapter implements SttProviderAdapter {
     let sent: Promise<void> | null = null;
     const request = new AbortController();
 
-    let stopCapture: (() => Promise<void>) | null = await (this.options.capture ?? createPcmPipeline)(
+    const capture = this.options.capture ?? ((stream, onAudio) => createPcmPipeline(
+      stream,
+      onAudio,
+      { workletUrl: this.options.workletUrl },
+    ));
+    let stopCapture: (() => Promise<void>) | null = await capture(
       input.stream,
       (audio) => {
         if (discarded || kept >= maxSamples) return;

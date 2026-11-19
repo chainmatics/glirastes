@@ -377,9 +377,10 @@ the chat window keys, `usePushToTalkHotkey` a hold-to-talk combination, and
 
 ## Speech worklet
 
-`DeepgramSttAdapter` captures microphone audio in an AudioWorklet loaded from
-`DEFAULT_AUDIO_WORKLET_URL` (`/audio-worklet-processor.js`, exported from
-`glirastes/react` and `glirastes/stt`). The package ships the file at
+`DeepgramSttAdapter` and `RecordedSttAdapter` capture microphone audio in an
+AudioWorklet loaded from `DEFAULT_AUDIO_WORKLET_URL`
+(`/audio-worklet-processor.js`, exported from `glirastes/react` and
+`glirastes/stt`). The package ships the file at
 `node_modules/glirastes/dist/react/audio-worklet-processor.js`; the host must
 serve it at that path. Copy it into `public/` on dev and build:
 
@@ -390,4 +391,9 @@ serve it at that path. Copy it into `public/` on dev and build:
 }
 ```
 
-Serving it elsewhere: construct the adapter with `new DeepgramSttAdapter({ workletUrl: '/static/pcm.js', getToken })` and pass it as the chat's `voice.adapter`; keep that instance stable. The built-in voice path does not take a `workletUrl`.
+Merge these two entries with the existing `predev` and `prebuild` scripts
+rather than replacing them.
+
+Served elsewhere: set `voice.workletUrl` on the chat (the built-in voice input
+passes it to its adapter), or construct `new DeepgramSttAdapter({ workletUrl, getToken })`
+or `new RecordedSttAdapter({ workletUrl })` and pass it as `voice.adapter`; keep that instance stable.

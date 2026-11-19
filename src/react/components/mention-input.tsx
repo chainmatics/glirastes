@@ -81,6 +81,7 @@ function ProviderMentionInput({
             disabled={!canCompose}
             language={voice.language ?? 'de'}
             baseUrl={voice.baseUrl}
+            workletUrl={voice.workletUrl}
             getToken={voice.getToken}
             onTranscript={composer.appendText}
             onError={voice.onError}
@@ -261,6 +262,7 @@ function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
             disabled={!canCompose}
             language={voice.language ?? 'de'}
             baseUrl={voice.baseUrl}
+            workletUrl={voice.workletUrl}
             getToken={voice.getToken}
             onTranscript={(text) => {
               const nextValue = value.length > 0 ? `${value} ${text}` : text;

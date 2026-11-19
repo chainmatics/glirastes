@@ -18,8 +18,9 @@ export function useDeepgramTranscription(
   const ownAdapter = options.adapter;
   const adapter = useMemo(() => ownAdapter ?? new DeepgramSttAdapter({
     baseUrl: options.baseUrl,
+    workletUrl: options.workletUrl,
     getToken: () => getTokenRef.current?.(),
-  }), [ownAdapter, options.baseUrl]);
+  }), [ownAdapter, options.baseUrl, options.workletUrl]);
   const stt = useStt({
     adapter,
     language: options.language ?? 'de',
