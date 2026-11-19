@@ -1,4 +1,12 @@
 import type { StreamTextTransform, TextStreamPart, ToolSet } from 'ai';
+import {
+  isTechnicalIdKey,
+  isUuidLike,
+  looksLikeTechnicalId,
+  ownLabelOf,
+  siblingLabelOf,
+  UUID_PATTERN_SOURCE,
+} from '../../../contracts/entity-identity.js';
 
 /**
  * Keeps technical ids out of the assistant's answers. Tool results teach the
@@ -13,53 +21,13 @@ export const HIDE_IDS_PROMPT =
 type Part = TextStreamPart<ToolSet>;
 type TextDelta = Extract<Part, { type: 'text-delta' }>;
 
-const UUID_SOURCE = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-const UUID = new RegExp(`^${UUID_SOURCE}$`, 'i');
-const LABEL_KEYS = ['title', 'name', 'displayName', 'label'];
+const UUID_SOURCE = UUID_PATTERN_SOURCE;
 const MAX_HELD = 80;
 
 export type IdLabels = Map<string, string | undefined>;
 
-function isIdKey(key: string): boolean {
-  return key === 'id' || /(?:Id|_id|Ids|_ids)$/.test(key);
-}
-
-/** A non-UUID value counts as an id only when it cannot be an ordinary word. */
-function looksLikeId(value: string): boolean {
-  if (UUID.test(value)) return true;
-  return value.length >= 8 && !/\s/.test(value) && /\d/.test(value) && /^[\w-]+$/.test(value);
-}
-
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function ownLabel(record: Record<string, unknown>): string | undefined {
-  for (const key of Object.keys(record)) {
-    if (/identifier$/i.test(key) || key === 'key') {
-      const value = stringField(record, key);
-      if (value) return value;
-    }
-  }
-  for (const key of LABEL_KEYS) {
-    const value = stringField(record, key);
-    if (value) return value;
-  }
-  return undefined;
-}
-
-function siblingLabel(record: Record<string, unknown>, idKey: string): string | undefined {
-  const stem = idKey.replace(/(?:Id|_id)$/, '');
-  for (const suffix of ['DisplayName', 'Name', 'Title', 'Label', '_name', '_title']) {
-    const value = stringField(record, `${stem}${suffix}`);
-    if (value) return value;
-  }
-  return undefined;
-}
-
 function remember(labels: IdLabels, id: string, label: string | undefined): void {
-  if (!looksLikeId(id) || label === id) return;
+  if (!looksLikeTechnicalId(id) || label === id) return;
   if (label !== undefined || !labels.has(id)) labels.set(id, label ?? labels.get(id));
 }
 
@@ -72,8 +40,8 @@ export function collectIdLabels(value: unknown, labels: IdLabels, depth = 0): vo
   }
   const record = value as Record<string, unknown>;
   for (const [key, item] of Object.entries(record)) {
-    if (isIdKey(key)) {
-      const label = key === 'id' ? ownLabel(record) : siblingLabel(record, key);
+    if (isTechnicalIdKey(key)) {
+      const label = key === 'id' ? ownLabelOf(record) : siblingLabelOf(record, key);
       if (typeof item === 'string') remember(labels, item, label);
       else if (Array.isArray(item)) for (const entry of item) if (typeof entry === 'string') remember(labels, entry, undefined);
     }
@@ -86,7 +54,7 @@ function escape(value: string): string {
 }
 
 function idPattern(labels: IdLabels): string {
-  const known = [...labels.keys()].filter((id) => !UUID.test(id)).sort((a, b) => b.length - a.length).map(escape);
+  const known = [...labels.keys()].filter((id) => !isUuidLike(id)).sort((a, b) => b.length - a.length).map(escape);
   return known.length > 0 ? `(?:${UUID_SOURCE}|${known.join('|')})` : UUID_SOURCE;
 }
 

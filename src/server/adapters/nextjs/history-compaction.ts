@@ -12,14 +12,8 @@
  */
 
 import { READ_RESULT_ID_PREFIX, WRITE_RESULT_ID_PREFIX, READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
-import { idLikeFieldsOf } from '../../../contracts/record-identity.js';
-import {
-  dominantArrayRoute,
-  expiredInstruction,
-  IDENTITY_ID_KEYS,
-  IDENTITY_NAME_KEYS,
-  identityFieldsOf,
-} from '../../core/result-overview.js';
+import { identityFieldsOf, idLikeFieldsOf, NAME_KEYS as NAME_KEY_PROFILES, OWN_ID_KEYS } from '../../../contracts/entity-identity.js';
+import { dominantArrayRoute, expiredInstruction } from '../../core/result-overview.js';
 
 export const HISTORY_DEFAULTS = {
   maxTurns: 6,
@@ -55,6 +49,9 @@ export const HISTORY_TEXT_ONLY_NOTE = '[Tool results of this and earlier turns a
 const MAX_COMPACT_DEPTH = 6;
 const MARKER_LENGTH = JSON.stringify(HISTORY_MARKER_KEY).length;
 const OWN_MARKERS: ReadonlySet<string> = new Set(['_truncated', HISTORY_MARKER_KEY]);
+/** The result profile of `entity-identity.ts`, as the overview uses it. */
+const IDENTITY_ID_KEYS: ReadonlyArray<string> = OWN_ID_KEYS.result;
+const IDENTITY_NAME_KEYS: ReadonlyArray<string> = NAME_KEY_PROFILES.result;
 const ID_KEYS: ReadonlySet<string> = new Set(IDENTITY_ID_KEYS);
 const NAME_KEYS: ReadonlySet<string> = new Set(IDENTITY_NAME_KEYS);
 

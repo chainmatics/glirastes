@@ -10,7 +10,16 @@
  * then within each class the largest first. Pure and deterministic.
  */
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
-import { idLikeFieldsOf, RECOGNISED_ID_KEYS } from '../../contracts/record-identity.js';
+import {
+  idLikeFieldsOf,
+  identityFieldsOf,
+  isOpaqueIdText,
+  isReferenceKey,
+  isResultIdentityKey,
+  MAX_IDENTITY_FIELD_CHARS,
+  NAME_KEYS,
+  OWN_ID_KEYS,
+} from '../../contracts/entity-identity.js';
 import { leftOutFields, outputFieldTree, projectOutputFields, type LeftOutField } from './output-fields.js';
 import { formatResultPath, isSelectablePath, setOwn, type PathStep } from './result-paths.js';
 
@@ -92,42 +101,11 @@ const MAX_LISTED_PATH_CHARS = 120;
 /** Child keys named per left-out parent, and their longest. */
 const MAX_LISTED_KEYS = 8;
 const MAX_LISTED_KEY_CHARS = 64;
-/** Identity keys that identify an entry (its id), and those that name it for a person. */
-export const IDENTITY_ID_KEYS: ReadonlyArray<string> = RECOGNISED_ID_KEYS;
-export const IDENTITY_NAME_KEYS: ReadonlyArray<string> = ['name', 'title', 'label', 'displayName'];
-/** An entry's own fields that name it stay as long as they are small. Foreign keys (`folderId`) do not. */
-const IDENTITY_KEY = new RegExp(`^(${[...IDENTITY_ID_KEYS, ...IDENTITY_NAME_KEYS].join('|')})$`);
-const MAX_IDENTITY_FIELD_CHARS = 200;
-
-/**
- * The identity fields of one entry that name it: an identity key with a
- * scalar value whose field (key and value, serialized) is at most 200
- * characters, in the entry's key order. An entry without a recognised
- * identifier (`id`, `uuid`, `key`, `slug`, `code`) adds every id-like field
- * (`playlist_id`, `ownerId`: `idLikeFieldsOf`). `read_result` adds them to the
- * entries of an array it reads below; the overview keeps the same keys.
- */
-export function identityFieldsOf(entry: Record<string, unknown>): Array<[string, unknown]> {
-  const fields: Array<[string, unknown]> = [];
-  const idLike = new Set(idLikeFieldsOf(entry, IDENTITY_ID_KEYS));
-  for (const key of Object.keys(entry)) {
-    if (!IDENTITY_KEY.test(key) && !idLike.has(key)) continue;
-    const value = entry[key];
-    const scalar = value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
-    if (scalar && serializedLength(key) + 1 + serializedLength(value) + 1 <= MAX_IDENTITY_FIELD_CHARS) fields.push([key, value]);
-  }
-  return fields;
-}
-/**
- * A field that refers to another record (`folderId`, `tenant_id`,
- * `brandKitIDs`), not a word ending in "ID" (`VALID`, `COVID`).
- */
-const FOREIGN_KEY = /^(?:.*[a-z0-9_](?:Id|ID)|.+_id)s?$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const HEX = /^[0-9a-f]{16,}$/i;
+/** Identity keys that identify an entry (its id), and those that name it for a person (`entity-identity.ts`). */
+export const IDENTITY_ID_KEYS: ReadonlyArray<string> = OWN_ID_KEYS.result;
+export const IDENTITY_NAME_KEYS: ReadonlyArray<string> = NAME_KEYS.result;
+export { identityFieldsOf };
 const URL_LIKE = /^(?:[a-z][a-z0-9+.-]*:\/\/|data:|\/\/)/i;
-/** Long tokens with letters and digits (cuid, nanoid, base64 ids). */
-const TOKEN = /^(?=[^\s]*\d)(?=[^\s]*[a-z])[A-Za-z0-9_-]{20,}$/i;
 /** Strings longer than this (on average) are texts, not labels. */
 const MAX_LABEL_CHARS = 32;
 /** Strings longer than this (on average) rank with the opaque values. */
@@ -221,7 +199,7 @@ interface Candidate {
 }
 
 function isOpaque(text: string): boolean {
-  return UUID.test(text) || HEX.test(text) || URL_LIKE.test(text) || TOKEN.test(text);
+  return isOpaqueIdText(text) || URL_LIKE.test(text);
 }
 
 function measure(stats: ValueStats, value: Json): void {
@@ -250,7 +228,7 @@ function measure(stats: ValueStats, value: Json): void {
  */
 function valueRank(candidate: Candidate): 0 | 1 | 2 {
   const last = candidate.steps[candidate.steps.length - 1];
-  if (last?.kind === 'key' && FOREIGN_KEY.test(last.key)) return 0;
+  if (last?.kind === 'key' && isReferenceKey(last.key)) return 0;
   const stats = candidate.stats;
   if (stats.nested > 0) return 0;
   if (stats.strings === 0) return 2;
@@ -441,7 +419,7 @@ export function buildResultOverview(
     ownFieldSize.set(candidate.entryKey, (ownFieldSize.get(candidate.entryKey) ?? 0) + candidate.size);
   }
   const keep = new Set([...ownFieldSize].filter(([key, size]) => (
-    IDENTITY_KEY.test(key) && size / Math.max(1, objectEntries) <= MAX_IDENTITY_FIELD_CHARS
+    isResultIdentityKey(key) && size / Math.max(1, objectEntries) <= MAX_IDENTITY_FIELD_CHARS
   )).map(([key]) => key));
   // An entry without a recognised identifier keeps every id-like field (`playlist_id`, `ownerId`):
   // rather one field too many than no id for the next call. Kept for the whole array, never

@@ -120,7 +120,7 @@ Fixed (the tests keep their ids, titled `SA-nn (fixed in 0.17.2)`):
 
 | Id | Fixed behaviour | SDK code |
 | --- | --- | --- |
-| SA-01 | History compaction keeps `playlist_id` with `displayName` for entries 11–60; the `_history` marker's `keys` names it | `src/contracts/record-identity.ts` (`idLikeFieldsOf`), `src/server/adapters/nextjs/history-compaction.ts` |
+| SA-01 | History compaction keeps `playlist_id` with `displayName` for entries 11–60; the `_history` marker's `keys` names it | `src/contracts/entity-identity.ts` (`idLikeFieldsOf`), `src/server/adapters/nextjs/history-compaction.ts` |
 | SA-02 | Under size pressure the overview keeps `playlist_id`; other fields go first, then trailing entries | `src/server/core/result-overview.ts` |
 | SA-03 | `read_result` adds `playlist_id` with the name to entries read below the array | `src/server/core/result-overview.ts` (`identityFieldsOf`) |
-| SA-05 | Id 3 of user 3, playlist 3 and the versions of playlist 3 is named only for the kind the argument picks (`playlist_id: 3` → "Lobby Loop", `user_id: 3` → "Linus Torvalds"); a bare `id: 3` without a resource tool names none and lists every candidate | `src/react/utils/entity-kinds.ts`, `src/react/utils/entity-names.ts`, `src/react/utils/approval-subjects.ts` |
+| SA-05 | Id 3 of user 3, playlist 3 and the versions of playlist 3 is named only for the kind the argument picks (`playlist_id: 3` → "Lobby Loop", `user_id: 3` → "Linus Torvalds"); a bare `id: 3` without a resource tool names none and lists every candidate | `src/contracts/entity-identity.ts`, `src/react/utils/entity-names.ts`, `src/react/utils/approval-subjects.ts` |

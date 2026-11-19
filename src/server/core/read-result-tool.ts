@@ -11,7 +11,8 @@ import {
   READ_RESULT_TOOL_NAME,
 } from '../../contracts/result-handle.js';
 import { defineTool, type Tool } from '../../types.js';
-import { dominantArrayRoute, identityFieldsOf } from './result-overview.js';
+import { identityFieldsOf } from '../../contracts/entity-identity.js';
+import { dominantArrayRoute } from './result-overview.js';
 import {
   describeMissingPath,
   formatResultPath,
