@@ -150,8 +150,27 @@
 }
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] ul,
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] ol {
-  margin: 0.25rem 0 0.5rem 1.25rem;
-  padding: 0;
+  margin: 0.25rem 0 0.5rem 0;
+  padding-left: 1.25rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] ul {
+  list-style: disc outside;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] ol {
+  list-style: decimal outside;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] table {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.25rem 0 0.5rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] th,
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] td {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--cm-border);
+  text-align: left;
 }
 
 /* ---------- Chat input / mention input ---------- */

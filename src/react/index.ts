@@ -49,6 +49,7 @@ export type {
   ChatThemeOverride,
   ChatThemeColors,
   ChatLocale,
+  ChatMarkdownOptions,
   // Size
   ChatSize,
   ChatSizePreset,

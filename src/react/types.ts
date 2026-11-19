@@ -1453,6 +1453,11 @@ export interface AiChatProviderConfig {
    */
   entityLinks?: ChatEntityLinksConfig;
   /**
+   * Markdown rendering options for the default `Markdown` slot, e.g.
+   * `{ remarkPlugins: [remarkGfm] }` for GFM tables. Memoize the object.
+   */
+  markdown?: ChatMarkdownOptions;
+  /**
    * Shows the chat when `useChatComposer().open()` or `chatAbout()` asks for
    * it. Without it the surrounding `AssistantLayoutProvider` opens.
    */
@@ -2289,4 +2294,10 @@ export interface AiTriggerButtonProps {
   icon?: ReactNode;
   /** ARIA label for cancel recording. Default: "Cancel recording" */
   cancelAriaLabel?: string;
+}
+
+/** Options the host passes to the default Markdown renderer. */
+export interface ChatMarkdownOptions {
+  /** remark plugins, e.g. `remark-gfm` (installed by the host, not by glirastes). */
+  remarkPlugins?: ReadonlyArray<unknown>;
 }

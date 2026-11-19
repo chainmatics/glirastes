@@ -1,5 +1,6 @@
 import { Fragment, Suspense, lazy, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
+import { useChatMarkdownOptions } from '../markdown-options.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
 import {
@@ -48,6 +49,7 @@ import { turnStartId } from '../utils/turn-outcomes.js';
 // server-only consumers don't pay for it, and gracefully degrades to raw text
 // when the optional peer dep isn't installed.
 type MarkdownModule = typeof import('react-markdown');
+type ReactMarkdownOptions = import('react-markdown').Options;
 
 const ReactMarkdown = lazy<MarkdownModule['default']>(async () => {
   try {
@@ -771,10 +773,14 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 
 function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
   const links = useChatEntityLinks();
+  const { remarkPlugins } = useChatMarkdownOptions();
   return (
     <div className={className} data-component="markdown">
       <Suspense fallback={<>{content}</>}>
-        <ReactMarkdown components={links.enabled ? links.markdownComponents : undefined}>{content}</ReactMarkdown>
+        <ReactMarkdown
+          components={links.enabled ? links.markdownComponents : undefined}
+          remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
+        >{content}</ReactMarkdown>
       </Suspense>
     </div>
   );
