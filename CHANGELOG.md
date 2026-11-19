@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `glirastes tools refresh` and `glirastes tools check` print a short upgrade hint; `GLIRASTES_UPGRADE_HINT=0` turns it off. `GLIRASTES_SKILLS_AUTO_UPDATE=0` keeps them away from the installed skills and also stops the agent-block update.
 - In an app with installed skills, `glirastes tools refresh` creates `.glirastes/sdk-baseline.json` on its first run after an upgrade, so the file shows up in `git status`. Commit it.
 - `glirastes tools refresh` rewrites the marked Glirastes block in `CLAUDE.md` and `AGENTS.md` when it is outdated. The block written by `glirastes init` points to `glirastes upgrade report`.
-- A note you decide as `deferred` stays in the report after `glirastes upgrade ack`, until you decide `adopted` or `declined`.
+- A note you decide as `deferred` stays in the report after `glirastes upgrade ack`, until you decide `adopted` or `declined`. `--fail-on breaking` and the `glirastes doctor` warning count only Must items without any decision, so a deferred one does not fail CI; the refresh hint labels it, e.g. `1 must (1 deferred)`.
 - The full report lists breaking notes that found no evidence in your code under "Checked, no evidence found" (`checkedNotAffected` in `--json`), so you can confirm them, for example behind a barrel re-export. They do not block `ack`.
 - `--brief` lists Must, Should and Recommended items and counts the optional ones. Prerelease versions such as `0.19.0-rc.1` sort below their release.
 - `glirastes doctor` has a check `sdk-upgrade` that warns while notes you must act on are pending.

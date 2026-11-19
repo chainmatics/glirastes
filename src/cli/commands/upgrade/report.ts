@@ -185,6 +185,11 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
   return report;
 }
 
+/** Must items without any decision: what `--fail-on breaking`, doctor and ack treat as open. */
+export function openMustItems(report: UpgradeReport): ReportItem[] {
+  return report.must.filter((item) => item.decision === undefined);
+}
+
 function line(item: ReportItem): string {
   const evidence = item.evidence.length > 0 ? ` (${item.evidence.map((e) => `${e.file}:${e.line}`).join(', ')})` : '';
   const decision = item.decision ? ` [${item.decision}]` : '';
@@ -248,8 +253,10 @@ export function summarizeUpgradeReport(report: UpgradeReport): string | null {
     report.unclassified.length > 0
       ? `, ${report.unclassified.length} ${report.unclassified.length === 1 ? 'version' : 'versions'} without notes`
       : '';
+  const deferred = report.must.filter((item) => item.decision === 'deferred').length;
+  const must = `${report.must.length} must${deferred > 0 ? ` (${deferred} deferred)` : ''}`;
   return (
-    `Glirastes ${report.from} → ${report.to}: ${report.must.length} must, ${should} should, ` +
+    `Glirastes ${report.from} → ${report.to}: ${must}, ${should} should, ` +
     `${report.recommended.length} recommended, ${report.offer.length} optional${unclassified}. Run \`glirastes upgrade report\`.`
   );
 }
@@ -333,7 +340,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
           ? JSON.stringify(report, null, 2)
           : formatUpgradeReport(report, { brief: args.flags.has('--brief') }),
       );
-      return failOn === 'breaking' && report.must.length > 0 ? 1 : 0;
+      return failOn === 'breaking' && openMustItems(report).length > 0 ? 1 : 0;
     }
 
     if (sub === 'decide') {

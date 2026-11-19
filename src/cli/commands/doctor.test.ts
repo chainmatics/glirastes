@@ -575,6 +575,24 @@ describe('upgrade follow-ups in doctor', () => {
     expect(clean.checks.some((item) => item.name === 'sdk-upgrade')).toBe(false);
   });
 
+  it('does not warn for must items that are only deferred', async () => {
+    const rootDir = await fixture();
+    const notesDir = join(rootDir, '.notes');
+    await mkdir(notesDir, { recursive: true });
+    await writeFile(join(notesDir, '0.19.0.json'), JSON.stringify({
+      version: '0.19.0',
+      notes: [{ id: 'break-one', kind: 'breaking', summary: 's', howTo: 'h', skill: 'some-skill' }],
+    }));
+    await writeJson(rootDir, '.glirastes/sdk-baseline.json', {
+      schemaVersion: 1,
+      reviewedThrough: '0.18.0',
+      decisions: { 'break-one': { decision: 'deferred', version: '0.19.0' } },
+    });
+    const upgrade = { sdkVersion: '0.19.0', notesDir, changelogPath: join(rootDir, 'none.md') };
+    const report = await createDoctorReport({ rootDir, env: {}, upgrade });
+    expect(report.checks.some((item) => item.name === 'sdk-upgrade')).toBe(false);
+  });
+
   it('turns a corrupt baseline into a warning, not a failure', async () => {
     const rootDir = await fixture(false);
     await mkdir(join(rootDir, '.glirastes'), { recursive: true });

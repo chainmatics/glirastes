@@ -1,6 +1,7 @@
 export {
   createUpgradeReport,
   formatUpgradeReport,
+  openMustItems,
   runUpgradeCommand,
   summarizeUpgradeReport,
   UPGRADE_SUBCOMMANDS,

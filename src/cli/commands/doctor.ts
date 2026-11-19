@@ -9,7 +9,7 @@ import {
   createSelfSetupPlan,
   createSetupPlan,
 } from './setup-plan.js';
-import { createUpgradeReport, type UpgradeReportOptions } from './upgrade/report.js';
+import { createUpgradeReport, openMustItems, type UpgradeReportOptions } from './upgrade/report.js';
 import { upgradeHintDisabled } from './upgrade/hint.js';
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 import { inspectSkillsStaleness, skillsAutoUpdateDisabled } from './skills-auto-update.js';
@@ -160,7 +160,7 @@ async function upgradeCheck(options: CreateDoctorReportOptions, rootDir: string)
   if (upgradeHintDisabled(options.env ?? process.env)) return null;
   try {
     const report = await createUpgradeReport({ rootDir, ...options.upgrade });
-    return report.must.length > 0 ? check('sdk-upgrade', 'warn', 'E-SETUP-108', 'review-sdk-upgrade') : null;
+    return openMustItems(report).length > 0 ? check('sdk-upgrade', 'warn', 'E-SETUP-108', 'review-sdk-upgrade') : null;
   } catch (error) {
     const detail = (error instanceof Error ? error.message : String(error)).split('\n')[0]!;
     return { ...check('sdk-upgrade', 'warn', 'E-SETUP-108', 'repair-sdk-upgrade-report'), detail };

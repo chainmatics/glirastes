@@ -61,7 +61,9 @@ Run it:
 6. Record each choice: `glirastes upgrade decide <id> adopted`, `declined` or
    `deferred`. `deferred` keeps the item in every later report, also after
    `glirastes upgrade ack`; adopted and declined items drop out (`--all` lists
-   them again).
+   them again). A deferred Must item no longer counts as open: `--fail-on
+   breaking` and the doctor warning skip it, and the refresh hint labels it
+   (`1 must (1 deferred)`).
 7. Edited skills under Should (`skill:<name>`): `glirastes tools refresh`
    keeps an edited copy and the report names it. Merge the shipped changes
    from `node_modules/glirastes/skills/<name>` into the copy yourself. A copy you
@@ -92,7 +94,7 @@ glirastes upgrade ack
 
 `--brief` lists Must, Should and Recommended items and only counts the
 optional ones. `--fail-on breaking` exits 1 while
-a Must item is open, for CI. `--root <dir>` points any subcommand at another
+a Must item has no decision (deferred counts as a decision), for CI. `--root <dir>` points any subcommand at another
 app. `GLIRASTES_UPGRADE_HINT=0` removes the summary line from refresh and check.
 
 `glirastes install --with-upgrade-hook` adds a Claude Code `SessionStart` hook

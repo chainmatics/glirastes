@@ -283,6 +283,14 @@ describe('summarizeUpgradeReport', () => {
     );
   });
 
+  it('labels deferred must items in the count', async () => {
+    await writeNotes('0.19.0', [note('break-one', 'breaking'), note('break-two', 'breaking')]);
+    await baseline('0.18.0', { 'break-one': 'deferred' });
+    expect(summarizeUpgradeReport(await createUpgradeReport(opts()))).toBe(
+      'Glirastes 0.18.0 → 0.19.0: 2 must (1 deferred), 0 should, 0 recommended, 0 optional. Run `glirastes upgrade report`.',
+    );
+  });
+
   it('is null when up to date', async () => {
     await writeNotes('0.19.0', []);
     await baseline('0.19.0');
@@ -402,6 +410,22 @@ describe('runUpgradeCommand', () => {
     const a = io();
     expect(await runUpgradeCommand(['ack'], { ...a.io, sdkVersion: '0.19.0-rc.1' })).toBe(0);
     expect((await readBaseline(root))!.reviewedThrough).toBe('0.19.0-rc.1');
+  });
+
+  it('--fail-on breaking ignores deferred must items, which stay listed', async () => {
+    await seedAllKinds();
+    await baseline('0.18.0', { 'break-one': 'deferred' });
+    const a = io();
+    expect(await runUpgradeCommand(['report', '--fail-on', 'breaking'], a.io)).toBe(0);
+    expect(a.out.join('\n')).toContain('[break-one]');
+    expect(a.out.join('\n')).toContain('[deferred]');
+  });
+
+  it('--fail-on breaking with --all ignores adopted and declined must items', async () => {
+    await seedAllKinds();
+    await baseline('0.18.0', { 'break-one': 'adopted' });
+    const a = io();
+    expect(await runUpgradeCommand(['report', '--all', '--fail-on', 'breaking'], a.io)).toBe(0);
   });
 
   it('ack never moves reviewedThrough backwards', async () => {
