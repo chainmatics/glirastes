@@ -62,14 +62,14 @@ component; headless hooks and building blocks for an own chat:
 | `theme.colors.primary`, `theme.colors.primarySoft` | accent and gradient stop within a theme override |
 | `classNames` | per-slot class hooks |
 | `components` | replace a rendered component (see *Slots*) |
-| `locale`, `locales` | `locale` overrides any string for every language; `locales` per BCP-47 tag (`{ pl: { sendButton: 'Wyślij' } }`, partial tables fall back per key; language = `language`, else the page `lang` (`<glirastes-chat>`: nearest `lang`), else the turn's tool labels; `languageSource: 'server'` = old order; server side: `requestLocale`) |
+| `locale`, `locales` | `locale` overrides any string for every language; `locales` per BCP-47 tag (`{ pl: { sendButton: 'Wyślij' } }`, partial tables fall back per key; language = `language`, else the page `lang` (`<glirastes-chat>`: nearest `lang`), else the turn's tool labels, followed when the page changes it later; `languageSource: 'server'` = old order; sent per request as `Content-Language` unless `sendLanguage: false`, server side: `requestLocale` > `locale` > that > manifest, `clientLanguage: false`) |
 | `session` | `save` / `load` / `clear` for durable conversations |
 | `mentions` | mention sources and search |
 | `suggestions` | contextual suggestion chips |
 | `voice` | speech-to-text |
 | `attachments` | image and PDF attachments (section below) |
 | `chatInteractions` | derived `@` entities and `/` commands (section below) |
-| `entityLinks` | entity references in answers as chips (`knownEntities`, `ambiguousNames`, `resolveAmbiguous`, `scope`, `mentionMarkers: 'markdown'` + `verifyMentions`); `entityDeclarations` sets declared identity by tool name (`docs/entity-identity.md`) |
+| `entityLinks` | entity references in answers as chips (`knownEntities`, `ambiguousNames` (default `'text'`: a shared name stays text; `'first'` = before 0.18.0; markers with an id link by id), `resolveAmbiguous`, `scope`, `mentionMarkers: 'markdown'` + `verifyMentions`); `entityDeclarations` sets declared identity by tool name (`docs/entity-identity.md`) |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
 | `onBeforeSend`, `onToolResult`, `onUiActionOutcome` | hooks around a turn; UI action outcomes in `references/hooks-and-building-blocks.md` |
 | `approvalDescription`, `approvalDisplay` | human-readable text for an approval request; `approvalDisplay` (`decided: 'entry'`, `open: 'inline'`) places approvals at their tool part (`MessageParts.parts`) |

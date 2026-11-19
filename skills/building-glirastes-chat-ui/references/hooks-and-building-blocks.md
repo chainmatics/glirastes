@@ -57,6 +57,12 @@ step has `declinedBy: 'user' | 'server'` (the server did not run an approved
 call). The summary counts done, failed, declined and neutral steps apart
 and leaves out what is zero (`1 step done, 1 declined`, `2 declined`). Display only: server counting follows
 `classifyToolFailure`. A UI tool's hand-off note is never shown as a detail.
+Once its turn no longer runs (`active` false: the user stopped, the request
+failed, a stored history), `ActivityLog` shows a step still `running` as
+`aborted` (`data-status="aborted"`, a stop icon, counted on its own as
+`activityAbortedLabel`, `{count} stopped`, never as failed) and closes the
+log; a step `waiting` for approval stays `waiting`, a UI action still waiting
+for its outcome shows "not confirmed".
 
 ## Message layout
 
@@ -128,8 +134,15 @@ Defaults keep today's markup; everything below is opt-in.
   `{count}` of `activityDoneLabel` and `activityRunningProgressLabel` is the
   number of done steps.
 - The chat's language: `language` (stated by the app) wins, else the page's
-  `lang`, else the language of the server's tool labels;
+  `lang` (also when the page sets or changes it after the chat mounted),
+  else the language of the server's tool labels;
   `languageSource: 'server'` puts the tool labels first (before 0.18.0).
+  Keys a partial `locale` or `locales[tag]` lacks follow that language's
+  fallback (the language, another region of it, `en`). The chat names
+  `language`, else the page's `lang`, in each request as the
+  `Content-Language` header (`sendLanguage: false` sends none; not with
+  `languageSource: 'server'`); the handler takes it as the turn language
+  unless it sets `requestLocale` or `locale` (`clientLanguage: false`).
 - Under `prefers-reduced-motion: reduce` the status spinner stands still as
   an open arc (`data-motion="reduced"`, also without the stylesheet) and the
   shipped styles stop the typing dots and dialog animations.
