@@ -150,6 +150,24 @@ describe('skills update on tools refresh', () => {
     expect(h.out.join('\n')).toContain('1 added, 1 removed');
   });
 
+  it('a chat-ui-only install gains the upgrade skill on refresh and no other part', async () => {
+    const root = await nextApp();
+    await installSkills({ rootDir: root, host: 'claude', quiet: true, parts: ['chat-ui'] });
+    await rm(join(root, '.claude/skills/upgrading-glirastes'), { recursive: true });
+    const manifest = (await readInstalledSkillsManifest(root))!;
+    delete manifest.installs[0]!.skills['upgrading-glirastes'];
+    await writeInstalledSkillsManifest(root, { ...manifest, sdkVersion: '0.0.1' });
+
+    await runToolsCommand(['refresh'], io(root).deps);
+
+    expect(Object.keys((await readInstalledSkillsManifest(root))!.installs[0]!.skills)).toEqual([
+      'building-glirastes-chat-ui',
+      'curating-glirastes-chat-interactions',
+      'upgrading-glirastes',
+    ]);
+    expect(await installed(root, 'upgrading-glirastes')).toBe(await shipped('upgrading-glirastes'));
+  });
+
   it('relinks symlinked skills instead of copying them', async () => {
     const root = await installedByOlderSdk({ symlink: true });
     const link = join(root, '.claude/skills/maintaining-glirastes-tools');

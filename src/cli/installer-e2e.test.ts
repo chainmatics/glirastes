@@ -188,7 +188,7 @@ describe('parts install independently', () => {
     expect(Object.keys(hostRecord(manifest, 'codex')?.skills ?? {}))
       .toEqual(['describing-glirastes-tools', 'maintaining-glirastes-tools', 'upgrading-glirastes']);
     expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}))
-      .toEqual(['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions']);
+      .toEqual(['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions', 'upgrading-glirastes']);
   });
 
   it('accepts several hosts from one --host flag', async () => {

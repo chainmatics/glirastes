@@ -27,20 +27,23 @@ export interface PartResolutionContext {
 
 /**
  * Skills each part contributes. The framework part is stack-dependent, so it
- * resolves through the detected stack rather than a fixed name.
+ * resolves through the detected stack rather than a fixed name. Every part
+ * carries the upgrade skill, so any install learns what a new SDK changes.
  */
+const UPGRADE_SKILL = 'upgrading-glirastes';
+
 const FRAMEWORK_SKILLS: Record<DetectedStack, ReadonlyArray<string>> = {
-  nextjs: ['integrating-glirastes-nextjs'],
-  web: ['integrating-glirastes-web'],
+  nextjs: ['integrating-glirastes-nextjs', UPGRADE_SKILL],
+  web: ['integrating-glirastes-web', UPGRADE_SKILL],
 };
 
 const PART_SKILLS: Record<
   Exclude<InstallerPart, 'framework'>,
   ReadonlyArray<string>
 > = {
-  'chat-ui': ['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions'],
-  tools: ['maintaining-glirastes-tools', 'describing-glirastes-tools', 'upgrading-glirastes'],
-  setup: ['setting-up-glirastes', 'setting-up-glirastes-memory', 'migrating-to-glirastes', 'upgrading-glirastes'],
+  'chat-ui': ['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions', UPGRADE_SKILL],
+  tools: ['maintaining-glirastes-tools', 'describing-glirastes-tools', UPGRADE_SKILL],
+  setup: ['setting-up-glirastes', 'setting-up-glirastes-memory', 'migrating-to-glirastes', UPGRADE_SKILL],
 };
 
 /** Dependency whose presence proves a stack, rather than a heuristic; Next.js wins. */
