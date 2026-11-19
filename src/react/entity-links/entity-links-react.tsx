@@ -110,9 +110,18 @@ export function ChatEntityLinksProvider({
   // Strict names (`ambiguousNames: 'text'`, `resolveAmbiguous`): every reference by its name, for markers too.
   const strictNames = !!config && config.mentionMarkers === 'markdown'
     && (config.ambiguousNames === 'text' || config.resolveAmbiguous !== undefined);
+  // Only independently shown records compete for a name: an assistant's own markers do not.
   const namedReferences = useMemo(
-    () => (strictNames ? [...collectKnownEntities(messages, searches ?? [], entityDeclarations), ...known] : undefined),
-    [strictNames, messages, searches, entityDeclarations, known],
+    () => (strictNames
+      ? collectKnownEntities(
+        messages.map((message) => (message.role === 'assistant'
+          ? { ...message, parts: message.parts.filter((part) => (part as { type?: unknown }).type !== 'text') }
+          : message)),
+        searches ?? [],
+        entityDeclarations,
+      )
+      : undefined),
+    [strictNames, messages, searches, entityDeclarations],
   );
 
   const canOpen = useCallback((type: string) => {

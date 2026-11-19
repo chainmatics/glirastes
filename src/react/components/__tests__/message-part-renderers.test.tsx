@@ -289,6 +289,12 @@ describe('mention markers inside Markdown (W6)', () => {
     expect(screen.queryByRole('button', { name: 'Open Lobby Loop' })).toBeNull();
   });
 
+  it("does not let an invented marker make a shown record's name ambiguous", async () => {
+    const mixed = answer('{{mention:playlist:pl_7:Lobby Loop}} or {{mention:playlist:pl_999:Lobby Loop}}');
+    render(<Chat messages={mixed} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown', ambiguousNames: 'text', known: false }} />);
+    expect(await screen.findAllByRole('button', { name: 'Open Lobby Loop' })).toHaveLength(1);
+  });
+
   it('never takes an id from a field-name guess for the check', async () => {
     render(
       <Chat
