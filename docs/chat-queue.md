@@ -80,6 +80,7 @@ not paused (except for the one `sendNow` message).
 | Provider unmounts | The queue is dropped. |
 | `onBeforeSend` throws for a queued message | The queue pauses; the message stays. |
 | A queued message with files edited into a direct command | `editQueued` refuses it (a command cannot carry files); should one reach the head anyway, the queue pauses and keeps it. |
+| A queued message with files when attachments were turned off meanwhile | Not sent; the queue pauses and keeps it. |
 | `clear()` or `clearQueue()` while the stored queue still loads | The late load is dropped and an empty queue is saved. |
 | An emptied queue | No longer paused. |
 

@@ -2199,7 +2199,8 @@ export function AiChatProvider({
       queueStore.commit(queued, true, 'paused');
       return;
     }
-    if (files && prepared.kind !== 'message') {
+    if (files && (prepared.kind !== 'message' || !attachmentOptions)) {
+      // Attachments were turned off since it was queued, or it became a direct command: never sent with the files.
       // Edited into a direct command after it was queued with files: a command would drop them.
       queueStore.priorityRef.current = null;
       queueStore.commit(queued, true, 'paused');
@@ -2230,7 +2231,7 @@ export function AiChatProvider({
       if (mountedRef.current) setFlushTick((tick) => tick + 1);
     });
   }, [
-    queueEnabled, flushHeld, pendingUiWork, flushTick, queueStore, queueConfig.autoFlush, prepareSend, deliver,
+    queueEnabled, flushHeld, pendingUiWork, flushTick, queueStore, queueConfig.autoFlush, prepareSend, deliver, attachmentOptions,
   ]);
 
   const sendNow = useCallback((id: string): boolean => {

@@ -521,6 +521,20 @@ describe('chat queue enabled', () => {
     await waitFor(() => expect(on.sent[1]).toEqual({ text: 'with file', files: [file] }));
   });
 
+  it('keeps a queued file message paused when attachments were turned off meanwhile', async () => {
+    const file: FilePart = { type: 'file', mediaType: 'text/plain', url: 'data:text/plain;base64,aGk=', filename: 'a.txt' };
+    const chat = new FakeChat();
+    const view = render(<Host chat={chat} config={{ ...enabled, attachments: true }} />);
+    await startRun(chat);
+    await act(async () => { ctx.submit('with file', { files: [file] }); });
+    view.rerender(<Host chat={chat} config={{ ...enabled, attachments: false }} />);
+    await act(async () => { chat.finish(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(texts(chat)).toEqual(['first']);
+    expect(queuedTexts()).toEqual(['with file']);
+    expect(ctx.queue.paused).toBe(true);
+  });
+
   it('clear() and another conversation empty the queue; a language change keeps it', async () => {
     const chat = new FakeChat();
     const events: string[] = [];
