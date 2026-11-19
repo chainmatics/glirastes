@@ -1177,6 +1177,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   /**
    * With `history.seenObjects`: the messages the window or the chat memory
    * left out ahead of `recent` (a suffix of `all`), for the memo; else none.
+   * They get the same PII treatment as the window (`anonymizeMessages`). The
+   * memo reads only their tool results, which the shield sealed when the
+   * tool ran (`wrapToolsWithShield`), exactly like the tool results the
+   * window sends; shielding them again would map a pseudonym once more.
    */
   const seenObjectsSource = (all: unknown[], recent: unknown[]): unknown[] | undefined => (
     history && history.seenObjects && recent.length < all.length ? all.slice(0, all.length - recent.length) : undefined
@@ -2056,11 +2060,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxContextMessages;
         const memory = await prepareMemory(processedMessages, model, sessionId);
         let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
-        const earlierMessages = seenObjectsSource(processedMessages, recentMessages);
+        let earlierMessages = seenObjectsSource(processedMessages, recentMessages);
 
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
           recentMessages = await anonymizeMessages(recentMessages, piiShield, sessionId);
+          if (earlierMessages) earlierMessages = await anonymizeMessages(earlierMessages, piiShield, sessionId);
           aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
         }
 
@@ -2259,11 +2264,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
       const memory = await prepareMemory(processedMessages, model, legacySessionId);
       let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
-      const earlierMessages = seenObjectsSource(processedMessages, recentMessages);
+      let earlierMessages = seenObjectsSource(processedMessages, recentMessages);
 
       // PII Shield: anonymize message history + wrap tools (legacy mode)
       if (piiShield) {
         recentMessages = await anonymizeMessages(recentMessages, piiShield, legacySessionId);
+        if (earlierMessages) earlierMessages = await anonymizeMessages(earlierMessages, piiShield, legacySessionId);
         aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
       }
 
