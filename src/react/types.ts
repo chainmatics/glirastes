@@ -97,6 +97,11 @@ export interface ChatTransport {
   continueTurn?(): void | PromiseLike<void>;
   /** Called by the provider: whether it reports outcomes through this transport. */
   setUiOutcomeReporting?(enabled: boolean): void;
+  /**
+   * Called by the provider with the chat language to name in each request
+   * (`Content-Language`), or null for none (`sendLanguage: false`, unknown).
+   */
+  setRequestLanguage?(language: string | null): void;
 }
 
 /**
@@ -1196,7 +1201,8 @@ export interface AiChatProviderConfig {
    * - `'server'`: the language of the tool labels first, then the page's
    *   `lang` (the order before 0.18.0).
    * The tool labels themselves come from the server in its turn language
-   * (`requestLocale`); `toolLabels` overrides them.
+   * (`requestLocale`, else the language this chat sends, see
+   * `sendLanguage`); `toolLabels` overrides them.
    */
   languageSource?: 'page' | 'server';
   /**
@@ -1205,6 +1211,16 @@ export interface AiChatProviderConfig {
    * `languageSource`. `<glirastes-chat>` passes its nearest `lang`.
    */
   language?: string;
+  /**
+   * Names the chat language (`language`, else the page's `lang`) in each
+   * request as the `Content-Language` header (one BCP-47 tag), through a
+   * transport that supports it (`useVercelAiChatTransport`, `VercelAiChat`,
+   * `<glirastes-chat>`). The handler uses it as the turn language unless the
+   * app set `requestLocale` or `locale` there (`clientLanguage`). Default
+   * true; `false` sends none. Not sent with `languageSource: 'server'` or
+   * without a known language. A header the app's `headers` set wins.
+   */
+  sendLanguage?: boolean;
   /**
    * Theme for the floating widget: a preset name (autocompleted by your
    * editor) or an override object. Defaults to `'professional-lightblue'`.

@@ -28,7 +28,8 @@ Open `http://127.0.0.1:5173` and set the fixture session cookie once, as the
 script prints. Ctrl-C stops all three.
 
 The UI speaks English, German and Polish: `?lang=de` or `?lang=pl`. The page
-sends its language with every chat request (`x-app-language`); tool labels
+names its language in every chat request by itself (`Content-Language`, no
+app code); tool labels
 come per language from `languages` in `.glirastes/tools.json` and the
 endpoints' `x-glirastes-title`, Polish texts of the chat and the runtime are
 deliberately partial (`web/src/chat-config.ts`, `runtime/chat.mjs`).

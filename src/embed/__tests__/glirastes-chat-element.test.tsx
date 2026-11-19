@@ -289,6 +289,23 @@ describe('<glirastes-chat>', () => {
       .toMatchObject({ detail: { state: 'idle' } }));
   });
 
+  it('names its nearest lang in each request (Content-Language), and none with sendLanguage: false', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Cześć'));
+    vi.stubGlobal('fetch', fetchMock);
+    document.documentElement.setAttribute('lang', 'pl-PL');
+    const { element } = await mount((node) => { node.setAttribute('endpoint', '/api/chat'); });
+    await act(async () => { expect(element.send('Cześć')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(new Headers(fetchMock.mock.calls[0]![1]?.headers).get('content-language')).toBe('pl-PL');
+    await waitFor(() => expect(element.shadowRoot!.textContent).toContain('Cześć'));
+    element.config = { sendLanguage: false };
+    await act(async () => {});
+    await act(async () => { expect(element.send('Jeszcze raz')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(new Headers(fetchMock.mock.calls[1]![1]?.headers).get('content-language')).toBeNull();
+    document.documentElement.removeAttribute('lang');
+  });
+
   it('maps the voice and voice-language attributes onto the composer microphone', async () => {
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,

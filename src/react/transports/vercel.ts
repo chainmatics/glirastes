@@ -22,8 +22,24 @@ import type {
 import { limitRequestAttachments } from '../utils/attachments.js';
 import { MEMORY_BODY_FIELD, MEMORY_MAX_USER_NOTES, MEMORY_NOTES_PART, readMemoryEntries } from '../../contracts/memory.js';
 import { UI_OUTCOME_PROTOCOL_VERSION, UI_OUTCOMES_REQUEST_FIELD } from '../../contracts/ui-outcome.js';
+import { CHAT_LANGUAGE_HEADER, chatLanguageOf } from '../../contracts/localized-text.js';
 import { shouldContinueChat } from '../utils/ui-outcome-continuation.js';
 import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
+
+/**
+ * Headers of each chat request: the host's, plus the chat language
+ * (`Content-Language`, one BCP-47 tag) unless the host sets that header itself.
+ * @internal
+ */
+export function chatRequestHeaders(
+  headers: Record<string, string> | (() => Record<string, string>) | undefined,
+  language: string | null,
+): Record<string, string> {
+  const resolved = !headers ? {} : typeof headers === 'function' ? headers() : headers;
+  const tag = chatLanguageOf(language);
+  if (!tag || Object.keys(resolved).some((name) => name.toLowerCase() === CHAT_LANGUAGE_HEADER)) return resolved;
+  return { ...resolved, [CHAT_LANGUAGE_HEADER]: tag };
+}
 
 /**
  * Body of each chat request: the client actions the open page handles, so
@@ -108,6 +124,11 @@ export function useVercelAiChatTransport(
 
   const headersRef = useRef(userHeaders);
   headersRef.current = userHeaders;
+  // Set by the provider: the chat language each request names.
+  const languageRef = useRef<string | null>(null);
+  const setRequestLanguage = useCallback((language: string | null) => {
+    languageRef.current = language;
+  }, []);
 
   const onDataRef = useRef(onData);
   onDataRef.current = onData;
@@ -127,12 +148,7 @@ export function useVercelAiChatTransport(
     () =>
       new DefaultChatTransport({
         api: endpoint,
-        headers: userHeaders
-          ? () => {
-              const h = headersRef.current;
-              return typeof h === 'function' ? h() : h ?? {};
-            }
-          : undefined,
+        headers: () => chatRequestHeaders(headersRef.current, languageRef.current),
         body: () => chatRequestBody(bodyExtrasRef.current, memoryRef.current, reportsUiOutcomes()),
         // Same body as the default, with file data only in the latest user turns.
         prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => ({
@@ -145,8 +161,8 @@ export function useVercelAiChatTransport(
           },
         }),
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- headersRef/bodyExtrasRef are stable
-    [endpoint, !!userHeaders],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- headersRef/bodyExtrasRef/languageRef are stable
+    [endpoint],
   );
 
   const {
@@ -206,9 +222,10 @@ export function useVercelAiChatTransport(
       setMessages: setMessages as unknown as ChatTransport['setMessages'],
       addToolApprovalResponse,
       subscribeToData,
+      setRequestLanguage,
       ...(uiActionOutcomes ? { addToolOutput: writeToolOutput, continueTurn, setUiOutcomeReporting } : {}),
     }),
     [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData,
-      uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting],
+      setRequestLanguage, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting],
   );
 }

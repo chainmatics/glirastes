@@ -499,6 +499,7 @@ export function AiChatProvider({
   locales: userLocales,
   languageSource = 'page',
   language: userLanguage,
+  sendLanguage = true,
   theme: userTheme,
   themeScope = 'inline',
   unstyled = false,
@@ -865,6 +866,14 @@ export function AiChatProvider({
   const reportsUiOutcomes = uiActionOutcomes !== false && typeof resolvedTransport.addToolOutput === 'function';
   const reportsUiOutcomesRef = useRef(reportsUiOutcomes);
   reportsUiOutcomesRef.current = reportsUiOutcomes;
+  // The chat language each request names (`sendLanguage`): the app's or the page's, never the server's own echo.
+  const requestLanguage = sendLanguage !== false && languageSource !== 'server' ? statedLanguage ?? pageLanguage : null;
+  const setRequestLanguage = resolvedTransport.setRequestLanguage;
+  useEffect(() => {
+    if (!setRequestLanguage) return undefined;
+    setRequestLanguage(requestLanguage);
+    return () => setRequestLanguage(null);
+  }, [setRequestLanguage, requestLanguage]);
   const setUiOutcomeReporting = resolvedTransport.setUiOutcomeReporting;
   useEffect(() => {
     if (!setUiOutcomeReporting) return undefined;

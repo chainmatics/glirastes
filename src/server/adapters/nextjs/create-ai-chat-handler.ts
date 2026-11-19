@@ -117,7 +117,7 @@ import {
 } from './silent-turn-fallback.js';
 import { toolPresentationOf, type ToolPresentationPart } from './tool-presentation.js';
 import { assertChatServerLocales, resolveChatServerTexts } from './chat-texts.js';
-import { isLanguageTag } from '../../../contracts/localized-text.js';
+import { chatLanguageOf, CHAT_LANGUAGE_HEADER, isLanguageTag } from '../../../contracts/localized-text.js';
 import {
   PrincipalSchema,
   type Principal,
@@ -1154,6 +1154,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     systemPrompt: systemPromptConfig,
     locale: configuredLocale = 'en-US',
     requestLocale,
+    clientLanguage = true,
     locales: localesConfig,
     toolTexts,
     uiActionSchema,
@@ -1230,9 +1231,16 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     }
     return texts;
   };
-  /** The language of one request: `requestLocale` (opt-in), else the configured `locale`. */
+  /**
+   * The language of one request: the app's `requestLocale`, else (without an explicit `locale`)
+   * the language the chat UI sent, else the configured `locale`.
+   */
   const turnLocaleOf = async (req: Request): Promise<string | undefined> => {
-    if (!requestLocale) return undefined;
+    if (!requestLocale) {
+      return explicitLocale === undefined && clientLanguage !== false
+        ? chatLanguageOf(req.headers.get(CHAT_LANGUAGE_HEADER))
+        : undefined;
+    }
     try {
       const value = await requestLocale(req);
       return typeof value === 'string' && isLanguageTag(value.replace(/_/g, '-')) ? value.replace(/_/g, '-') : undefined;
@@ -1499,7 +1507,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     try {
       const body = await readJsonBody(req, maxBodyBytes);
       if (!body.ok) return body.response;
-      // The language of this turn: the request's (requestLocale), else the configured one.
+      // The language of this turn: the request's (requestLocale, else the chat UI's), else the configured one.
       const requestedLocale = await turnLocaleOf(req);
       const locale = requestedLocale ?? configuredLocale;
       const { messages: requestMessages, glirastesClientActions } = body.value as {

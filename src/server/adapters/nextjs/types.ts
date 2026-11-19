@@ -278,7 +278,8 @@ export interface AiChatHandlerConfig {
    * generated module, written when tools.json names `languages`; `chatTurn()`
    * hands it on). With it, the `data-tool-presentation` part of a managed
    * turn words each tool in the turn's language (`requestLocale`, else an
-   * explicitly set `locale`, else the manifest's locale as before): the
+   * explicitly set `locale`, else the language the chat UI sent, see
+   * `clientLanguage`, else the manifest's locale as before): the
    * manifest presentation where it is in that language, else these labels
    * (the language, another region of it, English, the first one). Local
    * data; never sent to the Platform.
@@ -359,6 +360,16 @@ export interface AiChatHandlerConfig {
    * body; a value that is no language tag, or a throw, falls back to `locale`.
    */
   requestLocale?: (request: Request) => string | undefined | Promise<string | undefined>;
+  /**
+   * The language the chat UI sends with each request (the React/Vercel
+   * transport and `<glirastes-chat>`: the `Content-Language` header, one
+   * BCP-47 tag; anything else is ignored). Default true: without
+   * `requestLocale` and without an explicit `locale` it is the turn's
+   * language (handler texts with `locales`, tool labels with `toolTexts`).
+   * Order: `requestLocale` > `locale` > this > the manifest's locale.
+   * `false` ignores it (the turn language of before).
+   */
+  clientLanguage?: boolean;
   /**
    * The handler's own texts per BCP-47 language tag, to add a language
    * (`pl`) or change single texts of one: the keys of `budgetStopTexts` plus
