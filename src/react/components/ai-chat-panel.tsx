@@ -8,7 +8,21 @@ import { SuggestionBar } from './suggestion-bar.js';
 import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
 import { BulkApprovalCard as DefaultBulkApprovalCard } from './bulk-approval-card.js';
 import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
-import type { AiChatPanelProps, PendingApproval } from '../types.js';
+import type { AiChatPanelProps, ChatMessage, PendingApproval } from '../types.js';
+
+/** Approval ids of the tool parts of the shown messages (where an inline card renders). */
+function approvalIdsOf(messages: ReadonlyArray<ChatMessage>): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      const approval = (part as { approval?: unknown }).approval;
+      if (typeof approval === 'object' && approval !== null && typeof (approval as { id?: unknown }).id === 'string') {
+        ids.add((approval as { id: string }).id);
+      }
+    }
+  }
+  return ids;
+}
 
 /**
  * Batteries-included chat panel.
@@ -44,6 +58,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     themeEffect,
     unstyled,
     attachments,
+    approvalDisplay,
   } = useChatContext();
 
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
@@ -54,10 +69,14 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
   const InputComponent = components.ChatInput
     ?? (hasMentions || hasCompletions || attachments ? MentionInput : ChatInput);
 
+  // `approvalDisplay.open: 'inline'`: a card whose message is shown renders at its tool part instead.
+  const inline = approvalDisplay?.open === 'inline';
   // Group approvals by tool name for bulk operations
   const { singleApprovals, bulkGroups } = useMemo(() => {
     const groups = new Map<string, PendingApproval[]>();
+    const shown = inline ? approvalIdsOf(messages) : undefined;
     for (const approval of pendingApprovals) {
+      if (shown?.has(approval.id)) continue;
       const existing = groups.get(approval.toolName) ?? [];
       existing.push(approval);
       groups.set(approval.toolName, existing);
@@ -73,7 +92,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
       }
     }
     return { singleApprovals: singles, bulkGroups: bulks };
-  }, [pendingApprovals]);
+  }, [pendingApprovals, inline, messages]);
 
   // Check if last assistant message has visible text (for typing indicator)
   const showTypingIndicator = useMemo(() => {

@@ -88,6 +88,34 @@ Defaults keep today's markup; everything below is opt-in.
   `text`, `toolResults` (each `null` when absent) and `children` (all of them
   in the default order). `useMessageParts(message)` returns the same nodes
   plus `visible` for a custom `MessageBubble`.
+- `parts` (in `MessagePartsProps` and from `useMessageParts`): every part of
+  the message in message order as a `MessagePartEntry` `{ key, index, kind,
+  part, toolName?, toolCallId?, node, approval? }` (`MessagePartKind`
+  `text` | `tool` | `file` | `other`; `key` is `tool:<toolCallId>` or
+  `<kind>:<index>`, stable while the message grows). `node` is the default
+  rendering at that position (`null` when nothing shows), so a layout can
+  put its own content at a tool part and keep the rest:
+  `parts.map((p) => p.key === myKey ? <Mine key={p.key} /> : p.node)`.
+- `approval` of a tool part that asked for one is a `ToolPartApproval`
+  `{ approvalId, toolCallId?, toolName, state: 'open' | 'decided',
+  decision?: ApprovalDecision, outcome: ApprovalOutcome, label, details?,
+  subjects?, pending? }`; `outcome` is `open`, `running`, `done`, `failed`,
+  `expected`, `declined` or `not-run` (approved, but the server did not run
+  it). A decided one is described again from the part's input and the
+  conversation the browser holds, also after a reload; read when accessed,
+  local only, nothing is sent.
+- `approvalDisplay` on the provider (`ApprovalDisplayConfig`, defaults as
+  before): `decided: 'entry'` draws a lasting `ApprovalEntry`
+  (`<div data-component="approval-entry" data-decision data-outcome>`,
+  replaceable as `components.ApprovalEntry`, props `ApprovalEntryProps`;
+  texts `approvalEntryRunningLabel`, `…DoneLabel`, `…FailedLabel`,
+  `…ExpectedLabel`, `…DeclinedLabel`, `…NotRunLabel`, `approvalOutcomeText`)
+  at the tool part; `open: 'inline'` draws the open `ApprovalCard` at its
+  tool part instead of below the messages (one card per call, no bulk
+  card). With either option the default bubble renders the text and tool
+  parts of a message with an approval in message order. A custom bubble that renders neither `toolResults` nor `parts`
+  must place the inline card itself (`approval.pending` with
+  `useChatContext().approve` / `reject`).
 - CSS-only themes select the parts by their existing hooks:
   `[data-component="plan-checklist"]`, `[data-component="activity-log"]`,
   `[data-component="turn-notice"]`, `[data-element="message-attachments"]`,
