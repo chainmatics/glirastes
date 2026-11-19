@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.18.0] - 2026-11-19
-
 ### Changed
 
 - `createLocalSessionStore` now keeps attachment files in IndexedDB by default, with no expiry, until their chat is deleted. Opt out with `attachmentStore: null`.
@@ -1019,4 +1017,3 @@ No code changes — patch-level docs release.
 [0.17.1]: https://github.com/chainmatics/glirastes/compare/v0.17.0...v0.17.1
 [0.17.2]: https://github.com/chainmatics/glirastes/compare/v0.17.1...v0.17.2
 [0.17.3]: https://github.com/chainmatics/glirastes/compare/v0.17.2...v0.17.3
-[0.18.0]: https://github.com/chainmatics/glirastes/compare/v0.17.3...v0.18.0

@@ -1,6 +1,6 @@
 {
   "name": "glirastes",
-  "version": "0.18.0",
+  "version": "0.17.3",
   "description": "Official Chainmatics SDK for building AI-powered chat, tools, and agent systems. Part of the Glirastes platform.",
   "license": "Apache-2.0",
   "author": {
@@ -390,7 +390,6 @@
     "class-transformer": "^0.5.0",
     "class-validator": "^0.15.1",
     "express": "^5.0.0",
-    "fake-indexeddb": "^6",
     "jsdom": "^28.1.0",
     "next": "^15.0.0",
     "passport": "^0.7",
