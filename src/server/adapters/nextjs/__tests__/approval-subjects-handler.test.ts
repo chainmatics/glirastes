@@ -601,10 +601,23 @@ describe('apps without a server declaration (golden)', () => {
     const types = on.text.split('\n').filter((line) => line.startsWith('data: {'))
       .map((line) => (JSON.parse(line.slice(6)) as { type: string }).type);
     expect(types).toEqual([
-      'data-tool-entities', 'data-pipeline-state', 'start', 'start-step', 'tool-input-available', 'data-step-report',
-      'tool-approval-request', 'finish-step', 'data-pipeline-state', 'finish',
+      'data-tool-entities', 'data-pipeline-state', 'start', 'start-step', 'tool-input-available', 'tool-approval-request',
+      'data-step-report', 'finish-step', 'data-pipeline-state', 'finish',
     ]);
     expect(on.text).toContain('glirastes-approval.v1.<iat>');
     expect(on.text).not.toContain('data-approval-subjects');
+  });
+
+  it('writes the step report after every approval request of its step, right before finish-step', async () => {
+    const { model } = callingModel([
+      { toolName: 'delete_playlist', input: { playlist_id: 7 } },
+      { toolName: 'delete_playlist', input: { playlist_id: 8 } },
+    ]);
+    const { chunks } = await turn({ tools: undeclared(), model, systemPrompt: 'A', approvalSecret: SECRET, endpointCaller: fakeBackend({}).endpointCaller });
+    expect(chunks.map((chunk) => chunk.type)).toEqual([
+      'data-tool-entities', 'data-pipeline-state', 'start', 'start-step',
+      'tool-input-available', 'tool-approval-request', 'tool-input-available', 'tool-approval-request',
+      'data-step-report', 'finish-step', 'data-pipeline-state', 'finish',
+    ]);
   });
 });
