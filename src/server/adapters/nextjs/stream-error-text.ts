@@ -89,7 +89,9 @@ const APPROVAL_SUBJECT_HISTORY_TEXTS: ReadonlyMap<string, string> = new Map([
  * instead of the chat's note. Only that exact text changes; nothing the model
  * wrote is added.
  */
-export function withModelFacingToolErrors<T>(messages: ReadonlyArray<T>): T[] {
+export function withModelFacingToolErrors<T>(messages: ReadonlyArray<T>, invalidInputTexts: ReadonlyArray<string> = []): T[] {
+  // The built-in texts of both languages plus the host's configured one.
+  const invalidTexts = new Set([INVALID_TOOL_INPUT_TEXT, INVALID_TOOL_INPUT_TEXT_DE, ...invalidInputTexts]);
   return messages.map((message) => {
     const parts = (message as { parts?: unknown }).parts;
     if (!Array.isArray(parts)) return message;
@@ -98,7 +100,7 @@ export function withModelFacingToolErrors<T>(messages: ReadonlyArray<T>): T[] {
       if (typeof part !== 'object' || part === null) return part;
       const record = part as Record<string, unknown>;
       if (record.state !== 'output-error') return part;
-      const historyText = record.errorText === INVALID_TOOL_INPUT_TEXT || record.errorText === INVALID_TOOL_INPUT_TEXT_DE
+      const historyText = typeof record.errorText === 'string' && invalidTexts.has(record.errorText)
         ? INVALID_TOOL_INPUT_HISTORY_TEXT
         : typeof record.errorText === 'string' ? APPROVAL_SUBJECT_HISTORY_TEXTS.get(record.errorText) : undefined;
       if (historyText === undefined) return part;

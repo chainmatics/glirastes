@@ -663,6 +663,7 @@ async function defaultStreamHandler(
   // Seen objects and the debug hook only; without them the options are as before.
   const historyExtras = {
     ...(ctx.earlierMessages ? { earlierMessages: ctx.earlierMessages as UIMessage[] } : {}),
+    invalidToolInputTexts: [streamErrorTexts.invalidToolInput],
     ...(ctx.onModelInput ? { onBreakdown: (value: ModelInputBreakdown) => { breakdown = value; } } : {}),
   };
   const preparedMessages = await prepareModelMessages(
@@ -1232,16 +1233,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
   assertChatServerLocales(localesConfig);
   resolveStreamErrorTexts(configuredLocale, streamErrorTextsConfig);
-  const streamErrorTextsByLocale = new Map<string, StreamErrorTexts>();
-  const streamErrorTextsFor = (turnLocale: string | undefined): StreamErrorTexts => {
-    const key = turnLocale ?? configuredLocale;
-    let texts = streamErrorTextsByLocale.get(key);
-    if (!texts) {
-      texts = resolveStreamErrorTexts(key, streamErrorTextsConfig);
-      if (streamErrorTextsByLocale.size < 100) streamErrorTextsByLocale.set(key, texts);
-    }
-    return texts;
-  };
+  const streamErrorTextsFor = (turnLocale: string | undefined): StreamErrorTexts => resolveStreamErrorTexts(turnLocale ?? configuredLocale, streamErrorTextsConfig);
   const explicitLocale = config.locale;
   if (requestLocale !== undefined && typeof requestLocale !== 'function') {
     throw new Error('createAiChatHandler: requestLocale must be a function of the request');

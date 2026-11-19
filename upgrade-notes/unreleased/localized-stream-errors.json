@@ -12,9 +12,21 @@
   "surface": [
     "glirastes/adapter/nextjs#AiChatHandlerConfig.streamErrorTexts",
     "glirastes/adapter/nextjs#AiChatHandlerFullConfig.streamErrorTexts",
+    "glirastes/adapter/nextjs#PrepareModelMessagesOptions.invalidToolInputTexts",
+    "glirastes/adapter/nextjs#StreamErrorTexts",
+    "glirastes/adapter/nextjs#StreamErrorTexts.generic",
+    "glirastes/adapter/nextjs#StreamErrorTexts.invalidToolInput",
     "glirastes/server/http#AiChatHandlerConfig.streamErrorTexts",
     "glirastes/server/http#AiChatHandlerFullConfig.streamErrorTexts",
+    "glirastes/server/http#PrepareModelMessagesOptions.invalidToolInputTexts",
+    "glirastes/server/http#StreamErrorTexts",
+    "glirastes/server/http#StreamErrorTexts.generic",
+    "glirastes/server/http#StreamErrorTexts.invalidToolInput",
     "glirastes/server/nextjs#AiChatHandlerConfig.streamErrorTexts",
-    "glirastes/server/nextjs#AiChatHandlerFullConfig.streamErrorTexts"
+    "glirastes/server/nextjs#AiChatHandlerFullConfig.streamErrorTexts",
+    "glirastes/server/nextjs#PrepareModelMessagesOptions.invalidToolInputTexts",
+    "glirastes/server/nextjs#StreamErrorTexts",
+    "glirastes/server/nextjs#StreamErrorTexts.generic",
+    "glirastes/server/nextjs#StreamErrorTexts.invalidToolInput"
   ]
 }
