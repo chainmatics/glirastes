@@ -70,6 +70,10 @@ describe('continuesAfterPageLoad', () => {
     expect(continuesAfterPageLoad([user, assistant(uiPart('c1', ok), uiPart('c2', at(now)))], now)).toBe(true);
   });
 
+  it('continues when the page load came from a report-only result next to a confirmed one', () => {
+    expect(continuesAfterPageLoad([user, assistant(uiPart('c1', at(now), false), uiPart('c2', { outcome: { v: 1 } }))], now)).toBe(true);
+  });
+
   it('does not continue later, without a code, with text after it or without a page load', () => {
     expect(continuesAfterPageLoad([user, assistant(uiPart('c1', at(now - UI_OUTCOME_RELOAD_CONTINUATION_MS - 1)))], now)).toBe(false);
     expect(continuesAfterPageLoad([user, assistant(uiPart('c1', at(now + 5_000)))], now)).toBe(false);

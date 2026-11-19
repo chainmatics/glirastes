@@ -90,11 +90,12 @@ export function continuesAfterPageLoad(messages: ReadonlyArray<unknown>, now: nu
   if (step.filter(isToolPart).some((part) => !SETTLED.has(String(part.state)) || toolNameOf(part) === CLARIFICATION_TOOL_NAME)) {
     return false;
   }
+  // Every waiting result is settled; one the page load cut off is "not confirmed" (`{ v: 1 }`).
+  if (waiting.some((part) => !isRecord((part.output as Record<string, unknown>).outcome))) return false;
   let started = false;
-  for (const part of waiting) {
+  // The page load may come from a report-only result of the same step.
+  for (const part of step.filter((entry) => isToolPart(entry) && isRecord(entry.output) && typeof entry.output.awaitsOutcome === 'boolean')) {
     const outcome = (part.output as Record<string, unknown>).outcome;
-    // Every waiting result is settled; one the page load cut off is "not confirmed" (`{ v: 1 }`).
-    if (!isRecord(outcome)) return false;
     const code = readUiOutcomeCode(outcome);
     if (code === 'initiated') {
       const at = (outcome as { at?: unknown }).at;

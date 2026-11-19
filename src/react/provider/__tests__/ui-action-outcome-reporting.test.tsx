@@ -12,6 +12,7 @@ import {
 import type { AiChatProviderConfig, ChatMessage, ChatTransport, SessionConfig, UiActionOutcomeEvent } from '../../types.js';
 import { AiChatProvider } from '../ai-chat-provider.js';
 import { useChatContext } from '../chat-context.js';
+import { continuesAfterPageLoad } from '../../utils/ui-outcome-continuation.js';
 
 type Status = ChatTransport['status'];
 type ToolOutput = { tool: string; toolCallId: string; output: Record<string, unknown> };
@@ -428,9 +429,13 @@ describe('a UI action that loads a new page', () => {
 
   it('saves before the bridge deadline also with a longer outcome timeout and a parallel call that stays open', async () => {
     const order: string[] = [];
+    let kept: ChatMessage[] = [];
     const session: SessionConfig = { load: async () => [], save: async (_id, messages) => {
       const parts = messages.at(-1)?.parts as Array<{ output?: { outcome?: { code?: string } } }> | undefined;
-      if (parts?.some((part) => part.output?.outcome?.code === 'initiated')) order.push('save');
+      if (parts?.some((part) => part.output?.outcome?.code === 'initiated')) {
+        order.push('save');
+        kept = messages;
+      }
     } };
     const { bus } = setup({ session, uiActionOutcomeTimeoutMs: 30_000 });
     vi.stubGlobal('location', { assign: vi.fn(() => { order.push('assign'); }) });
@@ -442,6 +447,9 @@ describe('a UI action that loads a new page', () => {
     await waitFor(() => expect(order).toContain('assign'), { timeout: 12_000 });
     expect(order.indexOf('save')).toBeGreaterThanOrEqual(0);
     expect(order.indexOf('save')).toBeLessThan(order.indexOf('assign'));
+    // The call whose result never arrived is left out, so the next page can continue the turn.
+    expect((kept.at(-1)!.parts as Array<{ toolCallId?: string }>).map((part) => part.toolCallId).filter(Boolean)).toEqual(['c1']);
+    expect(continuesAfterPageLoad(kept, Date.now())).toBe(true);
   }, 15_000);
 
   it('runs the later results and writes their own codes when a reloading bridge refuses the navigation', async () => {

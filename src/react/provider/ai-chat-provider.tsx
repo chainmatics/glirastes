@@ -927,11 +927,18 @@ export function AiChatProvider({
     if (!save) return;
     const messages = rawMessagesRef.current.map((message, index, all) => (index !== all.length - 1 ? message : {
       ...message,
-      parts: message.parts.map((part) => {
-        const toolPart = part as { toolCallId?: unknown; output?: unknown };
-        const outcome = typeof toolPart.toolCallId === 'string' ? outcomes.get(toolPart.toolCallId) : undefined;
-        return outcome && isRecord(toolPart.output) ? { ...part, output: { ...toolPart.output, outcome } } : part;
-      }),
+      parts: message.parts
+        // A call whose result never reached this page is left out: the model never sees an
+        // incomplete call either, and the turn can continue on the next page.
+        .filter((part) => {
+          const state = (part as { state?: unknown }).state;
+          return state !== 'input-streaming' && state !== 'input-available';
+        })
+        .map((part) => {
+          const toolPart = part as { toolCallId?: unknown; output?: unknown };
+          const outcome = typeof toolPart.toolCallId === 'string' ? outcomes.get(toolPart.toolCallId) : undefined;
+          return outcome && isRecord(toolPart.output) ? { ...part, output: { ...toolPart.output, outcome } } : part;
+        }),
     })) as ChatMessage[];
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
