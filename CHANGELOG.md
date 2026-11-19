@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-19
+
+### Changed
+
+- `createLocalSessionStore` now keeps attachment files in IndexedDB by default, with no expiry, until their chat is deleted. Opt out with `attachmentStore: null`.
+- `load` returns a promise when a store exists.
+- The first stored file calls `navigator.storage.persist()`, which can show a permission prompt in Firefox desktop.
+- The placeholder text is now `[attachment <id>: <name>]`, and filenames lose control characters, brackets and line breaks (and are cut at 120 characters).
+- Provider metadata a client sets on file parts is no longer passed on, except the attachment id.
+- Apps should call `clearLocalSessionStore` on sign-out.
+
 ### Added
 
 - **Keeping and handing on chat attachments** (`docs/chat-attachments.md`). Every attachment has an id `att_…` (`^att_[A-Za-z0-9_-]{16,64}$`) in `providerMetadata.glirastes.attachmentId`; the server writes `[attachment <id>: <filename>]` next to every user file part and as the placeholder of every file whose data was dropped (`[`, `]`, CR and LF are stripped from file names; only the validated id reaches the provider, other client provider metadata is dropped). `createLocalSessionStore` keeps the blobs in IndexedDB (`glirastes-chat-attachments`, store `files`) and restores them on load (`load` returns a promise when a store exists); new option `attachmentStore?: AttachmentBlobStore | null`, default IndexedDB when `storage` is set; localStorage keeps `url: ''`, never base64. Blobs are deleted when, and only when, their chat goes (`remove`, `clear`, `maxSessions` eviction, `clearLocalSessionStore()`), no expiry, no total-size eviction; deletion waits for the chat's pending writes; the first stored blob calls `navigator.storage.persist()` once. Without IndexedDB nothing throws and files live in memory. New exports from `glirastes/react`: `clearLocalSessionStore({ storageKey, storage?, attachmentStore? })` (call on sign-out), `createIndexedDbAttachmentStore`, `createMemoryAttachmentStore`, types `AttachmentBlobStore` and `StoredAttachment`, `getChatAttachment(id)` and `chatAttachmentFormData(id, field = 'file')` (active conversation only; else `null`); `SessionConfig.attachments`. A client action can hand a file to an upload route; a derived server tool for a multipart route cannot work and should be disabled with `glirastes tools policy`.
@@ -1008,3 +1019,4 @@ No code changes — patch-level docs release.
 [0.17.1]: https://github.com/chainmatics/glirastes/compare/v0.17.0...v0.17.1
 [0.17.2]: https://github.com/chainmatics/glirastes/compare/v0.17.1...v0.17.2
 [0.17.3]: https://github.com/chainmatics/glirastes/compare/v0.17.2...v0.17.3
+[0.18.0]: https://github.com/chainmatics/glirastes/compare/v0.17.3...v0.18.0

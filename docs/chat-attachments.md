@@ -95,9 +95,12 @@ Every attachment has an id like `att_k3J9...`, matching
 
 The server writes `[attachment <id>: <filename>]` next to every user file
 part the model receives, and uses the same text as the placeholder of every
-file whose data was dropped. `[`, `]`, CR and LF are stripped from file
-names. Only the validated id reaches the provider as provider options; any
-other provider metadata from the client is dropped.
+file whose data was dropped. Control characters (including tab and line
+breaks), U+2028/U+2029, bidi controls and `[`, `]` are stripped from file
+names, which are cut at 120 characters (`…`). On file parts, only the
+validated id reaches the provider as provider options; any other provider
+metadata the client set on a file part is dropped. The allowlist applies to
+file parts only.
 
 ## Keeping attachments
 
@@ -115,6 +118,7 @@ Lifetime: Blobs are deleted when, and only when, their chat goes: `remove(id)`,
 expiry, no total-size eviction. Deletion waits for the chat's pending
 writes. On the first stored blob the store calls `navigator.storage.persist()`
 once, so the browser is less likely to drop the files under storage pressure.
+Firefox desktop can show a permission prompt for this request.
 
 Without IndexedDB (private windows, blocked storage) nothing throws. The
 files live in memory for the page's lifetime.
@@ -127,6 +131,11 @@ import { clearLocalSessionStore } from 'glirastes/react';
 
 await clearLocalSessionStore({ storageKey: 'my-app-chat' });
 ```
+
+Limits: it does not wait for a file write that a live store started in the same
+moment, so call it after the chat is idle. It removes files by the exact
+`storageKey`, but localStorage keys by the `${storageKey}:` prefix, so a
+nested key such as `my-app-chat:team` keeps its files.
 
 It takes `{ storageKey, storage?, attachmentStore? }`. Also exported:
 `createIndexedDbAttachmentStore`, `createMemoryAttachmentStore` and the types
