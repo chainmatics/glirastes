@@ -125,6 +125,37 @@ describe('compareVersions', () => {
   });
 });
 
+describe('compareVersions with prereleases', () => {
+  it('orders a prerelease below its final release', () => {
+    expect(compareVersions('0.19.0-rc.1', '0.19.0')).toBeLessThan(0);
+    expect(compareVersions('0.19.0', '0.19.0-rc.1')).toBeGreaterThan(0);
+    expect(compareVersions('0.19.0-rc.1', '0.18.9')).toBeGreaterThan(0);
+    expect(compareVersions('0.19.0-rc.1', '0.19.0-rc.1')).toBe(0);
+  });
+
+  it('compares prerelease identifiers per semver', () => {
+    const ordered = [
+      '1.0.0-alpha',
+      '1.0.0-alpha.1',
+      '1.0.0-alpha.beta',
+      '1.0.0-beta',
+      '1.0.0-beta.2',
+      '1.0.0-beta.11',
+      '1.0.0-rc.1',
+      '1.0.0',
+    ];
+    for (let i = 0; i < ordered.length - 1; i++) {
+      expect(compareVersions(ordered[i]!, ordered[i + 1]!), `${ordered[i]} < ${ordered[i + 1]}`).toBeLessThan(0);
+    }
+    expect(compareVersions('1.0.0+build.5', '1.0.0')).toBe(0);
+  });
+
+  it('loads a released file for a prerelease version', async () => {
+    await writeFile(join(dir, '0.19.0-rc.1.json'), JSON.stringify({ version: '0.19.0-rc.1', notes: [] }));
+    await expect(loadUpgradeNotes(dir, '0.19.0')).resolves.toEqual([]);
+  });
+});
+
 describe('findPackageUpgradeNotesDir', () => {
   it('locates the repo upgrade-notes directory', () => {
     expect(findPackageUpgradeNotesDir()).toMatch(/upgrade-notes$/);

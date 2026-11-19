@@ -13,6 +13,16 @@ export const UPGRADE_NOTE_KINDS = [
 
 export type UpgradeNoteKind = (typeof UPGRADE_NOTE_KINDS)[number];
 
+const IDENT = '(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)';
+/** Semantic version 2.0.0, prerelease and build metadata included (e.g. `0.19.0-rc.1`). */
+export const SEMVER_RE = new RegExp(
+  `^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(${IDENT}(?:\\.${IDENT})*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$`,
+);
+
+export function isSemver(version: string): boolean {
+  return SEMVER_RE.test(version);
+}
+
 const patternSchema = z.string().refine(
   (src) => {
     try {
@@ -56,7 +66,7 @@ export type UpgradeNote = z.infer<typeof UpgradeNoteSchema>;
 
 const ReleasedFileSchema = z
   .object({
-    version: z.string().regex(/^\d+\.\d+\.\d+$/),
+    version: z.string().regex(SEMVER_RE),
     notes: z.array(UpgradeNoteSchema),
   })
   .strict();
@@ -125,16 +135,16 @@ export async function loadUpgradeNoteSet(
       `Cannot read upgrade notes directory ${notesDir}: ${(cause as Error).message}`,
     );
   }
-  const SEMVER_FILE = /^\d+\.\d+\.\d+\.json$/;
+  const isReleasedFile = (f: string) => f.endsWith('.json') && isSemver(f.slice(0, -5));
   for (const f of entries) {
-    if (f.endsWith('.json') && !SEMVER_FILE.test(f) && !IGNORED_JSON.has(f)) {
+    if (f.endsWith('.json') && !isReleasedFile(f) && !IGNORED_JSON.has(f)) {
       throw new UpgradeNotesError(
         `Invalid upgrade note. ${f}: unexpected file, expected <semver>.json`,
       );
     }
   }
   const releasedFiles = entries
-    .filter((f) => SEMVER_FILE.test(f))
+    .filter(isReleasedFile)
     .sort((a, b) => compareVersions(a.slice(0, -5), b.slice(0, -5)));
   for (const file of releasedFiles) {
     const parsed = ReleasedFileSchema.safeParse(
@@ -183,19 +193,36 @@ export function findPackageUpgradeNotesDir(): string {
   );
 }
 
+/**
+ * Semver precedence: a prerelease sorts below its release (`0.19.0-rc.1 <
+ * 0.19.0`), prerelease identifiers compare numerically when both are numeric,
+ * numeric below alphanumeric, and a shorter list below a longer one. Build
+ * metadata is ignored.
+ */
 export function compareVersions(a: string, b: string): number {
-  const parse = (v: string): number[] => {
-    const parts = v.split(/[-+]/)[0]!.split('.');
-    if (parts.length !== 3 || !parts.every((p) => /^\d+$/.test(p))) {
-      throw new Error(`Invalid version '${v}': expected <major>.<minor>.<patch>.`);
-    }
-    return parts.map(Number);
+  const parse = (v: string): { core: number[]; pre: string[] } => {
+    const m = SEMVER_RE.exec(v);
+    if (!m) throw new Error(`Invalid version '${v}': expected <major>.<minor>.<patch>[-<prerelease>].`);
+    return { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ? m[4].split('.') : [] };
   };
+  const sign = (d: number) => (d < 0 ? -1 : d > 0 ? 1 : 0);
   const pa = parse(a);
   const pb = parse(b);
   for (let i = 0; i < 3; i++) {
-    const d = pa[i]! - pb[i]!;
-    if (d !== 0) return d < 0 ? -1 : 1;
+    const d = pa.core[i]! - pb.core[i]!;
+    if (d !== 0) return sign(d);
   }
-  return 0;
+  if (pa.pre.length === 0 || pb.pre.length === 0) return sign(pb.pre.length - pa.pre.length);
+  const numeric = /^\d+$/;
+  for (let i = 0; i < Math.min(pa.pre.length, pb.pre.length); i++) {
+    const x = pa.pre[i]!;
+    const y = pb.pre[i]!;
+    if (x === y) continue;
+    const xn = numeric.test(x);
+    const yn = numeric.test(y);
+    if (xn && yn) return sign(Number(x) - Number(y));
+    if (xn !== yn) return xn ? -1 : 1;
+    return x < y ? -1 : 1;
+  }
+  return sign(pa.pre.length - pb.pre.length);
 }

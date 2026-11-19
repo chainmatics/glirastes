@@ -1,5 +1,6 @@
 import { mkdir, readdir, copyFile, readFile, stat, symlink, lstat, unlink, rm, writeFile, rename } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, relative, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -423,9 +424,14 @@ async function addUpgradeHook(rootDir: string): Promise<'added' | 'present' | st
     },
   };
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  await rename(temporary, path);
+  const temporary = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+    await rename(temporary, path);
+  } catch (cause) {
+    await unlink(temporary).catch(() => undefined);
+    throw cause;
+  }
   return 'added';
 }
 

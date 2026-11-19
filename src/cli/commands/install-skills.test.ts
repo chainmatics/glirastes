@@ -491,6 +491,35 @@ describe('upgrade baseline and hook on install', () => {
     await expect(access(join(rootDir, '.claude/settings.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('seeds the baseline from a prerelease manifest version', async () => {
+    const rootDir = await nextAppRoot();
+    await mkdir(join(rootDir, '.glirastes'), { recursive: true });
+    await writeFile(
+      join(rootDir, '.glirastes/installed-skills.json'),
+      JSON.stringify({ schemaVersion: 1, sdkVersion: '0.19.0-rc.1', installs: [] }),
+    );
+    await installSkills({ rootDir, host: 'claude', quiet: true });
+    expect((await readBaseline(rootDir))!.reviewedThrough).toBe('0.19.0-rc.1');
+  });
+
+  it('an invalid manifest version warns and writes no baseline', async () => {
+    const rootDir = await nextAppRoot();
+    await mkdir(join(rootDir, '.glirastes'), { recursive: true });
+    await writeFile(
+      join(rootDir, '.glirastes/installed-skills.json'),
+      JSON.stringify({ schemaVersion: 1, sdkVersion: 'workspace:*', installs: [] }),
+    );
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await installSkills({ rootDir, host: 'claude', quiet: true });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]?.[0])).toContain('workspace:*');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await readBaseline(rootDir)).toBeUndefined();
+  });
+
   it('a corrupt baseline warns once and does not abort the other hosts', async () => {
     const rootDir = await nextAppRoot();
     await mkdir(join(rootDir, '.glirastes'), { recursive: true });

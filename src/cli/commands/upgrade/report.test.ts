@@ -182,6 +182,22 @@ describe('createUpgradeReport', () => {
     expect(formatUpgradeReport(report, {})).toContain('baseline is ahead of the installed version');
   });
 
+  it('a prerelease review does not hide the final release notes', async () => {
+    await writeNotes('0.19.0', [note('final-break', 'breaking')]);
+    await baseline('0.19.0-rc.1');
+    const report = await createUpgradeReport(opts());
+    expect(report.baselineAhead).toBe(false);
+    expect(report.must.map((i) => i.id)).toEqual(['final-break']);
+  });
+
+  it('a prerelease --from is accepted', async () => {
+    await writeNotes('0.19.0', [note('final-break', 'breaking')]);
+    await baseline('0.19.0');
+    const a = io();
+    expect(await runUpgradeCommand(['report', '--from', '0.19.0-rc.1'], a.io)).toBe(0);
+    expect(a.out.join('\n')).toContain('[final-break]');
+  });
+
   it('--from overrides reviewedThrough', async () => {
     await writeNotes('0.18.0', [note('old-break', 'breaking')]);
     await baseline('0.18.0');
@@ -369,6 +385,23 @@ describe('runUpgradeCommand', () => {
     expect(report.must.map((i) => [i.id, i.decision])).toEqual([['break-one', 'deferred']]);
     expect(report.recommended).toEqual([]);
     expect(report.upToDate).toBe(false);
+  });
+
+  it('ack with an invalid installed version warns and writes nothing', async () => {
+    await writeNotes('0.19.0', []);
+    await baseline('0.18.0');
+    const a = io();
+    expect(await runUpgradeCommand(['ack'], { ...a.io, sdkVersion: 'workspace' })).toBe(1);
+    expect(a.err.join('\n')).toContain('workspace');
+    expect((await readBaseline(root))!.reviewedThrough).toBe('0.18.0');
+  });
+
+  it('ack records a prerelease sdk version', async () => {
+    await writeNotes('0.19.0', []);
+    await baseline('0.18.0');
+    const a = io();
+    expect(await runUpgradeCommand(['ack'], { ...a.io, sdkVersion: '0.19.0-rc.1' })).toBe(0);
+    expect((await readBaseline(root))!.reviewedThrough).toBe('0.19.0-rc.1');
   });
 
   it('ack never moves reviewedThrough backwards', async () => {

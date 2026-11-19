@@ -18,6 +18,7 @@ import { evaluateNote, scanApp, type AppScan } from './detect.js';
 import {
   compareVersions,
   findPackageUpgradeNotesDir,
+  isSemver,
   loadUpgradeNotes,
   loadUpgradeNoteSet,
   type UpgradeNoteKind,
@@ -70,7 +71,7 @@ export interface UpgradeReportOptions {
   scan?: (root: string) => Promise<AppScan>;
 }
 
-const HEADING = /^## \[(\d+\.\d+\.\d+)\]/;
+const HEADING = /^## \[(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\]/;
 
 async function changelogHeadings(path: string): Promise<Array<{ version: string; heading: string }>> {
   let text: string;
@@ -82,7 +83,7 @@ async function changelogHeadings(path: string): Promise<Array<{ version: string;
   const result: Array<{ version: string; heading: string }> = [];
   for (const line of text.split('\n')) {
     const match = HEADING.exec(line);
-    if (match) result.push({ version: match[1]!, heading: line.trimEnd() });
+    if (match && isSemver(match[1]!)) result.push({ version: match[1]!, heading: line.trimEnd() });
   }
   return result;
 }
@@ -318,7 +319,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
         return 2;
       }
       const from = args.values.get('--from');
-      if (from !== undefined && !/^\d+\.\d+\.\d+([-+].*)?$/.test(from)) {
+      if (from !== undefined && !isSemver(from)) {
         error(`--from needs a version like 0.17.0, got '${from}'.\n${UPGRADE_USAGE}`);
         return 2;
       }
@@ -358,6 +359,10 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
     }
 
     // ack
+    if (!isSemver(sdkVersion)) {
+      error(`glirastes upgrade: the installed version '${sdkVersion}' is not semver; ${BASELINE_PATH} was not changed.`);
+      return 1;
+    }
     const report = await createUpgradeReport(reportOptions);
     const baseline: SdkBaseline = (await readBaseline(rootDir)) ?? {
       schemaVersion: 1,

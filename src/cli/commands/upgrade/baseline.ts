@@ -1,6 +1,8 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { SEMVER_RE } from './notes.js';
 
 export const BASELINE_PATH = '.glirastes/sdk-baseline.json';
 
@@ -8,7 +10,7 @@ export const UPGRADE_DECISIONS = ['adopted', 'declined', 'deferred'] as const;
 
 export type UpgradeDecision = (typeof UPGRADE_DECISIONS)[number];
 
-const SEMVER = /^\d+\.\d+\.\d+$/;
+const SEMVER = SEMVER_RE;
 
 const BaselineSchema = z
   .object({
@@ -76,19 +78,41 @@ export async function readBaseline(root: string): Promise<SdkBaseline | undefine
   return parsed.data;
 }
 
-/** Writes the baseline atomically with recursively sorted keys. */
+/**
+ * Writes the baseline atomically with recursively sorted keys. A baseline that
+ * does not match the schema (e.g. a version that is not semver) is refused
+ * before anything is written.
+ */
 export async function writeBaseline(root: string, baseline: SdkBaseline): Promise<void> {
+  const parsed = BaselineSchema.safeParse(baseline);
+  if (!parsed.success) {
+    const details = parsed.error.issues
+      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .join('; ');
+    throw new Error(`Refusing to write ${BASELINE_PATH}: ${details}.`);
+  }
   const file = baselineFile(root);
   await mkdir(join(root, '.glirastes'), { recursive: true });
-  const tmp = `${file}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(sortKeys(baseline), null, 2)}\n`);
-  await rename(tmp, file);
+  const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(sortKeys(baseline), null, 2)}\n`);
+    await rename(tmp, file);
+  } catch (cause) {
+    await unlink(tmp).catch(() => undefined);
+    throw cause;
+  }
 }
 
-/** Returns the existing baseline, or creates one reviewed through `version` when missing. */
+/**
+ * Returns the existing baseline, or creates one reviewed through `version` when
+ * missing. A `version` that is not semver is refused and nothing is written.
+ */
 export async function ensureBaseline(root: string, version: string): Promise<SdkBaseline> {
   const existing = await readBaseline(root);
   if (existing) return existing;
+  if (!SEMVER.test(version)) {
+    throw new Error(`Not creating ${BASELINE_PATH}: '${version}' is not a semver version.`);
+  }
   const created: SdkBaseline = { schemaVersion: 1, reviewedThrough: version, decisions: {} };
   await writeBaseline(root, created);
   return created;

@@ -90,6 +90,23 @@ describe('sdk baseline', () => {
     expect((error as Error).message).toMatch(/resolve the merge conflict|delete the file/);
   });
 
+  it('writes and reads back a prerelease baseline', async () => {
+    await ensureBaseline(root, '0.19.0-rc.1');
+    expect((await readBaseline(root))!.reviewedThrough).toBe('0.19.0-rc.1');
+  });
+
+  it('ensureBaseline refuses an invalid version and writes nothing', async () => {
+    await expect(ensureBaseline(root, 'workspace:*')).rejects.toThrow(/workspace:\*/);
+    expect(await readBaseline(root)).toBeUndefined();
+  });
+
+  it('writeBaseline refuses a baseline that does not match the schema', async () => {
+    await expect(
+      writeBaseline(root, { schemaVersion: 1, reviewedThrough: 'latest', decisions: {} }),
+    ).rejects.toThrow(/reviewedThrough/);
+    expect(await readBaseline(root)).toBeUndefined();
+  });
+
   it('recordDecision replaces an earlier decision', () => {
     const before: SdkBaseline = {
       schemaVersion: 1,
