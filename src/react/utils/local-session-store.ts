@@ -176,7 +176,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   const activeKey = `${options.storageKey}:active`;
   const indexKey = `${options.storageKey}:sessions`;
   const messagesKey = (id: string) => `${options.storageKey}:messages:${id}`;
-  type Entry = SessionSummary & { createdAt: number; updatedAt: number; named?: boolean };
+  type Entry = SessionSummary & { createdAt: number; updatedAt: number; named?: boolean; trimmed?: boolean };
 
   const read = (key: string): unknown => {
     try {
@@ -224,7 +224,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     write(indexKey, kept);
     return kept;
   };
-  const summary = ({ named: _named, ...entry }: Entry): SessionSummary => entry;
+  const summary = ({ named: _named, trimmed: _trimmed, ...entry }: Entry): SessionSummary => entry;
 
   const rehydrate = async (conversationId: string, messages: Array<ChatMessage | WireChatMessage>) => {
     if (!files) return messages;
@@ -282,10 +282,11 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       const messages = tail(allMessages, maxMessages);
       const list = entries();
       const existing = list.find((entry) => entry.id === conversationId) ?? fresh(conversationId);
-      // Derived once: after a trim the first user message is no longer the first question.
-      const derived = existing.named || existing.title !== newTitle ? null : titleFrom(allMessages);
+      // Once a save has trimmed the chat, the first stored user message is no longer the first question.
+      const derived = existing.named || existing.trimmed ? null : titleFrom(allMessages);
       const entry: Entry = {
         ...existing,
+        ...(messages.length < allMessages.length ? { trimmed: true } : {}),
         title: derived ?? existing.title,
         updatedAt: now(),
         messageCount: messages.length,

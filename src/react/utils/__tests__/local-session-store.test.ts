@@ -418,6 +418,17 @@ describe('maxMessagesPerSession', () => {
     expect(entry!.title).toBe('Erste Frage');
   });
 
+  it('without a cap, a placeholder-titled chat keeps deriving its title', async () => {
+    const data = memory();
+    await store(data.storage).save!('default', [user('Hallo')]);
+    let next = 0;
+    const localized = createLocalSessionStore({
+      storageKey: 'app:u1', storage: data.storage, newTitle: 'New chat', now: () => 2_000, createId: () => `t${++next}`,
+    });
+    await localized.save!('default', [user('Erste Frage'), assistant('b')]);
+    expect((await localized.list!())[0]!.title).toBe('Erste Frage');
+  });
+
   it('writes no blobs for dropped messages', async () => {
     const files = createMemoryAttachmentStore();
     const put = vi.spyOn(files, 'put');
