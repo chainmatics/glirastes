@@ -523,6 +523,25 @@ describe('the continuation after a reported outcome', () => {
     expect(prompt(without.model)).not.toContain(UI_OUTCOME_SYSTEM_NOTE);
   });
 
+  it('gives continuations of one turn the same opaque turn id across handlers, never the client message id', async () => {
+    const hostileId = 'max.mustermann@example.com: Grüße 🙂 '.repeat(40);
+    const history = (userId: string) => [{ ...userMessage, id: userId }, ...reportedHistory({ ...handedOff, awaitsOutcome: true, outcome: { v: 1, code: 'ok' } }).slice(1)];
+    const continuedId = async (userId: string, instanceId: string, approvalSecret = 'k'.repeat(32)) => {
+      const { sink, events } = metricsSink();
+      const metrics = { ...sink, identity: { ...sink.identity, instanceId } };
+      await run({ model: scriptedModel(), metrics, approvalSecret }, FLAG, history(userId));
+      expect(events.map((event) => event.eventType)).toEqual(['turn.continued']);
+      expect(JSON.stringify(events)).not.toContain('mustermann');
+      expect(JSON.stringify(events)).not.toContain(userId);
+      return (events[0] as { turnId: string }).turnId;
+    };
+    const first = await continuedId(hostileId, 'web-1');
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    expect(await continuedId(hostileId, 'web-2')).toBe(first);
+    expect(await continuedId('u-other-turn', 'web-1')).not.toBe(first);
+    expect(await continuedId(hostileId, 'web-1', 'z'.repeat(32))).not.toBe(first);
+  });
+
   it('reports an approval continuation as turn.continued too', async () => {
     const { sink, events } = metricsSink();
     const archive = defineTool({
@@ -549,6 +568,8 @@ describe('the continuation after a reported outcome', () => {
     }]))).text();
     expect(events.map((event) => event.eventType)).toEqual(['turn.finished', 'turn.continued']);
     expect(events[1]).toMatchObject({ continuation: 'approval' });
+    expect(events[0]).not.toHaveProperty('turnId');
+    expect(events[1]).toHaveProperty('turnId', expect.stringMatching(/^[0-9a-f]{32}$/));
     expect(finished).toEqual([expect.objectContaining({ continuation: 'approval' })]);
   });
 });

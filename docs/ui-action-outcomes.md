@@ -66,7 +66,13 @@ shape it is told the action was handed over, not that it happened (the
    (`glirastes/contracts`); an unknown version, code or no code reads as "not
    confirmed, and it will not be carried out later". The code is only a key:
    no text from the client reaches the model this way. `onFinish` gets
-   `continuation: 'ui-outcome'`, metrics a `turn.continued` event.
+   `continuation: 'ui-outcome'`, metrics a `turn.continued` event. Its
+   `turnId` is an opaque HMAC of the turn (32 hex characters, keyed by the
+   approval secret), the same for every continuation of the turn; the
+   client's message id never reaches the Platform. The Platform can group a
+   turn's continuations by it and count turns from `turn.finished`, which
+   carries no `turnId`, so it cannot join the first request of a turn to its
+   continuations (see `docs/managed-runtime-sync.md`, Runtime metrics).
 
 A custom client opts in by doing 1, 3 and 4 itself.
 

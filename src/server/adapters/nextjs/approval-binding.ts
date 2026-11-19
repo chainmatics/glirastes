@@ -387,6 +387,24 @@ let warnedAboutProcessSecret = false;
  * and warns once. Approvals then do not survive a restart or reach another
  * instance, which is why they are refused in production.
  */
+/**
+ * The key approvals of this handler are signed with: the configured secret
+ * (option, else `GLIRASTES_APPROVAL_SECRET`), else the random secret of this
+ * process. Never throws or warns; `resolveApprovalBinder` decides whether a
+ * missing secret is an error. Used to key the opaque `turnId` of
+ * `turn.continued` metrics, so it is as stable as approvals are.
+ */
+export function resolveApprovalSecret(options: {
+  secret?: string;
+  env?: Record<string, string | undefined>;
+}): string {
+  const env = options.env ?? (typeof process !== 'undefined' ? process.env : {});
+  const configured = options.secret || env[APPROVAL_SECRET_ENV] || undefined;
+  if (configured) return configured;
+  processSecret ??= randomBytes(32).toString('base64url');
+  return processSecret;
+}
+
 export function resolveApprovalBinder(options: {
   secret?: string;
   env?: Record<string, string | undefined>;

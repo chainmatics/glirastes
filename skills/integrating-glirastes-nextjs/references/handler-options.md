@@ -106,7 +106,7 @@ it. The type's JSDoc carries the full detail.
 | `onModelInput` | opt-in local debug hook: before every model step a `ModelInputEvent` (`stepNumber`, the step's `messages`, `system`, `estimatedTokens`, `breakdown`: a `ModelInputBreakdown` with each earlier turn's `HistoryTurnMode` `compacted` / `text` / `left-out` and the memo). CARRIES CONTENT (prompts, tool results, ids, names): keep it out of production logs; never sent to the stream, the browser or the Platform; server config only. Built-in stream handler only (custom ones pass `onBreakdown` / `earlierMessages` to `prepareModelMessages`); not in the runtime container |
 | `onPipelineResult` | intent, module, model and tools chosen by `pipeline` |
 | `onAudit` | `AuditEmitter` for all audit events; forward to logs or a SIEM |
-| `metrics` | content-free turn metrics, e.g. from `createGlirastes(...).chatTurn()`; a continuation is a `turn.continued` event (`TurnContinuedEvent`, `TurnContinuedEventSchema`, `TurnContinuation`, `TurnContinuationSchema`) instead of `turn.finished`, in batches of its own |
+| `metrics` | content-free turn metrics, e.g. from `createGlirastes(...).chatTurn()`; a continuation is a `turn.continued` event (`TurnContinuedEvent`, `TurnContinuedEventSchema`, `TurnContinuation`, `TurnContinuationSchema`) instead of `turn.finished`, in batches of its own, with an opaque `turnId` (HMAC keyed by the approval secret, never the client's message id) shared by every continuation of the turn |
 | `modelPricing` | price table for providers that report no cost |
 
 ## Legacy and Pro

@@ -141,9 +141,9 @@ describe('createRuntimeMetricsSink', () => {
     }) as unknown as typeof globalThis.fetch;
     const { sink, drops } = sinkWith(fetch);
 
-    sink.record({ ...event(), eventType: 'turn.continued', continuation: 'ui-outcome' } as never);
+    sink.record({ ...event(), eventType: 'turn.continued', continuation: 'ui-outcome', turnId: 'ab'.repeat(16) } as never);
     sink.record(event());
-    sink.record({ ...event(), eventType: 'turn.continued', continuation: 'approval' } as never);
+    sink.record({ ...event(), eventType: 'turn.continued', continuation: 'approval', turnId: 'cd'.repeat(16) } as never);
     sink.record(event());
     await sink.flush();
 
