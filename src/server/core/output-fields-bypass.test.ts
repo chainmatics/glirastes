@@ -113,7 +113,8 @@ describe('4: failure bodies under a bound', () => {
     const response = { ...conflict };
     const tool = endpoint({});
     const plain = await toolToAiTool(tool, { ...ctx(response), classifyToolFailure: (info: { body: unknown }) => { seen.push(info.body); return 'error'; } } as never, 'designs_list').execute({});
-    expect(JSON.stringify(plain)).toBe(JSON.stringify({ success: false, error: 'Conflict', retryable: false, status: 409, body: conflict.data }));
+    // The classifier's `'error'` travels as `expectedFailure: false` (the browser shows the step as failed).
+    expect(JSON.stringify(plain)).toBe(JSON.stringify({ success: false, error: 'Conflict', retryable: false, status: 409, body: conflict.data, expectedFailure: false }));
     const bounded = endpoint({ outputAllowedFields: ['data'] });
     await toolToAiTool(bounded, { ...ctx(response), classifyToolFailure: (info: { body: unknown }) => { seen.push(info.body); return 'error'; } } as never, 'designs_list').execute({});
     expect(seen).toEqual([conflict.data, conflict.data]);

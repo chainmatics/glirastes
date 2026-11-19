@@ -189,7 +189,7 @@ describe('MessageBubble tool-result visibility', () => {
     const log = document.querySelector('[data-component="activity-log"]')!;
     expect(log.getAttribute('data-state')).toBe('error');
     expect(log.querySelector('[data-element="activity-summary"]')!.textContent)
-      .toBe('3 Schritte ausgeführt, 1 fehlgeschlagen, 1 ohne Ergebnis');
+      .toBe('1 Schritt ausgeführt, 1 fehlgeschlagen, 1 ohne Ergebnis');
     expect(Array.from(log.querySelectorAll('[data-element="activity-step"]')).map((row) => row.getAttribute('data-status')))
       .toEqual(['expected', 'done', 'error']);
   });

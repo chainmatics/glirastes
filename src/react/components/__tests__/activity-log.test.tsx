@@ -69,7 +69,7 @@ describe('ActivityLog', () => {
 
     // The summary still counts every call.
     expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
-      .toContain('7 Schritte ausgeführt');
+      .toBe('6 Schritte ausgeführt, 1 fehlgeschlagen');
     expect(rows().map((row) => row.textContent)).toEqual([
       'Aufgaben lesen×3',
       'Team anlegen',
@@ -118,8 +118,7 @@ describe('ActivityLog', () => {
     );
     const summary = document.querySelector('[data-element="activity-summary"]')!;
     expect(root()!.getAttribute('data-state')).toBe('error');
-    expect(summary.textContent).toContain('3 Schritte ausgeführt');
-    expect(summary.textContent).toContain('1 fehlgeschlagen');
+    expect(summary.textContent).toBe('2 Schritte ausgeführt, 1 fehlgeschlagen');
 
     fireEvent.click(summary);
     expect(root()!.open).toBe(true);
@@ -144,7 +143,7 @@ describe('ActivityLog', () => {
     );
     const summary = document.querySelector('[data-element="activity-summary"]')!;
     expect(root()!.getAttribute('data-state')).toBe('done');
-    expect(summary.textContent).toBe('2 Schritte ausgeführt, 1 abgelehnt');
+    expect(summary.textContent).toBe('1 Schritt ausgeführt, 1 abgelehnt');
     expect(summary.querySelector('[data-icon="check"]')).not.toBeNull();
     expect(rows()[1].getAttribute('data-status')).toBe('declined');
     expect(rows()[1].querySelector('[data-element="icon"]')!.getAttribute('data-icon')).toBe('declined');
@@ -162,7 +161,7 @@ describe('ActivityLog', () => {
     );
     const summary = document.querySelector('[data-element="activity-summary"]')!;
     expect(root()!.getAttribute('data-state')).toBe('done');
-    expect(summary.textContent).toBe('2 Schritte ausgeführt, 1 ohne Ergebnis');
+    expect(summary.textContent).toBe('1 Schritt ausgeführt, 1 ohne Ergebnis');
     expect(summary.querySelector('[data-icon="check"]')).not.toBeNull();
     expect(rows()[0].getAttribute('data-status')).toBe('expected');
     expect(rows()[0].querySelector('[data-element="icon"]')!.getAttribute('data-icon')).toBe('notice');
@@ -182,7 +181,7 @@ describe('ActivityLog', () => {
     );
     expect(root()!.getAttribute('data-state')).toBe('error');
     expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
-      .toBe('3 Schritte ausgeführt, 1 fehlgeschlagen, 1 abgelehnt, 1 ohne Ergebnis');
+      .toBe('1 fehlgeschlagen, 1 abgelehnt, 1 ohne Ergebnis');
   });
 
   it('counts failed and declined calls apart', () => {
@@ -197,7 +196,63 @@ describe('ActivityLog', () => {
     );
     expect(root()!.getAttribute('data-state')).toBe('error');
     expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
-      .toBe('2 Schritte ausgeführt, 1 fehlgeschlagen, 1 abgelehnt');
+      .toBe('1 fehlgeschlagen, 1 abgelehnt');
+  });
+
+  it('words the summary true for every mix of outcomes (de and en)', () => {
+    const summary = () => document.querySelector('[data-element="activity-summary"]')!.textContent;
+    const cases: Array<[Array<'done' | 'error' | 'declined' | 'expected'>, string, string]> = [
+      [['expected', 'expected'], '2 ohne Ergebnis', '2 without result'],
+      [['declined', 'declined'], '2 abgelehnt', '2 declined'],
+      [['done', 'declined'], '1 Schritt ausgeführt, 1 abgelehnt', '1 step done, 1 declined'],
+      [['done', 'done', 'expected'], '2 Schritte ausgeführt, 1 ohne Ergebnis', '2 steps done, 1 without result'],
+      [['error'], '1 fehlgeschlagen', '1 failed'],
+      [['done', 'error', 'error', 'declined', 'expected'], '1 Schritt ausgeführt, 2 fehlgeschlagen, 1 abgelehnt, 1 ohne Ergebnis',
+        '1 step done, 2 failed, 1 declined, 1 without result'],
+    ];
+    for (const [statuses, german, english] of cases) {
+      const steps = statuses.map((status, i) => ({ id: `c${i}`, toolName: i % 2 ? 'list_tasks' : 'create_team', status }));
+      for (const [locale, text] of [[deChatLocale, german], [DEFAULT_LOCALE, english]] as const) {
+        chatContext.current.locale = locale as unknown as Record<string, string>;
+        render(<ActivityLog active={false} steps={steps} />);
+        expect(summary()).toBe(text);
+        cleanup();
+      }
+    }
+  });
+
+  it('keeps an app override of the done texts, now with the done steps as {count}', () => {
+    chatContext.current.locale = {
+      ...deChatLocale,
+      activityDoneLabel: '{count} Aktionen',
+      activityDoneOneLabel: 'Eine Aktion',
+    } as unknown as Record<string, string>;
+    const view = render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'list_tasks', status: 'done' },
+          { id: 'c2', toolName: 'create_team', status: 'done' },
+          { id: 'c3', toolName: 'create_team', status: 'declined' },
+        ]}
+      />,
+    );
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent).toBe('2 Aktionen, 1 abgelehnt');
+    view.rerender(<ActivityLog active={false} steps={[{ id: 'c1', toolName: 'list_tasks', status: 'done' }]} />);
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent).toBe('Eine Aktion');
+  });
+
+  it('keeps an approval the server did not use apart from a refused one', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'create_team', status: 'declined', declinedBy: 'user' },
+          { id: 'c2', toolName: 'create_team', status: 'declined', declinedBy: 'server' },
+        ]}
+      />,
+    );
+    expect(rows()).toHaveLength(2);
   });
 
   it('uses the singular for one step', () => {
@@ -269,7 +324,8 @@ describe('ActivityLog', () => {
     cleanup();
     chatContext.current.activityLog = { runningProgress: true };
     render(<ActivityLog active steps={steps} />);
-    expect(summary()).toBe('2 erledigt, Team anlegen…');
+    // Only done steps count: the neutral one is not "erledigt".
+    expect(summary()).toBe('1 erledigt, Team anlegen…');
 
     cleanup();
     render(<ActivityLog active steps={[{ id: 'c1', toolName: 'create_team', status: 'running' }]} />);
@@ -301,7 +357,7 @@ describe('ActivityLog', () => {
       />,
     );
     expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
-      .toBe('3 Schritte ausgeführt / 2 fehlgeschlagen / 1 abgelehnt');
+      .toBe('2 fehlgeschlagen / 1 abgelehnt');
     expect(rows()[0]!.querySelector('[data-element="count"]')!.textContent).toBe('(2)');
   });
 

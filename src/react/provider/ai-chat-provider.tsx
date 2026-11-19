@@ -11,6 +11,7 @@ import { getThemeEffect, getThemeVars } from '../themes.js';
 import { ChatContext, type ChatContextValue } from './chat-context.js';
 import type {
   ActivityLogConfig,
+  ActivityLogDetails,
   AiChatProviderConfig,
   ChatMessage,
   ChatTransport,
@@ -119,6 +120,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   activityRunningProgressLabel: '{count} done, {label}…',
   activityStepCountLabel: '×{count}',
   activitySummarySeparator: ', ',
+  activityApprovalNotUsedDetail: 'The approval could not be used',
   activityUiPendingLabel: 'Waiting for the app',
   activityUiRejectedContract: 'Rejected by the app (invalid input)',
   activityUiRejectedHandler: 'Not carried out by the app',
@@ -462,6 +464,8 @@ function continuesRequestBase(
  * }
  * ```
  */
+const ACTIVITY_DETAILS = new Set<ActivityLogDetails>(['auto', 'results', 'all', 'none']);
+
 export function AiChatProvider({
   transport,
   mentions,
@@ -482,6 +486,8 @@ export function AiChatProvider({
   suggestions: userSuggestions,
   locale: userLocale,
   locales: userLocales,
+  languageSource = 'page',
+  language: userLanguage,
   theme: userTheme,
   themeScope = 'inline',
   unstyled = false,
@@ -513,7 +519,12 @@ export function AiChatProvider({
   const declarationsRef = useRef(declarations);
   declarationsRef.current = declarations;
   const pageLanguage = usePageLanguage();
-  const language = toolPresentation?.locale ?? pageLanguage;
+  // The app's stated language, else the page's (the UI the user reads), the server's tool wording only without one;
+  // `languageSource: 'server'` keeps the order before 0.18.0.
+  const statedLanguage = typeof userLanguage === 'string' && userLanguage.trim() !== '' ? userLanguage.trim() : null;
+  const language = statedLanguage ?? (languageSource === 'server'
+    ? toolPresentation?.locale ?? pageLanguage
+    : pageLanguage ?? toolPresentation?.locale ?? null);
   // English defaults, then the built-in texts of the app's language, then the caller's overrides.
   // With `locales`, per key in the language's fallback order (the app's table before the built-in one).
   const locale = useMemo<ChatLocale>(
@@ -549,11 +560,17 @@ export function AiChatProvider({
   const activityExpandWhileRunning = userActivityLog?.expandWhileRunning === true;
   const activityRunningProgress = userActivityLog?.runningProgress === true;
   const activityNoticePlacement = userActivityLog?.noticePlacement === 'message' ? 'message' : 'log';
+  const activityDetails = ACTIVITY_DETAILS.has(userActivityLog?.details as ActivityLogDetails)
+    ? userActivityLog!.details!
+    : 'auto';
+  const activityGrouping = userActivityLog?.grouping === 'sections' ? 'sections' : 'message';
   const activityLogConfig = useMemo<Required<ActivityLogConfig>>(() => ({
     expandWhileRunning: activityExpandWhileRunning,
     runningProgress: activityRunningProgress,
     noticePlacement: activityNoticePlacement,
-  }), [activityExpandWhileRunning, activityRunningProgress, activityNoticePlacement]);
+    details: activityDetails,
+    grouping: activityGrouping,
+  }), [activityExpandWhileRunning, activityRunningProgress, activityNoticePlacement, activityDetails, activityGrouping]);
   const toolRendererRegistry = useMemo(
     () => (toolRenderers && toolRenderers.length > 0
       ? createToolResultRendererRegistry(toolRenderers)

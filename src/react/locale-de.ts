@@ -48,6 +48,7 @@ export const deChatLocale: ChatLocale = {
   activityRunningProgressLabel: '{count} erledigt, {label}…',
   activityStepCountLabel: '×{count}',
   activitySummarySeparator: ', ',
+  activityApprovalNotUsedDetail: 'Die Freigabe konnte nicht verwendet werden',
   activityUiPendingLabel: 'Wartet auf die App',
   activityUiRejectedContract: 'Von der App abgelehnt (ungültige Eingabe)',
   activityUiRejectedHandler: 'Von der App nicht ausgeführt',

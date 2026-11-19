@@ -17,7 +17,7 @@ import type {
 import type { Lancer } from '../../lancer/index.js';
 import type { ApprovalStore } from './approval-binding.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
-import type { HistoryOptions } from './prepare-model-messages.js';
+import type { HistoryOptions, ModelInputBreakdown } from './prepare-model-messages.js';
 import type { ChatMemoryConfig } from './chat-memory.js';
 import type { BudgetStopTexts } from './budget-stop-notice.js';
 import type { ChatServerLocales } from './chat-texts.js';
@@ -149,6 +149,20 @@ export interface StepUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+}
+
+/** What one model step receives (`AiChatHandlerConfig.onModelInput`). Carries content: local diagnostics only. */
+export interface ModelInputEvent {
+  /** The model step of the turn, from 0. */
+  stepNumber: number;
+  /** The messages of this step as the model gets them (with `promptCaching`, the system prompt is the first). */
+  messages: unknown[];
+  /** The system prompt, when it travels apart from the messages (`promptCaching: false`). */
+  system?: string;
+  /** What the history of the turn became; the same for every step of a turn. */
+  breakdown: ModelInputBreakdown;
+  /** Estimated tokens of `messages` and `system` (4 characters per token; tool definitions not counted). */
+  estimatedTokens: number;
 }
 
 export interface PipelineStepReport {
@@ -395,6 +409,9 @@ export interface AiChatHandlerConfig {
    * and `name` under a `_history` marker unless `keepIdentity: false`),
    * older turns as text only, at most `maxTurns` (6) within `maxTokens`
    * (4000, estimated). `false` keeps the flat slice-and-prune of earlier versions.
+   * Opt-in: `toolTurnCounting: 'tool-turns'` counts only turns with tool
+   * calls against `toolTurns`; `seenObjects` adds a memo of declared
+   * records whose results left the history (see `HistoryOptions`).
    */
   history?: HistoryOptions | false;
   /**
@@ -543,6 +560,19 @@ export interface AiChatHandlerConfig {
    */
   onPipelineResult?: (result: PipelineResult) => void;
   onStepReport?: (report: PipelineStepReport) => void;
+  /**
+   * Debug hook, opt-in: called by the built-in stream handler before every
+   * model step with the exact messages that step sends to the model and a
+   * breakdown of the history (which earlier turns kept their tool results,
+   * which went as text or were left out, the seen-objects memo, a token
+   * estimate). It CARRIES CONTENT: prompts, user text, tool results, ids and
+   * names, after the PII shield. It runs in this process only: nothing of it
+   * is sent to the browser, the stream or the Platform, and no request can
+   * turn it on. Keep it out of production logs, or redact first. A throw
+   * from it is ignored. Not called by a custom `streamHandler`, which can
+   * pass `onBreakdown` to `prepareModelMessages` itself.
+   */
+  onModelInput?: (event: ModelInputEvent) => void;
   onFinish?: (event: {
     totalSteps: number;
     finishReason: string;

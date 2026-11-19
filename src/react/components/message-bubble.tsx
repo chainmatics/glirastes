@@ -8,7 +8,7 @@ import { clarificationAnswerMessage, readClarificationPart } from '../utils/clar
 import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
 import { ActivityLog, TurnNotice as DefaultTurnNotice } from './activity-log.js';
 import { PlanChecklist } from './plan-checklist.js';
-import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
+import { readActivitySteps, readLatestPlan, type ActivityDetailSource, type ActivityStep, type ActivityStepStatus } from '../utils/activity.js';
 import { PLAN_TOOL_NAME } from '../../contracts/plan.js';
 import { RendererBoundary } from '../tool-renderers/renderer-boundary.js';
 import {
@@ -18,6 +18,7 @@ import {
 import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
 import type {
+  ActivityLogDetails,
   ChatLocale,
   ChatMessage,
   FilePart,
@@ -69,6 +70,78 @@ function shouldRenderToolResult(
   if (mode === 'hidden') return false;
   if (mode === 'allowlist') return allowlist.includes(toolName);
   return true;
+}
+
+/**
+ * Whether a step's detail (error text, done message) is shown under the
+ * `activityLog.details` policy. `resultShown`: the tool's result is displayed
+ * (`toolResults`). Under `'auto'` the error text a tool returned for a failed
+ * or neutral step is shown whatever the result display; the `errorText` the
+ * AI SDK or the runtime wrote (`source: 'error-text'`) only where results are.
+ */
+function allowStepDetail(
+  details: ActivityLogDetails,
+  status: ActivityStepStatus,
+  source: ActivityDetailSource,
+  resultShown: boolean,
+): boolean {
+  switch (details) {
+    case 'none':
+      return false;
+    case 'all':
+      return true;
+    case 'results':
+      return resultShown;
+    default:
+      return resultShown || (source === 'output' && (status === 'error' || status === 'expected'));
+  }
+}
+
+function isToolPart(part: unknown): boolean {
+  if (!isRecord(part) || typeof part.type !== 'string') return false;
+  return part.type === 'dynamic-tool' || part.type.startsWith('tool-');
+}
+
+type ActivitySection =
+  | { kind: 'text'; node: ReactNode }
+  | { kind: 'steps'; steps: ActivityStep[] };
+
+/**
+ * The text nodes and the runs of tool steps of a message in message order,
+ * or null when no run of steps comes after a text (the single log renders
+ * exactly as before then). Parts that are neither (reasoning, step markers,
+ * data) do not split a run.
+ */
+function activitySections(
+  parts: ReadonlyArray<unknown>,
+  texts: ReadonlyArray<{ index: number; node: ReactNode }>,
+  readSteps: (parts: ReadonlyArray<unknown>) => ActivityStep[],
+): ActivitySection[] | null {
+  const textAt = new Map(texts.map((entry) => [entry.index, entry.node] as const));
+  const raw: Array<{ kind: 'text'; node: ReactNode } | { kind: 'tools'; parts: unknown[] }> = [];
+  parts.forEach((part, index) => {
+    const node = textAt.get(index);
+    if (node !== undefined && node !== null) {
+      raw.push({ kind: 'text', node });
+      return;
+    }
+    if (!isToolPart(part)) return;
+    const last = raw.at(-1);
+    if (last?.kind === 'tools') last.parts.push(part);
+    else raw.push({ kind: 'tools', parts: [part] });
+  });
+  const sections: ActivitySection[] = [];
+  for (const entry of raw) {
+    if (entry.kind === 'text') {
+      sections.push(entry);
+      continue;
+    }
+    const steps = readSteps(entry.parts);
+    if (steps.length > 0) sections.push({ kind: 'steps', steps });
+  }
+  const firstText = sections.findIndex((section) => section.kind === 'text');
+  const interleaved = firstText >= 0 && sections.slice(firstText).some((section) => section.kind === 'steps');
+  return interleaved ? sections : null;
 }
 
 /** Stop or failure of the latest turn, shown as the last activity line. */
@@ -216,9 +289,19 @@ export function useMessageParts(message: ChatMessage): MessageParts {
   const allowlist = toolResults.allowlist ?? [];
 
   const isAssistant = message.role === 'assistant';
-  const activitySteps = isAssistant
-    ? readActivitySteps(message.parts, (toolName) => shouldRenderToolResult(toolName, mode, allowlist))
-    : [];
+  const details = activityLog?.details ?? 'auto';
+  const resultShown = (toolName: string) => shouldRenderToolResult(toolName, mode, allowlist);
+  const readSteps = (parts: ReadonlyArray<unknown>): ActivityStep[] => readActivitySteps(
+    parts,
+    (toolName, status, source) => allowStepDetail(details, status, source, resultShown(toolName)),
+  ).map((step) => (
+    // A call the user approved that the server did not run: the reason is the SDK's own text.
+    step.status === 'declined' && step.declinedBy === 'server' && !step.detail
+      && (details === 'all' || details === 'auto')
+      ? { ...step, detail: locale.activityApprovalNotUsedDetail }
+      : step
+  ));
+  const activitySteps = isAssistant ? readSteps(message.parts) : [];
   const planItems = isAssistant ? readLatestPlan(message.parts) : null;
   const hasPlan = (planItems?.length ?? 0) >= 2;
   const turnActive = isLatestMessage && isLoading;
@@ -230,15 +313,15 @@ export function useMessageParts(message: ChatMessage): MessageParts {
     && activitySteps.length > 0;
 
   // Extract tool result summaries as fallback text when no text parts exist
-  const cleanTextParts = message.parts
-    .filter(isTextPart)
-    .filter((p) => p.text.trim())
-    .map((p) => stripChatCommandMarkers(stripClarificationMarkers(stripContextBlocks(p.text))))
-    .map((text) => (
-      message.role === 'assistant'
-        ? extractTrailingFollowupSuggestions(text).text
-        : text
-    ));
+  const textEntries = message.parts
+    .map((part, index) => ({ part, index }))
+    .filter((entry): entry is { part: TextPart; index: number } => isTextPart(entry.part))
+    .filter((entry) => entry.part.text.trim())
+    .map(({ part, index }) => {
+      const text = stripChatCommandMarkers(stripClarificationMarkers(stripContextBlocks(part.text)));
+      return { index, text: message.role === 'assistant' ? extractTrailingFollowupSuggestions(text).text : text };
+    });
+  const cleanTextParts = textEntries.map((entry) => entry.text);
   const hasTextContent = cleanTextParts.some((text) => text.trim().length > 0);
   const fileParts = message.parts.filter(isFilePart);
 
@@ -385,9 +468,27 @@ export function useMessageParts(message: ChatMessage): MessageParts {
     return null;
   });
 
+  // `activityLog.grouping: 'sections'`: a log per run of steps, at its place between the texts.
+  const sections = (activityLog?.grouping ?? 'message') === 'sections' && isAssistant && activitySteps.length > 0
+    ? activitySections(message.parts, textEntries.map((entry, i) => ({ index: entry.index, node: textNodes[i] ?? null })), readSteps)
+    : null;
+  const lastStepsSection = sections ? sections.map((section) => section.kind).lastIndexOf('steps') : -1;
+  const sectionNodes = sections?.map((section, i) => {
+    if (section.kind === 'text') return section.node;
+    const last = i === lastStepsSection;
+    return (
+      <ActivityLog
+        key={`activity-${i}-${section.steps[0]!.id}`}
+        steps={section.steps}
+        active={turnActive && last}
+        {...(last && notice && noticeInLog ? { notice: notice.text, noticeStatus: notice.status } : {})}
+      />
+    );
+  });
+
   const nodes = {
     plan: hasPlan ? <PlanChecklist items={planItems!} active={turnActive} /> : null,
-    activity: activitySteps.length > 0
+    activity: sectionNodes ? null : activitySteps.length > 0
       ? (
         <ActivityLog
           steps={activitySteps}
@@ -406,7 +507,7 @@ export function useMessageParts(message: ChatMessage): MessageParts {
         </div>
       )
       : null,
-    text: hasTextContent || fallbackSummary
+    text: sectionNodes ? <>{sectionNodes}</> : hasTextContent || fallbackSummary
       ? (
         <>
           {textNodes}

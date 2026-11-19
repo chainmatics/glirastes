@@ -20,7 +20,7 @@ import {
   type AiSdkToolHooks,
 } from '../../../runtime/ai-sdk/engine.js';
 import { attachmentPlaceholderText } from '../../../contracts/attachments.js';
-import { declarationsForRead, type EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
+import { declarationsForRead, type EntityDeclarationsByTool, type OutputEntityDeclaration } from '../../../contracts/entity-declaration.js';
 import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 import { withModelFacingToolErrors } from './stream-error-text.js';
@@ -31,6 +31,14 @@ import {
   HISTORY_DEFAULTS,
   HISTORY_TEXT_ONLY_NOTE,
 } from './history-compaction.js';
+import {
+  collectSeenObjects,
+  renderSeenObjects,
+  seenObjectKeys,
+  type SeenObject,
+  type SeenObjectSource,
+  type SeenObjectsOptions,
+} from './seen-objects.js';
 
 export { compactToolOutput };
 
@@ -42,8 +50,34 @@ export { compactToolOutput };
 export interface HistoryOptions {
   /** Earlier turns sent at all (default 6). */
   maxTurns?: number;
-  /** Most recent earlier turns that keep their tool calls, with compacted results (default 1). */
+  /**
+   * Most recent earlier turns that keep their tool calls, with compacted
+   * results (default 1). What counts as a turn: `toolTurnCounting`.
+   */
   toolTurns?: number;
+  /**
+   * What `toolTurns` counts (default `'all-turns'`, as before). `'all-turns'`:
+   * the `toolTurns` most recent earlier turns, whether they called a tool or
+   * not, so a turn without tools ("thanks") uses up a slot and pushes the
+   * results before it out. `'tool-turns'`: the `toolTurns` most recent
+   * earlier turns that called a tool; turns without tools in between go as
+   * text and use up no slot. Both modes give way oldest turn first when the
+   * history does not fit `maxTokens` or the message limit; in `'tool-turns'`
+   * such a turn with compacted results first goes as text, and is left out
+   * only if that still does not fit. `maxTurns` caps both modes.
+   */
+  toolTurnCounting?: 'all-turns' | 'tool-turns';
+  /**
+   * Seen-objects memo (default off; opt-in since it changes the model
+   * input): the records earlier tool results showed under a DECLARED
+   * identity (`outputEntities`: type, id fields, name or fallback), listed
+   * ahead of the history once their results are no longer in it. A tool
+   * without a declaration contributes nothing. `true` uses the default
+   * bounds (40 entries, 800 estimated tokens; the least recently seen go
+   * first); an object sets `maxEntries` and `maxTokens`. Not applied with
+   * `history: false`.
+   */
+  seenObjects?: boolean | SeenObjectsOptions;
   /** Estimated token budget of all earlier turns; the oldest drop first (default 4000). */
   maxTokens?: number;
   /** Array items kept complete per array in compacted tool results (default 10). */
@@ -73,6 +107,19 @@ export interface PrepareModelMessagesOptions {
    * id and name fields. Without it, as before.
    */
   entities?: EntityDeclarationsByTool;
+  /**
+   * The UI messages ahead of `uiMessages` that the message window or the chat
+   * memory already left out. Read only for the seen-objects memo (their tool
+   * results, never their text); without it the memo covers `uiMessages`.
+   */
+  earlierMessages?: UIMessage[];
+  /**
+   * Receives what the history became: which turns kept their tool results,
+   * which went as text or were left out, the seen-objects memo and a token
+   * estimate. Local diagnostics: it carries content (the memo's names and
+   * ids). A throw from it is ignored.
+   */
+  onBreakdown?: (breakdown: ModelInputBreakdown) => void;
   /** Override pruneMessages config (legacy pipeline only). */
   pruneConfig?: {
     /** How to handle reasoning blocks (default: 'none'). */
@@ -82,6 +129,31 @@ export interface PrepareModelMessagesOptions {
     /** Empty message handling (default: 'remove'). */
     emptyMessages?: 'remove' | 'keep';
   };
+}
+
+/** How one earlier turn reached the model. */
+export type HistoryTurnMode =
+  /** With its tool calls and compacted tool results. */
+  | 'compacted'
+  /** As text only (tool calls and results left out, oversized text cut). */
+  | 'text'
+  /** Not at all (`maxTurns`, `maxTokens` or `maxContextMessages`). */
+  | 'left-out';
+
+/** What `prepareModelMessages` made of the history (`onBreakdown`). Carries content: local diagnostics only. */
+export interface ModelInputBreakdown {
+  /** `turn-aware` (default) or `legacy` (`history: false`, or a `pruneConfig.toolCalls`). */
+  pipeline: 'turn-aware' | 'legacy';
+  /** `history.toolTurnCounting` in effect. */
+  toolTurnCounting: 'all-turns' | 'tool-turns';
+  /** Earlier turns of `uiMessages`, oldest first; the current turn always goes complete and is not listed. Empty for `legacy`. */
+  turns: Array<{ index: number; mode: HistoryTurnMode; hadToolCalls: boolean }>;
+  /** UI messages ahead of `uiMessages` (`earlierMessages`) the window or the chat memory had left out already. */
+  earlierMessages: number;
+  /** The memo sent ahead of the history, when `seenObjects` is on and it lists anything. */
+  seenObjects?: { objects: SeenObject[]; omitted: number; estimatedTokens: number };
+  /** Estimated tokens of the returned messages (4 characters per token, a flat 1,000 per file part). */
+  estimatedTokens: number;
 }
 
 const CHARS_PER_TOKEN = 4;
@@ -111,7 +183,10 @@ export async function prepareModelMessages(
     ignoreIncompleteToolCalls: true,
   });
 
-  const pruned = options?.history === false || options?.pruneConfig?.toolCalls
+  const legacy = options?.history === false || Boolean(options?.pruneConfig?.toolCalls);
+  const limits: ResolvedHistory = { ...HISTORY_DEFAULTS, toolTurnCounting: 'all-turns', ...(options?.history || {}) };
+  const history = legacy ? undefined : turnAwareHistory(raw as ModelMessageLike[], maxCtx, limits, options?.entities);
+  const pruned = legacy
     ? pruneMessages({
         messages: raw.slice(-maxCtx),
         reasoning: (options?.pruneConfig?.reasoning ?? 'none') as 'none',
@@ -120,10 +195,7 @@ export async function prepareModelMessages(
         emptyMessages: (options?.pruneConfig?.emptyMessages ?? 'remove') as 'remove',
       })
     : pruneMessages({
-        messages: turnAwareHistory(raw as ModelMessageLike[], maxCtx, {
-          ...HISTORY_DEFAULTS,
-          ...options?.history,
-        }, options?.entities) as typeof raw,
+        messages: history!.messages as typeof raw,
         reasoning: 'none',
         toolCalls: 'none',
         emptyMessages: (options?.pruneConfig?.emptyMessages ?? 'remove') as 'remove',
@@ -133,7 +205,80 @@ export async function prepareModelMessages(
 
   // Strip uiAction from tool-result parts — the LLM doesn't need them
   // (uiActions are auto-generated by SDK templates and consumed by the client)
-  return stripUiActionsFromToolResults(sanitized);
+  const stripped = stripUiActionsFromToolResults(sanitized);
+  const seen = history && limits.seenObjects && options?.entities
+    ? await seenObjectsMemo(
+        stripped as ModelMessageLike[], raw as ModelMessageLike[], options.earlierMessages,
+        options.entities, limits.seenObjects,
+      )
+    : undefined;
+  const result = seen ? [seen.message as (typeof stripped)[number], ...stripped] : stripped;
+  if (options?.onBreakdown) {
+    try {
+      options.onBreakdown({
+        pipeline: legacy ? 'legacy' : 'turn-aware',
+        toolTurnCounting: limits.toolTurnCounting,
+        turns: history?.turns ?? [],
+        earlierMessages: options.earlierMessages?.length ?? 0,
+        ...(seen ? { seenObjects: { objects: seen.objects, omitted: seen.omitted, estimatedTokens: estimateTokens([seen.message]) } } : {}),
+        estimatedTokens: estimateTokens(result),
+      });
+    } catch {
+      // Diagnostics only; the turn goes on.
+    }
+  }
+  return result;
+}
+
+type ResolvedHistory = Required<Omit<HistoryOptions, 'seenObjects'>> & Pick<HistoryOptions, 'seenObjects'>;
+
+/**
+ * The seen-objects memo: the declared records of every tool result of the
+ * conversation (`earlierMessages` and `raw`, the full results) that the
+ * returned messages no longer show (turns sent as text or left out, entries
+ * a compacted result dropped), as one user-role message ahead of the history.
+ */
+async function seenObjectsMemo(
+  sent: ReadonlyArray<ModelMessageLike>,
+  raw: ReadonlyArray<ModelMessageLike>,
+  earlierMessages: UIMessage[] | undefined,
+  entities: EntityDeclarationsByTool,
+  setting: true | SeenObjectsOptions,
+): Promise<{ message: ModelMessageLike; objects: SeenObject[]; omitted: number } | undefined> {
+  const earlier = earlierMessages && earlierMessages.length > 0
+    ? await convertToModelMessages(withModelFacingToolErrors(earlierMessages), { ignoreIncompleteToolCalls: true }) as ModelMessageLike[]
+    : [];
+  const all = [...earlier, ...raw];
+  const handles = handleProducersOf(all);
+  const objects = collectSeenObjects(
+    seenSourcesOf(all, entities, handles),
+    seenObjectKeys(seenSourcesOf(sent, entities, handles)),
+  );
+  const rendered = renderSeenObjects(objects, setting === true ? {} : setting);
+  if (!rendered) return undefined;
+  return {
+    message: { role: 'user', content: [{ type: 'text', text: rendered.text }] },
+    objects: rendered.objects,
+    omitted: rendered.omitted,
+  };
+}
+
+/** The JSON tool results of `messages` with their declarations; a result without one is left out. */
+function seenSourcesOf(
+  messages: ReadonlyArray<ModelMessageLike>,
+  entities: EntityDeclarationsByTool,
+  handles: HandleProducers,
+): SeenObjectSource[] {
+  const sources: SeenObjectSource[] = [];
+  for (const message of messages) {
+    if (message.role !== 'tool' || !Array.isArray(message.content)) continue;
+    for (const part of message.content as Array<Record<string, unknown>>) {
+      if (!isCompactable(part) || part.output.type !== 'json') continue;
+      const declarations = declarationsOfPart(part, entities, handles);
+      if (declarations && declarations.length > 0) sources.push({ value: part.output.value, declarations });
+    }
+  }
+  return sources;
 }
 
 interface ModelMessageLike {
@@ -265,9 +410,30 @@ function handleProducersOf(messages: ReadonlyArray<ModelMessageLike>): HandlePro
   return { producers, outputs, readInputs };
 }
 
+/**
+ * The declarations of one tool result: its tool's; for a `read_result` answer
+ * those of the tool that produced the handle it read, a path-less one with
+ * the path it had in the producing result.
+ */
+function declarationsOfPart(
+  part: CompactablePart,
+  entities: EntityDeclarationsByTool,
+  { producers, outputs, readInputs }: HandleProducers,
+): ReadonlyArray<OutputEntityDeclaration> | undefined {
+  let readId: string | undefined;
+  if (part.toolName === READ_RESULT_TOOL_NAME && typeof part.toolCallId === 'string') {
+    const input = readInputs.get(part.toolCallId);
+    const resultId = typeof input === 'object' && input !== null ? (input as { resultId?: unknown }).resultId : undefined;
+    if (typeof resultId === 'string' && producers.has(resultId)) readId = resultId;
+  }
+  const tool = readId !== undefined ? producers.get(readId)! : part.toolName;
+  const own = typeof tool === 'string' && Object.prototype.hasOwnProperty.call(entities, tool) ? entities[tool]!.output : undefined;
+  return readId !== undefined ? declarationsForRead(own, outputs.get(readId)) : own;
+}
+
 function withCompactedResults(
   turn: ModelMessageLike[],
-  limits: Required<HistoryOptions>,
+  limits: ResolvedHistory,
   entities?: EntityDeclarationsByTool,
   handles: HandleProducers = handleProducersOf(turn),
 ): ModelMessageLike[] {
@@ -291,22 +457,9 @@ function withCompactedResults(
     });
   };
   const options = { maxItems: limits.maxItems, maxStringLength: limits.maxStringLength, keepIdentity: limits.keepIdentity };
-  // A `read_result` answer is compacted with the declarations of the tool that produced its handle.
-  const { producers, outputs, readInputs } = handles;
-  const readIdOf = (part: CompactablePart): string | undefined => {
-    if (part.toolName !== READ_RESULT_TOOL_NAME || typeof part.toolCallId !== 'string') return undefined;
-    const input = readInputs.get(part.toolCallId);
-    const resultId = typeof input === 'object' && input !== null ? (input as { resultId?: unknown }).resultId : undefined;
-    return typeof resultId === 'string' && producers.has(resultId) ? resultId : undefined;
-  };
   /** The options for one part: with its tool's declared entities, when it has any. */
   const optionsOf = (part: CompactablePart) => {
-    if (!entities) return options;
-    const readId = readIdOf(part);
-    const tool = readId !== undefined ? producers.get(readId)! : part.toolName;
-    const own = typeof tool === 'string' && Object.prototype.hasOwnProperty.call(entities, tool) ? entities[tool]!.output : undefined;
-    // A read keeps the path a path-less declaration had in the producing result.
-    const declared = readId !== undefined ? declarationsForRead(own, outputs.get(readId)) : own;
+    const declared = entities ? declarationsOfPart(part, entities, handles) : undefined;
     return declared ? { ...options, entities: declared } : options;
   };
   const compacted: unknown[] = [];
@@ -371,31 +524,50 @@ function withTruncatedTexts(turn: ModelMessageLike[], maxChars: number): ModelMe
  * to head and tail. Older turns go as text, at most `maxTurns`, within what
  * `maxTokens` and `maxCtx` leave. The newest text-only turn whose tool
  * results were left out ends with a note that no ids from them are known.
+ *
+ * Which earlier turns keep their tool results: with `toolTurnCounting`
+ * `'all-turns'` the last `toolTurns` turns, with `'tool-turns'` the last
+ * `toolTurns` turns that hold tool calls or results. In `'tool-turns'` an
+ * oldest turn that does not fit goes as text before it is left out, when it
+ * has compacted results.
  */
 function turnAwareHistory(
   messages: ModelMessageLike[],
   maxCtx: number,
-  limits: Required<HistoryOptions>,
+  limits: ResolvedHistory,
   entities?: EntityDeclarationsByTool,
-): ModelMessageLike[] {
+): { messages: ModelMessageLike[]; turns: ModelInputBreakdown['turns'] } {
   const handles = entities ? handleProducersOf(messages) : undefined;
   const turns = splitTurns(messages);
   const current = turns.pop() ?? [];
   const kept = turns.slice(-Math.max(0, limits.maxTurns));
-  const isToolTurn = (index: number) => index >= kept.length - limits.toolTurns;
+  const first = turns.length - kept.length;
+  const countToolTurnsOnly = limits.toolTurnCounting === 'tool-turns';
+  const withTools = kept.flatMap((turn, index) => (hasToolContent(turn) ? [index] : []));
+  const toolTurnIndexes = new Set(countToolTurnsOnly && limits.toolTurns > 0 ? withTools.slice(-limits.toolTurns) : []);
+  const isToolTurn = (index: number) => (countToolTurnsOnly ? toolTurnIndexes.has(index) : index >= kept.length - limits.toolTurns);
   const earlier = kept.map((turn, index) => (isToolTurn(index) ? withCompactedResults(turn, limits, entities, handles) : textOnly(turn)));
   // Per earlier turn: sent as text with its tool calls and results left out.
   const dropped = kept.map((turn, index) => !isToolTurn(index) && hasToolContent(turn));
+  // Per kept turn, for the breakdown; the first `shifted` are left out below.
+  const modes: HistoryTurnMode[] = kept.map((turn, index) => (isToolTurn(index) && hasToolContent(turn) ? 'compacted' : 'text'));
+  let shifted = 0;
+  const breakdown = (): ModelInputBreakdown['turns'] => turns.map((turn, index) => ({
+    index,
+    mode: index < first + shifted ? 'left-out' : modes[index - first]!,
+    hadToolCalls: hasToolContent(turn),
+  }));
   const previousSource = kept.at(-1);
   let previousDropped = dropped.pop() ?? false;
   let previous = earlier.pop();
-  if (!previous || !previousSource) return current;
+  if (!previous || !previousSource) return { messages: current, turns: breakdown() };
 
   const tooLarge = (turn: ModelMessageLike[]) =>
     estimateTokens(turn) > limits.maxTokens || turn.length + current.length > maxCtx;
   if (tooLarge(previous)) {
     previous = textOnly(previous);
     previousDropped = hasToolContent(previousSource);
+    modes[kept.length - 1] = 'text';
   }
   // The newest turn whose tool results were left out says so, once.
   if (previousDropped) previous = withTextOnlyNote(previous);
@@ -413,10 +585,18 @@ function turnAwareHistory(
     earlier.length > 0
     && (estimateTokens(sent()) > tokenRoom || sent().length > messageRoom)
   ) {
+    if (countToolTurnsOnly && modes[shifted] === 'compacted') {
+      // Oldest first, as before, but a turn with results goes as text before it is left out.
+      earlier[0] = textOnly(kept[shifted]!);
+      dropped[0] = true;
+      modes[shifted] = 'text';
+      continue;
+    }
     earlier.shift();
     dropped.shift();
+    shifted += 1;
   }
-  return [...sent(), ...previous, ...current];
+  return { messages: [...sent(), ...previous, ...current], turns: breakdown() };
 }
 
 // ---------------------------------------------------------------------------

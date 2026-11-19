@@ -25,8 +25,14 @@ export interface ActivityStep {
   id: string;
   toolName: string;
   status: ActivityStepStatus;
-  /** Tool output message or error text, when the display mode allows it. */
+  /** Tool output message or error text, when the detail policy (`activityLog.details`) allows it. */
   detail?: string;
+  /**
+   * Who refused a `declined` call: `'user'` (answered "no" in the approval
+   * card), `'server'` (the user approved, but the server did not run it: an
+   * expired or already used approval). Absent when the part does not say.
+   */
+  declinedBy?: 'user' | 'server';
   /**
    * What the app reported for a UI action the model waits on (outcome
    * protocol): `pending` until it reports, then its code (`ok` shows no
@@ -84,8 +90,9 @@ function isFailedOutput(output: unknown): output is Record<string, unknown> {
  * neutrally. Display only: what the server counts (`maxConsecutiveErrors`,
  * turn metrics) follows `classifyToolFailure` alone.
  * - The app's marker `expectedFailure: true` (`classifyToolFailure` returned
- *   `'expected'`), for any status.
- * - Without it, a backend answer with a client-class status (400-499, e.g. a
+ *   `'expected'`), for any status. An explicit `expectedFailure: false` (the
+ *   classifier returned `'error'`) is a failure, for any status.
+ * - Without a marker (no classifier, an older server, stored history), a backend answer with a client-class status (400-499, e.g. a
  *   404 the model then looks up, a 403): the backend understood the call and
  *   said no. Except 408 and 429 (timeout, rate limit) and a call the SDK's
  *   endpoint caller refused itself before it reached the backend.
@@ -95,6 +102,7 @@ function isFailedOutput(output: unknown): output is Record<string, unknown> {
 function isExpectedFailure(output: Record<string, unknown>): boolean {
   if (output.success !== false) return false;
   if (output.expectedFailure === true) return true;
+  if (output.expectedFailure === false) return false;
   const status = output.status;
   if (typeof status !== 'number' || !Number.isInteger(status) || status < 400 || status > 499) return false;
   if (status === 408 || status === 429) return false;
@@ -119,12 +127,26 @@ function stepStatus(state: unknown, output: unknown): ActivityStepStatus {
 }
 
 /**
+ * Where a step's detail comes from: `'output'` the tool's own result (its
+ * `error` or `message`), `'error-text'` the `errorText` of an `output-error`
+ * part (the AI SDK or the runtime refused or aborted the call).
+ */
+export type ActivityDetailSource = 'output' | 'error-text';
+
+/** `'server'` for a call the user approved that did not run, `'user'` for a refusal. */
+function declinedByOf(approval: unknown): ActivityStep['declinedBy'] {
+  if (!isRecord(approval) || typeof approval.approved !== 'boolean') return undefined;
+  return approval.approved ? 'server' : 'user';
+}
+
+/**
  * App tool calls of a message in the order they ran. `allowDetail` decides
- * per tool whether its output message or error text may be shown.
+ * per tool (and step status) whether its output message or error text may be
+ * shown.
  */
 export function readActivitySteps(
   parts: ReadonlyArray<unknown>,
-  allowDetail: (toolName: string) => boolean,
+  allowDetail: (toolName: string, status: ActivityStepStatus, source: ActivityDetailSource) => boolean,
 ): ActivityStep[] {
   const steps: ActivityStep[] = [];
   parts.forEach((part, index) => {
@@ -139,17 +161,30 @@ export function readActivitySteps(
       status,
       ...(outcome?.uiOutcome ? { uiOutcome: outcome.uiOutcome } : {}),
     };
-    // A UI action's outcome is shown by its own text, not by the result's message.
-    if (allowDetail(toolName) && !outcome) {
-      let detail: unknown;
-      if (status === 'error' || status === 'expected') {
-        detail = isFailedOutput(part.output) && part.state === 'output-available' ? part.output.error : part.errorText;
-      } else if (status === 'done' && isRecord(part.output)) {
-        // The hand-off note of a UI tool is for the model, not the user.
-        detail = isUiActionHandoffMessage(part.output.message) ? undefined : part.output.message;
-      }
-      if (typeof detail === 'string' && detail.trim()) step.detail = detail.trim();
+    if (status === 'declined') {
+      const declinedBy = declinedByOf(part.approval);
+      if (declinedBy) step.declinedBy = declinedBy;
     }
+    // A UI action's outcome is shown by its own text, not by the result's message.
+    if (outcome) {
+      steps.push(step);
+      return;
+    }
+    let detail: unknown;
+    // `errorText` of an `output-error` part: written by the AI SDK or the runtime (invalid input, a guard), not by the tool.
+    let source: ActivityDetailSource = 'output';
+    if (status === 'error' || status === 'expected') {
+      if (isFailedOutput(part.output) && part.state === 'output-available') {
+        detail = part.output.error;
+      } else {
+        detail = part.errorText;
+        source = 'error-text';
+      }
+    } else if (status === 'done' && isRecord(part.output)) {
+      // The hand-off note of a UI tool is for the model, not the user.
+      detail = isUiActionHandoffMessage(part.output.message) ? undefined : part.output.message;
+    }
+    if (typeof detail === 'string' && detail.trim() && allowDetail(toolName, status, source)) step.detail = detail.trim();
     steps.push(step);
   });
   return steps;

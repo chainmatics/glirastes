@@ -62,7 +62,7 @@ component; headless hooks and building blocks for an own chat:
 | `theme.colors.primary`, `theme.colors.primarySoft` | accent and gradient stop within a theme override |
 | `classNames` | per-slot class hooks |
 | `components` | replace a rendered component (see *Slots*) |
-| `locale`, `locales` | `locale` overrides any string for every language; `locales` per BCP-47 tag (`{ pl: { sendButton: 'Wyślij' } }`, partial tables fall back per key; language = the turn's tool labels, else the page `lang`; server side: `requestLocale`) |
+| `locale`, `locales` | `locale` overrides any string for every language; `locales` per BCP-47 tag (`{ pl: { sendButton: 'Wyślij' } }`, partial tables fall back per key; language = `language`, else the page `lang` (`<glirastes-chat>`: nearest `lang`), else the turn's tool labels; `languageSource: 'server'` = old order; server side: `requestLocale`) |
 | `session` | `save` / `load` / `clear` for durable conversations |
 | `mentions` | mention sources and search |
 | `suggestions` | contextual suggestion chips |

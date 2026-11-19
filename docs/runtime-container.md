@@ -197,6 +197,12 @@ budgets and its own place in `maxConcurrentTurns`; a turn can cost up to four
 times the per-request budgets. A strict proxy in front of the container must
 allow the body field `glirastesUiOutcomes`.
 
+The model history uses the SDK defaults (`history`, `maxContextMessages`);
+the config has no keys for them, so the opt-ins `history.toolTurnCounting`
+and `history.seenObjects` are embedded-only for now. The debug hook
+`onModelInput` is embedded-only by design: it carries prompts and tool
+results, and the container's stdout carries content-free events only.
+
 ## State, cancellation and lifecycle
 
 PostgreSQL stores only hashed consumed approval IDs, scope and expiration. The

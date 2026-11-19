@@ -64,6 +64,7 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
       last
       && last.step.toolName === step.toolName
       && last.step.status === step.status
+      && last.step.declinedBy === step.declinedBy
       && !last.step.detail
       && !step.detail
       && last.step.uiOutcome === step.uiOutcome
@@ -101,10 +102,11 @@ export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, cla
   // An expected failure (classifyToolFailure) is a normal answer: counted on its own as well.
   const expected = steps.filter((step) => step.status === 'expected').length;
   const waiting = steps.some((step) => step.status === 'waiting');
+  // Counted on their own too, so the summary is true for every mix ("1 step done, 1 declined", "2 declined").
+  const done = steps.filter((step) => step.status === 'done').length;
 
   const state = running || active ? 'running' : waiting ? 'waiting' : failed > 0 ? 'error' : 'done';
 
-  const finished = steps.filter((step) => step.status !== 'running' && step.status !== 'waiting').length;
   const separator = locale.activitySummarySeparator ?? ', ';
 
   let summaryIcon: StatusIconKind;
@@ -112,26 +114,22 @@ export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, cla
   if (state === 'running') {
     summaryIcon = 'spinner';
     const current = running ? label(running.toolName) : locale.activityWorkingLabel;
-    summaryText = activityLog?.runningProgress && finished > 0
-      ? fillLocaleText(locale.activityRunningProgressLabel ?? '{count} done, {label}…', { count: finished, label: current })
+    summaryText = activityLog?.runningProgress && done > 0
+      ? fillLocaleText(locale.activityRunningProgressLabel ?? '{count} done, {label}…', { count: done, label: current })
       : fillLocaleText(locale.activityRunningLabel ?? '{label}…', { label: current });
   } else if (state === 'waiting') {
     summaryIcon = 'pending';
     summaryText = locale.activityWaitingLabel;
   } else {
     summaryIcon = failed > 0 ? 'error' : 'check';
-    summaryText = steps.length === 1
-      ? locale.activityDoneOneLabel
-      : locale.activityDoneLabel.replace('{count}', String(steps.length));
-    if (failed > 0) {
-      summaryText += `${separator}${locale.activityFailedLabel.replace('{count}', String(failed))}`;
+    const counts: string[] = [];
+    if (done > 0) {
+      counts.push(done === 1 ? locale.activityDoneOneLabel : fillLocaleText(locale.activityDoneLabel, { count: done }));
     }
-    if (declined > 0) {
-      summaryText += `${separator}${locale.activityDeclinedLabel.replace('{count}', String(declined))}`;
-    }
-    if (expected > 0) {
-      summaryText += `${separator}${locale.activityExpectedLabel.replace('{count}', String(expected))}`;
-    }
+    if (failed > 0) counts.push(fillLocaleText(locale.activityFailedLabel, { count: failed }));
+    if (declined > 0) counts.push(fillLocaleText(locale.activityDeclinedLabel, { count: declined }));
+    if (expected > 0) counts.push(fillLocaleText(locale.activityExpectedLabel, { count: expected }));
+    summaryText = counts.join(separator);
   }
 
   const NoticeComponent = components?.TurnNotice ?? TurnNotice;
