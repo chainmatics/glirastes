@@ -31,7 +31,11 @@ const DetectSchema = z
     symbols: z.array(z.string().min(1)).optional(),
     patterns: z.array(patternSchema).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (d) => [d.imports, d.symbols, d.patterns].some((a) => a !== undefined && a.length > 0),
+    { message: 'Detect must contain at least one non-empty imports, symbols or patterns list' },
+  );
 
 export type Detect = z.infer<typeof DetectSchema>;
 
@@ -56,6 +60,8 @@ const ReleasedFileSchema = z
     notes: z.array(UpgradeNoteSchema),
   })
   .strict();
+
+const IGNORED_JSON = new Set(['api-surface.released.json']);
 
 export class UpgradeNotesError extends Error {
   constructor(message: string) {
@@ -102,8 +108,24 @@ export async function loadUpgradeNotes(
     result.push({ ...note, version });
   };
 
-  const releasedFiles = (await readdir(notesDir))
-    .filter((f) => /^\d+\.\d+\.\d+\.json$/.test(f))
+  let entries: string[];
+  try {
+    entries = await readdir(notesDir);
+  } catch (cause) {
+    throw new UpgradeNotesError(
+      `Cannot read upgrade notes directory ${notesDir}: ${(cause as Error).message}`,
+    );
+  }
+  const SEMVER_FILE = /^\d+\.\d+\.\d+\.json$/;
+  for (const f of entries) {
+    if (f.endsWith('.json') && !SEMVER_FILE.test(f) && !IGNORED_JSON.has(f)) {
+      throw new UpgradeNotesError(
+        `Invalid upgrade note. ${f}: unexpected file, expected <semver>.json`,
+      );
+    }
+  }
+  const releasedFiles = entries
+    .filter((f) => SEMVER_FILE.test(f))
     .sort((a, b) => compareVersions(a.slice(0, -5), b.slice(0, -5)));
   for (const file of releasedFiles) {
     const parsed = ReleasedFileSchema.safeParse(

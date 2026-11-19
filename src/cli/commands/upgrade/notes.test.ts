@@ -65,7 +65,7 @@ describe('loadUpgradeNotes', () => {
 
   it('rejects id "A_b"', async () => {
     await write('unreleased/x.json', note({ id: 'A_b' }));
-    await expect(loadUpgradeNotes(dir, '0.19.0')).rejects.toThrow(/id/);
+    await expect(loadUpgradeNotes(dir, '0.19.0')).rejects.toThrow(/x\.json: id:/);
   });
 
   it('rejects unknown keys, oversize summary and bad skill', async () => {
@@ -84,9 +84,30 @@ describe('loadUpgradeNotes', () => {
     await expect(loadUpgradeNotes(dir, '0.19.0')).rejects.toThrow(/version/);
   });
 
-  it('tolerates a missing notes dir contents (.gitkeep only)', async () => {
+  it('tolerates an unreleased dir that only holds .gitkeep', async () => {
     await writeFile(join(dir, 'unreleased', '.gitkeep'), '');
     expect(await loadUpgradeNotes(dir, '0.19.0')).toEqual([]);
+  });
+});
+
+describe('loader strictness', () => {
+  it('rejects a stray top-level json file, ignoring non-json and api-surface.released.json', async () => {
+    await writeFile(join(dir, 'README.md'), '');
+    await write('api-surface.released.json', {});
+    expect(await loadUpgradeNotes(dir, '0.19.0')).toEqual([]);
+    await write('notes.json', {});
+    await expect(loadUpgradeNotes(dir, '0.19.0')).rejects.toThrow(/notes\.json/);
+  });
+
+  it('throws UpgradeNotesError for a missing notes dir', async () => {
+    await expect(loadUpgradeNotes(join(dir, 'nope'), '0.19.0')).rejects.toThrow(UpgradeNotesError);
+  });
+
+  it('rejects an empty Detect', async () => {
+    await write('unreleased/e.json', note({ affectedWhen: {} }));
+    await expect(loadUpgradeNotes(dir, '0.19.0')).rejects.toThrow(/at least one/);
+    await write('unreleased/e.json', note({ adoptedWhen: { imports: [] } }));
+    await expect(loadUpgradeNotes(dir, '0.19.0')).rejects.toThrow(/at least one/);
   });
 });
 
