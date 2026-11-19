@@ -288,24 +288,26 @@ interface ModelMessageLike {
   content: unknown;
 }
 
-/** Inserts the reference text after each user file part with a valid id, unless it is already there. */
+/**
+ * Inserts the reference text after each user file part with a valid id, unless it is
+ * already there. The part's provider metadata is rebuilt: only the id reaches the provider.
+ */
 export function withAttachmentReferences(messages: UIMessage[]): UIMessage[] {
   return messages.map((message) => {
-    if (message.role !== 'user' || !message.parts.some((part) => part.type === 'file' && part.providerMetadata?.glirastes)) return message;
+    if (message.role !== 'user' || !message.parts.some((part) => part.type === 'file')) return message;
     const parts: UIMessage['parts'] = [];
     message.parts.forEach((part, index) => {
       if (part.type !== 'file') {
         parts.push(part);
         return;
       }
+      const { providerMetadata: _client, ...rest } = part;
       const id = attachmentIdOf(part);
       if (!id) {
-        // An invalid id must not reach the provider as options either.
-        const { glirastes: _dropped, ...rest } = part.providerMetadata ?? {};
-        parts.push({ ...part, providerMetadata: Object.keys(rest).length > 0 ? (rest as typeof part.providerMetadata) : undefined });
+        parts.push(rest);
         return;
       }
-      parts.push(part);
+      parts.push({ ...rest, providerMetadata: { glirastes: { attachmentId: id } } });
       const text = attachmentPlaceholderText(part.filename, id);
       const next = message.parts[index + 1];
       if (next?.type === 'text' && next.text === text) return;

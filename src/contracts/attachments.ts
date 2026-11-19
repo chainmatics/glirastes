@@ -45,7 +45,7 @@ export function attachmentIdOf(part: unknown): string | undefined {
 
 /** Text that stands in for a file part once its data is no longer sent. */
 export function attachmentPlaceholderText(filename?: string, id?: string): string {
-  const name = filename && filename.trim() ? filename.trim() : 'file';
+  const name = filename?.replace(/[[\]\r\n]/g, '').trim() || 'file';
   return isChatAttachmentId(id) ? `[attachment ${id}: ${name}]` : `[attachment: ${name}]`;
 }
 

@@ -306,6 +306,14 @@ describe('attachment references', () => {
     expect(contentOf(messages).map((part) => part.type)).toEqual(['text', 'file']);
   });
 
+  it('passes only the attachment id on as provider options', async () => {
+    const part = { ...file(ID), providerMetadata: { openai: { x: 1 }, glirastes: { attachmentId: ID, extra: 1 } } };
+    const messages = await prepareModelMessages([message([part])]);
+    const sent = contentOf(messages).find((p) => p.type === 'file');
+    expect(sent?.providerOptions).toEqual({ glirastes: { attachmentId: ID } });
+    expect(JSON.stringify(messages)).not.toContain('openai');
+  });
+
   it('is idempotent and leaves assistant messages alone', () => {
     const once = withAttachmentReferences([message([file(ID)])]);
     expect(withAttachmentReferences(once)).toEqual(once);
