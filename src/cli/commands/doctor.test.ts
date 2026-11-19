@@ -580,6 +580,18 @@ describe('upgrade follow-ups in doctor', () => {
     await mkdir(join(rootDir, '.glirastes'), { recursive: true });
     await writeFile(join(rootDir, '.glirastes/sdk-baseline.json'), '<<<<<<< HEAD\n');
     const report = await createDoctorReport({ rootDir, env: {} });
-    expect(report.checks.find((item) => item.name === 'sdk-upgrade')).toMatchObject({ status: 'warn' });
+    expect(report.checks.find((item) => item.name === 'sdk-upgrade')).toMatchObject({
+      status: 'warn',
+      remediation: 'repair-sdk-upgrade-report',
+      detail: expect.stringContaining('sdk-baseline.json is not valid JSON'),
+    });
+    // The next action follows the first failing check; show this warning on its own.
+    const text = formatDoctorReport({
+      ...report,
+      status: 'pass',
+      checks: report.checks.filter((item) => item.name === 'sdk-upgrade'),
+    });
+    expect(text).toContain('Next: glirastes upgrade report could not run: .glirastes/sdk-baseline.json is not valid JSON');
+    expect(text).not.toContain('see the SDK changes that need a decision');
   });
 });

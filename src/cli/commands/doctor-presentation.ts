@@ -92,7 +92,9 @@ export function formatDoctorReport(
 
   const issue = report.checks.find((item) => item.status === 'fail')
     ?? report.checks.find((item) => item.status === 'warn');
-  const next = issue
+  const next = issue?.remediation === 'repair-sdk-upgrade-report'
+    ? `glirastes upgrade report could not run: ${issue.detail ?? 'unknown error'} Fix that, then run glirastes doctor again.`
+    : issue
     ? NEXT_ACTIONS.get(issue.remediation)
       ?? 'Ask your coding agent to inspect glirastes doctor --json for the required local repair.'
     : report.mode === 'standalone'

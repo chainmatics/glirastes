@@ -33,6 +33,8 @@ export interface DoctorCheck {
   status: DoctorCheckStatus;
   code: `E-${string}`;
   remediation: string;
+  /** One line naming what went wrong, when the remediation needs it (e.g. a report error). */
+  detail?: string;
 }
 
 export interface DoctorReport {
@@ -159,8 +161,9 @@ async function upgradeCheck(options: CreateDoctorReportOptions, rootDir: string)
   try {
     const report = await createUpgradeReport({ rootDir, ...options.upgrade });
     return report.must.length > 0 ? check('sdk-upgrade', 'warn', 'E-SETUP-108', 'review-sdk-upgrade') : null;
-  } catch {
-    return check('sdk-upgrade', 'warn', 'E-SETUP-108', 'review-sdk-upgrade');
+  } catch (error) {
+    const detail = (error instanceof Error ? error.message : String(error)).split('\n')[0]!;
+    return { ...check('sdk-upgrade', 'warn', 'E-SETUP-108', 'repair-sdk-upgrade-report'), detail };
   }
 }
 
