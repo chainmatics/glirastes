@@ -95,6 +95,47 @@ describe('approval subject lookups', () => {
     expect(backend.calls).toHaveLength(0);
   });
 
+  describe('lookupEffect: read and the approval of the source', () => {
+    /** A POST dry-run source (the SDK's own default asks for approval) and a write tool looked up through it. */
+    const postSource = (approvalSubject?: Record<string, unknown>) => endpointToolsToRegistry([
+      defineEndpointTool({
+        id: 'playlists.check', toolName: 'check_playlist', description: 'Dry-run.', method: 'POST', path: '/playlists/:playlist_id/check',
+        inputSchema: z.object({ playlist_id: z.number() }).strict(), lookupEffect: 'read',
+        outputEntities: [{ type: 'playlist', id: 'playlist_id', name: 'displayName', path: '' }],
+        entityLookup: { type: 'playlist', params: { playlist_id: 'playlist_id' } },
+      }),
+      defineEndpointTool({
+        id: 'playlists.delete', toolName: 'delete_playlist', description: 'Delete.', method: 'DELETE', path: '/playlists/:playlist_id',
+        inputSchema: z.object({ playlist_id: z.number() }).strict(), inputEntities: [{ type: 'playlist', args: 'playlist_id' }],
+        ...(approvalSubject ? { approvalSubject } : {}),
+      }),
+    ]);
+    const route = { 'POST /playlists/7/check': () => ok({ playlist_id: 7, displayName: 'Lobby Loop' }) };
+
+    it('lifts the SDK\'s own approval of a POST source (local default, and a local guard without a policy approval)', async () => {
+      const local = resolverFor(route, { registry: postSource() });
+      expect(local.resolver.isDeclared('delete_playlist')).toBe(true);
+      await local.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+      expect(local.resolver.take('c1')!.part.subjects[0]).toMatchObject({ status: 'named', name: 'Lobby Loop' });
+      const { guard } = guardStub({ lookup: async () => ({ requiresApproval: false }) });
+      const governed = resolverFor(route, { registry: postSource(), guard });
+      await governed.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+      expect(governed.resolver.take('c1')!.part.subjects[0]).toMatchObject({ status: 'named' });
+    });
+
+    it('never lifts an approval the signed policy requires: not checkable (warn), refused with block', async () => {
+      const { guard } = guardStub({ lookup: async () => ({ requiresApproval: true }) });
+      const warn = resolverFor(route, { registry: postSource(), guard });
+      expect(await warn.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } })).toBeUndefined();
+      expect(warn.resolver.take('c1')!.part.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'source_unavailable' });
+      expect(warn.backend.calls).toHaveLength(0);
+      const block = resolverFor(route, { registry: postSource({ onUnavailable: 'block' }), guard });
+      const outcome = await block.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+      expect(outcome?.deny).toMatchObject({ code: 'approval_subject_unavailable' });
+      expect(block.backend.calls).toHaveLength(0);
+    });
+  });
+
   it('sends only the declared parameters, from the validated input, never other arguments', async () => {
     const { resolver, backend } = resolverFor({ 'GET /users?limit=2': () => ok({ items: [] }) });
     await resolver.resolve({ toolName: 'delete_user', toolCallId: 'c1', input: { user_id: 9, path: '/admin' } });

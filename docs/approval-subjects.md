@@ -122,9 +122,15 @@ in the body).
 This is a separate statement, read **only** for lookups and previews. It
 never lowers the tool's own risk class or approval when the model calls it:
 the dry-run keeps `requiresApproval` (and any policy) exactly as without it
-(see [tool-policy.md](tool-policy.md)). For a lookup the server does not ask
-the user to approve the dry-run; authorization (role, policy, revocation)
-still applies. A POST without the statement is never a source.
+(see [tool-policy.md](tool-policy.md)). For a lookup it lifts only the
+approval the SDK derives locally (the POST/write default, a local
+`needsApproval`): the server does not ask the user to approve the dry-run.
+**An approval a signed Platform policy requires for the source (governed
+mode) is never lifted**: the source is then not available, the subject or
+preview is "not checkable" (`source_unavailable`), with the card's warning
+or, under `onUnavailable: 'block'`, a refused call. Authorization (role,
+policy, revocation) always applies. A POST without the statement is never a
+source.
 
 ## What happens at runtime
 
@@ -142,9 +148,9 @@ and before the approval request is sent. For each looked-up reference:
 - **Authorization**: in a managed turn `ManagedTurnGuard.beforeSubjectLookup`
   for every lookup (also a cached one): fresh principal, fresh revocations,
   pinned agent, manifest and policy, like a tool call. A source the role may
-  not use, that is revoked, or that asks for approval (locally or by policy,
-  unless it states `lookupEffect: 'read'`) is not called: "not checkable"
-  (`source_unavailable`).
+  not use, that is revoked, that the signed policy puts behind an approval,
+  or that asks for approval locally without `lookupEffect: 'read'` is not
+  called: "not checkable" (`source_unavailable`).
 - **Result**: only the read tool's core path: its output schema, its output
   bound (`outputDeniedFields`, app-wide `output.deniedFields`: the denial
   wins) and then the PII shield, so the card gets a value in the form the

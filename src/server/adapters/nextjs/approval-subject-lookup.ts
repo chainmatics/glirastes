@@ -460,9 +460,10 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         throw error;
       }
     }
-    // A source that asks for approval is not called without one, unless it states that its calls change nothing.
-    if (tool.lookupEffect === 'read') return undefined;
+    // An approval the signed policy requires (governed mode) is never lifted: the source is not available.
     if (policyApproval) return 'source_unavailable';
+    // The SDK's own approval (the POST/write default, a local `needsApproval`) is lifted by `lookupEffect: 'read'`.
+    if (tool.lookupEffect === 'read') return undefined;
     if (tool.needsApproval === true) return 'source_unavailable';
     if (typeof tool.needsApproval === 'function') {
       try {
