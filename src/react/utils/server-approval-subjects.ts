@@ -144,8 +144,18 @@ export function applyServerApprovalSubjects(described: PendingApproval, merged: 
  */
 export function serverSubjectNames(part: ApprovalSubjectsPartData | undefined): Map<string, string> {
   const names = new Map<string, string>();
+  // The description generator looks names up by id alone: an id two subjects share
+  // (playlist 3 and user 3) names neither, rather than the wrong one.
+  const shared = new Set<string>();
   for (const subject of part?.subjects ?? []) {
-    if (subject.check === 'found' && subject.status === 'named' && subject.name) names.set(subject.id.toLowerCase(), subject.name);
+    const key = subject.id.toLowerCase();
+    if (names.has(key) || shared.has(key)) {
+      names.delete(key);
+      shared.add(key);
+      continue;
+    }
+    if (subject.check === 'found' && subject.status === 'named' && subject.name) names.set(key, subject.name);
+    else shared.add(key);
   }
   return names;
 }

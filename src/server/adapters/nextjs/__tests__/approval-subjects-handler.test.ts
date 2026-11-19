@@ -142,6 +142,49 @@ describe('server approval subjects in the chat handler', () => {
     expect(writes(backend.calls)).toHaveLength(0);
   });
 
+  it('keeps block for a role whose tool set has no read source: not checkable, refused', async () => {
+    const { config, prompts, backend } = deletePlaylist(() => ok({ playlist_id: 7, displayName: 'Lobby Loop' }), {
+      deletePlaylist: { approvalSubject: { onUnavailable: 'block' } },
+    });
+    const tools = { ...config.tools };
+    delete tools.get_playlist;
+    const { chunks } = await turn({ ...config, tools });
+    expect(chunks.some((chunk) => chunk.type === 'tool-approval-request')).toBe(false);
+    expect(promptText(prompts)).toContain('approval_subject_unavailable');
+    expect(backend.calls).toHaveLength(0);
+  });
+
+  it('warns for a declared write tool whose read source is not in the tool set (v2, source_unavailable)', async () => {
+    const { config } = deletePlaylist(() => ok({}), { deletePlaylist: { approvalSubject: {} } });
+    const tools = { ...config.tools };
+    delete tools.get_playlist;
+    const { chunks } = await turn({ ...config, tools });
+    expect(subjectsPart(chunks)!.data.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'source_unavailable', ids: { playlist_id: '7' } });
+    expect(chunks.find((chunk) => chunk.type === 'tool-approval-request')!.approvalId).toMatch(/^glirastes-approval\.v2\./);
+  });
+
+  it('signs the raw record, so recheck: unchanged accepts an unchanged record the PII shield hides the name of', async () => {
+    const shield = {
+      outbound: async (text: string) => text,
+      inbound: (text: string) => text,
+      rehydrateArgs: (args: Record<string, unknown>) => args,
+      anonymizeResult: async (value: unknown) => {
+        const copy = JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+        delete copy.displayName;
+        return copy;
+      },
+      getComplianceSummary: () => ({}),
+      clearSession: () => {},
+    } as unknown as PiiShield;
+    const { config, backend } = deletePlaylist(() => ok({ playlist_id: 7, displayName: 'Lobby Loop' }), {
+      deletePlaylist: { approvalSubject: { recheck: 'unchanged' } },
+    });
+    const { handler, chunks, message } = await turn({ ...config, piiShield: shield });
+    expect(subjectsPart(chunks)!.data.subjects[0]).toMatchObject({ status: 'seen' });
+    await streamChunks(await handler(post([user, answered(message, true)])));
+    expect(writes(backend.calls)).toHaveLength(1);
+  });
+
   it('times out a slow lookup (lookupTimeoutMs) and warns', async () => {
     const { config } = deletePlaylist(() => new Promise(() => {}));
     const { chunks } = await turn({ ...config, approvalSubjects: { lookupTimeoutMs: 100 } });

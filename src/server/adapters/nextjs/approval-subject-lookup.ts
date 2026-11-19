@@ -184,7 +184,12 @@ interface LookupSource {
 interface PlanItem {
   readonly ref: InputEntityRef;
   readonly args: string[];
-  readonly source: LookupSource;
+  /**
+   * Undefined when the write tool declares `approvalSubject` but no read
+   * source of the type is in this request's tools (a role without the read
+   * tool): the subject is `source_unavailable`, and `block` / `recheck` hold.
+   */
+  readonly source?: LookupSource;
 }
 
 interface ToolPlan {
@@ -272,6 +277,8 @@ export function approvalSubjectPlans(registry: ToolRegistry): Map<string, ToolPl
         candidate.name !== name && entityIdFields(candidate.declaration).length === args.length
       ));
       if (source) items.push({ ref, args, source });
+      // Declared on the write tool itself: a missing source is "not checkable", never "not declared".
+      else if (option !== undefined) items.push({ ref, args });
     }
     const preview = declaration.preview
       ? {
@@ -537,7 +544,8 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     status: ServerApprovalSubject['status'],
     check: ServerApprovalSubject['check'],
   ): ServerApprovalSubject => {
-    const fields = entityIdFields(item.source.declaration);
+    // Without a source the argument paths stand in for the id fields.
+    const fields = item.source ? entityIdFields(item.source.declaration) : item.args;
     const ids: Record<string, string> = Object.create(null);
     fields.forEach((field, index) => {
       ids[field] = sanitizeSubjectText(values[index]) ?? '';
@@ -550,21 +558,35 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       path: item.args.join(','),
       status,
       check,
-      idKind: item.ref.idKind ?? entityIdKindOf(item.source.declaration),
+      idKind: item.ref.idKind ?? (item.source ? entityIdKindOf(item.source.declaration) : 'opaque'),
     };
   };
 
-  /** The canonical form of a subject for the digest: raw found values, never the shielded display. */
-  const canonicalSubject = (subject: ServerApprovalSubject, raw: { name?: string; fallback?: string | number } | undefined): unknown => [
+  /**
+   * The canonical form of a subject for the digest, from the raw (bounded,
+   * unshielded) record only: its status, name and fallback as found, never
+   * the shielded display, so a recheck of an unchanged record matches.
+   */
+  const canonicalSubject = (
+    subject: ServerApprovalSubject,
+    raw: { status: ServerApprovalSubject['status']; name?: string; fallbackField?: string; fallback?: string | number } | undefined,
+  ): unknown => [
     subject.type, subject.role, subject.path, Object.entries(subject.ids).sort(([a], [b]) => compareCodeUnits(a, b)),
-    subject.status, raw?.name ?? null, subject.fallbackField ?? null, raw?.fallback ?? null,
+    raw?.status ?? subject.status, raw?.name ?? null, raw?.fallbackField ?? null, raw?.fallback ?? null,
   ];
+  /** The raw identity of a found record for the digest. */
+  const rawOf = (identity: { name?: string; fallbackField?: string; fallbackValue?: string | number }) => ({
+    status: (identity.name !== undefined ? 'named' : 'seen') as ServerApprovalSubject['status'],
+    ...(identity.name !== undefined ? { name: identity.name } : {}),
+    ...(identity.fallbackField !== undefined && identity.name === undefined
+      ? { fallbackField: identity.fallbackField, fallback: identity.fallbackValue } : {}),
+  });
 
   /** The parameters of a lookup for one reference, or undefined when a `{ ref }` parameter has no value. */
-  const paramsFor = (item: PlanItem, values: Array<string | number>, refs: InputEntityRef[], input: unknown) => {
-    const fields = entityIdFields(item.source.declaration);
+  const paramsFor = (lookup: LookupSource, values: Array<string | number>, refs: InputEntityRef[], input: unknown) => {
+    const fields = entityIdFields(lookup.declaration);
     const params: Record<string, unknown> = {};
-    for (const [param, source] of Object.entries(item.source.lookup.params)) {
+    for (const [param, source] of Object.entries(lookup.lookup.params)) {
       if (typeof source === 'string') {
         params[param] = values[fields.indexOf(source)];
         continue;
@@ -574,12 +596,19 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       if (!isEntityIdValue(value)) return undefined;
       params[param] = value;
     }
-    for (const [param, value] of Object.entries(item.source.lookup.const ?? {})) params[param] = value;
+    for (const [param, value] of Object.entries(lookup.lookup.const ?? {})) params[param] = value;
     return params;
   };
 
   /** Finds the record the reference names in a source's answer. */
-  const match = (item: PlanItem, values: Array<string | number>, outcome: RawOutcome, plan: ToolPlan, displayed: unknown): SubjectOutcome => {
+  const match = (
+    item: PlanItem,
+    source: LookupSource,
+    values: Array<string | number>,
+    outcome: RawOutcome,
+    plan: ToolPlan,
+    displayed: unknown,
+  ): SubjectOutcome => {
     const type = item.ref.type;
     switch (outcome.kind) {
       case 'not_found':
@@ -594,7 +623,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       case 'ok':
         break;
     }
-    const declaration = item.source.declaration;
+    const declaration = source.declaration;
     const speaking = (item.ref.idKind ?? entityIdKindOf(declaration)) === 'speaking';
     // The same path as the model sees the result; the display copy is read at the same position.
     const steps = entityPathOf(declaration, outcome.value);
@@ -609,12 +638,12 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     const hits = known.filter(({ identity }) => identity!.idValues.every((part, index) => sameId(part, values[index]!, speaking)));
     if (hits.length === 0) {
       // No record of the declared shape where the declaration says: the answer is not what was declared.
-      if (known.length === 0 && (records.length > 0 || item.source.result === 'one' || !steps || !listPresent(outcome.value, steps))) {
+      if (known.length === 0 && (records.length > 0 || source.result === 'one' || !steps || !listPresent(outcome.value, steps))) {
         return unchecked(item, values, 'invalid_response');
       }
-      if (item.source.result === 'one') return unchecked(item, values, 'mismatch');
+      if (source.result === 'one') return unchecked(item, values, 'mismatch');
       // A page that may not hold every record says nothing about one that is not on it.
-      if (item.source.lookup.complete === true && !overflow) return { kind: 'deny', code: 'approval_subject_not_found', type };
+      if (source.lookup.complete === true && !overflow) return { kind: 'deny', code: 'approval_subject_not_found', type };
       return unchecked(item, values, 'not_in_page');
     }
     const shownIdentity = (entry: (typeof hits)[number]) => (entry.shown ? declaredIdentityOf(entry.shown, declaration) : undefined);
@@ -626,7 +655,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       return {
         kind: 'subject',
         subject: { ...subject, ...(candidates.length > 0 ? { candidates } : {}) },
-        canonical: canonicalSubject(subject, { name: JSON.stringify(hits.map((entry) => entry.identity!.name ?? null)) }),
+        canonical: canonicalSubject(subject, { status: 'ambiguous', name: JSON.stringify(hits.map((entry) => entry.identity!.name ?? null)) }),
       };
     }
     const hit = hits[0]!;
@@ -634,7 +663,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     const name = sanitizeSubjectText(display?.name);
     if (name !== undefined) {
       const subject = { ...baseSubject(item, values, 'named', 'found'), name };
-      return { kind: 'subject', subject, canonical: canonicalSubject(subject, { name: hit.identity!.name }) };
+      return { kind: 'subject', subject, canonical: canonicalSubject(subject, rawOf(hit.identity!)) };
     }
     const fallbackValue = display?.fallbackValue === undefined
       ? undefined
@@ -646,7 +675,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     return {
       kind: 'subject',
       subject,
-      canonical: canonicalSubject(subject, { ...(hit.identity!.name ? { name: hit.identity!.name } : {}), ...(hit.identity!.fallbackValue !== undefined ? { fallback: hit.identity!.fallbackValue } : {}) }),
+      canonical: canonicalSubject(subject, rawOf(hit.identity!)),
     };
   };
 
@@ -702,11 +731,12 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         continue;
       }
       slots -= 1;
-      const params = paramsFor(item, ids, plan.refs, input);
-      tasks.push(params === undefined
+      const source = item.source;
+      const params = source ? paramsFor(source, ids, plan.refs, input) : undefined;
+      tasks.push(source === undefined || params === undefined
         ? Promise.resolve(unchecked(item, ids, 'source_unavailable'))
-        : lookUp(item.source.name, item.source.tool, params, timeoutMs).then(async (outcome) => match(
-          item, ids, outcome, plan,
+        : lookUp(source.name, source.tool, params, timeoutMs).then(async (outcome) => match(
+          item, source, ids, outcome, plan,
           // Only what reaches the browser is shielded; a recheck compares the raw values.
           outcome.kind === 'ok' ? (forDisplay ? await displayOf(outcome) : outcome.value) : undefined,
         )));

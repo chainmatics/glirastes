@@ -5,6 +5,7 @@ import {
   applyServerApprovalSubjects,
   findApprovalSubjectsPart,
   mergeServerApprovalSubjects,
+  serverSubjectNames,
 } from '../server-approval-subjects.js';
 
 function part(data: Record<string, unknown>) {
@@ -19,6 +20,15 @@ const found = {
   type: 'playlist', role: 'target', id: 'p1', ids: { playlist_id: 'p1' }, path: 'playlist_id',
   status: 'named', check: 'found', name: 'Abend-Promos', idKind: 'opaque',
 };
+
+describe('serverSubjectNames', () => {
+  it('names an id only when no other subject of the call shares it (playlist 3 and user 3)', () => {
+    const playlist = { ...found, id: '3', ids: { playlist_id: '3' }, name: 'Lobby Loop' };
+    const user = { ...found, type: 'user', id: '3', ids: { user_id: '3' }, path: 'user_id', name: 'Linus Torvalds' };
+    expect(serverSubjectNames(server([playlist, user])).has('3')).toBe(false);
+    expect(serverSubjectNames(server([playlist])).get('3')).toBe('Lobby Loop');
+  });
+});
 
 describe('findApprovalSubjectsPart', () => {
   it('finds the part of the call by its toolCallId and ignores the rest', () => {
