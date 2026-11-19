@@ -100,6 +100,20 @@ describe('<glirastes-chat>', () => {
     ]);
   });
 
+  it('speaks the nearest lang of the element, not only the one of the page', async () => {
+    document.documentElement.setAttribute('lang', 'de');
+    defineGlirastesChatElement('glirastes-chat');
+    const region = document.createElement('div');
+    region.setAttribute('lang', 'pl-PL');
+    const element = document.createElement('glirastes-chat') as GlirastesChatElement;
+    element.transport = transport();
+    element.config = { locales: { pl: { placeholder: 'Napisz wiadomość' } } };
+    region.append(element);
+    await act(async () => { document.body.append(region); });
+    expect(element.shadowRoot!.querySelector('textarea')?.getAttribute('placeholder')).toBe('Napisz wiadomość');
+    document.documentElement.removeAttribute('lang');
+  });
+
   it('lets host CSS variables theme the panel instead of inline variables', async () => {
     const { element } = await mount((node) => {
       node.setAttribute('theme', 'professional-dark');

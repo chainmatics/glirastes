@@ -340,7 +340,10 @@ export class GlirastesChatElement extends BaseElement {
     const placeholder = this.getAttribute('placeholder');
     const voiceLanguage = this.getAttribute('voice-language');
     const chatInteractions = this.#chatInteractions();
+    // The nearest `lang` is the UI language of this element (a region of the page may have its own).
+    const nearestLang = (this.closest('[lang]')?.getAttribute('lang') ?? '').trim().replace(/_/g, '-');
     const config: GlirastesChatElementConfig = {
+      ...(isLanguageTag(nearestLang) ? { language: nearestLang } : {}),
       ...this.#config,
       ...(chatInteractions ? { chatInteractions } : {}),
       ...(placeholder

@@ -554,7 +554,32 @@ export interface ActivityLogConfig {
    * own element.
    */
   noticePlacement?: 'log' | 'message';
+  /**
+   * Which steps show their detail line (`data-element="detail"`: the error
+   * text, a done step's message):
+   * - `'auto'` (default): a failed or neutral (`expected`) step shows the
+   *   error text its tool returned, and a call the user approved that the
+   *   server did not run shows `activityApprovalNotUsedDetail`, whatever the
+   *   result display (`toolResults`); a done step shows its message, and an
+   *   SDK-level `output-error` its text, only where its result is displayed.
+   * - `'results'`: every step only where its result is displayed (the rule
+   *   before 0.18.0, also for failures).
+   * - `'all'`: every step that has a detail.
+   * - `'none'`: no step.
+   */
+  details?: ActivityLogDetails;
+  /**
+   * `'message'` (default): one log for all steps of a message, before its
+   * text. `'sections'`: when an assistant message interleaves text and tool
+   * steps (text, steps, text), each run of steps gets its own log at its
+   * place between the texts, in message order; a message whose steps all
+   * come before its text renders exactly as with `'message'`.
+   */
+  grouping?: 'message' | 'sections';
 }
+
+/** Detail policy of the activity log steps (`ActivityLogConfig.details`). */
+export type ActivityLogDetails = 'auto' | 'results' | 'all' | 'none';
 
 /** Pipeline status of a turn that ends with a notice. */
 export type TurnNoticeStatus = 'safety-stop' | 'aborted' | 'error';
@@ -764,7 +789,13 @@ export interface ChatLocale {
   // Work log of an assistant turn and its optional plan
   activityWorkingLabel: string;
   activityWaitingLabel: string;
-  activityDoneLabel: string;         // supports `{count}`
+  /**
+   * Steps that finished without failure, declined or neutral outcome;
+   * supports `{count}`. Left out of the summary when no step is done
+   * ("2 declined"). Before 0.18.0 `{count}` was every step.
+   */
+  activityDoneLabel: string;
+  /** `activityDoneLabel` for one done step. */
   activityDoneOneLabel: string;
   activityFailedLabel: string;       // supports `{count}`
   /** Calls whose approval was declined (not counted as failed); supports `{count}`. */
@@ -777,12 +808,14 @@ export interface ChatLocale {
   activityExpectedLabel: string;
   /** Summary while a tool runs; `{label}` is the tool's label or `activityWorkingLabel` (`{label}…`). */
   activityRunningLabel: string;
-  /** Running summary with `activityLog.runningProgress`; supports `{count}` (finished steps) and `{label}`. */
+  /** Running summary with `activityLog.runningProgress`; supports `{count}` (done steps, as `activityDoneLabel`) and `{label}`. */
   activityRunningProgressLabel: string;
   /** Count of a step line folding repeated calls; supports `{count}` (`×{count}`). */
   activityStepCountLabel: string;
   /** Joins the parts of the finished summary (`, `). */
   activitySummarySeparator: string;
+  /** Detail of a declined step the user approved but the server did not run (expired or already used approval). */
+  activityApprovalNotUsedDetail: string;
   planTitle: string;
   /** Shown when the user sends while an approval card waits for a decision. */
   approvalPendingHint: string;
@@ -988,13 +1021,32 @@ export interface AiChatProviderConfig {
   /**
    * The chat's texts per BCP-47 language tag, to add a language (`pl`) or
    * change single texts of one, e.g. `{ pl: plChatLocale, de: { sendButton: 'Los' } }`.
-   * The chat's language is the one of the turn's tool labels (the server's
-   * `data-tool-presentation` part), else the page's `lang`. Per key: `locale`
+   * The chat's language is the page's `lang`, else the one of the turn's
+   * tool labels (`languageSource`). Per key: `locale`
    * (language-free, wins everywhere), then these tables and the built-in
    * German and English texts in the language's fallback order (the
    * language, another region of it, English). Partial tables are fine.
    */
   locales?: Readonly<Record<string, Partial<ChatLocale>>>;
+  /**
+   * Which language the chat's texts follow (`locales`, the built-in German
+   * and English ones; also the date format of approval cards) when the app
+   * states none (`language`):
+   * - `'page'` (default): the page's `lang` (the UI the user reads), and
+   *   only without one the language of the turn's tool labels (the server's
+   *   `data-tool-presentation` part).
+   * - `'server'`: the language of the tool labels first, then the page's
+   *   `lang` (the order before 0.18.0).
+   * The tool labels themselves come from the server in its turn language
+   * (`requestLocale`); `toolLabels` overrides them.
+   */
+  languageSource?: 'page' | 'server';
+  /**
+   * The UI language the app states (BCP-47, e.g. from its router or i18n
+   * stack): wins over the page's `lang` and the server's wording, whatever
+   * `languageSource`. `<glirastes-chat>` passes its nearest `lang`.
+   */
+  language?: string;
   /**
    * Theme for the floating widget: a preset name (autocompleted by your
    * editor) or an override object. Defaults to `'professional-lightblue'`.
