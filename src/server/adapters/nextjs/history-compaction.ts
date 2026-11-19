@@ -319,9 +319,38 @@ function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultO
   const idLikeSeen = new Set<string>();
   if (!declared) for (const entry of source) for (const key of idLikeFieldsOf(entry, IDENTITY_ID_KEYS)) idLikeSeen.add(key);
   const idLikeOrder = [...idLikeSeen];
-  const keysInOrder = (kept: ReadonlySet<string>): string[] => (declared
-    ? declaredIdentityKeys(declared).filter((key) => kept.has(key))
-    : orderedKeys(kept, idLikeOrder));
+  // Declared records one level below an entry (`data[].owner`, `data[].items[]`) keep their identity too.
+  const entryPath = `${rootArray ? 'data' : route.join('.')}[]`;
+  const nested = (options.entities ?? []).flatMap((declaration) => {
+    const match = declaration.path?.startsWith(`${entryPath}.`)
+      ? /^([A-Za-z_$][\w$-]{0,63})(\[\])?$/.exec(declaration.path.slice(entryPath.length + 1))
+      : null;
+    return match ? [{ key: match[1]!, each: match[2] === '[]', declared: declaration }] : [];
+  });
+  const nestedKeys = nested.map(({ key }) => key);
+  const keysInOrder = (kept: ReadonlySet<string>): string[] => [
+    ...(declared
+      ? declaredIdentityKeys(declared).filter((key) => kept.has(key))
+      : orderedKeys(kept, idLikeOrder)),
+    ...nestedKeys.filter((key, index) => kept.has(key) && nestedKeys.indexOf(key) === index),
+  ];
+  const identityWithNested = (entry: unknown, level: IdentityLevel): Array<[string, unknown]> => {
+    const fields = identityOf(entry, level, declared);
+    if (nested.length === 0 || !isPlainObject(entry)) return fields;
+    for (const { key, each, declared: inner } of nested) {
+      if (fields.some(([kept]) => kept === key)) continue;
+      const value = entry[key];
+      if (each && Array.isArray(value)) {
+        const list = value.filter(isPlainObject).map((item) => objectOf(declaredIdentityOf(item, level, inner)))
+          .filter((item) => Object.keys(item).length > 0);
+        if (list.length > 0) fields.push([key, list]);
+      } else if (!each && isPlainObject(value)) {
+        const object = objectOf(declaredIdentityOf(value, level, inner));
+        if (Object.keys(object).length > 0) fields.push([key, object]);
+      }
+    }
+    return fields;
+  };
   // Identity per entry on each level, with prefix sums of their sizes and counts.
   const forms = (['all', 'pair', 'clipped'] as const).map((level) => {
     const sizes = [0];
@@ -329,7 +358,7 @@ function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultO
     const keys = new Set<string>();
     let clipped = false;
     for (const entry of source) {
-      const fields = identityOf(entry, level, declared);
+      const fields = identityWithNested(entry, level);
       for (const [key] of fields) keys.add(key);
       clipped ||= isClipped(fields, declared);
       sizes.push(sizes.at(-1)! + (fields.length > 0 ? serializedLength(objectOf(fields)) : 0));
@@ -396,7 +425,7 @@ function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultO
   const kept = new Set<string>();
   let anyClipped = false;
   for (let index = plan.full; index < plan.end; index += 1) {
-    const fields = identityOf(source[index], plan.form.level, declared);
+    const fields = identityWithNested(source[index], plan.form.level);
     if (fields.length === 0) continue;
     for (const [key] of fields) kept.add(key);
     anyClipped ||= isClipped(fields, declared);

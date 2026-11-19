@@ -563,6 +563,24 @@ describe('declared paths of overviews and nested ids in the history', () => {
     expect(((compacted.data as Entry[])[1]!.owner as Entry).bio).not.toBe('b'.repeat(60));
   });
 
+  it('keeps declared nested records of entries beyond maxItems', () => {
+    const value = { data: Array.from({ length: 30 }, (_, index) => ({
+      id: index, text: 't'.repeat(80),
+      owner: { userNo: 900 + index, nick: `nick ${index}`, bio: 'b'.repeat(80) },
+      items: [{ itemNo: index * 10, label: 'L', blob: 'x'.repeat(50) }],
+    })) };
+    const compacted = compactHistoryResult(value, {
+      entities: [
+        { type: 'user', id: 'userNo', name: 'nick', path: 'data[].owner' },
+        { type: 'item', id: 'itemNo', name: 'label', path: 'data[].items[]' },
+      ],
+    }) as Entry & { _history: HistoryMarker };
+    expect((compacted.data as Entry[])[20]).toEqual({ id: 20, owner: { userNo: 920, nick: 'nick 20' }, items: [{ itemNo: 200, label: 'L' }] });
+    expect(compacted._history.keys).toEqual(['id', 'owner', 'items']);
+    // Without the nested declarations, as before: the entry keeps its own id only.
+    expect((compactHistoryResult(value) as Entry & { data: Entry[] }).data[20]).toEqual({ id: 20 });
+  });
+
   it('applies a path-less declaration to the overview\'s dominant array only, also in history compaction', () => {
     const overview = {
       tracks: [{ n: 1, title: 'Track 1' }],
