@@ -146,7 +146,12 @@ Defaults keep today's markup; everything below is opt-in.
   `language`, else the page's `lang`, in each request as the
   `Content-Language` header (`sendLanguage: false` sends none; not with
   `languageSource: 'server'`); the handler takes it as the turn language
-  unless it sets `requestLocale` or `locale` (`clientLanguage: false`).
+  unless it sets `requestLocale` or `locale` (`clientLanguage: false`): a
+  fixed handler `locale` wins over the language the page sends. For a
+  language stored per user (the app's database), pass it as `language` here
+  (built-in texts) and read it in the handler's `requestLocale` (tool labels,
+  approval card, the handler's own texts); see the Next.js handler options,
+  "The user's language from the app's database".
 - Under `prefers-reduced-motion: reduce` the status spinner stands still as
   an open arc (`data-motion="reduced"`, also without the stylesheet) and the
   shipped styles stop the typing dots and dialog animations.

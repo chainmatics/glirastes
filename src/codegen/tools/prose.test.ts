@@ -286,6 +286,26 @@ describe('tool prose', () => {
         .toEqual({ en: 'New task', de: 'Aufgabe anlegen', pl: 'New task' });
     });
 
+    it('leaves out a region variant whose labels equal its base language', () => {
+      const prose = resolveToolProse({
+        ...base, locale: 'de-DE', languages: ['de', 'de-DE', 'en'],
+        hints: { presentation: { locale: 'de-DE', singular: 'Aufgabe anlegen', plural: 'Aufgaben anlegen', approval: 'Aufgabe anlegen?' } },
+      });
+      expect(Object.keys(prose.labels ?? {})).toEqual(['de', 'en']);
+      expect(prose.labels?.de).toEqual({ singular: 'Aufgabe anlegen', plural: 'Aufgaben anlegen', approval: 'Aufgabe anlegen?' });
+      expect(prose.missingLabelLanguages).toBeUndefined();
+    });
+
+    it('keeps a region variant that differs from its base language, and one without a base', () => {
+      const prose = resolveToolProse({
+        ...base, languages: ['en', 'pt', 'pt-BR', 'fr-CA'],
+        hints: { title: { pt: 'Criar tarefa (PT)', 'pt-BR': 'Criar tarefa', 'fr-CA': 'Créer une tâche' } },
+      });
+      expect(prose.labels?.pt?.approval).toBe('Criar tarefa (PT)');
+      expect(prose.labels?.['pt-BR']?.approval).toBe('Criar tarefa');
+      expect(prose.labels?.['fr-CA']?.approval).toBe('Créer une tâche');
+    });
+
     it('drops a secret-looking label instead of shipping it', () => {
       const prose = resolveToolProse({ ...base, languages, hints: { title: { pl: `Bearer ${'a'.repeat(30)}` } } });
       expect(JSON.stringify(prose)).not.toContain('Bearer');

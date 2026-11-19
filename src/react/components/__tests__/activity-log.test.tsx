@@ -45,6 +45,35 @@ function rows() {
   return Array.from(document.querySelectorAll('[data-element="activity-step"]'));
 }
 
+describe('ActivityLog summary icon', () => {
+  const summaryIcon = () => document.querySelector('[data-element="activity-summary"] [data-element="icon"]')!.getAttribute('data-icon');
+  type Status = 'done' | 'error' | 'declined' | 'expected' | 'aborted';
+  const stepsOf = (statuses: Status[]) => statuses.map((status, index) => ({ id: `c${index}`, toolName: 'list_tasks', status }));
+
+  it.each<[Status[], string]>([
+    [['done'], 'check'],
+    [['done', 'declined'], 'check'],
+    [['done', 'aborted', 'expected'], 'check'],
+    [['aborted'], 'aborted'],
+    [['aborted', 'aborted'], 'aborted'],
+    [['declined'], 'declined'],
+    [['expected'], 'notice'],
+    [['declined', 'aborted'], 'notice'],
+    [['expected', 'declined'], 'notice'],
+    [['error'], 'error'],
+    [['done', 'error'], 'error'],
+    [['aborted', 'error'], 'error'],
+  ])('shows a check mark only when a step succeeded and none failed: %j → %s', (statuses, icon) => {
+    render(<ActivityLog active={false} steps={stepsOf(statuses)} />);
+    expect(summaryIcon()).toBe(icon);
+  });
+
+  it('shows a neutral icon for a step that was still running when its turn ended', () => {
+    render(<ActivityLog active={false} steps={[{ id: 'c1', toolName: 'list_tasks', status: 'running' }]} />);
+    expect(summaryIcon()).toBe('aborted');
+  });
+});
+
 describe('ActivityLog', () => {
   it('renders nothing without tool steps', () => {
     const { container } = render(<ActivityLog steps={[]} active />);
