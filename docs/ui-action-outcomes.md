@@ -34,7 +34,10 @@ it happened. `uiToolResultShape: 'legacy'` on `createAiChatHandler` keeps the
    `outcome: { v: 1, code }` (`addToolOutput`). Codes: `ok`,
    `rejected-contract`, `rejected-handler`, `unavailable`, `failed`,
    `initiated` (with `at`, the browser time in ms). A timeout or an older bus
-   writes `{ v: 1 }` (not confirmed).
+   writes `{ v: 1 }` (not confirmed). An outcome is only written while its
+   result is in the last message: a `report-only` outcome that arrives after
+   the user sent the next message is dropped (`reported: false`) and the model
+   reads "not confirmed".
 4. Browser: sends the history again once every `awaitsOutcome: true` result of
    the last step has an `outcome`, no approval is open and no clarification is
    in that step. Never for `initiated` on the leaving page.

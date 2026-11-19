@@ -22,6 +22,7 @@ let control: {
   messages(): ChatMessage[];
 };
 const written: ToolOutput[] = [];
+let failWrites = false;
 const continued = vi.fn();
 const reporting: boolean[] = [];
 const loading: boolean[] = [];
@@ -31,6 +32,7 @@ const cleanups: Array<() => void> = [];
 beforeEach(() => {
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   written.length = 0;
+  failWrites = false;
   reporting.length = 0;
   loading.length = 0;
   continued.mockReset();
@@ -66,7 +68,8 @@ function Host({ initial = [], config, withOutputs = true }: {
     messages: () => messages,
   };
   const outputs = useMemo(() => ({
-    addToolOutput: (value: ToolOutput) => {
+    addToolOutput: async (value: ToolOutput) => {
+      if (failWrites) throw new Error('write failed');
       written.push(value);
       setMessages((current) => current.map((message, index) => (index !== current.length - 1 ? message : {
         ...message,
@@ -201,6 +204,30 @@ describe('AiChatProvider reports UI outcomes into marked results', () => {
     expect(loading.at(-1)).toBe(false);
     await act(async () => { release(); });
     await waitFor(() => expect(written).toHaveLength(1));
+  });
+
+  it('reports reported: false when writing the outcome fails', async () => {
+    failWrites = true;
+    const { bus, outcomes } = setup();
+    cleanups.push(registerNavigationBridge({ bus, push: () => {} }));
+    await stream([user, assistant(uiPart('c1'))]);
+    await waitFor(() => expect(outcomes).toHaveLength(1));
+    expect(outcomes[0]).toMatchObject({ code: 'ok', reported: false });
+    await waitFor(() => expect(loading.at(-1)).toBe(false));
+  });
+
+  it('does not claim a report-only outcome once a new message followed its result', async () => {
+    const { bus, outcomes } = setup();
+    let release!: () => void;
+    cleanups.push(registerNavigationBridge({ bus, push: () => new Promise<void>((resolve) => { release = resolve; }) }));
+    await stream([user, assistant(uiPart('c1', { awaitsOutcome: false }))]);
+    await settle();
+    const next = { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'And now?' }] } as ChatMessage;
+    await act(async () => { control.set([...control.messages(), next], 'submitted'); });
+    await act(async () => { release(); });
+    await waitFor(() => expect(outcomes).toHaveLength(1));
+    expect(outcomes[0]).toMatchObject({ code: 'ok', reported: false });
+    expect(written).toEqual([]);
   });
 
   it('keeps the composer locked until the outcome of a confirmed result is written', async () => {

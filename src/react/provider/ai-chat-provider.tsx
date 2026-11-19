@@ -851,15 +851,17 @@ export function AiChatProvider({
 
   /**
    * Writes the outcome into a marked result through the transport and
-   * returns it; undefined when the result is not marked, the chat does not
-   * report, or the same outcome was written already.
+   * resolves it once written (also when the same outcome was written
+   * before); undefined when the result is not marked, the chat does not
+   * report, the result is no longer in the last message (a new message
+   * followed it: `addToolOutput` reaches only the last one) or writing failed.
    */
-  const reportUiOutcome = useCallback((
+  const reportUiOutcome = useCallback(async (
     toolName: string,
     toolCallId: string,
     output: Record<string, unknown>,
     code: UiActionRunCode,
-  ): UiOutcome | undefined => {
+  ): Promise<UiOutcome | undefined> => {
     if (typeof output.awaitsOutcome !== 'boolean' || !reportsUiOutcomesRef.current) return undefined;
     const write = transportRef.current.addToolOutput;
     if (typeof write !== 'function') return undefined;
@@ -868,14 +870,22 @@ export function AiChatProvider({
       : code === 'initiated' ? { v: 1, code, at: Date.now() } : { v: 1, code };
     const earlier = reportedOutcomesRef.current.get(toolCallId);
     if (earlier && earlier.code === outcome.code) return earlier;
+    const last = rawMessagesRef.current.at(-1);
+    const inLast = last?.role === 'assistant'
+      && last.parts.some((part) => (part as { toolCallId?: unknown }).toolCallId === toolCallId);
+    if (!inLast) return undefined;
     reportedOutcomesRef.current.set(toolCallId, outcome);
     try {
-      void Promise.resolve(write.call(transportRef.current, { tool: toolName, toolCallId, output: { ...output, outcome } }))
-        .catch(() => { console.warn('[glirastes] A UI action outcome could not be written'); });
+      await write.call(transportRef.current, { tool: toolName, toolCallId, output: { ...output, outcome } });
+      return outcome;
     } catch {
+      if (reportedOutcomesRef.current.get(toolCallId) === outcome) {
+        if (earlier) reportedOutcomesRef.current.set(toolCallId, earlier);
+        else reportedOutcomesRef.current.delete(toolCallId);
+      }
       console.warn('[glirastes] A UI action outcome could not be written');
+      return undefined;
     }
-    return outcome;
   }, []);
 
   /**
@@ -888,7 +898,7 @@ export function AiChatProvider({
     current: { toolName: string; toolCallId: string; output: Record<string, unknown> },
     waitForStep: boolean,
   ) => {
-    const initiated = reportUiOutcome(current.toolName, current.toolCallId, current.output, 'initiated');
+    const initiated = await reportUiOutcome(current.toolName, current.toolCallId, current.output, 'initiated');
     if (!initiated) return;
     // The other results of the step may still arrive: hold the page load until the stream ended.
     if (waitForStep) {
@@ -1173,7 +1183,7 @@ export function AiChatProvider({
         if (run.code !== 'ok' && run.code !== 'initiated') {
           console.warn('[glirastes] A generated UI action was not carried out');
         }
-        const reported = reportUiOutcome(toolName, toolCallId, record, run.code) !== undefined;
+        const reported = (await reportUiOutcome(toolName, toolCallId, record, run.code)) !== undefined;
         try {
           onUiActionOutcomeRef.current?.({
             toolName,
