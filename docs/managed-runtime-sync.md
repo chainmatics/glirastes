@@ -439,7 +439,20 @@ Cost is `provider-reported` when OpenRouter returns `usage.cost`, also through
 `.chat`, because `createOpenAI(...)(model)` talks to the Responses API, whose
 usage the handler does not read. An endpoint that refuses a call its tool
 schema accepted (400 or 422) adds a content-free `tool_contract_rejected`
-event to the same sink, in its own batch. A `modelPricing`
+event to the same sink, in its own batch. A request that continues a turn
+(answered approvals, reported UI outcomes; no new user message) is a
+`turn.continued` event instead of `turn.finished`, also in batches of its own.
+It adds `continuation` and `turnId`: 32 lower-case hex characters, the first
+128 bits of HMAC-SHA-256 over app, environment and the handler's turn id (the
+client's id of the last user message) under a subkey of the approval secret
+(`approvalSecret`, else `GLIRASTES_APPROVAL_SECRET`, else a random secret of
+the process). The client's id never leaves the consumer, and the value
+reveals nothing about it. Instances that share the approval secret give every
+continuation of a turn the same `turnId`, also after a restart; with the
+process secret only continuations served by the same process share it.
+`turn.finished` carries no `turnId`, so the Platform can group the
+continuations of one turn and count turns from `turn.finished`, but cannot
+join a turn's first request to its continuations. A `modelPricing`
 table on the handler estimates the rest (`price-table`, with its version).
 Without either, the cost stays unknown (`null`), never 0. A known cost also
 counts against the turn's `maxEstimatedCostUsd`. The legacy Lancer `telemetry`

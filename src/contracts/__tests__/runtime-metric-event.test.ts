@@ -146,7 +146,7 @@ describe('TechnicalRuntimeEvent v2 limits', () => {
 
 describe('turn.continued (a request that continued a turn)', () => {
   const continued = (patch: Record<string, unknown> = {}) => ({
-    ...eventOf(patch), eventType: 'turn.continued', continuation: 'ui-outcome',
+    ...eventOf(patch), eventType: 'turn.continued', continuation: 'ui-outcome', turnId: '0123456789abcdef0123456789abcdef',
   });
 
   it('has the shape of turn.finished plus the kind of continuation', () => {
@@ -171,6 +171,27 @@ describe('turn.continued (a request that continued a turn)', () => {
       expect(TurnContinuedEventSchema.safeParse(continued(patch)).success).toBe(false);
     },
   );
+
+  it('requires an opaque turn id of 32 lower-case hex characters', () => {
+    const { turnId: _turnId, ...withoutTurnId } = continued();
+    expect(TurnContinuedEventSchema.safeParse(withoutTurnId).success).toBe(false);
+    for (const turnId of [
+      '0123456789ABCDEF0123456789ABCDEF',
+      '0123456789abcdef0123456789abcde',
+      '0123456789abcdef0123456789abcdef0',
+      'ai-msg-1',
+      'max.mustermann@example.com',
+      '',
+      42,
+      null,
+    ]) {
+      expect(TurnContinuedEventSchema.safeParse({ ...continued(), turnId }).success).toBe(false);
+    }
+  });
+
+  it('keeps turn.finished without a turn id', () => {
+    expect(TechnicalRuntimeEventV2Schema.safeParse({ ...vectors.base, turnId: '0123456789abcdef0123456789abcdef' }).success).toBe(false);
+  });
 
   it('never shares a batch with turn.finished', () => {
     expect(TechnicalRuntimeEventBatchSchema.safeParse({ schemaVersion: 2, events: [continued(), vectors.base] }).success).toBe(false);

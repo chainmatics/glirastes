@@ -19,6 +19,7 @@ import {
 
 const APP_ID = '019fb900-0000-7000-8000-0000000000a1';
 const ENVIRONMENT_ID = '019fb900-0000-7000-8000-0000000000e1';
+const SECRET = 'a'.repeat(32);
 const LIST_TASKS_ID = agentRevision.toolAllowlist[0]!;
 const provider = (usd: number) => ({
   usd,
@@ -304,7 +305,9 @@ describe('tool_contract_rejected in the turn recorder', () => {
 describe('a request that continues a turn', () => {
   it.each(['approval', 'ui-outcome'] as const)('reports %s as turn.continued instead of turn.finished', (continuation) => {
     const { sink, events } = fakeSink();
-    const recorder = createTurnMetricsRecorder({ sink, snapshot, startedAtMs: 0, now: () => 10, continuation });
+    const recorder = createTurnMetricsRecorder({
+      sink, snapshot, startedAtMs: 0, now: () => 10, continuation, continuedTurn: { turnId: 'ai-message-1', secret: SECRET },
+    });
     recorder.recordStep({
       model: 'anthropic/claude-sonnet-5.5', inputTokens: 5, outputTokens: 2, cost: UNKNOWN_TURN_COST,
       toolNames: [], failedToolNames: [],
@@ -312,5 +315,77 @@ describe('a request that continues a turn', () => {
     const event = recorder.finish({ status: 'completed', errorCode: null });
     expect(events).toEqual([event]);
     expect(event).toMatchObject({ eventType: 'turn.continued', continuation, inputTokens: 5, outputTokens: 2 });
+    expect(event).toHaveProperty('turnId', expect.stringMatching(/^[0-9a-f]{32}$/));
+  });
+
+  const continuedTurnId = (
+    turnId: string,
+    options: { secret?: string; instanceId?: string; environmentId?: string; continuation?: 'approval' | 'ui-outcome' } = {},
+  ) => {
+    const { sink } = fakeSink();
+    const identity = {
+      ...sink.identity,
+      instanceId: options.instanceId ?? sink.identity.instanceId,
+      environmentId: options.environmentId ?? sink.identity.environmentId,
+    };
+    const recorder = createTurnMetricsRecorder({
+      sink: { ...sink, identity },
+      startedAtMs: 0,
+      now: () => 10,
+      continuation: options.continuation ?? 'ui-outcome',
+      continuedTurn: { turnId, secret: options.secret ?? SECRET },
+    });
+    const event = recorder.finish({ status: 'completed', errorCode: null });
+    return event && 'turnId' in event ? event.turnId : undefined;
+  };
+
+  it('gives every continuation of one turn the same turn id, on any instance and after a restart', () => {
+    const first = continuedTurnId('ai-message-1');
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    expect(continuedTurnId('ai-message-1', { instanceId: 'web-2' })).toBe(first);
+    expect(continuedTurnId('ai-message-1', { continuation: 'approval' })).toBe(first);
+  });
+
+  it('gives another turn, another key or another environment another turn id', () => {
+    const first = continuedTurnId('ai-message-1');
+    expect(continuedTurnId('ai-message-2')).not.toBe(first);
+    expect(continuedTurnId('ai-message-1', { secret: 'b'.repeat(32) })).not.toBe(first);
+    expect(continuedTurnId('ai-message-1', { environmentId: '019fb900-0000-7000-8000-0000000000e2' })).not.toBe(first);
+  });
+
+  it.each([
+    ['long text', `ai-${'Please transfer 10,000 EUR to the account of my landlord. '.repeat(200)}`],
+    ['PII', 'ai-max.mustermann@example.com +49 170 1234567 DE89370400440532013000'],
+    ['unicode', 'ai-Grüße 🙂 日本語 \u202e\u0000'],
+    ['a credential', 'ai-Bearer abcdefghijklmnopqrstuvwxyz0123456789'],
+  ])('never sends a client turn id with %s, only its opaque derivation', (_name, turnId) => {
+    const { sink, events } = fakeSink();
+    const recorder = createTurnMetricsRecorder({
+      sink, startedAtMs: 0, now: () => 10, continuation: 'approval', continuedTurn: { turnId, secret: SECRET },
+    });
+    const event = recorder.finish({ status: 'completed', errorCode: null });
+    expect(event).toHaveProperty('turnId', expect.stringMatching(/^[0-9a-f]{32}$/));
+    const sent = JSON.stringify(events);
+    for (const piece of [turnId, turnId.slice(3), 'mustermann', 'landlord', 'Grüße', '日本語', 'Bearer']) {
+      expect(sent).not.toContain(piece);
+    }
+  });
+
+  it('builds no event for a continuation without its turn or with an empty key (fail closed)', () => {
+    const { sink, events } = fakeSink();
+    const recorder = createTurnMetricsRecorder({ sink, startedAtMs: 0, now: () => 10, continuation: 'ui-outcome' });
+    expect(recorder.finish({ status: 'completed', errorCode: null })).toBeUndefined();
+    expect(continuedTurnId('ai-message-1', { secret: '' })).toBeUndefined();
+    expect(events).toEqual([]);
+  });
+
+  it('keeps turn.finished without a turn id', () => {
+    const { sink } = fakeSink();
+    const recorder = createTurnMetricsRecorder({
+      sink, startedAtMs: 0, now: () => 10, continuedTurn: { turnId: 'ai-message-1', secret: SECRET },
+    });
+    const event = recorder.finish({ status: 'completed', errorCode: null });
+    expect(event?.eventType).toBe('turn.finished');
+    expect(event).not.toHaveProperty('turnId');
   });
 });

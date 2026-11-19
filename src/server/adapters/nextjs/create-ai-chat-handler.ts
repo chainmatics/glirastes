@@ -44,6 +44,7 @@ import {
   enforceApprovalBindings,
   gateApprovalTools,
   resolveApprovalBinder,
+  resolveApprovalSecret,
   type ApprovalBinder,
   type VerifiedApproval,
 } from './approval-binding.js';
@@ -1678,7 +1679,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             sink: metrics,
             snapshot: managedTurn?.snapshot,
             startedAtMs: requestStart,
-            ...(continuation ? { continuation } : {}),
+            ...(continuation
+              ? {
+                  continuation,
+                  // Keyed like approvals: the configured approval secret is
+                  // shared by every instance and survives a restart.
+                  continuedTurn: { turnId, secret: resolveApprovalSecret({ secret: approvalSecret }) },
+                }
+              : {}),
           })
         : undefined;
 

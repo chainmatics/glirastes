@@ -209,15 +209,26 @@ export const TechnicalRuntimeEventV2Schema = z.object({
 export const TurnContinuationSchema = z.enum(['approval', 'ui-outcome']);
 
 /**
+ * Opaque reference of the turn a continuation belongs to: 32 lower-case hex
+ * characters (128 bits of an HMAC-SHA-256 under a key that never leaves the
+ * consumer). Every continuation of one turn carries the same value; it
+ * reveals nothing about the turn, its messages or the client's message id.
+ */
+const RUNTIME_METRIC_TURN_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+/**
  * A request that continued a turn (no new user message): the same numbers
  * as `turn.finished` for that request, so turns are not counted twice. A
  * type of its own, sent in batches of its own: a Platform that does not know
  * it yet refuses only these batches and keeps receiving finished turns.
+ * `turnId` groups the continuations of one turn; `turn.finished` carries
+ * none, so the first request of a turn cannot be joined to them.
  */
 export const TurnContinuedEventSchema = z.object({
   ...turnEventFields,
   eventType: z.literal('turn.continued'),
   continuation: TurnContinuationSchema,
+  turnId: z.string().regex(RUNTIME_METRIC_TURN_ID_PATTERN),
 }).strict().superRefine(refineTurnEvent);
 
 export type TechnicalRuntimeEventV2 = z.infer<typeof TechnicalRuntimeEventV2Schema>;
