@@ -2151,8 +2151,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         [clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
       );
       const legacyScope = await requestApprovalScope(req, managedTurn);
-      // The shield session of the legacy path is derived below; the card's values are shielded only once tools run.
-      const legacySubjects = approvalSubjectResolverFor(registry, endpointToolContext, () => legacySessionId, legacyScope);
+      // The shield session of the legacy path, derived once (also for a recheck before it is used below).
+      let legacyShieldSession: string | undefined;
+      const legacyShieldSessionOf = () => (legacyShieldSession ??= deriveSessionId(processedMessages));
+      const legacySubjects = approvalSubjectResolverFor(registry, endpointToolContext, legacyShieldSessionOf, legacyScope);
       const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, legacyScope, legacySubjects);
       processedMessages = legacyApprovals.messages;
       // Routing sees what the model may see: a consumer router can hand the
@@ -2166,7 +2168,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
 
       // PII Shield: anonymize for legacy mode
-      const legacySessionId = piiShield ? deriveSessionId(processedMessages) : '';
+      const legacySessionId = piiShield ? legacyShieldSessionOf() : '';
       if (piiShield) {
         const lastUserText = extractLastUserText(processedMessages);
         await piiShield.outbound(lastUserText, legacySessionId);

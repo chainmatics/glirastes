@@ -91,6 +91,8 @@ export const DEFAULT_APPROVAL_SUBJECT_LIMITS: Readonly<ApprovalSubjectLimits> = 
 
 /** Marks a PII shield that did not answer within the lookup time. */
 const SHIELD_TIMEOUT: unique symbol = Symbol('shield-timeout');
+/** Marks a PII shield step that threw. */
+const SHIELD_FAILED: unique symbol = Symbol('shield-failed');
 
 /** Entries of one list page that are searched, at most. */
 export const MAX_LOOKUP_LIST_ENTRIES = 200;
@@ -453,6 +455,26 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     ]).finally(() => { if (timer) clearTimeout(timer); });
   };
 
+  /** The shield's original values of a lookup's parameters (the same session as the tool call). */
+  const rehydrate = async (params: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    if (!options.shield) return params;
+    const { shield, sessionId } = options.shield;
+    return shield.rehydrateArgsAsync ? shield.rehydrateArgsAsync(params, sessionId()) : shield.rehydrateArgs(params, sessionId());
+  };
+
+  /**
+   * A shield step of a lookup: its value, `SHIELD_TIMEOUT` past the deadline,
+   * `SHIELD_FAILED` when it throws. A cancelled request still rejects.
+   */
+  const guarded = async <T,>(work: Promise<T>, deadline: number): Promise<T | typeof SHIELD_TIMEOUT | typeof SHIELD_FAILED> => {
+    try {
+      return await bounded(work, deadline - now(), SHIELD_TIMEOUT);
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      return SHIELD_FAILED;
+    }
+  };
+
   /** Runs the source once: its result as the tool would show it (schema, bound, shield), or why not. */
   const execute = async (name: string, tool: Tool, input: unknown, timeoutMs: number): Promise<RawOutcome> => {
     const timeout = new AbortController();
@@ -512,8 +534,13 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   };
 
   /** One lookup through a source: validated input, authorization, cache, limits. */
-  const lookUp = async (name: string, tool: Tool, params: Record<string, unknown>, deadline: number): Promise<RawOutcome> => {
+  const lookUp = async (name: string, tool: Tool, modelParams: Record<string, unknown>, deadline: number): Promise<RawOutcome> => {
     options.signal?.throwIfAborted();
+    // The values come from the model's call: with a PII shield they are pseudonyms, restored as for the tool call itself.
+    const restored = await guarded(rehydrate(modelParams), deadline);
+    if (restored === SHIELD_TIMEOUT) return { kind: 'unchecked', reason: 'timeout' };
+    if (restored === SHIELD_FAILED) return { kind: 'unchecked', reason: 'unavailable' };
+    const params = restored;
     const parsed = tool.inputSchema.safeParse(params);
     if (!parsed.success) return { kind: 'invalid' };
     if (rateLimited.has(name)) return { kind: 'unchecked', reason: 'rate_limited' };
@@ -720,8 +747,9 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     if (outcome.kind === 'unchecked') return none(outcome.reason);
     if (outcome.kind === 'forbidden') return none('forbidden');
     if (outcome.kind !== 'ok') return none('unavailable');
-    const displayed = await bounded(displayOf(outcome), deadline - now(), SHIELD_TIMEOUT);
+    const displayed = await guarded(displayOf(outcome), deadline);
     if (displayed === SHIELD_TIMEOUT) return none('timeout');
+    if (displayed === SHIELD_FAILED) return none('unavailable');
     const fields: ApprovalPreviewValue[] = [];
     for (const field of preview.declaration.fields) {
       const raw = valueAt(displayed, field.path);
@@ -762,9 +790,10 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         : lookUp(source.name, source.tool, params, deadline).then(async (outcome) => {
           // Only what reaches the browser is shielded (bounded like the lookup); a recheck compares the raw values.
           const displayed = outcome.kind === 'ok' && forDisplay
-            ? await bounded(displayOf(outcome), deadline - now(), SHIELD_TIMEOUT)
+            ? await guarded(displayOf(outcome), deadline)
             : outcome.kind === 'ok' ? outcome.value : undefined;
           if (displayed === SHIELD_TIMEOUT) return unchecked(item, ids, 'timeout');
+          if (displayed === SHIELD_FAILED) return unchecked(item, ids, 'unavailable');
           return match(item, source, ids, outcome, plan, displayed);
         }));
     }

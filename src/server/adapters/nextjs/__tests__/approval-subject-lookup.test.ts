@@ -159,12 +159,49 @@ describe('approval subject lookups', () => {
   });
 
   it('bounds a PII shield that does not answer', async () => {
-    const shield = { anonymizeResult: () => new Promise(() => {}) } as unknown as PiiShield;
+    const shield = { rehydrateArgs: (args: unknown) => args, anonymizeResult: () => new Promise(() => {}) } as unknown as PiiShield;
     const { resolver } = resolverFor(playlist, {
       shield: { shield, sessionId: () => 's' }, limits: { ...DEFAULT_APPROVAL_SUBJECT_LIMITS, lookupTimeoutMs: 100 },
     });
     await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
     expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ reason: 'timeout' });
+  });
+
+  it('restores pseudonymized lookup parameters with the shield before the backend call', async () => {
+    const shield = {
+      rehydrateArgsAsync: async (args: Record<string, unknown>, session: string) => (
+        session === 's1' ? JSON.parse(JSON.stringify(args).replaceAll('[KEY_1]', 'lobby')) : args),
+      anonymizeResult: async (value: unknown) => value,
+    } as unknown as PiiShield;
+    const { resolver, backend } = resolverFor({ 'GET /channels': () => ok([{ key: 'lobby', title: 'Lobby screens' }]) }, {
+      shield: { shield, sessionId: () => 's1' },
+    });
+    const ownRegistry = referenceTools();
+    (ownRegistry.list_channels as { entityLookup?: unknown }).entityLookup = { type: 'channel', params: { key: 'key' }, complete: true };
+    (ownRegistry.list_channels as { inputSchema: unknown }).inputSchema = z.object({ key: z.string().optional() }).strict();
+    const byKey = resolverFor({ 'GET /channels?key=lobby': () => ok([{ key: 'lobby', title: 'Lobby screens' }]) }, {
+      registry: ownRegistry, shield: { shield, sessionId: () => 's1' },
+    });
+    await byKey.resolver.resolve({ toolName: 'delete_channel', toolCallId: 'c1', input: { key: '[KEY_1]' } });
+    expect(byKey.backend.calls.map((call) => call.path)).toEqual(['/channels?key=lobby']);
+    expect(backend.calls).toHaveLength(0);
+    expect(resolver.isDeclared('delete_channel')).toBe(true);
+  });
+
+  it('never refuses a call for a preview whose shield fails', async () => {
+    const shield = {
+      rehydrateArgs: (args: unknown) => args,
+      anonymizeResult: async () => { throw new Error('shield down'); },
+    } as unknown as PiiShield;
+    const registry = referenceTools();
+    (registry.delete_playlist as { approvalSubject?: unknown }).approvalSubject = {
+      preview: { tool: 'get_playlist', params: { playlist_id: 'playlist_id' }, fields: [{ path: 'displayName', label: 'Name' }] },
+    };
+    const { resolver } = resolverFor(playlist, { registry, shield: { shield, sessionId: () => 's' } });
+    expect(await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } })).toBeUndefined();
+    const part = resolver.take('c1')!.part;
+    expect(part.preview).toEqual({ check: 'unchecked', reason: 'unavailable', fields: [] });
+    expect(part.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'unavailable' });
   });
 
   it('keeps a readable subject for a nested argument without a read source', async () => {
