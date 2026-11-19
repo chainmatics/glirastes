@@ -262,6 +262,33 @@ describe('mention markers inside Markdown (W6)', () => {
     expect(open).toHaveBeenCalledWith({ type: 'playlist', id: 'pl_8', label: 'Lobby Loop' });
   });
 
+  it("follows ambiguousNames: 'text' and resolveAmbiguous for a name two records share", async () => {
+    const twinsListed = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Which playlist?' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [
+          { ...listed, output: { playlists: [{ id: 'pl_7', name: 'Lobby Loop' }, { id: 'pl_8', name: 'Lobby Loop' }] } },
+          { type: 'text', text: '**Found:** {{mention:playlist:pl_7:Lobby Loop}}' },
+        ],
+      },
+    ] as unknown as ChatMessage[];
+    const strong = () => bubble().querySelector('[data-component="markdown"] strong');
+    render(<Chat messages={twinsListed} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown' }} />);
+    expect(await screen.findAllByRole('button', { name: 'Open Lobby Loop' })).toHaveLength(1);
+    cleanup();
+    render(<Chat messages={twinsListed} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown', ambiguousNames: 'text' }} />);
+    await waitFor(() => expect(strong()).not.toBeNull());
+    expect(screen.queryByRole('button', { name: 'Open Lobby Loop' })).toBeNull();
+    cleanup();
+    const pick = (id: string) => (_label: string, candidates: ReadonlyArray<{ id: string }>) => candidates.find((c) => c.id === id) as never;
+    render(<Chat messages={twinsListed} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown', resolveAmbiguous: pick('pl_7') }} />);
+    expect(await screen.findAllByRole('button', { name: 'Open Lobby Loop' })).toHaveLength(1);
+    cleanup();
+    render(<Chat messages={twinsListed} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown', resolveAmbiguous: pick('pl_8'), known: false }} />);
+    await waitFor(() => expect(strong()).not.toBeNull());
+    expect(screen.queryByRole('button', { name: 'Open Lobby Loop' })).toBeNull();
+  });
+
   it('never takes an id from a field-name guess for the check', async () => {
     render(
       <Chat
