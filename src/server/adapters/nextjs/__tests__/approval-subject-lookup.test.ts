@@ -14,7 +14,7 @@ import {
   withoutApprovalSubjectParts,
 } from '../approval-subject-lookup.js';
 import { prepareModelMessages } from '../prepare-model-messages.js';
-import { fakeBackend, ok, referenceTools } from './approval-subject-fixtures.js';
+import { failure, fakeBackend, ok, referenceTools } from './approval-subject-fixtures.js';
 
 function guardStub(options: {
   lookup?: (toolName: string) => Promise<{ requiresApproval: boolean }>;
@@ -124,6 +124,38 @@ describe('approval subject lookups', () => {
     const running = hanging.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c2', input: { playlist_id: 7 } });
     controller.abort(new Error('cancelled'));
     await expect(running).rejects.toThrow('cancelled');
+  });
+
+  it('gives authorization and execution one deadline together', async () => {
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const { guard } = guardStub({ lookup: async () => { await wait(70); return { requiresApproval: false }; } });
+    const { resolver } = resolverFor({ 'GET /playlists/7': async () => { await wait(70); return ok({ playlist_id: 7, displayName: 'x' }); } }, {
+      guard, limits: { ...DEFAULT_APPROVAL_SUBJECT_LIMITS, lookupTimeoutMs: 100 },
+    });
+    await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+    expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ reason: 'timeout' });
+  });
+
+  it('recheck unchanged: a parent that cannot be checked again never hides a changed target', async () => {
+    let state: 'before' | 'after' = 'before';
+    const routes = {
+      'GET /playlists/3': () => (state === 'before' ? ok({ playlist_id: 3, displayName: 'Lobby Loop' }) : failure(503)),
+      'GET /playlists/3/versions': () => ok([{ version_id: 303, versionNumber: state === 'before' ? 3 : 4 }]),
+    };
+    const registry = referenceTools({ extra: [] });
+    (registry.roll_back_playlist as { approvalSubject?: unknown }).approvalSubject = { recheck: 'unchanged' };
+    const { resolver } = resolverFor(routes, { registry });
+    await resolver.resolve({ toolName: 'roll_back_playlist', toolCallId: 'c1', input: { playlist_id: 3, version_id: 303 } });
+    const signed = resolver.take('c1')!.canonical;
+    const digestOf = (value: unknown) => JSON.stringify(value);
+    state = 'after';
+    const fresh = resolverFor(routes, { registry }).resolver;
+    expect(await fresh.recheck({ toolName: 'roll_back_playlist', input: { playlist_id: 3, version_id: 303 }, subjectDigest: digestOf(signed), digestOf }))
+      .toBe('approval_subject_changed');
+    state = 'before';
+    expect(await resolverFor(routes, { registry }).resolver.recheck({
+      toolName: 'roll_back_playlist', input: { playlist_id: 3, version_id: 303 }, subjectDigest: digestOf(signed), digestOf,
+    })).toBeUndefined();
   });
 
   it('bounds a PII shield that does not answer', async () => {

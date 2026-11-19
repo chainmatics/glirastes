@@ -221,8 +221,11 @@ are looked up again before it runs; a missing one refuses it
 (`approval_subject_gone`). `unchanged`: additionally the records must still
 match the digest signed into the approval id (`approval_subject_changed`).
 With `onUnavailable: 'block'` a recheck that cannot check refuses it
-(`approval_subject_unavailable`); with `warn` it runs. Rechecks count against
-the same limits.
+(`approval_subject_unavailable`); with `warn`, `exists` runs it, while
+`unchanged` compares every subject, so a record that was found at the
+approval and cannot be checked now counts as changed. Rechecks count against
+the same limits; authorization, execution and the PII shield of one lookup
+share one `lookupTimeoutMs`.
 
 ## Format changes (declared tools only)
 

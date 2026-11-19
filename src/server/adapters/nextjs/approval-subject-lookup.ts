@@ -512,15 +512,17 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   };
 
   /** One lookup through a source: validated input, authorization, cache, limits. */
-  const lookUp = async (name: string, tool: Tool, params: Record<string, unknown>, timeoutMs: number): Promise<RawOutcome> => {
+  const lookUp = async (name: string, tool: Tool, params: Record<string, unknown>, deadline: number): Promise<RawOutcome> => {
     options.signal?.throwIfAborted();
     const parsed = tool.inputSchema.safeParse(params);
     if (!parsed.success) return { kind: 'invalid' };
     if (rateLimited.has(name)) return { kind: 'unchecked', reason: 'rate_limited' };
-    if (timeoutMs <= 0) return { kind: 'unchecked', reason: 'limit' };
-    // The authorization is part of the lookup: bounded by its time and the request.
-    const denial = await bounded(sourceDenial(name, tool, parsed.data), timeoutMs, 'timeout' as const);
+    if (deadline - now() <= 0) return { kind: 'unchecked', reason: 'limit' };
+    // Authorization, execution and shield share one deadline, and the request's cancellation.
+    const denial = await bounded(sourceDenial(name, tool, parsed.data), deadline - now(), 'timeout' as const);
     if (denial) return { kind: 'unchecked', reason: denial };
+    const timeoutMs = deadline - now();
+    if (timeoutMs <= 0) return { kind: 'unchecked', reason: 'timeout' };
     let key: string;
     try {
       key = canonicalJson([options.scope ?? '', name, params]);
@@ -700,7 +702,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     };
   };
 
-  const previewOf = async (plan: ToolPlan, input: unknown, timeoutMs: number, overLimit: boolean): Promise<ApprovalPreviewData> => {
+  const previewOf = async (plan: ToolPlan, input: unknown, deadline: number, overLimit: boolean): Promise<ApprovalPreviewData> => {
     const preview = plan.preview!;
     const none = (reason: ApprovalSubjectUncheckedReason): ApprovalPreviewData => ({ check: 'unchecked', reason, fields: [] });
     if (overLimit) return none('limit');
@@ -714,11 +716,11 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         params[param] = source.const;
       }
     }
-    const outcome = await lookUp(preview.source.name, preview.source.tool, params, timeoutMs);
+    const outcome = await lookUp(preview.source.name, preview.source.tool, params, deadline);
     if (outcome.kind === 'unchecked') return none(outcome.reason);
     if (outcome.kind === 'forbidden') return none('forbidden');
     if (outcome.kind !== 'ok') return none('unavailable');
-    const displayed = await bounded(displayOf(outcome), timeoutMs, SHIELD_TIMEOUT);
+    const displayed = await bounded(displayOf(outcome), deadline - now(), SHIELD_TIMEOUT);
     if (displayed === SHIELD_TIMEOUT) return none('timeout');
     const fields: ApprovalPreviewValue[] = [];
     for (const field of preview.declaration.fields) {
@@ -740,7 +742,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     preview?: ApprovalPreviewData;
   }> => {
     const startedAt = now();
-    const timeoutMs = lookupTimeout();
+    const deadline = startedAt + lookupTimeout();
     let slots = limits.maxSubjectsPerCall;
     const tasks: Array<Promise<SubjectOutcome>> = [];
     for (const item of plan.items) {
@@ -757,16 +759,16 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       const params = source ? paramsFor(source, ids, plan.refs, input) : undefined;
       tasks.push(source === undefined || params === undefined
         ? Promise.resolve(unchecked(item, ids, 'source_unavailable'))
-        : lookUp(source.name, source.tool, params, timeoutMs).then(async (outcome) => {
+        : lookUp(source.name, source.tool, params, deadline).then(async (outcome) => {
           // Only what reaches the browser is shielded (bounded like the lookup); a recheck compares the raw values.
           const displayed = outcome.kind === 'ok' && forDisplay
-            ? await bounded(displayOf(outcome), timeoutMs, SHIELD_TIMEOUT)
+            ? await bounded(displayOf(outcome), deadline - now(), SHIELD_TIMEOUT)
             : outcome.kind === 'ok' ? outcome.value : undefined;
           if (displayed === SHIELD_TIMEOUT) return unchecked(item, ids, 'timeout');
           return match(item, source, ids, outcome, plan, displayed);
         }));
     }
-    const previewTask = plan.preview ? previewOf(plan, input, timeoutMs, slots <= 0) : undefined;
+    const previewTask = plan.preview ? previewOf(plan, input, deadline, slots <= 0) : undefined;
     try {
       const [outcomes, preview] = await Promise.all([Promise.all(tasks), previewTask]);
       return { outcomes, ...(preview ? { preview } : {}) };
@@ -817,10 +819,12 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       const { outcomes } = await subjectsOf({ ...plan, preview: undefined } as ToolPlan, parsed.data, false);
       if (outcomes.some((outcome) => outcome.kind === 'deny')) return 'approval_subject_gone';
       const subjects = outcomes as Array<Extract<SubjectOutcome, { kind: 'subject' }>>;
-      if (subjects.some((outcome) => outcome.subject.check === 'unchecked')) {
-        return plan.onUnavailable === 'block' ? 'approval_subject_unavailable' : undefined;
+      if (plan.onUnavailable === 'block' && subjects.some((outcome) => outcome.subject.check === 'unchecked')) {
+        return 'approval_subject_unavailable';
       }
       if (plan.recheck === 'exists') return undefined;
+      // Every subject compared, also a not checkable one (as `unknown`): a record that was found at the
+      // approval and cannot be checked now counts as changed, so it never hides a change of another.
       return subjectDigest !== undefined && digestOf(subjects.map((outcome) => outcome.canonical)) === subjectDigest
         ? undefined
         : 'approval_subject_changed';
