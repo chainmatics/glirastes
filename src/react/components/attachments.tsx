@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
+import { fillTemplate } from '../utils/fill-template.js';
 import type { AttachmentButtonProps, AttachmentTrayProps } from '../types.js';
 
 const VISUALLY_HIDDEN: CSSProperties = {
@@ -14,7 +15,7 @@ const VISUALLY_HIDDEN: CSSProperties = {
   border: 0,
 };
 
-const fill = (text: string, name: string) => text.replace('{name}', name);
+const fill = (text: string, name: string) => fillTemplate(text, { name });
 
 /**
  * Files waiting in the composer: image thumbnails, other files by name,

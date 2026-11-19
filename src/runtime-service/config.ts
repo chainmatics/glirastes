@@ -149,6 +149,25 @@ export const RuntimeConfigSchema = z
         maxInputTokens: z.number().int().min(1).max(200_000).default(40_000),
         maxOutputTokens: z.number().int().min(1).max(32_000).default(4000),
         maxEstimatedCostUsd: z.number().positive().max(100).default(0.5),
+        /**
+         * Local limits of the server lookups behind approval cards
+         * (docs/approval-subjects.md), or false to turn them off. They never
+         * count against maxToolCalls (calls made by the model).
+         */
+        approvalLookups: z
+          .union([
+            z.literal(false),
+            z
+              .object({
+                maxLookupsPerTurn: z.number().int().min(1).max(256),
+                maxSubjectsPerCall: z.number().int().min(1).max(16),
+                lookupTimeoutMs: z.number().int().min(100).max(60_000),
+                maxLookupTimePerTurnMs: z.number().int().min(100).max(300_000),
+              })
+              .partial()
+              .strict(),
+          ])
+          .optional(),
       })
       .default({
         maxModelSteps: 6,

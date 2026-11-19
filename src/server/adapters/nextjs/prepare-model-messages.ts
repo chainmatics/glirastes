@@ -24,6 +24,7 @@ import { declarationsForRead, type EntityDeclarationsByTool, type OutputEntityDe
 import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 import { withModelFacingToolErrors } from './stream-error-text.js';
+import { withoutApprovalSubjectParts } from './approval-subject-lookup.js';
 import { withModelFacingUiOutcomes } from './ui-outcomes.js';
 import {
   compactHistoryResult,
@@ -178,8 +179,9 @@ export async function prepareModelMessages(
   const maxCtx = options?.maxContextMessages ?? 12;
 
   // A failed call keeps only the chat's text in the browser; the model gets an instruction instead.
-  // A UI result of the outcome protocol becomes the fixed text of its code.
-  const raw = await convertToModelMessages(withModelFacingToolErrors(withModelFacingUiOutcomes(uiMessages)), {
+  // A UI result of the outcome protocol becomes the fixed text of its code; approval subjects
+  // are for the browser only: never model input, whatever the AI SDK's defaults.
+  const raw = await convertToModelMessages(withModelFacingToolErrors(withModelFacingUiOutcomes(withoutApprovalSubjectParts(uiMessages))), {
     ignoreIncompleteToolCalls: true,
   });
 
@@ -246,7 +248,7 @@ async function seenObjectsMemo(
   setting: true | SeenObjectsOptions,
 ): Promise<{ message: ModelMessageLike; objects: SeenObject[]; omitted: number } | undefined> {
   const earlier = earlierMessages && earlierMessages.length > 0
-    ? await convertToModelMessages(withModelFacingToolErrors(earlierMessages), { ignoreIncompleteToolCalls: true }) as ModelMessageLike[]
+    ? await convertToModelMessages(withModelFacingToolErrors(withoutApprovalSubjectParts(earlierMessages)), { ignoreIncompleteToolCalls: true }) as ModelMessageLike[]
     : [];
   const all = [...earlier, ...raw];
   const handles = handleProducersOf(all);

@@ -483,7 +483,12 @@
         "summary": "List Channels",
         "tags": [
           "channels"
-        ]
+        ],
+        "x-glirastes-entity-lookup": {
+          "complete": true,
+          "params": {},
+          "type": "channel"
+        }
       }
     },
     "/api/channels/{key}": {
@@ -599,7 +604,16 @@
             "path": "revisions[]",
             "type": "channel-revision"
           }
-        ]
+        ],
+        "x-glirastes-entity-lookup": {
+          "complete": true,
+          "params": {
+            "key": {
+              "ref": "channel"
+            }
+          },
+          "type": "channel-revision"
+        }
       }
     },
     "/api/channels/{key}/revisions/{revision_id}/rollback": {
@@ -928,6 +942,12 @@
         "tags": [
           "playlists"
         ],
+        "x-glirastes-entity-lookup": {
+          "params": {
+            "playlist_id": "playlist_id"
+          },
+          "type": "playlist"
+        },
         "x-glirastes-title": {
           "de": "Playlist anzeigen",
           "en": "Show playlist",
@@ -995,7 +1015,16 @@
             "path": "versions[]",
             "type": "playlist-version"
           }
-        ]
+        ],
+        "x-glirastes-entity-lookup": {
+          "complete": true,
+          "params": {
+            "playlist_id": {
+              "ref": "playlist"
+            }
+          },
+          "type": "playlist-version"
+        }
       }
     },
     "/api/playlists/{playlist_id}/versions/{version_id}/rollback": {
@@ -1189,6 +1218,28 @@
       "get": {
         "description": "List the users of your workspace.",
         "operationId": "list_users_api_users_get",
+        "parameters": [
+          {
+            "description": "Omit to get all users",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omit to get all users",
+              "title": "Limit"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1199,6 +1250,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -1212,7 +1273,14 @@
         "summary": "List Users",
         "tags": [
           "users"
-        ]
+        ],
+        "x-glirastes-entity-lookup": {
+          "const": {
+            "limit": 2
+          },
+          "params": {},
+          "type": "user"
+        }
       }
     },
     "/api/users/{user_id}": {

@@ -11,6 +11,7 @@ import {
 } from '../entity-links/entity-links-react.js';
 import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
 import { ApprovalEntry as DefaultApprovalEntry } from './approval-entry.js';
+import { fillTemplate } from '../utils/fill-template.js';
 import { readToolPartApproval } from '../utils/tool-part-approval.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, readClarificationPart } from '../utils/clarification.js';
@@ -236,7 +237,7 @@ function MessageAttachment({ part, locale }: { part: FilePart; locale: ChatLocal
       </span>
     );
   }
-  const label = locale.openAttachmentLabel.replace('{name}', name);
+  const label = fillTemplate(locale.openAttachmentLabel, { name });
   return (
     <a
       href={part.url}
@@ -289,6 +290,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     approvalSubjects,
     approvalDisplay,
     entityDeclarations,
+    language,
   } = useChatContext();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
@@ -550,6 +552,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
           declarations: entityDeclarations,
           describe: approvalDescription ?? ((name, id, args) => ({ id, toolName: name, args: isRecord(args) ? args : {}, messageId: message.id })),
           withSubjects: approvalSubjects !== false,
+          ...(language ? { language } : {}),
         })
         : undefined);
     }

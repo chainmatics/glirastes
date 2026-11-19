@@ -55,6 +55,18 @@ describe("runtime service trust configuration", () => {
       expect(() => parseRuntimeConfig(c)).toThrow();
     }
   });
+  it("accepts limits.approvalLookups strictly (or false) and leaves it unset by default", () => {
+    expect(parseRuntimeConfig(raw()).limits.approvalLookups).toBeUndefined();
+    const withLookups = (value: unknown) => ({ ...raw(), limits: { approvalLookups: value } });
+    expect(parseRuntimeConfig(withLookups(false)).limits.approvalLookups).toBe(false);
+    expect(parseRuntimeConfig(withLookups({ maxLookupsPerTurn: 10, lookupTimeoutMs: 500 })).limits.approvalLookups)
+      .toEqual({ maxLookupsPerTurn: 10, lookupTimeoutMs: 500 });
+    // The signed budget's own limit keeps its default and meaning.
+    expect(parseRuntimeConfig(withLookups({ maxLookupsPerTurn: 10 })).limits.maxToolCalls).toBe(8);
+    for (const value of [true, { maxLookupsPerTurn: 0 }, { maxLookupsPerTurn: 1.5 }, { other: 1 }]) {
+      expect(() => parseRuntimeConfig(withLookups(value))).toThrow();
+    }
+  });
   it("accepts the chat languages and leaves them unset by default", () => {
     expect(parseRuntimeConfig(raw()).chat).toBeUndefined();
     const chat = { locale: "de-DE", requestLocaleHeader: "accept-language", locales: { pl: { silentTurn: "Nie udało się." } } };

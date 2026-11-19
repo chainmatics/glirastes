@@ -40,6 +40,8 @@ export interface ReadToolPartApprovalOptions {
   declarations?: EntityDeclarationsByTool;
   describe: ApprovalDescriptionFn;
   withSubjects: boolean;
+  /** The chat's language, for server preview labels. */
+  language?: string;
 }
 
 /**
@@ -67,11 +69,16 @@ export function readToolPartApproval(part: unknown, options: ReadToolPartApprova
     declarations: options.declarations,
     describe: options.describe,
     withSubjects: options.withSubjects,
+    // A decided call keeps the server's names after a reload: its subjects part stays in the history.
+    ...(toolCallId ? { toolCallId } : {}),
+    ...(options.language ? { language: options.language } : {}),
   });
   const card = {
     label: described.description ?? options.toolName,
     ...(described.details && described.details.length > 0 ? { details: described.details } : {}),
     ...(described.subjects && described.subjects.length > 0 ? { subjects: described.subjects } : {}),
+    ...(described.preview && described.preview.length > 0 ? { preview: described.preview } : {}),
+    ...(described.previewCheck ? { previewCheck: described.previewCheck } : {}),
   };
   if (outcome === 'open') {
     return { ...base, state: 'open', outcome, ...card, ...(open ? { pending: open } : {}) };

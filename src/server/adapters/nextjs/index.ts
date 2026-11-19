@@ -62,6 +62,11 @@ export {
   type UiActionOutcomesOption,
 } from './ui-outcomes.js';
 export type { ApprovalStore, ApprovalDenialCode } from './approval-binding.js';
+export {
+  DEFAULT_APPROVAL_SUBJECT_LIMITS,
+  type ApprovalSubjectLimits,
+  type ApprovalSubjectRefusalCode,
+} from './approval-subject-lookup.js';
 export type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 export type { HistoryOptions, HistoryTurnMode, ModelInputBreakdown } from './prepare-model-messages.js';
 export type { SeenObject, SeenObjectsOptions } from './seen-objects.js';

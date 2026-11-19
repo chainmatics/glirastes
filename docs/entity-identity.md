@@ -108,7 +108,9 @@ FastAPI: `model_config = ConfigDict(json_schema_extra={'x-glirastes-entity': {..
   text does not tell its parts apart) is `seen` with
   `provenance: 'user-message'`; an unknown speaking id gets no warning. `seen`
   subjects carry `fallbackField` next to `fallback` (deprecated, still filled).
-  No new `status` values.
+  No new `status` values. This is the browser's guess from the chat history;
+  with a declared read source the server looks the record up instead, and
+  the guess is only the fallback: see [approval-subjects.md](approval-subjects.md).
 - **Entity links:** the declared records of any tool result with a `type` and
   a name become known references, also nested. A composite key's reference
   has the readable id (`lobby/503`) and its parts in `data.idValues`.

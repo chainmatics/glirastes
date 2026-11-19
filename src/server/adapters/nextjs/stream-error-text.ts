@@ -3,6 +3,7 @@ import { ModelFacingInputError } from '../../../runtime/ai-sdk/engine.js';
 import { ToolExecutionDeniedError, toolDenialDisplayText } from '../../../runtime/tool-denial.js';
 import { ToolInputValidationError } from '../../../runtime/tool-input-error.js';
 import type { AiChatErrorInfo } from './types.js';
+import { APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS, ApprovalSubjectRefusedError } from './approval-subject-lookup.js';
 
 /** What the chat shows for any failure the SDK does not name itself. */
 export const GENERIC_STREAM_ERROR_TEXT = 'AI request failed';
@@ -20,6 +21,23 @@ export const INVALID_TOOL_INPUT_HISTORY_TEXT = 'This call was not executed: its 
   + 'first find the id with a list or search tool. Do not ask the user for an id.';
 
 /**
+ * What a later turn reads for a call the server refused before its approval
+ * card (`ApprovalSubjectRefusedError`), by the chat text the browser kept.
+ * Fixed and content-free; the same for a missing and an invisible record.
+ */
+const APPROVAL_SUBJECT_HISTORY_TEXTS: ReadonlyMap<string, string> = new Map([
+  [APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS.approval_subject_not_found,
+    'This call was not executed and no approval was asked: the record it names does not exist or the user cannot see it. '
+    + 'Look the id up with a list or search tool; do not ask the user. Do not quote this text.'],
+  [APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS.approval_subject_invalid_id,
+    'This call was not executed and no approval was asked: the id it names is not valid. '
+    + 'Look the id up with a list or search tool; do not ask the user. Do not quote this text.'],
+  [APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS.approval_subject_unavailable,
+    'This call was not executed and no approval was asked: the record it names could not be checked. '
+    + 'Tell the user it could not be checked and that they can try again later. Do not quote this text.'],
+]);
+
+/**
  * The UI history with the chat text of an invalid tool call replaced by
  * `INVALID_TOOL_INPUT_HISTORY_TEXT`, so a later turn reads an instruction
  * instead of the chat's note. Only that exact text changes; nothing the model
@@ -33,9 +51,13 @@ export function withModelFacingToolErrors<T>(messages: ReadonlyArray<T>): T[] {
     const next = parts.map((part) => {
       if (typeof part !== 'object' || part === null) return part;
       const record = part as Record<string, unknown>;
-      if (record.state !== 'output-error' || record.errorText !== INVALID_TOOL_INPUT_TEXT) return part;
+      if (record.state !== 'output-error') return part;
+      const historyText = record.errorText === INVALID_TOOL_INPUT_TEXT
+        ? INVALID_TOOL_INPUT_HISTORY_TEXT
+        : typeof record.errorText === 'string' ? APPROVAL_SUBJECT_HISTORY_TEXTS.get(record.errorText) : undefined;
+      if (historyText === undefined) return part;
       changed = true;
-      return { ...record, errorText: INVALID_TOOL_INPUT_HISTORY_TEXT };
+      return { ...record, errorText: historyText };
     });
     return changed ? { ...message, parts: next } : message;
   });
@@ -84,6 +106,8 @@ export function createToolStreamErrorMask(): (error: unknown) => MaskedToolError
       const text = toolDenialDisplayText(error);
       return error.recoverable ? { text } : { text, report: { error, info: { source: 'tool-call', kind: 'denied' } } };
     }
+    // A record the call names does not exist, cannot be seen or checked: part of the turn, not reported.
+    if (error instanceof ApprovalSubjectRefusedError) return { text: APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS[error.code] };
     if (NoSuchToolError.isInstance(error)) {
       invalidCallTexts.set(error.message, UNAVAILABLE_TOOL_TEXT);
       return { text: UNAVAILABLE_TOOL_TEXT };

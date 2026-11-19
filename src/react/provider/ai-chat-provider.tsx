@@ -96,6 +96,10 @@ export const DEFAULT_LOCALE: ChatLocale = {
   approvalAmbiguousIdWarning: 'This id came up with different names: {names}. Check it before you approve.',
   approvalCollidingIdWarning: 'This id came up for different kinds of records: {candidates}. Check which one is meant before you approve.',
   approvalSeenIdNote: 'seen in this conversation',
+  approvalSubjectUncheckedWarning: '{label} {id} could not be checked right now.',
+  approvalSubjectsUncheckedWarning: 'These could not be checked right now: {ids}.',
+  approvalReferenceIdNote: 'Referenced, not checked.',
+  approvalPreviewUncheckedNote: 'The preview could not be loaded.',
   moreItemsLabel: 'more',
   showAllItemsLabel: 'Show all {count}',
   showMoreLabel: 'Show more',
@@ -778,6 +782,8 @@ export function AiChatProvider({
   approvalDescriptionRef.current = approvalDescriptionFn;
   const approvalSubjectsRef = useRef(approvalSubjects);
   approvalSubjectsRef.current = approvalSubjects;
+  const languageRef = useRef(language);
+  languageRef.current = language;
 
   // Data part handler — processes pipeline and truncation events from any transport
   const handleDataPart = useCallback((dataPart: { type: string; data: unknown }) => {
@@ -1345,6 +1351,8 @@ export function AiChatProvider({
             declarations: declarationsRef.current,
             describe: approvalDescriptionRef.current,
             withSubjects: approvalSubjectsRef.current,
+            ...(toolPart.toolCallId ? { toolCallId: toolPart.toolCallId } : {}),
+            ...(languageRef.current ? { language: languageRef.current } : {}),
           });
           setPendingApprovalsMap(prev => new Map(prev).set(toolPart.approval!.id, pending));
         }
@@ -2095,9 +2103,11 @@ export function AiChatProvider({
       renameSession,
       refreshSessions,
       entityDeclarations: declarations,
+      language: language ?? undefined,
     }),
     [
       declarations,
+      language,
       classNames,
       components,
       locale,

@@ -2,6 +2,13 @@ import type { EntityDeclarationsByTool } from '../../contracts/entity-declaratio
 import type { ApprovalDescriptionFn, PendingApproval } from '../types.js';
 import { resolveApprovalSubjects } from './approval-subjects.js';
 import { collectEntitySightings, collectSeenEntityIds, isUuidLike, userTextsOf } from './entity-names.js';
+import type { ApprovalSubjectsPartData } from '../../contracts/approval-subject.js';
+import {
+  applyServerApprovalSubjects,
+  applyServerSubjectNames,
+  findApprovalSubjectsPart,
+  mergeServerApprovalSubjects,
+} from './server-approval-subjects.js';
 
 export interface DescribeApprovalCallOptions {
   toolName: string;
@@ -13,6 +20,26 @@ export interface DescribeApprovalCallOptions {
   describe: ApprovalDescriptionFn;
   /** `approvalSubjects` of the provider: attach the resolved ids. */
   withSubjects: boolean;
+  /**
+   * The call's id: its `data-approval-subjects` part in `messages` (the
+   * server's lookup, only with a declaration) then names its records; the
+   * history guess stays the fallback.
+   */
+  toolCallId?: string;
+  /** The chat's language, for the preview labels. */
+  language?: string;
+}
+
+/** The server's subjects of a call, from any message of the conversation. */
+function serverPartOf(messages: ReadonlyArray<unknown>, toolCallId: string | undefined): ApprovalSubjectsPartData | undefined {
+  if (!toolCallId) return undefined;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const parts = (messages[index] as { parts?: unknown } | undefined)?.parts;
+    if (!Array.isArray(parts)) continue;
+    const found = findApprovalSubjectsPart(parts, toolCallId);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /**
@@ -30,6 +57,8 @@ export function describeApprovalCall({
   declarations,
   describe,
   withSubjects,
+  toolCallId,
+  language,
 }: DescribeApprovalCallOptions): PendingApproval {
   const sightings = collectEntitySightings(messages, declarations);
   const inputEntities = declarations && Object.prototype.hasOwnProperty.call(declarations, toolName)
@@ -56,7 +85,11 @@ export function describeApprovalCall({
     if (name) names.set(key, name);
     else names.delete(key);
   }
+  // What the server looked up through the tool's declared read source (only with a declaration).
+  const serverPart = serverPartOf(messages, toolCallId);
+  applyServerSubjectNames(names, serverPart, resolved);
   const described = describe(toolName, approvalId, input, { names });
-  const subjects = withSubjects ? resolved : [];
-  return subjects.length > 0 ? { ...described, subjects } : described;
+  return applyServerApprovalSubjects(described, withSubjects
+    ? mergeServerApprovalSubjects(resolved, serverPart, language)
+    : { subjects: [] });
 }

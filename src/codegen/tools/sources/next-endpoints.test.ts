@@ -198,6 +198,24 @@ describe('next-app endpoint source', () => {
     expect(tools.get('GET /api/tasks')).not.toHaveProperty('maxResultChars');
   }, 30_000);
 
+  it('carries the approval-subject declarations of the sibling contract.ts as the tool code level, never as a finding of the tool', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  POST: { input: z.object({ title: z.string() }), id: 'notes.add', approvalSubject: { onUnavailable: 'block' },"
+        + " lookupEffect: 'write' },\n};\n",
+    });
+    const observed = await createNextEndpointSource().observe(context(app.root));
+    const add = byKey(observed.observations).get('POST /api/notes')!;
+    expect(add.approvalDeclarations?.code).toMatchObject({
+      where: 'src/app/api/notes/contract.ts',
+      approvalSubject: { onUnavailable: 'block' },
+    });
+    expect(add.approvalDeclarations?.code?.issues).toHaveLength(1);
+    expect(add.findings.filter((finding) => finding.code.startsWith('approval'))).toEqual([]);
+    expect(byKey(observed.observations).get('GET /api/tasks')).not.toHaveProperty('approvalDeclarations');
+  }, 30_000);
+
   it('enumerates HEAD as a read tool and reports only OPTIONS as unsupported', async () => {
     const app = await createAppFixture({
       'src/app/api/tasks/route.ts': 'declare function getSession(): Promise<unknown>;\n'

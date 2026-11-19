@@ -226,8 +226,11 @@ def list_playlists(
 
 
 # Titles in three languages; tool-semantics.json overrides German only (mixing per language).
+# The read source the server looks a playlist up through before an approval card
+# (docs/approval-subjects.md): one record, by its own path parameter.
 @playlists_router.get('/{playlist_id}', response_model=Playlist, openapi_extra={
     'x-glirastes-title': {'en': 'Show playlist', 'de': 'Playlist anzeigen', 'pl': 'Pokaż playlistę'},
+    'x-glirastes-entity-lookup': {'type': 'playlist', 'params': {'playlist_id': 'playlist_id'}},
 })
 def get_playlist(user: CurrentUser, playlist_id: int = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'playlist'}})) -> Playlist:
     """Get one playlist with all its items."""
@@ -250,6 +253,8 @@ def delete_playlist(user: CurrentUser, playlist_id: int = Path(json_schema_extra
     'x-glirastes-entities': [
         {'type': 'playlist-version', 'id': 'version_id', 'fallback': 'versionNumber', 'path': 'versions[]'},
     ],
+    # Every version of the parent playlist, unpaged: a version not on it does not exist.
+    'x-glirastes-entity-lookup': {'type': 'playlist-version', 'params': {'playlist_id': {'ref': 'playlist'}}, 'complete': True},
 })
 def list_playlist_versions(user: CurrentUser, playlist_id: int = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'playlist', 'role': 'parent'}})) -> PlaylistVersionList:
     """List the saved versions of a playlist, oldest first."""
@@ -273,7 +278,9 @@ def roll_back_playlist(user: CurrentUser, playlist_id: int = Path(json_schema_ex
     raise HTTPException(status_code=404, detail=f'Version {version_id} not found')
 
 
-@channels_router.get('', response_model=ChannelList)
+@channels_router.get('', response_model=ChannelList, openapi_extra={
+    'x-glirastes-entity-lookup': {'type': 'channel', 'params': {}, 'complete': True},
+})
 def list_channels(user: CurrentUser) -> ChannelList:
     """List the screen channels and the playlist each one plays."""
     return ChannelList(channels=list(library_of(user.subjectId).channels.values()))
@@ -295,6 +302,7 @@ def delete_channel(user: CurrentUser, key: str = Path(json_schema_extra={'x-glir
     'x-glirastes-entities': [
         {'type': 'channel-revision', 'id': 'revision_id', 'fallback': 'rev', 'path': 'revisions[]'},
     ],
+    'x-glirastes-entity-lookup': {'type': 'channel-revision', 'params': {'key': {'ref': 'channel'}}, 'complete': True},
 })
 def list_channel_revisions(user: CurrentUser, key: str = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'channel', 'role': 'parent'}, 'x-glirastes-id-kind': 'speaking'})) -> ChannelRevisionList:
     """List the saved revisions of a channel's settings, oldest first."""
@@ -318,10 +326,15 @@ def roll_back_channel(user: CurrentUser, key: str = Path(json_schema_extra={'x-g
     raise HTTPException(status_code=404, detail=f'Revision {revision_id} not found')
 
 
-@users_router.get('', response_model=UserList)
-def list_users(user: CurrentUser) -> UserList:
+# The list-page case: the lookup reads one page (`limit`), so a user who is not
+# on it is "not checkable" on the card, never "does not exist".
+@users_router.get('', response_model=UserList, openapi_extra={
+    'x-glirastes-entity-lookup': {'type': 'user', 'params': {}, 'const': {'limit': 2}},
+})
+def list_users(user: CurrentUser, limit: int | None = Query(default=None, ge=1, le=100, description='Omit to get all users')) -> UserList:
     """List the users of your workspace."""
-    return UserList(users=list(library_of(user.subjectId).users.values()))
+    users = list(library_of(user.subjectId).users.values())
+    return UserList(users=users if limit is None else users[:limit])
 
 
 @users_router.delete('/{user_id}', status_code=204, openapi_extra={'x-glirastes-effect': 'destructive'})

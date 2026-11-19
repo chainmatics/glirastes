@@ -49,6 +49,14 @@ import {
   type ObservedEntities,
 } from '../entity-declarations.js';
 import type { InputEntityRef } from '../../../contracts/entity-declaration.js';
+import {
+  APPROVAL_SUBJECT_EXTENSION,
+  approvalLevelOf,
+  ENTITY_LOOKUP_EXTENSION,
+  LOOKUP_EFFECT_EXTENSION,
+  OPENAPI_FIELD_NAMES,
+  type ObservedApprovalLevel,
+} from '../approval-subject-declarations.js';
 import type {
   ExcludedTool,
   JsonSchemaLike,
@@ -122,6 +130,8 @@ interface OpenapiEntry {
   texts?: DeclaredTexts['hints'];
   /** Entity declarations of the operation and its response schemas (`x-glirastes-entit*`). */
   entities?: ObservedEntities;
+  /** `x-glirastes-entity-lookup`, `-approval-subject`, `-lookup-effect` of the operation (also FastAPI `openapi_extra`). */
+  approval?: ObservedApprovalLevel;
 }
 
 interface OpenapiPiece {
@@ -397,6 +407,12 @@ function readEntry(
   }
   const entities = readEntities(document, operation.operation, parameters.list as JsonObject[], body.schema, stableKey, where);
   findings.push(...entities.findings);
+  // Checked here, reported by the pipeline (never a finding of the tool itself, so it never disables it).
+  const approval = approvalLevelOf({
+    entityLookup: operation.operation[ENTITY_LOOKUP_EXTENSION],
+    approvalSubject: operation.operation[APPROVAL_SUBJECT_EXTENSION],
+    lookupEffect: operation.operation[LOOKUP_EFFECT_EXTENSION],
+  }, OPENAPI_FIELD_NAMES, where);
   const description = typeof operation.operation.description === 'string' && operation.operation.description.trim()
     ? operation.operation.description.trim()
     : typeof operation.operation.summary === 'string' && operation.operation.summary.trim()
@@ -425,6 +441,7 @@ function readEntry(
     ...(outputFields.declared ? { outputFields: outputFields.declared } : {}),
     ...(Object.keys(texts.hints).length > 0 ? { texts: texts.hints } : {}),
     ...(entities.entities ? { entities: entities.entities } : {}),
+    ...(approval ? { approval } : {}),
   };
 }
 
@@ -526,6 +543,14 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
     ...outputFieldLists(resolved),
     ...(entry.entities || resolved.codeEntities
       ? { entities: { ...entry.entities, ...(resolved.codeEntities ? { code: resolved.codeEntities } : {}) } }
+      : {}),
+    ...(entry.approval || resolved.codeApproval
+      ? {
+        approvalDeclarations: {
+          ...(resolved.codeApproval ? { code: resolved.codeApproval } : {}),
+          ...(entry.approval ? { operation: entry.approval } : {}),
+        },
+      }
       : {}),
   };
 }

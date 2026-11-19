@@ -351,6 +351,27 @@ function fieldSteps(path: string | undefined, field: string): OutputFieldStep[] 
 }
 
 /**
+ * Whether the output fields of a tool deny a field of the records at an
+ * entity path (`playlists[]`, `''`): an any-depth `**.<field>` pattern, a
+ * denied path, or an allow-list that does not cover it. The denial wins.
+ */
+export function outputFieldDenial(
+  tool: { outputAllowedFields?: ReadonlyArray<string>; outputDeniedFields?: ReadonlyArray<string> },
+): (path: string | undefined, field: string) => boolean {
+  const denied = tool.outputDeniedFields ?? [];
+  const deniedKeys = anyDepthKeys(denied);
+  const deniedTree = outputFieldTree(denied.filter((path) => !path.startsWith('**.')));
+  const allowedTree = tool.outputAllowedFields ? outputFieldTree(tool.outputAllowedFields) : undefined;
+  return (path, field) => {
+    if (deniedKeys.has(field)) return true;
+    const steps = fieldSteps(path, field);
+    if (!steps) return false;
+    if (outputFieldCovers(deniedTree, steps)) return true;
+    return allowedTree !== undefined && !outputFieldCovers(allowedTree, steps);
+  };
+}
+
+/**
  * Resolves the entity declarations of every endpoint tool: levels,
  * precedence, the output bound and the tools.json `identity`. Pure and
  * deterministic (tools in code-unit order of their definition id).
@@ -455,17 +476,7 @@ export function resolveToolEntities(input: {
     }
 
     // The output bound wins: a denied id drops the declaration, a denied name or fallback that field.
-    const denied = tool.outputDeniedFields ?? [];
-    const deniedKeys = anyDepthKeys(denied);
-    const deniedTree = outputFieldTree(denied.filter((path) => !path.startsWith('**.')));
-    const allowedTree = tool.outputAllowedFields ? outputFieldTree(tool.outputAllowedFields) : undefined;
-    const isDenied = (path: string | undefined, field: string): boolean => {
-      if (deniedKeys.has(field)) return true;
-      const steps = fieldSteps(path, field);
-      if (!steps) return false;
-      if (outputFieldCovers(deniedTree, steps)) return true;
-      return allowedTree !== undefined && !outputFieldCovers(allowedTree, steps);
-    };
+    const isDenied = outputFieldDenial(tool);
     const sites = new Map((observed.sites ?? []).map((site) => [site.path, site] as const));
     const output: OutputEntityDeclaration[] = [];
     for (const { declaration } of chosen.values()) {

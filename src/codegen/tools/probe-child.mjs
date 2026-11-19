@@ -137,6 +137,18 @@ async function main() {
     }
   };
 
+  // A declared JSON value goes on (wrapped, so any value is told apart from the marker); anything else is invalid.
+  const jsonDeclaration = (value) => {
+    if (value === undefined) return null;
+    try {
+      const text = JSON.stringify(value);
+      if (text === undefined || text.length > 64 * 1024) return 'invalid';
+      return { value: JSON.parse(text) };
+    } catch {
+      return 'invalid';
+    }
+  };
+
   const describeEntry = async (entry) => {
     if (entry === null || typeof entry !== 'object') return { ok: false, reason: 'invalid-entry' };
     const input = await describeSchema(entry.input, 'input');
@@ -172,6 +184,10 @@ async function main() {
       // Checked in the parent; only a list of at most 20 JSON values goes on, anything else declared is invalid.
       outputEntities: entityList(entry.outputEntities),
       inputEntities: entityList(entry.inputEntities),
+      // Approval subjects: checked in the parent.
+      entityLookup: jsonDeclaration(entry.entityLookup),
+      approvalSubject: jsonDeclaration(entry.approvalSubject),
+      lookupEffect: jsonDeclaration(entry.lookupEffect),
     };
   };
 

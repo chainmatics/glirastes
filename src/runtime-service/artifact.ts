@@ -416,7 +416,10 @@ function materialize(
   const bindings: GeneratedToolBinding[] = tools.map((tool) => {
     const contract = byId.get(tool.toolId)?.contract;
     const maxResultChars = byId.get(tool.toolId)?.maxResultChars;
-    const { outputAllowedFields, outputDeniedFields, outputDefaultFields, outputEntities, inputEntities } = byId.get(tool.toolId) ?? {};
+    const {
+      outputAllowedFields, outputDeniedFields, outputDefaultFields, outputEntities, inputEntities,
+      entityLookup, approvalSubject, lookupEffect,
+    } = byId.get(tool.toolId) ?? {};
     if (
       !contract ||
       contract.runtime.input.kind !== "json" ||
@@ -465,6 +468,9 @@ function materialize(
           ...(outputDefaultFields ? { outputDefaultFields } : {}),
           ...(outputEntities ? { outputEntities } : {}),
           ...(inputEntities ? { inputEntities } : {}),
+          ...(entityLookup ? { entityLookup } : {}),
+          ...(approvalSubject !== undefined ? { approvalSubject } : {}),
+          ...(lookupEffect ? { lookupEffect } : {}),
         }),
       };
     }

@@ -50,6 +50,15 @@ export interface AiSdkToolHooks {
   afterToolCall?: (call: AiSdkToolSuccess) => void | Promise<void>;
   onToolError?: (call: AiSdkToolFailure) => void | Promise<void>;
   resolveApproval?: (call: AiSdkToolCall) => boolean | Promise<boolean>;
+  /**
+   * Runs after the decision that a call needs approval (the tool's own or
+   * `resolveApproval`) and before the approval request is sent: the server
+   * looks up the records the call names. `{ deny }` refuses the call without
+   * an approval request: the call does not run, the model gets the error as
+   * the tool's result (with a guard counted like any denied call: one call,
+   * one error). Only called for a call with a tool call id.
+   */
+  resolveApprovalSubjects?: (call: AiSdkToolCall & { toolCallId: string }) => Promise<{ deny: Error } | undefined>;
   toolTimeoutMs?: number;
 }
 
@@ -172,7 +181,8 @@ export function createAiSdkTools(
     const baseNeedsApproval = options.resolveApproval
       ? (input: unknown) => options.resolveApproval!({ toolName, input })
       : source.needsApproval;
-    const decide = typeof baseNeedsApproval === 'function'
+    const resolveSubjects = options.resolveApprovalSubjects;
+    const decide = typeof baseNeedsApproval === 'function' || (resolveSubjects && baseNeedsApproval === true)
       ? async (rawInput: unknown, approvalOptions?: unknown): Promise<boolean> => {
         let input: unknown;
         try {
@@ -182,7 +192,20 @@ export function createAiSdkTools(
           return true;
         }
         try {
-          return Boolean(await (baseNeedsApproval as (value: unknown, extra?: unknown) => unknown)(input, approvalOptions));
+          const needed = typeof baseNeedsApproval === 'function'
+            ? Boolean(await (baseNeedsApproval as (value: unknown, extra?: unknown) => unknown)(input, approvalOptions))
+            : true;
+          if (!needed || !resolveSubjects) return needed;
+          const toolCallId = (approvalOptions as { toolCallId?: unknown } | undefined)?.toolCallId;
+          // Without a call id there is no request to hold subjects for, and no denial to hold.
+          if (typeof toolCallId !== 'string') return needed;
+          const outcome = await resolveSubjects({ toolName, toolCallId, input });
+          if (outcome) {
+            // Refused without an approval request: `execute` throws it (the gate lets the call through to it).
+            deniedCalls.set(toolCallId, outcome.deny);
+            return false;
+          }
+          return needed;
         } catch (error) {
           // A call this principal may not make never asks for approval: it
           // goes on to `execute`, which refuses it, and the model receives

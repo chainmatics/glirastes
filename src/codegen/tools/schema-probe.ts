@@ -16,6 +16,7 @@ import {
 import { isValidMaxResultChars } from '../../runtime/result-limit.js';
 import { normalizeOutputFields } from '../../server/core/output-fields.js';
 import { sha256Digest, sortKeysDeep } from './canonical.js';
+import { CODE_FIELD_NAMES, FAIL_CLOSED_SUBJECT, readApprovalDeclarations, type ApprovalDeclarations } from './approval-subject-declarations.js';
 import { readDeclaredTexts, type DeclaredTextField, type DeclaredTexts } from './declared-texts.js';
 import { LocalizedPresentationSchema, type LocalizedPresentation } from './semantics.js';
 import type { JsonSchemaLike } from './types.js';
@@ -86,6 +87,13 @@ export interface ProbedContractEntry {
   outputEntities?: OutputEntityDeclaration[];
   inputEntities?: InputEntityRef[];
   /**
+   * `entityLookup`, `approvalSubject` and `lookupEffect` of the entry: the
+   * valid ones, and the issues of the others in words without their values
+   * (reported by the pipeline as `approval-subject-invalid`, which never
+   * disables the tool). Not part of `moduleDigest`.
+   */
+  approval?: ApprovalDeclarations & { issues?: string[] };
+  /**
    * Set only when the entry declares an `effect` outside the known set, a
    * `presentation` that fails its schema, a `maxResultChars` out of range or
    * an output field list that is not a list of valid field paths;
@@ -154,6 +162,9 @@ const WireEntry = z.object({
   outputDefaultFields: z.union([z.array(z.string()), z.literal('invalid')]).nullable().optional(),
   outputEntities: z.union([z.array(z.unknown()), z.literal('invalid')]).nullable().optional(),
   inputEntities: z.union([z.array(z.unknown()), z.literal('invalid')]).nullable().optional(),
+  entityLookup: z.union([z.object({ value: z.unknown() }).strict(), z.literal('invalid')]).nullable().optional(),
+  approvalSubject: z.union([z.object({ value: z.unknown() }).strict(), z.literal('invalid')]).nullable().optional(),
+  lookupEffect: z.union([z.object({ value: z.unknown() }).strict(), z.literal('invalid')]).nullable().optional(),
 });
 const WireFailure = z.object({
   ok: z.literal(false),
@@ -264,6 +275,24 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
   }
   // Field paths are written to tool-contracts.json: a secret-looking one rejects the entry like any metadata.
   if (carriesSecret(outputFields) || carriesSecret(entities)) return CONTENT_REJECTED;
+  // Approval subjects: only valid declarations go on (a secret-looking one is an issue), never an invalid value.
+  const approvalIssues: string[] = [];
+  const approvalRaw: Record<string, unknown> = {};
+  for (const name of ['entityLookup', 'approvalSubject', 'lookupEffect'] as const) {
+    const declared = wire[name] ?? null;
+    if (declared === null) continue;
+    if (declared === 'invalid') approvalIssues.push(`${name} that is not a JSON value of at most 64 KiB`);
+    else approvalRaw[name] = declared.value;
+  }
+  const approvalRead = readApprovalDeclarations(approvalRaw, CODE_FIELD_NAMES);
+  approvalIssues.push(...approvalRead.issues);
+  // An approvalSubject the probe could not carry (a function, a cycle, too large) is never dropped: it fails closed.
+  if (wire.approvalSubject === 'invalid') {
+    (approvalRead.declarations as { approvalSubject?: unknown }).approvalSubject = FAIL_CLOSED_SUBJECT;
+  }
+  const approval = Object.keys(approvalRead.declarations).length > 0 || approvalIssues.length > 0
+    ? { ...approvalRead.declarations, ...(approvalIssues.length > 0 ? { issues: approvalIssues } : {}) }
+    : undefined;
   return {
     ok: true,
     kind: 'contract-entry',
@@ -275,6 +304,7 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
     ...(presentations?.success && !carriesSecret(presentations.data) ? { presentations: presentations.data } : {}),
     ...(Object.keys(texts.hints).length > 0 ? { texts: texts.hints } : {}),
     ...entities,
+    ...(approval ? { approval } : {}),
     ...(invalidFields.length > 0 ? { invalidFields } : {}),
     moduleDigest: sha256Digest(JSON.stringify(sortKeysDeep({
       input: input.digest,

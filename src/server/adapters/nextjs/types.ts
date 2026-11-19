@@ -16,6 +16,7 @@ import type {
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import type { ApprovalStore } from './approval-binding.js';
+import type { ApprovalSubjectLimits } from './approval-subject-lookup.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions, ModelInputBreakdown } from './prepare-model-messages.js';
 import type { ChatMemoryConfig } from './chat-memory.js';
@@ -749,6 +750,20 @@ export interface AiChatHandlerConfig {
    * approval to its user.
    */
   approvalScope?: (request: Request) => string | Promise<string>;
+
+  /**
+   * Local limits of the server lookups behind approval cards
+   * (docs/approval-subjects.md): `maxLookupsPerTurn` (32),
+   * `maxSubjectsPerCall` (4, a preview included), `lookupTimeoutMs` (3000,
+   * at most the managed tool timeout), `maxLookupTimePerTurnMs` (10 000).
+   * They apply only to tools with a declaration (`entityLookup` on a read
+   * tool, `inputEntities` or `approvalSubject` on the write tool); lookups
+   * never count against the signed `maxToolCalls`, which means calls made
+   * by the model. `false` turns the lookups off: every card then names
+   * records from the chat history, as without a declaration. A custom
+   * `streamHandler` gets no lookups either.
+   */
+  approvalSubjects?: Partial<ApprovalSubjectLimits> | false;
 
   /**
    * Origins, besides the request's own, whose pages may post to the handler
