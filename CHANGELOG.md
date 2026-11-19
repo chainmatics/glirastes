@@ -14,9 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `glirastes upgrade report | ack`: lists what changed between the SDK version your app last reviewed and the installed one; `ack` records the review, and `ack --defer <id>` keeps a note listed.
 - Chat: `createLocalSessionStore` takes `maxMessagesPerSession` (default unlimited) to keep only the newest messages per chat, starting at a user message.
 - Next.js handler: `temperature: null` sends no `temperature` to the model, including memory summary calls, for models that reject it (reasoning models).
-- Next.js handler: the fixed stream failure texts follow the chat language (German `KI-Anfrage fehlgeschlagen`), with a `streamErrorTexts` override.
 - Chat: `headers` and `voice.getToken` may be async functions, so a short-lived token or ticket can be fetched per request without casts.
-- Voice: `DeepgramSttAdapter` takes `workletUrl` and the audio worklet path is exported as `DEFAULT_AUDIO_WORKLET_URL` (default `/audio-worklet-processor.js`, unchanged); the speech worklet section of the chat skill's references shows how to copy the file.
+- Voice: `DeepgramSttAdapter` and `RecordedSttAdapter` take `workletUrl` (set it on the chat as `voice.workletUrl`) and the audio worklet path is exported as `DEFAULT_AUDIO_WORKLET_URL` (default `/audio-worklet-processor.js`, unchanged); the speech worklet section of the chat skill's references shows how to copy the file.
 - Chat Markdown: lists show bullets and numbers by default; `AiChatProvider` takes `markdown={{ remarkPlugins }}` so the host can enable GFM tables with `remark-gfm`.
 - The package ships upgrade notes, and the report reads them. The baseline of what an app has reviewed lives in `.glirastes/sdk-baseline.json`.
 - `glirastes tools refresh` prints a short upgrade hint; `GLIRASTES_UPGRADE_HINT=0` turns it off. `GLIRASTES_SKILLS_AUTO_UPDATE=0` keeps `glirastes tools refresh` and `glirastes tools check` away from the installed skills.
@@ -31,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Visible change for German chats whose activity wording is the built-in German one: the failure texts listed under Added are German instead of English, e.g. "Endpoint failed (503)" → "Endpunkt fehlgeschlagen (503)", "The note could not be saved." → "Die Notiz konnte nicht gespeichert werden.", "You are not permitted to use this tool." → "Du darfst dieses Tool nicht verwenden." (the server texts only where the detail is shown: displayed results or `details: 'all'`). Such a chat is German when the app states `language: 'de'`, else when the page `lang` is German, else (no `language`, no page `lang`) when the server's tool labels are German (`languageSource: 'server'` puts the tool labels before the page). An app whose own `locale` or `locales` table words the activity log itself (any other `activity…` key with a text that is not the built-in German one) keeps the English failure texts unless it states `language`, sets the `activityFailure…` keys or spreads `deChatLocale`. English chats see no change. A language without a built-in table (an app's own `locales.pl`) keeps the English texts unless it sets the new keys.
+- Next.js handler: the fixed stream failure texts follow the chat language (German `KI-Anfrage fehlgeschlagen`), with a `streamErrorTexts` override. Permission and budget denials, the unavailable-tool text and approval-subject refusals stay English.
 
 ### Removed
 

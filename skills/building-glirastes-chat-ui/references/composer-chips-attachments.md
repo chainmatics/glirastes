@@ -47,6 +47,7 @@ for a "Chat about this" menu entry or an AI button in a detail view:
 - A composer on `useChatComposerInput` receives the requests by itself. Any
   other own composer on `RichMentionInput` connects with
   `useChatComposerTarget(inputRef, { onChange })`.
+- `useChatComposerInput({ initialValue })` (and `MentionInput`'s `initialValue`) applies on mount only; a draft that arrives later goes through `setText`.
 - Do not confuse `useChatComposer()` (this programmatic API) with
   `useChatComposerInput()` (the logic for a custom input). In the
   `0.8.0-chat.*` prereleases the latter was called `useChatComposer(options)`;

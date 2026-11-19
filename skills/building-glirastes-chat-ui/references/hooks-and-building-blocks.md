@@ -391,6 +391,12 @@ serve it at that path. Copy it into `public/` on dev and build:
 }
 ```
 
+Cross-platform alternative (also works on Windows; `public/` must exist):
+
+```json
+"predev": "node -e \"require('fs').copyFileSync('node_modules/glirastes/dist/react/audio-worklet-processor.js','public/audio-worklet-processor.js')\""
+```
+
 Merge these two entries with the existing `predev` and `prebuild` scripts
 rather than replacing them.
 

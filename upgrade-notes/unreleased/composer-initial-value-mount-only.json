@@ -6,10 +6,8 @@
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
     "symbols": [
-      "useChatComposerInput"
-    ],
-    "patterns": [
-      "\\binitialValue\\b"
+      "useChatComposerInput",
+      "MentionInput"
     ]
   }
 }

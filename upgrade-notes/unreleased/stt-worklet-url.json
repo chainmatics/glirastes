@@ -5,12 +5,12 @@
   "howTo": "Add predev and prebuild scripts that copy node_modules/glirastes/dist/react/audio-worklet-processor.js into public/, merged with your existing scripts (see the speech worklet section of the building-glirastes-chat-ui references). If the file is served elsewhere, set voice.workletUrl on the chat, or pass workletUrl to the speech adapter.",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
-    "imports": [
-      "glirastes/react"
-    ],
     "symbols": [
       "DeepgramSttAdapter",
-      "RecordedSttAdapter"
+      "RecordedSttAdapter",
+      "VoiceInputButton",
+      "useDeepgramTranscription",
+      "voice"
     ]
   },
   "surface": [

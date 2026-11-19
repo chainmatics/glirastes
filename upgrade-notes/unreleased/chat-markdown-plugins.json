@@ -1,11 +1,13 @@
 {
   "id": "chat-markdown-plugins",
-  "kind": "optional",
+  "kind": "recommended",
   "summary": "Chat Markdown lists now show bullets and numbers by default. GFM tables render when you pass remark plugins through the new AiChatProvider `markdown` prop.",
-  "howTo": "Run `bun add remark-gfm`, then pass `markdown={{ remarkPlugins: [remarkGfm] }}` (memoized) to AiChatProvider.",
+  "howTo": "Run `bun add remark-gfm`, then pass `markdown={{ remarkPlugins: [remarkGfm] }}` (memoized) to AiChatProvider. Lists now get markers by default, so remove your own list or table CSS workarounds (for example `list-style` overrides) unless you want a different look.",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
-    "imports": ["glirastes/react"]
+    "imports": [
+      "glirastes/react"
+    ]
   },
   "surface": [
     "glirastes/embed#GlirastesChatElementConfig.markdown",
