@@ -113,13 +113,15 @@ describe('entity links with declarations (D1–D4)', () => {
     expect(collectKnownEntities(conversation as never, [])).toEqual([]);
   });
 
-  it('D2: two records with one name link the first by default, stay text with ambiguousNames: text, or ask the hook', () => {
+  it("D2: two records with one name stay text by default, link the first with ambiguousNames: 'first', or ask the hook", () => {
     const known = [{ type: 'album', id: '1', label: 'Lobby Loop' }, { type: 'album', id: '2', label: 'Lobby Loop' }];
-    expect(splitEntityText('Lobby Loop', { known })[0]).toMatchObject({ kind: 'entity', reference: { id: '1' } });
+    expect(splitEntityText('Lobby Loop', { known })).toEqual([{ kind: 'text', text: 'Lobby Loop' }]);
     expect(splitEntityText('Lobby Loop', { known, ambiguousNames: 'text' })).toEqual([{ kind: 'text', text: 'Lobby Loop' }]);
+    expect(splitEntityText('Lobby Loop', { known, ambiguousNames: 'first' })[0]).toMatchObject({ kind: 'entity', reference: { id: '1' } });
     expect(splitEntityText('Lobby Loop', { known, resolveAmbiguous: (_label, candidates) => candidates[1] })[0])
       .toMatchObject({ kind: 'entity', reference: { id: '2' } });
     // The same record twice is no ambiguity.
+    expect(splitEntityText('Lobby Loop', { known: [known[0]!, known[0]!] })[0]).toMatchObject({ kind: 'entity' });
     expect(splitEntityText('Lobby Loop', { known: [known[0]!, known[0]!], ambiguousNames: 'text' })[0]).toMatchObject({ kind: 'entity' });
   });
 });
