@@ -83,3 +83,90 @@ export function markUiActionInitiated(action: UiAction): void {
 export function wasUiActionInitiated(action: UiAction): boolean {
   return initiatedActions().has(action);
 }
+
+const BEFORE_LOAD_KEY = Symbol.for('glirastes.beforeUiActionPageLoad');
+
+/**
+ * Longest a bridge waits for the chat before it loads the next page: the end
+ * of the running step (at most the 10 s outcome timeout) plus 500 ms to save.
+ */
+export const BEFORE_PAGE_LOAD_TIMEOUT_MS = 10_500;
+
+/** Returning `false` cancels the page load: the chat that asked for it was reset meanwhile. */
+type BeforePageLoad = (action: UiAction) => void | boolean | Promise<void | boolean>;
+
+function beforePageLoadListeners(): Set<BeforePageLoad> {
+  const scope = globalThis as Record<symbol, unknown>;
+  const existing = scope[BEFORE_LOAD_KEY];
+  if (existing instanceof Set) return existing as Set<BeforePageLoad>;
+  const created = new Set<BeforePageLoad>();
+  scope[BEFORE_LOAD_KEY] = created;
+  return created;
+}
+
+/**
+ * Called before a reloading bridge (`reloads`) loads the next page for an
+ * action, so the chat can write and save the action's outcome while the
+ * page still runs. Shared by every SDK copy on the page. @internal
+ */
+export function onBeforeUiActionPageLoad(listener: BeforePageLoad): () => void {
+  const listeners = beforePageLoadListeners();
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+const PAGE_LOAD_RESULT_KEY = Symbol.for('glirastes.uiActionPageLoadResult');
+
+/** What became of a page load a reloading bridge prepared: started, refused (`push` returned `false`) or failed (threw). */
+export type UiActionPageLoadResult = 'started' | 'refused' | 'failed';
+
+type PageLoadResultListener = (action: UiAction, result: UiActionPageLoadResult) => void;
+
+function pageLoadResultListeners(): Set<PageLoadResultListener> {
+  const scope = globalThis as Record<symbol, unknown>;
+  const existing = scope[PAGE_LOAD_RESULT_KEY];
+  if (existing instanceof Set) return existing as Set<PageLoadResultListener>;
+  const created = new Set<PageLoadResultListener>();
+  scope[PAGE_LOAD_RESULT_KEY] = created;
+  return created;
+}
+
+/** Called once a reloading bridge called `push` for a prepared page load. @internal */
+export function onUiActionPageLoadResult(listener: PageLoadResultListener): () => void {
+  const listeners = pageLoadResultListeners();
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** @internal */
+export function uiActionPageLoadResult(action: UiAction, result: UiActionPageLoadResult): void {
+  for (const listener of [...pageLoadResultListeners()]) {
+    try {
+      listener(action, result);
+    } catch {
+      // A listener's failure does not stop the navigation.
+    }
+  }
+}
+
+/** Runs the listeners, at most `BEFORE_PAGE_LOAD_TIMEOUT_MS`; a listener that throws is skipped. @internal */
+export async function beforeUiActionPageLoad(action: UiAction): Promise<boolean> {
+  const listeners = [...beforePageLoadListeners()];
+  if (listeners.length === 0) return true;
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => { timer = setTimeout(resolve, BEFORE_PAGE_LOAD_TIMEOUT_MS); });
+  const all = Promise.all(listeners.map(async (listener) => {
+    try {
+      if (await listener(action) === false) cancelled = true;
+    } catch {
+      // Saving is best effort; the page load goes on.
+    }
+  }));
+  try {
+    await Promise.race([all, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+  return !cancelled;
+}

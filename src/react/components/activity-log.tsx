@@ -1,6 +1,6 @@
 import { useState, type SyntheticEvent } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
-import type { TurnNoticeProps, TurnNoticeStatus } from '../types.js';
+import type { ChatLocale, TurnNoticeProps, TurnNoticeStatus } from '../types.js';
 import type { ActivityStep, ActivityStepStatus } from '../utils/activity.js';
 import { StatusIcon, type StatusIconKind } from './status-icon.js';
 
@@ -29,6 +29,20 @@ export function TurnNotice({ text, status, placement }: TurnNoticeProps) {
   return <p data-component="turn-notice" data-status={status}>{text}</p>;
 }
 
+/** The locale text of a UI action's reported outcome, if any. */
+function uiOutcomeText(step: ActivityStep, locale: ChatLocale): string | undefined {
+  switch (step.uiOutcome) {
+    case 'pending': return locale.activityUiPendingLabel;
+    case 'rejected-contract': return locale.activityUiRejectedContract;
+    case 'rejected-handler': return locale.activityUiRejectedHandler;
+    case 'unavailable': return locale.activityUiUnavailable;
+    case 'failed': return locale.activityUiFailed;
+    case 'initiated': return locale.activityUiInitiated;
+    case 'unconfirmed': return locale.activityUiUnconfirmed;
+    default: return undefined;
+  }
+}
+
 const STEP_ICONS: Record<ActivityStepStatus, StatusIconKind> = {
   done: 'check',
   error: 'error',
@@ -53,6 +67,7 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
       && last.step.declinedBy === step.declinedBy
       && !last.step.detail
       && !step.detail
+      && last.step.uiOutcome === step.uiOutcome
     ) {
       last.count += 1;
     } else {
@@ -69,8 +84,12 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
  *
  * Keeps styling neutral via `data-*` attributes.
  */
-export function ActivityLog({ steps, active, notice, noticeStatus, className }: ActivityLogProps) {
+export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, className }: ActivityLogProps) {
   const { locale, toolLabels, components, activityLog } = useChatContext();
+  // A UI action still waiting once its turn ended was never confirmed.
+  const steps = active ? allSteps : allSteps.map((step) => (step.uiOutcome === 'pending'
+    ? { ...step, status: 'done' as const, uiOutcome: 'unconfirmed' as const }
+    : step));
   // The user's own toggle wins over expandWhileRunning; null until the user toggles.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   if (steps.length === 0) return null;
@@ -143,7 +162,9 @@ export function ActivityLog({ steps, active, notice, noticeStatus, className }: 
             {count > 1 && (
               <span data-element="count">{fillLocaleText(locale.activityStepCountLabel ?? '×{count}', { count })}</span>
             )}
-            {step.detail && <span data-element="detail">{step.detail}</span>}
+            {(step.detail ?? uiOutcomeText(step, locale)) && (
+              <span data-element="detail">{step.detail ?? uiOutcomeText(step, locale)}</span>
+            )}
           </li>
         ))}
       </ol>

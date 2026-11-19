@@ -9,7 +9,13 @@ where the SDK only fits the pilot's shapes.
   the previous release's record.
 - The model-free part runs in CI (job "Reference app Vue+FastAPI"):
   `tests/second-acceptance-vue-fastapi.test.ts`, and for the three UI
-  languages `tests/second-acceptance-vue-fastapi-languages.test.ts`.
+  languages `tests/second-acceptance-vue-fastapi-languages.test.ts`; for the
+  outcome protocol of UI actions `tests/second-acceptance-vue-fastapi-ui-outcomes.test.ts`
+  (marker, continuation texts, fallback without the flag) and
+  `tests/second-acceptance-vue-fastapi-ui-outcomes-reload.test.tsx` (an app
+  without client routing: `registerDocumentNavigation()`, saved `initiated`,
+  one continuation on the new page). The Next reference app has the same in
+  `tests/ui-outcomes-next.test.ts`.
 - SDK findings are reported, not silently fixed. Each known gap is a test titled
   `KNOWN GAP SA-nn` that asserts today's behaviour; a fix makes it fail visibly,
   then the test changes to the fixed behaviour and the gap leaves the list below.

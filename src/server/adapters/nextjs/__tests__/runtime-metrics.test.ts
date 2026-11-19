@@ -101,6 +101,7 @@ function collectingSink(record?: (event: TechnicalRuntimeEventV2) => void) {
         rejections.push(event);
         return;
       }
+      if (event.eventType !== 'turn.finished') return;
       events.push(event);
       record?.(event);
     },

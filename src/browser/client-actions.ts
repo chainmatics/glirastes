@@ -132,7 +132,8 @@ async function dispatchRoutedAction(
 }
 
 /**
- * Hands the UI actions of a successful tool result to the bus. Only actions
+ * Hands the UI actions of a handed-off (`handedOff: true`) or successful
+ * tool result to the bus. Only actions
  * of generated Glirastes tools (`glirastes.*`) are dispatched; app-specific
  * uiActions stay with the app's own result handler. A client action with a
  * `route` whose handler is not registered opens that route first and runs
@@ -143,7 +144,7 @@ export async function dispatchToolResultUiActions(
   bus: UiActionBus = getDefaultUiActionBus(),
   options: DispatchToolResultOptions = {},
 ): Promise<number> {
-  if (!isRecord(result) || result.success !== true) return 0;
+  if (!handsOffUiActions(result)) return 0;
   const actions = Array.isArray(result.uiAction) ? result.uiAction : [result.uiAction];
   let dispatched = 0;
   for (const action of actions) {
@@ -194,12 +195,26 @@ export interface RunToolResultUiActionsOptions extends DispatchToolResultOptions
   signal?: AbortSignal;
 }
 
-/** The Glirastes UI actions (`glirastes.*`) of a successful tool result, in order. */
+/**
+ * Whether a tool result handed its UI actions to the browser: the hand-off
+ * shape (`handedOff: true`, from 0.18) or a successful result (`success: true`).
+ */
+export function handsOffUiActions(result: unknown): result is Record<string, unknown> {
+  return isRecord(result) && (result.handedOff === true || result.success === true);
+}
+
+/**
+ * The UI actions the chat runs for a tool result, in order: its Glirastes
+ * actions (`glirastes.*`), and every action of a result the server marked for
+ * the outcome protocol (`awaitsOutcome`), which a UI tool that opted in
+ * (`defineUiTool({ outcome: 'confirm' })`) has for its own action types.
+ */
 export function toolResultUiActions(result: unknown): UiAction[] {
-  if (!isRecord(result) || result.success !== true) return [];
+  if (!handsOffUiActions(result)) return [];
+  const all = typeof result.awaitsOutcome === 'boolean';
   const actions = Array.isArray(result.uiAction) ? result.uiAction : [result.uiAction];
   return actions.filter((action): action is UiAction => (
-    isRecord(action) && typeof action.type === 'string' && action.type.startsWith('glirastes.')
+    isRecord(action) && typeof action.type === 'string' && (all || action.type.startsWith('glirastes.'))
   ));
 }
 

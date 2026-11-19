@@ -300,3 +300,17 @@ describe('tool_contract_rejected in the turn recorder', () => {
     expect(sink.record).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('a request that continues a turn', () => {
+  it.each(['approval', 'ui-outcome'] as const)('reports %s as turn.continued instead of turn.finished', (continuation) => {
+    const { sink, events } = fakeSink();
+    const recorder = createTurnMetricsRecorder({ sink, snapshot, startedAtMs: 0, now: () => 10, continuation });
+    recorder.recordStep({
+      model: 'anthropic/claude-sonnet-5.5', inputTokens: 5, outputTokens: 2, cost: UNKNOWN_TURN_COST,
+      toolNames: [], failedToolNames: [],
+    });
+    const event = recorder.finish({ status: 'completed', errorCode: null });
+    expect(events).toEqual([event]);
+    expect(event).toMatchObject({ eventType: 'turn.continued', continuation, inputTokens: 5, outputTokens: 2 });
+  });
+});

@@ -122,6 +122,8 @@ export const RuntimeConfigSchema = z
         locales: z
           .record(languageTag, z.record(z.string().max(100), z.string().min(1).max(1_000)))
           .optional(),
+        // Outcome protocol of UI actions (createAiChatHandler uiActionOutcomes); `confirm` when absent.
+        uiActionOutcomes: z.enum(["confirm", "report-only", "off"]).optional(),
       })
       .strict()
       .optional(),

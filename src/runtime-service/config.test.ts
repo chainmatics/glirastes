@@ -75,6 +75,14 @@ describe("runtime service trust configuration", () => {
       expect(() => parseRuntimeConfig({ ...raw(), chat: wrong })).toThrow();
     }
   });
+  it("accepts the outcome protocol mode of UI actions and nothing else", () => {
+    for (const uiActionOutcomes of ["confirm", "report-only", "off"]) {
+      expect(parseRuntimeConfig({ ...raw(), chat: { uiActionOutcomes } }).chat).toEqual({ uiActionOutcomes });
+    }
+    for (const wrong of ["always", true, { confirm: true }]) {
+      expect(() => parseRuntimeConfig({ ...raw(), chat: { uiActionOutcomes: wrong } })).toThrow();
+    }
+  });
   it("reads the turn language from the configured header", () => {
     const request = (headers: Record<string, string>) => new Request("https://app.test/glirastes/chat", { headers });
     expect(requestLocaleOf(request({ "accept-language": "pl-PL,pl;q=0.9,en;q=0.8" }), "accept-language")).toBe("pl-PL");

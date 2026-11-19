@@ -151,6 +151,7 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
           maxOutputTokens: config.limits.maxOutputTokens,
           ...(config.chat?.locale ? { locale: config.chat.locale } : {}),
           ...(config.chat?.locales ? { locales: config.chat.locales } : {}),
+          ...(config.chat?.uiActionOutcomes ? { uiActionOutcomes: config.chat.uiActionOutcomes } : {}),
           ...(config.chat?.requestLocaleHeader
             ? { requestLocale: (req: Request) => requestLocaleOf(req, config.chat!.requestLocaleHeader!) }
             : {}),

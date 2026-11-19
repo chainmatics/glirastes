@@ -50,6 +50,10 @@ function stringParams(value: unknown): Record<string, string> | undefined {
  * text tells the model it was handed over, not that it happened.
  */
 export function uiActionToolToTool(definition: GeneratedUiToolDefinition): Tool {
+  return { ...generatedUiTool(definition), uiTool: {} };
+}
+
+function generatedUiTool(definition: GeneratedUiToolDefinition): Tool {
   return defineTool({
     id: definition.id,
     description: definition.description,

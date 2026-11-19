@@ -17,8 +17,9 @@ function extractUiAction(result: Record<string, unknown>): unknown {
   return undefined;
 }
 
+/** A successful result, or a UI tool result that handed its action to the app (`handedOff`, from 0.18). */
 function hasSuccessfulResult(result: Record<string, unknown>): boolean {
-  if (result.success === true) return true;
+  if (result.success === true || result.handedOff === true) return true;
   return isRecord(result.data) && result.data.success === true;
 }
 

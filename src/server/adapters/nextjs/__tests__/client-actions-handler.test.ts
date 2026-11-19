@@ -66,12 +66,12 @@ describe('client actions the page reports with the request', () => {
     await expect(toolOutput({ glirastesClientActions: ['task-details.open'] })).resolves.toMatchObject({ success: false });
   });
 
-  it('runs a client action the open page handles', async () => {
-    await expect(toolOutput({ glirastesClientActions: ['task-delete-dialog.open'] })).resolves.toMatchObject({ success: true });
+  it('hands a client action the open page handles to the browser', async () => {
+    await expect(toolOutput({ glirastesClientActions: ['task-delete-dialog.open'] })).resolves.toMatchObject({ handedOff: true });
   });
 
   it('ignores a malformed report and keeps the previous behavior', async () => {
-    await expect(toolOutput({ glirastesClientActions: 'task-details.open' })).resolves.toMatchObject({ success: true });
-    await expect(toolOutput({})).resolves.toMatchObject({ success: true });
+    await expect(toolOutput({ glirastesClientActions: 'task-details.open' })).resolves.toMatchObject({ handedOff: true });
+    await expect(toolOutput({})).resolves.toMatchObject({ handedOff: true });
   });
 });

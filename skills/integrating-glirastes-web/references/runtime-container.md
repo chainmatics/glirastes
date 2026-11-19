@@ -178,6 +178,11 @@ fall back per key, an unknown key fails at start). With `languages` in
 (local, never sent to the Platform), and the approval card and step display
 show them in the turn's language.
 
+`chat.uiActionOutcomes` (`confirm` default, `report-only`, `off`) is the UI
+action outcome protocol: with `confirm` a turn with a UI action takes two
+POSTs (up to four with retries, so up to four times the per-request budgets);
+a strict proxy in front must allow the body field `glirastesUiOutcomes`.
+
 For bearer authentication use `"credential": {"type":"bearer"}`. For existing
 backend CSRF middleware set `identity.csrfHeader` to `x-csrf-token` or
 `x-xsrf-token` and send that header from the chat UI. Do not disable CSRF checks.

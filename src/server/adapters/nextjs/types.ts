@@ -22,6 +22,8 @@ import type { HistoryOptions, ModelInputBreakdown } from './prepare-model-messag
 import type { ChatMemoryConfig } from './chat-memory.js';
 import type { BudgetStopTexts } from './budget-stop-notice.js';
 import type { ChatServerLocales } from './chat-texts.js';
+import type { UiActionOutcomesOption } from './ui-outcomes.js';
+import type { UiToolResultShape } from '../../core/index.js';
 import type { ToolTextsMap } from '../../../runtime/tool-texts.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ResultHandleLimits, ToolFailureClassifier } from '../../core/index.js';
 import type {
@@ -431,6 +433,27 @@ export interface AiChatHandlerConfig {
    */
   hideIds?: boolean;
   /**
+   * Outcome protocol of UI actions, for requests whose client reports
+   * outcomes (`glirastesUiOutcomes: 1` in the body; the bundled React
+   * provider and `<glirastes-chat>` send it). `'confirm'` (default): a UI
+   * tool result that hands a `glirastes.*` action to the browser carries
+   * `awaitsOutcome: true`, the request ends after that step, the browser
+   * writes `outcome` into the result and sends the history again, and the
+   * model answers with a fixed text per outcome (one more request, at most
+   * three per turn). `'report-only'`: `awaitsOutcome: false`, the model
+   * answers in the same request and reads the outcome in the next turn.
+   * `'off'`: no marker. A function decides per tool name. A client without
+   * the flag, and a custom `streamHandler`, always get no marker.
+   */
+  uiActionOutcomes?: UiActionOutcomesOption;
+  /**
+   * Shape of a UI tool result that hands a `uiAction` to the browser:
+   * `'handoff'` (default) `{ handedOff: true, message, uiAction }` without
+   * `success`, because the server does not know whether the app carried it
+   * out; `'legacy'` `{ success: true, message, uiAction }` as up to 0.17.
+   */
+  uiToolResultShape?: UiToolResultShape;
+  /**
    * Number of recent user/assistant text pairs to include as conversation
    * history for intent classification. Helps the classifier understand
    * follow-up messages. Defaults to 4.
@@ -567,6 +590,15 @@ export interface AiChatHandlerConfig {
      * classified as expected. Local only; never sent to the Platform.
      */
     expectedToolFailureCount: number;
+    /**
+     * Set when this request continued a turn instead of starting one:
+     * answered approvals (`'approval'`) or reported UI outcomes
+     * (`'ui-outcome'`). `onFinish` fires once per request, so count turns
+     * by the requests without it.
+     */
+    continuation?: 'approval' | 'ui-outcome';
+    /** Set when the request ended to wait for the outcome of a UI action; a continuation follows. */
+    awaitingUiOutcome?: true;
   }) => void;
 
   /**
