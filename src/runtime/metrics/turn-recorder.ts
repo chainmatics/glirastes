@@ -5,7 +5,10 @@ import {
   RUNTIME_METRIC_MAX_TOOLS,
   TechnicalRuntimeEventV2Schema,
   ToolContractRejectedEventSchema,
+  TurnContinuedEventSchema,
   type RuntimeMetricEvent,
+  type TurnContinuation,
+  type TurnContinuedEvent,
   type RuntimeTurnCost,
   type RuntimeTurnErrorCode,
   type RuntimeTurnStatus,
@@ -64,7 +67,7 @@ export interface TurnMetricsRecorder {
    * Builds the turn's event and hands it to the sink exactly once. Returns
    * the event, or undefined when the turn was already finished. Never throws.
    */
-  finish(outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | undefined;
+  finish(outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | TurnContinuedEvent | undefined;
   /**
    * An endpoint refused a call its tool schema accepted (spec 4.7). Hands a
    * content-free `tool_contract_rejected` event to the sink right away and
@@ -80,6 +83,11 @@ export interface TurnMetricsRecorderOptions {
   snapshot?: TurnSnapshot;
   /** Turn start (request start), in the clock of `now`. */
   startedAtMs: number;
+  /**
+   * Set when the request continues a turn (no new user message): the
+   * request is reported as `turn.continued` instead of `turn.finished`.
+   */
+  continuation?: TurnContinuation;
   now?: () => number;
   createEventId?: () => string;
 }
@@ -139,17 +147,16 @@ export function createTurnMetricsRecorder(
     .slice(0, RUNTIME_METRIC_MAX_TOOLS)
     .sort((left, right) => left.toolId.localeCompare(right.toolId));
 
-  const build = (outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | undefined => {
+  const build = (outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | TurnContinuedEvent | undefined => {
     const endedAtMs = now();
     const totalMs = bounded(endedAtMs - options.startedAtMs, MAX_DURATION_MS);
     const firstTokenMs = firstChunkAtMs === undefined
       ? null
       : Math.min(totalMs, bounded(firstChunkAtMs - options.startedAtMs, MAX_DURATION_MS));
     const calls = Math.min(MAX_CALLS, toolCallCount);
-    const parsed = TechnicalRuntimeEventV2Schema.safeParse({
+    const fields = {
       schemaVersion: 2,
       eventId: createEventId(),
-      eventType: 'turn.finished',
       occurredAt: new Date(endedAtMs).toISOString(),
       appId: options.sink.identity.appId,
       environmentId: options.sink.identity.environmentId,
@@ -166,7 +173,10 @@ export function createTurnMetricsRecorder(
       toolCallCount: calls,
       toolErrorCount: Math.min(calls, toolErrorCount),
       tools: listedTools(),
-    });
+    };
+    const parsed = options.continuation
+      ? TurnContinuedEventSchema.safeParse({ ...fields, eventType: 'turn.continued', continuation: options.continuation })
+      : TechnicalRuntimeEventV2Schema.safeParse({ ...fields, eventType: 'turn.finished' });
     return parsed.success ? parsed.data : undefined;
   };
 

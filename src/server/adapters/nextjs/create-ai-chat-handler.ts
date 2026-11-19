@@ -142,6 +142,19 @@ import {
   type HybridToolDiscovery,
 } from './tool-discovery.js';
 import { defaultIntentRouterFor, previousTurnScope } from './default-intent-routing.js';
+import {
+  assertUiActionOutcomesOption,
+  currentTurnToolNames,
+  readUiOutcomesFlag,
+  stepAwaitsUiOutcome,
+  turnContinuationOf,
+  uiOutcomeCapReached,
+  uiOutcomeModeOf,
+  withUiOutcomeMarkers,
+  type UiOutcomePlan,
+} from './ui-outcomes.js';
+import { UI_OUTCOME_SYSTEM_NOTE } from '../../../contracts/ui-outcome.js';
+import type { TurnContinuation } from '../../../contracts/events.js';
 
 /**
  * Callback that the consumer provides to stream the AI response.
@@ -551,6 +564,14 @@ function orderToolsForCaching(
   return ordered;
 }
 
+/** What the handler knows about the request beyond the stream handler context. */
+interface RequestTurnState {
+  /** Set when the client reports UI outcomes and the handler's mode is not `off`. */
+  uiOutcomes?: UiOutcomePlan;
+  /** Set when the request continues a turn. */
+  continuation?: TurnContinuation;
+}
+
 /**
  * Built-in default stream handler.
  *
@@ -563,7 +584,9 @@ async function defaultStreamHandler(
   onStreamError?: (error: unknown, info?: AiChatErrorInfo) => void,
   budgetStopTexts: BudgetStopTexts = resolveBudgetStopTexts(ctx.locale, undefined),
   silentTurnText?: string,
+  request: RequestTurnState = {},
 ): Promise<Response> {
+  const uiOutcomes = request.uiOutcomes;
   // SDK built-ins the handler created itself are not manifest tools, so the
   // managed guard would deny them. Everything else stays guarded.
   const builtinNames = new Set(ctx.handlerBuiltinToolNames ?? []);
@@ -587,20 +610,25 @@ async function defaultStreamHandler(
   if (Object.keys(builtinTools).length > 0) {
     Object.assign(vercelTools, wrapToolsForVercelAi(builtinTools));
   }
+  // The outcome marker goes on last, after every wrapper shaped the result.
+  const markedTools = uiOutcomes ? withUiOutcomeMarkers(vercelTools, ctx.tools, uiOutcomes) : vercelTools;
   const orderedTools = ctx.toolDiscovery
-    ? orderToolsForCaching(vercelTools, ctx.toolDiscovery.activeToolNames())
-    : vercelTools;
+    ? orderToolsForCaching(markedTools, ctx.toolDiscovery.activeToolNames())
+    : markedTools;
   const promptCaching = ctx.promptCaching !== false;
   const hideIds = ctx.hideIds !== false;
   // Fixed notes after the app's own prompt: no ids in answers, and with
   // discovery that the offered tools are a start set `find_tools` widens.
+  const uiOutcomeNote = uiOutcomes && !uiOutcomes.capReached ? [UI_OUTCOME_SYSTEM_NOTE] : [];
   const systemPrompt = ctx.systemPrompt
     ? [
         ctx.systemPrompt,
         ...(hideIds ? [HIDE_IDS_PROMPT] : []),
         ...(ctx.toolDiscovery ? [FIND_TOOLS_PROMPT] : []),
+        ...uiOutcomeNote,
       ].join('\n\n')
-    : ctx.systemPrompt;
+    // The outcome note holds without an app prompt too: the request ends before the model could answer.
+    : uiOutcomeNote[0] ?? ctx.systemPrompt;
   const idLabels: IdLabels = new Map();
   // Declared identity of the turn's tools (field names only): history, hideIds and the browser.
   const toolEntities = entityDeclarationsOfTools(ctx.tools);
@@ -652,11 +680,19 @@ async function defaultStreamHandler(
   // Set when the turn stops at a limit without a summary call: the handler
   // closes the answer with the notice of these limits.
   let stopLimits: BudgetStopLimit[] | null = null;
+  // Set when the request ends to let the browser report a UI outcome.
+  let awaitingUiOutcome = false;
   const budgetExhausted = () =>
     ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
   const shouldStop = (event: {
-    steps: Array<{ toolCalls: Array<{ toolName: string }> }>;
+    steps: Array<{ toolCalls: Array<{ toolName: string }>; toolResults?: ReadonlyArray<unknown> }>;
   }) => {
+    // A handed-off UI action ends the request without a notice: the
+    // continuation answers once the browser reported its outcome.
+    if (uiOutcomes && stepAwaitsUiOutcome(event.steps.at(-1))) {
+      awaitingUiOutcome = true;
+      return true;
+    }
     const tracker = ctx.managedTurn?.tracker;
     const evaluation = tracker?.evaluate();
     const budgetState = evaluation?.state;
@@ -947,10 +983,11 @@ async function defaultStreamHandler(
           const budgetEvaluation = ctx.managedTurn?.tracker.evaluate();
           const stoppedByBudget =
             budgetEvaluation?.state === 'hard-limit';
-          wasTruncated = finalSummaryClaimed || (
+          // Ending for a UI outcome is no cut: the continuation answers.
+          wasTruncated = !awaitingUiOutcome && (finalSummaryClaimed || (
             event.finishReason === 'tool-calls' &&
             (event.steps.length >= ctx.maxSteps || stoppedByBudget)
-          );
+          ));
           totalSteps = Math.max(totalSteps, event.steps.length);
 
           const isSafetyStop =
@@ -1016,6 +1053,8 @@ async function defaultStreamHandler(
               (count, step) => count + failedToolNames(step.content, 'expected').length,
               0,
             ),
+            ...(request.continuation ? { continuation: request.continuation } : {}),
+            ...(awaitingUiOutcome ? { awaitingUiOutcome: true as const } : {}),
           });
         },
       });
@@ -1141,8 +1180,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     attachments,
     memory: memoryConfig,
     budgetStopTexts: budgetStopTextsConfig,
+    uiActionOutcomes = 'confirm',
+    uiToolResultShape,
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
+  assertUiActionOutcomesOption(uiActionOutcomes, 'createAiChatHandler');
+  if (uiToolResultShape !== undefined && uiToolResultShape !== 'handoff' && uiToolResultShape !== 'legacy') {
+    throw new Error("createAiChatHandler: uiToolResultShape must be 'handoff' or 'legacy'");
+  }
   const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
   assertChatServerLocales(localesConfig);
   const explicitLocale = config.locale;
@@ -1228,11 +1273,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
 
   // Build stream handler factory — per-request to allow session.ended audit
-  function createStreamHandler(req: Request, auditContext?: {
+  function createStreamHandler(req: Request, auditContext: {
     sessionId: string;
     requestStart: number;
     modelId?: string;
-  }) {
+  } | undefined, requestState: RequestTurnState) {
     const wrappedOnFinish: typeof onFinish = (event) => {
       onFinish?.(event);
       if (auditContext && (onAudit || telemetry)) {
@@ -1274,6 +1319,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         context, wrappedOnFinish, (error, info) => (info ? onError?.(error, req, info) : onError?.(error, req)),
         texts.budgetStop,
         texts.silentTurn,
+        requestState,
       );
     };
   }
@@ -1504,6 +1550,20 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (clientActions) toolContext.runtime = { ...toolContext.runtime, clientActions };
       const requestStart = Date.now();
       const turnId = deriveSessionId(messages);
+      // A request without a new user message continues the turn (approvals, UI outcomes).
+      const continuation = directCommand ? undefined : turnContinuationOf(requestMessages);
+      // Only the built-in stream handler marks, stops and explains; others get no marker.
+      const requestState: RequestTurnState = {
+        ...(continuation ? { continuation } : {}),
+        ...(!customStreamHandler && uiActionOutcomes !== 'off' && readUiOutcomesFlag(body.value)
+          ? {
+              uiOutcomes: {
+                modeOf: (toolName: string) => uiOutcomeModeOf(uiActionOutcomes, toolName),
+                capReached: uiOutcomeCapReached(requestMessages),
+              },
+            }
+          : {}),
+      };
 
       let managedTurn: ManagedTurnGuard | undefined;
       let managedPrincipal: Principal | undefined;
@@ -1577,6 +1637,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             sink: metrics,
             snapshot: managedTurn?.snapshot,
             startedAtMs: requestStart,
+            ...(continuation ? { continuation } : {}),
           })
         : undefined;
 
@@ -1689,6 +1750,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // through the manifest-checked index.
         const builtinToolNames = handlerBuiltinNames.filter((name) =>
           ALWAYS_ON_BUILTINS.includes(name) || initialToolNames.includes(name));
+        // A UI outcome continuation keeps the tools the turn already called, also those `find_tools` added.
+        if (continuation === 'ui-outcome') {
+          initialToolNames = [...new Set([...initialToolNames, ...currentTurnToolNames(requestMessages)])];
+        }
         if (!managedTurn) {
           return createHybridToolDiscovery({
             discovery: createRegistryToolDiscovery({
@@ -1726,6 +1791,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         traceId: sessionId || undefined,
         telemetry,
         ...(maxResultChars !== undefined ? { maxResultChars } : {}),
+        ...(uiToolResultShape ? { uiToolResultShape } : {}),
       };
       /**
        * The result handles and `read_result` of a model turn (not of a direct
@@ -2079,7 +2145,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           sessionId,
           requestStart,
           modelId: resolvedModelId,
-        } : undefined);
+        } : undefined, requestState);
 
         return clearWhenDone(await pipelineStreamHandler({
           tools: discoveryController
@@ -2282,7 +2348,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const legacyStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
         sessionId: legacySessionId || sessionId,
         requestStart,
-      } : undefined);
+      } : undefined, requestState);
 
       // Delegate streaming to consumer's handler
       return clearWhenDone(await legacyStreamHandler({

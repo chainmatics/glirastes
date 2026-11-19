@@ -120,10 +120,10 @@ export const RuntimeTurnToolUsageSchema = z.object({
   path: ['errors'],
 });
 
-export const TechnicalRuntimeEventV2Schema = z.object({
+/** Fields of a turn event, without its type. */
+const turnEventFields = {
   schemaVersion: z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION),
   eventId: z.uuid(),
-  eventType: z.literal('turn.finished'),
   occurredAt: z.iso.datetime({ offset: true }),
   appId: z.uuid(),
   environmentId: z.uuid(),
@@ -143,7 +143,11 @@ export const TechnicalRuntimeEventV2Schema = z.object({
   toolCallCount: callCount,
   toolErrorCount: callCount,
   tools: z.array(RuntimeTurnToolUsageSchema).max(RUNTIME_METRIC_MAX_TOOLS),
-}).strict().superRefine((event, context) => {
+};
+
+type TurnEventFields = z.infer<z.ZodObject<typeof turnEventFields>>;
+
+function refineTurnEvent(event: TurnEventFields, context: z.RefinementCtx): void {
   const allowed = ERROR_CODES_BY_STATUS[event.status];
   if (allowed ? !event.errorCode || !allowed.includes(event.errorCode) : event.errorCode !== null) {
     context.addIssue({
@@ -194,9 +198,31 @@ export const TechnicalRuntimeEventV2Schema = z.object({
       path: forbidden,
     });
   }
-});
+}
+
+export const TechnicalRuntimeEventV2Schema = z.object({
+  ...turnEventFields,
+  eventType: z.literal('turn.finished'),
+}).strict().superRefine(refineTurnEvent);
+
+/** Why a request continued a turn instead of starting one: answered approvals, or reported UI outcomes. */
+export const TurnContinuationSchema = z.enum(['approval', 'ui-outcome']);
+
+/**
+ * A request that continued a turn (no new user message): the same numbers
+ * as `turn.finished` for that request, so turns are not counted twice. A
+ * type of its own, sent in batches of its own: a Platform that does not know
+ * it yet refuses only these batches and keeps receiving finished turns.
+ */
+export const TurnContinuedEventSchema = z.object({
+  ...turnEventFields,
+  eventType: z.literal('turn.continued'),
+  continuation: TurnContinuationSchema,
+}).strict().superRefine(refineTurnEvent);
 
 export type TechnicalRuntimeEventV2 = z.infer<typeof TechnicalRuntimeEventV2Schema>;
+export type TurnContinuation = z.infer<typeof TurnContinuationSchema>;
+export type TurnContinuedEvent = z.infer<typeof TurnContinuedEventSchema>;
 export type RuntimeTurnStatus = z.infer<typeof RuntimeTurnStatusSchema>;
 export type RuntimeTurnErrorCode = z.infer<typeof RuntimeTurnErrorCodeSchema>;
 export type RuntimeCostSource = z.infer<typeof RuntimeCostSourceSchema>;
@@ -239,9 +265,10 @@ export const ToolContractRejectedEventSchema = z.object({
 
 export type ToolContractRejectedEvent = z.infer<typeof ToolContractRejectedEventSchema>;
 
-/** Every content-free metric event of the runtime: finished turns and contract rejections. */
+/** Every content-free metric event of the runtime: finished and continued turns, contract rejections. */
 export const RuntimeMetricEventSchema = z.discriminatedUnion('eventType', [
   TechnicalRuntimeEventV2Schema,
+  TurnContinuedEventSchema,
   ToolContractRejectedEventSchema,
 ]);
 

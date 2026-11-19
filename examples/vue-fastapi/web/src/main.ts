@@ -9,5 +9,6 @@ import { pageLanguage } from './chat-config';
 document.documentElement.lang = pageLanguage();
 defineGlirastesChatElement();
 // Always mounted: the chat's navigation and filter tools push through the app's router.
-registerNavigationBridge({ push: (href) => router.push(href) });
+// vue-router resolves a failed navigation: `false` reports it as not carried out (UI action outcomes).
+registerNavigationBridge({ push: async (href) => !(await router.push(href)) });
 createApp(App).use(router).mount('#app');

@@ -1,5 +1,10 @@
 import { getDefaultUiActionBus, type UiAction, type UiActionBus } from './ui-action-bus.js';
-import { markUiActionInitiated, UiActionRejectedError } from './ui-action-signals.js';
+import {
+  beforeUiActionPageLoad,
+  markUiActionInitiated,
+  UiActionRejectedError,
+  uiActionPageLoadResult,
+} from './ui-action-signals.js';
 
 /** Action id of every generated navigation and filter tool (`ui.navigate`, `ui.filter.<view>`). */
 export const GLIRASTES_NAVIGATE_ACTION_ID = 'glirastes.navigate';
@@ -97,11 +102,28 @@ export function registerNavigationBridge(options: NavigationBridgeOptions): () =
   return bus.subscribeById(GLIRASTES_NAVIGATE_ACTION_ID, async (action) => {
     const href = hrefOf(action);
     if (!isSafeAppHref(href)) throw new UiActionRejectedError('contract', 'Unsafe navigation target');
-    if (await options.push(href) === false) {
+    const reloads = typeof options.reloads === 'function' ? options.reloads(href) : options.reloads === true;
+    // The chat saves the outcome while this page still runs.
+    // The chat that asked for the page load was reset while it prepared: the page stays.
+    if (reloads && !await beforeUiActionPageLoad(action)) {
+      uiActionPageLoadResult(action, 'refused');
+      throw new UiActionRejectedError('handler', `Navigation to ${href} was cancelled`);
+    }
+    let pushed: unknown;
+    try {
+      pushed = await options.push(href);
+    } catch (error) {
+      if (reloads) uiActionPageLoadResult(action, 'failed');
+      throw error;
+    }
+    if (pushed === false) {
+      if (reloads) uiActionPageLoadResult(action, 'refused');
       throw new UiActionRejectedError('handler', `Navigation to ${href} was not carried out`);
     }
-    const reloads = typeof options.reloads === 'function' ? options.reloads(href) : options.reloads === true;
-    if (reloads) markUiActionInitiated(action);
+    if (reloads) {
+      markUiActionInitiated(action);
+      uiActionPageLoadResult(action, 'started');
+    }
   });
 }
 

@@ -189,6 +189,14 @@ fall back per key, an unknown key fails at start). With `languages` in
 (local, never sent to the Platform), and the approval card and step display
 show them in the turn's language.
 
+UI action outcomes (optional): `chat.uiActionOutcomes` is `confirm` (default),
+`report-only` or `off`, the handler's `uiActionOutcomes` (see
+[UI action outcomes](ui-action-outcomes.md)). With `confirm` a turn with a UI
+action takes two POSTs to `chatPath`, each its own request with its own
+budgets and its own place in `maxConcurrentTurns`; a turn can cost up to four
+times the per-request budgets. A strict proxy in front of the container must
+allow the body field `glirastesUiOutcomes`.
+
 The model history uses the SDK defaults (`history`, `maxContextMessages`);
 the config has no keys for them, so the opt-ins `history.toolTurnCounting`
 and `history.seenObjects` are embedded-only for now. The debug hook

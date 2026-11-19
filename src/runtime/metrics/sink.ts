@@ -103,8 +103,9 @@ export function createRuntimeMetricsSink(
     instanceId: config.instanceId,
   });
   // One queue per event type: a batch never mixes types, so a Platform that
-  // does not know `tool_contract_rejected` yet refuses only those batches.
-  // Turns are listed first, so they are sent first whatever arrives first.
+  // does not know `tool_contract_rejected` or `turn.continued` yet refuses
+  // only those batches. Finished turns are listed first, so they are sent
+  // first whatever arrives first.
   const queues = new Map<RuntimeMetricEvent['eventType'], RuntimeMetricEvent[]>([['turn.finished', []]]);
   const queued = () => [...queues.values()].reduce((sum, events) => sum + events.length, 0);
   let timer: ReturnType<typeof setInterval> | undefined;

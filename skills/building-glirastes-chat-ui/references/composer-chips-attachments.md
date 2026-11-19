@@ -144,4 +144,8 @@ a `UiActionRunResult` `{ code, dispatched, durationMs, error? }` (`null` when
 the codes are listed in `hooks-and-building-blocks.md`. Run the results of one
 answer one after another in call order, and only results your own running
 request delivered: never results restored from a stored history or results
-that already carry an `outcome`.
+that already carry an `outcome`. Such an own chat gets the fallback (no
+marker, the model answers at once) unless it sends `glirastesUiOutcomes: 1`,
+writes `outcome: { v: 1, code }` into every `awaitsOutcome` result (no code
+for `timeout`/`unconfirmed`) and sends the history again once all have one;
+the package's `docs/ui-action-outcomes.md` has the protocol.

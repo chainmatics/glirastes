@@ -83,6 +83,19 @@ export interface ChatTransport {
    * for custom data-part processing.
    */
   subscribeToData?(handler: ChatTransportDataHandler): () => void;
+  /**
+   * Replaces the output of a tool call in the last message. With it the
+   * provider reports UI outcomes (`outcome` in the tool result); the
+   * transport then sends the history again once every result that waits for
+   * an outcome (`awaitsOutcome: true`) has one, and says in every request
+   * that it does so (`glirastesUiOutcomes: 1`). Without it the chat neither
+   * reports nor resends, and the server answers as without the protocol.
+   */
+  addToolOutput?(output: { tool: string; toolCallId: string; output: unknown }): void | PromiseLike<void>;
+  /** Sends the history again without a new message (a turn continued on a page the UI action loaded). */
+  continueTurn?(): void | PromiseLike<void>;
+  /** Called by the provider: whether it reports outcomes through this transport. */
+  setUiOutcomeReporting?(enabled: boolean): void;
 }
 
 /**
@@ -905,6 +918,20 @@ export interface ChatLocale {
   activityStepCountLabel: string;
   /** Joins the parts of the finished summary (`, `). */
   activitySummarySeparator: string;
+  /** Step of a UI action whose outcome the chat waits for ("Waiting for the app"). */
+  activityUiPendingLabel: string;
+  /** The app refused the UI action's input. */
+  activityUiRejectedContract: string;
+  /** The app's handler declined the UI action. */
+  activityUiRejectedHandler: string;
+  /** Nothing on the open page carries the UI action out. */
+  activityUiUnavailable: string;
+  /** The UI action failed in the app. */
+  activityUiFailed: string;
+  /** The UI action started a page load. */
+  activityUiInitiated: string;
+  /** The app did not confirm the UI action. */
+  activityUiUnconfirmed: string;
   /** Detail of a declined step the user approved but the server did not run (expired or already used approval). */
   activityApprovalNotUsedDetail: string;
   /** Outcome of a decided approval (`ApprovalEntry`): approved, no result yet. */
@@ -1028,7 +1055,12 @@ export interface UiActionOutcomeEvent {
    */
   code: UiActionRunCode;
   actions: Array<{ type: string; actionId?: string }>;
-  /** Whether the outcome was written back to the tool result for the model; always `false` for now. */
+  /**
+   * Whether the outcome was written into the tool result for the model
+   * (`outcome`): only for a result the server marked (`awaitsOutcome`), with
+   * a transport that can write it (`addToolOutput`) and `uiActionOutcomes`
+   * not `false`.
+   */
   reported: boolean;
   durationMs: number;
   /** What a refusing or failing handler threw. */
@@ -1192,6 +1224,15 @@ export interface AiChatProviderConfig {
    * wait (5 000 ms) on top.
    */
   uiActionOutcomeTimeoutMs?: number;
+  /**
+   * Outcome protocol of UI actions (default true): with a transport that has
+   * `addToolOutput` (the bundled Vercel transport), the chat writes the
+   * outcome into every tool result the server marked (`awaitsOutcome`), and
+   * the model answers once all are reported; the composer stays locked
+   * until then (at most until the timeout). `false` turns it off for this
+   * chat: no flag in the request, nothing written, no second request.
+   */
+  uiActionOutcomes?: boolean;
   onBeforeSend?: OnBeforeSend;
   approvalDescription?: ApprovalDescriptionFn;
   /**
