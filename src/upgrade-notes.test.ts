@@ -201,6 +201,8 @@ describe('shipped note detection', () => {
       'const de = { sendButton: "Senden" } satisfies ChatLocale;',
       'const de = { sendButton: "Senden" } as ChatLocale;',
       'const de = <ChatLocale>{ sendButton: "Senden" };',
+      'const all: Record<string, ChatLocale> = {};',
+      'const all = new Map<string,ChatLocale>();',
     ]) {
       const scan = scanOf({ 'app/locale.ts': `import type { ChatLocale } from 'glirastes/react';\n${usage}\n` });
       expect(evaluateNote(note, scan), usage).toMatchObject({

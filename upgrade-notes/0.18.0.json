@@ -12,7 +12,8 @@
           ":\\s*ChatLocale\\b",
           "\\bsatisfies\\s+ChatLocale\\b",
           "\\bas\\s+ChatLocale\\b",
-          "(?<![\\w$])<ChatLocale>"
+          "(?<![\\w$])<ChatLocale>",
+          ",\\s*ChatLocale>"
         ]
       }
     },
