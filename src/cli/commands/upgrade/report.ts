@@ -41,6 +41,8 @@ export interface UpgradeReport {
   should: ReportItem[];
   recommended: ReportItem[];
   offer: ReportItem[];
+  /** Breaking notes whose affectedWhen found no evidence. Informational, never blocks ack. */
+  checkedNotAffected: ReportItem[];
   keptSkills: KeptSkill[];
   unclassified: Array<{ version: string; changelogHeading: string }>;
   upToDate: boolean;
@@ -116,6 +118,7 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
     should: [],
     recommended: [],
     offer: [],
+    checkedNotAffected: [],
     keptSkills: [],
     unclassified: [],
     upToDate: true,
@@ -138,7 +141,7 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
   // Reading the whole app tree is only worth it when a note could match.
   const scan = notes.length > 0 ? await (options.scan ?? scanApp)(options.rootDir) : undefined;
 
-  const report: UpgradeReport = { ...empty };
+  const report: UpgradeReport = { ...empty, checkedNotAffected: [] };
   for (const note of notes) {
     const { status, evidence } = evaluateNote(note, scan!);
     const decision = decisions[note.id]?.decision;
@@ -159,6 +162,7 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
     else if (note.kind === 'deprecated' && relevant) report.should.push(item);
     else if (note.kind === 'recommended' && relevant) report.recommended.push(item);
     else if (note.kind === 'optional' && status !== 'adopted') report.offer.push(item);
+    else if (note.kind === 'breaking' && status === 'not-affected') report.checkedNotAffected.push(item);
   }
 
   const classified = new Set(allNotes.map((note) => note.version));
@@ -193,14 +197,20 @@ export function formatUpgradeReport(report: UpgradeReport, options: { brief?: bo
   }
   lines.push(`Glirastes upgrade review: ${report.from} → ${report.to}`);
   if (report.baselineMissing) lines.push(`no baseline, reviewed as ${report.from}`);
-  if (report.upToDate) {
-    lines.push('Nothing to review.');
-    return lines.join('\n');
-  }
   const section = (title: string, items: string[]) => {
     if (items.length === 0) return;
     lines.push('', `${title}:`, ...items);
   };
+  const checked = () =>
+    section(
+      'Checked, no evidence found',
+      report.checkedNotAffected.map((item) => `- [${item.id}] ${item.summary}`),
+    );
+  if (report.upToDate) {
+    lines.push('Nothing to review.');
+    if (!options.brief) checked();
+    return lines.join('\n');
+  }
   section('Must (breaking)', report.must.map(line));
   section('Should', [
     ...report.should.map(line),
@@ -215,6 +225,7 @@ export function formatUpgradeReport(report: UpgradeReport, options: { brief?: bo
       'Unclassified (no upgrade notes, read the changelog)',
       report.unclassified.map((u) => `- ${u.changelogHeading}`),
     );
+    checked();
     lines.push(
       '',
       'This report never changes your code. Record outcomes with `glirastes upgrade decide <id> adopted|declined|deferred`, then `glirastes upgrade ack`.',

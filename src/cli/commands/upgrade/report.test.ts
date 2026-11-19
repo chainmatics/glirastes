@@ -182,6 +182,41 @@ describe('createUpgradeReport', () => {
   });
 });
 
+describe('checked, not affected', () => {
+  const guarded = () =>
+    writeNotes('0.19.0', [
+      note('break-guarded', 'breaking', { affectedWhen: { patterns: ['Never[I]nThisApp'] } }),
+      note('deprecate-guarded', 'deprecated', { affectedWhen: { patterns: ['Never[I]nThisApp'] } }),
+    ]);
+
+  it('lists not-affected breaking items in the JSON, not in must', async () => {
+    await guarded();
+    await baseline('0.18.0');
+    const report = await createUpgradeReport(opts());
+    expect(report.must).toEqual([]);
+    expect(report.checkedNotAffected.map((i) => [i.id, i.status])).toEqual([['break-guarded', 'not-affected']]);
+  });
+
+  it('the full report prints one line per item; hint and --brief do not', async () => {
+    await guarded();
+    await baseline('0.18.0');
+    const report = await createUpgradeReport(opts());
+    const full = formatUpgradeReport(report, {});
+    expect(full).toContain('Checked, no evidence found:');
+    expect(full).toContain('- [break-guarded] break-guarded summary');
+    expect(formatUpgradeReport(report, { brief: true })).not.toContain('break-guarded');
+    expect(summarizeUpgradeReport(report)).toBeNull();
+  });
+
+  it('does not block ack', async () => {
+    await guarded();
+    await baseline('0.18.0');
+    const a = io();
+    expect(await runUpgradeCommand(['ack'], a.io)).toBe(0);
+    expect((await readBaseline(root))!.reviewedThrough).toBe('0.19.0');
+  });
+});
+
 describe('summarizeUpgradeReport', () => {
   it('summary line', async () => {
     await seedAllKinds();
