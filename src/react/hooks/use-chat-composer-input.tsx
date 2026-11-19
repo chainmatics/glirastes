@@ -75,10 +75,13 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   }, [composerMentions, consumeComposerMentions]);
 
   // Child effects run first, so the input's own `initialMentions` are already in the editor.
+  // Only the value at mount counts: a consumer that passes its live draft here must not
+  // have the first typed character re-applied as an "initial" value (and the caret reset).
   useEffect(() => {
     const handle = inputRef.current;
-    if (initialApplied.current || !initialValue || !handle) return;
+    if (initialApplied.current || !handle) return;
     initialApplied.current = true;
+    if (!initialValue) return;
     const prefix = handle.getValue();
     handle.setValue(prefix ? `${prefix} ${initialValue}` : initialValue, handle.getMentions());
     setValue(handle.getValue());

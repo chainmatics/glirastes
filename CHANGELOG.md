@@ -94,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Chat composer: `useChatComposerInput({ initialValue })` applies the value only on mount, as documented. A consumer that passed its live, controlled draft there had the first typed character re-applied after the first keystroke and the caret reset, so typing `Welche` into the empty input ended as `elcheW W`.
 - `createAiChatHandler`: the parts the handler writes from the model's step and finish callbacks no longer land wherever the scheduler puts them. A `data-step-report` now comes right before the `finish-step` of its step, after every chunk of that step (its approval requests included), and never before the step's own tool parts. The final `data-pipeline-state` comes right before `finish` or `abort` (and before the stop notice or silent-turn text), so the terminal part is always last. Before, both were written beside the merged model stream, and the order changed with the runtime and the number of stream transforms: `finish` could arrive before the final state.
 
 ## [0.18.0] - 2026-11-19
