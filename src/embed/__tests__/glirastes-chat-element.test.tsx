@@ -114,6 +114,32 @@ describe('<glirastes-chat>', () => {
     document.documentElement.removeAttribute('lang');
   });
 
+  it("keeps the server's tool wording first with languageSource: 'server'", async () => {
+    document.documentElement.setAttribute('lang', 'en');
+    const handlers = new Set<(part: { type: string; data: unknown }) => void>();
+    const { element } = await mount((node) => {
+      node.transport = {
+        ...transport(),
+        subscribeToData: (handler) => {
+          handlers.add(handler);
+          return () => handlers.delete(handler);
+        },
+      };
+      node.config = { languageSource: 'server' };
+    });
+    await act(async () => {
+      handlers.forEach((handler) => handler({
+        type: 'data-tool-presentation',
+        data: { locale: 'de-DE', tools: { tasks_list: { label: 'Aufgaben lesen' } } },
+      }));
+    });
+    expect(element.shadowRoot!.querySelector('textarea')?.getAttribute('placeholder')).toBe('Nachricht eingeben…');
+    element.config = {};
+    await act(async () => {});
+    expect(element.shadowRoot!.querySelector('textarea')?.getAttribute('placeholder')).not.toBe('Nachricht eingeben…');
+    document.documentElement.removeAttribute('lang');
+  });
+
   it('lets host CSS variables theme the panel instead of inline variables', async () => {
     const { element } = await mount((node) => {
       node.setAttribute('theme', 'professional-dark');
