@@ -54,8 +54,8 @@ async function nativeApp() {
   /** What the chat does with a tool result: hand its generated UI action to the page-wide bus. */
   const run = async (name: string, input: unknown) => {
     const result = await turn.execute(name, input);
-    // A UI tool only hands its action to the app (0.18 shape, no `success`).
-    expect(result).toMatchObject({ handedOff: true });
+    // Outside a chat request (no outcome flag) a UI tool result has the shape every browser runs.
+    expect(result).toMatchObject({ success: true });
     await act(async () => { await dispatchToolResultUiActions(result); });
   };
   return { app, turn, run, Bridge: bridge.GlirastesBridge, TasksPage: tasksPage.default };

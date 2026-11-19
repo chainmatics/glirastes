@@ -246,8 +246,9 @@ export interface Tool {
 
   /**
    * Set on UI tools (`uiToolToTool`, the generated UI tools): a successful
-   * result with a `uiAction` only hands the action to the browser, so it
-   * travels as `{ handedOff: true, message, uiAction }` (see
+   * result with a `uiAction` only hands the action to the browser, so a
+   * client that sends the outcome flag gets `{ handedOff: true, message,
+   * uiAction }`, every other the 0.17.3 shape with `success: true` (see
    * `uiToolResultShape`). `outcome: 'confirm'` lets the browser report what
    * became of the tool's own (non-`glirastes.*`) actions too.
    */

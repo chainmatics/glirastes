@@ -10,6 +10,7 @@ import { useVercelAiChatTransport, type UseVercelAiChatTransportOptions } from '
 import type { AiChatProviderConfig, ChatTransport } from '../types.js';
 
 const sent: Array<Record<string, string>> = [];
+const bodies: Array<Record<string, unknown>> = [];
 let chunks: unknown[] = [];
 
 function stream(): Response {
@@ -27,9 +28,11 @@ const textAnswer = [
 
 beforeEach(() => {
   sent.length = 0;
+  bodies.length = 0;
   chunks = textAnswer;
   vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: RequestInit) => {
     sent.push(Object.fromEntries(new Headers(init?.headers).entries()));
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
     return stream();
   }));
 });
@@ -61,6 +64,18 @@ describe('the Vercel transport names the chat language', () => {
     act(() => transport.setRequestLanguage!('pl'));
     await act(async () => { await transport.sendMessage({ text: 'four' }); });
     expect(sent[3]).toMatchObject({ 'content-language': 'de', authorization: 'Bearer t' });
+  });
+
+  it('sends the outcome flag in the body and the language as a header side by side', async () => {
+    render(<Probe />);
+    act(() => {
+      transport.setUiOutcomeReporting!(true);
+      transport.setRequestLanguage!('pl');
+    });
+    await act(async () => { await transport.sendMessage({ text: 'one' }); });
+    expect(bodies[0]).toMatchObject({ glirastesUiOutcomes: 1 });
+    expect(bodies[0]).not.toHaveProperty('content-language');
+    expect(sent[0]!['content-language']).toBe('pl');
   });
 });
 

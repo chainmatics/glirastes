@@ -256,7 +256,8 @@ is in the package's `docs/tool-policy.md`.
    model answers after it (a second request; the package's
    `docs/ui-action-outcomes.md`). A strict body check in front of the chat
    endpoint must allow `glirastesUiOutcomes`. UI results are
-   `{ handedOff: true, … }` without `success`.
+   `{ handedOff: true, … }` without `success` for clients that send it, the
+   0.17.3 `{ success: true, … }` for all others.
 
    Export the zod payload contract from a module that imports only zod and
    pass that export: the generated tool then takes formats, descriptions,

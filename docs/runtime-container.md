@@ -209,11 +209,20 @@ UI action outcomes (optional): `chat.uiActionOutcomes` is `confirm` (default),
 action takes two POSTs to `chatPath`, each its own request with its own
 budgets and its own place in `maxConcurrentTurns`; a turn can cost up to four
 times the per-request budgets. A strict proxy in front of the container must
-allow the body field `glirastesUiOutcomes`.
+allow the body field `glirastesUiOutcomes`. The shape of a UI tool result
+is not configurable here: the container follows the SDK default
+(`uiToolResultShape: 'auto'`), so a request with that field gets
+`{ handedOff: true, … }` and every other request the 0.17.3 shape
+`{ success: true, … }`.
 
-The model history uses the SDK defaults (`history`, `maxContextMessages`);
-the config has no keys for them, so the opt-ins `history.toolTurnCounting`
-and `history.seenObjects` are embedded-only for now. The debug hook
+The model history uses the SDK defaults (`history`, `maxContextMessages`):
+since 0.18.0 `history.toolTurnCounting` is `tool-turns` and the seen-objects
+memo is on for tools with declared identity (see
+[History measurement](history-measurement.md)). `chat.history` (optional,
+strict) is the way back: `{"toolTurnCounting": "all-turns", "seenObjects":
+false}` restores the 0.17 model input; each key is optional (`all-turns` or
+`tool-turns`, `true` or `false`), any other key fails at start. The other
+history limits keep the SDK defaults. The debug hook
 `onModelInput` is embedded-only by design: it carries prompts and tool
 results, and the container's stdout carries content-free events only.
 

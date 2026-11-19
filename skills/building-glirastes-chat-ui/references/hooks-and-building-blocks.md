@@ -219,9 +219,11 @@ stays locked meanwhile (`isLoading`). A custom `ChatTransport` opts in with
 flag itself. The activity log shows the outcome per step (locale keys
 `activityUiPendingLabel`, `activityUiRejectedContract`,
 `activityUiRejectedHandler`, `activityUiUnavailable`, `activityUiFailed`,
-`activityUiInitiated`, `activityUiUnconfirmed`). UI results from 0.18 are
-`{ handedOff: true, message, uiAction }` without `success`: a renderer or
-`onToolResult` that checks `success` checks `handedOff` too. Details:
+`activityUiInitiated`, `activityUiUnconfirmed`). A request with the flag
+gets UI results as `{ handedOff: true, message, uiAction }` without
+`success`: a renderer or `onToolResult` that checks `success` checks
+`handedOff` too. Without the flag the server sends the 0.17.3
+`{ success: true, … }`. Details:
 `docs/ui-action-outcomes.md` of the package.
 
 | `code` | When |

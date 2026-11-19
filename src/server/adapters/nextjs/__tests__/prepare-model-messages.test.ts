@@ -53,7 +53,7 @@ describe('prepareModelMessages', () => {
 
   it('keeps the previous turn\'s tool call so a follow-up can repeat it', async () => {
     const filter = { status: 'open', priority: 'high', assignee: 'me' };
-    const messages = await prepareModelMessages([
+    const twoBack = [
       user('u1', 'Nur meine offenen Aufgaben mit hoher Priorität'),
       assistant('a1', [
         { type: 'step-start' },
@@ -64,9 +64,13 @@ describe('prepareModelMessages', () => {
       user('u2', 'Zeig alle'),
       assistant('a2', [{ type: 'text', text: 'Alle Aufgaben.' }]),
       user('u3', 'bitte den Filter den wir eben hatten anwenden'),
+    ] as UIMessage[];
+    // The filter turn is two turns back: by default (tool-turns) the turn without tools in between
+    // uses up no slot, so it keeps its call; with all-turns it is text-only ...
+    expect(toolCalls(await prepareModelMessages(twoBack))).toEqual([
+      expect.objectContaining({ toolName: 'ui_tasks_filters_apply', input: filter }),
     ]);
-    // The filter turn is two turns back, so it is text-only now ...
-    expect(toolCalls(messages)).toEqual([]);
+    expect(toolCalls(await prepareModelMessages(twoBack, { history: { toolTurnCounting: 'all-turns' } }))).toEqual([]);
 
     const followUp = await prepareModelMessages([
       user('u1', 'Nur meine offenen Aufgaben mit hoher Priorität'),

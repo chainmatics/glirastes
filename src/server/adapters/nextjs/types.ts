@@ -23,7 +23,7 @@ import type { ChatMemoryConfig } from './chat-memory.js';
 import type { BudgetStopTexts } from './budget-stop-notice.js';
 import type { ChatServerLocales } from './chat-texts.js';
 import type { UiActionOutcomesOption } from './ui-outcomes.js';
-import type { UiToolResultShape } from '../../core/index.js';
+import type { UiToolResultShapeOption } from '../../core/index.js';
 import type { ToolTextsMap } from '../../../runtime/tool-texts.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ResultHandleLimits, ToolFailureClassifier } from '../../core/index.js';
 import type {
@@ -421,9 +421,11 @@ export interface AiChatHandlerConfig {
    * and `name` under a `_history` marker unless `keepIdentity: false`),
    * older turns as text only, at most `maxTurns` (6) within `maxTokens`
    * (4000, estimated). `false` keeps the flat slice-and-prune of earlier versions.
-   * Opt-in: `toolTurnCounting: 'tool-turns'` counts only turns with tool
-   * calls against `toolTurns`; `seenObjects` adds a memo of declared
-   * records whose results left the history (see `HistoryOptions`).
+   * Defaults since 0.18.0: `toolTurnCounting: 'tool-turns'` counts only
+   * turns with tool calls against `toolTurns` (`'all-turns'` is the way
+   * back); `seenObjects` (on, `false` is the way back) adds a memo of
+   * declared records whose results left the history, nothing for an app
+   * without declarations (see `HistoryOptions`).
    */
   history?: HistoryOptions | false;
   /**
@@ -458,12 +460,18 @@ export interface AiChatHandlerConfig {
    */
   uiActionOutcomes?: UiActionOutcomesOption;
   /**
-   * Shape of a UI tool result that hands a `uiAction` to the browser:
-   * `'handoff'` (default) `{ handedOff: true, message, uiAction }` without
-   * `success`, because the server does not know whether the app carried it
-   * out; `'legacy'` `{ success: true, message, uiAction }` as up to 0.17.
+   * Shape of a UI tool result that hands a `uiAction` to the browser.
+   * `'auto'` (default), per request: a client that sends
+   * `glirastesUiOutcomes: 1` (glirastes 0.18 and later) gets
+   * `{ handedOff: true, message, uiAction }` without `success`, because the
+   * server does not know whether the app carried it out; every other
+   * request gets `{ success: true, message, uiAction }` exactly as 0.17.3
+   * sent it, since a 0.17 browser runs an action only with `success: true`.
+   * `'handoff'` and `'legacy'` force one of the two for every request (also
+   * direct commands and a custom `streamHandler`, which follow the flag
+   * under `'auto'` as well).
    */
-  uiToolResultShape?: UiToolResultShape;
+  uiToolResultShape?: UiToolResultShapeOption;
   /**
    * Number of recent user/assistant text pairs to include as conversation
    * history for intent classification. Helps the classifier understand
