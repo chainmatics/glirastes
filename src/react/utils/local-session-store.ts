@@ -131,11 +131,18 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     ? (storage ? createIndexedDbAttachmentStore({ storageKey: options.storageKey }) : null)
     : options.attachmentStore;
   const written = new Set<string>();
+  const failures = new Map<string, number>();
+  // A permanently failing IndexedDB must not re-decode every file on every save.
+  const MAX_WRITE_ATTEMPTS = 2;
   const pending = new Map<string, Set<Promise<void>>>();
   // A put must not land after its chat's delete, so the delete waits for it.
   const deleteFiles = async (conversationId: string): Promise<void> => {
     if (!files) return;
-    for (const marker of [...written]) if (marker.startsWith(`${conversationId}\u0000`)) written.delete(marker);
+    for (const marker of [...written, ...failures.keys()]) {
+      if (!marker.startsWith(`${conversationId}\u0000`)) continue;
+      written.delete(marker);
+      failures.delete(marker);
+    }
     await Promise.allSettled([...(pending.get(conversationId) ?? [])]);
     try {
       await files.deleteConversation(conversationId);
@@ -272,12 +279,19 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
             written.add(marker);
             const filename = (part as { filename?: string }).filename;
             const task = (async () => {
+              let ok = false;
               try {
-                const stored = await files.put(conversationId, id, { blob, name: filename ?? 'file', mediaType: blob.type });
-                if (stored === false) written.delete(marker);
+                ok = (await files.put(conversationId, id, { blob, name: filename ?? 'file', mediaType: blob.type })) !== false;
               } catch {
-                written.delete(marker);
+                // counted as a failed attempt below
               }
+              if (ok) {
+                failures.delete(marker);
+                return;
+              }
+              const attempts = (failures.get(marker) ?? 0) + 1;
+              failures.set(marker, attempts);
+              if (attempts < MAX_WRITE_ATTEMPTS) written.delete(marker);
             })();
             const set = pending.get(conversationId) ?? new Set<Promise<void>>();
             pending.set(conversationId, set);

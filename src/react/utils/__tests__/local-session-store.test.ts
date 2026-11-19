@@ -300,6 +300,17 @@ describe('attachment files kept as long as their chat', () => {
     expect(put).toHaveBeenCalledTimes(2);
   });
 
+  it('gives up on a file after two failed writes', async () => {
+    const { storage } = memory();
+    const put = vi.fn(async () => false);
+    const chats = sessions(storage, { ...createMemoryAttachmentStore(), put });
+    for (let i = 0; i < 5; i++) {
+      chats.save!('A', [withFile(ID_A)]);
+      await flush();
+    }
+    expect(put).toHaveBeenCalledTimes(2);
+  });
+
   it('does not write restored files again after a reload', async () => {
     const { storage } = memory();
     const inner = createMemoryAttachmentStore();
