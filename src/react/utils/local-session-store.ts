@@ -236,10 +236,10 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     },
     async remove(conversationId) {
       drop(messagesKey(conversationId));
-      await deleteFiles(conversationId);
       const remaining = entries().filter((entry) => entry.id !== conversationId);
       if (remaining.length === 0) drop(indexKey);
       else persist(remaining);
+      await deleteFiles(conversationId);
     },
     async rename(conversationId, title) {
       const next = title.trim();
@@ -298,8 +298,8 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     async clear(conversationId) {
       const id = conversationId ?? DEFAULT_ID;
       drop(messagesKey(id));
-      await deleteFiles(id);
       persist(entries().map((entry) => (entry.id === id ? { ...entry, messageCount: 0 } : entry)));
+      await deleteFiles(id);
     },
   };
 }
