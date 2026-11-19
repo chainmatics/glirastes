@@ -735,6 +735,26 @@ describe('chat queue enabled', () => {
     await waitFor(() => expect(texts(chat)).toEqual(['stored', 'new']));
   });
 
+  it('finishes restoring when a conversation is loaded again with nothing stored', async () => {
+    let releaseS2!: () => void;
+    const storage: ChatQueueStorage = {
+      load: (id) => (id === 's2' ? new Promise((resolve) => { releaseS2 = () => resolve([]); }) : []),
+      save: vi.fn(),
+    };
+    const chat = new FakeChat();
+    const config = (activeId: string): Partial<AiChatProviderConfig> => ({
+      queue: { enabled: true, storage }, session: { activeId },
+    });
+    const view = render(<Host chat={chat} config={config('s1')} />);
+    await waitFor(() => expect(ctx.queue.restoring).toBe(false));
+    await act(async () => { view.rerender(<Host chat={chat} config={config('s2')} />); });
+    await act(async () => { view.rerender(<Host chat={chat} config={config('s1')} />); });
+    await waitFor(() => expect(ctx.queue.restoring).toBe(false));
+    await act(async () => { ctx.submit('hello'); });
+    await waitFor(() => expect(texts(chat)).toEqual(['hello']));
+    releaseS2();
+  });
+
   it('sends nothing while the stored queue loads, also with nothing stored', async () => {
     let release!: () => void;
     const storage: ChatQueueStorage = {

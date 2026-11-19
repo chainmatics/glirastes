@@ -141,10 +141,11 @@ export function useMessageQueueStore(
   // The session whose stored queue was read; nothing is saved for a session before that.
   const loadedForRef = useRef<string | null>(null);
   // Re-renders once a load answered (also with nothing stored).
-  const [, setLoadedFor] = useState<string | null>(null);
+  const [, setLoads] = useState(0);
   const markLoaded = useCallback((id: string) => {
     loadedForRef.current = id;
-    setLoadedFor(id);
+    // A counter, not the id: loading the same conversation again must render again.
+    setLoads((count) => count + 1);
   }, []);
   // Until the stored queue is read, new messages queue behind it (FIFO across a reload).
   const restoringRef = useRef(false);
