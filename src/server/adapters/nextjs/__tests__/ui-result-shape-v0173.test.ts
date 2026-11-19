@@ -41,21 +41,43 @@ function toolOutput(record: CaseRecord): Json {
   return chunk!.output as Json;
 }
 
+/**
+ * A record in the form the golden test compares. `data-step-report` is
+ * written from the step callback next to the model's merged stream, so
+ * where it lands among the model's chunks depends on the scheduler (0.17.3
+ * does the same; CI and a local run place it differently). Every other
+ * chunk is compared in exact order, the step reports in their own order,
+ * every chunk byte for byte.
+ */
+function comparable(record: CaseRecord): string {
+  const isReport = (chunk: Json) => chunk.type === 'data-step-report';
+  return JSON.stringify({
+    chunks: record.chunks.filter((chunk) => !isReport(chunk)),
+    stepReports: record.chunks.filter(isReport),
+    modelToolResults: record.modelToolResults,
+  });
+}
+
 describe('UI tool results for a client without the outcome flag (0.17.3 compatibility)', () => {
   it('golden: the stream and the model input of a UI tool turn equal glirastes 0.17.3, byte for byte', async () => {
     expect(golden.sdk).toBe('glirastes@0.17.3');
     const records = await runAll(sdk);
     expect(Object.keys(records)).toEqual(CASES.map((entry) => entry.name));
     for (const entry of CASES) {
-      expect(JSON.stringify(records[entry.name]), entry.name).toBe(JSON.stringify(golden.records[entry.name]));
+      expect(comparable(records[entry.name]!), entry.name).toBe(comparable(golden.records[entry.name]!));
     }
   });
 
   it("golden: uiToolResultShape: 'legacy' gives the same stream", async () => {
     const records = await runAll(sdk, { uiToolResultShape: 'legacy' });
     for (const entry of CASES) {
-      expect(JSON.stringify(records[entry.name]), entry.name).toBe(JSON.stringify(golden.records[entry.name]));
+      expect(comparable(records[entry.name]!), entry.name).toBe(comparable(golden.records[entry.name]!));
     }
+  });
+
+  it('golden: the comparison still sees every chunk (the hand-off shape differs)', async () => {
+    const records = await runAll(sdk, { uiToolResultShape: 'handoff' });
+    expect(comparable(records[CASES[0]!.name]!)).not.toBe(comparable(golden.records[CASES[0]!.name]!));
   });
 
   it('a 0.17.3 browser runs the generated UI actions of a 0.18 server (its own dispatch rule)', async () => {
