@@ -89,6 +89,17 @@ export function ApprovalEntry({ approval }: ApprovalEntryProps) {
       {approval.previewCheck === 'unchecked' && (
         <span data-element="detail-line" data-preview="unchecked">{locale.approvalPreviewUncheckedNote}</span>
       )}
+      {/* The call's field details, as the card showed them (`Label: value`, or one plain line). */}
+      {(approval.details ?? []).map((detail, i) => {
+        const colon = detail.indexOf(':');
+        if (colon === -1) return <span key={`detail-${i}`} data-element="detail-line">{detail}</span>;
+        return (
+          <span key={`detail-${i}`} data-element="detail-line">
+            <span data-element="detail-label">{detail.slice(0, colon)}</span>
+            <span data-element="detail-value">{detail.slice(colon + 1).trim()}</span>
+          </span>
+        );
+      })}
       <span data-element="outcome">{approvalOutcomeText(approval.outcome, locale)}</span>
     </div>
   );
