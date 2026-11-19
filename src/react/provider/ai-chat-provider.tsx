@@ -940,7 +940,12 @@ export function AiChatProvider({
     let resolve!: (result: UiActionPageLoadResult) => void;
     const done = new Promise<UiActionPageLoadResult>((settle) => { resolve = settle; });
     pageLoadRef.current = { toolCallId: current.toolCallId, action, done, resolve };
+    const generation = uiActionGenerationRef.current;
+    const { signal } = uiActionAbortRef.current;
     await settleForPageLoad(current, true);
+    // Reset (cleared, another session, unmounted) while preparing: the page must not be left for it.
+    if (signal.aborted || uiActionGenerationRef.current !== generation || !mountedRef.current) return false;
+    return undefined;
   }), [settleForPageLoad]);
 
   // What the bridge's push made of a page load this chat prepared.

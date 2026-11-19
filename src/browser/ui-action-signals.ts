@@ -92,7 +92,8 @@ const BEFORE_LOAD_KEY = Symbol.for('glirastes.beforeUiActionPageLoad');
  */
 export const BEFORE_PAGE_LOAD_TIMEOUT_MS = 10_500;
 
-type BeforePageLoad = (action: UiAction) => void | Promise<void>;
+/** Returning `false` cancels the page load: the chat that asked for it was reset meanwhile. */
+type BeforePageLoad = (action: UiAction) => void | boolean | Promise<void | boolean>;
 
 function beforePageLoadListeners(): Set<BeforePageLoad> {
   const scope = globalThis as Record<symbol, unknown>;
@@ -149,14 +150,15 @@ export function uiActionPageLoadResult(action: UiAction, result: UiActionPageLoa
 }
 
 /** Runs the listeners, at most `BEFORE_PAGE_LOAD_TIMEOUT_MS`; a listener that throws is skipped. @internal */
-export async function beforeUiActionPageLoad(action: UiAction): Promise<void> {
+export async function beforeUiActionPageLoad(action: UiAction): Promise<boolean> {
   const listeners = [...beforePageLoadListeners()];
-  if (listeners.length === 0) return;
+  if (listeners.length === 0) return true;
+  let cancelled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<void>((resolve) => { timer = setTimeout(resolve, BEFORE_PAGE_LOAD_TIMEOUT_MS); });
   const all = Promise.all(listeners.map(async (listener) => {
     try {
-      await listener(action);
+      if (await listener(action) === false) cancelled = true;
     } catch {
       // Saving is best effort; the page load goes on.
     }
@@ -166,4 +168,5 @@ export async function beforeUiActionPageLoad(action: UiAction): Promise<void> {
   } finally {
     clearTimeout(timer);
   }
+  return !cancelled;
 }

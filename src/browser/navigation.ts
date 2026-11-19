@@ -104,7 +104,11 @@ export function registerNavigationBridge(options: NavigationBridgeOptions): () =
     if (!isSafeAppHref(href)) throw new UiActionRejectedError('contract', 'Unsafe navigation target');
     const reloads = typeof options.reloads === 'function' ? options.reloads(href) : options.reloads === true;
     // The chat saves the outcome while this page still runs.
-    if (reloads) await beforeUiActionPageLoad(action);
+    // The chat that asked for the page load was reset while it prepared: the page stays.
+    if (reloads && !await beforeUiActionPageLoad(action)) {
+      uiActionPageLoadResult(action, 'refused');
+      throw new UiActionRejectedError('handler', `Navigation to ${href} was cancelled`);
+    }
     let pushed: unknown;
     try {
       pushed = await options.push(href);

@@ -382,6 +382,23 @@ describe('a UI action that loads a new page', () => {
     expect(outcomes).toEqual([]);
   });
 
+  it('never leaves the page for an action whose chat was cleared while the page load was prepared', async () => {
+    const session: SessionConfig = {
+      load: async () => [],
+      save: () => new Promise<void>((resolve) => { setTimeout(resolve, 150); }),
+    };
+    const { bus } = setup({ session });
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    cleanups.push(registerDocumentNavigation({ bus }));
+    await settle();
+    await stream([user, assistant(uiPart('c1', { awaitsOutcome: true }, navigate('/reports')))]);
+    await settle(20);
+    await act(async () => { control.set([]); });
+    await settle(300);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
   it('runs the later results and writes their own codes when a reloading bridge refuses the navigation', async () => {
     const { bus } = setup();
     cleanups.push(registerNavigationBridge({ bus, push: () => false, reloads: true }));
