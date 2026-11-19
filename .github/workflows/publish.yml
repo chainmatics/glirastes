@@ -62,6 +62,19 @@ jobs:
           fi
           echo "Publishing version $PKG_VERSION"
 
+      # Release flow: unreleased notes are merged into upgrade-notes/<version>.json first.
+      - name: Verify upgrade notes are released for this version
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if ls upgrade-notes/unreleased/*.json >/dev/null 2>&1; then
+            echo "::error::upgrade-notes/unreleased/ still holds notes; merge them into upgrade-notes/$PKG_VERSION.json"
+            exit 1
+          fi
+          if [ ! -f "upgrade-notes/$PKG_VERSION.json" ]; then
+            echo "::error::upgrade-notes/$PKG_VERSION.json is missing"
+            exit 1
+          fi
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
