@@ -83,3 +83,50 @@ export function markUiActionInitiated(action: UiAction): void {
 export function wasUiActionInitiated(action: UiAction): boolean {
   return initiatedActions().has(action);
 }
+
+const BEFORE_LOAD_KEY = Symbol.for('glirastes.beforeUiActionPageLoad');
+
+/** Longest a bridge waits for the chat to save its history before it loads the next page. */
+export const BEFORE_PAGE_LOAD_TIMEOUT_MS = 500;
+
+type BeforePageLoad = (action: UiAction) => void | Promise<void>;
+
+function beforePageLoadListeners(): Set<BeforePageLoad> {
+  const scope = globalThis as Record<symbol, unknown>;
+  const existing = scope[BEFORE_LOAD_KEY];
+  if (existing instanceof Set) return existing as Set<BeforePageLoad>;
+  const created = new Set<BeforePageLoad>();
+  scope[BEFORE_LOAD_KEY] = created;
+  return created;
+}
+
+/**
+ * Called before a reloading bridge (`reloads`) loads the next page for an
+ * action, so the chat can write and save the action's outcome while the
+ * page still runs. Shared by every SDK copy on the page. @internal
+ */
+export function onBeforeUiActionPageLoad(listener: BeforePageLoad): () => void {
+  const listeners = beforePageLoadListeners();
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** Runs the listeners, at most `BEFORE_PAGE_LOAD_TIMEOUT_MS`; a listener that throws is skipped. @internal */
+export async function beforeUiActionPageLoad(action: UiAction): Promise<void> {
+  const listeners = [...beforePageLoadListeners()];
+  if (listeners.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => { timer = setTimeout(resolve, BEFORE_PAGE_LOAD_TIMEOUT_MS); });
+  const all = Promise.all(listeners.map(async (listener) => {
+    try {
+      await listener(action);
+    } catch {
+      // Saving is best effort; the page load goes on.
+    }
+  }));
+  try {
+    await Promise.race([all, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}

@@ -43,7 +43,10 @@ import {
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
-import { runToolResultUiActions, toolResultUiActions } from '../../browser/client-actions.js';
+import { runToolResultUiActions, toolResultUiActions, type UiActionRunCode } from '../../browser/client-actions.js';
+import { onBeforeUiActionPageLoad } from '../../browser/ui-action-signals.js';
+import type { UiOutcome } from '../../contracts/ui-outcome.js';
+import { continuesAfterPageLoad, waitingToolCallIds } from '../utils/ui-outcome-continuation.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
@@ -105,6 +108,13 @@ export const DEFAULT_LOCALE: ChatLocale = {
   activityRunningProgressLabel: '{count} done, {label}…',
   activityStepCountLabel: '×{count}',
   activitySummarySeparator: ', ',
+  activityUiPendingLabel: 'Waiting for the app',
+  activityUiRejectedContract: 'Rejected by the app (invalid input)',
+  activityUiRejectedHandler: 'Not carried out by the app',
+  activityUiUnavailable: 'Not available on this page',
+  activityUiFailed: 'Failed in the app',
+  activityUiInitiated: 'Started',
+  activityUiUnconfirmed: 'Not confirmed',
   planTitle: 'Plan',
   chatTitle: 'AI Assistant',
   closeChatAriaLabel: 'Close chat',
@@ -379,6 +389,9 @@ export interface AiChatProviderProps extends AiChatProviderConfig {
   children: ReactNode;
 }
 
+/** Turns this page continued after a page load, by the ids of their results (also across providers). */
+const CONTINUED_TURNS = new Set<string>();
+
 /**
  * A result with generated UI actions that already carries the browser's
  * `outcome` object: it ran before and never runs again. Other tools may have
@@ -462,6 +475,7 @@ export function AiChatProvider({
   uiActionBus,
   onUiActionOutcome,
   uiActionOutcomeTimeoutMs,
+  uiActionOutcomes = true,
   onBeforeSend,
   approvalDescription: userApprovalDescription,
   approvalSubjects = true,
@@ -786,6 +800,100 @@ export function AiChatProvider({
   const streamActiveRef = useRef(isLoading);
   streamActiveRef.current = isLoading;
   const sessionNotReady = Boolean(session?.load && loadedSessionId !== activeSessionId);
+
+  // ---------------------------------------------------------------------------
+  // Outcome protocol: write each marked result's outcome through the transport.
+  // ---------------------------------------------------------------------------
+  const transportRef = useRef(resolvedTransport);
+  transportRef.current = resolvedTransport;
+  const rawMessagesRef = useRef(rawMessages);
+  rawMessagesRef.current = rawMessages;
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+  const reportsUiOutcomes = uiActionOutcomes !== false && typeof resolvedTransport.addToolOutput === 'function';
+  const reportsUiOutcomesRef = useRef(reportsUiOutcomes);
+  reportsUiOutcomesRef.current = reportsUiOutcomes;
+  const setUiOutcomeReporting = resolvedTransport.setUiOutcomeReporting;
+  useEffect(() => {
+    if (!setUiOutcomeReporting) return undefined;
+    setUiOutcomeReporting(reportsUiOutcomes);
+    return () => setUiOutcomeReporting(false);
+  }, [setUiOutcomeReporting, reportsUiOutcomes]);
+  // The outcome written per tool call id, so a result is reported once (again only with another code).
+  const reportedOutcomesRef = useRef<Map<string, UiOutcome>>(new Map());
+  // The result whose actions run right now, for a page load that starts during it.
+  const currentUiRunRef = useRef<{ toolName: string; toolCallId: string; output: Record<string, unknown> } | null>(null);
+  // Results that wait for their outcome before the model answers: the composer stays locked meanwhile.
+  const [awaitedOutcomes, setAwaitedOutcomes] = useState(0);
+  // The session whose history was just loaded, until the page-load continuation was checked.
+  const loadedHistoryRef = useRef<string | null>(null);
+
+  /**
+   * Writes the outcome into a marked result through the transport and
+   * returns it; undefined when the result is not marked, the chat does not
+   * report, or the same outcome was written already.
+   */
+  const reportUiOutcome = useCallback((
+    toolName: string,
+    toolCallId: string,
+    output: Record<string, unknown>,
+    code: UiActionRunCode,
+  ): UiOutcome | undefined => {
+    if (typeof output.awaitsOutcome !== 'boolean' || !reportsUiOutcomesRef.current) return undefined;
+    const write = transportRef.current.addToolOutput;
+    if (typeof write !== 'function') return undefined;
+    const outcome: UiOutcome = code === 'timeout' || code === 'unconfirmed'
+      ? { v: 1 }
+      : code === 'initiated' ? { v: 1, code, at: Date.now() } : { v: 1, code };
+    const earlier = reportedOutcomesRef.current.get(toolCallId);
+    if (earlier && earlier.code === outcome.code) return earlier;
+    reportedOutcomesRef.current.set(toolCallId, outcome);
+    try {
+      void Promise.resolve(write.call(transportRef.current, { tool: toolName, toolCallId, output: { ...output, outcome } }))
+        .catch(() => { console.warn('[glirastes] A UI action outcome could not be written'); });
+    } catch {
+      console.warn('[glirastes] A UI action outcome could not be written');
+    }
+    return outcome;
+  }, []);
+
+  /** Saves the history with this outcome in place now: the page is about to be left. */
+  const saveWithOutcome = useCallback(async (toolCallId: string, outcome: UiOutcome) => {
+    const save = sessionRef.current?.save;
+    if (!save) return;
+    const messages = rawMessagesRef.current.map((message, index, all) => (index !== all.length - 1 ? message : {
+      ...message,
+      parts: message.parts.map((part) => {
+        const toolPart = part as { toolCallId?: unknown; output?: unknown };
+        return toolPart.toolCallId === toolCallId && isRecord(toolPart.output)
+          ? { ...part, output: { ...toolPart.output, outcome } }
+          : part;
+      }),
+    })) as ChatMessage[];
+    await Promise.resolve(save(activeSessionIdRef.current, messages));
+  }, []);
+
+  // A reloading bridge (registerDocumentNavigation, `reloads`) waits for this before it loads the next page.
+  useEffect(() => onBeforeUiActionPageLoad(async () => {
+    const current = currentUiRunRef.current;
+    if (!current) return;
+    const outcome = reportUiOutcome(current.toolName, current.toolCallId, current.output, 'initiated');
+    if (outcome) await saveWithOutcome(current.toolCallId, outcome);
+  }), [reportUiOutcome, saveWithOutcome]);
+
+  // A bridge that loads a page without saying so: the page goes while the action runs.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onPageHide = () => {
+      const current = currentUiRunRef.current;
+      if (!current) return;
+      pageLeavingRef.current = true;
+      const outcome = reportUiOutcome(current.toolName, current.toolCallId, current.output, 'initiated');
+      if (outcome) void saveWithOutcome(current.toolCallId, outcome).catch(() => {});
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [reportUiOutcome, saveWithOutcome]);
   const error = transportError ?? (sessionLoadFailure?.id === activeSessionId ? sessionLoadFailure.error : null);
 
   useEffect(() => {
@@ -882,6 +990,8 @@ export function AiChatProvider({
             coerced as unknown as Array<{ role: string; parts: unknown[] }>,
           );
           setMessages(sanitized as unknown as typeof rawMessages);
+          // A turn whose UI action loaded this page may continue once (see below).
+          loadedHistoryRef.current = activeSessionId;
         } else {
           setMessages([] as unknown as typeof rawMessages);
         }
@@ -903,6 +1013,31 @@ export function AiChatProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId, setMessages, markStoredMessagesAsProcessed, sessionRestoreAttempt, isBootstrapSentinel]);
 
+  // A history loaded on a page a UI action opened with a full page load:
+  // the turn continues once, within a minute, as a model call only. Nothing
+  // of it runs again (its results are marked as processed above).
+  useEffect(() => {
+    if (loadedHistoryRef.current === null || loadedHistoryRef.current !== loadedSessionId) return;
+    // The loaded messages reach the transport a render after the session id.
+    if (loadedSessionId !== activeSessionId || rawMessages.length === 0) return;
+    loadedHistoryRef.current = null;
+    const continueTurn = transportRef.current.continueTurn;
+    if (!reportsUiOutcomesRef.current || typeof continueTurn !== 'function') return;
+    if (!continuesAfterPageLoad(rawMessages, Date.now())) return;
+    const key = `glirastes.uiOutcomeContinued.${waitingToolCallIds(rawMessages).join(',')}`;
+    if (CONTINUED_TURNS.has(key)) return;
+    CONTINUED_TURNS.add(key);
+    try {
+      if (globalThis.sessionStorage?.getItem(key)) return;
+      globalThis.sessionStorage?.setItem(key, '1');
+    } catch {
+      // Without storage the in-memory guard holds for this page.
+    }
+    void Promise.resolve(continueTurn.call(transportRef.current)).catch(() => {
+      console.warn('[glirastes] The turn could not be continued after the page load');
+    });
+  }, [rawMessages, loadedSessionId, activeSessionId]);
+
   // Save messages to session on change (scoped to the active session).
   useEffect(() => {
     if (!isInitialized) return;
@@ -921,38 +1056,50 @@ export function AiChatProvider({
     if (actions.length === 0) return;
     const generation = uiActionGenerationRef.current;
     const { signal } = uiActionAbortRef.current;
+    const record = output as Record<string, unknown>;
+    // The model answers once this outcome is written: keep the composer locked until then.
+    const awaited = reportsUiOutcomesRef.current && record.awaitsOutcome === true;
+    if (awaited) setAwaitedOutcomes((count) => count + 1);
     uiActionQueueRef.current = uiActionQueueRef.current.then(async () => {
-      if (!mountedRef.current || pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
-      const run = await runToolResultUiActions(
-        output,
-        uiActionBusRef.current ?? getDefaultUiActionBus(),
-        {
-          signal,
-          ...(uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {}),
-        },
-      ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }));
-      if (!run || uiActionGenerationRef.current !== generation) return;
-      if (run.code === 'initiated') pageLeavingRef.current = true;
-      if (run.code !== 'ok' && run.code !== 'initiated') {
-        console.warn('[glirastes] A generated UI action was not carried out');
-      }
       try {
-        onUiActionOutcomeRef.current?.({
-          toolName,
-          toolCallId,
-          code: run.code,
-          actions: actions.map((action) => (typeof action.actionId === 'string'
-            ? { type: action.type, actionId: action.actionId }
-            : { type: action.type })),
-          reported: false,
-          durationMs: run.durationMs,
-          ...(run.error !== undefined ? { error: run.error } : {}),
-        });
-      } catch {
-        console.warn('[glirastes] onUiActionOutcome threw');
+        if (!mountedRef.current || pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
+        currentUiRunRef.current = { toolName, toolCallId, output: record };
+        const run = await runToolResultUiActions(
+          output,
+          uiActionBusRef.current ?? getDefaultUiActionBus(),
+          {
+            signal,
+            ...(uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {}),
+          },
+        ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }))
+          .finally(() => { currentUiRunRef.current = null; });
+        if (!run || uiActionGenerationRef.current !== generation) return;
+        if (run.code === 'initiated') pageLeavingRef.current = true;
+        if (run.code !== 'ok' && run.code !== 'initiated') {
+          console.warn('[glirastes] A generated UI action was not carried out');
+        }
+        const reported = reportUiOutcome(toolName, toolCallId, record, run.code) !== undefined;
+        try {
+          onUiActionOutcomeRef.current?.({
+            toolName,
+            toolCallId,
+            code: run.code,
+            actions: actions.map((action) => (typeof action.actionId === 'string'
+              ? { type: action.type, actionId: action.actionId }
+              : { type: action.type })),
+            reported,
+            durationMs: run.durationMs,
+            ...(run.error !== undefined ? { error: run.error } : {}),
+          });
+        } catch {
+          console.warn('[glirastes] onUiActionOutcome threw');
+        }
+      } finally {
+        // One tick later: the transport has started the continuation by then.
+        if (awaited) setTimeout(() => { if (mountedRef.current) setAwaitedOutcomes((count) => Math.max(0, count - 1)); }, 0);
       }
     });
-  }, []);
+  }, [reportUiOutcome]);
 
   // Process tool results and approvals from streaming messages
   useEffect(() => {
@@ -1765,8 +1912,9 @@ export function AiChatProvider({
       pipelineMessageTranslator,
       stepSummaryFormatter,
       messages: visibleMessages,
-      isLoading: isLoading || isSessionMutating || sessionNotReady,
-      isSessionChangeBlocked: isLoading || isSessionMutating,
+      // A UI action whose outcome the model waits for holds the turn open.
+      isLoading: isLoading || awaitedOutcomes > 0 || isSessionMutating || sessionNotReady,
+      isSessionChangeBlocked: isLoading || awaitedOutcomes > 0 || isSessionMutating,
       error: error ?? approvalError,
       send,
       stop,
@@ -1841,6 +1989,7 @@ export function AiChatProvider({
       stepSummaryFormatter,
       visibleMessages,
       isLoading,
+      awaitedOutcomes,
       sessionNotReady,
       isSessionMutating,
       isBootstrapSentinel,

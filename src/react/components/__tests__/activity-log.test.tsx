@@ -379,3 +379,42 @@ describe('PlanChecklist', () => {
       .toBe('pending');
   });
 });
+
+describe('ActivityLog and UI action outcomes', () => {
+  const details = () => rows().map((row) => row.querySelector('[data-element="detail"]')?.textContent ?? null);
+
+  it('names each reported outcome in the chat language, without folding different ones', () => {
+    render(
+      <ActivityLog
+        active
+        steps={[
+          { id: 'c1', toolName: 'ui_navigate', status: 'waiting', uiOutcome: 'pending' },
+          { id: 'c2', toolName: 'ui_navigate', status: 'error', uiOutcome: 'rejected-contract' },
+          { id: 'c3', toolName: 'ui_navigate', status: 'error', uiOutcome: 'rejected-handler' },
+          { id: 'c4', toolName: 'ui_navigate', status: 'error', uiOutcome: 'unavailable' },
+          { id: 'c5', toolName: 'ui_navigate', status: 'error', uiOutcome: 'failed' },
+          { id: 'c6', toolName: 'ui_navigate', status: 'done', uiOutcome: 'initiated' },
+          { id: 'c7', toolName: 'ui_navigate', status: 'done', uiOutcome: 'unconfirmed' },
+          { id: 'c8', toolName: 'ui_navigate', status: 'done' },
+        ]}
+      />,
+    );
+    expect(details()).toEqual([
+      'Wartet auf die App',
+      'Von der App abgelehnt (ungültige Eingabe)',
+      'Von der App nicht ausgeführt',
+      'Auf dieser Seite nicht verfügbar',
+      'In der App fehlgeschlagen',
+      'Gestartet',
+      'Nicht bestätigt',
+      null,
+    ]);
+  });
+
+  it('shows a result still waiting after its turn ended as not confirmed', () => {
+    chatContext.current.locale = DEFAULT_LOCALE as unknown as Record<string, string>;
+    render(<ActivityLog active={false} steps={[{ id: 'c1', toolName: 'ui_navigate', status: 'waiting', uiOutcome: 'pending' }]} />);
+    expect(details()).toEqual(['Not confirmed']);
+    expect(rows()[0]!.getAttribute('data-status')).toBe('done');
+  });
+});

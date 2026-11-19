@@ -21,6 +21,8 @@ import type {
 } from '../types.js';
 import { limitRequestAttachments } from '../utils/attachments.js';
 import { MEMORY_BODY_FIELD, MEMORY_MAX_USER_NOTES, MEMORY_NOTES_PART, readMemoryEntries } from '../../contracts/memory.js';
+import { UI_OUTCOME_PROTOCOL_VERSION, UI_OUTCOMES_REQUEST_FIELD } from '../../contracts/ui-outcome.js';
+import { shouldContinueChat } from '../utils/ui-outcome-continuation.js';
 import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
 
 /**
@@ -31,10 +33,13 @@ import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
 export function chatRequestBody(
   extras: Record<string, unknown> | (() => Record<string, unknown>) | undefined,
   memory?: BrowserMemoryStore,
+  reportsUiOutcomes = false,
 ): Record<string, unknown> {
   const resolved = !extras ? {} : typeof extras === 'function' ? extras() : extras;
   return {
     glirastesClientActions: getDefaultUiActionBus().registeredActionIds(),
+    // The chat reports UI outcomes and sends the history again (protocol version 1).
+    ...(reportsUiOutcomes ? { [UI_OUTCOMES_REQUEST_FIELD]: UI_OUTCOME_PROTOCOL_VERSION } : {}),
     ...(memory ? { [MEMORY_BODY_FIELD]: { user: memory.read() } } : {}),
     ...resolved,
   };
@@ -64,6 +69,14 @@ export interface UseVercelAiChatTransportOptions extends ChatTransportConfig {
    * model adds or removes one. Not needed when the handler has a store.
    */
   memory?: BrowserMemoryStore;
+  /**
+   * Outcome protocol of UI actions (default true): once an `AiChatProvider`
+   * reports outcomes through this transport, every request says so
+   * (`glirastesUiOutcomes: 1`), the provider writes each outcome into its
+   * tool result, and the transport sends the history again once every
+   * result that waits for one has it. `false` sends neither.
+   */
+  uiActionOutcomes?: boolean;
 }
 
 export function useVercelAiChatTransport(
@@ -76,10 +89,22 @@ export function useVercelAiChatTransport(
     autoResumeOnApproval = true,
     bodyExtras,
     memory,
+    uiActionOutcomes = true,
   } = options;
 
   const memoryRef = useRef(memory);
   memoryRef.current = memory;
+
+  // Set by the provider that reports outcomes through this transport.
+  const reportingRef = useRef(false);
+  const uiActionOutcomesRef = useRef(uiActionOutcomes);
+  uiActionOutcomesRef.current = uiActionOutcomes;
+  const setUiOutcomeReporting = useCallback((enabled: boolean) => {
+    reportingRef.current = enabled;
+  }, []);
+  const reportsUiOutcomes = () => uiActionOutcomesRef.current && reportingRef.current;
+  const autoResumeRef = useRef(autoResumeOnApproval);
+  autoResumeRef.current = autoResumeOnApproval;
 
   const headersRef = useRef(userHeaders);
   headersRef.current = userHeaders;
@@ -108,7 +133,7 @@ export function useVercelAiChatTransport(
               return typeof h === 'function' ? h() : h ?? {};
             }
           : undefined,
-        body: () => chatRequestBody(bodyExtrasRef.current, memoryRef.current),
+        body: () => chatRequestBody(bodyExtrasRef.current, memoryRef.current, reportsUiOutcomes()),
         // Same body as the default, with file data only in the latest user turns.
         prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => ({
           body: {
@@ -132,11 +157,17 @@ export function useVercelAiChatTransport(
     stop,
     setMessages,
     addToolApprovalResponse,
+    addToolOutput,
   } = useChat({
     transport,
-    sendAutomaticallyWhen: autoResumeOnApproval
-      ? lastAssistantMessageIsCompleteWithApprovalResponses
-      : undefined,
+    // With the outcome protocol: approvals answered and every UI outcome reported (see shouldContinueChat).
+    sendAutomaticallyWhen: uiActionOutcomes
+      ? (options) => (reportsUiOutcomes()
+        ? shouldContinueChat(options, { approvals: autoResumeRef.current })
+        : autoResumeRef.current && lastAssistantMessageIsCompleteWithApprovalResponses(options))
+      : autoResumeOnApproval
+        ? lastAssistantMessageIsCompleteWithApprovalResponses
+        : undefined,
     onData: (dataPart) => {
       const part = dataPart as { type: string; data: unknown };
       if (part.type === MEMORY_NOTES_PART && memoryRef.current) {
@@ -156,6 +187,15 @@ export function useVercelAiChatTransport(
     [sendMessage],
   );
 
+  const writeToolOutput = useCallback<NonNullable<ChatTransport['addToolOutput']>>(
+    ({ tool, toolCallId, output }) => (addToolOutput as unknown as (
+      value: { tool: string; toolCallId: string; output: unknown },
+    ) => Promise<void>)({ tool, toolCallId, output }),
+    [addToolOutput],
+  );
+  // The history as it is, sent again without a new message (a turn continued on a new page).
+  const continueTurn = useCallback(() => sendMessage(), [sendMessage]);
+
   return useMemo<ChatTransport>(
     () => ({
       messages: rawMessages as unknown as ChatMessage[],
@@ -166,7 +206,9 @@ export function useVercelAiChatTransport(
       setMessages: setMessages as unknown as ChatTransport['setMessages'],
       addToolApprovalResponse,
       subscribeToData,
+      ...(uiActionOutcomes ? { addToolOutput: writeToolOutput, continueTurn, setUiOutcomeReporting } : {}),
     }),
-    [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData],
+    [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData,
+      uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting],
   );
 }

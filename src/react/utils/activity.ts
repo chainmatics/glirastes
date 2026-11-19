@@ -2,6 +2,7 @@ import { CLARIFICATION_TOOL_NAME } from '../../contracts/clarification.js';
 import { PLAN_TOOL_NAME, readPlanItems, type PlanItem } from '../../contracts/plan.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
+import { readUiOutcomeCode, type UiOutcomeCode } from '../../contracts/ui-outcome.js';
 import {
   ENDPOINT_PATH_NOT_ALLOWED_ERROR,
   ENDPOINT_PATH_NOT_RELATIVE_ERROR,
@@ -26,6 +27,24 @@ export interface ActivityStep {
   status: ActivityStepStatus;
   /** Tool output message or error text, when the display mode allows it. */
   detail?: string;
+  /**
+   * What the app reported for a UI action the model waits on (outcome
+   * protocol): `pending` until it reports, then its code (`ok` shows no
+   * extra text) or `unconfirmed`. The log shows the matching locale text.
+   */
+  uiOutcome?: ActivityUiOutcome;
+}
+
+export type ActivityUiOutcome = 'pending' | Exclude<UiOutcomeCode, 'ok'> | 'unconfirmed';
+
+/** Status and display of a result of the outcome protocol (`awaitsOutcome`), or undefined for any other. */
+function uiOutcomeStep(output: unknown): { status: ActivityStepStatus; uiOutcome?: ActivityUiOutcome } | undefined {
+  if (!isRecord(output) || typeof output.awaitsOutcome !== 'boolean') return undefined;
+  if (output.outcome === undefined) return output.awaitsOutcome ? { status: 'waiting', uiOutcome: 'pending' } : { status: 'done' };
+  const code = readUiOutcomeCode(output.outcome);
+  if (code === 'ok') return { status: 'done' };
+  if (code === undefined) return { status: 'done', uiOutcome: 'unconfirmed' };
+  return { status: code === 'initiated' ? 'done' : 'error', uiOutcome: code };
 }
 
 /** SDK built-ins render elsewhere (plan, clarification card, suggestions) or are internal (find_tools, read_result). */
@@ -112,13 +131,16 @@ export function readActivitySteps(
     if (!isRecord(part)) return;
     const toolName = toolPartName(part);
     if (!toolName || BUILTIN_TOOL_NAMES.has(toolName)) return;
-    const status = stepStatus(part.state, part.output);
+    const outcome = part.state === 'output-available' ? uiOutcomeStep(part.output) : undefined;
+    const status = outcome?.status ?? stepStatus(part.state, part.output);
     const step: ActivityStep = {
       id: typeof part.toolCallId === 'string' ? part.toolCallId : `part-${index}`,
       toolName,
       status,
+      ...(outcome?.uiOutcome ? { uiOutcome: outcome.uiOutcome } : {}),
     };
-    if (allowDetail(toolName)) {
+    // A UI action's outcome is shown by its own text, not by the result's message.
+    if (allowDetail(toolName) && !outcome) {
       let detail: unknown;
       if (status === 'error' || status === 'expected') {
         detail = isFailedOutput(part.output) && part.state === 'output-available' ? part.output.error : part.errorText;
