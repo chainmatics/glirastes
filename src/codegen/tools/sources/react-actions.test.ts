@@ -5,7 +5,7 @@ import { createJsonSchemaLike } from '../../../runtime/json-schema.js';
 import { createAppFixture, removeAppFixtures } from '../__tests__/app-fixture.js';
 import { loadToolsConfig } from '../config.js';
 import { EMPTY_CONVENTIONS } from '../resolutions.js';
-import { createSchemaProbe } from '../schema-probe.js';
+import { createSchemaProbe, type SchemaProbeOptions } from '../schema-probe.js';
 import type { ObservedTool, ToolSourceContext } from '../types.js';
 import { createReactActionSource } from './react-actions.js';
 
@@ -345,10 +345,8 @@ describe('react-actions source', () => {
 
     it('hands the probe of a zod contract the tsconfig nearest to srcDir', async () => {
       const app = await createAppFixture(MONOREPO);
-      const probe = vi.fn(async (_root: string, items: ReadonlyArray<unknown>) => items.map(() => ({
-        ok: false as const,
-        reason: 'probe-failed',
-      })));
+      const probe = vi.fn(async (_root: string, items: ReadonlyArray<unknown>, _options?: SchemaProbeOptions) => items
+        .map(() => ({ ok: false as const, reason: 'probe-failed' as const })));
       await createReactActionSource({ srcDir: 'apps/web/src' }).observe({ ...context(app.root), probe: { probe } });
       expect(probe).toHaveBeenCalledTimes(1);
       expect(probe.mock.calls[0]![2]).toEqual({ tsconfig: join(app.root, 'apps/web/tsconfig.json') });
