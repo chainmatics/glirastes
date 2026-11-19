@@ -719,6 +719,29 @@ describe('runToolsPipeline (labels per language by default)', () => {
     expect(withDefault.list?.title).toEqual(list?.title);
   }, 120_000);
 
+  it('keeps en and de and reports the rest when the tools declare more languages than one table holds', async () => {
+    const fixture = await app();
+    const tags = Array.from({ length: 60 }, (_, index) => `q${String.fromCharCode(97 + Math.floor(index / 26))}${String.fromCharCode(97 + (index % 26))}`);
+    const titles = (part: string[]) => Object.fromEntries(part.map((tag) => [tag, `Title ${tag}`]));
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'GET /api/tasks', title: titles(tags.slice(0, 30)) },
+        { stableKey: 'POST /api/tasks', title: titles(tags.slice(30)) },
+      ],
+    })}\n`);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const list = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts))).tools
+      .find((tool) => tool.stableKey === 'GET /api/tasks');
+    const emitted = Object.keys(list?.labels ?? {});
+    expect(emitted).toHaveLength(50);
+    expect(emitted).toEqual(expect.arrayContaining(['de', 'en', 'qaa']));
+    expect(emitted).not.toContain('qch');
+    const limited = result.findings.filter((finding) => finding.code === 'label-languages-limited');
+    expect(limited.map((finding) => [finding.severity, finding.subjectRef])).toEqual([['warning', '.glirastes/tools.json#languages']]);
+    expect(limited[0]!.message).toContain('qbw, qbx');
+  }, 120_000);
+
   it('emits only the named languages and reports the missing ones with an explicit list', async () => {
     const { list, result } = await refreshed(['en', 'pl']);
     expect(list?.labels).toEqual({ en: label('List tasks'), pl: label('Pokaż zadania') });

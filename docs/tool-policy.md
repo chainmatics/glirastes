@@ -288,8 +288,10 @@ What goes where:
   `toolTexts` in the generated module. The languages are
   `"languages": ["en", "de", "pl"]` in `.glirastes/tools.json`; without it
   (since 0.18.0) `en`, `de` and every language a tool's presentation or
-  title is declared in. Only a named language without an own label is
-  reported as `label-translation-missing` (warning, one per language). The
+  title is declared in (at most 50: en, de and the first others in
+  code-unit order; more is reported as `label-languages-limited`). Only a
+  named language without an own label is reported as
+  `label-translation-missing` (warning, one per language). The
   runtime words the chat in the turn's language (the chat handler's
   `requestLocale`, else `locale`, else the language the chat UI sends).
   `"languages": []` keeps the output of before 0.18.0: one presentation in

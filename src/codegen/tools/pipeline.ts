@@ -633,12 +633,20 @@ async function generate(
   const languages = requiredLanguages(config.locale, config.languages);
   // Labels per language: tools.json `languages`; without it every language a tool's texts are declared in plus the
   // template languages (en, de); `languages: []` keeps one label in `locale` (the output before 0.18.0).
-  const labelLanguages = config.languages !== undefined
-    ? (config.languages.length > 0 ? config.languages : undefined)
-    : defaultLabelLanguages(inventory.executions.map((execution) => ({
+  const derivedLabels = config.languages === undefined
+    ? defaultLabelLanguages(inventory.executions.map((execution) => ({
       hints: observedByKey.get(execution.stableKey)?.prose,
       entry: lookupSemantics(inputs.semantics, execution.stableKey, execution.definitionId),
-    })));
+    })))
+    : undefined;
+  const labelLanguages = config.languages !== undefined
+    ? (config.languages.length > 0 ? config.languages : undefined)
+    : derivedLabels!.languages;
+  if (derivedLabels && derivedLabels.dropped.length > 0) {
+    findings.push(toolFinding('label-languages-limited', 'warning', `${TOOLS_PATHS.config}#languages`,
+      `The tools declare texts in more than ${MAX_TEXT_LANGUAGES} languages; labels are generated for en, de and the first others in code-unit order, not for: `
+      + `${derivedLabels.dropped.slice(0, 10).join(', ')}${derivedLabels.dropped.length > 10 ? `, and ${derivedLabels.dropped.length - 10} more` : ''}.`));
+  }
   const usedSemantics = new Set<ToolSemanticsEntry>();
   const missingLabels = new Map<string, string[]>();
 
@@ -1106,14 +1114,21 @@ export async function runToolsPipeline(options: ToolsPipelineOptions): Promise<T
 /**
  * The label languages of an app without tools.json `languages`: the template
  * languages and every language a tool's presentation or title is declared
- * in, each once (case-insensitive), in code-unit order.
+ * in, each once (case-insensitive), in code-unit order. At most
+ * `MAX_TEXT_LANGUAGES`: en and de always, then the others in code-unit
+ * order; the rest is `dropped` (reported, the app can name its languages).
  */
 function defaultLabelLanguages(
   tools: ReadonlyArray<{ hints: Parameters<typeof declaredLabelLanguages>[0]; entry: Parameters<typeof declaredLabelLanguages>[1] }>,
-): string[] {
-  const byLower = new Map<string, string>();
-  for (const tag of [...TEMPLATE_LABEL_LANGUAGES, ...tools.flatMap((tool) => declaredLabelLanguages(tool.hints, tool.entry))]) {
+): { languages: string[]; dropped: string[] } {
+  const byLower = new Map<string, string>(TEMPLATE_LABEL_LANGUAGES.map((tag) => [tag, tag]));
+  for (const tag of tools.flatMap((tool) => declaredLabelLanguages(tool.hints, tool.entry))) {
     if (!byLower.has(tag.toLowerCase())) byLower.set(tag.toLowerCase(), tag);
   }
-  return [...byLower.values()].sort(compareCodeUnits).slice(0, MAX_TEXT_LANGUAGES);
+  const others = [...byLower.values()].slice(TEMPLATE_LABEL_LANGUAGES.length).sort(compareCodeUnits);
+  const room = MAX_TEXT_LANGUAGES - TEMPLATE_LABEL_LANGUAGES.length;
+  return {
+    languages: [...TEMPLATE_LABEL_LANGUAGES, ...others.slice(0, room)].sort(compareCodeUnits),
+    dropped: others.slice(room),
+  };
 }
