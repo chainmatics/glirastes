@@ -249,13 +249,14 @@ is in the package's `docs/tool-policy.md`.
    page to register the action, then runs it. Do not relay a window event
    from a global registration to a listener on one page
    (`ui-action-indirect`). A handler returns `false` when it could not do its
-   work; the dispatch then fails in the browser. The model is not told: a UI
-   tool's result only says the action was handed to the app, so the model
-   reports it as requested, not done. The chat classifies each outcome (`ok`,
-   `rejected-contract`, `rejected-handler`, `unavailable`, `failed`,
-   `initiated`, `timeout`) for `onUiActionOutcome` and the
-   `glirastes-chat:ui-action` event, and runs a UI action only from its own
-   running request, never from a restored history.
+   work; the dispatch then fails in the browser. The chat classifies each
+   outcome (`ok`, `rejected-contract`, `rejected-handler`, `unavailable`,
+   `failed`, `initiated`, `timeout`) for `onUiActionOutcome` and the
+   `glirastes-chat:ui-action` event, writes it into the tool result and the
+   model answers after it (a second request; the package's
+   `docs/ui-action-outcomes.md`). A strict body check in front of the chat
+   endpoint must allow `glirastesUiOutcomes`. UI results are
+   `{ handedOff: true, … }` without `success`.
 
    Export the zod payload contract from a module that imports only zod and
    pass that export: the generated tool then takes formats, descriptions,

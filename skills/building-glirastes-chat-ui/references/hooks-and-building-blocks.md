@@ -142,9 +142,26 @@ Defaults keep today's markup; everything below is opt-in.
 once per tool result with generated UI actions (`glirastes.*`), after they
 ran. The `UiActionOutcomeEvent` is `{ toolName, toolCallId, code, actions:
 [{ type, actionId? }], reported, durationMs, error? }`, no payload. A throw
-inside is caught. `reported` is `false`: the model is not told the outcome
-yet. `code` is a `UiActionRunCode`: a `UiOutcomeCode` of the protocol, or
-`timeout` / `unconfirmed`, which the protocol reports without a code.
+inside is caught. `reported` is `true` when the outcome was written into the
+tool result for the model. `code` is a `UiActionRunCode`: a `UiOutcomeCode` of
+the protocol, or `timeout` / `unconfirmed`, which the protocol reports without
+a code.
+
+Outcome protocol (default on, `uiActionOutcomes={false}` turns it off): with a
+transport that has `addToolOutput` (the bundled Vercel one) every request
+sends `glirastesUiOutcomes: 1`; the server marks UI results `awaitsOutcome:
+true` and ends the request; the provider writes `outcome: { v: 1, code }` and
+the transport sends the history again once all marked results of the step
+have one (`shouldContinueChat`), so the model answers after it. The composer
+stays locked meanwhile (`isLoading`). A custom `ChatTransport` opts in with
+`addToolOutput`, `continueTurn` and `setUiOutcomeReporting`, and sends the
+flag itself. The activity log shows the outcome per step (locale keys
+`activityUiPendingLabel`, `activityUiRejectedContract`,
+`activityUiRejectedHandler`, `activityUiUnavailable`, `activityUiFailed`,
+`activityUiInitiated`, `activityUiUnconfirmed`). UI results from 0.18 are
+`{ handedOff: true, message, uiAction }` without `success`: a renderer or
+`onToolResult` that checks `success` checks `handedOff` too. Details:
+`docs/ui-action-outcomes.md` of the package.
 
 | `code` | When |
 | --- | --- |
@@ -165,7 +182,14 @@ transport set, another tab's sync) or carrying an `outcome` never run and do
 not call `onToolResult`. A custom transport must report `submitted` or
 `streaming` while a request runs, or none of its results run. Hand-written
 `defineUiTool` actions with their own types are not classified and stay with
-`onToolResult`.
+`onToolResult`, unless the tool opts in with `outcome: 'confirm'`: then the
+chat runs them through the bus (`useAiClientActionByType`) and reports them;
+skip results with `awaitsOutcome` in `onToolResult`.
+
+After a full page load (`registerDocumentNavigation()`, `reloads`) the chat
+writes `initiated` and calls `session.save` before the page goes; the chat on
+the new page (`session.load`) continues the turn once within 60 s, as a model
+call only. Without `session` nothing is continued.
 
 Handlers refuse with `UiActionRejectedError` (`code` is
 `UI_ACTION_REJECTED_ERROR_CODE`, `glirastes.ui-action-rejected`; a

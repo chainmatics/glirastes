@@ -60,6 +60,8 @@ it. The type's JSDoc carries the full detail.
 | `hideIds` | keep technical ids out of answers (default `true`); also learns the ids a tool's `outputEntities` declare (integers only with an id prefix) |
 | declared identity | `outputEntities` / `inputEntities` on `Tool`, `defineTool`, `defineEndpointTool` and a `contract.ts` entry, `defineEntity` (`glirastes`): id (or composite key), name, fallback, type, `idKind`; used by overview, history, `read_result`, `hideIds`, approval card and entity links, sent to the browser as a transient `data-tool-entities` part only when declared (`entityDeclarationsOfTools`, `TOOL_ENTITIES_PART_TYPE`, `ToolEntitiesPart`); `collectDeclaredIdLabels` feeds a custom `createHideIdsTransform`. Types: `EntityDeclaration`, `OutputEntityDeclaration`, `InputEntityRef`, `InputEntityRole`, `EntityIdKind`, `ToolEntityDeclarations`, `EntityDeclarationsByTool`. See `docs/entity-identity.md` |
 | `uiActionSchema` | schema that validates the `uiAction` of tool results |
+| `uiActionOutcomes` | `UiActionOutcomesOption`: a `UiActionOutcomeMode` (`'confirm'` default, `'report-only'`, `'off'`) or `(toolName) => mode`. For a client that sends `glirastesUiOutcomes: 1` (`UI_OUTCOMES_REQUEST_FIELD`) a UI result handing a `glirastes.*` action off carries `awaitsOutcome` and the request ends after that step; the browser writes `outcome` and resends, and the model reads the fixed text per code (`UI_OUTCOME_MODEL_TEXTS`, `readUiOutcomeCode`, `uiOutcomeModelResult`; one fixed `UI_OUTCOME_SYSTEM_NOTE`). At most `MAX_UI_OUTCOME_CONTINUATIONS` (3) per turn, so up to four times the per-request budgets. Custom `streamHandler`s get no marker; `withModelFacingUiOutcomes` replaces the reported results for one that converts messages itself (`prepareModelMessages` does it). See `docs/ui-action-outcomes.md` |
+| `uiToolResultShape` | `UiToolResultShape`: `'handoff'` (default) `{ handedOff: true, message, uiAction }` without `success`; `'legacy'` the 0.17 `{ success: true, … }` |
 
 ## Built-in tools
 
@@ -96,12 +98,12 @@ it. The type's JSDoc carries the full detail.
 | `onError` | `(error, req, info?: AiChatErrorInfo)`: the request or turn failed (no `info`), or one tool call of a running turn failed (`info.source === 'tool-call'`, `info.kind`: `'denied'` budget or terminal guard denial, `'invalid-input'` a `ToolInputValidationError` with `issues: ToolInputIssue[]` (field path and expectation, never the value), `'failed'` timeout or thrown error); once per failure, a throw is ignored during streaming. The chat sees `AI request failed`, or a fixed text for a guard denial such as `Tool call limit for this turn reached (8).`; a budget denial is a `ToolExecutionDeniedError` with `budget: BudgetLimitState[]` (`{ dimension, limit, used }`) |
 | `onToolError` | a tool threw |
 | `classifyToolFailure` | `ToolFailureClassifier`: gets `ToolFailureInfo` (`toolName`, HTTP `status`, full parsed `body`) of a failed backend call and returns a `ToolFailureClassification`, `'expected'` or `'error'`; expected failures skip `maxConsecutiveErrors` and metric errors, counted locally only; never applies to managed-guard denials, which always count as errors; also on `createGlirastes`; not in the runtime container |
-| `onFinish` | steps, finish reason, token usage, truncation, `StepLimitSource` and the local `expectedToolFailureCount` |
+| `onFinish` | steps, finish reason, token usage, truncation, `StepLimitSource` and the local `expectedToolFailureCount`; once per request, with `continuation: 'approval' \| 'ui-outcome'` for a request that continued a turn and `awaitingUiOutcome: true` for one that ended to wait for a UI outcome |
 | `emitStepReports` | `data-step-report` stream parts (default on) |
 | `onStepReport` | one `PipelineStepReport` per step |
 | `onPipelineResult` | intent, module, model and tools chosen by `pipeline` |
 | `onAudit` | `AuditEmitter` for all audit events; forward to logs or a SIEM |
-| `metrics` | content-free turn metrics, e.g. from `createGlirastes(...).chatTurn()` |
+| `metrics` | content-free turn metrics, e.g. from `createGlirastes(...).chatTurn()`; a continuation is a `turn.continued` event (`TurnContinuedEvent`, `TurnContinuedEventSchema`, `TurnContinuation`, `TurnContinuationSchema`) instead of `turn.finished`, in batches of its own |
 | `modelPricing` | price table for providers that report no cost |
 
 ## Legacy and Pro

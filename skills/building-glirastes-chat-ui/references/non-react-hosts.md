@@ -125,7 +125,11 @@ vue-router resolves a failure, so pass `async (href) => !(await
 router.push(href))`. Without client-side routing call
 `registerDocumentNavigation()` (`location.assign`, outcome `initiated`). The
 element emits `glirastes-chat:ui-action` with `{ toolName, toolCallId, code,
-actionIds }` for every outcome. Only supported explicit route sources can supply that inventory. Keep
+actionIds }` for every outcome and reports it to the model (outcome protocol).
+On a server-rendered page the element remounts per page: give it a `session`
+(storage) so the turn continues once on the new page; without one the chat
+starts empty there. A strict proxy must allow the body field
+`glirastesUiOutcomes`. Only supported explicit route sources can supply that inventory. Keep
 manual verification of filter paths where automatic route cross-checking is
 unavailable. Neither UI visibility nor a client action can grant backend access.
 
