@@ -158,18 +158,23 @@ describe('schema probe', () => {
         + "  POST: { input: z.object({}), entityLookup: [{ type: 'Bad SECRETNAME', params: {} }], approvalSubject: { recheck: 'SECRETNAME' },"
         + " lookupEffect: 'SECRETNAME' },\n"
         + "  PUT: { input: z.object({}), approvalSubject: false, lookupEffect: 'read', entityLookup: () => 1 },\n"
-        + '  DELETE: { input: z.object({}) },\n};\n',
+        + '  DELETE: { input: z.object({}) },\n'
+        + "  PATCH: { input: z.object({}), approvalSubject: (() => { const a: Record<string, unknown> = { onUnavailable: 'block' }; a.self = a; return a; })() },\n};\n",
     });
     const entry = (method: string): SchemaProbeItem => ({
       kind: 'contract-entry', io: 'input', module: 'src/app/api/notes/contract.ts', export: 'contract', property: [method],
     });
-    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'PUT', 'DELETE'].map(entry));
-    const [get, post, put, del] = results.map((result) => (
+    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(entry));
+    const [get, post, put, del, patch] = results.map((result) => (
       result.ok && result.kind === 'contract-entry' ? result : undefined
     ));
     expect(get?.approval).toEqual({ entityLookup: [{ type: 'note', params: { note_id: 'note_id' } }] });
     expect(post?.approval?.issues).toHaveLength(3);
     expect(post?.approval).not.toHaveProperty('entityLookup');
+    // An explicit approvalSubject that is invalid, or that the probe cannot carry (a cycle), is never dropped: fail closed.
+    expect(post?.approval?.approvalSubject).toEqual({ refs: [], onUnavailable: 'block' });
+    expect(patch?.approval?.approvalSubject).toEqual({ refs: [], onUnavailable: 'block' });
+    expect(patch?.approval?.issues).toEqual([expect.stringMatching(/^approvalSubject that/)]);
     // A function is no JSON value: an issue, and the valid fields still go on.
     expect(put?.approval).toMatchObject({ approvalSubject: false, lookupEffect: 'read' });
     expect(put?.approval?.issues).toHaveLength(1);

@@ -16,7 +16,7 @@ import {
 import { isValidMaxResultChars } from '../../runtime/result-limit.js';
 import { normalizeOutputFields } from '../../server/core/output-fields.js';
 import { sha256Digest, sortKeysDeep } from './canonical.js';
-import { CODE_FIELD_NAMES, readApprovalDeclarations, type ApprovalDeclarations } from './approval-subject-declarations.js';
+import { CODE_FIELD_NAMES, FAIL_CLOSED_SUBJECT, readApprovalDeclarations, type ApprovalDeclarations } from './approval-subject-declarations.js';
 import { readDeclaredTexts, type DeclaredTextField, type DeclaredTexts } from './declared-texts.js';
 import { LocalizedPresentationSchema, type LocalizedPresentation } from './semantics.js';
 import type { JsonSchemaLike } from './types.js';
@@ -286,6 +286,10 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
   }
   const approvalRead = readApprovalDeclarations(approvalRaw, CODE_FIELD_NAMES);
   approvalIssues.push(...approvalRead.issues);
+  // An approvalSubject the probe could not carry (a function, a cycle, too large) is never dropped: it fails closed.
+  if (wire.approvalSubject === 'invalid') {
+    (approvalRead.declarations as { approvalSubject?: unknown }).approvalSubject = FAIL_CLOSED_SUBJECT;
+  }
   const approval = Object.keys(approvalRead.declarations).length > 0 || approvalIssues.length > 0
     ? { ...approvalRead.declarations, ...(approvalIssues.length > 0 ? { issues: approvalIssues } : {}) }
     : undefined;
