@@ -457,6 +457,35 @@ describe('the continuation after a reported outcome', () => {
     expect(active).toContain('ui_navigate');
   });
 
+  it('keeps a tool find_tools found but the first request did not call yet, never one outside the registry', async () => {
+    const hidden = defineTool({
+      id: 'tasks.highlight', description: 'Highlight a task.', inputSchema: z.object({}),
+      execute: async () => ({ success: true }),
+    });
+    const model = scriptedModel();
+    await run({
+      tools: { ...registry, tasks_highlight: hidden },
+      toolDiscovery: true,
+      intentRouter: async () => ({ toolNames: ['tasks_list'] }),
+      model,
+    }, FLAG, reportedHistory({ ...handedOff, awaitsOutcome: true, outcome: { v: 1, code: 'ok' } }, [
+      {
+        type: 'tool-find_tools', toolCallId: 'call-0', state: 'output-available', input: { query: 'highlight' },
+        output: { tools: [{ name: 'tasks_highlight' }, { name: 'admin_wipe' }] },
+      },
+    ]));
+    const active = model.doStreamCalls[0]!.tools?.map((tool) => tool.name) ?? [];
+    expect(active).toContain('tasks_highlight');
+    expect(active).not.toContain('admin_wipe');
+  });
+
+  it('sends the outcome note without an app system prompt too', async () => {
+    const { model } = await run({ systemPrompt: '' }, FLAG);
+    expect(prompt(model)).toContain(UI_OUTCOME_SYSTEM_NOTE);
+    const without = await run({ systemPrompt: '' }, {});
+    expect(prompt(without.model)).not.toContain(UI_OUTCOME_SYSTEM_NOTE);
+  });
+
   it('reports an approval continuation as turn.continued too', async () => {
     const { sink, events } = metricsSink();
     const archive = defineTool({

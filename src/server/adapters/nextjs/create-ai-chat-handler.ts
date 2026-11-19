@@ -609,14 +609,16 @@ async function defaultStreamHandler(
   const hideIds = ctx.hideIds !== false;
   // Fixed notes after the app's own prompt: no ids in answers, and with
   // discovery that the offered tools are a start set `find_tools` widens.
+  const uiOutcomeNote = uiOutcomes && !uiOutcomes.capReached ? [UI_OUTCOME_SYSTEM_NOTE] : [];
   const systemPrompt = ctx.systemPrompt
     ? [
         ctx.systemPrompt,
         ...(hideIds ? [HIDE_IDS_PROMPT] : []),
         ...(ctx.toolDiscovery ? [FIND_TOOLS_PROMPT] : []),
-        ...(uiOutcomes && !uiOutcomes.capReached ? [UI_OUTCOME_SYSTEM_NOTE] : []),
+        ...uiOutcomeNote,
       ].join('\n\n')
-    : ctx.systemPrompt;
+    // The outcome note holds without an app prompt too: the request ends before the model could answer.
+    : uiOutcomeNote[0] ?? ctx.systemPrompt;
   const idLabels: IdLabels = new Map();
   // Declared identity of the turn's tools (field names only): history, hideIds and the browser.
   const toolEntities = entityDeclarationsOfTools(ctx.tools);

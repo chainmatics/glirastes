@@ -186,7 +186,11 @@ export function turnContinuationOf(messages: ReadonlyArray<unknown>): TurnContin
   return undefined;
 }
 
-/** Tool names the running turn already called (for a continuation's start set). */
+/**
+ * Tool names the running turn already called or `find_tools` found (for a
+ * continuation's start set). Only candidates: discovery keeps a name only
+ * when it is eligible for this turn, as for `find_tools` itself.
+ */
 export function currentTurnToolNames(messages: ReadonlyArray<unknown>): string[] {
   const names = new Set<string>();
   for (const message of currentTurn(messages)) {
@@ -195,6 +199,11 @@ export function currentTurnToolNames(messages: ReadonlyArray<unknown>): string[]
       if (!isRecord(part) || typeof part.type !== 'string') continue;
       if (part.type === 'dynamic-tool' && typeof part.toolName === 'string') names.add(part.toolName);
       else if (part.type.startsWith('tool-')) names.add(part.type.slice('tool-'.length));
+      if (part.type === 'tool-find_tools' && isRecord(part.output) && Array.isArray(part.output.tools)) {
+        for (const found of part.output.tools.slice(0, 50)) {
+          if (isRecord(found) && typeof found.name === 'string') names.add(found.name);
+        }
+      }
     }
   }
   return [...names];
