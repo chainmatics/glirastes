@@ -116,7 +116,7 @@ function isToolPart(part: unknown): boolean {
 
 type ActivitySection =
   | { kind: 'text'; node: ReactNode }
-  | { kind: 'steps'; steps: ActivityStep[] };
+  | { kind: 'steps'; steps: ActivityStep[]; start: number };
 
 /**
  * The text nodes and the runs of tool steps of a message in message order,
@@ -130,7 +130,7 @@ function activitySections(
   readSteps: (parts: ReadonlyArray<unknown>) => ActivityStep[],
 ): ActivitySection[] | null {
   const textAt = new Map(texts.map((entry) => [entry.index, entry.node] as const));
-  const raw: Array<{ kind: 'text'; node: ReactNode } | { kind: 'tools'; parts: unknown[] }> = [];
+  const raw: Array<{ kind: 'text'; node: ReactNode } | { kind: 'tools'; parts: unknown[]; start: number }> = [];
   parts.forEach((part, index) => {
     const node = textAt.get(index);
     if (node !== undefined && node !== null) {
@@ -140,7 +140,7 @@ function activitySections(
     if (!isToolPart(part)) return;
     const last = raw.at(-1);
     if (last?.kind === 'tools') last.parts.push(part);
-    else raw.push({ kind: 'tools', parts: [part] });
+    else raw.push({ kind: 'tools', parts: [part], start: index });
   });
   const sections: ActivitySection[] = [];
   for (const entry of raw) {
@@ -149,7 +149,7 @@ function activitySections(
       continue;
     }
     const steps = readSteps(entry.parts);
-    if (steps.length > 0) sections.push({ kind: 'steps', steps });
+    if (steps.length > 0) sections.push({ kind: 'steps', steps, start: entry.start });
   }
   const firstText = sections.findIndex((section) => section.kind === 'text');
   const interleaved = firstText >= 0 && sections.slice(firstText).some((section) => section.kind === 'steps');
@@ -261,6 +261,16 @@ function MessageAttachment({ part, locale }: { part: FilePart; locale: ChatLocal
  * `MessageBubble` or `components.MessageParts` that arranges them itself.
  */
 export function useMessageParts(message: ChatMessage): MessageParts {
+  const { logsAt: _logsAt, ...parts } = useMessagePartsWithLogs(message);
+  return parts;
+}
+
+/**
+ * `useMessageParts` plus, with `activityLog.grouping: 'sections'`, each
+ * section's log keyed by the index of the first tool part of its run, so the
+ * bubble can keep the logs when it renders the parts in message order.
+ */
+function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt: ReadonlyMap<number, ReactNode> } {
   const {
     components,
     toolResults,
@@ -572,10 +582,11 @@ export function useMessageParts(message: ChatMessage): MessageParts {
     ? activitySections(message.parts, textEntries.map((entry, i) => ({ index: entry.index, node: textNodes[i] ?? null })), readSteps)
     : null;
   const lastStepsSection = sections ? sections.map((section) => section.kind).lastIndexOf('steps') : -1;
+  const logsAt = new Map<number, ReactNode>();
   const sectionNodes = sections?.map((section, i) => {
     if (section.kind === 'text') return section.node;
     const last = i === lastStepsSection;
-    return (
+    const log = (
       <ActivityLog
         key={`activity-${i}-${section.steps[0]!.id}`}
         steps={section.steps}
@@ -583,6 +594,8 @@ export function useMessageParts(message: ChatMessage): MessageParts {
         {...(last && notice && noticeInLog ? { notice: notice.text, noticeStatus: notice.status } : {})}
       />
     );
+    logsAt.set(section.start, scoped(log));
+    return log;
   });
 
   const nodes = {
@@ -646,6 +659,7 @@ export function useMessageParts(message: ChatMessage): MessageParts {
   return {
     visible,
     parts,
+    logsAt,
     plan: scoped(nodes.plan),
     activity: scoped(nodes.activity),
     notice: scoped(nodes.notice),
@@ -667,12 +681,14 @@ export function useMessageParts(message: ChatMessage): MessageParts {
  */
 export function MessageBubble({ message, className }: MessageBubbleProps) {
   const { classNames, components, approvalDisplay } = useChatContext();
-  const { visible, parts, ...nodes } = useMessageParts(message);
+  const { visible, parts, logsAt, ...nodes } = useMessagePartsWithLogs(message);
   if (!visible) return null;
   // With `approvalDisplay` placing approvals at their tool part, a message that
   // has one renders its text and tool parts in message order, so the approval
   // sits between the texts around it. Otherwise the default order, unchanged:
-  // plan, log, notice, attachments, text, results.
+  // plan, log, notice, attachments, text, results. With
+  // `activityLog.grouping: 'sections'` each section's log goes before the
+  // first tool part of its run, as in `nodes.text`.
   const display = approvalDisplay ?? { decided: 'none', open: 'panel' };
   const inOrder = (display.decided !== 'none' || display.open !== 'panel')
     && parts.some((entry) => entry.kind === 'text' && entry.node !== null)
@@ -685,7 +701,12 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
       {nodes.attachments}
       {inOrder
         ? parts.filter((entry) => entry.kind === 'text' || entry.kind === 'tool')
-          .map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)
+          .map((entry) => (
+            <Fragment key={entry.key}>
+              {logsAt.get(entry.index) ?? null}
+              {entry.node}
+            </Fragment>
+          ))
         : (
           <>
             {nodes.text}

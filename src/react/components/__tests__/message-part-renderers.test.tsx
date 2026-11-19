@@ -180,6 +180,26 @@ describe('approvals at their tool part (W3)', () => {
     await waitFor(() => expect(order()).toEqual(['Text A', 'approval-card', 'Text B']));
   });
 
+  it("keeps each log of activityLog.grouping: 'sections' at its place when approvals render in message order", async () => {
+    const order = () => Array.from(bubble().querySelectorAll(
+      '[data-component="markdown"], [data-component="approval-entry"], [data-component="activity-log"]',
+    )).map((node) => node.getAttribute('data-component') === 'markdown' ? node.textContent : node.getAttribute('data-component'));
+    render(
+      <Chat
+        messages={conversation(
+          { type: 'text', text: 'Text A' },
+          deletion('output-available', { id: 'ap1', approved: true }, { output: { success: true } }),
+          { type: 'text', text: 'Text B' },
+        )}
+        approvalDisplay={{ decided: 'entry' }}
+        activityLog={{ grouping: 'sections' }}
+      />,
+    );
+    await screen.findByText('Text B');
+    // The first log (the list call) comes before Text A, the second (the deletion) before its entry.
+    expect(order()).toEqual(['activity-log', 'Text A', 'activity-log', 'approval-entry', 'Text B']);
+  });
+
   it("open: 'inline' draws the open card at its tool part instead of below the messages", async () => {
     const messages = conversation({ type: 'text', text: 'Please confirm.' }, deletion('approval-requested', { id: 'ap9' }));
     const { unmount } = render(<Chat messages={messages} />);
