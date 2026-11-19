@@ -39,7 +39,7 @@ const PART_SKILLS: Record<
   ReadonlyArray<string>
 > = {
   'chat-ui': ['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions'],
-  tools: ['maintaining-glirastes-tools', 'describing-glirastes-tools'],
+  tools: ['maintaining-glirastes-tools', 'describing-glirastes-tools', 'upgrading-glirastes'],
   setup: ['setting-up-glirastes', 'setting-up-glirastes-memory', 'migrating-to-glirastes', 'upgrading-glirastes'],
 };
 
@@ -124,7 +124,8 @@ export const PART_LABELS: Record<InstallerPart, string> = {
 
 /**
  * Every skill of each part an install already has a skill from — the install's
- * selection as the current SDK defines it. Each framework stack counts as its
+ * selection as the current SDK defines it. A skill shared by several parts
+ * does not count as a sign of any of them. Each framework stack counts as its
  * own part, so a Next.js install never gains the web skill.
  */
 export function selectionOfInstalledSkills(
@@ -134,9 +135,11 @@ export function selectionOfInstalledSkills(
     ...Object.values(FRAMEWORK_SKILLS),
     ...Object.values(PART_SKILLS),
   ];
+  // A skill that several parts carry says nothing about which part was chosen.
+  const shared = (skill: string) => groups.filter((group) => group.includes(skill)).length > 1;
   const selection: string[] = [];
   for (const group of groups) {
-    if (!group.some((skill) => installed.includes(skill))) continue;
+    if (!group.some((skill) => !shared(skill) && installed.includes(skill))) continue;
     for (const skill of group) {
       if (!selection.includes(skill)) selection.push(skill);
     }

@@ -42,6 +42,8 @@ Run it:
 2. The groups are Must (breaking), Should (deprecated, plus edited skills that
    are behind), Recommended and Optional, only if wanted. Must, Should and
    Recommended items the code does not touch (`not-affected`) are not listed.
+   JSON keys: `must`, `should` (plus `keptSkills`), `recommended`, and `offer`
+   (= "Optional, only if wanted").
 3. For every Must, Should and Recommended item show the developer the id,
    the summary, the evidence (`file:line`) and the referenced skill section
    (`skill`, read it before you propose a change). `status: "unclear"` means

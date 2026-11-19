@@ -79,7 +79,7 @@ describe('part resolution', () => {
     expect(resolvePartSkills(['chat-ui'], { stack: 'nextjs' }))
       .toEqual(['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions']);
     expect(resolvePartSkills(['tools'], { stack: 'nextjs' }))
-      .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools']);
+      .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools', 'upgrading-glirastes']);
     expect(resolvePartSkills(['setup'], { stack: 'nextjs' }))
       .toEqual(['setting-up-glirastes', 'setting-up-glirastes-memory', 'migrating-to-glirastes', 'upgrading-glirastes']);
   });
@@ -90,7 +90,7 @@ describe('part resolution', () => {
 
   it('resolves an undetected stack to generic integration guidance without claiming detection', () => {
     expect(resolvePartSkills(['framework', 'tools'], { stack: null }))
-      .toEqual(['integrating-glirastes-web', 'maintaining-glirastes-tools', 'describing-glirastes-tools']);
+      .toEqual(['integrating-glirastes-web', 'maintaining-glirastes-tools', 'describing-glirastes-tools', 'upgrading-glirastes']);
   });
 
   it('never repeats a skill selected through two parts', () => {
@@ -102,6 +102,7 @@ describe('part resolution', () => {
       'integrating-glirastes-nextjs',
       'maintaining-glirastes-tools',
       'describing-glirastes-tools',
+      'upgrading-glirastes',
     ]);
   });
 
@@ -114,5 +115,12 @@ describe('part resolution', () => {
       ['guardrails' as (typeof INSTALLER_PARTS)[number]],
       { stack: 'nextjs' },
     )).toThrow(/framework/);
+  });
+
+  it('does not infer the setup part from the upgrade skill that tools also carry', async () => {
+    const { selectionOfInstalledSkills } = await import('./installer-parts.js');
+    expect(selectionOfInstalledSkills(['upgrading-glirastes'])).toEqual([]);
+    expect(selectionOfInstalledSkills(['maintaining-glirastes-tools']))
+      .toEqual(['maintaining-glirastes-tools', 'describing-glirastes-tools', 'upgrading-glirastes']);
   });
 });

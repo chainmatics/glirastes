@@ -22,6 +22,7 @@ const foundationSkills = [
   'describing-glirastes-tools',
   'building-glirastes-chat-ui',
   'curating-glirastes-chat-interactions',
+  'upgrading-glirastes',
 ] as const;
 const setupSkill = 'setting-up-glirastes';
 

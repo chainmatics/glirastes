@@ -186,7 +186,7 @@ describe('parts install independently', () => {
 
     const manifest = await readInstalledSkillsManifest(rootDir);
     expect(Object.keys(hostRecord(manifest, 'codex')?.skills ?? {}))
-      .toEqual(['describing-glirastes-tools', 'maintaining-glirastes-tools']);
+      .toEqual(['describing-glirastes-tools', 'maintaining-glirastes-tools', 'upgrading-glirastes']);
     expect(Object.keys(hostRecord(manifest, 'claude')?.skills ?? {}))
       .toEqual(['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions']);
   });
