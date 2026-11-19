@@ -90,7 +90,8 @@ history without running anything, and the chat continues the turn once
 have a code, one is `initiated` at most 60 s ago and no text follows. The
 model then says the page was opened. Without `session` the new page starts
 empty and nothing is continued. A bridge that reloads without `reloads` is
-caught on `pagehide` (outcome `initiated`, saved as far as possible).
+caught on `pagehide` (outcome `initiated` for a running navigation, "not
+confirmed" for any other running action; saved as far as possible).
 
 ## Never late
 

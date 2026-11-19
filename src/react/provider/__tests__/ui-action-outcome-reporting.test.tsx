@@ -485,6 +485,16 @@ describe('a UI action that loads a new page', () => {
     expect(written[0]!.output.outcome).toMatchObject({ v: 1, code: 'initiated' });
   });
 
+  it('writes not confirmed, never initiated, when the page goes while another kind of action runs', async () => {
+    const { bus } = setup();
+    cleanups.push(bus.subscribeById('dialog.open', () => new Promise(() => {})));
+    await stream([user, assistant(uiPart('c1', { awaitsOutcome: true }, { type: 'glirastes.action', actionId: 'dialog.open', payload: {} }))]);
+    await settle();
+    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    await settle();
+    expect(written.map((entry) => entry.output.outcome)).toEqual([{ v: 1 }]);
+  });
+
   function storedTurn(at: number, after: unknown[] = []): ChatMessage[] {
     return [user, assistant(uiPart('c1', { awaitsOutcome: true, outcome: { v: 1, code: 'initiated', at } }), ...after)];
   }

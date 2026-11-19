@@ -897,8 +897,9 @@ export function AiChatProvider({
   const settleForPageLoad = useCallback(async (
     current: { toolName: string; toolCallId: string; output: Record<string, unknown> },
     waitForStep: boolean,
+    code: 'initiated' | 'unconfirmed' = 'initiated',
   ) => {
-    const initiated = await reportUiOutcome(current.toolName, current.toolCallId, current.output, 'initiated');
+    const initiated = await reportUiOutcome(current.toolName, current.toolCallId, current.output, code);
     if (!initiated) return;
     // The other results of the step may still arrive: hold the page load until the stream ended.
     if (waitForStep) {
@@ -975,7 +976,11 @@ export function AiChatProvider({
       const current = currentUiRunRef.current;
       if (!current) return;
       pageLeavingRef.current = true;
-      void settleForPageLoad(current, false).catch(() => {});
+      // Only a running navigation started this page load; any other action's fate is unknown.
+      const navigates = toolResultUiActions(current.output).some((action) => (
+        action.type === 'glirastes.navigate' || typeof action.route === 'string'
+      ));
+      void settleForPageLoad(current, false, navigates ? 'initiated' : 'unconfirmed').catch(() => {});
     };
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);
