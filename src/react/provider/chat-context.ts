@@ -110,6 +110,13 @@ export interface ChatContextValue {
   removeQueued: (id: string) => boolean;
   /** Replaces the text of a queued message; false for an empty text or an unknown id. */
   editQueued: (id: string, text: string) => boolean;
+  /**
+   * Opens a queued message for editing (one at a time): the queue holds when
+   * it reaches it, so neither it nor a later one is sent past the open edit.
+   * `editQueued` for that id, `cancelEdit` or removing it ends the edit.
+   */
+  beginEdit: (id: string) => boolean;
+  cancelEdit: () => void;
   clearQueue: () => void;
   /** Lets a paused queue send again. */
   resumeQueue: () => void;

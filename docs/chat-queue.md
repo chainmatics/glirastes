@@ -83,6 +83,8 @@ not paused (except for the one `sendNow` message).
 | A queued message with files when attachments were turned off meanwhile | Not sent; the queue pauses and keeps it. |
 | `clear()` or `clearQueue()` while the stored queue still loads | The late load is dropped and an empty queue is saved. |
 | An emptied queue | No longer paused. |
+| A message open in an editor (`beginEdit`) | The queue holds when it reaches it: neither it nor a later message is sent until `editQueued` (saves and ends the edit), `cancelEdit` or removing it. Messages before it still go. `sendNow` refuses it while open. |
+| `queue.storage` still reading the conversation's queue (`queue.restoring`) | Nothing is sent; a message sent meanwhile is queued behind the stored ones. |
 
 Processing happens when a queued message is sent, through the same path as a
 typed one: `/` commands, mention serialization, `onBeforeSend` and the
@@ -99,9 +101,10 @@ attachments are off, and refused with a direct command.
 | --- | --- |
 | `send(text, options?)` | Unchanged signature; with the queue true when sent or queued, false when refused. |
 | `submit(text, options?)` | `'sent'`, `'queued'` or `'rejected'`; also without the queue (`'sent'`/`'rejected'`). |
-| `queue` | `{ enabled, items, paused }`. |
+| `queue` | `{ enabled, items, paused, restoring, editingId }`. |
 | `canCompose` | Whether a composer takes input: without the queue `!isLoading`; with it false only while the conversation loads or changes. |
 | `sendNow(id)`, `removeQueued(id)`, `editQueued(id, text)` | `boolean`: false for an unknown id (or an empty text). |
+| `beginEdit(id)`, `cancelEdit()` | Open / close the editor of a queued message (one at a time); while open, the queue holds at it. Call `beginEdit` when your UI opens an editor, so a run that ends meanwhile does not send the old text. |
 | `clearQueue()`, `resumeQueue()`, `pauseQueue()` | |
 
 `useChatQueue()` returns just the queue state and those actions, for a
@@ -143,7 +146,8 @@ A custom composer uses `canCompose` instead of `isLoading` to lock itself.
 - `data-element="title"`, `"paused"` (with `data-action="resume"`),
   `"items"`, `"item"` (`data-queue-id`, `data-state="queued" | "editing"`),
   `"text"`, `"files"`, `"actions"` with `data-action="send-now"`, `"edit"`,
-  `"remove"`; while editing `"edit"` with `data-action="save"`, `"cancel"`.
+  `"remove"`; while editing (`beginEdit`, the queue holds at it) `"edit"` with
+  `data-action="save"` (`editQueued`), `"cancel"` (`cancelEdit`).
 - Renders nothing while the queue is empty. `<ChatQueue>{(queue) => …}</ChatQueue>`
   renders it yourself.
 - Texts: `queueTitle` (`{count}`), `queueSendNowLabel`, `queueEditLabel`,

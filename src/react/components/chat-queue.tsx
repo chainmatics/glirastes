@@ -8,20 +8,24 @@ import type { ChatQueueApi, ChatQueueProps, QueuedMessage } from '../types.js';
  */
 export function useChatQueue(): ChatQueueApi {
   const {
-    queue, submit, sendNow, removeQueued, editQueued, clearQueue, resumeQueue, pauseQueue,
+    queue, submit, sendNow, removeQueued, editQueued, beginEdit, cancelEdit, clearQueue, resumeQueue, pauseQueue,
   } = useChatContext();
   return useMemo(() => ({
     enabled: queue.enabled,
     items: queue.items,
     paused: queue.paused,
+    restoring: queue.restoring,
+    editingId: queue.editingId,
     submit,
     sendNow,
     removeQueued,
     editQueued,
+    beginEdit,
+    cancelEdit,
     clearQueue,
     resumeQueue,
     pauseQueue,
-  }), [queue, submit, sendNow, removeQueued, editQueued, clearQueue, resumeQueue, pauseQueue]);
+  }), [queue, submit, sendNow, removeQueued, editQueued, beginEdit, cancelEdit, clearQueue, resumeQueue, pauseQueue]);
 }
 
 const fill = (text: string, values: Record<string, string | number>) =>
@@ -29,16 +33,18 @@ const fill = (text: string, values: Record<string, string | number>) =>
 
 function QueueItem({ item, queue }: { item: QueuedMessage; queue: ChatQueueApi }) {
   const { locale } = useChatContext();
-  const [draft, setDraft] = useState<string | null>(null);
+  // The edit lives in the queue (it holds the queue at this message); the typed text stays here.
+  const editing = queue.editingId === item.id;
+  const [draft, setDraft] = useState(item.text);
   const fileCount = item.files?.length ?? 0;
   return (
-    <li data-element="item" data-queue-id={item.id} data-state={draft !== null ? 'editing' : 'queued'}>
-      {draft !== null ? (
+    <li data-element="item" data-queue-id={item.id} data-state={editing ? 'editing' : 'queued'}>
+      {editing ? (
         <form
           data-element="edit"
           onSubmit={(event) => {
             event.preventDefault();
-            if (queue.editQueued(item.id, draft)) setDraft(null);
+            queue.editQueued(item.id, draft);
           }}
         >
           <textarea
@@ -48,7 +54,7 @@ function QueueItem({ item, queue }: { item: QueuedMessage; queue: ChatQueueApi }
             rows={2}
           />
           <button type="submit" data-action="save" disabled={draft.trim() === ''}>{locale.queueSaveLabel}</button>
-          <button type="button" data-action="cancel" onClick={() => setDraft(null)}>{locale.queueCancelLabel}</button>
+          <button type="button" data-action="cancel" onClick={queue.cancelEdit}>{locale.queueCancelLabel}</button>
         </form>
       ) : (
         <>
@@ -60,7 +66,7 @@ function QueueItem({ item, queue }: { item: QueuedMessage; queue: ChatQueueApi }
             <button type="button" data-action="send-now" onClick={() => queue.sendNow(item.id)}>
               {locale.queueSendNowLabel}
             </button>
-            <button type="button" data-action="edit" onClick={() => setDraft(item.text)}>
+            <button type="button" data-action="edit" onClick={() => { setDraft(item.text); queue.beginEdit(item.id); }}>
               {locale.queueEditLabel}
             </button>
             <button type="button" data-action="remove" onClick={() => queue.removeQueued(item.id)}>

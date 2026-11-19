@@ -101,6 +101,13 @@ export interface MessageQueueStore {
   commit(items: ReadonlyArray<QueuedMessage>, paused: boolean, reason: ChatQueueChangeReason, persist?: boolean): void;
   /** Empties the queue for good: a stored queue still loading is dropped, and an empty one is saved. */
   clearAll(): void;
+  /** True while the stored queue of the active conversation is still being read. */
+  restoring: boolean;
+  restoringRef: { readonly current: boolean };
+  /** The item open in an editor: the queue holds at it until the edit ends. */
+  editingId: string | null;
+  editingRef: { readonly current: string | null };
+  setEditing(id: string | null): void;
 }
 
 /**
@@ -118,6 +125,12 @@ export function useMessageQueueStore(
   const itemsRef = useRef<ReadonlyArray<QueuedMessage>>([]);
   const pausedRef = useRef(false);
   const priorityRef = useRef<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editingRef = useRef<string | null>(null);
+  const setEditing = useCallback((id: string | null) => {
+    editingRef.current = id;
+    setEditingId(id);
+  }, []);
   const onChangeRef = useRef(config?.onQueueChange);
   onChangeRef.current = config?.onQueueChange;
   const storageRef = useRef<ChatQueueStorage | undefined>(config?.storage);
@@ -127,6 +140,15 @@ export function useMessageQueueStore(
   sessionRef.current = sessionId;
   // The session whose stored queue was read; nothing is saved for a session before that.
   const loadedForRef = useRef<string | null>(null);
+  // Re-renders once a load answered (also with nothing stored).
+  const [, setLoadedFor] = useState<string | null>(null);
+  const markLoaded = useCallback((id: string) => {
+    loadedForRef.current = id;
+    setLoadedFor(id);
+  }, []);
+  // Until the stored queue is read, new messages queue behind it (FIFO across a reload).
+  const restoringRef = useRef(false);
+  restoringRef.current = hasStorage && loadedForRef.current !== sessionId;
   // Bumped by `clearAll`: a load that started before it must not bring the cleared queue back.
   const clearGenerationRef = useRef(0);
 
@@ -165,6 +187,7 @@ export function useMessageQueueStore(
     // A pause belongs to what is queued: an emptied queue is no longer paused.
     const effectivePaused = next.length === 0 && reason !== 'paused' ? false : nextPaused;
     if (priorityRef.current && !next.some((item) => item.id === priorityRef.current)) priorityRef.current = null;
+    if (editingRef.current && !next.some((item) => item.id === editingRef.current)) setEditing(null);
     itemsRef.current = next;
     pausedRef.current = effectivePaused;
     setItems(next);
@@ -175,7 +198,7 @@ export function useMessageQueueStore(
     } catch {
       // The app's callback never breaks the chat.
     }
-  }, [save]);
+  }, [save, setEditing]);
 
   // Another conversation: its queue is not this one's. With storage, read the new one's.
   const queueSessionRef = useRef(sessionId);
@@ -200,7 +223,7 @@ export function useMessageQueueStore(
         console.warn('[glirastes] queue.storage.load failed');
       }
       if (cancelled || sessionRef.current !== sessionId || clearGenerationRef.current !== generation) return;
-      loadedForRef.current = sessionId;
+      markLoaded(sessionId);
       if (stored.length === 0) {
         // Queued while the stored queue was read: keep it now.
         if (itemsRef.current.length > 0) save(sessionId, itemsRef.current);
@@ -211,18 +234,22 @@ export function useMessageQueueStore(
       commit([...stored.filter((item) => !known.has(item.id)), ...itemsRef.current], true, 'restored');
     })();
     return () => { cancelled = true; };
-  }, [sessionId, hasStorage, commit, save]);
+  }, [sessionId, hasStorage, commit, save, markLoaded]);
 
   const clearAll = useCallback(() => {
     clearGenerationRef.current += 1;
     // What is cleared now is this conversation's queue, also before its stored one was read.
-    if (storageRef.current) loadedForRef.current = sessionRef.current;
+    if (storageRef.current) markLoaded(sessionRef.current);
     if (itemsRef.current.length > 0 || pausedRef.current) commit([], false, 'cleared');
     else save(sessionRef.current, []);
-  }, [commit, save]);
+  }, [commit, save, markLoaded]);
 
+  const restoring = restoringRef.current;
   return useMemo(
-    () => ({ items, paused, itemsRef, pausedRef, priorityRef, commit, clearAll }),
-    [items, paused, commit, clearAll],
+    () => ({
+      items, paused, itemsRef, pausedRef, priorityRef, commit, clearAll,
+      restoring, restoringRef, editingId, editingRef, setEditing,
+    }),
+    [items, paused, commit, clearAll, restoring, editingId, setEditing],
   );
 }

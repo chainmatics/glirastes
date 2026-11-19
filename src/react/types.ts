@@ -1231,6 +1231,13 @@ export interface ChatQueueState {
   readonly enabled: boolean;
   readonly items: ReadonlyArray<QueuedMessage>;
   readonly paused: boolean;
+  /**
+   * True while `queue.storage` is still reading the active conversation's
+   * queue: nothing is sent meanwhile, new messages queue behind the stored ones.
+   */
+  readonly restoring: boolean;
+  /** The message open in an editor (`beginEdit`); the queue holds when it reaches it. */
+  readonly editingId: string | null;
 }
 
 /** The queue state and its actions (`useChatQueue`, `ChatQueue`'s render prop). */
@@ -1239,6 +1246,9 @@ export interface ChatQueueApi extends ChatQueueState {
   sendNow(id: string): boolean;
   removeQueued(id: string): boolean;
   editQueued(id: string, text: string): boolean;
+  /** Opens a queued message for editing: it is not sent until `editQueued` or `cancelEdit` ends the edit. */
+  beginEdit(id: string): boolean;
+  cancelEdit(): void;
   clearQueue(): void;
   resumeQueue(): void;
   pauseQueue(): void;

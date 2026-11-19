@@ -172,7 +172,7 @@ describe('chat queue disabled (default)', () => {
     expect(box.disabled).toBe(true);
     expect(document.querySelector('[data-action="stop"]')).not.toBeNull();
     expect(document.querySelector('[data-action="send"]')).toBeNull();
-    expect(ctx.queue).toEqual({ enabled: false, items: [], paused: false });
+    expect(ctx.queue).toEqual({ enabled: false, items: [], paused: false, restoring: false, editingId: null });
     expect(ctx.canCompose).toBe(false);
 
     // The provider's send never checked loading; it still does not.
@@ -686,6 +686,79 @@ describe('chat queue enabled', () => {
     await act(async () => { view.rerender(<Host chat={chat} config={config('s1')} />); });
     await act(async () => { pending.shift()!(); await new Promise((resolve) => setTimeout(resolve, 10)); });
     expect(ctx.queue.items).toHaveLength(0);
+  });
+
+  it('queues a message sent while the stored queue loads behind the stored ones', async () => {
+    let release!: () => void;
+    const storage: ChatQueueStorage = {
+      load: () => new Promise((resolve) => {
+        release = () => resolve([{ id: 'q1', text: 'stored', createdAt: '2026-01-01T00:00:00.000Z' }]);
+      }),
+      save: vi.fn(),
+    };
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true, storage } }} />);
+    expect(ctx.queue.restoring).toBe(true);
+    let result = '';
+    await act(async () => { result = ctx.submit('new'); });
+    expect(result).toBe('queued');
+    expect(texts(chat)).toEqual([]);
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
+    expect(ctx.queue.restoring).toBe(false);
+    expect(queuedTexts()).toEqual(['stored', 'new']);
+    await act(async () => { ctx.resumeQueue(); });
+    await waitFor(() => expect(texts(chat)).toEqual(['stored']));
+    await act(async () => { chat.finish(); });
+    await waitFor(() => expect(texts(chat)).toEqual(['stored', 'new']));
+  });
+
+  it('sends nothing while the stored queue loads, also with nothing stored', async () => {
+    let release!: () => void;
+    const storage: ChatQueueStorage = {
+      load: () => new Promise((resolve) => { release = () => resolve([]); }),
+      save: vi.fn(),
+    };
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true, storage } }} />);
+    await act(async () => { ctx.submit('early'); });
+    expect(texts(chat)).toEqual([]);
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
+    await waitFor(() => expect(texts(chat)).toEqual(['early']));
+  });
+
+  it('holds the queue at a message open in an editor', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={enabled} />);
+    await startRun(chat);
+    await act(async () => { ctx.submit('a'); ctx.submit('b'); ctx.submit('c'); });
+    const [a, b] = ctx.queue.items;
+    await act(async () => { expect(ctx.beginEdit(b!.id)).toBe(true); });
+    expect(ctx.queue.editingId).toBe(b!.id);
+    expect(ctx.sendNow(b!.id)).toBe(false);
+    await act(async () => { chat.finish(); });
+    await waitFor(() => expect(texts(chat)).toEqual(['first', 'a']));
+    expect(a).toBeDefined();
+    await act(async () => { chat.finish(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    // Neither the edited message nor the one behind it went out.
+    expect(texts(chat)).toEqual(['first', 'a']);
+    await act(async () => { ctx.editQueued(b!.id, 'b edited'); });
+    expect(ctx.queue.editingId).toBeNull();
+    await waitFor(() => expect(texts(chat)).toEqual(['first', 'a', 'b edited']));
+  });
+
+  it('cancelEdit and removing the message end the edit', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={enabled} />);
+    await startRun(chat);
+    await act(async () => { ctx.submit('a'); ctx.submit('b'); });
+    const [a, b] = ctx.queue.items;
+    await act(async () => { ctx.beginEdit(a!.id); });
+    await act(async () => { ctx.cancelEdit(); });
+    expect(ctx.queue.editingId).toBeNull();
+    await act(async () => { ctx.beginEdit(b!.id); ctx.removeQueued(b!.id); });
+    expect(ctx.queue.editingId).toBeNull();
+    expect(ctx.beginEdit('missing')).toBe(false);
   });
 
   it('never saves file items', async () => {

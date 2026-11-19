@@ -163,8 +163,10 @@ Off by default; `queue={{ enabled: true }}` on the provider (`config.queue` on
   `{ queued, paused, reason }`, `ChatQueueChangeReason`).
 - Context: `submit(text, options?)` returns `ChatSubmitResult`
   (`'sent' | 'queued' | 'rejected'`); `send` keeps its boolean; `queue`
-  (`ChatQueueState` `{ enabled, items, paused }`), `canCompose`, `sendNow`,
-  `removeQueued`, `editQueued`, `clearQueue`, `resumeQueue`, `pauseQueue`.
+  (`ChatQueueState` `{ enabled, items, paused, restoring, editingId }`),
+  `canCompose`, `sendNow`, `removeQueued`, `editQueued`, `beginEdit` /
+  `cancelEdit` (an open edit holds the queue at that message; call `beginEdit`
+  when a custom UI opens an editor), `clearQueue`, `resumeQueue`, `pauseQueue`.
   `useChatQueue()` returns `ChatQueueApi` (state plus actions).
 - `ChatQueue` (`ChatQueueProps`: `className`, `children(queue)`) renders above
   the composer in `AiChatPanel`; `components.ChatQueue` replaces it, `null`

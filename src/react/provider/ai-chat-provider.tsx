@@ -1776,7 +1776,8 @@ export function AiChatProvider({
   const clarificationOpen = queueEnabled
     && findOpenClarification(rawMessages as unknown as Array<{ role: string; parts: unknown[] }>) !== undefined;
   /** Also holds a queued message: it never answers a clarification or a command form by itself. */
-  const flushHeld = queueBusy || clarificationOpen || pendingCommand !== null || sessionNotReady || isSessionMutating;
+  const flushHeld = queueBusy || clarificationOpen || pendingCommand !== null || sessionNotReady || isSessionMutating
+    || queueStore.restoring;
   const [flushTick, setFlushTick] = useState(0);
 
   const submit = useCallback((
@@ -1802,8 +1803,9 @@ export function AiChatProvider({
       setIsMentionSearching(false);
     };
     // An open clarification is answered by what the user sends now, ahead of the queue (which waits for it).
+    // While the stored queue is read, a new message queues behind what it brings.
     const busy = queueBusy || sendInFlightRef.current || pendingUiWorkRef.current > 0
-      || (queued.length > 0 && !clarificationOpen);
+      || queueStore.restoringRef.current || (queued.length > 0 && !clarificationOpen);
     if (!busy) {
       // Idle: sent at once, so an open clarification is answered as before.
       resetComposer();
@@ -2186,6 +2188,8 @@ export function AiChatProvider({
     const priorityId = queueStore.priorityRef.current;
     const head = (priorityId ? queued.find((item) => item.id === priorityId) : undefined) ?? queued[0]!;
     const priority = head.id === priorityId;
+    // Open in an editor: neither it nor anything behind it goes out.
+    if (head.id === queueStore.editingRef.current) return;
     if (!priority && (queueStore.pausedRef.current || !queueConfig.autoFlush)) return;
     const files = head.files && head.files.length > 0 ? [...head.files] : undefined;
     let prepared: PreparedSend;
@@ -2238,7 +2242,8 @@ export function AiChatProvider({
     if (!queueEnabled) return false;
     const queued = queueStore.itemsRef.current;
     const item = queued.find((entry) => entry.id === id);
-    if (!item) return false;
+    // Open in an editor: save or cancel the edit first.
+    if (!item || queueStore.editingRef.current === id) return false;
     if (approvalWaiting) {
       // A typed message never decides an approval, unless the app chose so.
       if (queueConfig.sendNowDuringApproval === 'refuse') {
@@ -2272,13 +2277,24 @@ export function AiChatProvider({
       const plan = interactionRegistry?.planMessage(text, [...(item.mentions ?? [])]);
       if (plan?.status === 'send' || plan?.status === 'needs-args') return false;
     }
+    if (queueStore.editingRef.current === id) queueStore.setEditing(null);
     queueStore.commit(
-      queued.map((item) => (item.id === id ? { ...item, text } : item)),
+      queued.map((entry) => (entry.id === id ? { ...entry, text } : entry)),
       queueStore.pausedRef.current,
       'edited',
     );
     return true;
   }, [queueStore, interactionRegistry]);
+
+  const beginEdit = useCallback((id: string): boolean => {
+    if (!queueStore.itemsRef.current.some((item) => item.id === id)) return false;
+    queueStore.setEditing(id);
+    return true;
+  }, [queueStore]);
+
+  const cancelEdit = useCallback(() => {
+    if (queueStore.editingRef.current !== null) queueStore.setEditing(null);
+  }, [queueStore]);
 
   const clearQueue = useCallback(() => {
     queueStore.clearAll();
@@ -2295,8 +2311,14 @@ export function AiChatProvider({
   }, [queueEnabled, queueStore]);
 
   const queueState = useMemo<ChatQueueState>(
-    () => ({ enabled: queueEnabled, items: queueStore.items, paused: queueStore.paused }),
-    [queueEnabled, queueStore.items, queueStore.paused],
+    () => ({
+      enabled: queueEnabled,
+      items: queueStore.items,
+      paused: queueStore.paused,
+      restoring: queueStore.restoring,
+      editingId: queueStore.editingId,
+    }),
+    [queueEnabled, queueStore.items, queueStore.paused, queueStore.restoring, queueStore.editingId],
   );
 
   // Truncation
@@ -2427,6 +2449,8 @@ export function AiChatProvider({
       sendNow,
       removeQueued,
       editQueued,
+      beginEdit,
+      cancelEdit,
       clearQueue,
       resumeQueue,
       pauseQueue,
@@ -2522,6 +2546,8 @@ export function AiChatProvider({
       sendNow,
       removeQueued,
       editQueued,
+      beginEdit,
+      cancelEdit,
       clearQueue,
       resumeQueue,
       pauseQueue,
