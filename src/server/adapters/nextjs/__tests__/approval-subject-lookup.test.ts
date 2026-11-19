@@ -4,7 +4,7 @@ import type { ManagedTurnGuard } from '../../../../runtime/managed-turn.js';
 import { ToolExecutionDeniedError } from '../../../../runtime/tool-denial.js';
 import { z } from 'zod';
 import { parseApprovalSubjectsPart } from '../../../../contracts/approval-subject.js';
-import { defineEndpointTool, type PiiShield, type ToolContext } from '../../../../types.js';
+import { defineEndpointTool, defineTool, type PiiShield, type ToolContext } from '../../../../types.js';
 import { endpointToolsToRegistry } from '../../../core/index.js';
 import {
   ApprovalSubjectRefusedError,
@@ -228,6 +228,25 @@ describe('approval subject lookups', () => {
     expect(parseApprovalSubjectsPart(JSON.parse(JSON.stringify(part)))!.subjects).toEqual([
       expect.objectContaining({ path: 'playlist.id', ids: { id: '7' }, check: 'unchecked', reason: 'source_unavailable' }),
     ]);
+  });
+
+  it('applies the output schema to a list answer of a code-defined read tool', async () => {
+    const registry = referenceTools();
+    registry.list_channels = defineTool({
+      id: 'channels.list', description: 'List channels.', inputSchema: z.object({}).strict(),
+      outputSchema: z.array(z.object({ key: z.string(), title: z.string() })),
+      outputEntities: [{ type: 'channel', id: 'key', name: 'title', path: 'data[]' }],
+      entityLookup: { type: 'channel', params: {}, complete: true },
+      execute: async () => answer,
+    });
+    let answer: unknown = [{ key: 'lobby', title: 'Lobby screens', secret: 'x' }];
+    const { resolver } = resolverFor({}, { registry });
+    await resolver.resolve({ toolName: 'delete_channel', toolCallId: 'c1', input: { key: 'lobby' } });
+    expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ status: 'named', name: 'Lobby screens' });
+    answer = [{ key: 'lobby', title: 42 }];
+    const second = resolverFor({}, { registry }).resolver;
+    await second.resolve({ toolName: 'delete_channel', toolCallId: 'c2', input: { key: 'lobby' } });
+    expect(second.take('c2')!.part.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'invalid_response' });
   });
 
   it('validates its limits', () => {

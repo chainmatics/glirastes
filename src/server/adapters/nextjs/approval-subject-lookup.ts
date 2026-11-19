@@ -545,7 +545,18 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         }
         return { kind: 'unchecked', reason: 'unavailable' };
       }
-      const cleaned = cleanToolResult(tool, result, outputBoundOf(tool), name);
+      let answer: unknown = result;
+      if (!isRecordValue(answer)) {
+        // A list or scalar answer: its output schema applies too (the shared core path checks records only),
+        // and it travels under `data`, as a list answer does for the model.
+        if (tool.outputSchema) {
+          const parsedAnswer = tool.outputSchema.safeParse(answer);
+          if (!parsedAnswer.success) return { kind: 'unchecked', reason: 'invalid_response' };
+          answer = parsedAnswer.data;
+        }
+        answer = { data: answer };
+      }
+      const cleaned = cleanToolResult(tool, answer, outputBoundOf(tool), name);
       if (!cleaned.successful) return { kind: 'unchecked', reason: cleaned.withheld ? 'invalid_response' : 'unavailable' };
       return { kind: 'ok', value: cleaned.value };
     } catch {

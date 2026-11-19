@@ -333,6 +333,13 @@ describe('resolving approval subjects', () => {
       expect(codes(run({ preview: preview() }, { outputAllowedFields: ['summary'] }).findings)).toContain('approval-subject-field-denied');
       expect(codes(run({ preview: preview() }, { outputDeniedFields: ['**.impact'] }).findings)).toContain('approval-subject-field-denied');
     });
+
+    it('keeps a nested field an allow-list names exactly (impact.devices)', () => {
+      const fields = [{ path: 'impact.devices', label: 'Devices', format: 'count' }];
+      const allowed = run({ preview: preview({ fields }) }, { outputAllowedFields: ['impact.devices'] });
+      expect(codes(allowed.findings)).toEqual([]);
+      expect(allowed.byKey.get('DELETE /playlists/{playlist_id}')?.approvalSubject).toEqual({ preview: preview({ fields }) });
+    });
   });
 
   it('reports the issues of each level as a non-blocking error, never as the tool', () => {

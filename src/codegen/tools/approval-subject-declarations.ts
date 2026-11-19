@@ -474,10 +474,14 @@ function checkPreview(
     ? Object.values(preview.params).filter((value): value is string => typeof value === 'string' && !ownNames.has(value.split('.')[0]!))
     : [];
   if (unknownArgs.length > 0) return drop(`reads ${unknownArgs.join(', ')}, which is no parameter of this tool`);
-  const isDenied = outputFieldDenial(source);
+  // A denied field or ancestor hides it; the allow-list is checked at the full path only (`impact.devices` allows it).
+  const isDeniedStep = outputFieldDenial({ ...(source.outputDeniedFields ? { outputDeniedFields: source.outputDeniedFields } : {}) });
+  const isOutsideAllowed = outputFieldDenial({ ...(source.outputAllowedFields ? { outputAllowedFields: source.outputAllowedFields } : {}) });
   const fields = preview.fields.filter((field) => {
     const parts = field.path.split('.');
-    const denied = parts.some((part, index) => isDenied(index === 0 ? '' : parts.slice(0, index).join('.'), part));
+    const parent = (index: number) => (index === 0 ? '' : parts.slice(0, index).join('.'));
+    const denied = parts.some((part, index) => isDeniedStep(parent(index), part))
+      || isOutsideAllowed(parent(parts.length - 1), parts.at(-1)!);
     if (denied) {
       findings.push(toolFinding('approval-subject-field-denied', 'warning', subject,
         `The approvalSubject preview shows ${field.path}, which the output fields of ${source.definitionId} deny; the field is dropped.`));
