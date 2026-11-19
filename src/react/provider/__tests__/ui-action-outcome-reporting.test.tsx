@@ -362,6 +362,26 @@ describe('a UI action that loads a new page', () => {
     });
   });
 
+  it('releases the chat when a reloading push never settles: not confirmed, composer unlocked', async () => {
+    const { bus, outcomes } = setup({ uiActionOutcomeTimeoutMs: 20 });
+    cleanups.push(registerNavigationBridge({ bus, push: () => new Promise(() => {}), reloads: true }));
+    await stream([user, assistant(uiPart('c1'))]);
+    await waitFor(() => expect(outcomes).toHaveLength(1), { timeout: 12_000 });
+    expect(written.at(-1)!.output.outcome).toEqual({ v: 1 });
+    expect(outcomes[0]).toMatchObject({ code: 'unconfirmed', reported: true });
+    await waitFor(() => expect(loading.at(-1)).toBe(false));
+  }, 15_000);
+
+  it('releases the chat at once when it is cleared while a page load hangs', async () => {
+    const { bus, outcomes } = setup({ uiActionOutcomeTimeoutMs: 20 });
+    cleanups.push(registerNavigationBridge({ bus, push: () => new Promise(() => {}), reloads: true }));
+    await stream([user, assistant(uiPart('c1'))]);
+    await settle(60);
+    await act(async () => { control.set([]); });
+    await waitFor(() => expect(loading.at(-1)).toBe(false), { timeout: 1_000 });
+    expect(outcomes).toEqual([]);
+  });
+
   it('runs the later results and writes their own codes when a reloading bridge refuses the navigation', async () => {
     const { bus } = setup();
     cleanups.push(registerNavigationBridge({ bus, push: () => false, reloads: true }));

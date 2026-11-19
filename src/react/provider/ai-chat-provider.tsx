@@ -50,6 +50,7 @@ import {
   type UiActionRunCode,
 } from '../../browser/client-actions.js';
 import {
+  BEFORE_PAGE_LOAD_TIMEOUT_MS,
   onBeforeUiActionPageLoad,
   onUiActionPageLoadResult,
   type UiActionPageLoadResult,
@@ -1144,8 +1145,18 @@ export function AiChatProvider({
             if (!result || (result.code !== 'timeout' && result.code !== 'unconfirmed') || pageLoad?.toolCallId !== toolCallId) {
               return result;
             }
-            const navigation = await pageLoad.done;
-            const code = navigation === 'started' ? 'initiated' as const : navigation === 'refused' ? 'rejected-handler' as const : 'failed' as const;
+            // Bounded: a push that never settles, or a reset, leaves the action unconfirmed.
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const navigation = await Promise.race([
+              pageLoad.done,
+              new Promise<'unconfirmed'>((resolve) => {
+                timer = setTimeout(() => resolve('unconfirmed'), BEFORE_PAGE_LOAD_TIMEOUT_MS);
+                signal.addEventListener('abort', () => resolve('unconfirmed'), { once: true });
+              }),
+            ]).finally(() => clearTimeout(timer));
+            const code = navigation === 'started' ? 'initiated' as const
+              : navigation === 'refused' ? 'rejected-handler' as const
+                : navigation === 'failed' ? 'failed' as const : 'unconfirmed' as const;
             return { ...result, code };
           })
           .finally(() => {
