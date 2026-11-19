@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runToolsPipeline } from '../src/codegen/tools/pipeline.js';
 import { DEFAULT_LOCAL_LIMITS } from '../src/runtime/index.js';
 import { createHttpEndpointCaller, toolsToAiTools } from '../src/server/index.js';
+import { createAiChatHandler } from '../src/server/adapters/nextjs/create-ai-chat-handler.js';
 import { createReadResultTool } from '../src/server/core/read-result-tool.js';
 import { buildResultOverview } from '../src/server/core/result-overview.js';
 import { createResultStore } from '../src/server/core/result-store.js';
@@ -409,6 +410,105 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: approval subjects', (
     const asId = history(toolPart('revisions', { revisions: [{ id: 503, rev: 3, channelKey: 'lobby' }] }));
     expect(resolveApprovalSubjects({ revision_id: 503 }, collectEntitySightings(asId), collectSeenEntityIds(asId)))
       .toEqual([{ path: 'revision_id', id: '503', status: 'seen', label: 'Revision' }]);
+  });
+});
+
+describe.skipIf(!PYTHON_READY)('second acceptance fixture: server approval subjects (docs/approval-subjects.md)', () => {
+  const usage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 1, text: 1, reasoning: undefined },
+  };
+  /** One model-free turn through the built-in chat handler: the model calls `toolName` once. */
+  async function approvalTurn(toolName: string, input: Json, token = app.token) {
+    let step = 0;
+    const prompts: unknown[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async (options) => {
+        step += 1;
+        prompts.push(options.prompt);
+        const parts = step === 1
+          ? [{ type: 'tool-call', toolCallId: 'call-1', toolName, input: JSON.stringify(input) },
+            { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage }]
+          : [{ type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: 'Ok.' }, { type: 'text-end', id: 't' },
+            { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage }];
+        return { stream: new ReadableStream({ start(controller) { for (const part of [{ type: 'stream-start', warnings: [] }, ...parts]) controller.enqueue(part); controller.close(); } }) as never };
+      },
+    });
+    const handler = createAiChatHandler({
+      tools: app.turn({ authorization: `Bearer ${token}` }).registry,
+      model,
+      systemPrompt: 'Assistant',
+      approvalSecret: 'acceptance-approval-secret-32-chars!',
+      endpointCaller: (request) => createHttpEndpointCaller({ baseUrl: app.apiOrigin, request }),
+    });
+    const response = await handler(new Request(`${app.apiOrigin}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Please do it' }] }] }),
+    }));
+    const chunks = (await response.text()).split('\n').filter((line) => line.startsWith('data: {'))
+      .map((line) => JSON.parse(line.slice(6)) as Json);
+    const part = chunks.find((chunk) => chunk.type === 'data-approval-subjects') as { data: { subjects: Json[] } } | undefined;
+    return {
+      subjects: part?.data.subjects,
+      approvalId: chunks.find((chunk) => chunk.type === 'tool-approval-request')?.approvalId as string | undefined,
+      error: chunks.find((chunk) => chunk.type === 'tool-output-error')?.errorText,
+      prompt: JSON.stringify(prompts),
+    };
+  }
+
+  it('SA-04 through the server: delete_playlist(7) is named by get_playlist, with a v2 approval id', async () => {
+    const turn = await approvalTurn('playlists_delete', { playlist_id: 7 });
+    expect(turn.subjects).toEqual([{
+      type: 'playlist', role: 'target', id: '7', ids: { playlist_id: '7' }, path: 'playlist_id',
+      status: 'named', check: 'found', name: 'Weekend Loop', idKind: 'opaque',
+    }]);
+    expect(turn.approvalId).toMatch(/^glirastes-approval\.v2\./);
+    expect(turn.prompt).not.toContain('Weekend Loop');
+  });
+
+  it('SA-04 through the server: a playlist that does not exist gets no card, the model gets not_found', async () => {
+    const turn = await approvalTurn('playlists_delete', { playlist_id: 999 });
+    expect(turn.approvalId).toBeUndefined();
+    expect(turn.prompt).toContain('approval_subject_not_found');
+  });
+
+  it('SA-05 through the server: id 3 is the playlist "Lobby Loop", never user 3', async () => {
+    const turn = await approvalTurn('playlists_delete', { playlist_id: 3 });
+    expect(turn.subjects).toEqual([expect.objectContaining({ type: 'playlist', status: 'named', name: 'Lobby Loop' })]);
+    expect(JSON.stringify(turn.subjects)).not.toContain('Linus');
+  });
+
+  it('SA-06 through the server: delete_channel by key over the complete list_channels; a missing key is refused', async () => {
+    expect((await approvalTurn('channels_delete', { key: 'lobby' })).subjects).toEqual([
+      expect.objectContaining({ type: 'channel', status: 'named', name: 'Lobby screens', idKind: 'speaking' }),
+    ]);
+    const missing = await approvalTurn('channels_delete', { key: 'garage' });
+    expect(missing.approvalId).toBeUndefined();
+    expect(missing.prompt).toContain('approval_subject_not_found');
+  });
+
+  it('SA-07 through the server: roll_back_playlist(3, 303) finds version_id 303 in its playlist\'s versions', async () => {
+    expect((await approvalTurn('playlistsVersionsRollback_create', { playlist_id: 3, version_id: 303 })).subjects).toEqual([
+      expect.objectContaining({ type: 'playlist', role: 'parent', status: 'named', name: 'Lobby Loop' }),
+      expect.objectContaining({ type: 'playlist-version', role: 'target', status: 'seen', fallbackField: 'versionNumber', fallbackValue: 3 }),
+    ]);
+  });
+
+  it('SA-08 through the server: revision 503 of channel lobby is seen as "Rev 3"', async () => {
+    expect((await approvalTurn('channelsRevisionsRollback_create', { key: 'lobby', revision_id: 503 })).subjects).toEqual([
+      expect.objectContaining({ type: 'channel', role: 'parent', status: 'named', name: 'Lobby screens' }),
+      expect.objectContaining({ type: 'channel-revision', role: 'target', status: 'seen', fallbackField: 'rev', fallbackValue: 3 }),
+    ]);
+  });
+
+  it('list-page case: a user missing from the one page list_users reads is not checkable, never "does not exist"', async () => {
+    const onPage = await approvalTurn('users_delete', { user_id: 2 });
+    expect(onPage.subjects).toEqual([expect.objectContaining({ type: 'user', status: 'named', name: 'Grace Hopper' })]);
+    const offPage = await approvalTurn('users_delete', { user_id: 3 });
+    expect(offPage.subjects).toEqual([expect.objectContaining({ type: 'user', status: 'unknown', check: 'unchecked', reason: 'not_in_page' })]);
+    expect(offPage.approvalId).toMatch(/^glirastes-approval\.v2\./);
+    expect(offPage.prompt).not.toContain('approval_subject_not_found');
   });
 });
 
