@@ -1,8 +1,8 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
-import { EntityText, useChatEntityLinks } from '../entity-links/entity-links-react.js';
+import { EntityText, useChatEntityLinks, WithoutEntityLinks } from '../entity-links/entity-links-react.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, readClarificationPart } from '../utils/clarification.js';
 import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
@@ -180,6 +180,9 @@ export function useMessageParts(message: ChatMessage): MessageParts {
   const TurnNoticeComponent = components.TurnNotice ?? DefaultTurnNotice;
   const links = useChatEntityLinks();
   const linkText = links.enabled && message.role === 'assistant';
+  // `entityLinks.scope: 'assistant'`: nothing in a user's message becomes a chip, wherever its parts are placed.
+  const linksOff = links.enabled && links.scope === 'assistant' && message.role !== 'assistant';
+  const scoped = (node: ReactNode): ReactNode => (linksOff && node !== null ? <WithoutEntityLinks>{node}</WithoutEntityLinks> : node);
   const isLatestMessage = messages?.[messages.length - 1]?.id === message.id;
 
   const renderToolResult = (key: string, toolName: string, result: unknown) => {
@@ -382,8 +385,7 @@ export function useMessageParts(message: ChatMessage): MessageParts {
     return null;
   });
 
-  return {
-    visible,
+  const nodes = {
     plan: hasPlan ? <PlanChecklist items={planItems!} active={turnActive} /> : null,
     activity: activitySteps.length > 0
       ? (
@@ -414,6 +416,15 @@ export function useMessageParts(message: ChatMessage): MessageParts {
       )
       : null,
     toolResults: toolResultNodes.some((node) => node !== null) ? <>{toolResultNodes}</> : null,
+  };
+  return {
+    visible,
+    plan: scoped(nodes.plan),
+    activity: scoped(nodes.activity),
+    notice: scoped(nodes.notice),
+    attachments: scoped(nodes.attachments),
+    text: scoped(nodes.text),
+    toolResults: scoped(nodes.toolResults),
   };
 }
 

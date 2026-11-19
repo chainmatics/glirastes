@@ -12,8 +12,23 @@
  */
 
 import { READ_RESULT_ID_PREFIX, WRITE_RESULT_ID_PREFIX, READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
-import { identityFieldsOf, idLikeFieldsOf, NAME_KEYS as NAME_KEY_PROFILES, OWN_ID_KEYS } from '../../../contracts/entity-identity.js';
+import {
+  identityFieldsOf,
+  idLikeFieldsOf,
+  MAX_IDENTITY_FIELD_CHARS,
+  NAME_KEYS as NAME_KEY_PROFILES,
+  OWN_ID_KEYS,
+} from '../../../contracts/entity-identity.js';
 import { dominantArrayRoute, expiredInstruction } from '../../core/result-overview.js';
+import {
+  declarationForEntries,
+  declaredIdentityKeys,
+  declaredRecordsOf,
+  entityIdFields,
+  parseEntityPath,
+  type EntityPathStep,
+  type OutputEntityDeclaration,
+} from '../../../contracts/entity-declaration.js';
 
 export const HISTORY_DEFAULTS = {
   maxTurns: 6,
@@ -68,7 +83,12 @@ function orderedKeys(kept: ReadonlySet<string>, idLikeOrder: ReadonlyArray<strin
   ];
 }
 
-type Limits = { maxItems: number; maxStringLength: number };
+type Limits = {
+  maxItems: number;
+  maxStringLength: number;
+  /** Declared ids (`outputEntities`): never clipped. */
+  keep?: ReadonlySet<string>;
+};
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -85,7 +105,7 @@ function serializedLength(value: unknown): number {
 /** The size bound of earlier versions: first `maxItems` entries plus a count, strings cut, nesting cut. */
 function compactValue(current: unknown, depth: number, limits: Limits): unknown {
   if (typeof current === 'string') {
-    return current.length > limits.maxStringLength
+    return current.length > limits.maxStringLength && !limits.keep?.has(current)
       ? `${current.slice(0, limits.maxStringLength)}… [${current.length - limits.maxStringLength} more characters]`
       : current;
   }
@@ -141,8 +161,9 @@ type IdentityLevel = 'all' | 'pair' | 'clipped';
  * An entry without a recognised identifier keeps every id-like field
  * (`idLikeFieldsOf`) on every level.
  */
-function identityOf(entry: unknown, level: IdentityLevel): Array<[string, unknown]> {
+function identityOf(entry: unknown, level: IdentityLevel, declared?: OutputEntityDeclaration): Array<[string, unknown]> {
   if (!isPlainObject(entry)) return [];
+  if (declared) return declaredIdentityOf(entry, level, declared);
   const kept = new Map(identityFieldsOf(entry));
   const idLike = new Set(idLikeFieldsOf(entry, IDENTITY_ID_KEYS));
   let fields: Array<[string, unknown]> = [];
@@ -160,8 +181,34 @@ function identityOf(entry: unknown, level: IdentityLevel): Array<[string, unknow
     : fields;
 }
 
-function isClipped(fields: Array<[string, unknown]>): boolean {
-  return fields.some(([key, value]) => NAME_KEYS.has(key) && typeof value === 'string' && value.endsWith(CLIP_SUFFIX));
+/**
+ * The declared identity of an entry (its id fields, then its name, else its
+ * fallback; scalars only) on every level: a name is clipped when its field is
+ * too long to be an identity field, and always on `clipped`.
+ */
+function declaredIdentityOf(entry: Record<string, unknown>, level: IdentityLevel, declared: OutputEntityDeclaration): Array<[string, unknown]> {
+  const fields: Array<[string, unknown]> = [];
+  for (const key of declaredIdentityKeys(declared)) {
+    if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
+    const value = entry[key];
+    if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) continue;
+    // An id field is never clipped, also when it doubles as the name (`{ id: 'slug', name: 'slug' }`).
+    const isName = (key === declared.name || key === declared.fallback) && !entityIdFields(declared).includes(key);
+    if (isName && typeof value === 'string'
+      && (level === 'clipped' || JSON.stringify(key).length + JSON.stringify(value).length + 2 > MAX_IDENTITY_FIELD_CHARS)) {
+      fields.push([key, clipName(value)]);
+    } else {
+      fields.push([key, value]);
+    }
+  }
+  return fields;
+}
+
+function isClipped(fields: Array<[string, unknown]>, declared?: OutputEntityDeclaration): boolean {
+  const named = (key: string) => (declared
+    ? (key === declared.name || key === declared.fallback) && !entityIdFields(declared).includes(key)
+    : NAME_KEYS.has(key));
+  return fields.some(([key, value]) => named(key) && typeof value === 'string' && value.endsWith(CLIP_SUFFIX));
 }
 
 function objectOf(fields: Array<[string, unknown]>): Record<string, unknown> {
@@ -199,6 +246,12 @@ export interface CompactHistoryResultOptions {
   keepIdentity?: boolean;
   /** Upper bound of the serialized result when it carries a `_history` marker (default: none). */
   maxChars?: number;
+  /**
+   * The producing tool's `outputEntities`: entries of the dominant array a
+   * declaration names keep exactly their declared id fields and name (or
+   * fallback) instead of the guessed identity. Without one, as before.
+   */
+  entities?: ReadonlyArray<OutputEntityDeclaration>;
 }
 
 /**
@@ -225,9 +278,28 @@ export interface CompactHistoryResultOptions {
  * the caller sends the turn as text.
  */
 export function compactHistoryResult(value: unknown, options: CompactHistoryResultOptions = {}): unknown {
+  return compactHistoryResultOnce(value, options);
+}
+
+/**
+ * The string ids the declarations name anywhere in `value` (root, entries,
+ * nested objects): string clipping never shortens them, so every size the
+ * plan measures already holds them whole. Ids are at most 200 characters.
+ */
+function declaredIdTexts(value: unknown, entities: ReadonlyArray<OutputEntityDeclaration>): Set<string> {
+  const texts = new Set<string>();
+  const root = Array.isArray(value) ? { data: value } : value;
+  for (const identity of declaredRecordsOf(root, entities).values()) {
+    for (const id of identity.idValues) if (typeof id === 'string') texts.add(id);
+  }
+  return texts;
+}
+
+function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultOptions): unknown {
   const limits: Limits = {
     maxItems: options.maxItems ?? HISTORY_DEFAULTS.maxItems,
     maxStringLength: options.maxStringLength ?? HISTORY_DEFAULTS.maxStringLength,
+    ...(options.entities?.length ? { keep: declaredIdTexts(value, options.entities) } : {}),
   };
   const maxChars = options.maxChars ?? Number.POSITIVE_INFINITY;
   const legacy = withExpiredHandle(compactValue(value, 0, limits));
@@ -245,9 +317,75 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
   const length = source.length;
 
   // Id-like keys of entries without a recognised identifier, in the order they first occur.
+  const declared = declarationForEntries(options.entities, rootArray ? ['data'] : route, rootArray ? { data: value } : value);
   const idLikeSeen = new Set<string>();
-  for (const entry of source) for (const key of idLikeFieldsOf(entry, IDENTITY_ID_KEYS)) idLikeSeen.add(key);
+  if (!declared) for (const entry of source) for (const key of idLikeFieldsOf(entry, IDENTITY_ID_KEYS)) idLikeSeen.add(key);
   const idLikeOrder = [...idLikeSeen];
+  // Declared records below an entry (`data[].owner`, `data[].items[]`, `data[].meta.owner`) keep their
+  // identity too: the path to them is kept, nothing else on it.
+  const entryPath = `${rootArray ? 'data' : route.join('.')}[]`;
+  const nested = (options.entities ?? []).flatMap((declaration) => {
+    const steps = declaration.path?.startsWith(`${entryPath}.`) ? parseEntityPath(declaration.path.slice(entryPath.length + 1)) : undefined;
+    return steps && steps.length > 0 ? [{ steps, declared: declaration }] : [];
+  });
+  const nestedKeys = nested.map(({ steps }) => steps[0]!.key);
+  /** The declared identity at `steps` below `value`, with the objects and lists on the way; undefined for none. */
+  const project = (value: unknown, steps: ReadonlyArray<EntityPathStep>, inner: OutputEntityDeclaration, level: IdentityLevel): unknown => {
+    if (steps.length === 0) {
+      if (!isPlainObject(value)) return undefined;
+      const object = objectOf(declaredIdentityOf(value, level, inner));
+      return Object.keys(object).length > 0 ? object : undefined;
+    }
+    if (!isPlainObject(value)) return undefined;
+    const [step, ...rest] = steps;
+    const child = value[step!.key];
+    // Lists keep their positions (`undefined` where nothing is declared) until projections are joined.
+    const below = step!.each
+      ? (Array.isArray(child) ? child.map((item) => project(item, rest, inner, level)) : [])
+      : project(child, rest, inner, level);
+    if (below === undefined || (Array.isArray(below) && below.every((item) => item === undefined))) return undefined;
+    return { [step!.key]: below };
+  };
+  /** Joins two projections of one entry (`meta.owner` and `meta.editor`, `items[].owner` and `items[].editor`). */
+  const merge = (left: unknown, right: unknown): unknown => {
+    if (left === undefined) return right;
+    if (right === undefined) return left;
+    if (isPlainObject(left) && isPlainObject(right)) {
+      const output: Record<string, unknown> = { ...left };
+      for (const key of Object.keys(right)) setOwn(output, key, key in output ? merge(output[key], right[key]) : right[key]);
+      return output;
+    }
+    if (Array.isArray(left) && Array.isArray(right)) {
+      return Array.from({ length: Math.max(left.length, right.length) }, (_, index) => merge(left[index], right[index]));
+    }
+    return left;
+  };
+  /** A joined projection without the positions nothing was declared at. */
+  const settle = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.filter((item) => item !== undefined).map(settle);
+    if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, settle(item)]));
+    return value;
+  };
+  const keysInOrder = (kept: ReadonlySet<string>): string[] => [
+    ...(declared
+      ? declaredIdentityKeys(declared).filter((key) => kept.has(key))
+      : orderedKeys(kept, idLikeOrder)),
+    ...nestedKeys.filter((key, index) => kept.has(key) && nestedKeys.indexOf(key) === index),
+  ];
+  const identityWithNested = (entry: unknown, level: IdentityLevel): Array<[string, unknown]> => {
+    const fields = identityOf(entry, level, declared);
+    if (nested.length === 0 || !isPlainObject(entry)) return fields;
+    let extra: Record<string, unknown> = {};
+    for (const { steps, declared: inner } of nested) {
+      const key = steps[0]!.key;
+      if (fields.some(([kept]) => kept === key)) continue;
+      const projected = project(entry, steps, inner, level);
+      if (isPlainObject(projected)) extra = merge(extra, projected) as Record<string, unknown>;
+    }
+    extra = settle(extra) as Record<string, unknown>;
+    for (const key of Object.keys(extra)) fields.push([key, extra[key]]);
+    return fields;
+  };
   // Identity per entry on each level, with prefix sums of their sizes and counts.
   const forms = (['all', 'pair', 'clipped'] as const).map((level) => {
     const sizes = [0];
@@ -255,13 +393,13 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
     const keys = new Set<string>();
     let clipped = false;
     for (const entry of source) {
-      const fields = identityOf(entry, level);
+      const fields = identityWithNested(entry, level);
       for (const [key] of fields) keys.add(key);
-      clipped ||= isClipped(fields);
+      clipped ||= isClipped(fields, declared);
       sizes.push(sizes.at(-1)! + (fields.length > 0 ? serializedLength(objectOf(fields)) : 0));
       counts.push(counts.at(-1)! + (fields.length > 0 ? 1 : 0));
     }
-    return { level, sizes, counts, clipped, keys: orderedKeys(keys, idLikeOrder) };
+    return { level, sizes, counts, clipped, keys: keysInOrder(keys) };
   });
   if (forms[0]!.counts[length] === 0) return legacy;
   const fullCount = Math.min(limits.maxItems, length);
@@ -322,16 +460,16 @@ export function compactHistoryResult(value: unknown, options: CompactHistoryResu
   const kept = new Set<string>();
   let anyClipped = false;
   for (let index = plan.full; index < plan.end; index += 1) {
-    const fields = identityOf(source[index], plan.form.level);
+    const fields = identityWithNested(source[index], plan.form.level);
     if (fields.length === 0) continue;
     for (const [key] of fields) kept.add(key);
-    anyClipped ||= isClipped(fields);
+    anyClipped ||= isClipped(fields, declared);
     array.push(objectOf(fields));
   }
   let holder = output;
   for (const key of (rootArray ? ['data'] : route).slice(0, -1)) holder = holder[key] as Record<string, unknown>;
   setOwn(holder, rootArray ? 'data' : route.at(-1)!, array);
-  setOwn(output, HISTORY_MARKER_KEY, markerOf(plan, orderedKeys(kept, idLikeOrder), anyClipped));
+  setOwn(output, HISTORY_MARKER_KEY, markerOf(plan, keysInOrder(kept), anyClipped));
   return output;
 }
 

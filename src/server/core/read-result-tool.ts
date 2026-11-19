@@ -12,6 +12,7 @@ import {
 } from '../../contracts/result-handle.js';
 import { defineTool, type Tool } from '../../types.js';
 import { identityFieldsOf } from '../../contracts/entity-identity.js';
+import { declarationForEntries, declaredIdentityKeys, type OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
 import { dominantArrayRoute } from './result-overview.js';
 import {
   describeMissingPath,
@@ -299,7 +300,12 @@ function selects(prefix: ReadonlyArray<PathStep>, steps: ReadonlyArray<PathStep>
  * already covers, not for an entry that is no object. Changes `value` (a
  * fresh projection or cut) in place; the identity fields come first.
  */
-function identityAdder(source: Record<string, unknown>, known: ReadonlyArray<ParsedPath>, offset: number) {
+function identityAdder(
+  source: Record<string, unknown>,
+  known: ReadonlyArray<ParsedPath>,
+  offset: number,
+  entities?: ReadonlyArray<OutputEntityDeclaration>,
+) {
   const targets = new Map<string, { route: string[]; step: PathStep }>();
   for (const path of known) {
     const at = path.steps.findIndex((step) => step.kind !== 'key');
@@ -309,9 +315,17 @@ function identityAdder(source: Record<string, unknown>, known: ReadonlyArray<Par
     targets.set(JSON.stringify([route, step]), { route, step });
   }
   const covered = (steps: PathStep[]) => known.some((path) => selects(path.steps, steps));
-  const enrich = (entry: unknown, original: unknown, routeSteps: PathStep[]): unknown => {
+  /** The declared identity fields of an entry, scalars only; the heuristic's without a declaration. */
+  const identityOf = (original: Record<string, unknown>, declared: OutputEntityDeclaration | undefined): Array<[string, unknown]> => {
+    if (!declared) return identityFieldsOf(original);
+    return declaredIdentityKeys(declared)
+      .filter((key) => Object.prototype.hasOwnProperty.call(original, key))
+      .map((key): [string, unknown] => [key, original[key]])
+      .filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value));
+  };
+  const enrich = (entry: unknown, original: unknown, routeSteps: PathStep[], declared?: OutputEntityDeclaration): unknown => {
     if (!isPlainRecord(entry) || !isPlainRecord(original)) return entry;
-    const added = identityFieldsOf(original).filter(([key]) => (
+    const added = identityOf(original, declared).filter(([key]) => (
       !Object.prototype.hasOwnProperty.call(entry, key) && !covered([...routeSteps, { kind: 'key', key }])
     ));
     if (added.length === 0) return entry;
@@ -339,18 +353,95 @@ function identityAdder(source: Record<string, unknown>, known: ReadonlyArray<Par
       }
       if (!holder || !Array.isArray(original)) continue;
       const routeSteps: PathStep[] = route.map((key) => ({ kind: 'key', key }));
+      const declared = declarationForEntries(entities, route, source);
       if (step.kind === 'each' && Array.isArray(projected)) {
         const start = Math.min(offset, original.length);
         const entries = original;
-        setOwn(holder, last, projected.map((entry, index) => enrich(entry, entries[start + index], [...routeSteps, step])));
+        setOwn(holder, last, projected.map((entry, index) => enrich(entry, entries[start + index], [...routeSteps, step], declared)));
       } else if (step.kind === 'index' && isPlainRecord(projected)) {
         const key = String(step.index);
         if (Object.prototype.hasOwnProperty.call(projected, key)) {
           const copy: Record<string, unknown> = { ...projected };
-          setOwn(copy, key, enrich(projected[key], original[step.index], [...routeSteps, step]));
+          setOwn(copy, key, enrich(projected[key], original[step.index], [...routeSteps, step], declared));
           setOwn(holder, last, copy);
         }
       }
+    }
+    return value;
+  };
+}
+
+/**
+ * Adds the declared identity fields to entries of arrays nested below the
+ * outermost one a selected path reads through (`playlists[].items[].duration`
+ * with a declaration at `playlists[].items[]`). Only declared levels: below
+ * the outermost array the guess never added identity, so an app without a
+ * declaration reads as before. Projected entries are matched to the stored
+ * ones by position (the outermost array from `offset`). Changes `value` in place.
+ */
+function nestedDeclaredIdentityAdder(
+  source: Record<string, unknown>,
+  known: ReadonlyArray<ParsedPath>,
+  offset: number,
+  entities: ReadonlyArray<OutputEntityDeclaration> | undefined,
+) {
+  const levels: Array<{ steps: PathStep[]; declared: OutputEntityDeclaration }> = [];
+  const seen = new Set<string>();
+  for (const path of known) {
+    const first = path.steps.findIndex((step) => step.kind !== 'key');
+    if (first < 0) continue;
+    // Every deeper level a path reads below the outermost array, an array's entries (`items[]`)
+    // or one object (`owner`); not the last step: a whole entry or object needs no identity.
+    for (let at = first + 1; at < path.steps.length - 1; at += 1) {
+      const prefix = path.steps.slice(0, at + 1);
+      const text = prefix.map((step) => (step.kind === 'key' ? `.${step.key}` : '[]')).join('').replace(/^\./, '');
+      const declared = entities?.find((declaration) => declaration.path === text);
+      if (!declared || seen.has(JSON.stringify(prefix))) continue;
+      seen.add(JSON.stringify(prefix));
+      levels.push({ steps: prefix, declared });
+    }
+  }
+  const keysOf = (declared: OutputEntityDeclaration) => declaredIdentityKeys(declared);
+  const enrich = (entry: unknown, original: unknown, declared: OutputEntityDeclaration): unknown => {
+    if (!isPlainRecord(entry) || !isPlainRecord(original)) return entry;
+    const added = keysOf(declared).filter((key) => Object.prototype.hasOwnProperty.call(original, key)
+      && !Object.prototype.hasOwnProperty.call(entry, key)
+      && (original[key] === null || ['string', 'number', 'boolean'].includes(typeof original[key])));
+    if (added.length === 0) return entry;
+    const output: Record<string, unknown> = {};
+    for (const key of added) setOwn(output, key, original[key]);
+    for (const key of Object.keys(entry)) setOwn(output, key, entry[key]);
+    return output;
+  };
+  return (value: Record<string, unknown>): Record<string, unknown> => {
+    for (const { steps, declared } of levels) {
+      const visit = (projected: unknown, original: unknown, index: number, outer: boolean): unknown => {
+        const step = steps[index]!;
+        const last = index === steps.length - 1;
+        if (step.kind === 'key') {
+          if (!isPlainRecord(projected) || !isPlainRecord(original)
+            || !Object.prototype.hasOwnProperty.call(projected, step.key) || !Object.prototype.hasOwnProperty.call(original, step.key)) return projected;
+          const child = last
+            ? enrich(projected[step.key], original[step.key], declared)
+            : visit(projected[step.key], original[step.key], index + 1, outer);
+          if (child !== projected[step.key]) setOwn(projected, step.key, child);
+          return projected;
+        }
+        if (step.kind === 'index') {
+          if (!isPlainRecord(projected) || !Array.isArray(original)) return projected;
+          const key = String(step.index);
+          if (!Object.prototype.hasOwnProperty.call(projected, key)) return projected;
+          const next = last ? enrich(projected[key], original[step.index], declared) : visit(projected[key], original[step.index], index + 1, false);
+          if (next !== projected[key]) setOwn(projected, key, next);
+          return projected;
+        }
+        if (!Array.isArray(projected) || !Array.isArray(original)) return projected;
+        const start = outer ? Math.min(offset, original.length) : 0;
+        return projected.map((entry, position) => (last
+          ? enrich(entry, original[start + position], declared)
+          : visit(entry, original[start + position], index + 1, false)));
+      };
+      visit(value, source, 0, true);
     }
     return value;
   };
@@ -429,7 +520,10 @@ export function readResultHandle(handle: ResultHandle, input: ReadResultInput, p
    * entry (`cut`, with what reads more of it).
    */
   // Identity fields of the entries read below an array: only when the model chose the fields.
-  const addIdentity = paths ? identityAdder(source, known, offset) : (value: Record<string, unknown>) => value;
+  const outerIdentity = paths ? identityAdder(source, known, offset, handle.entities) : undefined;
+  const nestedIdentity = paths ? nestedDeclaredIdentityAdder(source, known, offset, handle.entities) : undefined;
+  const addIdentity = (value: Record<string, unknown>): Record<string, unknown> => (
+    outerIdentity ? nestedIdentity!(outerIdentity(value)) : value);
   const answer = (limit: number | undefined, detail: 0 | 1 | 2, mode?: { short: true } | { cut: string }, identity = true) => {
     const projection = projectResult(source, known, { offset, ...(limit !== undefined ? { limit } : {}) });
     // They count against the limit like all data: the fit loop below sees them.

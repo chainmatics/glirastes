@@ -149,7 +149,11 @@
           "items"
         ],
         "title": "Playlist",
-        "type": "object"
+        "type": "object",
+        "x-glirastes-entity": {
+          "id": "playlist_id",
+          "name": "displayName"
+        }
       },
       "PlaylistItem": {
         "properties": {
@@ -177,7 +181,11 @@
           "fileUrl"
         ],
         "title": "PlaylistItem",
-        "type": "object"
+        "type": "object",
+        "x-glirastes-entity": {
+          "id": "item_id",
+          "name": "displayName"
+        }
       },
       "PlaylistPage": {
         "properties": {
@@ -366,7 +374,12 @@
           "displayName"
         ],
         "title": "User",
-        "type": "object"
+        "type": "object",
+        "x-glirastes-entity": {
+          "id": "id",
+          "name": "displayName",
+          "type": "user"
+        }
       },
       "UserList": {
         "properties": {
@@ -484,7 +497,11 @@
             "required": true,
             "schema": {
               "title": "Key",
-              "type": "string"
+              "type": "string",
+              "x-glirastes-entity-ref": {
+                "type": "channel"
+              },
+              "x-glirastes-id-kind": "speaking"
             }
           }
         ],
@@ -532,7 +549,12 @@
             "required": true,
             "schema": {
               "title": "Key",
-              "type": "string"
+              "type": "string",
+              "x-glirastes-entity-ref": {
+                "role": "parent",
+                "type": "channel"
+              },
+              "x-glirastes-id-kind": "speaking"
             }
           }
         ],
@@ -569,6 +591,14 @@
         "summary": "List Channel Revisions",
         "tags": [
           "channels"
+        ],
+        "x-glirastes-entities": [
+          {
+            "fallback": "rev",
+            "id": "revision_id",
+            "path": "revisions[]",
+            "type": "channel-revision"
+          }
         ]
       }
     },
@@ -583,7 +613,12 @@
             "required": true,
             "schema": {
               "title": "Key",
-              "type": "string"
+              "type": "string",
+              "x-glirastes-entity-ref": {
+                "role": "parent",
+                "type": "channel"
+              },
+              "x-glirastes-id-kind": "speaking"
             }
           },
           {
@@ -592,7 +627,10 @@
             "required": true,
             "schema": {
               "title": "Revision Id",
-              "type": "integer"
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "channel-revision"
+              }
             }
           }
         ],
@@ -630,7 +668,15 @@
         "tags": [
           "channels"
         ],
-        "x-glirastes-effect": "write"
+        "x-glirastes-effect": "write",
+        "x-glirastes-entities": [
+          {
+            "fallback": "rev",
+            "id": "revision_id",
+            "path": "",
+            "type": "channel-revision"
+          }
+        ]
       }
     },
     "/api/me": {
@@ -790,7 +836,10 @@
             "required": true,
             "schema": {
               "title": "Playlist Id",
-              "type": "integer"
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "playlist"
+              }
             }
           }
         ],
@@ -838,7 +887,10 @@
             "required": true,
             "schema": {
               "title": "Playlist Id",
-              "type": "integer"
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "playlist"
+              }
             }
           }
         ],
@@ -894,7 +946,11 @@
             "required": true,
             "schema": {
               "title": "Playlist Id",
-              "type": "integer"
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "role": "parent",
+                "type": "playlist"
+              }
             }
           }
         ],
@@ -931,6 +987,14 @@
         "summary": "List Playlist Versions",
         "tags": [
           "playlists"
+        ],
+        "x-glirastes-entities": [
+          {
+            "fallback": "versionNumber",
+            "id": "version_id",
+            "path": "versions[]",
+            "type": "playlist-version"
+          }
         ]
       }
     },
@@ -945,7 +1009,11 @@
             "required": true,
             "schema": {
               "title": "Playlist Id",
-              "type": "integer"
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "role": "parent",
+                "type": "playlist"
+              }
             }
           },
           {
@@ -954,7 +1022,10 @@
             "required": true,
             "schema": {
               "title": "Version Id",
-              "type": "integer"
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "playlist-version"
+              }
             }
           }
         ],
@@ -992,7 +1063,15 @@
         "tags": [
           "playlists"
         ],
-        "x-glirastes-effect": "write"
+        "x-glirastes-effect": "write",
+        "x-glirastes-entities": [
+          {
+            "fallback": "versionNumber",
+            "id": "version_id",
+            "path": "",
+            "type": "playlist-version"
+          }
+        ]
       }
     },
     "/api/tasks": {
@@ -1147,7 +1226,10 @@
             "required": true,
             "schema": {
               "title": "User Id",
-              "type": "integer"
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "user"
+              }
             }
           }
         ],

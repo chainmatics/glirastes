@@ -118,6 +118,14 @@ Defaults keep today's markup; everything below is opt-in.
   history, a convenience and not a trust boundary: the server executes exactly
   the signed arguments. A subject the server resolves and signs is the planned
   stronger variant. Details: `docs/concepts.md`, Approvals.
+  With a declared identity (`outputEntities` / `inputEntities`, sent by the
+  chat handler or set with the provider's `entityDeclarations`) the card
+  names records by their declared id (numbers and composite keys too) and
+  only for an argument of the declared type; a declared argument's subject
+  also carries `type`, `role`, `idKind` and `provenance`, an id the user typed
+  verbatim is `seen` (`provenance: 'user-message'`), an unknown `speaking` id
+  gets no warning, and `seen` carries `fallbackField` next to the deprecated
+  `fallback`. Details: `docs/entity-identity.md`.
 - A custom `ApprovalCard` or `BulkApprovalCard` (`components`) does not get
   this for free: render `approval.subjects` yourself (grouped card: on each
   entry of `approvals`). One entry per id argument, `{ path, id, label?,

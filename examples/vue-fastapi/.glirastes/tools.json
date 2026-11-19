@@ -11,5 +11,10 @@
     { "kind": "react-actions", "srcDir": "web/src" }
   ],
   "output": { "deniedFields": ["**.fileUrl"] },
+  "identity": {
+    "entities": {
+      "channel": { "id": "key", "name": "title", "idKind": "speaking" }
+    }
+  },
   "emit": { "module": ".glirastes/build/tools.generated.mjs" }
 }

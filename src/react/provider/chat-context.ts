@@ -1,3 +1,4 @@
+import type { EntityDeclarationsByTool } from '../../contracts/entity-declaration.js';
 import { createContext, useContext } from 'react';
 import type { CSSProperties } from 'react';
 import type {
@@ -40,6 +41,12 @@ export interface ChatContextValue {
    * `chat-window`, `ai-trigger-button`) to apply the `theme` prop.
    */
   themeVars: CSSProperties;
+  /**
+   * Declared identity of the tools by model-facing name: the provider's
+   * `entityDeclarations` merged over what the server sent. Undefined when
+   * nothing is declared.
+   */
+  entityDeclarations?: EntityDeclarationsByTool;
   /**
    * Optional hint for themes that require special CSS treatment (e.g.
    * `liquid-glass` needs `backdrop-filter`). Apply as

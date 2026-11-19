@@ -1,6 +1,22 @@
 import { z } from 'zod';
 import { assertOutputFields } from './server/core/output-fields.js';
 import { isUuidLike } from './contracts/entity-identity.js';
+import {
+  assertToolEntities,
+  type InputEntityRef,
+  type OutputEntityDeclaration,
+} from './contracts/entity-declaration.js';
+
+export {
+  defineEntity,
+  type EntityDeclaration,
+  type EntityDeclarationsByTool,
+  type EntityIdKind,
+  type InputEntityRef,
+  type InputEntityRole,
+  type OutputEntityDeclaration,
+  type ToolEntityDeclarations,
+} from './contracts/entity-declaration.js';
 
 // ============================================================================
 // Host schema boundary
@@ -159,6 +175,24 @@ export interface Tool {
    */
   outputDefaultFields?: string[];
 
+  /**
+   * The records a successful result holds and how they are identified:
+   * id field (or fields of a composite key), name, fallback, type and id
+   * kind, at a result path (`playlists[]`, `data[].owner`; default: the
+   * entries of the largest array). Used by the result overview, history
+   * compaction, `read_result`, `hideIds`, the approval card and entity
+   * links instead of guessing from field names. Field names only; never
+   * sent to the Platform. See `defineEntity`. OpenAPI: `x-glirastes-entities`
+   * (operation) or `x-glirastes-entity` (response schema).
+   */
+  outputEntities?: OutputEntityDeclaration[];
+
+  /**
+   * The arguments that name a record (`{ type: 'playlist', args: 'playlist_id' }`),
+   * for the approval card. OpenAPI: `x-glirastes-entity-ref` on a parameter.
+   */
+  inputEntities?: InputEntityRef[];
+
   /** The actual implementation */
   execute: (input: unknown, context: ToolContext) => Promise<unknown>;
 }
@@ -180,6 +214,10 @@ export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
   outputDeniedFields?: string[];
   /** Fields the first answer shows; see `Tool.outputDefaultFields`. */
   outputDefaultFields?: string[];
+  /** Records the result holds; see `Tool.outputEntities`. */
+  outputEntities?: OutputEntityDeclaration[];
+  /** Arguments that name a record; see `Tool.inputEntities`. */
+  inputEntities?: InputEntityRef[];
   /** @deprecated Use Glirastes approval flows via `lancer.approvals` instead. Kept for backward compatibility. */
   needsApproval?:
     | boolean
@@ -192,6 +230,7 @@ export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
   assertOutputFields(tool.outputAllowedFields, `defineTool(${tool.id})`, 'outputAllowedFields');
   assertOutputFields(tool.outputDeniedFields, `defineTool(${tool.id})`, 'outputDeniedFields');
   assertOutputFields(tool.outputDefaultFields, `defineTool(${tool.id})`, 'outputDefaultFields');
+  assertToolEntities(tool, `defineTool(${tool.id})`);
   return tool as Tool;
 }
 
@@ -410,6 +449,10 @@ export interface AiEndpointToolDefinition<
    * `x-glirastes-output-default-fields`.
    */
   outputDefaultFields?: string[];
+  /** Records the result holds; see `Tool.outputEntities`. OpenAPI: `x-glirastes-entities`, `x-glirastes-entity`. */
+  outputEntities?: OutputEntityDeclaration[];
+  /** Arguments that name a record; see `Tool.inputEntities`. OpenAPI: `x-glirastes-entity-ref`. */
+  inputEntities?: InputEntityRef[];
   /**
    * Static uiAction template with $variable placeholders.
    * Use for simple cases where action is always the same.

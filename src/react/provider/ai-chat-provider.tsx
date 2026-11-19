@@ -26,7 +26,8 @@ import type {
 import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { resolveAttachmentOptions } from '../utils/attachments.js';
-import { collectEntitySightings, collectSeenEntityIds, isUuidLike } from '../utils/entity-names.js';
+import { collectEntitySightings, collectSeenEntityIds, isUuidLike, userTextsOf } from '../utils/entity-names.js';
+import { sanitizeEntityDeclarations, type EntityDeclarationsByTool } from '../../contracts/entity-declaration.js';
 import { resolveApprovalSubjects } from '../utils/approval-subjects.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
 import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
@@ -464,6 +465,7 @@ export function AiChatProvider({
   onBeforeSend,
   approvalDescription: userApprovalDescription,
   approvalSubjects = true,
+  entityDeclarations,
   continueMessage = 'Please continue.',
   toolLabels: userToolLabels,
   pipelineMessageTranslator,
@@ -474,6 +476,14 @@ export function AiChatProvider({
   // language) and the language of the page: the defaults of a chat that
   // configures neither `locale`, `toolLabels` nor `approvalDescription`.
   const [toolPresentation, setToolPresentation] = useState<ToolPresentation | null>(null);
+  /** Declared identity the server sent (`data-tool-entities`), merged with the app's own below. */
+  const [streamedEntities, setStreamedEntities] = useState<EntityDeclarationsByTool | null>(null);
+  const declarations = useMemo<EntityDeclarationsByTool | undefined>(() => {
+    const merged = { ...(streamedEntities ?? {}), ...sanitizeEntityDeclarations(entityDeclarations) };
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  }, [streamedEntities, entityDeclarations]);
+  const declarationsRef = useRef(declarations);
+  declarationsRef.current = declarations;
   const pageLanguage = usePageLanguage();
   const language = toolPresentation?.locale ?? pageLanguage;
   // English defaults, then the built-in texts of the app's language, then the caller's overrides.
@@ -712,6 +722,12 @@ export function AiChatProvider({
 
   // Data part handler — processes pipeline and truncation events from any transport
   const handleDataPart = useCallback((dataPart: { type: string; data: unknown }) => {
+    if (dataPart.type === 'data-tool-entities') {
+      const data = dataPart.data as { tools?: unknown } | null;
+      const next = sanitizeEntityDeclarations(data?.tools);
+      setStreamedEntities((current) => (JSON.stringify(current ?? {}) === JSON.stringify(next) ? current : next));
+      return;
+    }
     if (dataPart.type === 'data-tool-presentation') {
       const next = parseToolPresentation(dataPart.data);
       // Every turn sends it again; keep the object while its content is the same.
@@ -1022,10 +1038,17 @@ export function AiChatProvider({
           !handledApprovalIdsRef.current.has(toolPart.approval.id)
         ) {
           handledApprovalIdsRef.current.add(toolPart.approval.id);
-          const sightings = collectEntitySightings(rawMessages);
+          const declared = declarationsRef.current;
+          const sightings = collectEntitySightings(rawMessages, declared);
+          const inputEntities = declared && Object.prototype.hasOwnProperty.call(declared, toolName)
+            ? declared[toolName]!.input
+            : undefined;
           // Display only, from the browser's own history (not a trust boundary):
           // the approved arguments stay exactly what the call carries.
-          const resolved = resolveApprovalSubjects(toolPart.input, sightings, collectSeenEntityIds(rawMessages), { toolName });
+          const resolved = resolveApprovalSubjects(toolPart.input, sightings, collectSeenEntityIds(rawMessages, declared), {
+            toolName,
+            ...(inputEntities ? { inputEntities, userTexts: userTextsOf(rawMessages), declarations: declared } : {}),
+          });
           const names = new Map([...sightings].map(([id, seen]) => [id, seen.name]));
           // An id seen for records of different kinds names the record this call picks, or
           // none (also when the call uses it for two kinds: `nameLabels` look up by id only).
@@ -1796,8 +1819,10 @@ export function AiChatProvider({
       removeSession,
       renameSession,
       refreshSessions,
+      entityDeclarations: declarations,
     }),
     [
+      declarations,
       classNames,
       components,
       locale,

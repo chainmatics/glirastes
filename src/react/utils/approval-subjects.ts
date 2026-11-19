@@ -10,7 +10,17 @@ import {
   kindOfToolName,
   kindsMatch,
 } from '../../contracts/entity-identity.js';
-import type { EntitySighting, SeenEntity } from './entity-names.js';
+import {
+  entityIdKindOf,
+  entityIdText,
+  entityLookupId,
+  inputRefArgs,
+  isEntityIdValue,
+  type EntityDeclarationsByTool,
+  type EntityIdKind,
+  type InputEntityRef,
+} from '../../contracts/entity-declaration.js';
+import { exactEntityKey, type EntitySighting, type SeenEntity } from './entity-names.js';
 
 const MAX_DEPTH = 4;
 /** Id values checked per approval; a call with more ids is rare and the rest are not listed. */
@@ -50,6 +60,61 @@ export interface ApprovalSubjectOptions {
    * `id` at the top of its arguments addresses the kind this name names.
    */
   toolName?: string;
+  /**
+   * The tool's `inputEntities`: an argument (or the arguments of a composite
+   * key) declared to name a record of a type gets one subject with that
+   * `type`, its `role`, `idKind` and `provenance`; its type picks the record
+   * among colliding ids. Without it, every argument is judged by its key.
+   */
+  inputEntities?: ReadonlyArray<InputEntityRef>;
+  /**
+   * The texts of the user's own messages. With `inputEntities`, an id the
+   * user typed verbatim (a speaking key case-insensitively) is valid
+   * provenance: `seen` with `provenance: 'user-message'` instead of `unknown`.
+   */
+  userTexts?: ReadonlyArray<string>;
+  /**
+   * Every tool's declarations: the id kind an entity type is declared with
+   * anywhere (`speaking` for an order key) applies to a reference of that
+   * type the conversation never showed.
+   */
+  declarations?: EntityDeclarationsByTool;
+}
+
+/** The id kind each declared entity type has in the tools' outputs (the first declaration wins). */
+function idKindsByType(declarations: EntityDeclarationsByTool | undefined): Map<string, EntityIdKind> {
+  const kinds = new Map<string, EntityIdKind>();
+  for (const entry of Object.values(declarations ?? {})) {
+    for (const declaration of entry.output ?? []) {
+      if (declaration.type && !kinds.has(declaration.type)) kinds.set(declaration.type, entityIdKindOf(declaration));
+    }
+  }
+  return kinds;
+}
+
+/** The value at a dot path of the arguments (`filter.ownerId`). */
+function argumentAt(args: Record<string, unknown>, path: string): unknown {
+  let current: unknown = args;
+  for (const key of path.split('.')) {
+    if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, key)) return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Whether `id` occurs as a whole word in one of the user's texts (case-insensitive for a speaking key). */
+function typedByUser(id: string, texts: ReadonlyArray<string>, speaking: boolean): boolean {
+  if (!id || texts.length === 0) return false;
+  // A whole token only: not the 12 of `12.5`, `12,5`, `12/34` or `v:12`.
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}_-])(?<![\\p{L}\\p{N}][./:,])${escapeRegex(id)}(?![\\p{L}\\p{N}_-])(?![./:,][\\p{L}\\p{N}])`,
+    speaking ? 'iu' : 'u',
+  );
+  return texts.some((text) => pattern.test(text));
 }
 
 /** The kind an id argument addresses (`playlist_id` → `playlist`), or undefined when the key does not say. */
@@ -105,13 +170,42 @@ export function resolveApprovalSubjects(
   const toolKind = options.toolName ? kindOfToolName(options.toolName) : undefined;
 
   const add = (path: string, label: string | undefined, raw: unknown, kind: string | undefined) => {
-    const key = entityIdKey(raw);
+    const subject = subjectFor(path, label, raw, kind);
+    if (subject) subjects.push(subject);
+  };
+
+  function subjectFor(
+    path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false, display?: string, exact = false,
+  ): ApprovalSubject | undefined {
+    const subjects: ApprovalSubject[] = [];
+    resolve(subjects, path, label, raw, kind, strict, exact);
+    const subject = subjects[0];
+    return subject && display !== undefined ? { ...subject, id: display } : subject;
+  }
+
+  /**
+   * `strict` (a declared argument): a declared kind must equal the argument's
+   * type exactly, a UUID included; a guessed kind still matches by its last word.
+   */
+  function resolve(
+    subjects: ApprovalSubject[], path: string, label: string | undefined, raw: unknown, kind: string | undefined, strict = false, exact = false,
+  ): void {
+    // `exact`: a declared opaque id, looked up case-sensitively under its own key; an id only a
+    // guessed (undeclared) record showed is found under the lower-cased key, held to `exactIds`.
+    const exactKey = exact ? exactEntityKey(raw) : undefined;
+    const key = exactKey !== undefined && (sightings.has(exactKey) || seenIds.has(exactKey)) ? exactKey : entityIdKey(raw);
     if (key === undefined) return;
+    // `type`: the exact declared (or mentioned) type behind a kind; compared as it is for a declared argument.
+    const sameKind = (known: string, type: string | undefined) => (strict && type !== undefined ? type === kind : kindsMatch(known, kind!));
     const id = typeof raw === 'string' ? raw.trim() : String(raw);
-    const seen = sightings.get(key);
-    if (seen?.kinds && seen.kinds.length > 1 && !isUuidLike(id)) {
+    // A declared opaque id is case-sensitive: `abc-7` is not the `AbC-7` a result showed.
+    // A declared speaking argument matches case-insensitively; its type picks the record.
+    const exactly = (known: { exactIds?: string[] } | undefined) => (strict && !exact) || !known?.exactIds || known.exactIds.includes(id);
+    const shown = sightings.get(key);
+    const seen = exactly(shown) ? shown : undefined;
+    if (seen?.kinds && seen.kinds.length > 1 && (!isUuidLike(id) || (strict && seen.kinds.some((candidate) => candidate.type !== undefined)))) {
       const resolvedLabel = label ?? (seen.type ? humanize(seen.type) : undefined);
-      const picked = kind ? seen.kinds.filter((candidate) => kindsMatch(candidate.kind, kind)) : [];
+      const picked = kind ? seen.kinds.filter((candidate) => sameKind(candidate.kind, candidate.type)) : [];
       const one = picked.length === 1 ? picked[0]! : undefined;
       if (one && one.names.length === 1) {
         subjects.push({ path, id, status: 'named', name: one.names[0]!, ...(resolvedLabel ? { label: resolvedLabel } : {}) });
@@ -131,10 +225,20 @@ export function resolveApprovalSubjects(
       }
       return;
     }
-    if (!seen) {
-      const record = seenIds.get(key);
+    // A declared record of another kind than the argument's does not name it (user 1 is not playlist 1).
+    const otherKind = (known: string | undefined, type: string | undefined) => !!known && !!kind
+      && (!isUuidLike(id) || (strict && type !== undefined)) && !sameKind(known, type);
+    if (!seen || otherKind(seen.kind, seen.kindType)) {
+      const listed = seenIds.get(key);
+      const found = exactly(listed) ? listed : undefined;
+      // A declared type that carried this id: its own record, whichever came first.
+      const typed = found?.byType && kind ? Object.entries(found.byType).find(([type]) => sameKind(type, type)) : undefined;
+      const record = typed ? { ...typed[1], type: typed[0] } : found && !otherKind(found.type, found.type) ? found : undefined;
       subjects.push(record
-        ? { path, id, status: 'seen', ...(label ? { label } : {}), ...(record.fallback ? { fallback: record.fallback } : {}) }
+        ? {
+          path, id, status: 'seen', ...(label ? { label } : {}), ...(record.fallback ? { fallback: record.fallback } : {}),
+          ...(record.fallbackField ? { fallbackField: record.fallbackField } : {}),
+        }
         : { path, id, status: 'unknown', ...(label ? { label } : {}) });
       return;
     }
@@ -148,7 +252,51 @@ export function resolveApprovalSubjects(
       ...(ambiguous ? { names: [...seen.names] } : {}),
       ...(resolvedLabel ? { label: resolvedLabel } : {}),
     });
-  };
+  }
+
+  // Declared arguments first: one subject per reference, typed; the walk below skips them.
+  const declaredPaths = new Set<string>();
+  const typeIdKinds = options.inputEntities?.length ? idKindsByType(options.declarations) : new Map<string, EntityIdKind>();
+  if (isRecord(args)) {
+    for (const ref of options.inputEntities ?? []) {
+      if (subjects.length >= MAX_IDS) break;
+      const paths = inputRefArgs(ref);
+      const values = paths.map((path) => argumentAt(args, path));
+      if (!values.every(isEntityIdValue)) continue;
+      for (const path of paths) declaredPaths.add(path);
+      const id = entityIdText(values as Array<string | number>);
+      const lookup = entityLookupId(values as Array<string | number>);
+      const key = entityIdKey(lookup);
+      const sighting = key !== undefined ? sightings.get(key) : undefined;
+      const record = key !== undefined ? seenIds.get(key) : undefined;
+      // Only a record of the reference's own type tells its id kind; another type's record says nothing.
+      const ownTyped = record?.byType && Object.prototype.hasOwnProperty.call(record.byType, ref.type) ? record.byType[ref.type] : undefined;
+      const typedRecord = ownTyped ?? (record?.type === ref.type ? record : undefined);
+      const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? typedRecord?.idKind
+        ?? (sighting?.kindType === ref.type ? sighting.idKind : undefined)
+        ?? entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) });
+      const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, lookup, ref.type, true, id, idKind === 'opaque');
+      if (!subject) continue;
+      let provenance: ApprovalSubject['provenance'];
+      // Where the record of the reference's own type came from, not any record with this id.
+      const ofType = sighting?.kinds?.find((candidate) => candidate.type === ref.type);
+      if (subject.status !== 'unknown') {
+        provenance = ofType
+          ? (ofType.mentionedOnly && !(record?.byType && Object.prototype.hasOwnProperty.call(record.byType, ref.type)) ? 'mention' : 'tool-result')
+          : sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';
+      }
+      // A composite key's text (`a/b/c`) does not tell its parts apart: never counted as typed.
+      else if (paths.length === 1 && typedByUser(id, options.userTexts ?? [], idKind === 'speaking')) provenance = 'user-message';
+      subjects.push({
+        ...subject,
+        ...(provenance === 'user-message' ? { status: 'seen' as const } : {}),
+        type: ref.type,
+        role: ref.role ?? 'target',
+        idKind,
+        ...(provenance ? { provenance } : {}),
+      });
+    }
+  }
 
   const isIdValue = (key: string, value: unknown) =>
     isIdKey(key) || (typeof value === 'string' && isUuidLike(value));
@@ -162,6 +310,7 @@ export function resolveApprovalSubjects(
       if (subjects.length >= MAX_IDS) return;
       if (value === undefined || value === null) continue;
       const path = prefix ? `${prefix}.${key}` : key;
+      if (declaredPaths.has(path)) continue;
       // A bare `id` inside `playlist: { id }` takes the label of its object.
       const label = isBareIdArgumentKey(key) ? parentLabel : labelOfKey(key);
       const kind = isBareIdArgumentKey(key) ? parentKind : kindOfKey(key);

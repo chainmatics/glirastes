@@ -1,3 +1,4 @@
+import type { EntityDeclarationsByTool } from '../contracts/entity-declaration.js';
 import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { UiActionRunCode } from '../browser/client-actions.js';
@@ -1045,6 +1046,17 @@ export interface AiChatProviderConfig {
    * approving, not a trust boundary. Default true.
    */
   approvalSubjects?: boolean;
+  /**
+   * Declared identity by model-facing tool name, for apps whose server does
+   * not send it: which records each tool result holds and which arguments
+   * name one (`{ playlists_list: { output: [{ type: 'playlist', id:
+   * 'playlist_id', name: 'displayName', path: 'playlists[]' }] } }`). The
+   * built-in chat handler sends the tools' `outputEntities`/`inputEntities`
+   * as a `data-tool-entities` part; these entries win over it per tool.
+   * Used by approval names and subjects and entity links; without any, the
+   * field-name guess applies as before. Memoize the object.
+   */
+  entityDeclarations?: EntityDeclarationsByTool;
   continueMessage?: string;
   toolLabels?: ToolLabelConfig;
   pipelineMessageTranslator?: PipelineMessageTranslator;
@@ -1218,8 +1230,28 @@ export interface ApprovalSubject {
    * For `seen`: a short field of the record that stands in for its name
    * (`Version number 3`, from `versionNumber`, `version`, `number`, `code` or
    * `slug`), when it has one.
+   *
+   * @deprecated Use `fallbackField` with the record's value for a localised
+   * text; still filled.
    */
   fallback?: string;
+  /** For `seen`: the declared fallback field the text came from (`versionNumber`). Only with a declaration. */
+  fallbackField?: string;
+  /** The declared type of the record the argument names (`inputEntities`). */
+  type?: string;
+  /** What the call does with that record (`inputEntities`): `target`, `parent` or `reference`. */
+  role?: 'target' | 'parent' | 'reference';
+  /**
+   * `speaking`: a key the user types (order number, ticket key); an
+   * `unknown` speaking id gets no warning. Only with a declaration.
+   */
+  idKind?: 'opaque' | 'speaking';
+  /**
+   * Where the id came from (declared arguments only): a tool result of this
+   * conversation, an `@` mention, or typed verbatim in a user message (then
+   * `seen`, no warning).
+   */
+  provenance?: 'tool-result' | 'mention' | 'user-message';
 }
 
 export interface UseApprovalsReturn {

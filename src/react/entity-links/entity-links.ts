@@ -2,12 +2,25 @@ import { buildNavigationHref } from '../../browser/navigation.js';
 import type { ChatEntitySearchData } from '../../contracts/chat-interactions.js';
 import type { ChatEntityDefinition } from '../interactions/definitions.js';
 import { parseMentionSegments } from '../utils/mention-markup.js';
+import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
+import {
+  declarationsForRead,
+  declaredRecordsOf,
+  entityIdText,
+  entityLookupId,
+  type EntityDeclarationsByTool,
+} from '../../contracts/entity-declaration.js';
 
 /** One entity an assistant message refers to. */
 export interface ChatEntityReference {
   readonly type: string;
   readonly id: string;
   readonly label: string;
+  /**
+   * Free data of the app for `open` (a route, a tenant, a version), as a
+   * matcher's `resolve`, `knownEntities` or `resolveAmbiguous` returned it.
+   */
+  readonly data?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -25,6 +38,11 @@ export interface ChatEntityMatcher {
   resolve?(match: string): Promise<Omit<ChatEntityReference, 'type'> | undefined> | Omit<ChatEntityReference, 'type'> | undefined;
 }
 
+/** What `knownEntities` gets: the conversation the chat shows. */
+export interface ChatEntityLinksContext {
+  readonly messages: ReadonlyArray<{ readonly role?: string; readonly parts: ReadonlyArray<unknown> }>;
+}
+
 export interface ChatEntityLinksConfig {
   /** App-specific recognisers, e.g. task identifiers. */
   readonly matchers?: ReadonlyArray<ChatEntityMatcher>;
@@ -35,6 +53,22 @@ export interface ChatEntityLinksConfig {
   readonly known?: boolean;
   /** Shorter known names stay text; they collide with ordinary words. Default 4. */
   readonly minLabelLength?: number;
+  /**
+   * Further known references the app derives from the conversation (D3),
+   * merged after the built-in ones; called when the messages change.
+   * Memoize the function.
+   */
+  knownEntities?(context: ChatEntityLinksContext): ReadonlyArray<ChatEntityReference>;
+  /**
+   * When two known references share a name (two playlists "Lobby Loop"):
+   * `first` (default) links the first one found, `text` leaves the name as
+   * text. `resolveAmbiguous` decides instead when given.
+   */
+  readonly ambiguousNames?: 'first' | 'text';
+  /** Picks the reference for a name several known references share; `undefined` leaves it as text. */
+  resolveAmbiguous?(label: string, candidates: ReadonlyArray<ChatEntityReference>): ChatEntityReference | undefined;
+  /** `all` (default) links in every message, `assistant` only in the assistant's text. */
+  readonly scope?: 'all' | 'assistant';
   /**
    * Opens a reference. Return `false` to fall through to the default: the
    * entity's action that runs `ui.navigate` (a page like `/tasks/:taskId`),
@@ -76,13 +110,34 @@ export function splitEntityText(
     readonly matchers?: ReadonlyArray<Pick<ChatEntityMatcher, 'type' | 'pattern'>>;
     readonly known?: ReadonlyArray<ChatEntityReference>;
     readonly minLabelLength?: number;
+    readonly ambiguousNames?: 'first' | 'text';
+    readonly resolveAmbiguous?: (label: string, candidates: ReadonlyArray<ChatEntityReference>) => ChatEntityReference | undefined;
   } = {},
 ): ChatEntityTextSegment[] {
   const minLength = options.minLabelLength ?? 4;
   const byLabel = new Map<string, ChatEntityReference>();
+  const decide = options.resolveAmbiguous !== undefined || options.ambiguousNames === 'text';
+  const candidates = new Map<string, ChatEntityReference[]>();
   for (const reference of options.known ?? []) {
     const label = reference.label.trim();
-    if (label.length >= minLength && !byLabel.has(label)) byLabel.set(label, reference);
+    if (label.length < minLength) continue;
+    if (!decide) {
+      if (!byLabel.has(label)) byLabel.set(label, reference);
+      continue;
+    }
+    const list = candidates.get(label) ?? [];
+    const same = (known: ChatEntityReference) => known.type === reference.type && known.id === reference.id
+      && JSON.stringify(known.data?.idValues) === JSON.stringify(reference.data?.idValues);
+    if (!list.some(same)) list.push(reference);
+    candidates.set(label, list);
+  }
+  for (const [label, list] of candidates) {
+    if (list.length === 1) {
+      byLabel.set(label, list[0]!);
+      continue;
+    }
+    const picked = options.resolveAmbiguous?.(label, list);
+    if (picked) byLabel.set(label, picked);
   }
   const labels = [...byLabel.keys()].sort((a, b) => b.length - a.length).map(escapeRegex);
   const patterns: Array<{ regex: RegExp; matcher?: number }> = (options.matchers ?? []).map((matcher, index) => ({
@@ -166,13 +221,33 @@ function toolOutputOf(part: unknown): { tool: string; output: unknown } | undefi
 export function collectKnownEntities(
   messages: ReadonlyArray<{ readonly parts: ReadonlyArray<unknown> }>,
   searches: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }> = [],
+  declarations?: EntityDeclarationsByTool,
 ): ChatEntityReference[] {
   const found = new Map<string, ChatEntityReference>();
-  const add = (reference: ChatEntityReference) => {
-    const key = `${reference.type}\u0000${reference.id}`;
+  const add = (reference: ChatEntityReference, lookup?: string) => {
+    const key = `${reference.type}\u0000${lookup ?? reference.id}`;
     if (!found.has(key)) found.set(key, reference);
   };
   const byTool = new Map(searches.map((entry) => [toolKey(entry.search.tool), entry]));
+  // A `read_result` answer belongs to the tool that produced the result it reads.
+  const producers = new Map<string, string>();
+  const producerOutputs = new Map<string, unknown>();
+  if (declarations) {
+    for (const message of messages) {
+      for (const part of message.parts) {
+        const result = toolOutputOf(part);
+        const marker = result && isRecord(result.output) ? result.output._result : undefined;
+        if (result && result.tool !== READ_RESULT_TOOL_NAME && isRecord(marker) && typeof marker.id === 'string') {
+          producers.set(marker.id, result.tool);
+          producerOutputs.set(marker.id, result.output);
+        }
+      }
+    }
+  }
+  const producerOf = (part: unknown, tool: string): string => {
+    if (tool !== READ_RESULT_TOOL_NAME || !isRecord(part) || !isRecord(part.input)) return tool;
+    return typeof part.input.resultId === 'string' ? producers.get(part.input.resultId) ?? tool : tool;
+  };
   for (const message of messages) {
     for (const part of message.parts) {
       if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') {
@@ -183,6 +258,27 @@ export function collectKnownEntities(
         continue;
       }
       const result = toolOutputOf(part);
+      // A tool whose `outputEntities` declare a type and a name: every such record, also nested (D1).
+      const producer = result ? producerOf(part, result.tool) : undefined;
+      const own = producer && declarations && Object.prototype.hasOwnProperty.call(declarations, producer)
+        ? declarations[producer]!.output
+        : undefined;
+      // A read keeps the path a path-less declaration had in the producing result.
+      const readId = result && result.tool === READ_RESULT_TOOL_NAME && producer !== result.tool && isRecord(part) && isRecord(part.input)
+        && typeof part.input.resultId === 'string' ? part.input.resultId : undefined;
+      const declared = readId !== undefined ? declarationsForRead(own, producerOutputs.get(readId)) : own;
+      if (result && declared) {
+        for (const identity of declaredRecordsOf(result.output, declared).values()) {
+          if (identity.declaration.type && identity.name) {
+            // A composite key: readable id, its parts in `data`; told apart by its tuple.
+            const composite = identity.idValues.length > 1;
+            add({
+              type: identity.declaration.type, id: entityIdText(identity.idValues), label: identity.name,
+              ...(composite ? { data: { idValues: [...identity.idValues] } } : {}),
+            }, composite ? String(entityLookupId(identity.idValues)) : undefined);
+          }
+        }
+      }
       const entry = result ? byTool.get(toolKey(result.tool)) : undefined;
       if (!result || !entry) continue;
       const { search, type } = entry;

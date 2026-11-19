@@ -57,7 +57,8 @@ it. The type's JSDoc carries the full detail.
 | `memory` | chat memory: a rolling summary of older turns (`chat`, threshold `autoCompact` or `GLIRASTES_AUTOCOMPACT`), notes per user (`user`: browser or a `MemoryStore`) and per tenant (`shared`: a `MemoryStore`), with `scope(request)` giving the verified keys. Adds the built-in tools `memory_remember` and `memory_forget`. See the `setting-up-glirastes-memory` skill |
 | `maxConversationHistoryPairs` | user/assistant pairs the intent classifier sees (default 4) |
 | `promptCaching` | cache breakpoints and stable tool order (default `true`) |
-| `hideIds` | keep technical ids out of answers (default `true`) |
+| `hideIds` | keep technical ids out of answers (default `true`); also learns the ids a tool's `outputEntities` declare (integers only with an id prefix) |
+| declared identity | `outputEntities` / `inputEntities` on `Tool`, `defineTool`, `defineEndpointTool` and a `contract.ts` entry, `defineEntity` (`glirastes`): id (or composite key), name, fallback, type, `idKind`; used by overview, history, `read_result`, `hideIds`, approval card and entity links, sent to the browser as a transient `data-tool-entities` part only when declared (`entityDeclarationsOfTools`, `TOOL_ENTITIES_PART_TYPE`, `ToolEntitiesPart`); `collectDeclaredIdLabels` feeds a custom `createHideIdsTransform`. Types: `EntityDeclaration`, `OutputEntityDeclaration`, `InputEntityRef`, `InputEntityRole`, `EntityIdKind`, `ToolEntityDeclarations`, `EntityDeclarationsByTool`. See `docs/entity-identity.md` |
 | `uiActionSchema` | schema that validates the `uiAction` of tool results |
 
 ## Built-in tools

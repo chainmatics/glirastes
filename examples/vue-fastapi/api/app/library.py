@@ -13,8 +13,8 @@ See docs/acceptance/second-app-vue-fastapi.md.
 import hashlib
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from pydantic import BaseModel, ConfigDict
 
 from .sessions import CurrentUser, session_user
 
@@ -32,7 +32,16 @@ _NOUNS = ['Loop', 'Showcase', 'Highlights', 'Rotation']
 _STATUSES: list[PlaylistStatus] = ['published', 'draft', 'published', 'archived', 'published']
 
 
+# Declared identity (docs/acceptance/second-app-vue-fastapi.md): every declaration
+# site once. Schema level (`x-glirastes-entity` via pydantic json_schema_extra)
+# for playlists, their items and users; operation level (`x-glirastes-entities`)
+# for versions and revisions; parameters (`x-glirastes-entity-ref`); channels in
+# .glirastes/tools.json `identity`.
+
+
 class PlaylistItem(BaseModel):
+    model_config = ConfigDict(json_schema_extra={'x-glirastes-entity': {'id': 'item_id', 'name': 'displayName'}})
+
     item_id: int
     displayName: str
     durationSec: int
@@ -40,6 +49,8 @@ class PlaylistItem(BaseModel):
 
 
 class Playlist(BaseModel):
+    model_config = ConfigDict(json_schema_extra={'x-glirastes-entity': {'id': 'playlist_id', 'name': 'displayName'}})
+
     playlist_id: int
     displayName: str
     status: PlaylistStatus
@@ -89,6 +100,8 @@ class ChannelRevisionList(BaseModel):
 
 
 class User(BaseModel):
+    model_config = ConfigDict(json_schema_extra={'x-glirastes-entity': {'type': 'user', 'id': 'id', 'name': 'displayName'}})
+
     id: int
     displayName: str
 
@@ -216,7 +229,7 @@ def list_playlists(
 @playlists_router.get('/{playlist_id}', response_model=Playlist, openapi_extra={
     'x-glirastes-title': {'en': 'Show playlist', 'de': 'Playlist anzeigen', 'pl': 'Pokaż playlistę'},
 })
-def get_playlist(user: CurrentUser, playlist_id: int) -> Playlist:
+def get_playlist(user: CurrentUser, playlist_id: int = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'playlist'}})) -> Playlist:
     """Get one playlist with all its items."""
     return _playlist_or_404(library_of(user.subjectId), playlist_id)
 
@@ -225,7 +238,7 @@ def get_playlist(user: CurrentUser, playlist_id: int) -> Playlist:
     'x-glirastes-effect': 'destructive',
     'x-glirastes-title': {'en': 'Delete playlist', 'de': 'Playlist löschen', 'pl': 'Usuń playlistę'},
 })
-def delete_playlist(user: CurrentUser, playlist_id: int) -> None:
+def delete_playlist(user: CurrentUser, playlist_id: int = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'playlist'}})) -> None:
     """Delete a playlist and its versions."""
     library = library_of(user.subjectId)
     _playlist_or_404(library, playlist_id)
@@ -233,8 +246,12 @@ def delete_playlist(user: CurrentUser, playlist_id: int) -> None:
     del library.versions[playlist_id]
 
 
-@playlists_router.get('/{playlist_id}/versions', response_model=PlaylistVersionList)
-def list_playlist_versions(user: CurrentUser, playlist_id: int) -> PlaylistVersionList:
+@playlists_router.get('/{playlist_id}/versions', response_model=PlaylistVersionList, openapi_extra={
+    'x-glirastes-entities': [
+        {'type': 'playlist-version', 'id': 'version_id', 'fallback': 'versionNumber', 'path': 'versions[]'},
+    ],
+})
+def list_playlist_versions(user: CurrentUser, playlist_id: int = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'playlist', 'role': 'parent'}})) -> PlaylistVersionList:
     """List the saved versions of a playlist, oldest first."""
     library = library_of(user.subjectId)
     _playlist_or_404(library, playlist_id)
@@ -242,8 +259,11 @@ def list_playlist_versions(user: CurrentUser, playlist_id: int) -> PlaylistVersi
 
 
 @playlists_router.post('/{playlist_id}/versions/{version_id}/rollback', response_model=PlaylistVersion,
-                       openapi_extra={'x-glirastes-effect': 'write'})
-def roll_back_playlist(user: CurrentUser, playlist_id: int, version_id: int) -> PlaylistVersion:
+                       openapi_extra={'x-glirastes-effect': 'write', 'x-glirastes-entities': [
+                           {'type': 'playlist-version', 'id': 'version_id', 'fallback': 'versionNumber', 'path': ''},
+                       ]})
+def roll_back_playlist(user: CurrentUser, playlist_id: int = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'playlist', 'role': 'parent'}}),
+                       version_id: int = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'playlist-version'}})) -> PlaylistVersion:
     """Roll a playlist back to one of its saved versions."""
     library = library_of(user.subjectId)
     _playlist_or_404(library, playlist_id)
@@ -264,15 +284,19 @@ def list_channels(user: CurrentUser) -> ChannelList:
     'x-glirastes-effect': 'destructive',
     'x-glirastes-title': {'de': 'Kanal löschen'},
 })
-def delete_channel(user: CurrentUser, key: str) -> None:
+def delete_channel(user: CurrentUser, key: str = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'channel'}, 'x-glirastes-id-kind': 'speaking'})) -> None:
     """Delete a channel by its key."""
     library = library_of(user.subjectId)
     _channel_or_404(library, key)
     del library.channels[key]
 
 
-@channels_router.get('/{key}/revisions', response_model=ChannelRevisionList)
-def list_channel_revisions(user: CurrentUser, key: str) -> ChannelRevisionList:
+@channels_router.get('/{key}/revisions', response_model=ChannelRevisionList, openapi_extra={
+    'x-glirastes-entities': [
+        {'type': 'channel-revision', 'id': 'revision_id', 'fallback': 'rev', 'path': 'revisions[]'},
+    ],
+})
+def list_channel_revisions(user: CurrentUser, key: str = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'channel', 'role': 'parent'}, 'x-glirastes-id-kind': 'speaking'})) -> ChannelRevisionList:
     """List the saved revisions of a channel's settings, oldest first."""
     library = library_of(user.subjectId)
     _channel_or_404(library, key)
@@ -280,8 +304,11 @@ def list_channel_revisions(user: CurrentUser, key: str) -> ChannelRevisionList:
 
 
 @channels_router.post('/{key}/revisions/{revision_id}/rollback', response_model=ChannelRevision,
-                      openapi_extra={'x-glirastes-effect': 'write'})
-def roll_back_channel(user: CurrentUser, key: str, revision_id: int) -> ChannelRevision:
+                      openapi_extra={'x-glirastes-effect': 'write', 'x-glirastes-entities': [
+                          {'type': 'channel-revision', 'id': 'revision_id', 'fallback': 'rev', 'path': ''},
+                      ]})
+def roll_back_channel(user: CurrentUser, key: str = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'channel', 'role': 'parent'}, 'x-glirastes-id-kind': 'speaking'}),
+                      revision_id: int = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'channel-revision'}})) -> ChannelRevision:
     """Roll a channel's settings back to one of its saved revisions."""
     library = library_of(user.subjectId)
     _channel_or_404(library, key)
@@ -298,7 +325,7 @@ def list_users(user: CurrentUser) -> UserList:
 
 
 @users_router.delete('/{user_id}', status_code=204, openapi_extra={'x-glirastes-effect': 'destructive'})
-def delete_user(user: CurrentUser, user_id: int) -> None:
+def delete_user(user: CurrentUser, user_id: int = Path(json_schema_extra={'x-glirastes-entity-ref': {'type': 'user'}})) -> None:
     """Remove a user from your workspace."""
     library = library_of(user.subjectId)
     if user_id not in library.users:

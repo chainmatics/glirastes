@@ -27,6 +27,8 @@ import {
 export interface ChatEntityLinks {
   /** True when `entityLinks` is configured: assistant text is scanned for references. */
   readonly enabled: boolean;
+  /** `assistant`: links only in the assistant's text (`entityLinks.scope`). */
+  readonly scope?: 'all' | 'assistant';
   split(text: string): ChatEntityTextSegment[];
   /** Whether a chip of this type does something on click. */
   canOpen(type: string): boolean;
@@ -48,6 +50,14 @@ const ChatEntityLinksContext = createContext<ChatEntityLinks | null>(null);
 const LINKIFIED_TAGS = ['p', 'li', 'td', 'th', 'strong', 'em', 'h1', 'h2', 'h3', 'h4'] as const;
 
 /** Rendered by `AiChatProvider`; reads the conversation and the chat interactions. */
+/**
+ * Turns entity links off for its children: user messages when
+ * `entityLinks.scope` is `assistant`.
+ */
+export function WithoutEntityLinks({ children }: { children: ReactNode }) {
+  return <ChatEntityLinksContext.Provider value={DISABLED_LINKS}>{children}</ChatEntityLinksContext.Provider>;
+}
+
 export function ChatEntityLinksProvider({
   config,
   uiActionBus,
@@ -57,7 +67,7 @@ export function ChatEntityLinksProvider({
   uiActionBus?: UiActionBus;
   children: ReactNode;
 }) {
-  const { messages, interactions, locale } = useChatContext();
+  const { messages, interactions, locale, entityDeclarations } = useChatContext();
   const configRef = useRef(config);
   configRef.current = config;
   const busRef = useRef(uiActionBus);
@@ -71,10 +81,19 @@ export function ChatEntityLinksProvider({
 
   const knownEnabled = !!config && config.known !== false;
   const searches = interactions?.entitySearches;
-  const known = useMemo(
-    () => (knownEnabled ? collectKnownEntities(messages, searches ?? []) : []),
-    [knownEnabled, messages, searches],
-  );
+  const knownHook = config?.knownEntities;
+  const known = useMemo(() => {
+    if (!knownEnabled) return [];
+    const found = collectKnownEntities(messages, searches ?? [], entityDeclarations);
+    if (!knownHook) return found;
+    let extra: ReadonlyArray<ChatEntityReference> = [];
+    try {
+      extra = knownHook({ messages });
+    } catch {
+      extra = [];
+    }
+    return [...found, ...extra.filter((reference) => reference && typeof reference.id === 'string' && typeof reference.label === 'string')];
+  }, [knownEnabled, messages, searches, entityDeclarations, knownHook]);
 
   const canOpen = useCallback((type: string) => {
     const current = configRef.current;
@@ -99,8 +118,15 @@ export function ChatEntityLinksProvider({
     const keyOf = (segment: { matcher: number; text: string; match?: string }) => `${segment.matcher}\u0000${segment.match ?? segment.text}`;
     const links: ChatEntityLinks = {
       enabled: !!config,
+      ...(config?.scope ? { scope: config.scope } : {}),
       split: (text) => (config
-        ? splitEntityText(text, { matchers, known, minLabelLength: config.minLabelLength })
+        ? splitEntityText(text, {
+          matchers,
+          known,
+          minLabelLength: config.minLabelLength,
+          ...(config.ambiguousNames ? { ambiguousNames: config.ambiguousNames } : {}),
+          ...(config.resolveAmbiguous ? { resolveAmbiguous: config.resolveAmbiguous } : {}),
+        })
         : [{ kind: 'text', text }]),
       canOpen,
       open,
@@ -115,7 +141,12 @@ export function ChatEntityLinksProvider({
           pending = Promise.resolve()
             .then(() => (matcher?.resolve ? matcher.resolve(hit) : { id: hit, label: hit }))
             .then((found) => (found && typeof found.id === 'string' && found.id
-              ? { type: segment.type, id: found.id, label: typeof found.label === 'string' && found.label ? found.label : hit }
+              ? {
+                type: segment.type,
+                id: found.id,
+                label: typeof found.label === 'string' && found.label ? found.label : hit,
+                ...(found.data && typeof found.data === 'object' ? { data: found.data } : {}),
+              }
               : undefined))
             .catch(() => {
               cache.current.delete(key);

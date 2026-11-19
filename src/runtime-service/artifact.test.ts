@@ -171,6 +171,39 @@ describe("runtime container artifact", () => {
     expect(plainLoaded.createToolBindings()[0]!.tool).not.toHaveProperty("outputAllowedFields");
   });
 
+  it("carries declared entities through tool-contracts.json, the generated module and the container", async () => {
+    const app = await fixture({
+      "x-glirastes-entities": [{ type: "task", id: "task_id", name: "title", path: "data[]" }],
+      parameters: [{
+        in: "query", name: "owner_id", schema: { type: "integer", "x-glirastes-entity-ref": { type: "user", role: "reference" } },
+      }],
+    });
+    await buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") });
+    const written = ToolContractsFileSchema.parse(JSON.parse(await app.read(".glirastes/tool-contracts.json")));
+    expect(written.tools[0]).toMatchObject({
+      outputEntities: [{ type: "task", id: "task_id", name: "title", path: "data[]" }],
+      inputEntities: [{ type: "user", role: "reference", args: "owner_id" }],
+    });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    const module = renderGeneratedModule({
+      modulePath: "generated.ts",
+      artifact: payload.setupArtifact,
+      contracts: payload.contracts.tools,
+    });
+    expect(module).toContain("        outputEntities: [\n");
+    expect(module).toContain("        inputEntities: [\n");
+    // Field names stay local: never in the setup artifact the Platform gets.
+    expect(JSON.stringify(payload.setupArtifact)).not.toContain("task_id");
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    expect(loaded.createToolBindings()[0]!.tool).toMatchObject({
+      outputEntities: [{ type: "task", id: "task_id", name: "title", path: "data[]" }],
+      inputEntities: [{ type: "user", role: "reference", args: "owner_id" }],
+    });
+    const plain = await fixture();
+    await buildRuntimeArtifact({ projectRoot: plain.root, outputDirectory: plain.path("artifact") });
+    expect(await plain.read(".glirastes/tool-contracts.json")).not.toContain("Entities");
+  });
+
   it("refuses to build a container artifact for a tool with an invalid upper bound (fail closed)", async () => {
     for (const extension of ["x-glirastes-output-allowed-fields", "x-glirastes-output-denied-fields"]) {
       const app = await fixture({ [extension]: ["data[0]"] });

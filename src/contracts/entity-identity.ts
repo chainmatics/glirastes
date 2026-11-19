@@ -61,8 +61,21 @@ export function entityIdKey(value: unknown): string | undefined {
   if (typeof value === 'number') return Number.isSafeInteger(value) ? String(value) : undefined;
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
-  if (!trimmed || trimmed.length > MAX_ID_LENGTH) return undefined;
+  if (!trimmed || trimmed.length > maxIdLength(trimmed)) return undefined;
   return trimmed.toLowerCase();
+}
+
+/** Marks the lookup form of a declared composite key (`entityLookupId`); never part of a real id. */
+export const COMPOSITE_ID_MARK = '\u0002';
+/**
+ * A composite key's lookup form: the mark and the JSON tuple of up to four ids
+ * of 200 characters, each character escaped at most to six (`\\u0000`).
+ */
+const MAX_COMPOSITE_ID_LENGTH = 1 + 2 + 4 * (2 + 200 * 6) + 3;
+
+/** The longest id text a key is formed from: 200 characters, a composite key's lookup form its escaped bound. */
+export function maxIdLength(text: string): number {
+  return text.startsWith(COMPOSITE_ID_MARK) ? MAX_COMPOSITE_ID_LENGTH : MAX_ID_LENGTH;
 }
 
 /**
@@ -332,6 +345,11 @@ function fallbackLabel(key: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/** A fallback field and its value as text (`versionNumber`, 3 → `Version number 3`). */
+export function fallbackText(field: string, value: string | number): string {
+  return `${fallbackLabel(field)} ${typeof value === 'string' ? value.trim() : String(value)}`;
+}
+
 /** The first fallback field of a record as text (`Version number 3`), at most 80 characters of value. */
 export function fallbackTextOf(record: Record<string, unknown>): string | undefined {
   for (const key of FALLBACK_KEYS) {
@@ -422,9 +440,10 @@ export function kindOfToolName(toolName: string): string | undefined {
   return all.length > 0 ? all.map(singular).join(' ') : undefined;
 }
 
-/** Whether two kinds can be the same: their last words agree. */
+/** Whether two kinds can be the same: their last words agree (a declared `playlist-version` counts as words). */
 export function kindsMatch(left: string, right: string): boolean {
-  return left.split(' ').at(-1) === right.split(' ').at(-1);
+  const last = (kind: string) => kind.split(/[ _.-]+/).at(-1);
+  return last(left) === last(right);
 }
 
 /** `user` → `User`, `playlist version` → `Playlist version`. */

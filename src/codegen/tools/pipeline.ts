@@ -1,3 +1,4 @@
+import { resolveToolEntities } from './entity-declarations.js';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
@@ -255,7 +256,7 @@ function isError(finding: ToolFinding): boolean {
  * every other tool be generated and written: the one affected route has no
  * enabled tool, nothing else depends on it.
  */
-const NON_BLOCKING_ERROR_CODES: ReadonlySet<string> = new Set(['route-declared-twice']);
+const NON_BLOCKING_ERROR_CODES: ReadonlySet<string> = new Set(['route-declared-twice', 'entity-id-conflict']);
 
 function isBlocking(finding: ToolFinding): boolean {
   return isError(finding) && !NON_BLOCKING_ERROR_CODES.has(finding.code);
@@ -624,6 +625,27 @@ async function generate(
   const usedSemantics = new Set<ToolSemanticsEntry>();
   const missingLabels = new Map<string, string[]>();
 
+  // Declared identity of the endpoint tools: levels, precedence and tools.json `identity` (field names only).
+  const entityResolution = resolveToolEntities({
+    tools: inventory.executions.flatMap((execution) => {
+      const tool = observedByKey.get(execution.stableKey);
+      if (!tool || execution.executionKind !== 'endpoint') return [];
+      return [{
+        stableKey: execution.stableKey,
+        definitionId: execution.definitionId,
+        modelName: modelFacingToolName(execution.definitionId),
+        method: execution.method,
+        path: execution.path,
+        ...(tool.contract ? { params: tool.contract.params } : {}),
+        ...(tool.entities ? { entities: tool.entities } : {}),
+        ...(tool.outputAllowedFields ? { outputAllowedFields: tool.outputAllowedFields } : {}),
+        ...(tool.outputDeniedFields ? { outputDeniedFields: tool.outputDeniedFields } : {}),
+      }];
+    }),
+    ...(config.identity ? { identity: config.identity } : {}),
+  });
+  findings.push(...entityResolution.findings);
+
   for (const execution of inventory.executions) {
     const tool = observedByKey.get(execution.stableKey);
     if (!tool) throw new Error(`No observation for ${execution.stableKey}`);
@@ -752,6 +774,7 @@ async function generate(
       ...(tool.outputAllowedFields ? { outputAllowedFields: tool.outputAllowedFields } : {}),
       ...(tool.outputDeniedFields ? { outputDeniedFields: tool.outputDeniedFields } : {}),
       ...(tool.outputDefaultFields ? { outputDefaultFields: tool.outputDefaultFields } : {}),
+      ...entityResolution.byKey.get(execution.stableKey),
     });
     const requiresApproval = confirmationFloor(effective.riskClass, effective.requiresApproval);
     toolViews.push({

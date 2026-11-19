@@ -1,3 +1,4 @@
+import { entitiesOf } from '../entity-declarations.js';
 import ts from 'typescript';
 import { deriveToolPolicyDefaults } from '../../../contracts/tool-policy.js';
 import type { EndpointMethod } from '../../../types.js';
@@ -492,6 +493,8 @@ function toObserved(piece: NestPiece, definitionId: string): ObservedTool {
     ...(resolved && Object.keys(resolved.prose).length > 0 ? { prose: resolved.prose } : {}),
     ...(resolved?.maxResultChars !== undefined ? { maxResultChars: resolved.maxResultChars } : {}),
     ...outputFieldLists(resolved),
+    // Schema sites also without a code declaration: tools.json `identity.entities` applies by their type.
+    ...entitiesOf(resolved?.codeEntities, resolved?.contract?.output),
   };
 }
 

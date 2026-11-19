@@ -7,6 +7,12 @@ import { z } from 'zod';
 import { ToolPresentationSchema, type ToolPresentation } from '../../contracts/index.js';
 import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
 import type { DeclaredEffect } from '../../contracts/tool-policy.js';
+import {
+  entityDeclarationIssue,
+  inputEntityRefIssue,
+  type InputEntityRef,
+  type OutputEntityDeclaration,
+} from '../../contracts/entity-declaration.js';
 import { isValidMaxResultChars } from '../../runtime/result-limit.js';
 import { normalizeOutputFields } from '../../server/core/output-fields.js';
 import { sha256Digest, sortKeysDeep } from './canonical.js';
@@ -33,7 +39,8 @@ export interface ProbedSchema {
 /** Contract metadata fields that were declared but are unusable, so they read as `null`. */
 export type InvalidContractField =
   | 'effect' | 'presentation' | 'maxResultChars' | 'outputAllowedFields' | 'outputDeniedFields' | 'outputDefaultFields'
-  | DeclaredTextField;
+  | DeclaredTextField
+  | 'outputEntities' | 'inputEntities';
 
 /** The output field declarations of a contract entry. */
 const OUTPUT_FIELD_NAMES = ['outputAllowedFields', 'outputDeniedFields', 'outputDefaultFields'] as const;
@@ -71,6 +78,13 @@ export interface ProbedContractEntry {
   outputAllowedFields?: string[];
   outputDeniedFields?: string[];
   outputDefaultFields?: string[];
+  /**
+   * `outputEntities` and `inputEntities` of the entry, when every entry is a
+   * valid declaration (field names and types only). Not part of
+   * `moduleDigest`: they name the identity of results, not the contract.
+   */
+  outputEntities?: OutputEntityDeclaration[];
+  inputEntities?: InputEntityRef[];
   /**
    * Set only when the entry declares an `effect` outside the known set, a
    * `presentation` that fails its schema, a `maxResultChars` out of range or
@@ -138,6 +152,8 @@ const WireEntry = z.object({
   outputAllowedFields: z.union([z.array(z.string()), z.literal('invalid')]).nullable().optional(),
   outputDeniedFields: z.union([z.array(z.string()), z.literal('invalid')]).nullable().optional(),
   outputDefaultFields: z.union([z.array(z.string()), z.literal('invalid')]).nullable().optional(),
+  outputEntities: z.union([z.array(z.unknown()), z.literal('invalid')]).nullable().optional(),
+  inputEntities: z.union([z.array(z.unknown()), z.literal('invalid')]).nullable().optional(),
 });
 const WireFailure = z.object({
   ok: z.literal(false),
@@ -233,8 +249,21 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
     if (paths) outputFields[name] = paths;
     else invalidFields.push(name);
   }
+  const entities: { outputEntities?: OutputEntityDeclaration[]; inputEntities?: InputEntityRef[] } = {};
+  for (const [name, issueOf] of [
+    ['outputEntities', (item: unknown) => entityDeclarationIssue(item, { output: true })],
+    ['inputEntities', inputEntityRefIssue],
+  ] as const) {
+    const declared = wire[name] ?? null;
+    if (declared === null) continue;
+    if (declared !== 'invalid' && declared.every((item) => issueOf(item) === undefined)) {
+      (entities as Record<string, unknown>)[name] = declared;
+    } else {
+      invalidFields.push(name);
+    }
+  }
   // Field paths are written to tool-contracts.json: a secret-looking one rejects the entry like any metadata.
-  if (carriesSecret(outputFields)) return CONTENT_REJECTED;
+  if (carriesSecret(outputFields) || carriesSecret(entities)) return CONTENT_REJECTED;
   return {
     ok: true,
     kind: 'contract-entry',
@@ -245,6 +274,7 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
     ...outputFields,
     ...(presentations?.success && !carriesSecret(presentations.data) ? { presentations: presentations.data } : {}),
     ...(Object.keys(texts.hints).length > 0 ? { texts: texts.hints } : {}),
+    ...entities,
     ...(invalidFields.length > 0 ? { invalidFields } : {}),
     moduleDigest: sha256Digest(JSON.stringify(sortKeysDeep({
       input: input.digest,

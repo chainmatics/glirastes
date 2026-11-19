@@ -1,5 +1,7 @@
 import type { ToolPresentation } from '../../contracts/index.js';
 import type { LocalizedText } from '../../contracts/localized-text.js';
+import type { InputEntityRef, OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
+import type { ObservedEntities } from './entity-declarations.js';
 import type { DeclaredEffect, ToolPolicyDefaults, ToolPolicyFile } from '../../contracts/tool-policy.js';
 import type { LocalJsonSchema } from '../../runtime/json-schema.js';
 import type { GeneratedUiAction } from '../../server/core/generated-ui-tool.js';
@@ -143,6 +145,12 @@ export interface ObservedTool {
    */
   appDeniedHits?: string[];
   appDeniedNearKeys?: string[];
+  /**
+   * Entity declarations by level (tool code, OpenAPI operation, response
+   * schema) and the response's object schemas; resolved by the pipeline with
+   * tools.json `identity`. Local only.
+   */
+  entities?: ObservedEntities;
 }
 
 export interface ExcludedTool {
@@ -198,6 +206,9 @@ export interface ToolContractsEntry {
   outputAllowedFields?: string[];
   outputDeniedFields?: string[];
   outputDefaultFields?: string[];
+  /** Resolved entity declarations (field names only); the generated module passes them on. */
+  outputEntities?: OutputEntityDeclaration[];
+  inputEntities?: InputEntityRef[];
 }
 
 export interface ToolSourceContext {

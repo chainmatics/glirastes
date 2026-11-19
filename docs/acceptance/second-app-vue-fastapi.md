@@ -107,13 +107,13 @@ run with `ACCEPTANCE_LOCALE=de-DE`.
 | 4 | "Show me the files of Night Loop." | `playlists_get` with `playlist_id: 10` (or `read_result` on `playlists[9].items`) | 64 clip names and durations; no URL, no invented URL | Search for `fileUrl`, `X-Amz` and `https://` in the answer, the activity details and the copied chat text |
 | 5 | "Show playlist 9999." | `playlists_get` once | Says it does not exist; no retry loop | Number of calls; whether it offered a lookup (0.17.2 adds a lookup hint) |
 | 6 | Turn 1: case 1. Turn 2: "Delete entry 14 of that list." | `playlists_delete` with `playlist_id: 14` (after a lookup if needed) | Approval card for "Opening Loop"; decline it | The id sent; whether it re-listed first (SA-01, fixed in 0.17.2: the history keeps `playlist_id`) |
-| 7 | "Delete the playlist Weekend Loop." / DE: "Lösch die Playlist Weekend Loop." | lookup, then `playlists_delete` with `playlist_id: 7` | Card names "Weekend Loop" | Card status and name shown (known gap SA-04; SA-05 fixed in 0.17.2) |
+| 7 | "Delete the playlist Weekend Loop." / DE: "Lösch die Playlist Weekend Loop." | lookup, then `playlists_delete` with `playlist_id: 7` | Card names "Weekend Loop" | Card status and name shown (SA-04 fixed in 0.18.0 by the declaration; SA-05 fixed in 0.17.2) |
 | 8 | "Delete playlist 7." (new chat, no listing) | `playlists_delete` with `playlist_id: 7` | Card status `unknown`, shows id 7 with a warning | Card status |
-| 9 | "Roll Lobby Loop back to version 3." Then: "Roll the lobby channel back to revision 3." | `playlistsVersions_list`, `playlistsVersionsRollback_create` (`playlist_id: 3`, `version_id: 303`); `channelsRevisions_list`, `channelsRevisionsRollback_create` (`key: "lobby"`, `revision_id: 503`) | Card `seen` with "Version number 3"; for the revision a comparable fallback | Card status and fallback of both (known gaps SA-07, SA-08) |
+| 9 | "Roll Lobby Loop back to version 3." Then: "Roll the lobby channel back to revision 3." | `playlistsVersions_list`, `playlistsVersionsRollback_create` (`playlist_id: 3`, `version_id: 303`); `channelsRevisions_list`, `channelsRevisionsRollback_create` (`key: "lobby"`, `revision_id: 503`) | Card `seen` with "Version number 3"; for the revision a comparable fallback | Card status and fallback of both (SA-07, SA-08 fixed in 0.18.0 by the declaration) |
 | 10 | Case 1, then "Delete user 1." | `users_list` (or not), `users_delete` with `user_id: 1` | Card names "Ada Lovelace", never "Morning Loop" | Card status and name (SA-05, fixed in 0.17.2) |
 | 11 | Case 7, decline the approval | none after the decline | Model acknowledges; no retry; activity shows `declined` | Retries; wording |
 | 12 | Case 7, approve; then "List my playlists again." | `playlists_delete`, then `playlists_list` | Weekend Loop gone, total 59 | Total shown |
-| 13 | "Delete the lobby channel." | `channels_list` (optional), `channels_delete` with `key: "lobby"` | Card that identifies the lobby channel | What the card shows (known gap SA-06) |
+| 13 | "Delete the lobby channel." | `channels_list` (optional), `channels_delete` with `key: "lobby"` | Card that identifies the lobby channel | What the card shows (SA-06 fixed in 0.18.0 by the declaration) |
 | 14 | "Show me the files of every playlist." / DE: "Zeig mir die Dateien aller Playlists." — `ACCEPTANCE_LIMITS=sdk-default` | fan-out of `playlists_get` (or `read_result` on items) | Budget stop notice in the chat's language (DE run with `de-DE`) | Limit that stopped it; language of the notice; calls made |
 | 15 | "Show playlist banana." | lookup by name (`playlists_list`), no question back | Says there is no playlist named so, or picks none; does not ask the user for an id | Self-correction path; whether it asked the user |
 | 16 | Cases 1, 7 and 14 in German, `ACCEPTANCE_LOCALE=de-DE` | as the English case | Answers and notices in German | Language of answer, card and notice |
@@ -131,16 +131,18 @@ Language checks, once per release with either model (not counted as cases):
 
 | Id | Finding | SDK code |
 | --- | --- | --- |
-| SA-04 | A listed playlist is `unknown` on the approval card: only `id`, `_id`, `uuid` are record ids | `src/react/utils/entity-names.ts` |
-| SA-06 | A channel deleted by `key` gets no subject on the card | `src/react/utils/approval-subjects.ts` (`isIdKey`) |
-| SA-07 | A listed version (`version_id`) is `unknown`, not `seen` with its `versionNumber` | `src/react/utils/entity-names.ts` (`collectSeenEntityIds`) |
-| SA-08 | `rev` is no fallback field, even for a record seen under `id` | `src/react/utils/entity-names.ts` (`FALLBACK_KEYS`) |
-| SA-09 | `hideIds` learns no integer ids: "(ID: 3)" stays in the answer | `src/server/adapters/nextjs/hide-ids.ts` |
 
-Fixed (the tests keep their ids, titled `SA-nn (fixed in 0.17.2)`):
+None open. The reference app declares its object identity (OpenAPI `x-glirastes-entity` on the Playlist, PlaylistItem and User schemas, `x-glirastes-entities` on the versions and revisions operations, `x-glirastes-entity-ref` on the id parameters, `identity.entities.channel` in `examples/vue-fastapi/.glirastes/tools.json`). Each fixed gap keeps a test "without declarations" that shows the field-name fallback an app without declarations still gets.
+
+Fixed (the tests keep their ids, titled `SA-nn (fixed in <version>)`):
 
 | Id | Fixed behaviour | SDK code |
 | --- | --- | --- |
+| SA-04 | A listed playlist is named on the approval card by its declared `playlist_id` (0.18.0) | `src/react/utils/entity-names.ts`, `src/contracts/entity-declaration.ts` |
+| SA-06 | A channel deleted by its declared `key` gets a typed subject with its title, `idKind: speaking` (0.18.0) | `src/react/utils/approval-subjects.ts` |
+| SA-07 | A listed version is `seen` with its declared fallback "Version number 3" and `fallbackField` (0.18.0) | `src/react/utils/entity-names.ts` (`collectSeenEntityIds`) |
+| SA-08 | A revision is `seen` with its declared fallback `rev` ("Rev 3") (0.18.0) | `src/react/utils/entity-names.ts` (`collectSeenEntityIds`) |
+| SA-09 | `hideIds` learns declared integer ids and removes them with an id prefix ("(ID: 3)"); a bare number stays (0.18.0) | `src/server/adapters/nextjs/hide-ids.ts` (`collectDeclaredIdLabels`) |
 | SA-01 | History compaction keeps `playlist_id` with `displayName` for entries 11–60; the `_history` marker's `keys` names it | `src/contracts/entity-identity.ts` (`idLikeFieldsOf`), `src/server/adapters/nextjs/history-compaction.ts` |
 | SA-02 | Under size pressure the overview keeps `playlist_id`; other fields go first, then trailing entries | `src/server/core/result-overview.ts` |
 | SA-03 | `read_result` adds `playlist_id` with the name to entries read below the array | `src/server/core/result-overview.ts` (`identityFieldsOf`) |

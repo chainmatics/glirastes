@@ -20,6 +20,11 @@ import {
   NAME_KEYS,
   OWN_ID_KEYS,
 } from '../../contracts/entity-identity.js';
+import {
+  declarationForEntries,
+  declaredIdentityKeys,
+  type OutputEntityDeclaration,
+} from '../../contracts/entity-declaration.js';
 import { leftOutFields, outputFieldTree, projectOutputFields, type LeftOutField } from './output-fields.js';
 import { formatResultPath, isSelectablePath, setOwn, type PathStep } from './result-paths.js';
 
@@ -75,6 +80,13 @@ export interface BuildResultOverviewOptions {
    * of the view, so the declared fields are the last to go.
    */
   defaultFields?: ReadonlyArray<string>;
+  /**
+   * The tool's `outputEntities`: a declaration for the entries of the
+   * dominant array keeps their declared id, name and fallback fields (and
+   * replaces the id-like guess); one for the result itself (`path: ''`)
+   * keeps those fields of the root. Without one, the heuristic applies.
+   */
+  entities?: ReadonlyArray<OutputEntityDeclaration>;
 }
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -424,10 +436,28 @@ export function buildResultOverview(
   // An entry without a recognised identifier keeps every id-like field (`playlist_id`, `ownerId`):
   // rather one field too many than no id for the next call. Kept for the whole array, never
   // dropped: under size pressure every other field goes first, then trailing entries.
-  if (dominant) {
+  // A declared identity replaces that guess: its fields stay, whatever their size.
+  const declared = dominant ? declarationForEntries(options.entities, dominant.route, root) : undefined;
+  if (declared) {
+    for (const key of declaredIdentityKeys(declared)) if (ownFieldSize.has(key)) keep.add(key);
+  } else if (dominant) {
     for (const entry of dominant.entries) {
       for (const key of idLikeFieldsOf(entry, IDENTITY_ID_KEYS)) if (ownFieldSize.has(key)) keep.add(key);
     }
+  }
+  // The result's own declared identity (`path: ''`) stays too.
+  // A path-less declaration points at the result itself when it has no array.
+  const rootDeclared = options.entities?.find((declaration) => declaration.path === '')
+    ?? (dominant ? undefined : options.entities?.find((declaration) => declaration.path === undefined));
+  const rootKeep = new Set(rootDeclared ? declaredIdentityKeys(rootDeclared) : []);
+  // A declared object inside each entry (`data[].owner`) keeps its id and name fields too. (A nested
+  // array, `data[].items[]`, is measured as one field: it stays or goes as a whole.)
+  const entryPath = dominant ? `${dominant.route.join('.')}[]` : undefined;
+  const nestedKeep = new Set<string>();
+  for (const declaration of entryPath ? options.entities ?? [] : []) {
+    const rest = declaration.path?.startsWith(`${entryPath}.`) ? declaration.path.slice(entryPath!.length + 1) : undefined;
+    if (!rest || rest.includes('[')) continue;
+    for (const key of declaredIdentityKeys(declaration)) nestedKeep.add(`${entryPath}.${rest}.${key}`);
   }
   if (keep.size === 0 && ownFieldSize.size > 0) {
     const smallest = [...ownFieldSize].sort((left, right) => left[1] - right[1] || (left[0] < right[0] ? -1 : 1))[0]!;
@@ -437,7 +467,9 @@ export function buildResultOverview(
   // Low value first; in the two upper classes nested fields before an entry's own; then the largest first.
   const own = (candidate: Candidate) => (candidate.steps.length - candidate.base > 1 ? 0 : 1);
   const droppable = candidates
-    .filter((candidate) => candidate.entryKey === undefined || !keep.has(candidate.entryKey))
+    .filter((candidate) => (candidate.entryKey === undefined
+      ? !(candidate.steps.length === 1 && candidate.steps[0]!.kind === 'key' && rootKeep.has(candidate.steps[0]!.key))
+      : !keep.has(candidate.entryKey) && !nestedKeep.has(candidate.path)))
     .sort((left, right) => rank.get(left)! - rank.get(right)!
       || (rank.get(left)! > 0 ? own(left) - own(right) : 0) || right.size - left.size || byPath(left, right));
 
