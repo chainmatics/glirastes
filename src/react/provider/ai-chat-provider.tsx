@@ -33,7 +33,7 @@ import {
   applyServerApprovalSubjects,
   findApprovalSubjectsPart,
   mergeServerApprovalSubjects,
-  serverSubjectNames,
+  applyServerSubjectNames,
 } from '../utils/server-approval-subjects.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
 import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
@@ -1080,7 +1080,7 @@ export function AiChatProvider({
           }
           // What the server looked up through the tool's declared read source (only with a declaration).
           const serverPart = findApprovalSubjectsPart(lastMessage.parts, toolPart.toolCallId);
-          for (const [key, name] of serverSubjectNames(serverPart)) names.set(key, name);
+          applyServerSubjectNames(names, serverPart);
           const described = approvalDescriptionRef.current(
             toolName,
             toolPart.approval.id,

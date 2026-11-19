@@ -142,6 +142,19 @@ export function applyServerApprovalSubjects(described: PendingApproval, merged: 
  * The names the server found for the call's ids, by lower-cased id, for the
  * description's detail lines (`names`): the server's name wins over the history's.
  */
+/**
+ * The description generator's name index with the server's subjects of the
+ * call applied: a checked id (`found`) loses its history name, whatever its
+ * status, and gets the server's name where it has exactly one; an unchecked
+ * id keeps the history name as its fallback.
+ */
+export function applyServerSubjectNames(names: Map<string, string>, part: ApprovalSubjectsPartData | undefined): void {
+  for (const subject of part?.subjects ?? []) {
+    if (subject.check === 'found') names.delete(subject.id.toLowerCase());
+  }
+  for (const [key, name] of serverSubjectNames(part)) names.set(key, name);
+}
+
 export function serverSubjectNames(part: ApprovalSubjectsPartData | undefined): Map<string, string> {
   const names = new Map<string, string>();
   // The description generator looks names up by id alone: an id two subjects share

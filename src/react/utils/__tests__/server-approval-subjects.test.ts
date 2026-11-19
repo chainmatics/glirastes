@@ -5,6 +5,7 @@ import {
   applyServerApprovalSubjects,
   findApprovalSubjectsPart,
   mergeServerApprovalSubjects,
+  applyServerSubjectNames,
   serverSubjectNames,
 } from '../server-approval-subjects.js';
 
@@ -27,6 +28,18 @@ describe('serverSubjectNames', () => {
     const user = { ...found, type: 'user', id: '3', ids: { user_id: '3' }, path: 'user_id', name: 'Linus Torvalds' };
     expect(serverSubjectNames(server([playlist, user])).has('3')).toBe(false);
     expect(serverSubjectNames(server([playlist])).get('3')).toBe('Lobby Loop');
+  });
+});
+
+describe('applyServerSubjectNames', () => {
+  it('drops a history name for a checked id the server found without a name, keeps it for an unchecked one', () => {
+    const names = new Map([['3', 'Old name'], ['4', 'History name']]);
+    applyServerSubjectNames(names, server([
+      { ...found, id: '3', ids: { playlist_id: '3' }, status: 'seen', name: undefined },
+      { ...found, id: '4', ids: { playlist_id: '4' }, path: 'other_id', status: 'unknown', check: 'unchecked', reason: 'timeout', name: undefined },
+    ]));
+    expect(names.has('3')).toBe(false);
+    expect(names.get('4')).toBe('History name');
   });
 });
 
