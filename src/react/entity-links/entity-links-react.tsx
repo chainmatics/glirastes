@@ -272,9 +272,22 @@ export function EntityLinkChip({ reference, text }: { reference: ChatEntityRefer
   );
 }
 
-/** Encloses the label of a marker kept in Markdown text: a word joiner, invisible where nothing renders a chip. */
+/**
+ * A marker kept in Markdown text: `\u2060`, its index in zero-width digits
+ * (`\u200B` 0, `\u200C` 1), `\u2063`, its label, `\u2060`. Invisible where
+ * nothing renders a chip; the index keeps markers with one label apart.
+ */
 const MARKER_EDGE = '\u2060';
-const MARKER_SPAN = /\u2060([^\u2060]*)\u2060/g;
+const MARKER_SPAN = /\u2060([\u200B\u200C]+)\u2063([^\u2060]*)\u2060/g;
+const MARKER_CHARS = /[\u2060\u2063]/g;
+
+function markerIndexText(index: number): string {
+  return index.toString(2).replace(/0/g, '\u200B').replace(/1/g, '\u200C');
+}
+
+function markerIndexOf(text: string): number {
+  return Number.parseInt(text.replace(/\u200B/g, '0').replace(/\u200C/g, '1'), 2);
+}
 const MARKDOWN_PUNCTUATION = /[\\`*_{}[\]()#+\-.!<>|~]/g;
 
 /** The markers of one text part, in the order they occur. */
@@ -293,12 +306,12 @@ export function markdownWithMentionMarkers(
   let content = '';
   for (const segment of segments) {
     if (segment.kind === 'text') {
-      content += segment.text.replaceAll(MARKER_EDGE, '');
+      content += segment.text.replace(MARKER_CHARS, '');
       continue;
     }
-    mentions.push(segment.mention);
-    const label = segment.mention.displayName.replaceAll(MARKER_EDGE, '').replace(MARKDOWN_PUNCTUATION, (char) => `\\${char}`);
-    content += `${MARKER_EDGE}${label}${MARKER_EDGE}`;
+    const index = mentions.push(segment.mention) - 1;
+    const label = segment.mention.displayName.replace(MARKER_CHARS, '').replace(MARKDOWN_PUNCTUATION, (char) => `\\${char}`);
+    content += `${MARKER_EDGE}${markerIndexText(index)}\u2063${label}${MARKER_EDGE}`;
   }
   return { content, mentions };
 }
@@ -323,8 +336,8 @@ function MarkerText({ text }: { text: string }) {
   };
   for (const found of text.matchAll(MARKER_SPAN)) {
     plain(text.slice(cursor, found.index), `t${cursor}`);
-    const label = found[1] ?? '';
-    const mention = mentions.find((candidate) => candidate.displayName.replaceAll(MARKER_EDGE, '') === label);
+    const label = found[2] ?? '';
+    const mention = mentions[markerIndexOf(found[1] ?? '')];
     nodes.push(mention && links.showsMention(mention)
       ? <MarkerChip key={`m${found.index}`} mention={mention} />
       : <Fragment key={`m${found.index}`}>{label}</Fragment>);

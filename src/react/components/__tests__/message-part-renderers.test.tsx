@@ -221,6 +221,21 @@ describe('mention markers inside Markdown (W6)', () => {
     expect(await screen.findByRole('button', { name: 'Open Lobby*Loop' })).not.toBeNull();
   });
 
+  it('keeps two markers with one label apart by their ids', async () => {
+    const twins = answer('{{mention:playlist:pl_7:Lobby Loop}} and {{mention:playlist:pl_8:Lobby Loop}}');
+    render(<Chat messages={twins} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown', known: false }} />);
+    // Only pl_7 was shown by a declared result: one chip, the other stays text.
+    expect(await screen.findAllByRole('button', { name: 'Open Lobby Loop' })).toHaveLength(1);
+    expect(bubble().querySelector('[data-component="markdown"] p')!.textContent).toContain('and Lobby Loop is live.');
+    cleanup();
+    const open = vi.fn();
+    render(<Chat messages={twins} entityLinks={{ open, mentionMarkers: 'markdown', verifyMentions: false, known: false }} />);
+    const chips = await screen.findAllByRole('button', { name: 'Open Lobby Loop' });
+    expect(chips).toHaveLength(2);
+    fireEvent.click(chips[1]!);
+    expect(open).toHaveBeenCalledWith({ type: 'playlist', id: 'pl_8', label: 'Lobby Loop' });
+  });
+
   it('never takes an id from a field-name guess for the check', async () => {
     render(
       <Chat
