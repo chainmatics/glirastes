@@ -1,5 +1,6 @@
 import type { DeclaredEffect } from '../../contracts/tool-policy.js';
 import type { InputEntityRef, OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
+import type { ObservedApprovalLevel } from './approval-subject-declarations.js';
 import type { EndpointMethod } from '../../types.js';
 import { compareCodeUnits, JsonSchemaCompileError, jsonSchemaDigest, OPAQUE_JSON_SCHEMA } from './canonical.js';
 import { toolFinding } from './findings.js';
@@ -93,6 +94,8 @@ export interface ResolvedEndpointContract {
   appDeniedNearKeys?: string[];
   /** `outputEntities` / `inputEntities` of the sibling contract module entry (tool code), when valid. */
   codeEntities?: CodeEntities;
+  /** `entityLookup` / `approvalSubject` / `lookupEffect` of the contract module entry (tool code), and their issues. */
+  codeApproval?: ObservedApprovalLevel;
 }
 
 /** Entity declarations of a contract module entry, the highest level. */
@@ -590,6 +593,9 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
           ...(entry.inputEntities ? { input: entry.inputEntities } : {}),
         },
       }
+      : {}),
+    ...(entry?.approval && input.contractModule
+      ? { codeApproval: { where: input.contractModule.module, ...entry.approval } }
       : {}),
   };
   // A contract module with secret-looking content or unusable metadata is reported on every path, also when another tier wins.

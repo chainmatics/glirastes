@@ -151,6 +151,35 @@ describe('schema probe', () => {
     expect(get?.moduleDigest).toBe(del?.moduleDigest);
   }, 30_000);
 
+  it('reads the approval-subject declarations of a contract entry and names invalid ones without their value', async () => {
+    const app = await createAppFixture({
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  GET: { input: z.object({}), entityLookup: { type: 'note', params: { note_id: 'note_id' } } },\n"
+        + "  POST: { input: z.object({}), entityLookup: [{ type: 'Bad SECRETNAME', params: {} }], approvalSubject: { recheck: 'SECRETNAME' },"
+        + " lookupEffect: 'SECRETNAME' },\n"
+        + "  PUT: { input: z.object({}), approvalSubject: false, lookupEffect: 'read', entityLookup: () => 1 },\n"
+        + '  DELETE: { input: z.object({}) },\n};\n',
+    });
+    const entry = (method: string): SchemaProbeItem => ({
+      kind: 'contract-entry', io: 'input', module: 'src/app/api/notes/contract.ts', export: 'contract', property: [method],
+    });
+    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'PUT', 'DELETE'].map(entry));
+    const [get, post, put, del] = results.map((result) => (
+      result.ok && result.kind === 'contract-entry' ? result : undefined
+    ));
+    expect(get?.approval).toEqual({ entityLookup: [{ type: 'note', params: { note_id: 'note_id' } }] });
+    expect(post?.approval?.issues).toHaveLength(3);
+    expect(post?.approval).not.toHaveProperty('entityLookup');
+    // A function is no JSON value: an issue, and the valid fields still go on.
+    expect(put?.approval).toMatchObject({ approvalSubject: false, lookupEffect: 'read' });
+    expect(put?.approval?.issues).toHaveLength(1);
+    expect(del).not.toHaveProperty('approval');
+    // Never an invalid field of the contract (that would be a finding of the tool itself).
+    expect(post).not.toHaveProperty('invalidFields');
+    expect(JSON.stringify(results)).not.toContain('SECRETNAME');
+    expect(get?.moduleDigest).toBe(del?.moduleDigest);
+  }, 30_000);
+
   it('reads maxResultChars of a contract entry and flags an invalid one without its value', async () => {
     const app = await createAppFixture({
       'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"

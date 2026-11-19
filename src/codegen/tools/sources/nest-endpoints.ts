@@ -495,6 +495,7 @@ function toObserved(piece: NestPiece, definitionId: string): ObservedTool {
     ...outputFieldLists(resolved),
     // Schema sites also without a code declaration: tools.json `identity.entities` applies by their type.
     ...entitiesOf(resolved?.codeEntities, resolved?.contract?.output),
+    ...(resolved?.codeApproval ? { approvalDeclarations: { code: resolved.codeApproval } } : {}),
   };
 }
 

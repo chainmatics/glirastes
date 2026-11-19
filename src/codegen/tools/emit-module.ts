@@ -98,10 +98,15 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
         ['outputDefaultFields', entry?.outputDefaultFields]] as const)
         .filter((field): field is readonly [typeof field[0], string[]] => field[1] !== undefined)
       : [];
-    // Declared identity (field names only), endpoint results only.
+    // Declared identity and approval subjects (field, type and tool names only), endpoint tools only.
     const entities = tool.executionKind === 'endpoint'
-      ? ([['outputEntities', entry?.outputEntities], ['inputEntities', entry?.inputEntities]] as Array<[string, unknown[] | undefined]>)
-        .filter((field): field is [string, unknown[]] => field[1] !== undefined)
+      ? ([
+        ['outputEntities', entry?.outputEntities],
+        ['inputEntities', entry?.inputEntities],
+        ['entityLookup', entry?.entityLookup],
+        ['approvalSubject', entry?.approvalSubject],
+        ['lookupEffect', entry?.lookupEffect],
+      ] as Array<[string, unknown]>).filter((field) => field[1] !== undefined)
       : [];
     if (!contract) throw new Error(`Enabled tool ${tool.name} has no contract to bind.`);
     if (tool.executionKind === 'ui' && !contract.uiAction) {

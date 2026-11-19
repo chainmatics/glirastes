@@ -5,6 +5,13 @@ import {
   type InputEntityRef,
   type OutputEntityDeclaration,
 } from '../../contracts/entity-declaration.js';
+import {
+  approvalSubjectIssue,
+  entityLookupIssue,
+  MAX_ENTITY_LOOKUPS,
+  type ApprovalSubjectOption,
+  type EntityLookup,
+} from '../../contracts/approval-subject.js';
 import { z } from 'zod';
 import { isSafeAppHref } from '../../browser/navigation.js';
 import { MAX_MAX_RESULT_CHARS, MIN_MAX_RESULT_CHARS } from '../../runtime/result-limit.js';
@@ -148,6 +155,15 @@ const InputEntitiesSchema = z.array(z.unknown()).max(MAX_TOOL_ENTITIES)
   .refine((list) => list.every((entry) => inputEntityRefIssue(entry) === undefined), { message: 'Not a list of entity references' })
   .transform((list) => list as InputEntityRef[]);
 
+/** Approval-subject declarations (field, type and tool names only; local, never sent to the Platform). */
+const EntityLookupsSchema = z.array(z.unknown()).min(1).max(MAX_ENTITY_LOOKUPS)
+  .refine((list) => list.every((entry) => entityLookupIssue(entry) === undefined)
+    && new Set(list.map((entry) => (entry as EntityLookup).type)).size === list.length, { message: 'Not a list of entity lookups' })
+  .transform((list) => list as EntityLookup[]);
+const ApprovalSubjectSchema = z.unknown()
+  .refine((value) => value !== undefined && approvalSubjectIssue(value) === undefined, { message: 'Not an approval subject declaration' })
+  .transform((value) => value as ApprovalSubjectOption);
+
 const ToolTitleSchema = z.record(z.string().regex(LANGUAGE_TAG_PATTERN).max(35), z.string().min(1).max(200))
   .refine((title) => Object.keys(title).length <= MAX_TEXT_LANGUAGES, { message: `At most ${MAX_TEXT_LANGUAGES} languages` });
 
@@ -183,6 +199,9 @@ export const ToolContractsFileSchema = z.object({
     outputDefaultFields: outputFieldsSchema('outputDefaultFields').optional(),
     outputEntities: OutputEntitiesSchema.optional(),
     inputEntities: InputEntitiesSchema.optional(),
+    entityLookup: EntityLookupsSchema.optional(),
+    approvalSubject: ApprovalSubjectSchema.optional(),
+    lookupEffect: z.literal('read').optional(),
   }).strict()).max(5_000),
 }).strict();
 

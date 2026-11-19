@@ -170,6 +170,25 @@ export const ToolsConfigSchema = z.object({
       output: z.array(z.unknown()).max(20).optional(),
       input: z.array(z.unknown()).max(20).optional(),
     }).strict()).optional(),
+    /**
+     * Server lookups of approval subjects by entity type: `{ "playlist": {
+     * "tool": "playlists_get", "params": { "playlist_id": "playlist_id" } } }`
+     * attaches an `entityLookup` (`params`, `const?`, `result?`, `complete?`)
+     * to the named read tool (definition id or model name). The lowest level.
+     */
+    lookups: z.record(z.string().min(1).max(64), z.unknown())
+      .refine((lookups) => Object.keys(lookups).length <= 200, { message: 'At most 200 lookups' }).optional(),
+  }).strict().optional(),
+  /**
+   * `approvalSubject` per write tool (definition id or model name): an
+   * `ApprovalSubjectDeclaration` (`refs`, `preview`, `onUnavailable`,
+   * `onForbidden`, `recheck`) or `false` to turn the server lookup off. The
+   * lowest level: code and OpenAPI operation win. Entries are checked by the
+   * refresh (a finding, never a failure). Local only.
+   */
+  approvalSubjects: z.object({
+    tools: z.record(z.string().min(1).max(200), z.unknown())
+      .refine((tools) => Object.keys(tools).length <= 1_000, { message: 'At most 1000 tools' }).optional(),
   }).strict().optional(),
   output: z.object({
     deniedFields: z.array(z.string()).max(MAX_OUTPUT_FIELDS)

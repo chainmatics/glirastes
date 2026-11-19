@@ -6,6 +6,34 @@ import {
   type InputEntityRef,
   type OutputEntityDeclaration,
 } from './contracts/entity-declaration.js';
+import {
+  assertApprovalSubjectDeclarations,
+  type ApprovalSubjectOption,
+  type EntityLookup,
+  type LookupEffect,
+} from './contracts/approval-subject.js';
+
+export {
+  APPROVAL_SUBJECTS_PART_TYPE,
+  type ApprovalPreviewData,
+  type ApprovalPreviewDeclaration,
+  type ApprovalPreviewField,
+  type ApprovalPreviewFormat,
+  type ApprovalPreviewValue,
+  type ApprovalSubjectDeclaration,
+  type ApprovalSubjectForbidden,
+  type ApprovalSubjectOption,
+  type ApprovalSubjectRecheck,
+  type ApprovalSubjectsPartData,
+  type ApprovalSubjectUnavailable,
+  type ApprovalSubjectUncheckedReason,
+  type EntityLookup,
+  type EntityLookupConst,
+  type EntityLookupParam,
+  type EntityLookupResult,
+  type LookupEffect,
+  type ServerApprovalSubject,
+} from './contracts/approval-subject.js';
 
 export {
   defineEntity,
@@ -193,6 +221,29 @@ export interface Tool {
    */
   inputEntities?: InputEntityRef[];
 
+  /**
+   * The entity types this read tool can look up for an approval card, and
+   * how its parameters are filled (`{ type: 'playlist', params: { playlist_id:
+   * 'playlist_id' } }`). The tool must declare the entity in `outputEntities`.
+   * OpenAPI: `x-glirastes-entity-lookup`. See docs/approval-subjects.md.
+   */
+  entityLookup?: EntityLookup | EntityLookup[];
+
+  /**
+   * For a write tool: which of its `inputEntities` the server looks up
+   * before the approval card, a preview, and the failure behaviour; `false`
+   * turns the lookup off. OpenAPI: `x-glirastes-approval-subject`.
+   */
+  approvalSubject?: ApprovalSubjectOption;
+
+  /**
+   * `read`: a lookup or preview call through this tool changes nothing (a
+   * POST dry-run). Only read for lookups and previews: the tool keeps its
+   * own risk class and approval when the model calls it. GET and HEAD need
+   * no declaration. OpenAPI: `x-glirastes-lookup-effect`.
+   */
+  lookupEffect?: LookupEffect;
+
   /** The actual implementation */
   execute: (input: unknown, context: ToolContext) => Promise<unknown>;
 }
@@ -218,6 +269,12 @@ export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
   outputEntities?: OutputEntityDeclaration[];
   /** Arguments that name a record; see `Tool.inputEntities`. */
   inputEntities?: InputEntityRef[];
+  /** Entity types this read tool looks up for approval cards; see `Tool.entityLookup`. */
+  entityLookup?: EntityLookup | EntityLookup[];
+  /** Server lookup of the approval subjects; see `Tool.approvalSubject`. */
+  approvalSubject?: ApprovalSubjectOption;
+  /** A lookup or preview through this tool changes nothing; see `Tool.lookupEffect`. */
+  lookupEffect?: LookupEffect;
   /** @deprecated Use Glirastes approval flows via `lancer.approvals` instead. Kept for backward compatibility. */
   needsApproval?:
     | boolean
@@ -231,6 +288,7 @@ export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
   assertOutputFields(tool.outputDeniedFields, `defineTool(${tool.id})`, 'outputDeniedFields');
   assertOutputFields(tool.outputDefaultFields, `defineTool(${tool.id})`, 'outputDefaultFields');
   assertToolEntities(tool, `defineTool(${tool.id})`);
+  assertApprovalSubjectDeclarations(tool, `defineTool(${tool.id})`);
   return tool as Tool;
 }
 
@@ -453,6 +511,12 @@ export interface AiEndpointToolDefinition<
   outputEntities?: OutputEntityDeclaration[];
   /** Arguments that name a record; see `Tool.inputEntities`. OpenAPI: `x-glirastes-entity-ref`. */
   inputEntities?: InputEntityRef[];
+  /** Entity types this read tool looks up for approval cards; see `Tool.entityLookup`. OpenAPI: `x-glirastes-entity-lookup`. */
+  entityLookup?: EntityLookup | EntityLookup[];
+  /** Server lookup of the approval subjects; see `Tool.approvalSubject`. OpenAPI: `x-glirastes-approval-subject`. */
+  approvalSubject?: ApprovalSubjectOption;
+  /** A lookup or preview through this tool changes nothing; see `Tool.lookupEffect`. OpenAPI: `x-glirastes-lookup-effect`. */
+  lookupEffect?: LookupEffect;
   /**
    * Static uiAction template with $variable placeholders.
    * Use for simple cases where action is always the same.

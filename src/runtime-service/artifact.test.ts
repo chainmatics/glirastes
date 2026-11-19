@@ -10,6 +10,7 @@ import {
 import { createContractBindings } from "../runtime/contract-bindings.js";
 import { ToolContractsFileSchema } from "../codegen/tools/files.js";
 import { buildRuntimeArtifact, loadRuntimeArtifact } from "./artifact.js";
+import { runToolsPipeline } from "../codegen/tools/pipeline.js";
 import { createRegistryToolDiscovery } from "../runtime/tool-discovery.js";
 import { defaultIntentRouterFor } from "../server/adapters/nextjs/default-intent-routing.js";
 
@@ -203,6 +204,98 @@ describe("runtime container artifact", () => {
     await buildRuntimeArtifact({ projectRoot: plain.root, outputDirectory: plain.path("artifact") });
     expect(await plain.read(".glirastes/tool-contracts.json")).not.toContain("Entities");
   });
+
+  it("carries approval subjects through tool-contracts.json, the generated module and the container; an invalid one blocks nothing", async () => {
+    const ok = (properties: Record<string, unknown>) => ({
+      "200": { description: "ok", content: { "application/json": { schema: { type: "object", properties } } } },
+    });
+    const idParam = (extra: Record<string, unknown> = {}) => ({
+      in: "path", name: "playlist_id", required: true, schema: { type: "integer", ...extra },
+    });
+    const playlist = { playlist_id: { type: "integer" }, title: { type: "string" } };
+    const document = (impact: Record<string, unknown>) => JSON.stringify({
+      openapi: "3.1.0",
+      security: [{ session: [] }],
+      paths: {
+        "/api/playlists/{playlist_id}": {
+          get: {
+            description: "Show a playlist",
+            parameters: [idParam()],
+            "x-glirastes-entities": [{ type: "playlist", id: "playlist_id", name: "title", path: "" }],
+            "x-glirastes-entity-lookup": { type: "playlist", params: { playlist_id: "playlist_id" } },
+            responses: ok(playlist),
+          },
+          delete: {
+            description: "Delete a playlist",
+            parameters: [idParam({ "x-glirastes-entity-ref": { type: "playlist" } })],
+            responses: ok(playlist),
+          },
+        },
+        "/api/playlists/{playlist_id}/impact": {
+          post: {
+            description: "Impact of deleting a playlist",
+            "x-glirastes-name": "playlists.impact",
+            parameters: [idParam()],
+            ...impact,
+            responses: ok({ impact: { type: "object", properties: { devices: { type: "array", items: { type: "string" } } } } }),
+          },
+        },
+      },
+    });
+    const approvalSubjects = {
+      tools: {
+        playlists_delete: {
+          preview: {
+            tool: "playlists.impact",
+            params: { playlist_id: "playlist_id" },
+            fields: [{ path: "impact.devices", label: { en: "Affected devices" }, format: "count" }],
+          },
+          recheck: "exists",
+        },
+      },
+    };
+    const build = async (impact: Record<string, unknown>, keepGoing = false) => {
+      const app = await createAppFixture({ "api/openapi.json": document(impact) }, {
+        toolsConfig: { sources: [{ kind: "openapi", document: "api/openapi.json" }], approvalSubjects },
+      });
+      if (keepGoing) await runToolsPipeline({ root: app.root, mode: "write", keepGoing: true });
+      else await buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") });
+      const written = ToolContractsFileSchema.parse(JSON.parse(await app.read(".glirastes/tool-contracts.json")));
+      const byKey = new Map(written.tools.map((tool) => [tool.stableKey, tool] as const));
+      return { app, byKey };
+    };
+
+    const { app, byKey } = await build({ "x-glirastes-lookup-effect": "read" });
+    const deleteKey = "DELETE /api/playlists/:playlist_id";
+    expect(byKey.get(deleteKey)?.definitionId).toBe("playlists.delete");
+    expect(byKey.get("GET /api/playlists/:playlist_id")?.entityLookup).toEqual([{ type: "playlist", params: { playlist_id: "playlist_id" } }]);
+    expect(byKey.get("POST /api/playlists/:playlist_id/impact")?.lookupEffect).toBe("read");
+    expect(byKey.get(deleteKey)?.approvalSubject).toEqual(approvalSubjects.tools.playlists_delete);
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    const module = renderGeneratedModule({ modulePath: "generated.ts", artifact: payload.setupArtifact, contracts: payload.contracts.tools });
+    expect(module).toContain("        entityLookup: [\n");
+    expect(module).toContain("        approvalSubject: {\n");
+    expect(module).toContain('        lookupEffect: "read",\n');
+    // Local only: never in the setup artifact the Platform gets.
+    expect(JSON.stringify(payload.setupArtifact)).not.toContain("entityLookup");
+    expect(JSON.stringify(payload.setupArtifact)).not.toContain("Affected devices");
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    const tools = new Map(loaded.createToolBindings().map((binding) => [binding.definitionId, binding.tool] as const));
+    expect(tools.get("playlists.get")).toMatchObject({ entityLookup: [{ type: "playlist", params: { playlist_id: "playlist_id" } }] });
+    expect(tools.get("playlists.impact")).toMatchObject({ lookupEffect: "read" });
+    expect(tools.get("playlists.delete")).toMatchObject({ approvalSubject: { recheck: "exists", preview: { tool: "playlists.impact" } } });
+
+    // The same POST without lookupEffect: a non-blocking error (like entity-id-conflict). Under keepGoing every
+    // output is written, the preview dropped and every tool enabled; a strict build stops on the error.
+    const invalid = await build({}, true);
+    expect(invalid.byKey.get(deleteKey)?.approvalSubject).toEqual({ recheck: "exists" });
+    expect(invalid.byKey.get("POST /api/playlists/:playlist_id/impact")).not.toHaveProperty("lookupEffect");
+    expect(invalid.byKey.get("GET /api/playlists/:playlist_id")?.entityLookup).toHaveLength(1);
+    const inventory = JSON.parse(await invalid.app.read(".glirastes/setup-artifact.json"));
+    expect(inventory.tools.map((tool: { enabled: boolean }) => tool.enabled)).toEqual([true, true, true]);
+    await expect(buildRuntimeArtifact({ projectRoot: invalid.app.root, outputDirectory: invalid.app.path("artifact") }))
+      .rejects.toThrow(/errors/);
+  }, 60_000);
 
   it("refuses to build a container artifact for a tool with an invalid upper bound (fail closed)", async () => {
     for (const extension of ["x-glirastes-output-allowed-fields", "x-glirastes-output-denied-fields"]) {

@@ -1,4 +1,5 @@
 import { resolveToolEntities } from './entity-declarations.js';
+import { resolveApprovalSubjects } from './approval-subject-declarations.js';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
@@ -256,7 +257,7 @@ function isError(finding: ToolFinding): boolean {
  * every other tool be generated and written: the one affected route has no
  * enabled tool, nothing else depends on it.
  */
-const NON_BLOCKING_ERROR_CODES: ReadonlySet<string> = new Set(['route-declared-twice', 'entity-id-conflict']);
+const NON_BLOCKING_ERROR_CODES: ReadonlySet<string> = new Set(['route-declared-twice', 'entity-id-conflict', 'approval-subject-invalid']);
 
 function isBlocking(finding: ToolFinding): boolean {
   return isError(finding) && !NON_BLOCKING_ERROR_CODES.has(finding.code);
@@ -819,6 +820,36 @@ async function generate(
         schema: schemaQuality,
       },
     });
+  }
+  // Server-side approval subjects: after the identity (it needs the resolved entities) and the effective approval.
+  const viewByKey = new Map(toolViews.map((view) => [view.stableKey, view] as const));
+  const approvalResolution = resolveApprovalSubjects({
+    tools: inventory.executions.flatMap((execution) => {
+      const tool = observedByKey.get(execution.stableKey);
+      if (!tool || execution.executionKind !== 'endpoint') return [];
+      const entities = entityResolution.byKey.get(execution.stableKey);
+      return [{
+        stableKey: execution.stableKey,
+        definitionId: execution.definitionId,
+        modelName: modelFacingToolName(execution.definitionId),
+        method: execution.method,
+        path: execution.path,
+        requiresApproval: viewByKey.get(execution.stableKey)?.requiresApproval ?? true,
+        ...(tool.contract ? { params: tool.contract.params } : {}),
+        ...(tool.approvalDeclarations ? { declarations: tool.approvalDeclarations } : {}),
+        ...(entities?.outputEntities ? { outputEntities: entities.outputEntities } : {}),
+        ...(entities?.inputEntities ? { inputEntities: entities.inputEntities } : {}),
+        ...(tool.outputAllowedFields ? { outputAllowedFields: tool.outputAllowedFields } : {}),
+        ...(tool.outputDeniedFields ? { outputDeniedFields: tool.outputDeniedFields } : {}),
+      }];
+    }),
+    ...(config.identity?.lookups ? { lookups: config.identity.lookups } : {}),
+    ...(config.approvalSubjects ? { approvalSubjects: config.approvalSubjects } : {}),
+  });
+  findings.push(...approvalResolution.findings);
+  for (const entry of contractEntries) {
+    const declared = approvalResolution.byKey.get(entry.stableKey);
+    if (declared) Object.assign(entry, declared);
   }
   // An entry for an excluded route never applies either: say why (roadmap, P05).
   const excludedByKey = new Map(excluded.map((entry) => [entry.stableKey, entry] as const));

@@ -2,6 +2,8 @@ import type { ToolPresentation } from '../../contracts/index.js';
 import type { LocalizedText } from '../../contracts/localized-text.js';
 import type { InputEntityRef, OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
 import type { ObservedEntities } from './entity-declarations.js';
+import type { ApprovalSubjectOption, EntityLookup, LookupEffect } from '../../contracts/approval-subject.js';
+import type { ObservedApprovalDeclarations } from './approval-subject-declarations.js';
 import type { DeclaredEffect, ToolPolicyDefaults, ToolPolicyFile } from '../../contracts/tool-policy.js';
 import type { LocalJsonSchema } from '../../runtime/json-schema.js';
 import type { GeneratedUiAction } from '../../server/core/generated-ui-tool.js';
@@ -151,6 +153,13 @@ export interface ObservedTool {
    * tools.json `identity`. Local only.
    */
   entities?: ObservedEntities;
+  /**
+   * Approval-subject declarations by level (tool code, OpenAPI operation):
+   * `entityLookup`, `approvalSubject`, `lookupEffect`, the valid ones and
+   * the issues of the others; resolved by the pipeline with tools.json.
+   * Local only.
+   */
+  approvalDeclarations?: ObservedApprovalDeclarations;
 }
 
 export interface ExcludedTool {
@@ -209,6 +218,10 @@ export interface ToolContractsEntry {
   /** Resolved entity declarations (field names only); the generated module passes them on. */
   outputEntities?: OutputEntityDeclaration[];
   inputEntities?: InputEntityRef[];
+  /** Resolved approval-subject declarations (field and tool names only); the generated module passes them on. */
+  entityLookup?: EntityLookup[];
+  approvalSubject?: ApprovalSubjectOption;
+  lookupEffect?: LookupEffect;
 }
 
 export interface ToolSourceContext {
