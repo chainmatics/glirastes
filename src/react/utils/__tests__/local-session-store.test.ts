@@ -248,6 +248,78 @@ describe('attachment files kept as long as their chat', () => {
     expect(await files.get('A', ID_A)).toBeNull();
   });
 
+  const slowPut = (inner: AttachmentBlobStore): AttachmentBlobStore => ({
+    ...inner,
+    put: async (...args) => { await new Promise((resolve) => setTimeout(resolve, 5)); await inner.put(...args); },
+  });
+
+  it('remove waits for a pending write, so no blob outlives its chat', async () => {
+    const { storage } = memory();
+    const inner = createMemoryAttachmentStore();
+    const chats = sessions(storage, slowPut(inner));
+    chats.save!('A', [withFile(ID_A)]);
+    await chats.remove!('A');
+    await flush();
+    expect(await inner.get('A', ID_A)).toBeNull();
+  });
+
+  it('writes a file again after its chat was cleared', async () => {
+    const { storage } = memory();
+    const files = createMemoryAttachmentStore();
+    const chats = sessions(storage, files);
+    chats.save!('A', [withFile(ID_A)]);
+    await chats.clear!('A');
+    chats.save!('A', [withFile(ID_A)]);
+    await flush();
+    expect(await files.get('A', ID_A)).not.toBeNull();
+  });
+
+  it('retries a failed write on the next save', async () => {
+    const { storage } = memory();
+    const inner = createMemoryAttachmentStore();
+    let fail = true;
+    const files: AttachmentBlobStore = { ...inner, put: async (...args) => { if (fail) throw new Error('quota'); await inner.put(...args); } };
+    const chats = sessions(storage, files);
+    chats.save!('A', [withFile(ID_A)]);
+    await flush();
+    fail = false;
+    chats.save!('A', [withFile(ID_A)]);
+    await flush();
+    expect(await inner.get('A', ID_A)).not.toBeNull();
+  });
+
+  it('survives a store whose methods reject', async () => {
+    const { storage } = memory();
+    const boom = () => Promise.reject(new Error('boom'));
+    const files: AttachmentBlobStore = { put: boom, get: boom, deleteConversation: boom, deleteAll: boom };
+    const chats = sessions(storage, files);
+    chats.save!('A', [withFile(ID_A)]);
+    await flush();
+    const [loaded] = (await chats.load!('A')) as ChatMessage[];
+    expect((loaded!.parts[1] as { url: string }).url).toBe('');
+    await chats.clear!('A');
+    await chats.remove!('A');
+    await flush();
+  });
+
+  it('clearLocalSessionStore leaves a longer storageKey alone', async () => {
+    const data = new Map<string, string>([['app:u1:x', '1'], ['app:u10:x', '2']]);
+    const storage = {
+      get length() { return data.size; },
+      key: (index: number) => [...data.keys()][index] ?? null,
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: () => {},
+      removeItem: (key: string) => { data.delete(key); },
+    };
+    await clearLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null });
+    expect([...data.keys()]).toEqual(['app:u10:x']);
+  });
+
+  it('exposes the attachment store on the session config', () => {
+    const files = createMemoryAttachmentStore();
+    expect(sessions(memory().storage, files).attachments).toBe(files);
+  });
+
   it('works without IndexedDB', async () => {
     const { storage } = memory();
     const chats = sessions(storage, null);

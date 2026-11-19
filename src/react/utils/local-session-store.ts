@@ -84,7 +84,7 @@ function isSummary(value: unknown): value is SessionSummary & { createdAt: numbe
     && typeof entry.createdAt === 'number' && typeof entry.updatedAt === 'number';
 }
 
-/** Forgets every chat of this `storageKey`, files included (e.g. on sign-out). */
+/** Forgets every chat of this `storageKey` (every key starting with `${storageKey}:`), files included, e.g. on sign-out. */
 export async function clearLocalSessionStore(options: {
   storageKey: string;
   storage?: KeyValueStorage | null;
@@ -131,6 +131,18 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     ? (storage ? createIndexedDbAttachmentStore({ storageKey: options.storageKey }) : null)
     : options.attachmentStore;
   const written = new Set<string>();
+  const pending = new Map<string, Set<Promise<void>>>();
+  // A put must not land after its chat's delete, so the delete waits for it.
+  const deleteFiles = async (conversationId: string): Promise<void> => {
+    if (!files) return;
+    for (const marker of [...written]) if (marker.startsWith(`${conversationId}\u0000`)) written.delete(marker);
+    await Promise.allSettled([...(pending.get(conversationId) ?? [])]);
+    try {
+      await files.deleteConversation(conversationId);
+    } catch {
+      // files stay until the next delete
+    }
+  };
   const activeKey = `${options.storageKey}:active`;
   const indexKey = `${options.storageKey}:sessions`;
   const messagesKey = (id: string) => `${options.storageKey}:messages:${id}`;
@@ -176,7 +188,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     const ordered = sorted(list);
     for (const removed of ordered.slice(maxSessions)) {
       drop(messagesKey(removed.id));
-      void files?.deleteConversation(removed.id);
+      void deleteFiles(removed.id);
     }
     const kept = ordered.slice(0, maxSessions);
     write(indexKey, kept);
@@ -193,9 +205,9 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
         const file = part as { type?: unknown; url?: unknown };
         const id = attachmentIdOf(part);
         if (file?.type !== 'file' || file.url !== '' || !id) return part;
-        const stored = await files.get(conversationId, id);
-        if (!stored) return part;
         try {
+          const stored = await files.get(conversationId, id);
+          if (!stored) return part;
           return { ...file, url: await fileToDataUrl(stored.blob) };
         } catch {
           return part;
@@ -224,7 +236,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     },
     async remove(conversationId) {
       drop(messagesKey(conversationId));
-      void files?.deleteConversation(conversationId);
+      await deleteFiles(conversationId);
       const remaining = entries().filter((entry) => entry.id !== conversationId);
       if (remaining.length === 0) drop(indexKey);
       else persist(remaining);
@@ -258,7 +270,20 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
             if (!blob) continue;
             written.add(marker);
             const filename = (part as { filename?: string }).filename;
-            void files.put(conversationId, id, { blob, name: filename ?? 'file', mediaType: blob.type });
+            const task = (async () => {
+              try {
+                await files.put(conversationId, id, { blob, name: filename ?? 'file', mediaType: blob.type });
+              } catch {
+                written.delete(marker);
+              }
+            })();
+            const set = pending.get(conversationId) ?? new Set<Promise<void>>();
+            pending.set(conversationId, set);
+            set.add(task);
+            void task.then(() => {
+              set.delete(task);
+              if (set.size === 0 && pending.get(conversationId) === set) pending.delete(conversationId);
+            });
           }
         }
       }
@@ -270,10 +295,10 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       const messages = sanitizeStoredMessages(stored) as Array<ChatMessage | WireChatMessage>;
       return files ? rehydrate(conversationId, messages) : messages;
     },
-    clear(conversationId) {
+    async clear(conversationId) {
       const id = conversationId ?? DEFAULT_ID;
       drop(messagesKey(id));
-      void files?.deleteConversation(id);
+      await deleteFiles(id);
       persist(entries().map((entry) => (entry.id === id ? { ...entry, messageCount: 0 } : entry)));
     },
   };
