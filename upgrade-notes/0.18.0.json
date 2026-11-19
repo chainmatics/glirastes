@@ -1,0 +1,180 @@
+{
+  "version": "0.18.0",
+  "notes": [
+    {
+      "id": "ui-action-outcome-protocol",
+      "kind": "recommended",
+      "summary": "The chat now reports what became of a UI action back to the model, on by default. Requests carry a new body field glirastesUiOutcomes: 1, and a UI turn takes two POSTs, so onFinish and metrics fire twice.",
+      "howTo": "Check three things. 1) A proxy or backend that validates the chat request body strictly (Pydantic extra='forbid', JSON schema additionalProperties:false) must allow glirastesUiOutcomes. 2) Code that counts turns in onFinish or turnMetrics: count requests without `continuation`, or by turnId. 3) A UI turn can cost up to four times the per-request budgets. Switch it off with uiActionOutcomes={false} on AiChatProvider or uiActionOutcomes: 'off' on createAiChatHandler.",
+      "skill": "building-glirastes-chat-ui#ui-action-outcomes",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react",
+          "glirastes/embed"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "uiActionOutcomes",
+          "onUiActionOutcome"
+        ]
+      }
+    },
+    {
+      "id": "ui-tool-result-handoff-shape",
+      "kind": "recommended",
+      "summary": "For clients that send glirastesUiOutcomes, a UI tool result is now { handedOff: true, message, uiAction } instead of { success: true, ... }. Requests without the flag still get the 0.17 shape.",
+      "howTo": "Only matters if your own code reads UI tool results: a custom ToolResultBlock, onToolResult, a stored history parser or a custom client. Stop relying on `success` for UI actions and read handedOff and outcome. To pin one shape for every request set createAiChatHandler({ uiToolResultShape: 'legacy' | 'handoff' }); the default 'auto' follows the request flag.",
+      "skill": "building-glirastes-chat-ui#ui-action-outcomes",
+      "affectedWhen": {
+        "symbols": [
+          "onToolResult",
+          "ToolResultBlock",
+          "defineUiTool",
+          "uiToolResultShape"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "uiToolResultShape"
+        ]
+      }
+    },
+    {
+      "id": "model-history-defaults",
+      "kind": "recommended",
+      "summary": "Two history defaults changed: earlier tool results now survive turns without tools (history.toolTurnCounting 'tool-turns'), and apps that declare outputEntities get a <seen-objects> memo. Input tokens per request rise.",
+      "howTo": "Expect about +1,200 input tokens per request while a list is kept and about 140 plus 25 to 30 per object for the memo. Keep the old behavior with createAiChatHandler({ history: { toolTurnCounting: 'all-turns', seenObjects: false } }); in the runtime container use chat.history. Apps without outputEntities declarations get only the first change.",
+      "skill": "integrating-glirastes-nextjs#history-and-answers",
+      "affectedWhen": {
+        "symbols": [
+          "createAiChatHandler",
+          "chatTurn"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "toolTurnCounting",
+          "seenObjects"
+        ]
+      }
+    },
+    {
+      "id": "chat-language-follows-page",
+      "kind": "recommended",
+      "summary": "Chat texts now follow the page's lang before the server's tool wording, requests carry Content-Language, the server words labels and approval cards in it, and the chat follows a lang set after mount.",
+      "howTo": "Check that the page's <html lang> is correct: a page left at lang=\"en\" with a German server now shows English chat texts. Supply a locales table for each language you serve. To restore the old order use languageSource: 'server' on AiChatProvider, sendLanguage={false} on the provider, clientLanguage: false on the handler, or set an explicit locale or requestLocale.",
+      "skill": "building-glirastes-chat-ui#configuration",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react",
+          "glirastes/embed"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "languageSource",
+          "sendLanguage",
+          "clientLanguage",
+          "requestLocale"
+        ]
+      }
+    },
+    {
+      "id": "generated-tool-labels-per-language",
+      "kind": "recommended",
+      "summary": "Generated tool labels now exist per language by default, and zod client-action contracts give richer input schemas. Generated outputs and digests change once; glirastes tools check reports drift until you refresh.",
+      "howTo": "Run `glirastes tools refresh` as a developer, review the diff (tool-contracts.json gains labels, the generated module gains toolTexts) and commit it. To keep the old output byte for byte set \"languages\": [] in .glirastes/tools.json. A maintained tool-semantics.json field now also beats texts derived from code.",
+      "skill": "maintaining-glirastes-tools"
+    },
+    {
+      "id": "chat-visible-behavior-changes",
+      "kind": "recommended",
+      "summary": "Visible chat changes without code changes: activity-log summary counts done steps alone, failure reasons show with hidden tool results, stop or error notices show without tool steps, UI actions run in call order, equal names no longer link.",
+      "howTo": "Check custom CSS or tests that hide [data-component=\"turn-notice\"], assert activity-log summary text, or depend on entity links for duplicate names. Restore old rules with activityLog.details: 'results' and entityLinks.ambiguousNames: 'first'. Stopped steps now end as 'aborted' instead of spinning forever.",
+      "skill": "building-glirastes-chat-ui#message-layout",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react",
+          "glirastes/embed"
+        ]
+      }
+    },
+    {
+      "id": "turn-continued-metrics-turnid",
+      "kind": "recommended",
+      "summary": "A request that continues a turn (approval or UI outcome) is reported as the new event turn.continued instead of turn.finished, with an opaque turnId. An older Platform refuses only those batches.",
+      "howTo": "If you consume onFinish or turnMetrics, treat events with `continuation` as parts of one turn and join them by turnId. Set approvalSecret (or GLIRASTES_APPROVAL_SECRET) so turnId is stable across instances. Tokens and cost of continuations are missing in the Platform until it adopts the schema.",
+      "skill": "integrating-glirastes-nextjs#callbacks-and-observability",
+      "affectedWhen": {
+        "symbols": [
+          "onFinish",
+          "turnMetrics",
+          "approvalSecret"
+        ]
+      }
+    },
+    {
+      "id": "chat-attachments-indexeddb",
+      "kind": "optional",
+      "summary": "Chat attachments get a stable id and are kept in IndexedDB until their chat is deleted, so client actions can hand them to an upload route. createLocalSessionStore stores them by default.",
+      "howTo": "Set SessionConfig.attachments or createLocalSessionStore({ attachmentStore }), register a client action with a payload attachmentId (att_...), read the file with chatAttachmentFormData and call clearLocalSessionStore on logout. Opt out of IndexedDB with attachmentStore: null. See docs/chat-attachments.md.",
+      "skill": "building-glirastes-chat-ui#attachments",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "createIndexedDbAttachmentStore",
+          "chatAttachmentFormData"
+        ]
+      }
+    },
+    {
+      "id": "disable-base64-upload-tools",
+      "kind": "recommended",
+      "summary": "Derived upload tools that expect base64 file content cannot work: the model cannot provide the bytes and the executor sends JSON, not multipart.",
+      "howTo": "Disable derived server tools for multipart or base64 upload routes with `glirastes tools policy` and hand the file to the route through a client action with an attachmentId instead.",
+      "skill": "maintaining-glirastes-tools#policy-developer-only"
+    },
+    {
+      "id": "approval-subjects-from-server",
+      "kind": "optional",
+      "summary": "A read tool can declare entityLookup so approval cards name the real target record, looked up server-side with the user's own credentials. Declared tools use approval id v2.",
+      "howTo": "Declare entityLookup on the read tool and inputEntities with role target or parent on the write tool, then rebuild runtime container artifacts. With several instances deploy the new release everywhere before declaring, because an older release refuses a v2 approval id. See docs/approval-subjects.md.",
+      "skill": "integrating-glirastes-nextjs#approvals",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/server"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "entityLookup",
+          "x-glirastes-entity-lookup"
+        ]
+      }
+    },
+    {
+      "id": "declared-object-identity",
+      "kind": "optional",
+      "summary": "Tools can declare which field is a record's id and name (defineEntity, outputEntities, inputEntities), used by result overview, history, approval cards and entity links instead of field-name guesses.",
+      "howTo": "Declare identity with defineEntity and outputEntities on read tools, or x-glirastes-entities in OpenAPI. See docs/entity-identity.md. It also feeds the seen-objects memo.",
+      "skill": "describing-glirastes-tools#chat-entities-and-commands",
+      "affectedWhen": {
+        "imports": [
+          "glirastes"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "defineEntity",
+          "outputEntities",
+          "inputEntities"
+        ]
+      }
+    }
+  ]
+}
