@@ -89,6 +89,15 @@ export const DEFAULT_APPROVAL_SUBJECT_LIMITS: Readonly<ApprovalSubjectLimits> = 
   maxLookupTimePerTurnMs: 10_000,
 });
 
+/**
+ * Whether a not checkable subject is refused under `onUnavailable: 'block'`:
+ * every reason but `forbidden`, which only `onForbidden: 'warn'` produces and
+ * which therefore always shows its card.
+ */
+function blocks(subject: ServerApprovalSubject): boolean {
+  return subject.check === 'unchecked' && subject.reason !== 'forbidden';
+}
+
 /** Marks a PII shield that did not answer within the lookup time. */
 const SHIELD_TIMEOUT: unique symbol = Symbol('shield-timeout');
 /** Marks a PII shield step that threw. */
@@ -928,7 +937,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       if (denied) return { deny: new ApprovalSubjectRefusedError(denied.code, denied.type) };
       const subjects = outcomes.map((outcome) => (outcome as Extract<SubjectOutcome, { kind: 'subject' }>));
       if (plan.onUnavailable === 'block') {
-        const blocked = subjects.find((outcome) => outcome.subject.check === 'unchecked');
+        const blocked = subjects.find((outcome) => blocks(outcome.subject));
         if (blocked) return { deny: new ApprovalSubjectRefusedError('approval_subject_unavailable', blocked.subject.type) };
       }
       resolved.set(toolCallId, {
@@ -958,7 +967,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       const { outcomes } = await subjectsOf({ ...plan, preview: undefined } as ToolPlan, parsed.data, false);
       if (outcomes.some((outcome) => outcome.kind === 'deny')) return 'approval_subject_gone';
       const subjects = outcomes as Array<Extract<SubjectOutcome, { kind: 'subject' }>>;
-      if (plan.onUnavailable === 'block' && subjects.some((outcome) => outcome.subject.check === 'unchecked')) {
+      if (plan.onUnavailable === 'block' && subjects.some((outcome) => blocks(outcome.subject))) {
         return 'approval_subject_unavailable';
       }
       if (plan.recheck === 'exists') return undefined;

@@ -112,6 +112,13 @@ describe('server approval subjects in the chat handler', () => {
     expect(chunks.some((chunk) => chunk.type === 'tool-approval-request')).toBe(true);
   });
 
+  it('keeps the warning card for a 403 with onForbidden: warn also under onUnavailable: block', async () => {
+    const { config } = deletePlaylist(() => failure(403), { deletePlaylist: { approvalSubject: { onForbidden: 'warn', onUnavailable: 'block' } } });
+    const { chunks } = await turn(config);
+    expect(subjectsPart(chunks)!.data.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'forbidden' });
+    expect(chunks.some((chunk) => chunk.type === 'tool-approval-request')).toBe(true);
+  });
+
   it.each([400, 422])('refuses an id the read source rejects (%i) as invalid_id', async (status) => {
     const { config, prompts } = deletePlaylist(() => failure(status));
     const { chunks } = await turn(config);
