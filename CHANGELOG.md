@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Chat message layout hooks, all opt-in: an app that sets none of them gets the same markup, class names and `data-*` hooks as before.
+  - `activityLog` on `AiChatProvider` (and the `<glirastes-chat>` `config`), each default off: `expandWhileRunning` opens the activity log while its turn runs and collapses it when the turn is over (a toggle by the user wins); `runningProgress` counts the finished steps in the running summary (`2 done, Listing devices…`); `noticePlacement: 'log' | 'message'` (default `'log'`) moves the stop or error notice of the latest turn (`Safety stop`, `Stopped`, `Error`) out of the collapsible log into its own `<p data-component="turn-notice" data-status="safety-stop|aborted|error">` right after the log, visible while the log is collapsed.
+  - Slot `components.TurnNotice` (`{ text, status, placement }`, `placement` `'log'` or `'message'`) renders that notice wherever it goes; the default is exported as `TurnNotice`.
+  - Slot `components.MessageParts` arranges the parts of a message inside the bubble root: it receives `message`, the nodes `plan`, `activity`, `notice`, `attachments`, `text`, `toolResults` (each `null` when absent) and `children` (all of them in the default order). `useMessageParts(message)` returns the same nodes plus `visible` for a custom `MessageBubble`. New types `ActivityLogConfig`, `TurnNoticeProps`, `TurnNoticeStatus`, `MessagePartNodes`, `MessageParts`, `MessagePartsProps`.
+  - `ActivityLog` takes an optional `noticeStatus` for the slot.
+  - Locale keys (English / German) so every text of the activity log comes from `locale` and `locales`: `activityRunningLabel` (`{label}…`, was a hard-coded ellipsis), `activityRunningProgressLabel` (`{count} done, {label}…` / `{count} erledigt, {label}…`), `activityStepCountLabel` (`×{count}`, was hard-coded), `activitySummarySeparator` (`, `, was hard-coded). Unchanged defaults render the same text. A custom full `ChatLocale` object needs the four keys.
+
+### Changed
+
+- **Visible change for unchanged apps, only for users whose system asks for reduced motion (`prefers-reduced-motion: reduce`):** the status spinner of the activity log and the plan stands still as an open arc (`data-motion="reduced"` on its `svg`; done by `StatusIcon` itself, so also in unstyled mode), the typing dots of the shipped styles stand still in three strengths, and the confirm dialog appears without fade and pop. Everyone else sees the same motion as before. The embedded chat styles are regenerated.
+
+### Fixed
+
+- The stop or error notice of the latest assistant turn was not shown at all when the turn had no tool steps (for example stopped while writing text, or ended with an error before any output), because it only rendered inside the activity log. **Visible change for unchanged apps:** such a turn now shows the notice as `<p data-component="turn-notice" data-status="…">` after the (absent) log, and an assistant message that is otherwise empty is rendered for it. Turns with steps keep the notice inside the log. An app that renders its own notice and hides the SDK one by CSS also hides `[data-component="turn-notice"]`, or uses `components.TurnNotice`. The notice is still only shown for the latest message of the open session (never on a user message or a reloaded history).
+
 ## [0.17.3] - 2026-11-19
 
 ### Fixed

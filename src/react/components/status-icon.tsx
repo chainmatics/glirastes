@@ -1,14 +1,49 @@
+import { useSyncExternalStore } from 'react';
+
 export type StatusIconKind = 'check' | 'spinner' | 'pending' | 'error' | 'declined' | 'notice';
+
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+function reducedMotionQuery(): MediaQueryList | null {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return null;
+  return window.matchMedia(REDUCED_MOTION_QUERY);
+}
+
+function subscribeReducedMotion(onChange: () => void): () => void {
+  const query = reducedMotionQuery();
+  if (!query) return () => {};
+  if (typeof query.addEventListener === 'function') {
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }
+  // Safari before 14.
+  query.addListener?.(onChange);
+  return () => query.removeListener?.(onChange);
+}
+
+/** True while the user's system asks for reduced motion; false on the server. */
+function usePrefersReducedMotion(): boolean {
+  return useSyncExternalStore(
+    subscribeReducedMotion,
+    () => reducedMotionQuery()?.matches === true,
+    () => false,
+  );
+}
 
 /**
  * Inline status icon. It carries its own shape and motion (SMIL), so it
- * reads correctly in unstyled mode without any stylesheet.
+ * reads correctly in unstyled mode without any stylesheet. Under
+ * `prefers-reduced-motion: reduce` the spinner stands still as an open arc
+ * (`data-motion="reduced"`), still unlike the faint full circle of `pending`.
  */
 export function StatusIcon({ icon }: { icon: StatusIconKind }) {
+  const reducedMotion = usePrefersReducedMotion();
+  const still = icon === 'spinner' && reducedMotion;
   return (
     <svg
       data-element="icon"
       data-icon={icon}
+      {...(still ? { 'data-motion': 'reduced' } : {})}
       viewBox="0 0 16 16"
       width="14"
       height="14"
@@ -26,14 +61,16 @@ export function StatusIcon({ icon }: { icon: StatusIconKind }) {
       {icon === 'pending' && <circle cx="8" cy="8" r="5.5" strokeWidth="1.5" opacity="0.5" />}
       {icon === 'spinner' && (
         <path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5">
-          <animateTransform
-            attributeName="transform"
-            type="rotate"
-            from="0 8 8"
-            to="360 8 8"
-            dur="0.9s"
-            repeatCount="indefinite"
-          />
+          {!still && (
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from="0 8 8"
+              to="360 8 8"
+              dur="0.9s"
+              repeatCount="indefinite"
+            />
+          )}
         </path>
       )}
     </svg>

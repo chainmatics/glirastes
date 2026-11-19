@@ -596,6 +596,13 @@
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="activity-log"] [data-element="activity-notice"] {
   margin: 0.25rem 0 0;
 }
+/* The notice outside the log (`activityLog.noticePlacement: 'message'`, or a turn without steps). */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="turn-notice"] {
+  margin: 0 0 0.375rem;
+  font-size: 12px;
+  color: var(--cm-text-muted);
+  overflow-wrap: anywhere;
+}
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="plan-checklist"] [data-element="title"] {
   font-weight: 600;
   color: var(--cm-text);
@@ -1529,6 +1536,30 @@
 @keyframes cm-confirm-pop {
   from { opacity: 0; transform: scale(0.95) translateY(6px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ---------- Reduced motion ----------
+ * Only when the user's system asks for it. The typing dots stand still,
+ * stepped in strength so they still read as "the assistant is writing";
+ * dialogs appear without fading or popping. The status spinner (SMIL)
+ * stands still through StatusIcon itself, also without this stylesheet.
+ */
+@media (prefers-reduced-motion: reduce) {
+  [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="typing-indicator"] [data-element="dot"] {
+    animation: none;
+    transform: none;
+    opacity: 0.45;
+  }
+  [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="typing-indicator"] [data-element="dot"]:nth-child(2) {
+    opacity: 0.7;
+  }
+  [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="typing-indicator"] [data-element="dot"]:nth-child(3) {
+    opacity: 1;
+  }
+  [data-component="confirm-dialog-backdrop"]:where(:not([data-unstyled], [data-unstyled] *)),
+  [data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) {
+    animation: none;
+  }
 }
 
 [data-component="chat-window-body"]:where(:not([data-unstyled], [data-unstyled] *)) {

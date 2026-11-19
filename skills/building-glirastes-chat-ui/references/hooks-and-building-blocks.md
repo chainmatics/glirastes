@@ -9,6 +9,7 @@ them.
 - Own provider and transport
 - Headless hooks
 - Components
+- Message layout
 - Tool results and approvals
 - Sessions
 - Theme and keyboard
@@ -50,6 +51,39 @@ error and every other failure output (`success: false` or an `error` text:
 a refused UI tool, a custom tool). The detail of `error` and `expected` is
 the output's `error` text. Display only: server counting follows
 `classifyToolFailure`. A UI tool's hand-off note is never shown as a detail.
+
+## Message layout
+
+Defaults keep today's markup; everything below is opt-in.
+
+- `activityLog` on the provider (all off by default):
+  `expandWhileRunning` opens the log while its turn runs and collapses it
+  when the turn is over (a user toggle wins); `runningProgress` counts the
+  finished steps in the running summary (`activityRunningProgressLabel`,
+  "2 done, Listing devices…"); `noticePlacement: 'message'` moves the stop or
+  error notice of the latest turn out of the log into its own
+  `<p data-component="turn-notice" data-status="safety-stop|aborted|error">`
+  right after it. A turn without steps always shows the notice that way.
+- `components.TurnNotice` receives `{ text, status, placement }` (`status` is a
+  `TurnNoticeStatus`)
+  (`placement` is `'log'` inside the log, `'message'` outside). The default
+  is exported as `TurnNotice` for wrapping.
+- `components.MessageParts` arranges the parts inside the bubble root and
+  receives `message`, the nodes (`MessagePartNodes`) `plan`, `activity`, `notice`, `attachments`,
+  `text`, `toolResults` (each `null` when absent) and `children` (all of them
+  in the default order). `useMessageParts(message)` returns the same nodes
+  plus `visible` for a custom `MessageBubble`.
+- CSS-only themes select the parts by their existing hooks:
+  `[data-component="plan-checklist"]`, `[data-component="activity-log"]`,
+  `[data-component="turn-notice"]`, `[data-element="message-attachments"]`,
+  `[data-component="markdown"]` / `[data-component="message-rich-text"]`,
+  `[data-component="tool-result"]`.
+- Every text of the log comes from `locale` (and `locales`): besides the
+  `activity*` labels, `activityRunningLabel` (`{label}…`),
+  `activityStepCountLabel` (`×{count}`) and `activitySummarySeparator` (`, `).
+- Under `prefers-reduced-motion: reduce` the status spinner stands still as
+  an open arc (`data-motion="reduced"`, also without the stylesheet) and the
+  shipped styles stop the typing dots and dialog animations.
 
 ## Tool results and approvals
 
