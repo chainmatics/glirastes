@@ -495,11 +495,13 @@ counts as `'error'`. An expected failure still counts as a tool call and for
 the other budgets (tool calls, repeated fingerprint, timeouts), but neither
 increments nor resets the consecutive-error count, and it is no tool error in
 the metric event. The result carries `expectedFailure: true`, so the model
-knows the failure is a known outcome rather than a fault to retry. The
-chat's activity log reads the same marker: such a step is shown neutrally as
-`expected` (`1 without result`), not as failed. Without a classifier the log
-also shows a backend 4xx (other than 408 and 429) neutrally; a 5xx, 408, 429,
-timeout or network error is shown as failed. That is display only: without a
+knows the failure is a known outcome rather than a fault to retry; a failure
+the classifier called `'error'` (or that made it throw) carries
+`expectedFailure: false`. The chat's activity log reads the same marker: an
+`expected` step is shown neutrally (`1 without result`), a `false` one as
+failed whatever its status. Without a marker (no classifier, an older server,
+stored history) the log shows a backend 4xx (other than 408 and 429)
+neutrally; a 5xx, 408, 429, timeout or network error is shown as failed. That is display only: without a
 classifier every failure still counts toward `maxConsecutiveErrors`.
 
 Loop detection fingerprints an endpoint failure (a failure result with a
