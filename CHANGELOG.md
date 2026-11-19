@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `createAiChatHandler`: the parts the handler writes from the model's step and finish callbacks no longer land wherever the scheduler puts them. A `data-step-report` now comes right before the `finish-step` of its step, after every chunk of that step (its approval requests included), and never before the step's own tool parts. The final `data-pipeline-state` comes right before `finish` or `abort` (and before the stop notice or silent-turn text), so the terminal part is always last. Before, both were written beside the merged model stream, and the order changed with the runtime and the number of stream transforms: `finish` could arrive before the final state.
+
 ## [0.18.0] - 2026-11-19
 
 ### Changed
