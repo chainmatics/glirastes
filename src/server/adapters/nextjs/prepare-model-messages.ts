@@ -24,6 +24,7 @@ import { declarationsForRead, type EntityDeclarationsByTool } from '../../../con
 import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 import { withModelFacingToolErrors } from './stream-error-text.js';
+import { withoutApprovalSubjectParts } from './approval-subject-lookup.js';
 import {
   compactHistoryResult,
   compactToolOutput,
@@ -105,7 +106,8 @@ export async function prepareModelMessages(
   const maxCtx = options?.maxContextMessages ?? 12;
 
   // A failed call keeps only the chat's text in the browser; the model gets an instruction instead.
-  const raw = await convertToModelMessages(withModelFacingToolErrors(uiMessages), {
+  // Approval subjects are for the browser only: never model input, whatever the AI SDK's defaults.
+  const raw = await convertToModelMessages(withModelFacingToolErrors(withoutApprovalSubjectParts(uiMessages)), {
     ignoreIncompleteToolCalls: true,
   });
 

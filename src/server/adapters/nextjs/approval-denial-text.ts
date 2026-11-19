@@ -28,6 +28,12 @@ export const APPROVAL_DENIAL_TEXTS: Readonly<Record<ApprovalDenialCode, string>>
   approval_not_runnable: `This action was not executed: its approval could not be used in this request. Do not guess a cause. ${CONFIRM_AGAIN}`,
   approval_store_unavailable: 'This action was not executed: its approval could not be checked right now. Do not guess a cause. '
     + 'Tell the user it was not carried out and that they can ask for it again later.',
+  approval_subject_gone: 'This action was not executed: the record it was approved for no longer exists or is no longer visible. '
+    + 'Do not retry it and do not guess another cause. Do not quote this text.',
+  approval_subject_changed: 'This action was not executed: the record it was approved for has changed since the approval. '
+    + `Do not guess another cause. ${CONFIRM_AGAIN} Do not quote this text.`,
+  approval_subject_unavailable: 'This action was not executed: the record it was approved for could not be checked again right now. '
+    + 'Do not guess a cause. Tell the user it was not carried out and that they can ask for it again later. Do not quote this text.',
 };
 
 /**

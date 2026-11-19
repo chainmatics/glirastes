@@ -49,6 +49,11 @@ import {
 } from './approval-binding.js';
 import { withModelFacingDenialReasons } from './approval-denial-text.js';
 import {
+  createApprovalSubjectResolver,
+  resolveApprovalSubjectLimits,
+  type ApprovalSubjectResolver,
+} from './approval-subject-lookup.js';
+import {
   pseudonymizeCommandToolInputs,
   resolveDirectCommand,
   runDirectCommand,
@@ -73,7 +78,7 @@ import {
 import { finalSummaryInstruction } from '../../../runtime/tool-denial.js';
 import type { BudgetLimitState } from '../../../runtime/budget.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
-import type { Tool, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
+import type { Tool, ToolContext, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import {
@@ -251,6 +256,13 @@ export interface StreamHandlerContext {
    * refused on the next request (`approval_not_issued`).
    */
   bindApprovalRequests?: <T extends { type: string }>(stream: ReadableStream<T>) => ReadableStream<T>;
+  /**
+   * The server's approval-subject lookups of this request, set for the
+   * built-in stream handler when a tool declares them
+   * (docs/approval-subjects.md). It hooks them into the tools; the
+   * subjects then reach the stream through `bindApprovalRequests`.
+   */
+  approvalSubjects?: ApprovalSubjectResolver;
 }
 
 /**
@@ -562,6 +574,10 @@ async function defaultStreamHandler(
   for (const [name, tool] of Object.entries(ctx.tools)) {
     (builtinNames.has(name) ? builtinTools : domainTools)[name] = tool;
   }
+  // Server lookups of approval subjects, after the decision that a call needs approval.
+  const subjectHook = ctx.approvalSubjects
+    ? { resolveApprovalSubjects: ctx.approvalSubjects.resolve }
+    : {};
   const vercelTools = wrapToolsForVercelAi(
     domainTools,
     ctx.managedTurn
@@ -571,8 +587,9 @@ async function defaultStreamHandler(
           onToolError: ctx.managedTurn.onToolError,
           resolveApproval: ctx.managedTurn.resolveApproval,
           toolTimeoutMs: ctx.managedTurn.toolTimeoutMs,
+          ...subjectHook,
         }
-      : undefined,
+      : ctx.approvalSubjects ? subjectHook : undefined,
   );
   if (Object.keys(builtinTools).length > 0) {
     Object.assign(vercelTools, wrapToolsForVercelAi(builtinTools));
@@ -1090,6 +1107,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     approvalMaxAgeMs,
     approvalStore: configuredApprovalStore,
     approvalScope: approvalScopeOf,
+    approvalSubjects: approvalSubjectsConfig,
     allowedOrigins,
     crossOriginProtection,
     maxBodyBytes: configuredMaxBodyBytes,
@@ -1098,6 +1116,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     budgetStopTexts: budgetStopTextsConfig,
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
+  // Server lookups behind approval cards: only the built-in stream handler makes them.
+  const approvalSubjectLimits = customStreamHandler || approvalSubjectsConfig === false
+    ? undefined
+    : resolveApprovalSubjectLimits(approvalSubjectsConfig);
   const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
   assertChatServerLocales(localesConfig);
   const explicitLocale = config.locale;
@@ -1316,6 +1338,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     messages: unknown[],
     managedTurn: ManagedTurnGuard | undefined,
     scope: string,
+    subjects?: ApprovalSubjectResolver,
   ): Promise<{ binder: ApprovalBinder; storeScope: string; messages: unknown[]; verified: VerifiedApproval[] }> {
     const binder = resolveApprovalBinder({
       secret: approvalSecret,
@@ -1330,6 +1353,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     const storeScope = storeScopeOf(req, scope, binder);
     const checked = await enforceApprovalBindings(messages, {
       binder, store: approvalStore, scope: storeScope, localToolNames: new Set(Object.keys(registry)),
+      // Declared tools only: their approvals carry the signed subject digest, and may be checked again.
+      ...(subjects
+        ? { requiresSubjectDigest: (toolName: string) => subjects.isDeclared(toolName), recheck: (approval) => subjects.recheck(approval) }
+        : {}),
     });
     // The model reads a refusal or denial as the server's fixed text, never
     // the reason the client wrote or a bare code.
@@ -1693,6 +1720,30 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const ownReadResult = (registry: ToolRegistry, results: TurnResults | undefined): string | undefined => (
         results && registry[READ_RESULT_TOOL_NAME] === results.tool ? READ_RESULT_TOOL_NAME : undefined
       );
+      /**
+       * The approval-subject lookups of this request (docs/approval-subjects.md),
+       * or undefined when no tool declares them (then nothing changes).
+       * Lookups run through `context` (this request's transport, the user's
+       * credentials) and, in a managed turn, the guard.
+       */
+      const approvalSubjectResolverFor = (
+        registry: ToolRegistry,
+        context: ToolContext,
+        shieldSessionId: () => string,
+        scope: string,
+      ): ApprovalSubjectResolver | undefined => {
+        if (!approvalSubjectLimits) return undefined;
+        const resolver = createApprovalSubjectResolver({
+          registry,
+          context,
+          ...(managedTurn ? { guard: managedTurn } : {}),
+          ...(piiShield ? { shield: { shield: piiShield, sessionId: shieldSessionId } } : {}),
+          limits: approvalSubjectLimits,
+          signal: req.signal,
+          scope,
+        });
+        return resolver.hasDeclarations() ? resolver : undefined;
+      };
       const withResultTool = (registry: ToolRegistry, results: TurnResults | undefined): ToolRegistry => (
         results ? { ...registry, [results.tool.id]: results.tool } : registry
       );
@@ -1815,7 +1866,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           registry,
           [followupTool, clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
         );
-        const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
+        const pipelineScope = await requestApprovalScope(req, managedTurn);
+        const pipelineSubjects = approvalSubjectResolverFor(registry, endpointToolContext, () => sessionId, pipelineScope);
+        const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, pipelineScope, pipelineSubjects);
         processedMessages = pipelineApprovals.messages;
 
         // Extract user input for pipeline
@@ -2059,7 +2112,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           handlerBuiltinToolNames: discoveryController
             ? [...handlerBuiltinNames, 'find_tools']
             : handlerBuiltinNames,
-          bindApprovalRequests: (stream) => bindApprovalRequests(stream, pipelineApprovals.binder),
+          bindApprovalRequests: (stream) => bindApprovalRequests(stream, pipelineApprovals.binder, pipelineSubjects),
+          ...(pipelineSubjects ? { approvalSubjects: pipelineSubjects } : {}),
         }), turnResults?.store);
       }
 
@@ -2096,7 +2150,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         registry,
         [clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
       );
-      const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
+      const legacyScope = await requestApprovalScope(req, managedTurn);
+      // The shield session of the legacy path is derived below; the card's values are shielded only once tools run.
+      const legacySubjects = approvalSubjectResolverFor(registry, endpointToolContext, () => legacySessionId, legacyScope);
+      const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, legacyScope, legacySubjects);
       processedMessages = legacyApprovals.messages;
       // Routing sees what the model may see: a consumer router can hand the
       // names on to a model of its own, so a managed turn names only the
@@ -2260,7 +2317,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         handlerBuiltinToolNames: discoveryController
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,
-        bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder),
+        bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder, legacySubjects),
+        ...(legacySubjects ? { approvalSubjects: legacySubjects } : {}),
       }), turnResults?.store);
     } catch (error) {
       turnResultStore?.clear();

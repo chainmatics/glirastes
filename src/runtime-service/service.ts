@@ -158,6 +158,7 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
             ? { maxResultChars: config.application.maxResultChars }
             : {}),
           ...(config.application.resultHandles === false ? { resultHandles: false } : {}),
+          ...(config.limits.approvalLookups !== undefined ? { approvalSubjects: config.limits.approvalLookups } : {}),
           endpointCaller: (req) =>
             createHttpEndpointCaller({
               defaultHeaders: pinnedPrincipal

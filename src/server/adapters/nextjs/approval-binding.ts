@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { APPROVAL_SUBJECTS_PART_TYPE } from '../../../contracts/approval-subject.js';
 import {
   AI_SDK_APPROVAL_GATE,
   AI_SDK_APPROVAL_GATE_PASSED,
@@ -29,6 +30,21 @@ import {
  * shares the secret cannot accept what the issuer would refuse; the verifier
  * applies its own maximum age on top. (The format gained the expiry before
  * 0.5.0 was published, which is why it is still `v1`.)
+ *
+ * A call of a tool with server approval subjects (docs/approval-subjects.md)
+ * gets a `v2` id instead:
+ *
+ *   glirastes-approval.v2.<issuedAtMs>.<expiresAtMs>.<nonce>.<subjectDigest>.<mac>
+ *
+ * where `subjectDigest` is a 16-byte HMAC-SHA-256 (under a key derived from
+ * the secret) of the canonical subjects the server looked up, and the MAC
+ * covers it next to everything a v1 MAC covers, under the tag `v2`. The
+ * browser's copy of the subjects is never read back: only this digest
+ * counts. A handler verifies both versions; for a declared tool it refuses
+ * a v1 id (`approval_not_issued`), so the digest cannot be left out. A
+ * release before v2 refuses a v2 id as `approval_not_issued` by
+ * construction: its parser accepts only the `glirastes-approval.v1.` prefix
+ * and exactly four segments after it, and never computes a v1 MAC for it.
  */
 
 export const DEFAULT_APPROVAL_MAX_AGE_MS = 15 * 60_000;
@@ -47,6 +63,7 @@ export function assertApprovalMaxAge(value: unknown): asserts value is number {
 export const APPROVAL_SECRET_ENV = 'GLIRASTES_APPROVAL_SECRET';
 
 const ID_PREFIX = 'glirastes-approval.v1.';
+const ID_PREFIX_V2 = 'glirastes-approval.v2.';
 const MIN_SECRET_LENGTH = 16;
 /** Clock differences between processes sharing a secret. */
 const CLOCK_SKEW_MS = 60_000;
@@ -56,7 +73,13 @@ export type ApprovalDenialCode =
   | 'approval_expired'
   | 'approval_already_used'
   | 'approval_store_unavailable'
-  | 'approval_not_runnable';
+  | 'approval_not_runnable'
+  /** `recheck` of a declared tool: the approved record no longer exists (or is no longer visible). */
+  | 'approval_subject_gone'
+  /** `recheck: 'unchanged'`: the approved record is not what the approval was signed for. */
+  | 'approval_subject_changed'
+  /** `recheck` with `onUnavailable: 'block'`: the record could not be checked again. */
+  | 'approval_subject_unavailable';
 
 /**
  * Optional single-use store. `consume(approvalId, expiresAtMs, { scope })`
@@ -174,12 +197,22 @@ export type ApprovalVerification =
    * must keep the key until then, even when this handler's own maximum age
    * ends earlier.
    */
-  | { readonly ok: true; readonly expiresAtMs: number; readonly key: string }
+  /**
+   * `version` 2 carries `subjectDigest`, the digest of the server's
+   * approval subjects signed into the id.
+   */
+  | { readonly ok: true; readonly expiresAtMs: number; readonly key: string; readonly version?: 1 | 2; readonly subjectDigest?: string }
   | { readonly ok: false; readonly code: 'approval_not_issued' | 'approval_expired' };
 
 export interface ApprovalBinder {
-  issue: (call: ApprovalCall) => string;
+  /**
+   * Issues the id of an approval request: `v1`, or `v2` with the digest of
+   * `subjects` (the canonical server subjects of the call) when given.
+   */
+  issue: (call: ApprovalCall & { subjects?: unknown }) => string;
   verify: (call: ApprovalCall & { approvalId: string }) => ApprovalVerification;
+  /** The digest a `v2` id carries for canonical subjects (16 bytes, base64url). */
+  subjectDigest?: (subjects: unknown) => string;
   readonly maxAgeMs: number;
   /**
    * A store quota key for a caller's credentials: `caller:` and an
@@ -203,6 +236,7 @@ export class ApprovalSecretMissingError extends Error {
 
 const NONCE_BYTES = 16;
 const MAC_BYTES = 32;
+const SUBJECT_DIGEST_BYTES = 16;
 /** A decimal without sign or leading zeros, as `String(Date.now())` writes it. */
 const CANONICAL_TIME = /^(?:0|[1-9]\d{0,15})$/;
 
@@ -267,8 +301,19 @@ export function createApprovalBinder(options: {
     .update(JSON.stringify(['v1', issuedAt, expiresAt, nonce, scope, call.toolCallId, call.toolName, canonicalJson(call.input)]))
     .digest();
 
+  const macV2 = (issuedAt: string, expiresAt: string, nonce: string, digest: string, call: ApprovalCall): Buffer => createHmac('sha256', options.secret)
+    .update(JSON.stringify(['v2', issuedAt, expiresAt, nonce, digest, scope, call.toolCallId, call.toolName, canonicalJson(call.input)]))
+    .digest();
+  const subjectDigest = (subjects: unknown): string => createHmac('sha256', options.secret)
+    .update('glirastes-approval-subjects\0')
+    .update(canonicalJson(subjects))
+    .digest()
+    .subarray(0, SUBJECT_DIGEST_BYTES)
+    .toString('base64url');
+
   return {
     maxAgeMs,
+    subjectDigest,
     callerQuotaKey: (credentials) => `caller:${createHmac('sha256', options.secret)
       .update('glirastes-approval-quota-key\0')
       .update(credentials)
@@ -278,21 +323,31 @@ export function createApprovalBinder(options: {
       const issuedAt = String(issued);
       const expiresAt = String(issued + maxAgeMs);
       const nonce = randomBytes(NONCE_BYTES).toString('base64url');
+      if (call.subjects !== undefined) {
+        const digest = subjectDigest(call.subjects);
+        return `${ID_PREFIX_V2}${issuedAt}.${expiresAt}.${nonce}.${digest}.${macV2(issuedAt, expiresAt, nonce, digest, call).toString('base64url')}`;
+      }
       return `${ID_PREFIX}${issuedAt}.${expiresAt}.${nonce}.${mac(issuedAt, expiresAt, nonce, call).toString('base64url')}`;
     },
     verify: (call) => {
       const notIssued = { ok: false, code: 'approval_not_issued' } as const;
-      if (typeof call.approvalId !== 'string' || !call.approvalId.startsWith(ID_PREFIX)) return notIssued;
-      const [issuedAt, expiresAt, nonce, presented, ...rest] = call.approvalId.slice(ID_PREFIX.length).split('.');
+      if (typeof call.approvalId !== 'string') return notIssued;
+      const v2 = call.approvalId.startsWith(ID_PREFIX_V2);
+      if (!v2 && !call.approvalId.startsWith(ID_PREFIX)) return notIssued;
+      const segments = call.approvalId.slice((v2 ? ID_PREFIX_V2 : ID_PREFIX).length).split('.');
+      const [issuedAt, expiresAt, nonce] = segments;
+      const digest = v2 ? segments[3] : undefined;
+      const presented = segments[v2 ? 4 : 3];
       // Every segment must be spelled exactly as `issue` spells it: Node's
       // base64url decoder accepts padding, stray characters and changed low
       // bits, which would give one approval many ids.
-      if (!issuedAt || !expiresAt || !nonce || !presented || rest.length > 0) return notIssued;
+      if (!issuedAt || !expiresAt || !nonce || !presented || segments.length !== (v2 ? 5 : 4)) return notIssued;
       if (!CANONICAL_TIME.test(issuedAt) || !CANONICAL_TIME.test(expiresAt)) return notIssued;
       if (!isCanonicalBase64Url(nonce, NONCE_BYTES) || !isCanonicalBase64Url(presented, MAC_BYTES)) return notIssued;
+      if (v2 && (!digest || !isCanonicalBase64Url(digest, SUBJECT_DIGEST_BYTES))) return notIssued;
       let expected: Buffer;
       try {
-        expected = mac(issuedAt, expiresAt, nonce, call);
+        expected = v2 ? macV2(issuedAt, expiresAt, nonce, digest!, call) : mac(issuedAt, expiresAt, nonce, call);
       } catch {
         return notIssued;
       }
@@ -302,10 +357,20 @@ export function createApprovalBinder(options: {
       if (at - Number(issuedAt) < -CLOCK_SKEW_MS) return notIssued;
       // The issuer's signed expiry, and this handler's own maximum age.
       if (at > Math.min(Number(expiresAt), Number(issuedAt) + maxAgeMs)) return { ok: false, code: 'approval_expired' };
+      if (v2) {
+        return {
+          ok: true,
+          expiresAtMs: Number(expiresAt),
+          key: `${ID_PREFIX_V2}${issuedAt}.${expiresAt}.${nonce}.${digest}.${expected.toString('base64url')}`,
+          version: 2,
+          subjectDigest: digest!,
+        };
+      }
       return {
         ok: true,
         expiresAtMs: Number(expiresAt),
         key: `${ID_PREFIX}${issuedAt}.${expiresAt}.${nonce}.${expected.toString('base64url')}`,
+        version: 1,
       };
     },
   };
@@ -351,6 +416,11 @@ export function resolveApprovalBinder(options: {
 
 type Chunk = { type: string };
 
+/** Where `bindApprovalRequests` takes the server subjects of an approval request from. */
+export interface ApprovalSubjectsSource {
+  take(toolCallId: string): { readonly part: unknown; readonly canonical: unknown } | undefined;
+}
+
 /**
  * Gives every approval request of a UI message stream an id bound to the
  * call it announced (tool name and input come from the preceding
@@ -359,6 +429,12 @@ type Chunk = { type: string };
 export function bindApprovalRequests<T extends Chunk>(
   stream: ReadableStream<T>,
   binder: ApprovalBinder,
+  /**
+   * The server's approval subjects of this request (declared tools only):
+   * a request with subjects gets a persistent `data-approval-subjects` part
+   * right before it and a `v2` id with their digest. Without, nothing changes.
+   */
+  subjects?: ApprovalSubjectsSource,
 ): ReadableStream<T> {
   const calls = new Map<string, { toolName: string; input: unknown }>();
   return stream.pipeThrough(new TransformStream<T, T>({
@@ -369,16 +445,25 @@ export function bindApprovalRequests<T extends Chunk>(
       }
       if (record.type === 'tool-approval-request' && typeof record.toolCallId === 'string') {
         const announced = calls.get(record.toolCallId);
+        const found = subjects?.take(record.toolCallId);
         if (announced) {
           let approvalId: string | undefined;
           try {
-            approvalId = binder.issue({ toolCallId: record.toolCallId, ...announced });
+            approvalId = binder.issue({
+              toolCallId: record.toolCallId,
+              ...announced,
+              ...(found ? { subjects: found.canonical } : {}),
+            });
           } catch {
             // An input that cannot be hashed (a non-finite number) gets no
             // bound id; the AI SDK's own id never verifies, so the approval
             // can be answered but never runs.
           }
           if (approvalId) {
+            // The subjects go first, so the card has them when the request arrives.
+            if (found) {
+              controller.enqueue({ type: APPROVAL_SUBJECTS_PART_TYPE, id: record.toolCallId, data: found.part } as unknown as T);
+            }
             controller.enqueue({ ...chunk, approvalId });
             return;
           }
@@ -569,6 +654,17 @@ export async function enforceApprovalBindings(
      * call (and never consumed for a run that does not happen).
      */
     localToolNames?: ReadonlySet<string>;
+    /**
+     * Tools whose approvals must carry a subject digest (`v2`): a `v1` id for
+     * one of them is refused as `approval_not_issued`, so a client cannot
+     * leave the digest out.
+     */
+    requiresSubjectDigest?: (toolName: string) => boolean;
+    /**
+     * Checks the subjects of a verified, runnable approval again before it is
+     * consumed and runs (`recheck` of a declared tool); a code refuses it.
+     */
+    recheck?: ApprovalRecheck;
   },
 ): Promise<{ messages: unknown[]; denied: DeniedApproval[]; verified: VerifiedApproval[] }> {
   if (options.localToolNames) messages = withoutLocalProviderExecuted(messages, options.localToolNames);
@@ -606,7 +702,7 @@ export async function enforceApprovalBindings(
       const runnable = lastBlock.has(part) && isRunnableApproval(record);
       const code = runnable
         ? await denialCode({ input, toolName, toolCallId, approvalId, usedIds, ...options })
-        : bindingCode({ input, toolName, toolCallId, approvalId, binder: options.binder })
+        : bindingCode({ input, toolName, toolCallId, approvalId, binder: options.binder, requiresSubjectDigest: options.requiresSubjectDigest })
           ?? (isUnsettledApproval(record) ? 'approval_not_runnable' : undefined);
       if (!code) {
         if (runnable && record.providerExecuted !== true) verified.push({ toolCallId, toolName, input });
@@ -689,12 +785,31 @@ function runnableBlockOf(messages: ReadonlyArray<unknown>): Set<unknown> {
   return new Set(parts.slice(start));
 }
 
+/** Checks the subjects of an approved call again before it runs; see `enforceApprovalBindings`. */
+export type ApprovalRecheck = (approval: {
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  subjectDigest?: string;
+  digestOf: (subjects: unknown) => string;
+}) => Promise<ApprovalDenialCode | undefined>;
+
+/** A `v1` id for a tool whose approvals carry a subject digest. */
+function downgraded(
+  verified: Extract<ApprovalVerification, { ok: true }>,
+  toolName: string,
+  requiresSubjectDigest: ((toolName: string) => boolean) | undefined,
+): boolean {
+  return verified.version !== 2 && requiresSubjectDigest?.(toolName) === true;
+}
+
 function bindingCode(args: {
   input: unknown;
   toolName: string;
   toolCallId: string;
   approvalId: string;
   binder: ApprovalBinder;
+  requiresSubjectDigest?: (toolName: string) => boolean;
 }): ApprovalDenialCode | undefined {
   const verified = args.binder.verify({
     approvalId: args.approvalId,
@@ -702,6 +817,7 @@ function bindingCode(args: {
     toolName: args.toolName,
     input: args.input,
   });
+  if (verified.ok && downgraded(verified, args.toolName, args.requiresSubjectDigest)) return 'approval_not_issued';
   // Only the binding counts here: an executed call may be older than the maximum age.
   return !verified.ok && verified.code === 'approval_not_issued' ? 'approval_not_issued' : undefined;
 }
@@ -715,6 +831,8 @@ async function denialCode(args: {
   binder: ApprovalBinder;
   store?: ApprovalStore;
   scope?: string;
+  requiresSubjectDigest?: (toolName: string) => boolean;
+  recheck?: ApprovalRecheck;
 }): Promise<ApprovalDenialCode | undefined> {
   const verified = args.binder.verify({
     approvalId: args.approvalId,
@@ -723,8 +841,19 @@ async function denialCode(args: {
     input: args.input,
   });
   if (!verified.ok) return verified.code;
+  if (downgraded(verified, args.toolName, args.requiresSubjectDigest)) return 'approval_not_issued';
   if (args.usedIds.has(verified.key)) return 'approval_already_used';
   args.usedIds.add(verified.key);
+  if (args.recheck && args.binder.subjectDigest) {
+    const refused = await args.recheck({
+      toolCallId: args.toolCallId,
+      toolName: args.toolName,
+      input: args.input,
+      ...(verified.subjectDigest !== undefined ? { subjectDigest: verified.subjectDigest } : {}),
+      digestOf: args.binder.subjectDigest,
+    });
+    if (refused) return refused;
+  }
   if (args.store) {
     try {
       if (!(await args.store.consume(verified.key, verified.expiresAtMs, { scope: args.scope ?? '' }))) return 'approval_already_used';

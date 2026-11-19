@@ -57,6 +57,11 @@ export {
   type RecordingTranscriptionHandlerConfig,
 } from './recording-transcription-handler.js';
 export type { ApprovalStore, ApprovalDenialCode } from './approval-binding.js';
+export {
+  DEFAULT_APPROVAL_SUBJECT_LIMITS,
+  type ApprovalSubjectLimits,
+  type ApprovalSubjectRefusalCode,
+} from './approval-subject-lookup.js';
 export type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 export type { HistoryOptions } from './prepare-model-messages.js';
 export {
