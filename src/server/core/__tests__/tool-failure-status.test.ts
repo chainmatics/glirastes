@@ -225,15 +225,22 @@ describe('classifyToolFailure', () => {
     expect(toolResultFailure(result)).toBe('expected');
   });
 
-  it('marks nothing for an error classification', async () => {
-    const result = await run(context({ ok: false, status: 500, data: 'x' }, () => 'error'));
+  it('sends an error classification explicitly as expectedFailure: false', async () => {
+    const result = await run(context({ ok: false, status: 404, data: 'x' }, () => 'error'));
+    expect(result).toMatchObject({ success: false, status: 404, expectedFailure: false });
+    expect(toolResultFailure(result)).toBe('error');
+    expect(toolResultForFingerprint(result)).toEqual({ success: false, status: 404, retryable: false, expectedFailure: false });
+  });
+
+  it('marks nothing without a classifier', async () => {
+    const result = await run(context({ ok: false, status: 404, data: 'x' }));
     expect(result).not.toHaveProperty('expectedFailure');
     expect(toolResultFailure(result)).toBe('error');
   });
 
   it('treats a throwing classifier as error and keeps the result', async () => {
     const result = await run(context({ ok: false, status: 403, error: 'Forbidden' }, () => { throw new Error('boom'); }));
-    expect(result).toEqual({ success: false, error: 'Forbidden', retryable: false, status: 403 });
+    expect(result).toEqual({ success: false, error: 'Forbidden', retryable: false, status: 403, expectedFailure: false });
     expect(toolResultFailure(result)).toBe('error');
   });
 
@@ -388,5 +395,22 @@ describe('the not-found hint of a 404', () => {
     const result = await get({ ok: false, status: 404, data: 'x'.repeat(6_000) }, byId, { maxResultChars: 1_000 });
     expect(result.hint).toBe(HINT);
     expect(HINT.length).toBeLessThan(500);
+  });
+
+  it('keeps an explicit error classification under an output bound', async () => {
+    const allowed = defineEndpointTool({ ...byId, outputAllowedFields: ['name'] });
+    expect(await get({ ok: false, status: 404, data: { message: 'gone' } }, allowed, undefined, () => 'error'))
+      .toMatchObject({ status: 404, bodyWithheld: expect.any(String), expectedFailure: false });
+  });
+});
+
+describe('a thrown tool error', () => {
+  it('names the tool by its model-facing name, never by its internal id', async () => {
+    const id = '239574de-6c1f-4f7e-9a51-0d2b8c3f4e11';
+    const tool = endpointToolToTool(defineEndpointTool({ ...definition, id }));
+    const result = await toolToAiTool(tool, context(async () => { throw new Error('Endpoint timed out'); }), 'tasks_create')
+      .execute({ title: 'x' });
+    expect(result).toEqual({ error: 'Error in tasks_create: Endpoint timed out', hint: 'Check the parameters and try again.' });
+    expect(JSON.stringify(result)).not.toContain(id);
   });
 });

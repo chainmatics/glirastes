@@ -555,7 +555,32 @@ export interface ActivityLogConfig {
    * own element.
    */
   noticePlacement?: 'log' | 'message';
+  /**
+   * Which steps show their detail line (`data-element="detail"`: the error
+   * text, a done step's message):
+   * - `'auto'` (default): a failed or neutral (`expected`) step shows the
+   *   error text its tool returned, and a call the user approved that the
+   *   server did not run shows `activityApprovalNotUsedDetail`, whatever the
+   *   result display (`toolResults`); a done step shows its message, and an
+   *   SDK-level `output-error` its text, only where its result is displayed.
+   * - `'results'`: every step only where its result is displayed (the rule
+   *   before 0.18.0, also for failures).
+   * - `'all'`: every step that has a detail.
+   * - `'none'`: no step.
+   */
+  details?: ActivityLogDetails;
+  /**
+   * `'message'` (default): one log for all steps of a message, before its
+   * text. `'sections'`: when an assistant message interleaves text and tool
+   * steps (text, steps, text), each run of steps gets its own log at its
+   * place between the texts, in message order; a message whose steps all
+   * come before its text renders exactly as with `'message'`.
+   */
+  grouping?: 'message' | 'sections';
 }
+
+/** Detail policy of the activity log steps (`ActivityLogConfig.details`). */
+export type ActivityLogDetails = 'auto' | 'results' | 'all' | 'none';
 
 /** Pipeline status of a turn that ends with a notice. */
 export type TurnNoticeStatus = 'safety-stop' | 'aborted' | 'error';
@@ -590,12 +615,101 @@ export interface MessagePartNodes {
 export interface MessageParts extends MessagePartNodes {
   /** False for a message with nothing to show; the default bubble renders nothing then. */
   visible: boolean;
+  /** Every part of the message in message order, each with its default rendering. */
+  parts: MessagePartEntry[];
 }
 
 export interface MessagePartsProps extends MessagePartNodes {
   message: ChatMessage;
+  /** Every part of the message in message order, each with its default rendering (`node`). */
+  parts: MessagePartEntry[];
   /** All parts in the default order. */
   children: ReactNode;
+}
+
+/** `text`, `tool` (an AI SDK tool part or a `tool-result`), `file`, or `other` (reasoning, step markers, data). */
+export type MessagePartKind = 'text' | 'tool' | 'file' | 'other';
+
+/**
+ * One part of a message in message order, for a layout that places its own
+ * content at the position of a part (`MessageParts.parts`).
+ */
+export interface MessagePartEntry {
+  /** Stable across renders: `tool:<toolCallId>` for a tool part, else `<kind>:<index>`. */
+  key: string;
+  /** Position in `message.parts`. */
+  index: number;
+  kind: MessagePartKind;
+  part: ChatMessage['parts'][number];
+  /** Model-facing tool name of a tool part. */
+  toolName?: string;
+  toolCallId?: string;
+  /**
+   * What the default bubble renders for this part: the text (Markdown,
+   * mention chips), the tool result block, renderer or clarification card,
+   * the approval entry or inline card (`approvalDisplay`), the attachment.
+   * `null` when the part shows nothing here (a hidden result, a step only
+   * the activity log names, a reasoning part).
+   */
+  node: ReactNode;
+  /** The approval of a tool part that asked for one, open or decided. */
+  approval?: ToolPartApproval;
+}
+
+/** What the user answered on an approval card. */
+export type ApprovalDecision = 'approved' | 'declined';
+
+/**
+ * What became of a call that asked for approval: `open` waits for the
+ * user; `running` approved, no result yet; `done`, `failed`, `expected` (a
+ * neutral failure, as in the activity log) its result; `declined` the user
+ * said no; `not-run` the user approved, but the server did not run it (an
+ * expired or already used approval).
+ */
+export type ApprovalOutcome = 'open' | 'running' | 'done' | 'failed' | 'expected' | 'declined' | 'not-run';
+
+/**
+ * The approval of one tool part, open or decided, as the browser can still
+ * tell it from the message (also after a reload): the card's description and
+ * detail lines and the ids with the names this conversation shows now.
+ * Display only and local: nothing of it is sent anywhere.
+ */
+export interface ToolPartApproval {
+  approvalId: string;
+  toolCallId?: string;
+  toolName: string;
+  state: 'open' | 'decided';
+  /** Absent while open. */
+  decision?: ApprovalDecision;
+  outcome: ApprovalOutcome;
+  /** The card's description (`approvalDescription`), else the tool name. */
+  label: string;
+  details?: string[];
+  subjects?: ApprovalSubject[];
+  /** The open approval as the card gets it; only while `state` is `open`. */
+  pending?: PendingApproval;
+}
+
+export interface ApprovalEntryProps {
+  approval: ToolPartApproval;
+}
+
+/** Where approvals show in the chat (`AiChatProvider` `approvalDisplay`). */
+export interface ApprovalDisplayConfig {
+  /**
+   * A decided approval: `'none'` (default) shows nothing beyond the activity
+   * log, `'entry'` a lasting `ApprovalEntry` (or `components.ApprovalEntry`)
+   * at the tool part's position: what was approved or declined and what
+   * became of it, also after a reload.
+   */
+  decided?: 'none' | 'entry';
+  /**
+   * The open approval card: `'panel'` (default) below the messages, bulk
+   * cards for several calls of one tool; `'inline'` at the tool part's
+   * position inside the message, one card per call. A custom `MessageBubble`
+   * that does not render `parts` or `toolResults` must place it itself.
+   */
+  open?: 'panel' | 'inline';
 }
 
 export interface VoicePushToTalkConfig {
@@ -715,6 +829,8 @@ export interface ChatComponents {
    * render in the default order.
    */
   MessageParts?: ComponentType<MessagePartsProps>;
+  /** Lasting entry of a decided approval (`approvalDisplay.decided: 'entry'`). */
+  ApprovalEntry?: ComponentType<ApprovalEntryProps>;
 }
 
 export interface CommandArgumentsFormProps {
@@ -765,7 +881,13 @@ export interface ChatLocale {
   // Work log of an assistant turn and its optional plan
   activityWorkingLabel: string;
   activityWaitingLabel: string;
-  activityDoneLabel: string;         // supports `{count}`
+  /**
+   * Steps that finished without failure, declined or neutral outcome;
+   * supports `{count}`. Left out of the summary when no step is done
+   * ("2 declined"). Before 0.18.0 `{count}` was every step.
+   */
+  activityDoneLabel: string;
+  /** `activityDoneLabel` for one done step. */
   activityDoneOneLabel: string;
   activityFailedLabel: string;       // supports `{count}`
   /** Calls whose approval was declined (not counted as failed); supports `{count}`. */
@@ -778,12 +900,26 @@ export interface ChatLocale {
   activityExpectedLabel: string;
   /** Summary while a tool runs; `{label}` is the tool's label or `activityWorkingLabel` (`{label}…`). */
   activityRunningLabel: string;
-  /** Running summary with `activityLog.runningProgress`; supports `{count}` (finished steps) and `{label}`. */
+  /** Running summary with `activityLog.runningProgress`; supports `{count}` (done steps, as `activityDoneLabel`) and `{label}`. */
   activityRunningProgressLabel: string;
   /** Count of a step line folding repeated calls; supports `{count}` (`×{count}`). */
   activityStepCountLabel: string;
   /** Joins the parts of the finished summary (`, `). */
   activitySummarySeparator: string;
+  /** Detail of a declined step the user approved but the server did not run (expired or already used approval). */
+  activityApprovalNotUsedDetail: string;
+  /** Outcome of a decided approval (`ApprovalEntry`): approved, no result yet. */
+  approvalEntryRunningLabel: string;
+  /** Approved and done. */
+  approvalEntryDoneLabel: string;
+  /** Approved, the call failed. */
+  approvalEntryFailedLabel: string;
+  /** Approved, the call answered with a neutral failure (as `activityExpectedLabel`). */
+  approvalEntryExpectedLabel: string;
+  /** Declined by the user. */
+  approvalEntryDeclinedLabel: string;
+  /** Approved, but the server did not run it (expired or already used approval). */
+  approvalEntryNotRunLabel: string;
   planTitle: string;
   /** Shown when the user sends while an approval card waits for a decision. */
   approvalPendingHint: string;
@@ -1001,13 +1137,32 @@ export interface AiChatProviderConfig {
   /**
    * The chat's texts per BCP-47 language tag, to add a language (`pl`) or
    * change single texts of one, e.g. `{ pl: plChatLocale, de: { sendButton: 'Los' } }`.
-   * The chat's language is the one of the turn's tool labels (the server's
-   * `data-tool-presentation` part), else the page's `lang`. Per key: `locale`
+   * The chat's language is the page's `lang`, else the one of the turn's
+   * tool labels (`languageSource`). Per key: `locale`
    * (language-free, wins everywhere), then these tables and the built-in
    * German and English texts in the language's fallback order (the
    * language, another region of it, English). Partial tables are fine.
    */
   locales?: Readonly<Record<string, Partial<ChatLocale>>>;
+  /**
+   * Which language the chat's texts follow (`locales`, the built-in German
+   * and English ones; also the date format of approval cards) when the app
+   * states none (`language`):
+   * - `'page'` (default): the page's `lang` (the UI the user reads), and
+   *   only without one the language of the turn's tool labels (the server's
+   *   `data-tool-presentation` part).
+   * - `'server'`: the language of the tool labels first, then the page's
+   *   `lang` (the order before 0.18.0).
+   * The tool labels themselves come from the server in its turn language
+   * (`requestLocale`); `toolLabels` overrides them.
+   */
+  languageSource?: 'page' | 'server';
+  /**
+   * The UI language the app states (BCP-47, e.g. from its router or i18n
+   * stack): wins over the page's `lang` and the server's wording, whatever
+   * `languageSource`. `<glirastes-chat>` passes its nearest `lang`.
+   */
+  language?: string;
   /**
    * Theme for the floating widget: a preset name (autocompleted by your
    * editor) or an override object. Defaults to `'professional-lightblue'`.
@@ -1059,6 +1214,13 @@ export interface AiChatProviderConfig {
    * approving, not a trust boundary. Default true.
    */
   approvalSubjects?: boolean;
+  /**
+   * Where approvals show: a lasting entry for decided ones
+   * (`decided: 'entry'`) and the open card inline at its tool part
+   * (`open: 'inline'`). Default: as before (no entry, cards below the
+   * messages).
+   */
+  approvalDisplay?: ApprovalDisplayConfig;
   /**
    * Declared identity by model-facing tool name, for apps whose server does
    * not send it: which records each tool result holds and which arguments

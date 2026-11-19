@@ -71,6 +71,8 @@ const entityLinks = useMemo(() => ({
 | `minLabelLength` | default 4; shorter known names stay text |
 | `open(ref)` | opens a chip; return `false` to fall through to the entity's derived "Open" action (`ui.navigate` through the navigation bridge) |
 | `canOpen(type)` | which types `open` handles; default all |
+| `mentionMarkers` | `'plain'` (default, as before): a text part with a `{{mention:…}}` marker renders without Markdown; `'markdown'`: Markdown stays, each marker an inline chip (`MentionMarkers` and `markdownWithMentionMarkers` for a custom bubble) |
+| `verifyMentions` | default `true` with `'markdown'`: a chip only for an id the conversation showed by declaration (`outputEntities`, a user's `@` mention, a search hit), never a field-name guess; else the label stays text; `false` turns it off |
 
 - Without `open` and without a derived "Open" page a chip shows but is not
   clickable. Opening never sends a chat message. `@` pills in sent messages

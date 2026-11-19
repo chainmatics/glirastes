@@ -141,7 +141,8 @@ export function compactToolOutput(
 export const HISTORY_NAME_CLIP_CHARS = 60;
 const CLIP_SUFFIX = '…[clipped]';
 
-function clipName(name: string): string {
+/** A name clipped to {@link HISTORY_NAME_CLIP_CHARS} characters, marked `…[clipped]`. */
+export function clipName(name: string): string {
   if (name.length <= HISTORY_NAME_CLIP_CHARS) return name;
   let keep = HISTORY_NAME_CLIP_CHARS;
   const last = name.charCodeAt(keep - 1);

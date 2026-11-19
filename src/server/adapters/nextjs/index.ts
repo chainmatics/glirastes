@@ -63,7 +63,8 @@ export {
   type ApprovalSubjectRefusalCode,
 } from './approval-subject-lookup.js';
 export type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
-export type { HistoryOptions } from './prepare-model-messages.js';
+export type { HistoryOptions, HistoryTurnMode, ModelInputBreakdown } from './prepare-model-messages.js';
+export type { SeenObject, SeenObjectsOptions } from './seen-objects.js';
 export {
   contextWindowOf,
   type ChatCompactionOptions,
@@ -118,6 +119,7 @@ export type {
   StepLimitSource,
   StepUsage,
   PipelineStepReport,
+  ModelInputEvent,
   PipelineStreamStatus,
   PipelineStreamState,
   ExecuteToolOptions,

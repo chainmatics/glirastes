@@ -62,17 +62,17 @@ component; headless hooks and building blocks for an own chat:
 | `theme.colors.primary`, `theme.colors.primarySoft` | accent and gradient stop within a theme override |
 | `classNames` | per-slot class hooks |
 | `components` | replace a rendered component (see *Slots*) |
-| `locale`, `locales` | `locale` overrides any string for every language; `locales` per BCP-47 tag (`{ pl: { sendButton: 'Wyślij' } }`, partial tables fall back per key; language = the turn's tool labels, else the page `lang`; server side: `requestLocale`) |
+| `locale`, `locales` | `locale` overrides any string for every language; `locales` per BCP-47 tag (`{ pl: { sendButton: 'Wyślij' } }`, partial tables fall back per key; language = `language`, else the page `lang` (`<glirastes-chat>`: nearest `lang`), else the turn's tool labels; `languageSource: 'server'` = old order; server side: `requestLocale`) |
 | `session` | `save` / `load` / `clear` for durable conversations |
 | `mentions` | mention sources and search |
 | `suggestions` | contextual suggestion chips |
 | `voice` | speech-to-text |
 | `attachments` | image and PDF attachments (section below) |
 | `chatInteractions` | derived `@` entities and `/` commands (section below) |
-| `entityLinks` | entity references in answers as chips (`knownEntities`, `ambiguousNames`, `resolveAmbiguous`, `scope`); `entityDeclarations` sets declared identity by tool name (`docs/entity-identity.md`) |
+| `entityLinks` | entity references in answers as chips (`knownEntities`, `ambiguousNames`, `resolveAmbiguous`, `scope`, `mentionMarkers: 'markdown'` + `verifyMentions`); `entityDeclarations` sets declared identity by tool name (`docs/entity-identity.md`) |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
 | `onBeforeSend`, `onToolResult`, `onUiActionOutcome` | hooks around a turn; UI action outcomes in `references/hooks-and-building-blocks.md` |
-| `approvalDescription` | human-readable text for an approval request |
+| `approvalDescription`, `approvalDisplay` | human-readable text for an approval request; `approvalDisplay` (`decided: 'entry'`, `open: 'inline'`) places approvals at their tool part (`MessageParts.parts`) |
 
 `locale` exists so the SDK never fights the product's i18n stack. Bind it to
 whatever the app already uses:
@@ -102,7 +102,7 @@ styles are variable-driven, inline overrides break under a strict CSP.
 
 `components` replaces one rendered piece while the rest of the chat keeps
 working: `MessageBubble`, `MessageParts`, `TurnNotice` (message layout), `ChatInput`,
-`ToolResultBlock`, `Markdown`, `InputExtra`, `ApprovalCard`, `BulkApprovalCard`,
+`ToolResultBlock`, `Markdown`, `InputExtra`, `ApprovalCard`, `BulkApprovalCard`, `ApprovalEntry`,
 `PipelineTimeline`, `SuggestionChip`, `MentionChip`, `AttachmentTray`, `AttachmentButton`.
 
 Replace the narrowest slot: swapping `MessageBubble` to restyle one tool result

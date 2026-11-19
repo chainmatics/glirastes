@@ -199,6 +199,12 @@ fall back per key, an unknown key fails at start). With `languages` in
 (local, never sent to the Platform), and the approval card and step display
 show them in the turn's language.
 
+The model history uses the SDK defaults (`history`, `maxContextMessages`);
+the config has no keys for them, so the opt-ins `history.toolTurnCounting`
+and `history.seenObjects` are embedded-only for now. The debug hook
+`onModelInput` is embedded-only by design: it carries prompts and tool
+results, and the container's stdout carries content-free events only.
+
 ## State, cancellation and lifecycle
 
 PostgreSQL stores only hashed consumed approval IDs, scope and expiration. The

@@ -14,6 +14,8 @@ import type {
   TruncationInfo,
   ToolResultDisplayConfig,
   ActivityLogConfig,
+  ApprovalDescriptionFn,
+  ApprovalDisplayConfig,
   ToolLabelConfig,
   VoiceInputConfig,
   PipelineStepReport,
@@ -102,7 +104,11 @@ export interface ChatContextValue {
   approve: (id: string) => void;
   reject: (id: string) => void;
   isProcessingApproval: boolean;
-  approvalDescription: (toolName: string, approvalId: string, args: unknown) => PendingApproval;
+  approvalDescription: ApprovalDescriptionFn;
+  /** `approvalSubjects` of the provider (default true). */
+  approvalSubjects?: boolean;
+  /** `approvalDisplay` of the provider with its defaults. */
+  approvalDisplay?: Required<ApprovalDisplayConfig>;
 
   // Truncation
   truncation: TruncationInfo | null;

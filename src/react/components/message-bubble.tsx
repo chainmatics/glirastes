@@ -1,14 +1,23 @@
-import { Suspense, lazy, type ReactNode } from 'react';
+import { Fragment, Suspense, lazy, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
-import { EntityText, useChatEntityLinks, WithoutEntityLinks } from '../entity-links/entity-links-react.js';
+import {
+  EntityText,
+  MentionMarkers,
+  markdownWithMentionMarkers,
+  useChatEntityLinks,
+  WithoutEntityLinks,
+} from '../entity-links/entity-links-react.js';
+import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
+import { ApprovalEntry as DefaultApprovalEntry } from './approval-entry.js';
+import { readToolPartApproval } from '../utils/tool-part-approval.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, readClarificationPart } from '../utils/clarification.js';
 import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
 import { ActivityLog, TurnNotice as DefaultTurnNotice } from './activity-log.js';
 import { PlanChecklist } from './plan-checklist.js';
-import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
+import { readActivitySteps, readLatestPlan, type ActivityDetailSource, type ActivityStep, type ActivityStepStatus } from '../utils/activity.js';
 import { PLAN_TOOL_NAME } from '../../contracts/plan.js';
 import { RendererBoundary } from '../tool-renderers/renderer-boundary.js';
 import {
@@ -18,13 +27,17 @@ import {
 import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
 import type {
+  ActivityLogDetails,
   ChatLocale,
   ChatMessage,
   FilePart,
   MessageBubbleProps,
+  MessagePartEntry,
+  MessagePartKind,
   MessageParts,
   PipelineState,
   TextPart,
+  ToolPartApproval,
   TurnNoticeStatus,
 } from '../types.js';
 
@@ -71,6 +84,78 @@ function shouldRenderToolResult(
   return true;
 }
 
+/**
+ * Whether a step's detail (error text, done message) is shown under the
+ * `activityLog.details` policy. `resultShown`: the tool's result is displayed
+ * (`toolResults`). Under `'auto'` the error text a tool returned for a failed
+ * or neutral step is shown whatever the result display; the `errorText` the
+ * AI SDK or the runtime wrote (`source: 'error-text'`) only where results are.
+ */
+function allowStepDetail(
+  details: ActivityLogDetails,
+  status: ActivityStepStatus,
+  source: ActivityDetailSource,
+  resultShown: boolean,
+): boolean {
+  switch (details) {
+    case 'none':
+      return false;
+    case 'all':
+      return true;
+    case 'results':
+      return resultShown;
+    default:
+      return resultShown || (source === 'output' && (status === 'error' || status === 'expected'));
+  }
+}
+
+function isToolPart(part: unknown): boolean {
+  if (!isRecord(part) || typeof part.type !== 'string') return false;
+  return part.type === 'dynamic-tool' || part.type.startsWith('tool-');
+}
+
+type ActivitySection =
+  | { kind: 'text'; node: ReactNode }
+  | { kind: 'steps'; steps: ActivityStep[]; start: number };
+
+/**
+ * The text nodes and the runs of tool steps of a message in message order,
+ * or null when no run of steps comes after a text (the single log renders
+ * exactly as before then). Parts that are neither (reasoning, step markers,
+ * data) do not split a run.
+ */
+function activitySections(
+  parts: ReadonlyArray<unknown>,
+  texts: ReadonlyArray<{ index: number; node: ReactNode }>,
+  readSteps: (parts: ReadonlyArray<unknown>) => ActivityStep[],
+): ActivitySection[] | null {
+  const textAt = new Map(texts.map((entry) => [entry.index, entry.node] as const));
+  const raw: Array<{ kind: 'text'; node: ReactNode } | { kind: 'tools'; parts: unknown[]; start: number }> = [];
+  parts.forEach((part, index) => {
+    const node = textAt.get(index);
+    if (node !== undefined && node !== null) {
+      raw.push({ kind: 'text', node });
+      return;
+    }
+    if (!isToolPart(part)) return;
+    const last = raw.at(-1);
+    if (last?.kind === 'tools') last.parts.push(part);
+    else raw.push({ kind: 'tools', parts: [part], start: index });
+  });
+  const sections: ActivitySection[] = [];
+  for (const entry of raw) {
+    if (entry.kind === 'text') {
+      sections.push(entry);
+      continue;
+    }
+    const steps = readSteps(entry.parts);
+    if (steps.length > 0) sections.push({ kind: 'steps', steps, start: entry.start });
+  }
+  const firstText = sections.findIndex((section) => section.kind === 'text');
+  const interleaved = firstText >= 0 && sections.slice(firstText).some((section) => section.kind === 'steps');
+  return interleaved ? sections : null;
+}
+
 /** Stop or failure of the latest turn, shown as the last activity line. */
 function pipelineNotice(
   state: PipelineState | null,
@@ -86,6 +171,20 @@ function pipelineNotice(
     default:
       return undefined;
   }
+}
+
+/** Model-facing tool name of a tool part (`tool-{name}`, `dynamic-tool`, a `tool-result`), else null. */
+function toolPartName(part: Record<string, unknown>): string | null {
+  const type = typeof part.type === 'string' ? part.type : '';
+  if (type === 'dynamic-tool' || type === 'tool-result') return typeof part.toolName === 'string' ? part.toolName : null;
+  if (type.startsWith('tool-') && type !== 'tool-call') return type.slice('tool-'.length);
+  return typeof part.toolName === 'string' && 'result' in part ? part.toolName : null;
+}
+
+function partKind(part: unknown): MessagePartKind {
+  if (isTextPart(part)) return 'text';
+  if (isFilePart(part)) return 'file';
+  return isRecord(part) && toolPartName(part) !== null ? 'tool' : 'other';
 }
 
 function isTextPart(part: unknown): part is TextPart {
@@ -162,6 +261,16 @@ function MessageAttachment({ part, locale }: { part: FilePart; locale: ChatLocal
  * `MessageBubble` or `components.MessageParts` that arranges them itself.
  */
 export function useMessageParts(message: ChatMessage): MessageParts {
+  const { logsAt: _logsAt, ...parts } = useMessagePartsWithLogs(message);
+  return parts;
+}
+
+/**
+ * `useMessageParts` plus, with `activityLog.grouping: 'sections'`, each
+ * section's log keyed by the index of the first tool part of its run, so the
+ * bubble can keep the logs when it renders the parts in message order.
+ */
+function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt: ReadonlyMap<number, ReactNode> } {
   const {
     components,
     toolResults,
@@ -172,7 +281,18 @@ export function useMessageParts(message: ChatMessage): MessageParts {
     locale,
     pipelineState,
     activityLog,
+    pendingApprovals,
+    approve,
+    reject,
+    isProcessingApproval,
+    approvalDescription,
+    approvalSubjects,
+    approvalDisplay,
+    entityDeclarations,
+    language,
   } = useChatContext();
+  const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
+  const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
   const MarkdownComponent = components.Markdown ?? DefaultMarkdown;
   const ToolResultComponent = components.ToolResultBlock ?? DefaultToolResult;
   const MentionChipComponent = components.MentionChip ?? DefaultMentionChip;
@@ -216,9 +336,19 @@ export function useMessageParts(message: ChatMessage): MessageParts {
   const allowlist = toolResults.allowlist ?? [];
 
   const isAssistant = message.role === 'assistant';
-  const activitySteps = isAssistant
-    ? readActivitySteps(message.parts, (toolName) => shouldRenderToolResult(toolName, mode, allowlist))
-    : [];
+  const details = activityLog?.details ?? 'auto';
+  const resultShown = (toolName: string) => shouldRenderToolResult(toolName, mode, allowlist);
+  const readSteps = (parts: ReadonlyArray<unknown>): ActivityStep[] => readActivitySteps(
+    parts,
+    (toolName, status, source) => allowStepDetail(details, status, source, resultShown(toolName)),
+  ).map((step) => (
+    // A call the user approved that the server did not run: the reason is the SDK's own text.
+    step.status === 'declined' && step.declinedBy === 'server' && !step.detail
+      && (details === 'all' || details === 'auto')
+      ? { ...step, detail: locale.activityApprovalNotUsedDetail }
+      : step
+  ));
+  const activitySteps = isAssistant ? readSteps(message.parts) : [];
   const planItems = isAssistant ? readLatestPlan(message.parts) : null;
   const hasPlan = (planItems?.length ?? 0) >= 2;
   const turnActive = isLatestMessage && isLoading;
@@ -230,15 +360,15 @@ export function useMessageParts(message: ChatMessage): MessageParts {
     && activitySteps.length > 0;
 
   // Extract tool result summaries as fallback text when no text parts exist
-  const cleanTextParts = message.parts
-    .filter(isTextPart)
-    .filter((p) => p.text.trim())
-    .map((p) => stripChatCommandMarkers(stripClarificationMarkers(stripContextBlocks(p.text))))
-    .map((text) => (
-      message.role === 'assistant'
-        ? extractTrailingFollowupSuggestions(text).text
-        : text
-    ));
+  const textEntries = message.parts
+    .map((part, index) => ({ part, index }))
+    .filter((entry): entry is { part: TextPart; index: number } => isTextPart(entry.part))
+    .filter((entry) => entry.part.text.trim())
+    .map(({ part, index }) => {
+      const text = stripChatCommandMarkers(stripClarificationMarkers(stripContextBlocks(part.text)));
+      return { index, text: message.role === 'assistant' ? extractTrailingFollowupSuggestions(text).text : text };
+    });
+  const cleanTextParts = textEntries.map((entry) => entry.text);
   const hasTextContent = cleanTextParts.some((text) => text.trim().length > 0);
   const fileParts = message.parts.filter(isFilePart);
 
@@ -319,6 +449,16 @@ export function useMessageParts(message: ChatMessage): MessageParts {
       );
     }
 
+    // `entityLinks.mentionMarkers: 'markdown'`: the answer keeps its Markdown, each marker a chip inside it.
+    if (linkText && links.mentionMarkers === 'markdown') {
+      const { content, mentions } = markdownWithMentionMarkers(segments);
+      return (
+        <MentionMarkers key={`text-${i}`} mentions={mentions}>
+          <MarkdownComponent content={content} />
+        </MentionMarkers>
+      );
+    }
+
     return (
       <div key={`mention-text-${i}`} data-component="message-rich-text">
         {segments.map((segment, index) => {
@@ -348,7 +488,21 @@ export function useMessageParts(message: ChatMessage): MessageParts {
       </div>
     );
   });
+  /** The approval of a tool part, read once when asked for (`MessagePartEntry.approval`, the nodes below). */
+  const approvals = new Map<number, ToolPartApproval | undefined>();
   const toolResultNodes = message.parts.map((part, i) => {
+    const node = toolResultNode(part, i);
+    const approval = approvalNode(part, i);
+    if (!approval) return node;
+    return (
+      <Fragment key={`tool-part-${i}`}>
+        {approval}
+        {node}
+      </Fragment>
+    );
+  });
+
+  function toolResultNode(part: ChatMessage['parts'][number], i: number): ReactNode {
     const clarification = readClarificationPart(part);
     if (clarification) {
       return (
@@ -383,11 +537,72 @@ export function useMessageParts(message: ChatMessage): MessageParts {
     }
 
     return null;
+  }
+
+  function approvalAt(i: number): ToolPartApproval | undefined {
+    if (!approvals.has(i)) {
+      const part = message.parts[i];
+      const toolName = isRecord(part) ? toolPartName(part) : null;
+      approvals.set(i, toolName && isAssistant
+        ? readToolPartApproval(part, {
+          toolName,
+          pending: pendingApprovals ?? [],
+          messages: messages ?? [message],
+          declarations: entityDeclarations,
+          describe: approvalDescription ?? ((name, id, args) => ({ id, toolName: name, args: isRecord(args) ? args : {}, messageId: message.id })),
+          withSubjects: approvalSubjects !== false,
+          ...(language ? { language } : {}),
+        })
+        : undefined);
+    }
+    return approvals.get(i);
+  }
+
+  /** The approval entry or inline card at a tool part (`approvalDisplay`); null by default. */
+  function approvalNode(part: ChatMessage['parts'][number], i: number): ReactNode {
+    const display = approvalDisplay ?? { decided: 'none', open: 'panel' };
+    if (display.decided === 'none' && display.open === 'panel') return null;
+    if (!isRecord(part) || !isRecord(part.approval)) return null;
+    const approval = approvalAt(i);
+    if (!approval) return null;
+    if (approval.state === 'decided') {
+      return display.decided === 'entry' ? <ApprovalEntryComponent approval={approval} /> : null;
+    }
+    if (display.open !== 'inline' || !approval.pending) return null;
+    return (
+      <ApprovalCardComponent
+        approval={approval.pending}
+        onApprove={approve}
+        onReject={reject}
+        isProcessing={isProcessingApproval}
+      />
+    );
+  }
+
+  // `activityLog.grouping: 'sections'`: a log per run of steps, at its place between the texts.
+  const sections = (activityLog?.grouping ?? 'message') === 'sections' && isAssistant && activitySteps.length > 0
+    ? activitySections(message.parts, textEntries.map((entry, i) => ({ index: entry.index, node: textNodes[i] ?? null })), readSteps)
+    : null;
+  const lastStepsSection = sections ? sections.map((section) => section.kind).lastIndexOf('steps') : -1;
+  const logsAt = new Map<number, ReactNode>();
+  const sectionNodes = sections?.map((section, i) => {
+    if (section.kind === 'text') return section.node;
+    const last = i === lastStepsSection;
+    const log = (
+      <ActivityLog
+        key={`activity-${i}-${section.steps[0]!.id}`}
+        steps={section.steps}
+        active={turnActive && last}
+        {...(last && notice && noticeInLog ? { notice: notice.text, noticeStatus: notice.status } : {})}
+      />
+    );
+    logsAt.set(section.start, scoped(log));
+    return log;
   });
 
   const nodes = {
     plan: hasPlan ? <PlanChecklist items={planItems!} active={turnActive} /> : null,
-    activity: activitySteps.length > 0
+    activity: sectionNodes ? null : activitySteps.length > 0
       ? (
         <ActivityLog
           steps={activitySteps}
@@ -406,7 +621,7 @@ export function useMessageParts(message: ChatMessage): MessageParts {
         </div>
       )
       : null,
-    text: hasTextContent || fallbackSummary
+    text: sectionNodes ? <>{sectionNodes}</> : hasTextContent || fallbackSummary
       ? (
         <>
           {textNodes}
@@ -417,8 +632,36 @@ export function useMessageParts(message: ChatMessage): MessageParts {
       : null,
     toolResults: toolResultNodes.some((node) => node !== null) ? <>{toolResultNodes}</> : null,
   };
+  const textNodeAt = new Map(textEntries.map((entry, i) => [entry.index, textNodes[i] ?? null] as const));
+  const parts = message.parts.map((part, index): MessagePartEntry => {
+    const kind = partKind(part);
+    const toolName = kind === 'tool' && isRecord(part) ? toolPartName(part) ?? undefined : undefined;
+    const toolCallId = isRecord(part) && typeof part.toolCallId === 'string' && part.toolCallId ? part.toolCallId : undefined;
+    const node = kind === 'text'
+      ? textNodeAt.get(index) ?? null
+      : kind === 'file'
+        ? <MessageAttachment key={`file-${index}`} part={part as FilePart} locale={locale} />
+        : kind === 'tool' ? toolResultNodes[index] ?? null : null;
+    const entry: MessagePartEntry = {
+      key: kind === 'tool' && toolCallId ? `tool:${toolCallId}` : `${kind}:${index}`,
+      index,
+      kind,
+      part,
+      ...(toolName ? { toolName } : {}),
+      ...(toolCallId ? { toolCallId } : {}),
+      node: scoped(node),
+    };
+    if (kind === 'tool' && isRecord(part) && isRecord(part.approval)) {
+      // Read when asked for: describing a decided approval walks the conversation.
+      Object.defineProperty(entry, 'approval', { enumerable: true, get: () => approvalAt(index) });
+    }
+    return entry;
+  });
+
   return {
     visible,
+    parts,
+    logsAt,
     plan: scoped(nodes.plan),
     activity: scoped(nodes.activity),
     notice: scoped(nodes.notice),
@@ -439,18 +682,39 @@ export function useMessageParts(message: ChatMessage): MessageParts {
  * Uses `data-role` attribute for styling (user/assistant/system).
  */
 export function MessageBubble({ message, className }: MessageBubbleProps) {
-  const { classNames, components } = useChatContext();
-  const { visible, ...nodes } = useMessageParts(message);
+  const { classNames, components, approvalDisplay } = useChatContext();
+  const { visible, parts, logsAt, ...nodes } = useMessagePartsWithLogs(message);
   if (!visible) return null;
-  // The default order, unchanged: plan, log, notice, attachments, text, results.
+  // With `approvalDisplay` placing approvals at their tool part, a message that
+  // has one renders its text and tool parts in message order, so the approval
+  // sits between the texts around it. Otherwise the default order, unchanged:
+  // plan, log, notice, attachments, text, results. With
+  // `activityLog.grouping: 'sections'` each section's log goes before the
+  // first tool part of its run, as in `nodes.text`.
+  const display = approvalDisplay ?? { decided: 'none', open: 'panel' };
+  const inOrder = (display.decided !== 'none' || display.open !== 'panel')
+    && parts.some((entry) => entry.kind === 'text' && entry.node !== null)
+    && parts.some((entry) => entry.kind === 'tool' && isRecord(entry.part) && isRecord(entry.part.approval));
   const ordered = (
     <>
       {nodes.plan}
       {nodes.activity}
       {nodes.notice}
       {nodes.attachments}
-      {nodes.text}
-      {nodes.toolResults}
+      {inOrder
+        ? parts.filter((entry) => entry.kind === 'text' || entry.kind === 'tool')
+          .map((entry) => (
+            <Fragment key={entry.key}>
+              {logsAt.get(entry.index) ?? null}
+              {entry.node}
+            </Fragment>
+          ))
+        : (
+          <>
+            {nodes.text}
+            {nodes.toolResults}
+          </>
+        )}
     </>
   );
   const Arrange = components.MessageParts;
@@ -461,7 +725,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
       data-component="message-bubble"
       data-role={message.role}
     >
-      {Arrange ? <Arrange message={message} {...nodes}>{ordered}</Arrange> : ordered}
+      {Arrange ? <Arrange message={message} parts={parts} {...nodes}>{ordered}</Arrange> : ordered}
     </div>
   );
 }

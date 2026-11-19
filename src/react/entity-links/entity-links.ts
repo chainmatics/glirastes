@@ -8,6 +8,7 @@ import {
   declaredRecordsOf,
   entityIdText,
   entityLookupId,
+  type DeclaredRecordIdentity,
   type EntityDeclarationsByTool,
 } from '../../contracts/entity-declaration.js';
 
@@ -69,6 +70,23 @@ export interface ChatEntityLinksConfig {
   resolveAmbiguous?(label: string, candidates: ReadonlyArray<ChatEntityReference>): ChatEntityReference | undefined;
   /** `all` (default) links in every message, `assistant` only in the assistant's text. */
   readonly scope?: 'all' | 'assistant';
+  /**
+   * `{{mention:type:id:label}}` markers in an assistant's text.
+   * `'plain'` (default, as before): a text part with a marker renders
+   * without Markdown, each marker a chip. `'markdown'`: the text keeps its
+   * Markdown and each marker becomes a chip inside it (with a custom
+   * `components.Markdown`, through `markdownComponents`).
+   */
+  readonly mentionMarkers?: 'plain' | 'markdown';
+  /**
+   * With `mentionMarkers: 'markdown'`: a marker becomes a chip only when the
+   * conversation showed its id as a record, by declaration only (the tools'
+   * `outputEntities`, a `@` mention the user picked, an entity search hit);
+   * otherwise its label stays text. Never a field-name guess, so without
+   * declarations every marker stays text. Default true; `false` turns the
+   * check off. Names several records share follow `ambiguousNames`.
+   */
+  readonly verifyMentions?: boolean;
   /**
    * Opens a reference. Return `false` to fall through to the default: the
    * entity's action that runs `ui.navigate` (a page like `/tasks/:taskId`),
@@ -229,25 +247,7 @@ export function collectKnownEntities(
     if (!found.has(key)) found.set(key, reference);
   };
   const byTool = new Map(searches.map((entry) => [toolKey(entry.search.tool), entry]));
-  // A `read_result` answer belongs to the tool that produced the result it reads.
-  const producers = new Map<string, string>();
-  const producerOutputs = new Map<string, unknown>();
-  if (declarations) {
-    for (const message of messages) {
-      for (const part of message.parts) {
-        const result = toolOutputOf(part);
-        const marker = result && isRecord(result.output) ? result.output._result : undefined;
-        if (result && result.tool !== READ_RESULT_TOOL_NAME && isRecord(marker) && typeof marker.id === 'string') {
-          producers.set(marker.id, result.tool);
-          producerOutputs.set(marker.id, result.output);
-        }
-      }
-    }
-  }
-  const producerOf = (part: unknown, tool: string): string => {
-    if (tool !== READ_RESULT_TOOL_NAME || !isRecord(part) || !isRecord(part.input)) return tool;
-    return typeof part.input.resultId === 'string' ? producers.get(part.input.resultId) ?? tool : tool;
-  };
+  const producers = declarations ? resultProducers(messages) : undefined;
   for (const message of messages) {
     for (const part of message.parts) {
       if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') {
@@ -259,24 +259,14 @@ export function collectKnownEntities(
       }
       const result = toolOutputOf(part);
       // A tool whose `outputEntities` declare a type and a name: every such record, also nested (D1).
-      const producer = result ? producerOf(part, result.tool) : undefined;
-      const own = producer && declarations && Object.prototype.hasOwnProperty.call(declarations, producer)
-        ? declarations[producer]!.output
-        : undefined;
-      // A read keeps the path a path-less declaration had in the producing result.
-      const readId = result && result.tool === READ_RESULT_TOOL_NAME && producer !== result.tool && isRecord(part) && isRecord(part.input)
-        && typeof part.input.resultId === 'string' ? part.input.resultId : undefined;
-      const declared = readId !== undefined ? declarationsForRead(own, producerOutputs.get(readId)) : own;
-      if (result && declared) {
-        for (const identity of declaredRecordsOf(result.output, declared).values()) {
-          if (identity.declaration.type && identity.name) {
-            // A composite key: readable id, its parts in `data`; told apart by its tuple.
-            const composite = identity.idValues.length > 1;
-            add({
-              type: identity.declaration.type, id: entityIdText(identity.idValues), label: identity.name,
-              ...(composite ? { data: { idValues: [...identity.idValues] } } : {}),
-            }, composite ? String(entityLookupId(identity.idValues)) : undefined);
-          }
+      for (const identity of result && producers ? declaredIdentitiesOf(part, result, declarations!, producers) : []) {
+        if (identity.declaration.type && identity.name) {
+          // A composite key: readable id, its parts in `data`; told apart by its tuple.
+          const composite = identity.idValues.length > 1;
+          add({
+            type: identity.declaration.type, id: entityIdText(identity.idValues), label: identity.name,
+            ...(composite ? { data: { idValues: [...identity.idValues] } } : {}),
+          }, composite ? String(entityLookupId(identity.idValues)) : undefined);
         }
       }
       const entry = result ? byTool.get(toolKey(result.tool)) : undefined;
@@ -297,6 +287,99 @@ export function collectKnownEntities(
     }
   }
   return [...found.values()];
+}
+
+/** A `read_result` answer belongs to the tool that produced the result it reads. */
+interface ResultProducers {
+  tools: Map<string, string>;
+  outputs: Map<string, unknown>;
+}
+
+function resultProducers(messages: ReadonlyArray<{ readonly parts: ReadonlyArray<unknown> }>): ResultProducers {
+  const tools = new Map<string, string>();
+  const outputs = new Map<string, unknown>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      const result = toolOutputOf(part);
+      const marker = result && isRecord(result.output) ? result.output._result : undefined;
+      if (result && result.tool !== READ_RESULT_TOOL_NAME && isRecord(marker) && typeof marker.id === 'string') {
+        tools.set(marker.id, result.tool);
+        outputs.set(marker.id, result.output);
+      }
+    }
+  }
+  return { tools, outputs };
+}
+
+/** The records of one tool result its tool's `outputEntities` declare (a read: the producing tool's). */
+function declaredIdentitiesOf(
+  part: unknown,
+  result: { tool: string; output: unknown },
+  declarations: EntityDeclarationsByTool,
+  producers: ResultProducers,
+): Iterable<DeclaredRecordIdentity> {
+  const readId = result.tool === READ_RESULT_TOOL_NAME && isRecord(part) && isRecord(part.input)
+    && typeof part.input.resultId === 'string' ? part.input.resultId : undefined;
+  const producer = readId !== undefined ? producers.tools.get(readId) ?? result.tool : result.tool;
+  const own = Object.prototype.hasOwnProperty.call(declarations, producer) ? declarations[producer]!.output : undefined;
+  // A read keeps the path a path-less declaration had in the producing result.
+  const declared = readId !== undefined && producer !== result.tool ? declarationsForRead(own, producers.outputs.get(readId)) : own;
+  return declared ? declaredRecordsOf(result.output, declared).values() : [];
+}
+
+/**
+ * The `type`/`id` pairs a conversation showed as records by declaration
+ * only, never by a field-name guess: the records the tools' `outputEntities`
+ * declare (key `type\u0000id`, or `\u0000id` for a declaration without a
+ * type), the `@` mentions the user picked and the hits of an entity search
+ * tool. An assistant's own markers do not count.
+ */
+export function collectSeenReferenceKeys(
+  messages: ReadonlyArray<{ readonly role?: string; readonly parts: ReadonlyArray<unknown> }>,
+  searches: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }> = [],
+  declarations?: EntityDeclarationsByTool,
+): Set<string> {
+  const keys = new Set<string>();
+  const byTool = new Map(searches.map((entry) => [toolKey(entry.search.tool), entry]));
+  const producers = declarations ? resultProducers(messages) : undefined;
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') {
+        if (message.role !== 'user') continue;
+        for (const segment of parseMentionSegments(part.text)) {
+          if (segment.kind === 'mention' && segment.mention.type !== 'command') keys.add(referenceKey(segment.mention.type, segment.mention.id));
+        }
+        continue;
+      }
+      const result = toolOutputOf(part);
+      if (!result) continue;
+      for (const identity of producers ? declaredIdentitiesOf(part, result, declarations!, producers) : []) {
+        keys.add(referenceKey(identity.declaration.type ?? '', entityIdText(identity.idValues)));
+      }
+      const entry = byTool.get(toolKey(result.tool));
+      if (!entry) continue;
+      for (const candidate of [result.output, at(result.output, ['data']), at(result.output, ['value'])]) {
+        const list = entry.search.itemsPath.length ? at(candidate, entry.search.itemsPath) : candidate;
+        if (!Array.isArray(list)) continue;
+        for (const item of list) {
+          const id = at(item, [entry.search.idField]);
+          if (typeof id === 'string' || typeof id === 'number') keys.add(referenceKey(entry.type, String(id)));
+        }
+        break;
+      }
+    }
+  }
+  return keys;
+}
+
+/** Key of `collectSeenReferenceKeys`; the type compares case-insensitively. */
+export function referenceKey(type: string, id: string): string {
+  return `${type.toLowerCase()}\u0000${id}`;
+}
+
+/** Whether the conversation showed this reference (`collectSeenReferenceKeys`). */
+export function isSeenReference(keys: ReadonlySet<string>, type: string, id: string): boolean {
+  return keys.has(referenceKey(type, id)) || keys.has(referenceKey('', id));
 }
 
 /** The app path of an entity's `ui.navigate` action (`/tasks/:taskId`), or undefined. */

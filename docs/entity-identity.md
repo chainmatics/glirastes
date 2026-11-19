@@ -132,3 +132,5 @@ per tool), e.g. for a server that is not `createAiChatHandler`.
 | `resolveAmbiguous(label, candidates)` | none | Picks the reference for a shared name; `undefined` leaves it as text |
 | `scope` | `'all'` | `assistant`: only the assistant's text is linked, never a user's message |
 | `ChatEntityReference.data` | none | Free data from `resolve`, `knownEntities` or `resolveAmbiguous`, passed to `open` |
+| `mentionMarkers` | `'plain'` | `{{mention:type:id:label}}` markers in an assistant's text: `plain` renders such a text part without Markdown, each marker a chip (as before); `markdown` keeps the Markdown and puts each marker as an inline chip inside it (a custom `Markdown` keeps them through `markdownComponents`; without them it shows the label) |
+| `verifyMentions` | `true` | With `mentionMarkers: 'markdown'`: a marker becomes a chip only for an id the conversation showed as a record by declaration (`outputEntities` of a tool result, a `@` mention the user picked, a hit of an entity search tool), never by a field-name guess; otherwise its label stays text. `false` turns the check off |
