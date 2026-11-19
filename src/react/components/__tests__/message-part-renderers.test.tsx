@@ -154,6 +154,32 @@ describe('approvals at their tool part (W3)', () => {
     expect(entry.textContent).toContain('Lobby Loop');
   });
 
+  it('places the entry and the inline card between the texts around their tool part', async () => {
+    const order = () => Array.from(bubble().querySelectorAll(
+      '[data-component="markdown"], [data-component="approval-entry"], [data-component="approval-card"]',
+    )).map((node) => node.getAttribute('data-component') === 'markdown' ? node.textContent : node.getAttribute('data-component'));
+    render(
+      <Chat
+        messages={conversation(
+          { type: 'text', text: 'Text A' },
+          deletion('output-available', { id: 'ap1', approved: true }, { output: { success: true } }),
+          { type: 'text', text: 'Text B' },
+        )}
+        approvalDisplay={{ decided: 'entry' }}
+      />,
+    );
+    await screen.findByText('Text B');
+    expect(order()).toEqual(['Text A', 'approval-entry', 'Text B']);
+    cleanup();
+    render(
+      <Chat
+        messages={conversation({ type: 'text', text: 'Text A' }, deletion('approval-requested', { id: 'ap9' }), { type: 'text', text: 'Text B' })}
+        approvalDisplay={{ open: 'inline' }}
+      />,
+    );
+    await waitFor(() => expect(order()).toEqual(['Text A', 'approval-card', 'Text B']));
+  });
+
   it("open: 'inline' draws the open card at its tool part instead of below the messages", async () => {
     const messages = conversation({ type: 'text', text: 'Please confirm.' }, deletion('approval-requested', { id: 'ap9' }));
     const { unmount } = render(<Chat messages={messages} />);

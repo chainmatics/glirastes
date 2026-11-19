@@ -666,18 +666,32 @@ export function useMessageParts(message: ChatMessage): MessageParts {
  * Uses `data-role` attribute for styling (user/assistant/system).
  */
 export function MessageBubble({ message, className }: MessageBubbleProps) {
-  const { classNames, components } = useChatContext();
+  const { classNames, components, approvalDisplay } = useChatContext();
   const { visible, parts, ...nodes } = useMessageParts(message);
   if (!visible) return null;
-  // The default order, unchanged: plan, log, notice, attachments, text, results.
+  // With `approvalDisplay` placing approvals at their tool part, a message that
+  // has one renders its text and tool parts in message order, so the approval
+  // sits between the texts around it. Otherwise the default order, unchanged:
+  // plan, log, notice, attachments, text, results.
+  const display = approvalDisplay ?? { decided: 'none', open: 'panel' };
+  const inOrder = (display.decided !== 'none' || display.open !== 'panel')
+    && parts.some((entry) => entry.kind === 'text' && entry.node !== null)
+    && parts.some((entry) => entry.kind === 'tool' && isRecord(entry.part) && isRecord(entry.part.approval));
   const ordered = (
     <>
       {nodes.plan}
       {nodes.activity}
       {nodes.notice}
       {nodes.attachments}
-      {nodes.text}
-      {nodes.toolResults}
+      {inOrder
+        ? parts.filter((entry) => entry.kind === 'text' || entry.kind === 'tool')
+          .map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)
+        : (
+          <>
+            {nodes.text}
+            {nodes.toolResults}
+          </>
+        )}
     </>
   );
   const Arrange = components.MessageParts;

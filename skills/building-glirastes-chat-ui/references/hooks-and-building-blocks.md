@@ -112,7 +112,8 @@ Defaults keep today's markup; everything below is opt-in.
   `…ExpectedLabel`, `…DeclinedLabel`, `…NotRunLabel`, `approvalOutcomeText`)
   at the tool part; `open: 'inline'` draws the open `ApprovalCard` at its
   tool part instead of below the messages (one card per call, no bulk
-  card). A custom bubble that renders neither `toolResults` nor `parts`
+  card). With either option the default bubble renders the text and tool
+  parts of a message with an approval in message order. A custom bubble that renders neither `toolResults` nor `parts`
   must place the inline card itself (`approval.pending` with
   `useChatContext().approve` / `reject`).
 - CSS-only themes select the parts by their existing hooks:
