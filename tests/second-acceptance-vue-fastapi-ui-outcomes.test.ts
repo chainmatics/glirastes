@@ -123,8 +123,9 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: outcome protocol of t
     };
     expect(generated.toolCatalog.map((tool) => tool.modelName)).toContain('ui_navigate');
     const turn = app.turn({ authorization: `Bearer ${app.token}` });
+    // Outside a chat request (no outcome flag): the shape every browser runs.
     expect(await turn.execute('ui_navigate', { destination: '/overview' })).toMatchObject({
-      handedOff: true,
+      success: true,
       uiAction: { type: 'glirastes.navigate', payload: { href: '/overview' } },
     });
   });
@@ -175,11 +176,11 @@ describe.skipIf(!PYTHON_READY)('second acceptance fixture: outcome protocol of t
     expect(toolOutputs(chunks)).toEqual([]);
   }, 60_000);
 
-  it('without the flag (an older client, a custom client on /server/http): hand-off without marker, the model writes on', async () => {
+  it('without the flag (an older client, a custom client on /server/http): the 0.17.3 shape without marker, the model writes on', async () => {
     const { chunks, model } = await chat({ messages: [userMessage()] });
     const [result] = toolOutputs(chunks);
-    expect(Object.keys(result!.output).sort()).toEqual(['handedOff', 'message', 'uiAction']);
-    expect(result!.output).toMatchObject({ handedOff: true, uiAction: { type: 'glirastes.navigate', payload: { href: '/overview' } } });
+    expect(Object.keys(result!.output).sort()).toEqual(['message', 'success', 'uiAction']);
+    expect(result!.output).toMatchObject({ success: true, uiAction: { type: 'glirastes.navigate', payload: { href: '/overview' } } });
     expect(model.doStreamCalls).toHaveLength(2);
     expect(prompt(model)).not.toContain(UI_OUTCOME_SYSTEM_NOTE);
     expect(hasText(chunks)).toBe(true);

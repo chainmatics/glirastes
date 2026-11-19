@@ -937,16 +937,27 @@ export interface ToolToAiToolOptions {
   resultStore?: ResultStore;
   /**
    * Shape of a UI tool result that hands a `uiAction` to the browser.
-   * `'handoff'` (default): `{ handedOff: true, message, uiAction }`, without
-   * `success`, because the server does not know whether the app carried it
-   * out. `'legacy'`: `{ success: true, message, uiAction }` as up to 0.17.
-   * A UI tool without a `uiAction` keeps `{ success: true, message }`.
+   * `'legacy'` (default): `{ success: true, message, uiAction }`, exactly as
+   * up to 0.17.3, which every browser runs. `'handoff'`:
+   * `{ handedOff: true, message, uiAction }`, without `success`, because the
+   * server does not know whether the app carried it out; only a client that
+   * reads `handedOff` runs it (glirastes 0.18 and later, which say so with
+   * `glirastesUiOutcomes: 1`). `createAiChatHandler` picks it per request
+   * (its `uiToolResultShape`, default `'auto'`). A UI tool without a
+   * `uiAction` keeps `{ success: true, message }`.
    */
   uiToolResultShape?: UiToolResultShape;
 }
 
 /** See `ToolToAiToolOptions.uiToolResultShape`. */
 export type UiToolResultShape = 'handoff' | 'legacy';
+
+/**
+ * `createAiChatHandler`'s `uiToolResultShape`: `'auto'` (default) gives the
+ * hand-off shape to a request with `glirastesUiOutcomes: 1` and the 0.17.3
+ * shape to every other; `'handoff'` and `'legacy'` force one for all.
+ */
+export type UiToolResultShapeOption = 'auto' | UiToolResultShape;
 
 /**
  * A successful UI tool result that hands a `uiAction` to the browser, in
@@ -1117,7 +1128,7 @@ export function toolToAiTool(
         const normalized = options?.uiActionSchema
           ? normalizeResultUiAction(cleanResult, options.uiActionSchema)
           : cleanResult;
-        const output = tool.uiTool && options?.uiToolResultShape !== 'legacy' ? asHandedOff(normalized) : normalized;
+        const output = tool.uiTool && options?.uiToolResultShape === 'handoff' ? asHandedOff(normalized) : normalized;
         // Cut from the sealed copy in the store: the PII shield must not seal it again.
         if (overview || fromStore) store!.markIssued(output);
         return output;

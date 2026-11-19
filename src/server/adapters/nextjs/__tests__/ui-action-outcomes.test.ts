@@ -143,26 +143,41 @@ const handedOff = {
   uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks', destination: '/tasks' } },
 };
 
+/** What 0.17.3 sent, and what a request without the flag gets: `success: true`. */
+const legacy = { success: true, message: handedOff.message, uiAction: handedOff.uiAction };
+
 function prompt(model: MockLanguageModelV3, index = 0): string {
   return JSON.stringify(model.doStreamCalls[index]!.prompt);
 }
 
 describe('a UI tool result without the outcome protocol (fallback)', () => {
-  it('hands the action off without success and lets the model write on, without a flag', async () => {
+  it('sends the 0.17.3 shape (success: true) and lets the model write on, without a flag', async () => {
     const { outputs: [output], model, chunks } = await run({}, {});
-    expect(output).toEqual(handedOff);
+    expect(output).toEqual(legacy);
+    expect(Object.keys(output!)).not.toContain('handedOff');
     expect(model.doStreamCalls).toHaveLength(2);
     expect(chunks.some((chunk) => chunk.type === 'text-delta')).toBe(true);
     expect(prompt(model)).not.toContain(UI_OUTCOME_SYSTEM_NOTE);
   });
 
-  it("keeps the 0.17 shape with uiToolResultShape: 'legacy'", async () => {
-    const { outputs: [output] } = await run({ uiToolResultShape: 'legacy' }, {});
-    expect(output).toEqual({ ...handedOff, handedOff: undefined, success: true });
+  it("decides by the flag with uiToolResultShape: 'auto' (the default)", async () => {
+    expect((await run({ uiToolResultShape: 'auto' }, {})).outputs[0]).toEqual(legacy);
+    expect((await run({ uiToolResultShape: 'auto' }, FLAG)).outputs[0]).toEqual({ ...handedOff, awaitsOutcome: true });
+  });
+
+  it("forces the 0.17 shape with uiToolResultShape: 'legacy', also for a client with the flag", async () => {
+    const { outputs: [output] } = await run({ uiToolResultShape: 'legacy' }, FLAG);
+    expect(output).toEqual({ ...legacy, awaitsOutcome: true });
     expect(Object.keys(output!)).not.toContain('handedOff');
   });
 
-  it("ignores the flag with uiActionOutcomes: 'off'", async () => {
+  it("forces the hand-off shape with uiToolResultShape: 'handoff', also for a client without the flag", async () => {
+    const { outputs: [output], model } = await run({ uiToolResultShape: 'handoff' }, {});
+    expect(output).toEqual(handedOff);
+    expect(model.doStreamCalls).toHaveLength(2);
+  });
+
+  it("gives a client with the flag the hand-off shape without marker under uiActionOutcomes: 'off'", async () => {
     const { outputs: [output], model } = await run({ uiActionOutcomes: 'off' }, FLAG);
     expect(output).toEqual(handedOff);
     expect(model.doStreamCalls).toHaveLength(2);
@@ -170,7 +185,7 @@ describe('a UI tool result without the outcome protocol (fallback)', () => {
 
   it.each([2, '1', true, { v: 1 }])('treats the flag value %j as missing', async (value) => {
     const { outputs: [output], model } = await run({}, { glirastesUiOutcomes: value });
-    expect(output).not.toHaveProperty('awaitsOutcome');
+    expect(output).toEqual(legacy);
     expect(model.doStreamCalls).toHaveLength(2);
   });
 
@@ -189,23 +204,26 @@ describe('a UI tool result without the outcome protocol (fallback)', () => {
       successMessage: 'Dialog requested.', uiAction: { type: 'open-dialog' },
     }));
     const { outputs: [output] } = await run({ tools: { ui_open: own }, model: scriptedModel([{ toolName: 'ui_open' }]) }, {});
-    expect(output).toEqual({ handedOff: true, message: 'Dialog requested.', uiAction: { type: 'open-dialog' } });
+    expect(output).toEqual({ success: true, message: 'Dialog requested.', uiAction: { type: 'open-dialog' } });
+    const flagged = await run({ tools: { ui_open: own }, model: scriptedModel([{ toolName: 'ui_open' }]) }, FLAG);
+    expect(flagged.outputs[0]).toEqual({ handedOff: true, message: 'Dialog requested.', uiAction: { type: 'open-dialog' } });
   });
 
-  it('gives a custom stream handler the hand-off shape without a marker', async () => {
-    let output: unknown;
+  it('gives a custom stream handler the shape of the flag, never a marker', async () => {
+    const outputs: unknown[] = [];
     const handler = createAiChatHandler({
       tools: registry,
       model: scriptedModel(),
       systemPrompt: 'Assistant',
       streamHandler: async (ctx) => {
         const tool = ctx.tools.ui_navigate as { execute: (input: unknown, options: unknown) => Promise<unknown> };
-        output = await tool.execute({ destination: '/tasks' }, { toolCallId: 'c1', messages: [] });
+        outputs.push(await tool.execute({ destination: '/tasks' }, { toolCallId: 'c1', messages: [] }));
         return new Response('ok');
       },
     });
     await handler(post(FLAG));
-    expect(output).toEqual(handedOff);
+    await handler(post({}));
+    expect(outputs).toEqual([handedOff, legacy]);
   });
 
   it('marks nothing for a direct command', async () => {
@@ -214,6 +232,14 @@ describe('a UI tool result without the outcome protocol (fallback)', () => {
     expect(model.doStreamCalls).toHaveLength(0);
     expect(output).toMatchObject({ handedOff: true });
     expect(output).not.toHaveProperty('awaitsOutcome');
+    const without = await run({}, {}, [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: command }] }]);
+    expect(without.outputs[0]).toEqual(legacy);
+  });
+
+  it("refuses an unknown uiToolResultShape when the handler is created", () => {
+    expect(() => createAiChatHandler({
+      tools: registry, model: scriptedModel(), systemPrompt: 'Assistant', uiToolResultShape: 'success' as never,
+    })).toThrow("uiToolResultShape must be 'auto', 'handoff' or 'legacy'");
   });
 });
 

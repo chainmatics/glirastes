@@ -1200,7 +1200,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     memory: memoryConfig,
     budgetStopTexts: budgetStopTextsConfig,
     uiActionOutcomes = 'confirm',
-    uiToolResultShape,
+    uiToolResultShape = 'auto',
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
   // Server lookups behind approval cards: only the built-in stream handler makes them.
@@ -1208,8 +1208,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     ? undefined
     : resolveApprovalSubjectLimits(approvalSubjectsConfig);
   assertUiActionOutcomesOption(uiActionOutcomes, 'createAiChatHandler');
-  if (uiToolResultShape !== undefined && uiToolResultShape !== 'handoff' && uiToolResultShape !== 'legacy') {
-    throw new Error("createAiChatHandler: uiToolResultShape must be 'handoff' or 'legacy'");
+  if (uiToolResultShape !== 'auto' && uiToolResultShape !== 'handoff' && uiToolResultShape !== 'legacy') {
+    throw new Error("createAiChatHandler: uiToolResultShape must be 'auto', 'handoff' or 'legacy'");
   }
   const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
   assertChatServerLocales(localesConfig);
@@ -1819,7 +1819,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         traceId: sessionId || undefined,
         telemetry,
         ...(maxResultChars !== undefined ? { maxResultChars } : {}),
-        ...(uiToolResultShape ? { uiToolResultShape } : {}),
+        // `'auto'`: the hand-off shape only for a client that reads it (it sends the outcome flag);
+        // every other request gets the shape a 0.17 browser runs.
+        uiToolResultShape: uiToolResultShape === 'auto'
+          ? (readUiOutcomesFlag(body.value) ? 'handoff' : 'legacy')
+          : uiToolResultShape,
       };
       /**
        * The result handles and `read_result` of a model turn (not of a direct
