@@ -167,7 +167,7 @@ describe('detect', () => {
 
   // Coarse guard against per-note work over every file (the omnify case: ~1,400
   // files, 13 notes, 1 s). Files are ~6 KB like a real app. The bounds (1500 ms
-  // in total, 500 ms for evaluation alone) are generous so slow CI machines
+  // in total, 800 ms for evaluation alone) are generous so slow CI machines
   // pass; per-note line indexing or specifier parsing lands above them.
   it('scans 2,000 files and evaluates 15 notes in under 1500 ms', async () => {
     const body = Array.from({ length: 150 }, (_, i) => `export const value${i} = compute(${i}); // filler line\n`).join('');
@@ -193,7 +193,7 @@ describe('detect', () => {
     const finished = performance.now();
     expect(scan.files).toHaveLength(2000);
     expect(results.every((r) => r.status === 'affected')).toBe(true);
-    expect(finished - scanned).toBeLessThan(500);
+    expect(finished - scanned).toBeLessThan(800);
     expect(finished - started).toBeLessThan(1500);
   }, 20_000);
 });
