@@ -83,6 +83,13 @@ describe('attachment contract', () => {
     expect(attachmentPlaceholderText('[]\n')).toBe('[attachment: file]');
   });
 
+  it('strips control, separator and bidi characters and bounds the name', () => {
+    expect(attachmentPlaceholderText('a\tb\u0000c\u0085d\u2028e\u2029f\u202eg\u200fh\u2066i\u2069j.png')).toBe('[attachment: abcdefghij.png]');
+    expect(attachmentPlaceholderText('\u202e\t[]\u2028')).toBe('[attachment: file]');
+    expect(attachmentPlaceholderText('a'.repeat(120))).toBe(`[attachment: ${'a'.repeat(120)}]`);
+    expect(attachmentPlaceholderText('a'.repeat(121))).toBe(`[attachment: ${'a'.repeat(120)}…]`);
+  });
+
   it('reads the attachment id from provider metadata only when valid', () => {
     const id = 'att_0123456789abcdef';
     expect(attachmentIdOf({ type: 'file', providerMetadata: { glirastes: { attachmentId: id } } })).toBe(id);

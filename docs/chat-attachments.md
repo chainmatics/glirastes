@@ -131,7 +131,9 @@ await clearLocalSessionStore({ storageKey: 'my-app-chat' });
 It takes `{ storageKey, storage?, attachmentStore? }`. Also exported:
 `createIndexedDbAttachmentStore`, `createMemoryAttachmentStore` and the types
 `AttachmentBlobStore` and `StoredAttachment`. `SessionConfig.attachments`
-takes an `AttachmentBlobStore` for a custom session config.
+takes an `AttachmentBlobStore` for a custom session config. In a custom store,
+`put` resolves `true` once the file is written and `false` when the write
+failed; the session store then tries again on the next `save`.
 
 ## Handing attachments to the app
 

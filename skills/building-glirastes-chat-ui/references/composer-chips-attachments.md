@@ -116,7 +116,8 @@ Server, `attachments` on `createAiChatHandler`:
   `clear`, `maxSessions` eviction, `clearLocalSessionStore`), no expiry. Call
   `clearLocalSessionStore({ storageKey })` on sign-out. Without IndexedDB the
   files stay in memory. A custom store implements `AttachmentBlobStore` (items
-  are `StoredAttachment`); `createIndexedDbAttachmentStore` and
+  are `StoredAttachment`; `put` resolves `true` when written, `false` when it
+  failed, and the next `save` retries); `createIndexedDbAttachmentStore` and
   `createMemoryAttachmentStore` are the two shipped ones.
 - To hand a file to the app (an upload route), a client action calls
   `chatAttachmentFormData(attachmentId)` (or `getChatAttachment(id)`; `null`

@@ -40,6 +40,12 @@ describe('chat attachment registry', () => {
     expect(await readText((await getChatAttachment(ID))!.blob)).toBe('stored');
   });
 
+  it('ignores file parts of assistant messages', async () => {
+    const [message] = withFile(dataUrl);
+    setActiveChatAttachmentSource({ conversationId: 'A', messages: () => [{ ...message, role: 'assistant' } as ChatMessage], store: null });
+    expect(await getChatAttachment(ID)).toBeNull();
+  });
+
   it('does not resolve an id of another conversation', async () => {
     const store = createMemoryAttachmentStore();
     await store.put('B', ID, { blob: new Blob(['x']), name: 'a.txt', mediaType: 'text/plain' });

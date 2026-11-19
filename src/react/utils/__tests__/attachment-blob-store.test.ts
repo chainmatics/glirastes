@@ -33,7 +33,7 @@ const file = (text: string, name = 'a.txt', mediaType = 'text/plain') => ({
 describe('IndexedDB attachment store', () => {
   it('round-trips bytes, name and type; unknown id is null', async () => {
     const store = makeStore();
-    await store.put('c1', 'f1', file('hello', 'hi.txt'));
+    expect(await store.put('c1', 'f1', file('hello', 'hi.txt'))).toBe(true);
     const got = await store.get('c1', 'f1');
     expect(got?.name).toBe('hi.txt');
     expect(got?.mediaType).toBe('text/plain');
@@ -106,7 +106,7 @@ describe('IndexedDB attachment store', () => {
       req.onerror = () => reject(req.error);
     });
     await expect(store.get('c', 'f')).resolves.toBeNull();
-    await expect(store.put('c', 'g', file('y'))).resolves.toBeUndefined();
+    await expect(store.put('c', 'g', file('y'))).resolves.toBe(false);
   });
 
   it('deleteConversation leaves the same conversation id under another storageKey', async () => {
@@ -127,7 +127,7 @@ describe('IndexedDB attachment store', () => {
       },
     } as unknown as IDBFactory;
     const store = makeStore(broken);
-    await expect(store.put('c', 'f', file('x'))).resolves.toBeUndefined();
+    await expect(store.put('c', 'f', file('x'))).resolves.toBe(false);
     await expect(store.get('c', 'f')).resolves.toBeNull();
     await expect(store.deleteConversation('c')).resolves.toBeUndefined();
     await expect(store.deleteAll()).resolves.toBeUndefined();

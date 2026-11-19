@@ -22,6 +22,7 @@ export function clearChatAttachmentSource(source: ChatAttachmentSource): void {
 
 function fromMessages(source: ChatAttachmentSource, id: string): StoredAttachment | null {
   for (const message of source.messages()) {
+    if (message.role !== 'user') continue;
     for (const part of message.parts as ReadonlyArray<unknown>) {
       const p = part as { type?: string; url?: unknown; filename?: string; mediaType?: string };
       if (p.type !== 'file' || attachmentIdOf(part) !== id || typeof p.url !== 'string') continue;

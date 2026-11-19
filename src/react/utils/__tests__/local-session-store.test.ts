@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '../../types.js';
 import { clearLocalSessionStore, createLocalSessionStore } from '../local-session-store.js';
 import { createMemoryAttachmentStore, type AttachmentBlobStore } from '../attachment-blob-store.js';
@@ -250,7 +250,7 @@ describe('attachment files kept as long as their chat', () => {
 
   const slowPut = (inner: AttachmentBlobStore): AttachmentBlobStore => ({
     ...inner,
-    put: async (...args) => { await new Promise((resolve) => setTimeout(resolve, 5)); await inner.put(...args); },
+    put: async (...args) => { await new Promise((resolve) => setTimeout(resolve, 5)); return inner.put(...args); },
   });
 
   it('remove waits for a pending write, so no blob outlives its chat', async () => {
@@ -278,7 +278,7 @@ describe('attachment files kept as long as their chat', () => {
     const { storage } = memory();
     const inner = createMemoryAttachmentStore();
     let fail = true;
-    const files: AttachmentBlobStore = { ...inner, put: async (...args) => { if (fail) throw new Error('quota'); await inner.put(...args); } };
+    const files: AttachmentBlobStore = { ...inner, put: async (...args) => { if (fail) throw new Error('quota'); return inner.put(...args); } };
     const chats = sessions(storage, files);
     chats.save!('A', [withFile(ID_A)]);
     await flush();
@@ -286,6 +286,31 @@ describe('attachment files kept as long as their chat', () => {
     chats.save!('A', [withFile(ID_A)]);
     await flush();
     expect(await inner.get('A', ID_A)).not.toBeNull();
+  });
+
+  it('retries a write that resolved false on the next save', async () => {
+    const { storage } = memory();
+    const inner = createMemoryAttachmentStore();
+    const put = vi.fn(async () => false);
+    const chats = sessions(storage, { ...inner, put });
+    chats.save!('A', [withFile(ID_A)]);
+    await flush();
+    chats.save!('A', [withFile(ID_A)]);
+    await flush();
+    expect(put).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not write restored files again after a reload', async () => {
+    const { storage } = memory();
+    const inner = createMemoryAttachmentStore();
+    sessions(storage, inner).save!('A', [withFile(ID_A)]);
+    await flush();
+    const put = vi.fn(inner.put);
+    const reloaded = sessions(storage, { ...inner, put });
+    const loaded = (await reloaded.load!('A')) as ChatMessage[];
+    reloaded.save!('A', loaded);
+    await flush();
+    expect(put).not.toHaveBeenCalled();
   });
 
   it('survives a store whose methods reject', async () => {

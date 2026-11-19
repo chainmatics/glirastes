@@ -43,9 +43,14 @@ export function attachmentIdOf(part: unknown): string | undefined {
   return isChatAttachmentId(id) ? id : undefined;
 }
 
+// C0/C1 controls, line/paragraph separators, bidi controls, brackets.
+const UNSAFE_NAME_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069[\]]/g;
+const MAX_NAME_LENGTH = 120;
+
 /** Text that stands in for a file part once its data is no longer sent. */
 export function attachmentPlaceholderText(filename?: string, id?: string): string {
-  const name = filename?.replace(/[[\]\r\n]/g, '').trim() || 'file';
+  const cleaned = (filename ?? '').replace(UNSAFE_NAME_CHARS, '').trim();
+  const name = cleaned.length > MAX_NAME_LENGTH ? `${cleaned.slice(0, MAX_NAME_LENGTH).trimEnd()}…` : cleaned || 'file';
   return isChatAttachmentId(id) ? `[attachment ${id}: ${name}]` : `[attachment: ${name}]`;
 }
 

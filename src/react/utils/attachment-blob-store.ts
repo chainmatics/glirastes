@@ -5,7 +5,8 @@ export interface StoredAttachment {
 }
 
 export interface AttachmentBlobStore {
-  put(conversationId: string, id: string, file: StoredAttachment): Promise<void>;
+  /** Resolves `true` once written, `false` when the write failed (it is tried again on the next save). */
+  put(conversationId: string, id: string, file: StoredAttachment): Promise<boolean>;
   get(conversationId: string, id: string): Promise<StoredAttachment | null>;
   deleteConversation(conversationId: string): Promise<void>;
   deleteAll(): Promise<void>;
@@ -141,7 +142,7 @@ export function createIndexedDbAttachmentStore(options: {
 
   return {
     put: (conversationId, id, file) =>
-      run<void>(undefined, async (handle) => {
+      run<boolean>(false, async (handle) => {
         requestPersistence();
         const buffer = await readBlob(file.blob);
         const record: AttachmentRecord = {
@@ -155,6 +156,7 @@ export function createIndexedDbAttachmentStore(options: {
         const tx = handle.transaction(STORE, 'readwrite');
         tx.objectStore(STORE).put(record);
         await transactionDone(tx);
+        return true;
       }),
     get: (conversationId, id) =>
       run<StoredAttachment | null>(null, async (handle) => {
@@ -189,6 +191,7 @@ export function createMemoryAttachmentStore(): AttachmentBlobStore {
       let files = conversations.get(conversationId);
       if (!files) conversations.set(conversationId, (files = new Map()));
       files.set(id, file);
+      return true;
     },
     async get(conversationId, id) {
       return conversations.get(conversationId)?.get(id) ?? null;

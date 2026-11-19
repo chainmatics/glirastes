@@ -208,6 +208,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
         try {
           const stored = await files.get(conversationId, id);
           if (!stored) return part;
+          written.add(`${conversationId}\u0000${id}`);
           return { ...file, url: await fileToDataUrl(stored.blob) };
         } catch {
           return part;
@@ -272,7 +273,8 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
             const filename = (part as { filename?: string }).filename;
             const task = (async () => {
               try {
-                await files.put(conversationId, id, { blob, name: filename ?? 'file', mediaType: blob.type });
+                const stored = await files.put(conversationId, id, { blob, name: filename ?? 'file', mediaType: blob.type });
+                if (stored === false) written.delete(marker);
               } catch {
                 written.delete(marker);
               }
