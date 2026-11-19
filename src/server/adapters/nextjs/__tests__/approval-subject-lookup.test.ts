@@ -265,6 +265,24 @@ describe('approval subject lookups', () => {
     expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ status: 'named', name: 'Lobby screens' });
   });
 
+  it('never picks the first of two references of one type for a { ref } parameter', async () => {
+    const registry = referenceTools({
+      extra: [defineEndpointTool({
+        id: 'versions.copy', toolName: 'copy_version', description: 'Copy.', method: 'POST', path: '/versions/copy',
+        inputSchema: z.object({ from_playlist: z.number(), to_playlist: z.number(), version_id: z.number() }),
+        inputEntities: [
+          { type: 'playlist', args: 'from_playlist', role: 'reference' },
+          { type: 'playlist', args: 'to_playlist', role: 'reference' },
+          { type: 'playlist-version', args: 'version_id' },
+        ],
+      })],
+    });
+    const { resolver, backend } = resolverFor({ 'GET /playlists/1/versions': () => ok([]) }, { registry });
+    await resolver.resolve({ toolName: 'copy_version', toolCallId: 'c1', input: { from_playlist: 1, to_playlist: 2, version_id: 9 } });
+    expect(resolver.take('c1')!.part.subjects).toEqual([expect.objectContaining({ type: 'playlist-version', reason: 'source_unavailable' })]);
+    expect(backend.calls).toHaveLength(0);
+  });
+
   it('validates its limits', () => {
     expect(resolveApprovalSubjectLimits(undefined)).toEqual({ maxLookupsPerTurn: 32, maxSubjectsPerCall: 4, lookupTimeoutMs: 3000, maxLookupTimePerTurnMs: 10_000 });
     expect(() => resolveApprovalSubjectLimits({ maxLookupsPerTurn: 0 })).toThrow(RangeError);

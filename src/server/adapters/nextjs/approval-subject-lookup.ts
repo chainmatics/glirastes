@@ -674,7 +674,10 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         params[param] = values[fields.indexOf(source)];
         continue;
       }
-      const other = refs.find((ref) => ref.type === source.ref && inputRefArgs(ref).length === 1);
+      // Exactly one reference of that type (or one `parent` among several), never the first of two.
+      const ofType = refs.filter((ref) => ref.type === source.ref && inputRefArgs(ref).length === 1);
+      const parents = ofType.filter((ref) => ref.role === 'parent');
+      const other = ofType.length === 1 ? ofType[0] : parents.length === 1 ? parents[0] : undefined;
       const value = other ? valueAt(input, inputRefArgs(other)[0]!) : undefined;
       if (!isEntityIdValue(value)) return undefined;
       params[param] = value;
