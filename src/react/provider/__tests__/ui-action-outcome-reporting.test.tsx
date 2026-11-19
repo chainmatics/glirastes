@@ -426,6 +426,24 @@ describe('a UI action that loads a new page', () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
+  it('saves before the bridge deadline also with a longer outcome timeout and a parallel call that stays open', async () => {
+    const order: string[] = [];
+    const session: SessionConfig = { load: async () => [], save: async (_id, messages) => {
+      const parts = messages.at(-1)?.parts as Array<{ output?: { outcome?: { code?: string } } }> | undefined;
+      if (parts?.some((part) => part.output?.outcome?.code === 'initiated')) order.push('save');
+    } };
+    const { bus } = setup({ session, uiActionOutcomeTimeoutMs: 30_000 });
+    vi.stubGlobal('location', { assign: vi.fn(() => { order.push('assign'); }) });
+    cleanups.push(registerDocumentNavigation({ bus }));
+    await settle();
+    const open = { type: 'tool-tasks_list', toolCallId: 'c2', state: 'input-available', input: {} };
+    await act(async () => { control.set([user], 'submitted'); });
+    await act(async () => { control.set([user, assistant(uiPart('c1', { awaitsOutcome: true }, navigate('/reports')), open)], 'streaming'); });
+    await waitFor(() => expect(order).toContain('assign'), { timeout: 12_000 });
+    expect(order.indexOf('save')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('save')).toBeLessThan(order.indexOf('assign'));
+  }, 15_000);
+
   it('runs the later results and writes their own codes when a reloading bridge refuses the navigation', async () => {
     const { bus } = setup();
     cleanups.push(registerNavigationBridge({ bus, push: () => false, reloads: true }));

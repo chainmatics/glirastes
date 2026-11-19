@@ -902,7 +902,11 @@ export function AiChatProvider({
     if (!initiated) return;
     // The other results of the step may still arrive: hold the page load until the stream ended.
     if (waitForStep) {
-      const deadline = Date.now() + (uiActionOutcomeTimeoutRef.current ?? UI_ACTION_OUTCOME_TIMEOUT_MS);
+      // Within the bridge's own deadline, so the save below still lands before it loads the page.
+      const deadline = Date.now() + Math.min(
+        uiActionOutcomeTimeoutRef.current ?? UI_ACTION_OUTCOME_TIMEOUT_MS,
+        BEFORE_PAGE_LOAD_TIMEOUT_MS - PAGE_LOAD_SAVE_TIMEOUT_MS - 300,
+      );
       while (streamActiveRef.current && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
