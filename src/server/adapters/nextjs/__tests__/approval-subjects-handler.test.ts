@@ -260,6 +260,13 @@ describe('server approval subjects in the chat handler', () => {
     expect(promptText(missing.prompts)).toContain('approval_subject_not_found');
   });
 
+  it('never refuses on a complete list with an entry without the declared id (invalid_response)', async () => {
+    const backend = fakeBackend({ 'GET /channels': () => ok([{ key: 'lobby', title: 'Lobby screens' }, { title: 'No key' }]) });
+    const { model } = callingModel([{ toolName: 'delete_channel', input: { key: 'garage' } }]);
+    const { chunks } = await turn({ tools: referenceTools(), model, systemPrompt: 'A', approvalSecret: SECRET, endpointCaller: backend.endpointCaller });
+    expect(subjectsPart(chunks)!.data.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'invalid_response' });
+  });
+
   it('looks a version up through its parent playlist and shows the fallback (SA-07, composite lookup by ref)', async () => {
     const backend = fakeBackend({
       'GET /playlists/3': () => ok({ playlist_id: 3, displayName: 'Lobby Loop' }),

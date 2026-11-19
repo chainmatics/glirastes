@@ -691,7 +691,11 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       }
       if (source.result === 'one') return unchecked(item, values, 'mismatch');
       // A page that may not hold every record says nothing about one that is not on it.
-      if (source.lookup.complete === true && !overflow) return { kind: 'deny', code: 'approval_subject_not_found', type };
+      // Only a page whose every entry has the declared identity proves that the record does not exist.
+      if (source.lookup.complete === true && !overflow && known.length === identities.length) {
+        return { kind: 'deny', code: 'approval_subject_not_found', type };
+      }
+      if (known.length !== identities.length) return unchecked(item, values, 'invalid_response');
       return unchecked(item, values, 'not_in_page');
     }
     const shownIdentity = (entry: (typeof hits)[number]) => (entry.shown ? declaredIdentityOf(entry.shown, declaration) : undefined);
