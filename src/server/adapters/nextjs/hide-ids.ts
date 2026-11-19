@@ -212,7 +212,9 @@ export function collectDeclaredIdLabels(
         if (!set) prefixedOnly.set(labels, set = new Set());
         set.add(id);
       }
-      if (label !== undefined || !labels.has(id)) labels.set(id, label ?? labels.get(id));
+      // A part of a composite key names no record: a name the guess gave it is dropped.
+      if (composite && label === undefined) labels.set(id, undefined);
+      else if (label !== undefined || !labels.has(id)) labels.set(id, label ?? labels.get(id));
     };
     for (const raw of identity.idValues) learn(typeof raw === 'string' ? raw.trim() : String(raw), composite ? undefined : identity.name, technical(raw));
     // The whole key is technical when each part is (`abc123456/def123456`), else only removed with a prefix.

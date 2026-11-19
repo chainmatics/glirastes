@@ -563,6 +563,26 @@ describe('declared paths of overviews and nested ids in the history', () => {
     expect(((compacted.data as Entry[])[1]!.owner as Entry).bio).not.toBe('b'.repeat(60));
   });
 
+  it('keeps the declared identity of a nested object in an overview under pressure', () => {
+    const value = { data: Array.from({ length: 40 }, (_, index) => ({
+      id: index, text: 't'.repeat(80), owner: { userNo: 900 + index, nick: `nick ${index}`, bio: 'b'.repeat(80) },
+    })) };
+    const declared = buildResultOverview(value, {
+      id: 'ro_abcdefgh', maxChars: 1600, readOnly: true, entities: [{ type: 'user', id: 'userNo', name: 'nick', path: 'data[].owner' }],
+    }) as Overview;
+    expect((declared.data as Entry[])[0]!.owner).toEqual({ userNo: 900, nick: 'nick 0' });
+    const plain = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: 1600, readOnly: true }) as Overview;
+    expect((plain.data as Entry[])[0]!.owner).toBeUndefined();
+  });
+
+  it('drops a guessed name of a composite key part', () => {
+    const value = { data: [{ id: 'abc123456', revision: 'def123456', title: 'Dokument' }] };
+    const labels: IdLabels = new Map();
+    collectIdLabels(value, labels);
+    collectDeclaredIdLabels(value, [{ id: ['id', 'revision'], name: 'title' }], labels);
+    expect(redactIds('Parent abc123456; whole abc123456/def123456.', labels)).toBe('Parent; whole Dokument.');
+  });
+
   it('keeps declared nested records of entries beyond maxItems', () => {
     const value = { data: Array.from({ length: 30 }, (_, index) => ({
       id: index, text: 't'.repeat(80),

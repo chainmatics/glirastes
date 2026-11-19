@@ -450,6 +450,15 @@ export function buildResultOverview(
   const rootDeclared = options.entities?.find((declaration) => declaration.path === '')
     ?? (dominant ? undefined : options.entities?.find((declaration) => declaration.path === undefined));
   const rootKeep = new Set(rootDeclared ? declaredIdentityKeys(rootDeclared) : []);
+  // A declared object inside each entry (`data[].owner`) keeps its id and name fields too. (A nested
+  // array, `data[].items[]`, is measured as one field: it stays or goes as a whole.)
+  const entryPath = dominant ? `${dominant.route.join('.')}[]` : undefined;
+  const nestedKeep = new Set<string>();
+  for (const declaration of entryPath ? options.entities ?? [] : []) {
+    const rest = declaration.path?.startsWith(`${entryPath}.`) ? declaration.path.slice(entryPath!.length + 1) : undefined;
+    if (!rest || rest.includes('[')) continue;
+    for (const key of declaredIdentityKeys(declaration)) nestedKeep.add(`${entryPath}.${rest}.${key}`);
+  }
   if (keep.size === 0 && ownFieldSize.size > 0) {
     const smallest = [...ownFieldSize].sort((left, right) => left[1] - right[1] || (left[0] < right[0] ? -1 : 1))[0]!;
     keep.add(smallest[0]);
@@ -460,7 +469,7 @@ export function buildResultOverview(
   const droppable = candidates
     .filter((candidate) => (candidate.entryKey === undefined
       ? !(candidate.steps.length === 1 && candidate.steps[0]!.kind === 'key' && rootKeep.has(candidate.steps[0]!.key))
-      : !keep.has(candidate.entryKey)))
+      : !keep.has(candidate.entryKey) && !nestedKeep.has(candidate.path)))
     .sort((left, right) => rank.get(left)! - rank.get(right)!
       || (rank.get(left)! > 0 ? own(left) - own(right) : 0) || right.size - left.size || byPath(left, right));
 
