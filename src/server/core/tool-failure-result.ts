@@ -156,6 +156,7 @@ export function boundedToolFailure(
     ...(fromEndpoint && result.status === 404 && typeof result.hint === 'string'
       ? { hint: cutToolErrorText(result.hint, MAX_TOOL_ERROR_MESSAGE_CHARS) }
       : {}),
-    ...(fromEndpoint && result.expectedFailure === true ? { expectedFailure: true } : {}),
+    // `false` too: the app's classifier said `'error'` (the browser then shows it as failed, whatever the status).
+    ...(fromEndpoint && typeof result.expectedFailure === 'boolean' ? { expectedFailure: result.expectedFailure } : {}),
   };
 }

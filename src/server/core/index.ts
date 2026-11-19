@@ -663,9 +663,12 @@ export function endpointToolToTool<TInput extends SchemaLike>(
         }
         const fromBackend = response.refusedLocally !== true && Number.isInteger(response.status);
         let expected = false;
-        if (fromBackend && endpointContext.classifyToolFailure) {
+        // The app's classifier decided: its answer travels explicitly, also `'error'`,
+        // so the browser does not show a failure it counted as an error as neutral.
+        const classified = fromBackend && endpointContext.classifyToolFailure !== undefined;
+        if (classified) {
           try {
-            expected = endpointContext.classifyToolFailure({
+            expected = endpointContext.classifyToolFailure!({
               toolName: endpointTool.toolName,
               status: response.status,
               body: response.data,
@@ -681,7 +684,7 @@ export function endpointToolToTool<TInput extends SchemaLike>(
           // Under the tool's bound the body is reduced before it is serialized and cut.
           ...(fromBackend ? endpointFailureFields(response.data, ownBound) : {}),
           ...(fromBackend && response.status === 404 && pathNotFoundHint ? { hint: pathNotFoundHint } : {}),
-          ...(expected ? { expectedFailure: true } : {}),
+          ...(classified ? { expectedFailure: expected } : {}),
         };
         Object.defineProperty(failure, ENDPOINT_FAILURE, { value: true });
         // Kept unserialized (non-enumerable) so the bound of the tool that shows it can reduce it.
@@ -1189,7 +1192,8 @@ export function toolToAiTool(
           error instanceof Error ? error.message : 'Unknown error';
         return normalizeResultUiAction(
           {
-            error: `Error in ${tool.id}: ${errorMessage}`,
+            // The name the model calls the tool by, never its internal id (a managed tool's id is a UUID).
+            error: `Error in ${name}: ${errorMessage}`,
             hint: 'Check the parameters and try again.',
           },
           options?.uiActionSchema,

@@ -417,7 +417,7 @@ describe('runDirectCommand', () => {
 
   it.each([
     ['returns an error result', async () => ({ error: 'not found' }), 'not found'],
-    ['throws', async () => { throw new Error('not found'); }, 'Error in tasks.list: not found'],
+    ['throws', async () => { throw new Error('not found'); }, 'Error in tasks_list: not found'],
   ])('counts a tool that %s as a failed call', async (_label, execute, error) => {
     const { tools, aiTools } = registry({ execute });
     const { sink, events } = collectingSink();

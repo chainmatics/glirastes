@@ -48,6 +48,7 @@ export const deChatLocale: ChatLocale = {
   activityRunningProgressLabel: '{count} erledigt, {label}…',
   activityStepCountLabel: '×{count}',
   activitySummarySeparator: ', ',
+  activityApprovalNotUsedDetail: 'Die Freigabe konnte nicht verwendet werden',
   planTitle: 'Plan',
   chatTitle: 'KI-Assistent',
   closeChatAriaLabel: 'Chat schließen',

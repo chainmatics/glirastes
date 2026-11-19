@@ -60,6 +60,7 @@ export type {
   ToolResultDisplayConfig,
   // Message layout
   ActivityLogConfig,
+  ActivityLogDetails,
   TurnNoticeProps,
   TurnNoticeStatus,
   MessagePartNodes,
@@ -375,6 +376,7 @@ export {
   readLatestPlan,
   type ActivityStep,
   type ActivityStepStatus,
+  type ActivityDetailSource,
 } from './utils/activity.js';
 export type { PlanItem, PlanItemStatus } from '../contracts/plan.js';
 export { sanitizeStoredMessages } from './utils/sanitize-stored-messages.js';

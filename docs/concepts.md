@@ -235,9 +235,10 @@ LLMs have limited context. A successful tool result whose JSON is longer than th
 | --- | --- |
 | Backend answered non-2xx | `success: false`, `error` (cut to 1,000 characters), `retryable`, `status`, `body` (cut to 4,000 characters, reduced or withheld under an output bound) |
 | `classifyToolFailure` returned `'expected'` | as above plus `expectedFailure: true` (does not count toward `maxConsecutiveErrors`) |
+| `classifyToolFailure` returned `'error'` (or anything else, or threw) | as above plus `expectedFailure: false`; the chat's activity log shows the step as failed whatever the status (without a classifier there is no marker and a 4xx other than 408/429 is shown neutrally) |
 | **404** of a route with path parameters (`/playlists/:id`) | as above plus a fixed `hint`: `Not found: no record matches the path parameter "id". The value may not exist, or it may be the id of a different kind of record. If a list or search tool can find the record (for example by its name), look it up first, then call this tool again with the value it returns. Only if there is no such tool or the lookup finds nothing, tell the user it was not found; do not ask the user for an id before that.` (several parameters: `the path parameters "a", "b"`) |
 | 404 of a route without path parameters, any other status, a call refused locally | no `hint` |
-| Thrown error (timeout, network, response size) | `error: "Error in <tool>: …"` and `hint: "Check the parameters and try again."` |
+| Thrown error (timeout, network, response size) | `error: "Error in <tool>: …"` (`<tool>` is the name the model calls the tool by, never its internal id) and `hint: "Check the parameters and try again."` |
 
 The not-found hint names the route template's parameters (the same names the input schema shows), never a value, and is appended next to the app's own error body, never instead of it. Only path parameters count: they are the declared address of one record, whatever they are called (`id`, `key`, `orderNumber`); an id in the query or body is not treated as the address, because a 404 there can just as well mean the route. The hint is not part of the loop fingerprint (a failure with a status is fingerprinted by `success`, `status`, `retryable` and `expectedFailure` only) and does not change how the failure counts for `maxConsecutiveErrors`. A backend that answers 404 for a route that does not exist at all gets the hint as well.
 
@@ -416,7 +417,7 @@ React components and hooks for the chat experience. Styling-neutral (you provide
 
 **Key components**: MessageList, MessageBubble, ChatInput, ApprovalCard, PipelineTimeline, SuggestionBar, VoiceInputButton, AiTriggerButton.
 
-**Message layout** (opt-in, defaults keep the markup): `activityLog` on the provider (`expandWhileRunning`, `runningProgress`, `noticePlacement: 'log' | 'message'`), the slots `components.TurnNotice` and `components.MessageParts`, and `useMessageParts(message)` for a custom bubble. Under `prefers-reduced-motion: reduce` the spinner and the typing dots stand still.
+**Message layout** (opt-in, defaults keep the markup): `activityLog` on the provider (`expandWhileRunning`, `runningProgress`, `noticePlacement: 'log' | 'message'`, `details: 'auto' | 'results' | 'all' | 'none'` (default `'auto'`: a failed or neutral step shows the error text its tool returned, a call the user approved that the server did not run says so, whatever `toolResults`; a done step's message only where its result is displayed), `grouping: 'message' | 'sections'` (`'sections'`: one log per run of steps between the texts of a message)), the slots `components.TurnNotice` and `components.MessageParts`, and `useMessageParts(message)` for a custom bubble. Under `prefers-reduced-motion: reduce` the spinner and the typing dots stand still.
 
 ---
 
