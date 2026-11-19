@@ -8,14 +8,11 @@
       "howTo": "Add these keys to every full ChatLocale object: activityAbortedLabel, activityApprovalNotUsedDetail, activityRunningLabel, activityRunningProgressLabel, activityStepCountLabel, activitySummarySeparator, activityUiFailed, activityUiInitiated, activityUiPendingLabel, activityUiRejectedContract, activityUiRejectedHandler, activityUiUnavailable, activityUiUnconfirmed, approvalEntryAbortedLabel, approvalEntryDeclinedLabel, approvalEntryDoneLabel, approvalEntryExpectedLabel, approvalEntryFailedLabel, approvalEntryNotRunLabel, approvalEntryRunningLabel, approvalPreviewUncheckedNote, approvalReferenceIdNote, approvalSubjectUncheckedWarning, approvalSubjectsUncheckedWarning. The locale and locales props of AiChatProvider take Partial<ChatLocale>, so partial tables and overrides need no change.",
       "skill": "building-glirastes-chat-ui#configuration",
       "affectedWhen": {
-        "imports": [
-          "glirastes/react"
-        ],
-        "symbols": [
-          "ChatLocale"
-        ],
         "patterns": [
-          ":\\s*ChatLocale\\b"
+          ":\\s*ChatLocale\\b",
+          "\\bsatisfies\\s+ChatLocale\\b",
+          "\\bas\\s+ChatLocale\\b",
+          "(?<![\\w$])<ChatLocale>"
         ]
       }
     },

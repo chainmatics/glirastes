@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { computeApiSurface, githubSlug } from '../scripts/api-surface.js';
+import { evaluateNote } from './cli/commands/upgrade/detect.js';
 import { loadUpgradeNotes } from './cli/commands/upgrade/notes.js';
 import { SDK_VERSION } from './runtime/sdk-version.js';
 
@@ -174,5 +175,38 @@ describe('upgrade notes guard', () => {
       }
     }
     expect(problems, problems.join('\n')).toEqual([]);
+  });
+});
+
+describe('shipped note detection', () => {
+  const scanOf = (files: Record<string, string>) => ({
+    files: Object.entries(files).map(([path, text]) => ({
+      path,
+      text,
+      glirastesImports: [...text.matchAll(/from '(glirastes[^']*)'/g)].map((m) => m[1]!),
+    })),
+  });
+
+  it('chat-locale-new-required-keys flags full ChatLocale objects, not every React app', async () => {
+    const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === 'chat-locale-new-required-keys')!;
+    const plainReact = scanOf({
+      'app/chat.tsx':
+        "import { AiChatProvider, type ChatLocale } from 'glirastes/react';\n" +
+        'const de: Partial<ChatLocale> = { sendButton: "Senden" };\n',
+    });
+    expect(evaluateNote(note, plainReact).status).toBe('not-affected');
+
+    for (const usage of [
+      'const de: ChatLocale = { sendButton: "Senden" };',
+      'const de = { sendButton: "Senden" } satisfies ChatLocale;',
+      'const de = { sendButton: "Senden" } as ChatLocale;',
+      'const de = <ChatLocale>{ sendButton: "Senden" };',
+    ]) {
+      const scan = scanOf({ 'app/locale.ts': `import type { ChatLocale } from 'glirastes/react';\n${usage}\n` });
+      expect(evaluateNote(note, scan), usage).toMatchObject({
+        status: 'affected',
+        evidence: [{ file: 'app/locale.ts', line: 2 }],
+      });
+    }
   });
 });
