@@ -331,6 +331,19 @@ export function approvalSubjectPlans(registry: ToolRegistry): Map<string, ToolPl
   return plans;
 }
 
+/**
+ * The tools of a registry that declare a server check a path without
+ * lookups (direct commands, entity actions) cannot honour: `onUnavailable:
+ * 'block'` or a `recheck`. Such a path refuses them instead of running them unchecked.
+ */
+export function toolsRequiringServerCheck(registry: ToolRegistry): Set<string> {
+  const names = new Set<string>();
+  for (const [name, plan] of approvalSubjectPlans(registry)) {
+    if (plan.onUnavailable === 'block' || plan.recheck !== 'none') names.add(name);
+  }
+  return names;
+}
+
 // ============================================================================
 // Lookups
 // ============================================================================
@@ -423,6 +436,8 @@ export interface ApprovalSubjectResolverOptions {
   /** Groups the per-request cache; part of every cache key. */
   readonly scope?: string;
   readonly now?: () => number;
+  /** When the whole turn must end (`now()` units): request start plus the managed turn's `totalTimeoutMs`. */
+  readonly turnDeadline?: number;
 }
 
 /** What the stream binding takes for an approval request with server subjects. */
@@ -536,8 +551,14 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     const timeout = new AbortController();
     const signal = options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal;
     const endpoint = options.context as ToolContext & { callEndpoint?: (request: InternalApiRequest) => Promise<unknown> };
+    // A lookup is no tool call: the per-call reporting hooks (contract rejections, failure classes) stay out.
+    const {
+      onContractRejected: _contractRejected,
+      classifyToolFailure: _classifyFailure,
+      ...plainContext
+    } = options.context as ToolContext & { onContractRejected?: unknown; classifyToolFailure?: unknown };
     const context = {
-      ...options.context,
+      ...plainContext,
       abortSignal: signal,
       ...(endpoint.callEndpoint
         ? {
@@ -645,7 +666,9 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   const lookupTimeout = () => {
     const toolTimeout = options.guard?.toolTimeoutMs;
     const own = toolTimeout !== undefined ? Math.min(limits.lookupTimeoutMs, toolTimeout) : limits.lookupTimeoutMs;
-    return Math.min(own, limits.maxLookupTimePerTurnMs - spentMs);
+    // Never past the whole turn's time limit either (a managed turn's `totalTimeoutMs`, rechecks included).
+    const turnLeft = options.turnDeadline !== undefined ? options.turnDeadline - now() : Number.POSITIVE_INFINITY;
+    return Math.min(own, limits.maxLookupTimePerTurnMs - spentMs, turnLeft);
   };
 
   const unchecked = (item: PlanItem, values: Array<string | number>, reason: ApprovalSubjectUncheckedReason): SubjectOutcome => {
@@ -700,7 +723,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   /** The parameters of a lookup for one reference, or undefined when a `{ ref }` parameter has no value. */
   const paramsFor = (lookup: LookupSource, values: Array<string | number>, refs: InputEntityRef[], input: unknown) => {
     const fields = entityIdFields(lookup.declaration);
-    const params: Record<string, unknown> = {};
+    const params: Record<string, unknown> = Object.create(null);
     for (const [param, source] of Object.entries(lookup.lookup.params)) {
       if (typeof source === 'string') {
         params[param] = values[fields.indexOf(source)];
@@ -870,7 +893,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     const none = (reason: ApprovalSubjectUncheckedReason): ApprovalPreviewData => ({ check: 'unchecked', reason, fields: [] });
     if (overLimit) return none('limit');
     if (!preview.source) return none('source_unavailable');
-    const params: Record<string, unknown> = {};
+    const params: Record<string, unknown> = Object.create(null);
     for (const [param, source] of Object.entries(preview.declaration.params)) {
       if (typeof source === 'string') {
         const value = valueAt(input, source);

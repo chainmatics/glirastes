@@ -1418,6 +1418,8 @@ export interface PendingApproval {
    * What an approved call would do, as the server's preview source answered
    * (`data-approval-subjects`), labels in the chat's language. Looked-up,
    * untrusted values: plain text only. Absent without a server preview.
+   * The values show the state when the approval was requested; they are
+   * not rechecked when the approved call runs.
    */
   preview?: ApprovalPreviewItem[];
   /** `unchecked`: the server could not load the preview (no `preview` values; the card shows a note). */

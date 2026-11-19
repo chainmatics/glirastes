@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { GLIRASTES_NAVIGATE_ACTION_ID } from '../../browser/navigation.js';
+import { fillTemplate } from '../utils/fill-template.js';
 import { getDefaultUiActionBus, type UiActionBus } from '../../browser/ui-action-bus.js';
 import { MentionChip as DefaultMentionChip } from '../components/mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
@@ -159,7 +160,7 @@ export function ChatEntityLinksProvider({
         : [{ kind: 'text', text }]),
       canOpen,
       open,
-      openLabel: (reference) => locale.openEntityLabel.replace('{label}', reference.label),
+      openLabel: (reference) => fillTemplate(locale.openEntityLabel, { label: reference.label }),
       cachedMatch: (segment) => settled.current.get(keyOf(segment)),
       resolveMatch(segment) {
         const key = keyOf(segment);

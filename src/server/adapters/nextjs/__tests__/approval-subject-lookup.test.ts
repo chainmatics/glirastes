@@ -433,6 +433,48 @@ describe('approval subject lookups', () => {
     });
   });
 
+  it('records no metric for a lookup: a 400/422 of the read tool is no contract rejection, nothing is classified', async () => {
+    const onContractRejected = vi.fn();
+    const classifyToolFailure = vi.fn(() => 'expected' as const);
+    for (const status of [400, 422]) {
+      const backend = fakeBackend({ 'GET /playlists/7': () => failure(status) });
+      const request = new Request('https://app.example/api/chat', { headers: { authorization: 'Bearer user-token' } });
+      const resolver = createApprovalSubjectResolver({
+        registry: referenceTools(),
+        context: {
+          currentDate: new Date(), locale: 'en', callEndpoint: backend.endpointCaller(request), onContractRejected, classifyToolFailure,
+        } as unknown as ToolContext,
+        limits: DEFAULT_APPROVAL_SUBJECT_LIMITS,
+      });
+      expect((await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } }))?.deny)
+        .toMatchObject({ code: 'approval_subject_invalid_id' });
+    }
+    expect(onContractRejected).not.toHaveBeenCalled();
+    expect(classifyToolFailure).not.toHaveBeenCalled();
+  });
+
+  it('never looks past the whole turn\'s time limit', async () => {
+    let clock = 1_000;
+    const { resolver, backend } = resolverFor(playlist, { now: () => clock, turnDeadline: 1_000 });
+    await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+    expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ reason: 'limit' });
+    expect(backend.calls).toHaveLength(0);
+    clock = 0;
+    const early = resolverFor(playlist, { now: () => clock, turnDeadline: 50_000 });
+    await early.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+    expect(early.resolver.take('c1')!.part.subjects[0]).toMatchObject({ status: 'named' });
+  });
+
+  it('never uses a DELETE, PUT or PATCH tool as a source, whatever lookupEffect it carries', async () => {
+    const registry = referenceTools();
+    // Past the definition-time check (an artifact or a hand-built registry).
+    Object.assign(registry.get_playlist!, { method: 'DELETE', lookupEffect: 'read' });
+    const { resolver, backend } = resolverFor(playlist, { registry });
+    expect(resolver.isDeclared('delete_playlist')).toBe(false);
+    expect(await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } })).toBeUndefined();
+    expect(backend.calls).toHaveLength(0);
+  });
+
   it('validates its limits', () => {
     expect(resolveApprovalSubjectLimits(undefined)).toEqual({ maxLookupsPerTurn: 32, maxSubjectsPerCall: 4, lookupTimeoutMs: 3000, maxLookupTimePerTurnMs: 10_000 });
     expect(() => resolveApprovalSubjectLimits({ maxLookupsPerTurn: 0 })).toThrow(RangeError);

@@ -2,6 +2,7 @@ import { useChatContext } from '../provider/chat-context.js';
 import { sanitizeSubjectText } from '../../contracts/approval-subject.js';
 import type { ApprovalEntryProps, ApprovalOutcome, ApprovalSubject, ChatLocale } from '../types.js';
 import { approvalSubjectLines, previewValueText } from './approval-card.js';
+import { fillTemplate } from '../utils/fill-template.js';
 import { StatusIcon, type StatusIconKind } from './status-icon.js';
 
 const OUTCOME_ICONS: Record<ApprovalOutcome, StatusIconKind> = {
@@ -70,8 +71,10 @@ export function ApprovalEntry({ approval }: ApprovalEntryProps) {
       {unchecked.length > 0 && (
         <span data-element="detail-line" data-check="unchecked">
           {unchecked.length === 1
-            ? locale.approvalSubjectUncheckedWarning.replace('{label}', labelOf(unchecked[0]!)).replace('{id}', idOf(unchecked[0]!))
-            : locale.approvalSubjectsUncheckedWarning.replace('{ids}', unchecked.map((subject) => `${labelOf(subject)} ${idOf(subject)}`.trim()).join(', '))}
+            ? fillTemplate(locale.approvalSubjectUncheckedWarning, { label: labelOf(unchecked[0]!), id: idOf(unchecked[0]!) })
+            : fillTemplate(locale.approvalSubjectsUncheckedWarning, {
+              ids: unchecked.map((subject) => `${labelOf(subject)} ${idOf(subject)}`.trim()).join(', '),
+            })}
         </span>
       )}
       {preview.map((item, i) => (

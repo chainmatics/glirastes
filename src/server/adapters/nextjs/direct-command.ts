@@ -194,6 +194,12 @@ export interface RunDirectCommandOptions {
    * history run the command.
    */
   approvals?: ApprovalBinder;
+  /**
+   * Tools whose declared server check (`approvalSubject.onUnavailable:
+   * 'block'` or a `recheck`) a direct command cannot honour: it makes no
+   * lookups. They are refused (`approval_subject_check_required`).
+   */
+  requiresServerCheck?: (toolName: string) => boolean;
   /** Optional single-use store for verified approvals. */
   approvalStore?: ApprovalStore;
   /** The scope handed to the store with each approval (see `approvalScope`); default `''`. */
@@ -263,6 +269,11 @@ export async function runDirectCommand(options: RunDirectCommandOptions): Promis
         const parsed = registry[name]!.inputSchema.safeParse(command.invocation.args);
         if (!parsed.success) {
           fail('command_input_invalid');
+          return;
+        }
+        // A tool that declares onUnavailable: 'block' or a recheck runs only where the server looks its records up.
+        if (options.requiresServerCheck?.(name)) {
+          fail('approval_subject_check_required');
           return;
         }
         if (command.approval && !command.approval.approved) {

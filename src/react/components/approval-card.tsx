@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import { sanitizeSubjectText } from '../../contracts/approval-subject.js';
+import { fillTemplate } from '../utils/fill-template.js';
 import type { ApprovalCardProps, ApprovalPreviewItem, ApprovalSubject, ChatLocale, PendingApproval } from '../types.js';
 
 const COLLAPSED_ITEMS = 2;
@@ -151,9 +152,10 @@ export function ApprovalIdWarning({ id, subjects }: { id: string; subjects: Read
         {unchecked.length > 0 && (
           <p data-element="warning-text" data-check="unchecked">
             {unchecked.length === 1
-              ? locale.approvalSubjectUncheckedWarning
-                .replace('{label}', labelOf(unchecked[0]!)).replace('{id}', subjectText(unchecked[0]!, unchecked[0]!.id))
-              : locale.approvalSubjectsUncheckedWarning.replace('{ids}', unchecked.map(uncheckedText).join(', '))}
+              ? fillTemplate(locale.approvalSubjectUncheckedWarning, {
+                label: labelOf(unchecked[0]!), id: subjectText(unchecked[0]!, unchecked[0]!.id),
+              })
+              : fillTemplate(locale.approvalSubjectsUncheckedWarning, { ids: unchecked.map(uncheckedText).join(', ') })}
           </p>
         )}
         {unknown.length > 0 && (
@@ -176,12 +178,15 @@ export function ApprovalIdWarning({ id, subjects }: { id: string; subjects: Read
             <p data-element="warning-text">
               {subject.source === 'server'
                 // Several records matched the server's lookup: their names, not kinds.
-                ? locale.approvalAmbiguousIdWarning.replace('{names}', (subject.names ?? [])
-                  .map((name) => subjectText(subject, name)).join(', '))
+                ? fillTemplate(locale.approvalAmbiguousIdWarning, {
+                  names: (subject.names ?? []).map((name) => subjectText(subject, name)).join(', '),
+                })
                 : subject.candidates
-                ? locale.approvalCollidingIdWarning.replace('{candidates}', subject.candidates
-                  .map((candidate) => (candidate.name ? `${candidate.name} (${candidate.label})` : candidate.label)).join(', '))
-                : locale.approvalAmbiguousIdWarning.replace('{names}', (subject.names ?? []).join(', '))}
+                ? fillTemplate(locale.approvalCollidingIdWarning, {
+                  candidates: subject.candidates
+                    .map((candidate) => (candidate.name ? `${candidate.name} (${candidate.label})` : candidate.label)).join(', '),
+                })
+                : fillTemplate(locale.approvalAmbiguousIdWarning, { names: (subject.names ?? []).join(', ') })}
             </p>
             <ul data-element="warning-ids">
               <li data-element="detail-line" data-status="ambiguous">

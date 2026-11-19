@@ -25,6 +25,7 @@ import {
   toolReferenceFromDataset,
   toolReferenceToDataset,
 } from '../utils/mention-markup.js';
+import { fillTemplate } from '../utils/fill-template.js';
 
 const DEFAULT_TRIGGERS = ['@', '/'];
 const SEARCH_DEBOUNCE_MS = 100;
@@ -353,7 +354,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       removeBtn.dataset.action = 'remove-mention';
       removeBtn.dataset.mentionId = mention.id;
       removeBtn.setAttribute('role', 'button');
-      removeBtn.setAttribute('aria-label', removeMentionLabel.replace('{label}', displayName));
+      removeBtn.setAttribute('aria-label', fillTemplate(removeMentionLabel, { label: displayName }));
       removeBtn.textContent = '\u00D7';
       removeBtn.style.cursor = 'pointer';
 

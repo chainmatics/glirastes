@@ -51,6 +51,7 @@ import { withModelFacingDenialReasons } from './approval-denial-text.js';
 import {
   createApprovalSubjectResolver,
   resolveApprovalSubjectLimits,
+  toolsRequiringServerCheck,
   type ApprovalSubjectResolver,
 } from './approval-subject-lookup.js';
 import {
@@ -1863,6 +1864,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ...(piiShield ? { shield: { shield: piiShield, sessionId: shieldSessionId } } : {}),
           limits: approvalSubjectLimits,
           signal: req.signal,
+          // The whole turn's time limit bounds every lookup, the rechecks before the model too.
+          ...(managedTurn ? { turnDeadline: requestStart + managedTurn.snapshot.budget.totalTimeoutMs } : {}),
           scope,
         });
         return resolver.hasDeclarations() ? resolver : undefined;
@@ -1931,6 +1934,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           approvals: commandBinder,
           approvalStore,
           approvalScope: commandStoreScope,
+          // A direct command makes no lookups: a tool that declares block or a recheck is refused, never run unchecked.
+          ...(approvalSubjectsConfig !== false
+            ? (() => {
+                const checked = toolsRequiringServerCheck(registry);
+                return checked.size > 0 ? { requiresServerCheck: (toolName: string) => checked.has(toolName) } : {};
+              })()
+            : {}),
           onError: (error) => onError?.(error, req),
         });
       }

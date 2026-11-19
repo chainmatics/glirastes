@@ -34,6 +34,13 @@ defineEndpointTool({
 | `const` | Fixed parameters (`{ limit: 50 }`, a page size) |
 | `result` | `one` (the answer is the record) or `list` (the record is searched on one page). Default: `list` when the entity's declared path reads entries (`[]`), else `one` |
 | `complete` | Only `list`: the page holds every record that could match (no paging, or the parameters narrow it to the id). Then an id that is not on it does not exist |
+| `idCase` | `exact` (default) or `ignore-case`: the backend treats ids that differ only in case or surrounding whitespace as one record. Without it such a near match is never a found record |
+
+Parameter names are plain names; `__proto__`, `constructor` and `prototype`
+are refused. `lookupEffect: 'read'` stands only on a POST (or GET, HEAD, a
+tool without a method); on a DELETE, PUT or PATCH it throws at definition,
+is dropped by `tools refresh` (`approval-subject-invalid`) and is never a
+source at runtime.
 
 A list source reads **exactly one page** (no paging), at most 200 entries are
 searched. An id that is not on a page that is not `complete` is **not
@@ -107,6 +114,10 @@ approvalSubject: {
 }
 ```
 
+Preview values show the state at the time of the approval request; they are
+not rechecked when the approved call runs (`recheck` compares the subjects
+only).
+
 A preview never refuses a call: a failed preview is only "could not be
 loaded" on the card.
 
@@ -155,9 +166,22 @@ and before the approval request is sent. For each looked-up reference:
   bound (`outputDeniedFields`, app-wide `output.deniedFields`: the denial
   wins) and then the PII shield, so the card gets a value in the form the
   browser gets a result of that tool. No result handle, overview or cut.
-- **Match**: the ids in the answer must equal the requested ones (a number
-  and its decimal text are one id; a speaking id ignores case). A different
-  id is `mismatch`, never named.
+- **Match**: by field, the ids in the answer must equal the requested ones
+  exactly (a number and its decimal text are one id). A composite key's
+  arguments are mapped to the id fields **by name** (the argument path's last
+  step equals the id field: `version_id` → `version_id`, in any order); only
+  when no argument is named like an id field is the declared `inputEntities`
+  order used. Names that disagree are never guessed by position: no lookup,
+  "not checkable", and `tools refresh` reports `approval-subject-invalid`.
+  Ids that differ only in case or surrounding whitespace match only when the
+  lookup declares `idCase: 'ignore-case'`; otherwise such a record is
+  `mismatch` ("not checkable"), never named and never taken for "does not
+  exist". A different id is `mismatch`, never named. The browser's history
+  fallback, which matches a speaking key case-insensitively, is a display hint
+  only: it never sets `check: 'found'` or `source: 'server'`.
+- **No metrics**: a lookup is no tool call. It records no tool-call metric,
+  no `tool_contract_rejected` for a 400/422 of the read tool, and is never
+  classified by `classifyToolFailure`.
 
 ### Failure matrix
 
@@ -173,14 +197,23 @@ and before the approval request is sent. For each looked-up reference:
 | Different id in the answer (`mismatch`) | card with warning, never named | `block` | as above |
 | Not on the one page of a list that is not `complete` (`not_in_page`) | card with warning, never "does not exist" | `block` | as above |
 | Source not in the tool set, not for this role, revoked, asks for approval (`source_unavailable`) | card with warning | `block` | as above |
+| Composite key whose arguments cannot be mapped to the id fields by name (`source_unavailable`) | card with warning | `block` | as above |
+| Only case or whitespace differ from a record on the page (`mismatch`; also on a `complete` list) | card with warning, never named, never "does not exist" | `block`; `idCase: 'ignore-case'` makes it a match | as above |
+| A limit reached, the whole turn's time included (`limit`) | card with warning | `block` | as above |
 
 The tool set of a request decides what is declared: a write tool that only
 has `inputEntities` is looked up when a read source of the type is in this
 request's tools, and keeps the history fallback (and v1 ids) when none is.
 A write tool that declares `approvalSubject` itself is always looked up: a
 missing source is then `source_unavailable`, so `block` and `recheck` hold
-also for a role whose tools leave the read tool out.
-| A limit reached (`limit`) | card with warning | `block` | as above |
+also for a role whose tools leave the read tool out. **An explicit
+declaration is never dropped:** with nothing it can look up (`refs` that match
+no reference, invalid `inputEntities`) the tool keeps its v2 ids,
+`onUnavailable: 'block'` refuses every call and a `recheck` refuses the
+approved call; an `approvalSubject` that does not validate counts as
+`block`. `defineEndpointTool` and `endpointToolToTool` throw for `refs` that
+match no reference; `glirastes tools refresh` reports it as the blocking
+error `approval-subject-refs-unmatched`.
 
 "Not checkable" is shown on the card with its own text
 (`approvalSubjectUncheckedWarning`), different from the "id unknown" warning
@@ -212,8 +245,11 @@ the lookups off. Runtime container: `limits.approvalLookups` (same keys, or
 
 **`maxToolCalls` means calls made by the model. Lookups are made by the
 server and do not count against it; the meaning of the signed limit is
-unchanged.** The whole-turn timeout and the request's abort signal still end
-them.
+unchanged.** In a managed turn every lookup, the rechecks before the model
+call included, ends at the turn's `totalTimeoutMs` at the latest (counted
+from the start of the request; the lookup then is `limit`), and the
+request's abort signal cancels them. Without a managed turn there is no
+whole-turn limit; the lookup limits above bound them.
 
 Within one request answers are cached by source and parameters: 20
 `delete_channel` calls checked against `list_channels` make one read; 20
@@ -243,14 +279,28 @@ share one `lookupTimeoutMs`.
 | F4 | `ApprovalSubject` (React) gains optional `source`, `ids`, `fallbackValue`, `preview`, `check`, `reason`; `PendingApproval` gains `preview` and `previewCheck`. `PendingApproval.subjects` prefers the server's subjects; the history guess fills in only where the server sent nothing (and stays as the display of an unchecked subject). New labels `approvalSubjectUncheckedWarning`, `approvalSubjectsUncheckedWarning`, `approvalReferenceIdNote`, `approvalPreviewUncheckedNote` (English, German; `locales` overrides). |
 
 Looked-up names are untrusted content: never in the model context, plain
-text on the card (no markdown, links or entity links), control and bidi
-characters (U+202A–U+202E, U+2066–U+2069, marks) and line breaks removed, at
-most 200 characters; the browser sanitizes again when it reads the part.
+text on the card (no markdown, links or entity links), at most 200
+characters. Removed: control characters (C0, DEL, C1), line and paragraph
+breaks, bidi overrides, isolates and marks (U+202A–U+202E, U+2066–U+2069,
+U+200E, U+200F, U+061C), zero-width characters and the BOM, invisible
+operators (U+2060–U+2064), the soft hyphen, U+180E, variation selectors
+(U+FE00–U+FE0F), tag characters (U+E0000–U+E007F) and the Hangul fillers
+(U+115F, U+3164). Combining marks stay: many languages need them. The browser
+sanitizes again when it reads the part, and fills label templates with
+literal values (no replacement patterns).
 
 ## Where it does not apply
 
-- A custom `streamHandler` gets no lookups (and no v2 ids); its cards use the history fallback.
-- Direct commands (`/` commands, entity actions) keep v1 and the history fallback.
+- **A custom `streamHandler`** gets no lookups, no v2 ids, no `block` and no
+  `recheck` for declared tools: its cards use the history fallback. Use the
+  built-in stream handler for tools whose `block` or `recheck` matters.
+- **Direct commands and entity actions** make no lookups. A declared tool
+  without `block` or `recheck` keeps v1 and the history fallback there. A
+  tool that declares `onUnavailable: 'block'` or a `recheck` is refused by a
+  direct command or entity action (`approval_subject_check_required`), so a
+  declared safety option is never skipped; the model path still runs it
+  with its checks. With `approvalSubjects: false` the app has turned the
+  lookups off, and nothing is refused.
 - An argument that holds a list of ids gets no server subject.
 - Nothing goes to the Platform: manifest, policy and metric events are unchanged; declarations are field and tool names only.
 

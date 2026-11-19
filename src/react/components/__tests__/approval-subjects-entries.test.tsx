@@ -138,6 +138,30 @@ describe('server approval subjects on approval entries and the inline card', () 
     expect(declined.textContent).toContain('NO PREVIEW');
   });
 
+  it('shows a looked-up id with replacement patterns literally in the not-checkable texts of entry and card', async () => {
+    const hostile = { id: "k$&{label}$'", ids: { id: "k$&{label}$'" }, status: 'unknown', check: 'unchecked', reason: 'timeout' };
+    render(
+      <Chat
+        messages={conversation(subjectsPart(hostile), deletion('output-denied', { id: 'ap1', approved: false }), { type: 'text', text: 'Declined.' })}
+        approvalDisplay={{ decided: 'entry' }}
+        locale={{ approvalSubjectUncheckedWarning: '{label}: {id} not checked' }}
+      />,
+    );
+    await screen.findByText('Declined.');
+    expect(document.querySelector('[data-component="approval-entry"] [data-check="unchecked"]')!.textContent)
+      .toBe("Playlist: k$&{label}$' not checked");
+    cleanup();
+    render(
+      <Chat
+        messages={conversation(subjectsPart(hostile), deletion('approval-requested', { id: 'ap9' }))}
+        locale={{ approvalSubjectUncheckedWarning: '{label}: {id} not checked' }}
+      />,
+    );
+    await waitFor(() => expect(document.querySelector('[data-component="approval-card"] [data-check="unchecked"]')).toBeTruthy());
+    expect(document.querySelector('[data-component="approval-card"] [data-check="unchecked"]')!.textContent)
+      .toBe("Playlist: k$&{label}$' not checked");
+  });
+
   it('draws an open approval inline with the server subjects after a reload', async () => {
     const seen = approvalsOf(conversation(subjectsPart(found, preview), deletion('approval-requested', { id: 'ap9' })), {
       approvalDisplay: { open: 'inline' },

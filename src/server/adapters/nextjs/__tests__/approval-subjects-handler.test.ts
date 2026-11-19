@@ -5,6 +5,7 @@ import { endpointToolsToRegistry } from '../../../core/index.js';
 import { createApprovalBinder } from '../approval-binding.js';
 import { APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS } from '../approval-subject-lookup.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
+import { formatChatCommandMessage } from '../../../../contracts/chat-command.js';
 import {
   SECRET,
   answered,
@@ -507,6 +508,29 @@ describe('server approval subjects in the chat handler', () => {
     expect(chunks.some((chunk) => chunk.type === 'data-approval-subjects')).toBe(false);
     expect(chunks.find((chunk) => chunk.type === 'tool-approval-request')!.approvalId).toMatch(/^glirastes-approval\.v1\./);
     expect(backend.calls).toHaveLength(0);
+  });
+
+  it('refuses a direct command of a tool that declares block or a recheck (no lookup runs there), runs one that declares neither', async () => {
+    const command = formatChatCommandMessage({
+      commandId: 'playlists.delete', tool: 'playlists.delete', args: { playlist_id: 7 }, label: '/Delete playlist',
+    });
+    for (const [option, refused] of [
+      [{ onUnavailable: 'block' }, true],
+      [{ recheck: 'exists' }, true],
+      [{}, false],
+    ] as const) {
+      const backend = fakeBackend({ 'GET /playlists/7': () => ok({ playlist_id: 7, displayName: 'Lobby Loop' }) });
+      const { model } = callingModel([]);
+      const handler = createAiChatHandler({
+        tools: referenceTools({ deletePlaylist: { approvalSubject: option } }), model, systemPrompt: 'A', approvalSecret: SECRET,
+        endpointCaller: backend.endpointCaller,
+      });
+      const chunks = await streamChunks(await handler(post([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: command }] }])));
+      const error = chunks.find((chunk) => chunk.type === 'tool-output-error');
+      if (refused) expect(error).toMatchObject({ errorText: 'approval_subject_check_required' });
+      else expect(chunks.some((chunk) => chunk.type === 'tool-approval-request')).toBe(true);
+      expect(backend.calls.filter((call) => call.method === 'DELETE')).toHaveLength(0);
+    }
   });
 
   it('makes no lookup for a custom streamHandler', async () => {
