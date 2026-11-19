@@ -34,12 +34,13 @@ function doc(operation: Record<string, unknown> = {}) {
     },
   });
 }
-async function fixture(operation: Record<string, unknown> = {}) {
+async function fixture(operation: Record<string, unknown> = {}, config: Record<string, unknown> = {}) {
   return createAppFixture(
     { "api/openapi.json": doc(operation) },
     {
       toolsConfig: {
         sources: [{ kind: "openapi", document: "api/openapi.json" }],
+        ...config,
       },
     },
   );
@@ -47,6 +48,21 @@ async function fixture(operation: Record<string, unknown> = {}) {
 afterEach(removeAppFixtures);
 
 describe("runtime container artifact", () => {
+  it("carries the tool labels per language locally and leaves the setup artifact one presentation", async () => {
+    const app = await fixture(
+      { "x-glirastes-title": { de: "Aufgaben zeigen", pl: "Pokaż zadania" } },
+      { languages: ["en", "de", "pl"] },
+    );
+    await buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") });
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    const name = Object.keys(loaded.toolTexts ?? {})[0]!;
+    expect(loaded.toolTexts?.[name]?.labels?.pl?.approval).toBe("Pokaż zadania");
+    expect(JSON.stringify(loaded.setupArtifact)).not.toContain("Pokaż zadania");
+    const plain = await fixture();
+    await buildRuntimeArtifact({ projectRoot: plain.root, outputDirectory: plain.path("artifact") });
+    expect((await loadRuntimeArtifact(plain.path("artifact"))).toolTexts).toBeUndefined();
+  }, 60_000);
+
   it("rejects required bodies that can be empty because the caller omits an empty object", async () => {
     const app = await fixture();
     const spec = JSON.parse(await app.read("api/openapi.json"));

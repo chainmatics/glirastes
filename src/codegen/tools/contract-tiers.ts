@@ -195,6 +195,12 @@ function invalidMetadataFindings(subject: string, module: string, entry: ProbedC
     findings.push(toolFinding('contract-presentation-invalid', 'warning', subject,
       `${module} declares a presentation that does not match the presentation schema, so it is ignored.`));
   }
+  for (const field of ['title', 'description', 'synonyms', 'examples'] as const) {
+    if (entry.invalidFields?.includes(field)) {
+      findings.push(toolFinding('tool-texts-invalid', 'warning', subject,
+        `${module} declares a ${field} that is not one text or one text per language tag within the limits (or looks like a secret); it is ignored.`));
+    }
+  }
   if (entry.invalidFields?.includes('maxResultChars')) {
     findings.push(toolFinding('max-result-chars-invalid', 'warning', subject,
       `${module} declares a maxResultChars that is not an integer from 1000 to 200000; the declaration is ignored and the handler's limit applies.`));
@@ -511,11 +517,17 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
   const assessment = assessResolution(input, interfaceDigest);
   const resolution = assessment.usable;
   const effect = strongerEffect(strongerEffect(entry?.effect, resolution?.effect), input.openapi?.effect);
+  // A contract.ts description per language keeps the place of a plain one: below the JSDoc.
+  const { declaredDescription: contractDescriptions, title: contractTitle, ...contractTexts } = entry?.texts ?? {};
+  const contractDescription = entry?.description ?? contractDescriptions;
   const prose: ToolProseHints = {
-    ...(entry?.description ? { contractDescription: entry.description } : {}),
+    ...(contractDescription ? { contractDescription } : {}),
     ...(entry?.module ? { module: entry.module } : {}),
     ...(entry?.usageHints?.length ? { usageHints: entry.usageHints } : {}),
     ...(entry?.presentation ? { presentation: entry.presentation } : {}),
+    ...(entry?.presentations ? { presentations: entry.presentations } : {}),
+    ...(contractTitle !== undefined ? { contractTitle } : {}),
+    ...contractTexts,
   };
   // Output fields: of the OpenAPI operation, else of the contract module entry.
   const ownFields: DeclaredOutputFields | undefined = input.outputFields ?? (entry && input.contractModule

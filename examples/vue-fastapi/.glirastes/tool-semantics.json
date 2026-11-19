@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "tools": [
+    {
+      "stableKey": "GET /api/playlists/:playlist_id",
+      "title": { "de": "Playlist öffnen" }
+    }
+  ]
+}

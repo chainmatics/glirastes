@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router';
+import { chatConfig } from './chat-config';
 </script>
 
 <template>
@@ -8,7 +9,7 @@ import { RouterLink, RouterView } from 'vue-router';
     <RouterLink to="/tasks">Tasks</RouterLink>
   </nav>
   <main><RouterView /></main>
-  <glirastes-chat endpoint="/api/chat" theme="light" placeholder="Ask about your tasks"></glirastes-chat>
+  <glirastes-chat endpoint="/api/chat" theme="light" :config.prop="chatConfig"></glirastes-chat>
 </template>
 
 <style>

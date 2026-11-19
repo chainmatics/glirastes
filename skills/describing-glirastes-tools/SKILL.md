@@ -62,7 +62,9 @@ in each description which neighbour fits better for which request.
      Always in English, for every tool and every app: only the model reads
      it, and descriptions from code comments are English too, so a mixed set
      never arises. Everything people read (`title`, `presentation`,
-     `synonyms`, `examples`) follows the languages of the work list.
+     `synonyms`, `examples`) follows the languages of the work list: the
+     app's `languages` in `.glirastes/tools.json` (any BCP-47 tags, e.g.
+     `"pl"`), else its locale plus English.
    - The input schema: types, required fields, enums, formats, bounds and a
      description per parameter; strict JSON Schema 2020-12, an object with
      `additionalProperties: false`, at most 32 KB. An output schema where the
@@ -71,7 +73,9 @@ in each description which neighbour fits better for which request.
      listed in `languages`), plus `exampleCalls` whose `input` matches the
      input schema.
    - `title` per language, `presentation` (singular, plural, the confirmation
-     question) in the app's locale, `approvalHint` for tools that ask first.
+     question) in the app's locale, or per language
+     (`{ "pl": { "singular": …, "plural": …, "approval": … } }`), and
+     `approvalHint` for tools that ask first.
 3. Mark every field you wrote with `"origin": { "<field>": "agent" }` and keep
    `"agent": { "model": "<you>", "interfaceDigest": "<as printed>" }`.
 4. Run `glirastes tools refresh`, then `glirastes tools eval`. Each
@@ -99,6 +103,21 @@ in each description which neighbour fits better for which request.
 }
 ```
 
+### Which text wins
+
+Per field and per language: `tool-policy.json`, then a maintained
+`tool-semantics.json` field (written by a person, or locked), then the code
+(OpenAPI `x-glirastes-title`/`-description`/`-synonyms`/`-examples`, JSDoc or
+the OpenAPI description, `contract.ts`), then your agent fields, then the
+template. So your fields fill gaps and never replace what the code says; a
+reviewed (locked) field beats the code. A higher source wins only for the
+languages it has: add a missing `pl` title even where the code has `de` and
+`en`. A plain string has no language and stands for all. Fallback for a
+missing language: the same language with another region, English, the first
+one. `semantics-overrides-code` (refresh output) names fields where a
+maintained entry hides a differing code text; `label-translation-missing`
+names languages tools have no label in.
+
 ### What the model sees when
 
 - When it calls the tool: the `description` and the input schema with its
@@ -115,15 +134,17 @@ in each description which neighbour fits better for which request.
   language rejects the whole entry (`tool-semantics-invalid`,
   `resolution-rejected` for an agent entry): its other texts are lost too.
 - The description the model gets is the first non-empty of: `description`
-  in `.glirastes/tool-policy.json`, the code comment (JSDoc above the handler,
-  method or client action registration; for `openapi` the operation's
-  `description`, else `summary`), the `contract.ts` description (for
-  `ui.navigate` and `ui.filter.*` a generated text), the schema's
-  `.describe()`, then the `description` you write in `tool-semantics.json`;
-  the same for endpoint and UI tools. So a tool with a JSDoc comment ignores
-  your `description` today; if the comment is too thin, tell the developer
-  (you never change handler code). The next minor release is planned to let a maintained
-  `tool-semantics.json` entry win over the JSDoc.
+  in `.glirastes/tool-policy.json`, a maintained `description` in
+  `tool-semantics.json` (no `origin` or `"human"`, or `locked`), the code
+  (`x-glirastes-description`; the JSDoc above the handler, method or client
+  action registration; for `openapi` the operation's `description`, else
+  `summary`; the `contract.ts` description, for `ui.navigate` and
+  `ui.filter.*` a generated text; the schema's `.describe()`, for a client
+  action the top-level `.describe()` of its zod contract), then the
+  `description` you write (`origin: "agent"`); the same for endpoint and UI
+  tools. So a tool with a code description ignores your `description` until
+  a review locks it; if the code text is too thin, tell the developer (you
+  never change handler code).
 - Synonyms weigh second only to the name in the search. Never give a
   collective tool (navigation, a generic "open object" tool) the names of its
   targets as synonyms (`Playlists` on a navigation tool): it then joins every

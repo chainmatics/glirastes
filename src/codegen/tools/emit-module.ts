@@ -109,6 +109,12 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     .map((tool) => [catalogEntry(tool).modelName as string, toolSearchSemanticsOf(contractsById.get(tool.toolId)?.search)] as const)
     .filter((entry): entry is readonly [string, ToolSearchSemantics] => entry[1] !== undefined)
     .sort(([left], [right]) => compareCodeUnits(left, right)));
+  // Labels per language (tools.json languages), keyed like toolSearchSemantics; absent for an app without languages.
+  const toolTexts = Object.fromEntries(tools
+    .map((tool) => [catalogEntry(tool).modelName as string, contractsById.get(tool.toolId)?.labels] as const)
+    .filter((entry): entry is readonly [string, NonNullable<ToolContractsEntry['labels']>] => entry[1] !== undefined)
+    .map(([name, labels]) => [name, { labels }] as const)
+    .sort(([left], [right]) => compareCodeUnits(left, right)));
   const modules = [...new Set(bound
     .flatMap(({ contract }) => [contract.runtime.input, contract.runtime.output])
     .flatMap((source) => (source.kind === 'module-export' ? [source.module] : [])))]
@@ -157,6 +163,13 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     `export const toolSearchSemantics = ${literal(searchSemantics)}${typescript ? ' as const' : ''};`,
     '',
   );
+  if (Object.keys(toolTexts).length > 0) {
+    lines.push(
+      '/** Labels per language for the chat (tools.json `languages`); `chatTurn()` passes them on as `toolTexts`. */',
+      `export const toolTexts = ${literal(toolTexts)}${typescript ? ' as const' : ''};`,
+      '',
+    );
+  }
   lines.push('export function createToolBindings() {');
   if (bound.length === 0) {
     lines.push('  return [];');

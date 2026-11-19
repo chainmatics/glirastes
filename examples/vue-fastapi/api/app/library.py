@@ -196,6 +196,8 @@ users_router = APIRouter(prefix='/api/users', tags=['users'], dependencies=[Depe
     'x-glirastes-output-default-fields': [
         'playlists[].playlist_id', 'playlists[].displayName', 'playlists[].status', 'total',
     ],
+    # Search only, never sent to the model: Polish words find the tool too.
+    'x-glirastes-synonyms': {'pl': ['playlisty', 'listy odtwarzania']},
 })
 def list_playlists(
     user: CurrentUser,
@@ -210,13 +212,19 @@ def list_playlists(
     return PlaylistPage(playlists=page, total=len(matching), limit=limit, offset=offset)
 
 
-@playlists_router.get('/{playlist_id}', response_model=Playlist)
+# Titles in three languages; tool-semantics.json overrides German only (mixing per language).
+@playlists_router.get('/{playlist_id}', response_model=Playlist, openapi_extra={
+    'x-glirastes-title': {'en': 'Show playlist', 'de': 'Playlist anzeigen', 'pl': 'Pokaż playlistę'},
+})
 def get_playlist(user: CurrentUser, playlist_id: int) -> Playlist:
     """Get one playlist with all its items."""
     return _playlist_or_404(library_of(user.subjectId), playlist_id)
 
 
-@playlists_router.delete('/{playlist_id}', status_code=204, openapi_extra={'x-glirastes-effect': 'destructive'})
+@playlists_router.delete('/{playlist_id}', status_code=204, openapi_extra={
+    'x-glirastes-effect': 'destructive',
+    'x-glirastes-title': {'en': 'Delete playlist', 'de': 'Playlist löschen', 'pl': 'Usuń playlistę'},
+})
 def delete_playlist(user: CurrentUser, playlist_id: int) -> None:
     """Delete a playlist and its versions."""
     library = library_of(user.subjectId)
@@ -251,7 +259,11 @@ def list_channels(user: CurrentUser) -> ChannelList:
     return ChannelList(channels=list(library_of(user.subjectId).channels.values()))
 
 
-@channels_router.delete('/{key}', status_code=204, openapi_extra={'x-glirastes-effect': 'destructive'})
+# A partial translation: German only. English comes from the template, Polish falls back to English.
+@channels_router.delete('/{key}', status_code=204, openapi_extra={
+    'x-glirastes-effect': 'destructive',
+    'x-glirastes-title': {'de': 'Kanal löschen'},
+})
 def delete_channel(user: CurrentUser, key: str) -> None:
     """Delete a channel by its key."""
     library = library_of(user.subjectId)

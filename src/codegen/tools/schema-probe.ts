@@ -10,6 +10,8 @@ import type { DeclaredEffect } from '../../contracts/tool-policy.js';
 import { isValidMaxResultChars } from '../../runtime/result-limit.js';
 import { normalizeOutputFields } from '../../server/core/output-fields.js';
 import { sha256Digest, sortKeysDeep } from './canonical.js';
+import { readDeclaredTexts, type DeclaredTextField, type DeclaredTexts } from './declared-texts.js';
+import { LocalizedPresentationSchema, type LocalizedPresentation } from './semantics.js';
 import type { JsonSchemaLike } from './types.js';
 
 export interface SchemaProbeItem {
@@ -30,7 +32,8 @@ export interface ProbedSchema {
 
 /** Contract metadata fields that were declared but are unusable, so they read as `null`. */
 export type InvalidContractField =
-  | 'effect' | 'presentation' | 'maxResultChars' | 'outputAllowedFields' | 'outputDeniedFields' | 'outputDefaultFields';
+  | 'effect' | 'presentation' | 'maxResultChars' | 'outputAllowedFields' | 'outputDeniedFields' | 'outputDefaultFields'
+  | DeclaredTextField;
 
 /** The output field declarations of a contract entry. */
 const OUTPUT_FIELD_NAMES = ['outputAllowedFields', 'outputDeniedFields', 'outputDefaultFields'] as const;
@@ -46,6 +49,14 @@ export interface ProbedContractEntry {
   module: string | null;
   usageHints: string[] | null;
   presentation: ToolPresentation | null;
+  /** `presentation` given per language tag instead of one locale. */
+  presentations?: LocalizedPresentation;
+  /**
+   * Texts in any language the entry declares (`title`, `synonyms`,
+   * `examples`, a `description` per language). Not part of `moduleDigest`:
+   * they describe the tool for people and the search, not the contract.
+   */
+  texts?: DeclaredTexts['hints'];
   /**
    * `maxResultChars` of the entry, when it is an integer from 1,000 to
    * 200,000. Not part of `moduleDigest`: it bounds results, not the contract.
@@ -122,6 +133,7 @@ const WireEntry = z.object({
   module: z.string().nullable(),
   usageHints: z.array(z.string()).nullable(),
   presentation: z.record(z.string(), z.unknown()).nullable(),
+  texts: z.record(z.string(), z.unknown()).nullable().optional(),
   maxResultChars: z.union([z.number(), z.literal('invalid')]).nullable().optional(),
   outputAllowedFields: z.union([z.array(z.string()), z.literal('invalid')]).nullable().optional(),
   outputDeniedFields: z.union([z.array(z.string()), z.literal('invalid')]).nullable().optional(),
@@ -184,6 +196,17 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
   const output = wire.output ? toSchema(wire.output) : null;
   if (output && !output.ok) return output;
   const presentation = wire.presentation ? ToolPresentationSchema.safeParse(wire.presentation) : undefined;
+  // A presentation per language is no presentation of the single-locale schema; read it on its own.
+  const presentations = wire.presentation && !presentation?.success
+    ? LocalizedPresentationSchema.safeParse(wire.presentation)
+    : undefined;
+  const rawTexts = wire.texts ?? {};
+  const texts = readDeclaredTexts({
+    ...(rawTexts.title !== undefined ? { title: rawTexts.title } : {}),
+    ...(rawTexts.description !== undefined ? { description: rawTexts.description ?? 'invalid' } : {}),
+    ...(rawTexts.synonyms !== undefined ? { synonyms: rawTexts.synonyms } : {}),
+    ...(rawTexts.examples !== undefined ? { examples: rawTexts.examples } : {}),
+  });
   const metadata = {
     description: wire.description?.trim() ? wire.description.trim().slice(0, 1_000) : null,
     effect: wire.effect && DECLARED_EFFECTS.includes(wire.effect) ? wire.effect as DeclaredEffect : null,
@@ -197,7 +220,8 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
   if (carriesSecret(metadata)) return CONTENT_REJECTED;
   const invalidFields: InvalidContractField[] = [];
   if (wire.effect !== null && metadata.effect === null) invalidFields.push('effect');
-  if (presentation && !presentation.success) invalidFields.push('presentation');
+  if (presentation && !presentation.success && !presentations?.success) invalidFields.push('presentation');
+  for (const field of texts.invalid) invalidFields.push(field);
   const declaredLimit = wire.maxResultChars ?? null;
   const maxResultChars = isValidMaxResultChars(declaredLimit) ? declaredLimit : undefined;
   if (declaredLimit !== null && maxResultChars === undefined) invalidFields.push('maxResultChars');
@@ -219,6 +243,8 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
     ...metadata,
     ...(maxResultChars !== undefined ? { maxResultChars } : {}),
     ...outputFields,
+    ...(presentations?.success && !carriesSecret(presentations.data) ? { presentations: presentations.data } : {}),
+    ...(Object.keys(texts.hints).length > 0 ? { texts: texts.hints } : {}),
     ...(invalidFields.length > 0 ? { invalidFields } : {}),
     moduleDigest: sha256Digest(JSON.stringify(sortKeysDeep({
       input: input.digest,

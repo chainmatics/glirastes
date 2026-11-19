@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { chatText } from '../../contracts/chat-interactions.js';
 import { actionLabel, commandLabel, humanizeIdentifier, identifierWords, phraseLabel, singular, VERBS } from './chat-labels.js';
 
 describe('chat labels', () => {
@@ -40,6 +41,13 @@ describe('chat labels', () => {
       definitionId: 'tasks.permanentDelete', method: 'DELETE', trailingSegment: 'permanent',
       title: { de: 'Aufgabe endgültig löschen', en: 'Permanently delete task' },
     })).toEqual({ en: 'Permanently delete task', de: 'Aufgabe endgültig löschen' });
+  });
+
+  it('keeps any title language and lets a regional title stand for its language', () => {
+    const label = commandLabel('taskCreateDialog.open', { 'de-DE': 'Dialog öffnen', pl: 'Otwórz okno', 'en-GB': 'Open the dialogue' });
+    expect(label).toEqual({ 'de-DE': 'Dialog öffnen', pl: 'Otwórz okno', 'en-GB': 'Open the dialogue', en: 'Open the dialogue', de: 'Dialog öffnen' });
+    expect(chatText(label, 'de-AT')).toBe('Dialog öffnen');
+    expect(chatText(label, 'pl-PL')).toBe('Otwórz okno');
   });
 
   it('labels entity actions from the id, the path and the method', () => {

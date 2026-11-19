@@ -177,6 +177,18 @@ result is stored, shown or cut, and the first answer shows the default view. An
 invalid allow- or deny-list disables the tool at build time; an artifact whose
 lists are not valid field paths is refused when it is loaded.
 
+Languages (all optional, section `chat`): `chat.locale` (BCP-47, default
+English) is the language of the texts the runtime writes itself;
+`chat.requestLocaleHeader` names a request header with the turn's language
+(`accept-language` is read by preference, any other header holds one tag,
+e.g. `x-app-language` sent by the chat's transport); `chat.locales` adds or
+changes the runtime's own texts per language (`{"pl": {"closing": "...",
+"silentTurn": "..."}}`, keys of the SDK handler's `locales`; partial tables
+fall back per key, an unknown key fails at start). With `languages` in
+`.glirastes/tools.json` the artifact carries the tool labels per language
+(local, never sent to the Platform), and the approval card and step display
+show them in the turn's language.
+
 ## State, cancellation and lifecycle
 
 PostgreSQL stores only hashed consumed approval IDs, scope and expiration. The

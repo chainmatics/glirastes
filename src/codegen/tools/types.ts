@@ -1,4 +1,5 @@
 import type { ToolPresentation } from '../../contracts/index.js';
+import type { LocalizedText } from '../../contracts/localized-text.js';
 import type { DeclaredEffect, ToolPolicyDefaults, ToolPolicyFile } from '../../contracts/tool-policy.js';
 import type { LocalJsonSchema } from '../../runtime/json-schema.js';
 import type { GeneratedUiAction } from '../../server/core/generated-ui-tool.js';
@@ -63,11 +64,23 @@ export interface ToolContract {
 }
 
 export interface ToolProseHints {
-  contractDescription?: string;
+  /** contract.ts `description`: one text, or one per language tag. */
+  contractDescription?: LocalizedText;
   schemaDescription?: string;
+  /** The endpoint's own description per language (OpenAPI `x-glirastes-description`); above its plain description. */
+  declaredDescription?: LocalizedText;
   module?: string;
   usageHints?: string[];
   presentation?: ToolPresentation;
+  /** contract.ts `presentation` given per language tag. */
+  presentations?: Readonly<Record<string, { singular: string; plural: string; approval: string }>>;
+  /** The endpoint's title (OpenAPI `x-glirastes-title`): one text, or one per language tag. */
+  title?: LocalizedText;
+  /** contract.ts `title`, below the OpenAPI one per language (a language-free one stays for the languages it lacks). */
+  contractTitle?: LocalizedText;
+  /** The endpoint's synonyms and example requests per language (search only). */
+  synonyms?: Readonly<Record<string, ReadonlyArray<string>>>;
+  examples?: Readonly<Record<string, ReadonlyArray<string>>>;
   /**
    * Set by the openapi source only: a name without a dot there comes from
    * `x-glirastes-name` (`list_tags`) and carries its verb, so module and
@@ -157,9 +170,11 @@ export interface McpToolName {
   name: string;
 }
 
+/** A tool's title per BCP-47 language tag (`de`, `en`, `pl-PL`). */
 export interface ToolTitle {
-  de?: string;
-  en?: string;
+  readonly de?: string;
+  readonly en?: string;
+  readonly [language: string]: string | undefined;
 }
 
 export interface ToolContractsEntry {
@@ -170,6 +185,12 @@ export interface ToolContractsEntry {
   defaults: ToolPolicyDefaults;
   search?: ToolSearchFacts;
   title?: ToolTitle;
+  /**
+   * Labels per language for the chat (tools.json `languages`). Local only:
+   * the generated module and the container artifact carry them, the setup
+   * artifact keeps its one `presentation`.
+   */
+  labels?: Record<string, { singular: string; plural: string; approval: string }>;
   mcp?: McpToolName[];
   /** Upper bound of the serialized result the code declares; the generated module passes it on. */
   maxResultChars?: number;

@@ -648,14 +648,19 @@ function filterProse(locale: string, view: View, keys: ReadonlyArray<FilterKey>)
   const listed = keys.map((key) => describeKey(key, german)).join(', ');
   const params = view.params.map((name) => `params.${name}`).join(', ');
   const label = (text: string) => (text.length <= 200 ? text : `${text.slice(0, 199)}…`);
+  const same = (text: string) => ({ singular: label(text), plural: label(text), approval: label(text) });
+  // Both languages for tools.json languages; `presentation` stays the one of the app's locale.
+  const presentations = { de: same(`${view.path} filtern`), en: same(`Filter ${view.path}`) };
   return german
     ? {
       contractDescription: `Zeigt die Seite ${view.path} mit URL-Filtern: ${listed}.${params ? ` Braucht ${params}.` : ''}`,
-      presentation: { locale, singular: label(`${view.path} filtern`), plural: label(`${view.path} filtern`), approval: label(`${view.path} filtern`) },
+      presentation: { locale, ...presentations.de },
+      presentations,
     }
     : {
       contractDescription: `Show the ${view.path} page with URL filters: ${listed}.${params ? ` Needs ${params}.` : ''}`,
-      presentation: { locale, singular: label(`Filter ${view.path}`), plural: label(`Filter ${view.path}`), approval: label(`Filter ${view.path}`) },
+      presentation: { locale, ...presentations.en },
+      presentations,
     };
 }
 

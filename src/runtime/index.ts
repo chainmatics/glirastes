@@ -93,6 +93,12 @@ export {
   type TurnToolDiscoveryOptions,
 } from './tool-discovery.js';
 export {
+  mergeToolSearchSemantics,
+  type ToolLabelTexts,
+  type ToolTexts,
+  type ToolTextsMap,
+} from './tool-texts.js';
+export {
   createToolSearchIndex,
   searchTermVariants,
   searchTokens,

@@ -101,6 +101,8 @@ import {
   withSilentTurnFallback,
 } from './silent-turn-fallback.js';
 import { toolPresentationOf, type ToolPresentationPart } from './tool-presentation.js';
+import { assertChatServerLocales, resolveChatServerTexts } from './chat-texts.js';
+import { isLanguageTag } from '../../../contracts/localized-text.js';
 import {
   PrincipalSchema,
   type Principal,
@@ -543,6 +545,7 @@ async function defaultStreamHandler(
   onFinish?: AiChatHandlerConfig['onFinish'],
   onStreamError?: (error: unknown, info?: AiChatErrorInfo) => void,
   budgetStopTexts: BudgetStopTexts = resolveBudgetStopTexts(ctx.locale, undefined),
+  silentTurnText?: string,
 ): Promise<Response> {
   // SDK built-ins the handler created itself are not manifest tools, so the
   // managed guard would deny them. Everything else stays guarded.
@@ -958,7 +961,7 @@ async function defaultStreamHandler(
       const answerStream = withStopNotice(result.toUIMessageStream({ onError: maskToolStreamError }), stopNotice);
       const uiStream = resumedApprovals
         ? answerStream
-        : withSilentTurnFallback(answerStream, silentTurnFallbackText(ctx.locale));
+        : withSilentTurnFallback(answerStream, silentTurnText ?? silentTurnFallbackText(ctx.locale));
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
@@ -1030,7 +1033,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     // Shared
     model: modelConfig,
     systemPrompt: systemPromptConfig,
-    locale = 'en-US',
+    locale: configuredLocale = 'en-US',
+    requestLocale,
+    locales: localesConfig,
+    toolTexts,
     uiActionSchema,
     maxOutputTokens = 600,
     temperature = 0.2,
@@ -1075,7 +1081,35 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     budgetStopTexts: budgetStopTextsConfig,
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
-  const budgetStopTexts = resolveBudgetStopTexts(locale, budgetStopTextsConfig);
+  const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
+  assertChatServerLocales(localesConfig);
+  const explicitLocale = config.locale;
+  if (requestLocale !== undefined && typeof requestLocale !== 'function') {
+    throw new Error('createAiChatHandler: requestLocale must be a function of the request');
+  }
+  // The handler's own texts per turn language; without locales or requestLocale exactly the texts of before.
+  const serverTexts = new Map<string, { budgetStop: BudgetStopTexts; silentTurn?: string }>();
+  const textsFor = (turnLocale: string | undefined): { budgetStop: BudgetStopTexts; silentTurn?: string } => {
+    if (!localesConfig && (turnLocale === undefined || turnLocale === configuredLocale)) return { budgetStop: budgetStopTexts };
+    const key = turnLocale ?? configuredLocale;
+    let texts = serverTexts.get(key);
+    if (!texts) {
+      const { silentTurn, ...budgetStop } = resolveChatServerTexts(key, budgetStopTextsConfig, localesConfig);
+      texts = { budgetStop: Object.freeze(budgetStop), silentTurn };
+      if (serverTexts.size < 100) serverTexts.set(key, texts);
+    }
+    return texts;
+  };
+  /** The language of one request: `requestLocale` (opt-in), else the configured `locale`. */
+  const turnLocaleOf = async (req: Request): Promise<string | undefined> => {
+    if (!requestLocale) return undefined;
+    try {
+      const value = await requestLocale(req);
+      return typeof value === 'string' && isLanguageTag(value.replace(/_/g, '-')) ? value.replace(/_/g, '-') : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
   const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
@@ -1161,9 +1195,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     };
     return (ctx: StreamHandlerContext) => {
       const context = { ...ctx, abortSignal: req.signal };
+      const texts = textsFor(ctx.locale);
       return customStreamHandler ? customStreamHandler(context) : defaultStreamHandler(
         context, wrappedOnFinish, (error, info) => (info ? onError?.(error, req, info) : onError?.(error, req)),
-        budgetStopTexts,
+        texts.budgetStop,
+        texts.silentTurn,
       );
     };
   }
@@ -1315,6 +1351,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     try {
       const body = await readJsonBody(req, maxBodyBytes);
       if (!body.ok) return body.response;
+      // The language of this turn: the request's (requestLocale), else the configured one.
+      const requestedLocale = await turnLocaleOf(req);
+      const locale = requestedLocale ?? configuredLocale;
       const { messages: requestMessages, glirastesClientActions } = body.value as {
         messages?: unknown;
         glirastesClientActions?: unknown;
@@ -1555,6 +1594,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             principal: managedPrincipal,
             revocations: await loadTurnRevocations(),
           }),
+          {
+            ...(toolTexts ? { texts: toolTexts } : {}),
+            // A turn language only where the app states one; otherwise the manifest's, as before.
+            ...(requestedLocale ?? explicitLocale) !== undefined ? { locale: (requestedLocale ?? explicitLocale)! } : {},
+          },
         ) ?? undefined;
       };
 

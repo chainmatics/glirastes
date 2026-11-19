@@ -44,6 +44,7 @@ import { resolveLocalLimits, type LocalLimits } from './local-limits.js';
 import { SDK_VERSION } from './sdk-version.js';
 import { assertMaxResultChars } from './result-limit.js';
 import type { ToolSearchSemanticsMap } from './tool-discovery.js';
+import type { ToolTextsMap } from './tool-texts.js';
 import type { ToolFailureClassifier } from './tool-failure.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
 
@@ -53,6 +54,8 @@ const DEFAULT_RETRY_INTERVAL_MS = 30_000;
 /** The module `glirastes tools refresh` emits (`tools.generated.ts`). */
 export interface GlirastesGeneratedModule extends GeneratedToolModule {
   readonly toolSearchSemantics?: ToolSearchSemanticsMap;
+  /** Labels per language; emitted only when tools.json names `languages`. */
+  readonly toolTexts?: ToolTextsMap;
 }
 
 export interface CreateGlirastesOptions {
@@ -122,6 +125,8 @@ export interface GlirastesChatTurn {
   };
   loadTools: (context: { turnSnapshot?: TurnSnapshot }) => ToolRegistry;
   toolSemantics?: ToolSearchSemanticsMap;
+  /** Present when the generated module has labels per language (tools.json `languages`). */
+  toolTexts?: ToolTextsMap;
   metrics?: RuntimeMetricsSink;
   classifyToolFailure?: ToolFailureClassifier;
   maxResultChars?: number;
@@ -556,6 +561,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         loadTools: ({ turnSnapshot }) => (turnSnapshot
           ? materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: bound.bindings })
           : {}),
+        ...(options.generated.toolTexts ? { toolTexts: options.generated.toolTexts } : {}),
         ...(options.generated.toolSearchSemantics
           ? { toolSemantics: options.generated.toolSearchSemantics }
           : {}),

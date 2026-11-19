@@ -55,14 +55,19 @@ function navigationProse(locale: string, pages: ReadonlyArray<PageEntry>): ToolP
     : page.path));
   const rest = pages.length - listed.length;
   const more = rest > 0 ? (german ? ` und ${rest} weitere` : ` and ${rest} more`) : '';
+  // Both languages for tools.json languages; `presentation` stays the one of the app's locale.
+  const de = { singular: 'Seite öffnen', plural: 'Seiten öffnen', approval: 'Seite öffnen' };
+  const en = { singular: 'Open page', plural: 'Open pages', approval: 'Open a page' };
   return german
     ? {
       contractDescription: `Öffnet eine Seite dieser App im Browser des Nutzers. Ziele: ${listed.join(', ')}${more}.`,
-      presentation: { locale, singular: 'Seite öffnen', plural: 'Seiten öffnen', approval: 'Seite öffnen' },
+      presentation: { locale, ...de },
+      presentations: { de, en },
     }
     : {
       contractDescription: `Open a page of this app in the user's browser. Destinations: ${listed.join(', ')}${more}.`,
-      presentation: { locale, singular: 'Open page', plural: 'Open pages', approval: 'Open a page' },
+      presentation: { locale, ...en },
+      presentations: { de, en },
     };
 }
 

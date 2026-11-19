@@ -344,7 +344,12 @@ principal and loads the revocations again, as the guard does before every
 call: a role lost or a revocation loaded in the middle of a multi-step request
 takes the tool away from the next step and the next search, and a principal
 that cannot be resolved any more leaves only the built-ins. The tool labels
-(`data-tool-presentation`) are sent once, as of the start of the request. A
+(`data-tool-presentation`) are sent once, as of the start of the request,
+in the manifest presentation's locale; with `toolTexts` (generated when
+`.glirastes/tools.json` names `languages`) and a turn language
+(`requestLocale`, or an explicitly set `locale`) each label is the manifest's
+where it is in that language, else the generated label of that language or
+its fallback (another region, English, the first one). A
 custom `streamHandler` gets the per-step check as `authorizedToolNames` in
 its context and has to intersect its active tools with it. A legacy
 `intentRouter` gets only these tool names as well (as of the start of the

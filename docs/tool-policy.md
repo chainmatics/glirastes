@@ -98,6 +98,9 @@ string) or `opt-in`. The extensions are read on the operation object only
 | `x-glirastes-output-allowed-fields` | string array of field paths (`data[].name`, `meta`; no index; at most 200 of at most 200 characters) | Upper bound: a successful result shows only these fields (and `success`, `uiAction`), on every channel, before the PII shield, result handles and the size limit; new backend fields stay hidden until listed. Reduces the output contract. Local only, never sent to the Platform. See [concepts](concepts.md#output-fields-upper-bound-and-default-view) | `output-allowed-fields-invalid` (needs attention): the tool stays disabled (fail closed). A path the response schema does not have: `output-field-unknown` (warning) |
 | `x-glirastes-output-denied-fields` | string array of field paths, or `**.<key>` (any depth); app-wide patterns from `output.deniedFields` of `.glirastes/tools.json` are joined in | Part of the same upper bound: these fields (and everything below them) are never shown; wins over allowed and default fields. `**.fileUrl` removes every `fileUrl` at any depth, also at the top level | `output-denied-fields-invalid` (needs attention): the tool stays disabled. Unknown path: `output-field-unknown` (warning: a misspelt path excludes nothing) |
 | `x-glirastes-output-default-fields` | string array of field paths | The fields the first answer shows, also below the limit; the rest stays readable with `read_result` (without a result store: not readable, the answer says so) | `output-default-fields-invalid` (warning); ignored. Outside the allow-list: `output-default-fields-outside-allowed`; denied: `output-default-fields-denied` (warnings; not shown) |
+| `x-glirastes-title` | string, or one string per BCP-47 tag (`{"en": "Delete playlist", "pl": "Usuń playlistę"}`), at most 200 characters each | The tool's title people read: the label of its `/` command or entity action, and with `languages` in `.glirastes/tools.json` its label on approval cards and in the step display, per language. A plain string has no language and is used for all. See [texts and languages](#texts-and-languages) | `tool-texts-invalid` (warning); ignored |
+| `x-glirastes-description` | string, or one per tag, at most 1,000 characters each | The description for the model, above the operation's own `description`/`summary`. The model gets one, in English (else the fallback order) | `tool-texts-invalid` (warning); ignored |
+| `x-glirastes-synonyms`, `x-glirastes-examples` | one string array per tag (synonyms: at most 20 of 100 characters; examples: at most 10 of 200) | Search only (`find_tools`, the start set); every language is indexed, none is shown to the model | `tool-texts-invalid` (warning); ignored |
 | `x-glirastes-ignore` | `true` | Never a tool (excluded as `ai-ignore`) | – |
 
 Precedence: an operation is first checked for an unsupported method or path,
@@ -202,27 +205,90 @@ fails neither `tools check` nor `--strict`.
 
 `glirastes tools refresh` takes the first of these that is non-empty, the
 same way for endpoint tools (`next-app`, `nest`, `openapi`) and UI tools
-(client actions, navigation, filters):
+(client actions, navigation, filters); the order is the one of
+[Texts and languages](#texts-and-languages) below:
 
 1. `description` of the tool's entry in `.glirastes/tool-policy.json`.
-2. The code comment: the JSDoc above the Next.js handler or NestJS method;
-   for `openapi` the operation's `description`, else its `summary`; for a
-   client action the JSDoc above the registration statement, else above the
-   named handler function.
-3. The contract description: `description` of the `contract.ts` entry; for
-   the generated `ui.navigate` and `ui.filter.<view>` tools a fixed text
-   listing destinations or filters.
-4. The schema description: `.describe()` of the input schema, else of the
-   output schema.
-5. `description` of the tool's entry in `.glirastes/tool-semantics.json`.
-6. A template from method and path or the tool name, with the warning
+2. A maintained `description` of the tool's entry in
+   `.glirastes/tool-semantics.json`: one a person wrote (no `origin`, or
+   `"human"`) or a review locked (`locked`).
+3. The code, in this order: an OpenAPI `x-glirastes-description`; the code
+   comment (the JSDoc above the Next.js handler or NestJS method; for
+   `openapi` the operation's `description`, else its `summary`; for a client
+   action the JSDoc above the registration statement, else above the named
+   handler function); the contract description (`description` of the
+   `contract.ts` entry; for the generated `ui.navigate` and
+   `ui.filter.<view>` tools a fixed text listing destinations or filters);
+   the schema description (`.describe()` of the input schema, else of the
+   output schema; for a client action the top-level `.describe()` of its
+   probed zod payload contract).
+4. A `description` in `tool-semantics.json` an agent wrote (`origin:
+   "agent"`, not locked) or one copied from the code (`"code"`).
+5. A template from method and path or the tool name, with the warning
    `description-templated`.
 
-So a JSDoc comment currently wins over a description maintained in
-`tool-semantics.json`, also for UI tools; a client action takes neither 3
-nor 4 today. This order between the code comment and `tool-semantics.json`
-is planned to change in the next minor release: a maintained
-`tool-semantics.json` entry will win over the JSDoc.
+Since 0.18.0 a maintained `tool-semantics.json` description wins over the
+JSDoc and every other code text, also for UI tools; before, it came after
+them. When it overrides a differing code description, `glirastes tools
+refresh` warns `semantics-overrides-code`.
+
+## Texts and languages
+
+Every text about a tool can come from several places. Highest first, per
+field and per language:
+
+1. `tool-policy.json` (the description only).
+2. A maintained `tool-semantics.json` field: one a person wrote (no
+   `origin`, or `"human"`) or a review locked (`locked`).
+3. The code: the endpoint's own declarations (`x-glirastes-title`,
+   `-description`, `-synonyms`, `-examples`; in a `contract.ts` entry
+   `title`, `synonyms`, `examples`, and `description` or `presentation` per
+   language), then the JSDoc of the handler or the OpenAPI
+   `description`/`summary`, then the `contract.ts` description, then the
+   schema's.
+4. A `tool-semantics.json` field an agent wrote (`origin: "agent"`, not
+   locked) or one copied from the code (`"code"`).
+5. The template ("List playlists", "Playlists auflisten").
+
+Since 0.18.0 step 2 is above step 3 for API and UI tools alike (before, the
+code won and every semantics field came last). When a maintained entry
+overrides a differing description, usage hints or presentation of the code,
+`glirastes tools refresh` says so (`semantics-overrides-code`, warning, never
+stored in the outputs). The module is no text: `x-glirastes-group` and a
+`contract.ts` module still win over the entry.
+
+Languages are BCP-47 tags (`en`, `de`, `pl`, `pl-PL`, `pt-BR`); a plain
+string has no language and serves every language. One fallback order applies
+everywhere: the requested tag, the same language with another region
+(`pl-PL` → `pl`, `de-AT` → `de-DE`), English, then the first tag in
+code-unit order. In mixed sources a higher layer wins only for the languages
+it has (or with a plain string); the next layer fills the others, so
+`tool-semantics.json` can override the German title of an endpoint whose
+Polish one stays.
+
+What goes where:
+
+- **Model-facing** (`description`, `usageHints`): the model gets one text per
+  tool, in English (the fallback order when there is none), whatever the
+  user writes, so tokens do not grow with the number of languages. Usage
+  hints and model hints (404, truncation) are English only.
+- **Search** (`synonyms`, `examples`): all languages are indexed and none is
+  shown to the model, so a tool is found by Polish words even when its
+  description is English, and by its name and description when a language
+  has no synonyms.
+- **People** (`title`, `presentation`): with `"languages": ["en", "de", "pl"]`
+  in `.glirastes/tools.json` every tool gets a label per language (its
+  presentation, else its title, else the English or German template), local
+  in `tool-contracts.json` and as `toolTexts` in the generated module; a
+  language without an own label is reported as `label-translation-missing`
+  (warning, one per language). The runtime words the chat in the turn's
+  language (`requestLocale` of the chat handler). Without `languages`
+  nothing changes: one presentation in `locale`, titles in the chat's
+  command labels only.
+
+The setup artifact the Platform receives keeps one `presentation` in
+`locale`; translations, titles and synonyms never leave the app (the
+runtime container's artifact carries them, it is local).
 
 Without a group, a name with a dot keeps its module (the part before the first
 dot); a name without a dot (`list_tags`) takes the module from the path

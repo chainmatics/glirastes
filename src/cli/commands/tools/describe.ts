@@ -35,7 +35,7 @@ export async function runToolsDescribe(argv: ReadonlyArray<string>, io: ToolsIo)
   const list = buildDescribeWorklist(result, {
     root,
     locale: config.locale,
-    languages: requiredLanguages(config.locale),
+    languages: requiredLanguages(config.locale, config.languages),
     tools: args.positionals,
     all: args.flags.has('--all'),
     writeContracts: args.flags.has('--write-contracts') || config.enrich.writeContracts === true,

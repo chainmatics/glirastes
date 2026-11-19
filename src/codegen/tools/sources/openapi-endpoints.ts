@@ -39,6 +39,7 @@ import {
 import { validateResolutionEntry, type ResolutionEntry } from '../resolutions.js';
 import type { SchemaProbeItem, SchemaProbeResult } from '../schema-probe.js';
 import { outputFieldLists, type DeclaredOutputFields } from '../output-fields.js';
+import { mergeDeclaredTexts, readDeclaredTexts, type DeclaredTexts } from '../declared-texts.js';
 import type {
   ExcludedTool,
   JsonSchemaLike,
@@ -108,6 +109,8 @@ interface OpenapiEntry {
   maxResultChars?: number;
   /** `x-glirastes-output-*-fields`, checked against the response schema by `resolveEndpointContract`. */
   outputFields?: DeclaredOutputFields;
+  /** `x-glirastes-title`, `-description`, `-synonyms`, `-examples`: texts in any language. */
+  texts?: DeclaredTexts['hints'];
 }
 
 interface OpenapiPiece {
@@ -293,6 +296,16 @@ function readEntry(
   }
   const outputFields = readOutputFieldExtensions(operation.operation, where, stableKey);
   findings.push(...outputFields.findings);
+  const texts = readDeclaredTexts({
+    title: operation.operation['x-glirastes-title'],
+    description: operation.operation['x-glirastes-description'],
+    synonyms: operation.operation['x-glirastes-synonyms'],
+    examples: operation.operation['x-glirastes-examples'],
+  });
+  for (const field of texts.invalid) {
+    findings.push(toolFinding('tool-texts-invalid', 'warning', stableKey,
+      `${where} declares an x-glirastes-${field} that is not one text or one text per language tag within the limits (or looks like a secret); it is ignored.`));
+  }
   const description = typeof operation.operation.description === 'string' && operation.operation.description.trim()
     ? operation.operation.description.trim()
     : typeof operation.operation.summary === 'string' && operation.operation.summary.trim()
@@ -319,6 +332,7 @@ function readEntry(
     ...(roles && 'value' in roles && roles.value.length > 0 ? { roles: roles.value } : {}),
     ...(maxResultChars && 'value' in maxResultChars ? { maxResultChars: maxResultChars.value } : {}),
     ...(outputFields.declared ? { outputFields: outputFields.declared } : {}),
+    ...(Object.keys(texts.hints).length > 0 ? { texts: texts.hints } : {}),
   };
 }
 
@@ -373,7 +387,12 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
   const { entry, resolved } = piece;
   const findings = [...entry.findings, ...resolved.findings];
   // Only this source reads x-glirastes-name, so only its names without a dot take their resource from the route.
-  const prose: ToolProseHints = { ...resolved.prose, ...(entry.group ? { module: entry.group } : {}), resourceFromRoute: true };
+  // The operation's own texts win per language over a contract's; the other languages stay.
+  const prose: ToolProseHints = {
+    ...mergeDeclaredTexts(resolved.prose, entry.texts),
+    ...(entry.group ? { module: entry.group } : {}),
+    resourceFromRoute: true,
+  };
   const bodyKeys = bodyKeysOf(entry.body);
   if (!entry.authEvidence) {
     findings.push(toolFinding('auth-evidence-missing', 'needs_attention', entry.stableKey,

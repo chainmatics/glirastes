@@ -5,6 +5,11 @@ import {
   MAX_MAX_RESULT_CHARS,
   MIN_MAX_RESULT_CHARS,
 } from "../runtime/result-limit.js";
+import {
+  isLanguageTag,
+  LANGUAGE_TAG_PATTERN,
+  preferredLanguage,
+} from "../contracts/localized-text.js";
 
 const origin = z.string().refine((value) => {
   try {
@@ -25,6 +30,7 @@ const path = z.string().regex(/^\/(?!\/)[A-Za-z0-9/_-]*$/);
 const file = z
   .string()
   .refine(isAbsolute, "Secret and artifact paths must be absolute");
+const languageTag = z.string().max(35).regex(LANGUAGE_TAG_PATTERN);
 const token = z
   .string()
   .regex(/^[A-Za-z0-9_-]+$/)
@@ -106,6 +112,19 @@ export const RuntimeConfigSchema = z
     approvals: z
       .object({ secretFile: file, connectionStringFile: file })
       .strict(),
+    // Languages of the chat (all optional): `locale` is the default, `requestLocaleHeader` a header that names
+    // the turn's language (`accept-language` is parsed; any other header holds one tag), `locales` the
+    // runtime's own texts per language (keys of createAiChatHandler `locales`). Absent: English, as before.
+    chat: z
+      .object({
+        locale: languageTag.optional(),
+        requestLocaleHeader: z.string().regex(/^[a-z0-9-]{1,64}$/).optional(),
+        locales: z
+          .record(languageTag, z.record(z.string().max(100), z.string().min(1).max(1_000)))
+          .optional(),
+      })
+      .strict()
+      .optional(),
     platform: z
       .discriminatedUnion("enabled", [
         z.object({ enabled: z.literal(false) }).strict(),
@@ -162,4 +181,12 @@ export async function readSecret(filename: string): Promise<string> {
   const result = (await readFile(filename, "utf8")).trim();
   if (!result || result.length > 16384) throw new Error("Invalid secret file");
   return result;
+}
+
+/** The turn language a request names in the configured header; `accept-language` is read by preference. */
+export function requestLocaleOf(request: Request, header: string): string | undefined {
+  const value = request.headers.get(header);
+  if (header === "accept-language") return preferredLanguage(value);
+  const tag = value?.trim();
+  return tag && isLanguageTag(tag) ? tag : undefined;
 }

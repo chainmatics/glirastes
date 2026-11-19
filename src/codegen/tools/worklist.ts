@@ -6,7 +6,7 @@ import { TOOLS_PATHS } from './config.js';
 import { ToolContractsFileSchema } from './files.js';
 import type { ToolsPipelineResult, ToolsPipelineTool } from './pipeline.js';
 import { evaluateRouting, type RoutingSentenceFailure } from './routing-eval.js';
-import { SEMANTICS_FIELDS, type SemanticsLanguage } from './semantics.js';
+import { SEMANTICS_FIELDS } from './semantics.js';
 import type { ToolFinding } from './types.js';
 
 /**
@@ -395,7 +395,7 @@ export interface DescribeWorkItem {
   /** Fields a human wrote, the code supplies or a review locked; leave them as they are. */
   protectedFields: string[];
   /** Required languages that still lack 3–5 example sentences. */
-  missingExamples: SemanticsLanguage[];
+  missingExamples: string[];
   /** Example sentences that do not find this tool (`tools eval`). */
   routing: RoutingSentenceFailure[];
   targets: {
@@ -411,7 +411,7 @@ export interface DescribeWorklist {
   outputsCurrent: boolean;
   blocking: BlockingFinding[];
   /** Languages every tool needs synonyms and examples in: the app language and English. */
-  languages: SemanticsLanguage[];
+  languages: string[];
   writeContracts: boolean;
   /** Tools of one module are described together, so similar tools set themselves apart. */
   modules: Array<{ module: string; tools: string[] }>;
@@ -422,7 +422,7 @@ export interface DescribeWorklist {
 export interface DescribeWorklistOptions {
   root: string;
   locale: string;
-  languages: SemanticsLanguage[];
+  languages: string[];
   /** Named tools (definition id or stable key); empty means every tool with a gap. */
   tools?: ReadonlyArray<string>;
   all?: boolean;
@@ -469,7 +469,7 @@ export function describeGaps(
   return gaps;
 }
 
-function perLanguage<T>(languages: ReadonlyArray<SemanticsLanguage>, value: (language: SemanticsLanguage) => T): Record<string, T> {
+function perLanguage<T>(languages: ReadonlyArray<string>, value: (language: string) => T): Record<string, T> {
   return Object.fromEntries(languages.map((language) => [language, value(language)]));
 }
 

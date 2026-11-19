@@ -49,6 +49,21 @@ function jsonObject(value) {
   }
 }
 
+/** Texts in any language (contract.ts title, synonyms, examples, a description per language); null when none is declared. */
+function declaredTexts(entry) {
+  const texts = {};
+  for (const field of ['title', 'synonyms', 'examples']) {
+    if (entry[field] === undefined) continue;
+    try {
+      texts[field] = JSON.parse(JSON.stringify(entry[field]) ?? 'null');
+    } catch {
+      texts[field] = null;
+    }
+  }
+  if (entry.description !== null && typeof entry.description === 'object') texts.description = jsonObject(entry.description);
+  return Object.keys(texts).length > 0 ? texts : null;
+}
+
 async function main() {
   const request = await readRequest();
   register(new URL('./probe-loader.mjs', import.meta.url), {
@@ -133,6 +148,7 @@ async function main() {
       presentation: entry.presentation !== null && typeof entry.presentation === 'object'
         ? jsonObject(entry.presentation)
         : null,
+      texts: declaredTexts(entry),
       // A finite number goes on to the range check; any other declared value is invalid.
       maxResultChars: entry.maxResultChars === undefined || entry.maxResultChars === null
         ? null

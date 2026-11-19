@@ -515,7 +515,10 @@
         "tags": [
           "channels"
         ],
-        "x-glirastes-effect": "destructive"
+        "x-glirastes-effect": "destructive",
+        "x-glirastes-title": {
+          "de": "Kanal l\u00f6schen"
+        }
       }
     },
     "/api/channels/{key}/revisions": {
@@ -767,7 +770,13 @@
           "playlists[].displayName",
           "playlists[].status",
           "total"
-        ]
+        ],
+        "x-glirastes-synonyms": {
+          "pl": [
+            "playlisty",
+            "listy odtwarzania"
+          ]
+        }
       }
     },
     "/api/playlists/{playlist_id}": {
@@ -812,7 +821,12 @@
         "tags": [
           "playlists"
         ],
-        "x-glirastes-effect": "destructive"
+        "x-glirastes-effect": "destructive",
+        "x-glirastes-title": {
+          "de": "Playlist l\u00f6schen",
+          "en": "Delete playlist",
+          "pl": "Usu\u0144 playlist\u0119"
+        }
       },
       "get": {
         "description": "Get one playlist with all its items.",
@@ -861,7 +875,12 @@
         "summary": "Get Playlist",
         "tags": [
           "playlists"
-        ]
+        ],
+        "x-glirastes-title": {
+          "de": "Playlist anzeigen",
+          "en": "Show playlist",
+          "pl": "Poka\u017c playlist\u0119"
+        }
       }
     },
     "/api/playlists/{playlist_id}/versions": {

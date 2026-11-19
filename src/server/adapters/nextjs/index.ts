@@ -23,6 +23,7 @@ export {
   type BudgetStopReason,
   type BudgetStopTexts,
 } from './budget-stop-notice.js';
+export { type ChatServerLocales, type ChatServerTexts } from './chat-texts.js';
 export { sanitizeModelMessages } from './sanitize-model-messages.js';
 export {
   prepareModelMessages,

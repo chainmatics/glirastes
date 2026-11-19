@@ -1,12 +1,17 @@
 import { z } from 'zod';
 import { ToolPresentationSchema } from '../../contracts/index.js';
+import { LANGUAGE_TAG_PATTERN, MAX_TEXT_LANGUAGES, primaryLanguage } from '../../contracts/localized-text.js';
 import { createJsonSchemaLike } from '../../runtime/json-schema.js';
 import { AGENT_MODEL_PATTERN, agenticContentProblem, lockDigest } from './agentic.js';
 import { compareCodeUnits } from './canonical.js';
 import { toolFinding } from './findings.js';
 import type { JsonSchemaLike, ToolFinding, ToolTitle } from './types.js';
 
-/** Languages of synonyms, titles and example sentences (spec 4.7 "DE/EN"). */
+/**
+ * The languages the managed enrichment job fills by default (spec 4.7
+ * "DE/EN"). An entry may carry any BCP-47 language tag; tools.json
+ * `languages` names the ones an app needs.
+ */
 export const SEMANTICS_LANGUAGES = ['de', 'en'] as const;
 export type SemanticsLanguage = typeof SEMANTICS_LANGUAGES[number];
 
@@ -43,7 +48,21 @@ export const SEMANTICS_LIMITS = {
 const digest = z.string().regex(/^sha256:[A-Za-z0-9_-]{43}$/);
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.-]{0,199}$/;
 const text = (max: number) => z.string().trim().min(1).max(max);
-const perLanguage = <T extends z.ZodType>(item: T) => z.object({ de: item.optional(), en: item.optional() }).strict();
+const languageTag = z.string().regex(LANGUAGE_TAG_PATTERN).max(35);
+/** One value per BCP-47 language tag (`de`, `pl-PL`); at most MAX_TEXT_LANGUAGES of them. */
+const perLanguage = <T extends z.ZodType>(item: T) => z.record(languageTag, item)
+  .refine((value) => Object.keys(value).length <= MAX_TEXT_LANGUAGES, { message: `At most ${MAX_TEXT_LANGUAGES} languages` });
+/** The labels of one language; `presentation` maps a language tag to them. */
+export const PresentationLabelsSchema = z.object({
+  singular: z.string().trim().min(1).max(200),
+  plural: z.string().trim().min(1).max(200),
+  approval: z.string().trim().min(1).max(500),
+}).strict();
+export type PresentationLabels = z.infer<typeof PresentationLabelsSchema>;
+/** `presentation` per language: `{ "de": { singular, plural, approval }, "pl": { … } }`. */
+export const LocalizedPresentationSchema = perLanguage(PresentationLabelsSchema)
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one language' });
+export type LocalizedPresentation = z.infer<typeof LocalizedPresentationSchema>;
 
 /**
  * One entry of `.glirastes/tool-semantics.json` (spec 4.3, 4.7): the Get It
@@ -57,7 +76,8 @@ export const SemanticsEntrySchema = z.object({
   stableKey: z.string().trim().min(1).max(2_100).optional(),
   /** Written by older exports; read for compatibility, never used. */
   modelName: z.string().optional(),
-  description: z.string().optional(),
+  /** One text for the model, or one per language (the model gets one; see resolveToolProse). */
+  description: z.union([z.string(), perLanguage(z.string())]).optional(),
   module: z.string().optional(),
   sharedWith: z.array(z.string()).optional(),
   usageHints: z.array(z.string()).optional(),
@@ -92,9 +112,14 @@ export function isAgenticSemantics(value: unknown): boolean {
   return isRecord(value.origin) && Object.values(value.origin).includes('agent');
 }
 
-/** The app's language plus English, each once. */
-export function requiredLanguages(locale: string): SemanticsLanguage[] {
-  const own = locale.toLowerCase().split('-')[0];
+/**
+ * The languages the texts people read need: tools.json `languages` when the
+ * app names them, else the app's language plus English (German or English
+ * only, as before `languages` existed), each once.
+ */
+export function requiredLanguages(locale: string, languages?: ReadonlyArray<string>): string[] {
+  if (languages && languages.length > 0) return [...new Set(languages)];
+  const own = primaryLanguage(locale);
   return own === 'de' ? ['de', 'en'] : ['en'];
 }
 
@@ -133,7 +158,8 @@ function proseOf(entry: ToolSemanticsEntry): unknown {
 }
 
 function agentLimitsProblem(entry: ToolSemanticsEntry): string | undefined {
-  if (entry.description !== undefined && entry.description.length > SEMANTICS_LIMITS.description) {
+  const descriptions = typeof entry.description === 'object' ? Object.values(entry.description) : [entry.description];
+  if (descriptions.some((text) => text !== undefined && text.length > SEMANTICS_LIMITS.description)) {
     return `the description is longer than ${SEMANTICS_LIMITS.description} characters`;
   }
   const hints = entry.usageHints ?? [];
@@ -144,8 +170,9 @@ function agentLimitsProblem(entry: ToolSemanticsEntry): string | undefined {
   if ((entry.sharedWith?.length ?? 0) > SEMANTICS_LIMITS.sharedWith || identifiers.some((name) => !IDENTIFIER.test(name))) {
     return 'module and sharedWith must be module names (letters, digits, _, . or -)';
   }
-  if (entry.presentation !== undefined && !ToolPresentationSchema.safeParse(entry.presentation).success) {
-    return 'the presentation does not match its schema (locale, singular, plural, approval)';
+  if (entry.presentation !== undefined && !ToolPresentationSchema.safeParse(entry.presentation).success
+    && !LocalizedPresentationSchema.safeParse(entry.presentation).success) {
+    return 'the presentation does not match its schema (locale, singular, plural, approval; or those three per language tag)';
   }
   return undefined;
 }
@@ -211,12 +238,12 @@ export interface SemanticsFacts {
   protectedFields: SemanticsField[];
   hasSynonyms: boolean;
   /** Required languages without 3–5 example sentences. */
-  missingExamples: SemanticsLanguage[];
+  missingExamples: string[];
 }
 
 export function semanticsFacts(
   entry: ToolSemanticsEntry | undefined,
-  languages: ReadonlyArray<SemanticsLanguage>,
+  languages: ReadonlyArray<string>,
 ): SemanticsFacts {
   const protectedFields = entry
     ? SEMANTICS_FIELDS.filter((field) => fieldValue(entry, field) !== undefined
@@ -224,29 +251,96 @@ export function semanticsFacts(
     : [];
   return {
     protectedFields,
-    hasSynonyms: SEMANTICS_LANGUAGES.some((language) => (entry?.synonyms?.[language]?.length ?? 0) > 0),
+    hasSynonyms: Object.values(entry?.synonyms ?? {}).some((list) => list.length > 0),
     missingExamples: languages.filter((language) => (entry?.examples?.[language]?.length ?? 0) === 0),
   };
 }
 
-/** Synonyms and example sentences of both languages, each once, in code-unit order. */
-export function semanticsSearch(entry: ToolSemanticsEntry | undefined): { synonyms: string[]; examples: string[] } {
+/** Lists per language tag; the tool search reads all of them. */
+export type PerLanguageLists = Readonly<Record<string, ReadonlyArray<string>>>;
+
+/**
+ * A semantics field a person maintains: written by a human (no origin, or
+ * `human`) or locked by a review. Such a field beats the code's own text;
+ * an unlocked field an agent wrote, or one copied from the code (`code`),
+ * stays below the code, where every semantics field was before 0.18.0.
+ */
+export function isMaintainedField(entry: ToolSemanticsEntry | undefined, field: SemanticsField): boolean {
+  if (!entry || entry[field] === undefined) return false;
+  if (entry.locked?.[field] !== undefined) return true;
+  const origin = entry.origin?.[field];
+  return origin === undefined || origin === 'human';
+}
+
+/** Per language, the list of the first layer (highest first) that has one. */
+export function mergePerLanguage(...layers: ReadonlyArray<PerLanguageLists | undefined>): Record<string, string[]> {
+  const merged: Record<string, string[]> = {};
+  for (const layer of layers) {
+    for (const [language, list] of Object.entries(layer ?? {})) {
+      const taken = Object.keys(merged).some((key) => key.toLowerCase() === language.toLowerCase());
+      if (!taken && list.length > 0) merged[language] = [...list];
+    }
+  }
+  return merged;
+}
+
+/** A maintained entry field before the endpoint's declaration, the endpoint's before an agent's. */
+function ordered<T>(entry: ToolSemanticsEntry | undefined, field: SemanticsField, own: T | undefined, declared: T | undefined): Array<T | undefined> {
+  return isMaintainedField(entry, field) ? [own, declared] : [declared, own];
+}
+
+/**
+ * Synonyms and example sentences of every language, each once, in code-unit
+ * order: the search must find a tool in a language its texts lack, so all
+ * languages are indexed; none of them is ever sent to the model.
+ */
+export function semanticsSearch(
+  entry: ToolSemanticsEntry | undefined,
+  declared?: { synonyms?: PerLanguageLists; examples?: PerLanguageLists },
+): { synonyms: string[]; examples: string[] } {
   const collect = (values: ReadonlyArray<string>) => [...new Set(values.map((value) => value.trim()))]
     .filter((value) => value.length > 0)
     .sort(compareCodeUnits);
+  const synonyms = mergePerLanguage(...ordered(entry, 'synonyms', entry?.synonyms, declared?.synonyms));
+  const examples = mergePerLanguage(...ordered(entry, 'examples', entry?.examples, declared?.examples));
   return {
-    synonyms: collect(SEMANTICS_LANGUAGES.flatMap((language) => entry?.synonyms?.[language] ?? []))
-      .slice(0, SEMANTICS_LIMITS.synonyms),
-    examples: collect(SEMANTICS_LANGUAGES.flatMap((language) => entry?.examples?.[language] ?? [])),
+    synonyms: collect(Object.values(synonyms).flat()).slice(0, SEMANTICS_LIMITS.synonyms),
+    examples: collect(Object.values(examples).flat()),
   };
 }
 
-/** The reviewed title per language; a language whose text the chat list cannot show is left out. */
-export function semanticsTitle(entry: ToolSemanticsEntry | undefined): ToolTitle | undefined {
-  const title: ToolTitle = {};
-  for (const language of SEMANTICS_LANGUAGES) {
-    const text = entry?.title?.[language]?.trim();
-    if (text && text.length <= SEMANTICS_LIMITS.title && !/[\u0000-\u001F]/.test(text)) title[language] = text;
+function titleText(value: string | undefined): string | undefined {
+  const text = value?.trim();
+  return text && text.length <= SEMANTICS_LIMITS.title && !/[\u0000-\u001F]/.test(text) ? text : undefined;
+}
+
+/**
+ * The title per language for the chat's commands and entity actions: a
+ * maintained entry before the endpoint's own title, that before an agent's,
+ * per language. A language-free endpoint title stands for each of
+ * `languages` the others lack. A text the chat list cannot show is left out.
+ */
+export function semanticsTitle(
+  entry: ToolSemanticsEntry | undefined,
+  declared?: string | Readonly<Record<string, string>>,
+  languages: ReadonlyArray<string> = [],
+  /** A lower code title (contract.ts below the OpenAPI operation). */
+  lowerDeclared?: string | Readonly<Record<string, string>>,
+): ToolTitle | undefined {
+  const title: Record<string, string> = {};
+  const add = (language: string, value: string | undefined) => {
+    const text = titleText(value);
+    const taken = Object.keys(title).some((key) => key.toLowerCase() === language.toLowerCase());
+    if (text && !taken) title[language] = text;
+  };
+  // In precedence order; a language-free title fills, at its own level, every language still open.
+  const code = [declared, lowerDeclared];
+  const layers = isMaintainedField(entry, 'title') ? [entry?.title, ...code] : [...code, entry?.title];
+  // A language-free title speaks for every language any source names, not only the required ones.
+  const named = [...new Set([...languages, ...layers.flatMap((layer) => (layer && typeof layer === 'object' ? Object.keys(layer) : []))])];
+  for (const layer of layers) {
+    if (typeof layer === 'string') for (const language of named) add(language, layer);
+    else for (const [language, value] of Object.entries(layer ?? {})) add(language, value);
   }
-  return Object.keys(title).length > 0 ? title : undefined;
+  return Object.keys(title).length > 0 ? title as ToolTitle : undefined;
 }

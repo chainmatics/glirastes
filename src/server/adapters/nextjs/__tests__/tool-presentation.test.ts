@@ -50,6 +50,38 @@ describe('the wording the chat UI gets for the tools of a turn', () => {
   });
 });
 
+describe('the wording per language (toolTexts)', () => {
+  const labels = (text: string) => ({ singular: text, plural: text, approval: `${text}?` });
+  const texts = { list_tasks: { labels: { en: labels('List tasks'), de: labels('Aufgaben zeigen'), pl: labels('Pokaż zadania') } } };
+
+  it('words a tool in the turn language, the manifest where it speaks that language', () => {
+    expect(toolPresentationOf(worded, everyTool, { texts, locale: 'pl-PL' }))
+      .toEqual({ locale: 'pl-PL', tools: { list_tasks: { label: 'Pokaż zadania' } } });
+    // The manifest presentation is German (a Platform revision may have curated it): it wins for German.
+    expect(toolPresentationOf(worded, everyTool, { texts, locale: 'de-AT' }))
+      .toEqual({ locale: 'de-AT', tools: { list_tasks: { label: 'Aufgaben auflisten' } } });
+    // A long confirmation question stays, as in the part without languages.
+    const long = { list_tasks: { labels: { pl: { singular: 'Zadania', plural: 'Zadania', approval: `${'Czy '.repeat(80)}?` } } } };
+    expect(toolPresentationOf(worded, everyTool, { texts: long, locale: 'pl' })?.tools.list_tasks?.label).toBe('Czy '.repeat(80).trim());
+    // No French labels: English.
+    expect(toolPresentationOf(worded, everyTool, { texts, locale: 'fr' })?.tools).toEqual({ list_tasks: { label: 'List tasks' } });
+  });
+
+  it('keeps the part of before without a turn language or without labels', () => {
+    expect(toolPresentationOf(worded, everyTool, { texts })).toEqual(toolPresentationOf(worded, everyTool));
+    // Two tools worded in different locales: each keeps its own manifest label.
+    const mixed = {
+      ...worded,
+      tools: worded.tools.map((tool, index) => (index === 1
+        ? { ...tool, modelName: 'other_tool', presentation: { locale: 'en-US', singular: 'Other', plural: 'Others', approval: 'Run other?' } }
+        : tool)),
+    };
+    const withOther = { ...texts, other_tool: { labels: { de: labels('Anderes') } } };
+    expect(toolPresentationOf(mixed, everyTool, { texts: withOther })).toEqual(toolPresentationOf(mixed, everyTool));
+    expect(toolPresentationOf(worded, everyTool, { locale: 'pl' })).toEqual(toolPresentationOf(worded, everyTool));
+  });
+});
+
 describe('the wording for the principal of a turn', () => {
   const wording = (approval: string) => ({ locale: 'de-DE', singular: 'Aufgabe', plural: 'Aufgaben', approval });
   const wordedCommands = {

@@ -957,6 +957,16 @@ export interface AiChatProviderConfig {
    */
   locale?: Partial<ChatLocale>;
   /**
+   * The chat's texts per BCP-47 language tag, to add a language (`pl`) or
+   * change single texts of one, e.g. `{ pl: plChatLocale, de: { sendButton: 'Los' } }`.
+   * The chat's language is the one of the turn's tool labels (the server's
+   * `data-tool-presentation` part), else the page's `lang`. Per key: `locale`
+   * (language-free, wins everywhere), then these tables and the built-in
+   * German and English texts in the language's fallback order (the
+   * language, another region of it, English). Partial tables are fine.
+   */
+  locales?: Readonly<Record<string, Partial<ChatLocale>>>;
+  /**
    * Theme for the floating widget: a preset name (autocompleted by your
    * editor) or an override object. Defaults to `'professional-lightblue'`.
    *

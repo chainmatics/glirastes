@@ -171,3 +171,11 @@ export type {
   PairingTokenResult,
   PlatformConnectionDescriptor,
 } from './platform-connection.js';
+
+export {
+  isLanguageTag,
+  pickLanguage,
+  preferredLanguage,
+  resolveLocalizedText,
+} from './localized-text.js';
+export type { LanguageTag, LocalizedText } from './localized-text.js';

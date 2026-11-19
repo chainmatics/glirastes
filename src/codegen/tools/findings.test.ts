@@ -51,7 +51,7 @@ describe('tool findings', () => {
   });
 
   it('marks only change-relative findings as transient so they never reach committed outputs', () => {
-    expect([...TRANSIENT_FINDING_CODES].sort()).toEqual(['definition-id-reassigned', 'risk-raised', 'tool-outputs-drift']);
+    expect([...TRANSIENT_FINDING_CODES].sort()).toEqual(['definition-id-reassigned', 'risk-raised', 'semantics-overrides-code', 'tool-outputs-drift']);
     expect(TRANSIENT_FINDING_CODES.has('override-lapsed-risk-raised')).toBe(false);
   });
 

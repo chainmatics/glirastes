@@ -475,6 +475,13 @@ function materialize(
       tool: uiActionToolToTool({ ...definition, action: contract.uiAction }),
     };
   });
+  // Labels per language (tools.json languages): local data of the artifact, keyed like toolSearchSemantics.
+  const toolTexts = Object.fromEntries(
+    tools.flatMap((tool) => {
+      const labels = byId.get(tool.toolId)?.labels;
+      return labels ? [[tool.modelName ?? modelFacingToolName(tool.name), { labels }]] : [];
+    }),
+  );
   const generated: LoadedRuntimeArtifact = {
     setupArtifact,
     promptBundle,
@@ -488,6 +495,7 @@ function materialize(
           : [];
       }),
     ),
+    ...(Object.keys(toolTexts).length > 0 ? { toolTexts } : {}),
     createToolBindings: () => bindings,
   };
   if (createContractBindings(generated).disabled.length)

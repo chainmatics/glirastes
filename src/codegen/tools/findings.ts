@@ -45,6 +45,8 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'tool-roles-invalid': 'Set x-glirastes-roles on the operation to a list of at most 50 role names (non-empty strings), or [] for no restriction, export the OpenAPI document again and run glirastes tools refresh; the tool stays disabled until then.',
   'policy-roles-disjoint': 'Nobody may call the tool, so it is disabled. In .glirastes/tool-policy.json, set allowedRoles of the tool to roles the code also declares (the entry can only narrow them) or remove allowedRoles; or change x-glirastes-roles in the OpenAPI export. If the tool is meant to be off, set "enabled": false instead. Then run glirastes tools refresh.',
   'semantics-entry-orphaned': 'Re-key the entry in .glirastes/tool-semantics.json to the operation it describes: "stableKey": "METHOD /path" as in the tool report (e.g. "GET /api/tags"), or the tool\'s current "name"; or delete it. Then run glirastes tools refresh. Its texts are not used meanwhile.',
+  'semantics-overrides-code': 'Nothing to do if the tool-semantics.json text is the one to keep: since 0.18.0 a maintained entry (written by a person or locked) beats JSDoc, the OpenAPI description and contract.ts. Otherwise delete the field from the entry, or copy the code text into it, then run glirastes tools refresh.',
+  'label-translation-missing': 'Add the label in that language: a presentation or title per language in .glirastes/tool-semantics.json, x-glirastes-title on the OpenAPI operation or title in contract.ts; then run glirastes tools refresh. The tools show the fallback (English, else the first language) meanwhile.',
   'tool-semantics-invalid': 'Fix .glirastes/tool-semantics.json; descriptions fall back to code and templates meanwhile.',
   'prompt-bundle-missing': 'Create .glirastes/prompt-bundle.json for this app (glirastes init sets it up).',
   'prompt-bundle-invalid': 'Fix .glirastes/prompt-bundle.json: it must match its schema and this appId.',
@@ -109,6 +111,8 @@ export const TRANSIENT_FINDING_CODES: ReadonlySet<string> = new Set([
   // Relative to the previous inventory: gone once the refresh that reported it wrote the new names.
   'definition-id-reassigned',
   'tool-outputs-drift',
+  // The precedence change of 0.18.0 made visible on every refresh, never stored.
+  'semantics-overrides-code',
 ]);
 
 const SEVERITY_ORDER: Readonly<Record<ToolFindingSeverity, number>> = {
