@@ -70,8 +70,14 @@ function actionsOf(output: Record<string, unknown>): unknown[] {
  */
 export function handsOffUiAction(output: unknown, ownActions: boolean): boolean {
   if (!isRecord(output) || (output.handedOff !== true && output.success !== true)) return false;
-  return actionsOf(output).some((action) => isRecord(action) && typeof action.type === 'string'
-    && (ownActions || action.type.startsWith('glirastes.')));
+  const actions = actionsOf(output).filter((action): action is Record<string, unknown> & { type: string } => (
+    isRecord(action) && typeof action.type === 'string'
+  ));
+  if (actions.length === 0) return false;
+  // The marker makes the browser run every action of the result through the
+  // bus: without the opt-in only a result of Glirastes actions alone, so an
+  // app's own action types stay with its `onToolResult`.
+  return ownActions || actions.every((action) => action.type.startsWith('glirastes.'));
 }
 
 export interface UiOutcomePlan {

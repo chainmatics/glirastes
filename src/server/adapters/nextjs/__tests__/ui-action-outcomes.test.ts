@@ -291,6 +291,17 @@ describe('a UI tool result with the outcome protocol (confirm)', () => {
     expect(model.doStreamCalls).toHaveLength(2);
   });
 
+  it("does not mark a hand-written UI tool that mixes its own actions with a Glirastes one, without the opt-in", async () => {
+    const mixed = uiToolToTool(defineUiTool({
+      id: 'ui.open', toolName: 'ui_open', description: 'Open.', inputSchema: z.object({}),
+      uiAction: [{ type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks' } }, { type: 'open-dialog' }],
+    }));
+    const { outputs: [output], model } = await run({ tools: { ui_open: mixed }, model: scriptedModel([{ toolName: 'ui_open' }]) }, FLAG);
+    expect(output).toMatchObject({ handedOff: true });
+    expect(output).not.toHaveProperty('awaitsOutcome');
+    expect(model.doStreamCalls).toHaveLength(2);
+  });
+
   it("marks a hand-written UI tool's own actions with outcome: 'confirm'", async () => {
     const own = uiToolToTool(defineUiTool({
       id: 'ui.open', toolName: 'ui_open', description: 'Open.', inputSchema: z.object({}),

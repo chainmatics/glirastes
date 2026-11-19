@@ -105,7 +105,8 @@ call only.
 `defineUiTool({ …, outcome: 'confirm' })` opts in: the chat runs its own
 action types through the UI action bus (`useAiClientActionByType`) and
 reports them. Without it, its actions stay with `onToolResult` and are not
-reported. `onToolResult` is still called for an opted-in result; skip results
+reported; a result that mixes own action types with `glirastes.*` ones is then
+not marked at all (fallback), so nothing of it runs twice. `onToolResult` is still called for an opted-in result; skip results
 with `awaitsOutcome` there to not run them twice.
 
 ## Migration
