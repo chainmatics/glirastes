@@ -1,4 +1,5 @@
 import type { EntityDeclarationsByTool } from '../contracts/entity-declaration.js';
+import type { ApprovalPreviewFormat, ApprovalSubjectUncheckedReason } from '../contracts/approval-subject.js';
 import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { UiActionRunCode } from '../browser/client-actions.js';
@@ -802,6 +803,18 @@ export interface ChatLocale {
   approvalCollidingIdWarning: string;
   /** Note next to an id a tool result of this conversation carried without a name (no warning). */
   approvalSeenIdNote: string;
+  /**
+   * Warning for one id the server could not check right now (lookup timed
+   * out, source unavailable); supports `{label}` and `{id}`. Not the same as
+   * `approvalUnknownIdWarning`: the record may well exist.
+   */
+  approvalSubjectUncheckedWarning: string;
+  /** The same warning for several ids; supports `{ids}` (`Playlist p1, Version 3`). */
+  approvalSubjectsUncheckedWarning: string;
+  /** Quiet note next to a referenced id the server did not look up and no name is known for. */
+  approvalReferenceIdNote: string;
+  /** Quiet note when the server could not load the preview of a call. */
+  approvalPreviewUncheckedNote: string;
 
   // Floating widget / chat window chrome
   chatTitle: string;                 // default header title ("AI Assistant")
@@ -1193,6 +1206,24 @@ export interface PendingApproval {
    * (`approvalSubjects`). Display only: the approved arguments are `args`.
    */
   subjects?: ApprovalSubject[];
+  /**
+   * What an approved call would do, as the server's preview source answered
+   * (`data-approval-subjects`), labels in the chat's language. Looked-up,
+   * untrusted values: plain text only. Absent without a server preview.
+   */
+  preview?: ApprovalPreviewItem[];
+  /** `unchecked`: the server could not load the preview (no `preview` values; the card shows a note). */
+  previewCheck?: 'found' | 'unchecked';
+}
+
+/** One shown value of a server preview. */
+export interface ApprovalPreviewItem {
+  /** The result path the value was read from (`impact.devices`). */
+  key: string;
+  /** The label in the chat's language. */
+  label: string;
+  value: string | number | boolean;
+  format?: ApprovalPreviewFormat;
 }
 
 /**
@@ -1252,6 +1283,28 @@ export interface ApprovalSubject {
    * `seen`, no warning).
    */
   provenance?: 'tool-result' | 'mention' | 'user-message';
+  /**
+   * Where the name and status come from: `server` (looked up through the
+   * tool's declared read source, `data-approval-subjects`) or `history` (the
+   * browser's own message history). Absent = history; set explicitly on every
+   * subject of a call the server sent subjects for.
+   */
+  source?: 'server' | 'history';
+  /** The id by field (one entry, or one per part of a composite key). Only from the server. */
+  ids?: Record<string, string>;
+  /** For `seen`: the value of `fallbackField` (`3`), for a localised text. Only from the server. */
+  fallbackValue?: string | number;
+  /** The call's server preview, on its first `target` subject from the server. */
+  preview?: ApprovalPreviewItem[];
+  /**
+   * Only from the server: `found` (the record exists), or `unchecked` (it
+   * could not be checked right now, see `reason`; the card warns, distinct
+   * from an unknown id). With `unchecked`, `source: 'history'` means the name
+   * and status shown are the browser's fallback.
+   */
+  check?: 'found' | 'unchecked';
+  /** Why the server could not check the record (`check: 'unchecked'`). */
+  reason?: ApprovalSubjectUncheckedReason;
 }
 
 export interface UseApprovalsReturn {

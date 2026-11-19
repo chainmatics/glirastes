@@ -45,6 +45,11 @@ function humanize(key: string): string {
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : '';
 }
 
+/** The label of a declared entity type (`play_list` → `Play list`), as a declared argument gets it. */
+export function entityTypeLabel(type: string): string | undefined {
+  return humanize(type) || undefined;
+}
+
 /** The entity an id key names (`playlistId` → `Playlist`, `trackIds` → `Tracks`), or undefined for a bare `id`. */
 function labelOfKey(key: string): string | undefined {
   if (isBareIdArgumentKey(key)) return undefined;

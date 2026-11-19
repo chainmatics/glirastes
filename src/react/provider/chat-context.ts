@@ -47,6 +47,8 @@ export interface ChatContextValue {
    * nothing is declared.
    */
   entityDeclarations?: EntityDeclarationsByTool;
+  /** The chat's language (the turn's, else the page's): dates and looked-up labels on approval cards. */
+  language?: string;
   /**
    * Optional hint for themes that require special CSS treatment (e.g.
    * `liquid-glass` needs `backdrop-filter`). Apply as

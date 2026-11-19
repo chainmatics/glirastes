@@ -29,6 +29,12 @@ import { resolveAttachmentOptions } from '../utils/attachments.js';
 import { collectEntitySightings, collectSeenEntityIds, isUuidLike, userTextsOf } from '../utils/entity-names.js';
 import { sanitizeEntityDeclarations, type EntityDeclarationsByTool } from '../../contracts/entity-declaration.js';
 import { resolveApprovalSubjects } from '../utils/approval-subjects.js';
+import {
+  applyServerApprovalSubjects,
+  findApprovalSubjectsPart,
+  mergeServerApprovalSubjects,
+  serverSubjectNames,
+} from '../utils/server-approval-subjects.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
 import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
 import { resolveToolResultConfig } from '../utils/tool-result-config.js';
@@ -81,6 +87,10 @@ export const DEFAULT_LOCALE: ChatLocale = {
   approvalAmbiguousIdWarning: 'This id came up with different names: {names}. Check it before you approve.',
   approvalCollidingIdWarning: 'This id came up for different kinds of records: {candidates}. Check which one is meant before you approve.',
   approvalSeenIdNote: 'seen in this conversation',
+  approvalSubjectUncheckedWarning: '{label} {id} could not be checked right now.',
+  approvalSubjectsUncheckedWarning: 'These could not be checked right now: {ids}.',
+  approvalReferenceIdNote: 'Referenced, not checked.',
+  approvalPreviewUncheckedNote: 'The preview could not be loaded.',
   moreItemsLabel: 'more',
   showAllItemsLabel: 'Show all {count}',
   showMoreLabel: 'Show more',
@@ -719,6 +729,8 @@ export function AiChatProvider({
   approvalDescriptionRef.current = approvalDescriptionFn;
   const approvalSubjectsRef = useRef(approvalSubjects);
   approvalSubjectsRef.current = approvalSubjects;
+  const languageRef = useRef(language);
+  languageRef.current = language;
 
   // Data part handler — processes pipeline and truncation events from any transport
   const handleDataPart = useCallback((dataPart: { type: string; data: unknown }) => {
@@ -1066,14 +1078,18 @@ export function AiChatProvider({
             if (name) names.set(key, name);
             else names.delete(key);
           }
+          // What the server looked up through the tool's declared read source (only with a declaration).
+          const serverPart = findApprovalSubjectsPart(lastMessage.parts, toolPart.toolCallId);
+          for (const [key, name] of serverSubjectNames(serverPart)) names.set(key, name);
           const described = approvalDescriptionRef.current(
             toolName,
             toolPart.approval.id,
             toolPart.input,
             { names },
           );
-          const subjects = approvalSubjectsRef.current ? resolved : [];
-          const pending = subjects.length > 0 ? { ...described, subjects } : described;
+          const pending = applyServerApprovalSubjects(described, approvalSubjectsRef.current
+            ? mergeServerApprovalSubjects(resolved, serverPart, languageRef.current ?? undefined)
+            : { subjects: [] });
           setPendingApprovalsMap(prev => new Map(prev).set(toolPart.approval!.id, pending));
         }
 
@@ -1820,9 +1836,11 @@ export function AiChatProvider({
       renameSession,
       refreshSessions,
       entityDeclarations: declarations,
+      language: language ?? undefined,
     }),
     [
       declarations,
+      language,
       classNames,
       components,
       locale,

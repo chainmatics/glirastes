@@ -1,8 +1,44 @@
 import { useId, useState } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
-import type { ApprovalCardProps, ApprovalSubject, ChatLocale, PendingApproval } from '../types.js';
+import { sanitizeSubjectText } from '../../contracts/approval-subject.js';
+import type { ApprovalCardProps, ApprovalPreviewItem, ApprovalSubject, ChatLocale, PendingApproval } from '../types.js';
 
 const COLLAPSED_ITEMS = 2;
+const MAX_PREVIEW_ROWS = 3;
+
+/**
+ * A text of a server subject as the card shows it: looked up, so untrusted,
+ * sanitized again (no control or bidi characters, no line breaks) and only
+ * ever rendered as a text node. History texts stay as they are.
+ */
+function subjectText(subject: ApprovalSubject, text: string): string {
+  return subject.source === 'server' ? sanitizeSubjectText(text) ?? '' : text;
+}
+
+/** An id the server could not check right now (not the same as an unknown id). */
+function isUnchecked(subject: ApprovalSubject): boolean {
+  return subject.check === 'unchecked';
+}
+
+/** A referenced id of a call the server sent subjects for, that it did not look up and no name is known for. */
+function isQuietReference(subject: ApprovalSubject): boolean {
+  return subject.source === 'history' && subject.check === undefined && subject.role === 'reference' && subject.status === 'unknown';
+}
+
+/** A preview value as text: `count` and `number` as the number, `date` a short date in the chat's language. */
+export function previewValueText(item: ApprovalPreviewItem, language: string | undefined): string {
+  if (item.format === 'date' && typeof item.value !== 'boolean') {
+    const date = new Date(item.value);
+    if (!Number.isNaN(date.getTime())) {
+      try {
+        return new Intl.DateTimeFormat(language, { dateStyle: 'medium' }).format(date);
+      } catch {
+        return date.toISOString().slice(0, 10);
+      }
+    }
+  }
+  return sanitizeSubjectText(String(item.value)) ?? '';
+}
 const LONG_TEXT_LENGTH = 100;
 
 function DetailValue({ value, items }: { value: string; items?: string[] }) {
@@ -65,9 +101,11 @@ export function approvalSubjectLines(approval: PendingApproval, locale: ChatLoca
   const lines = new Map<string, SubjectLine>();
   const shown = (name: string) => (approval.details ?? []).some((detail) => detail.endsWith(`: ${name}`));
   for (const subject of approval.subjects ?? []) {
-    if (subject.status !== 'named' || !subject.name || shown(subject.name)) continue;
-    const line = lines.get(subject.path) ?? { label: subject.label ?? locale.approvalTargetLabel, names: [] };
-    if (!line.names.includes(subject.name)) line.names.push(subject.name);
+    if (subject.status !== 'named' || !subject.name) continue;
+    const name = subjectText(subject, subject.name);
+    if (!name || shown(name)) continue;
+    const line = lines.get(subject.path) ?? { label: subjectText(subject, subject.label ?? locale.approvalTargetLabel), names: [] };
+    if (!line.names.includes(name)) line.names.push(name);
     lines.set(subject.path, line);
   }
   return [...lines.values()];
@@ -75,11 +113,14 @@ export function approvalSubjectLines(approval: PendingApproval, locale: ChatLoca
 
 /**
  * The ids of the call that get a warning: no single known name and not seen
- * as a record id in this conversation (`unknown`, `ambiguous`).
+ * as a record id in this conversation (`unknown`, `ambiguous`), or one the
+ * server could not check right now (`check: 'unchecked'`).
  */
 export function flaggedApprovalSubjects(approvals: ReadonlyArray<PendingApproval>): ApprovalSubject[] {
   return approvals.flatMap((approval) => (approval.subjects ?? [])
-    .filter((subject) => (subject.status === 'unknown' && subject.idKind !== 'speaking') || subject.status === 'ambiguous'));
+    .filter((subject) => isUnchecked(subject)
+      || (subject.status === 'unknown' && subject.idKind !== 'speaking' && !isQuietReference(subject))
+      || subject.status === 'ambiguous'));
 }
 
 /** The ids a tool result of this conversation carried without a name: shown neutrally, no warning. */
@@ -96,13 +137,25 @@ function seenApprovalSubjects(approval: PendingApproval): ApprovalSubject[] {
 export function ApprovalIdWarning({ id, subjects }: { id: string; subjects: ReadonlyArray<ApprovalSubject> }) {
   const { locale } = useChatContext();
   // A speaking key (declared) the user types needs no warning: it is readable on its own.
-  const unknown = subjects.filter((subject) => subject.status === 'unknown' && subject.idKind !== 'speaking');
-  const ambiguous = subjects.filter((subject) => subject.status === 'ambiguous');
-  const labelOf = (subject: ApprovalSubject) => subject.label ?? locale.approvalTargetLabel;
+  // Not checkable comes first and has its own text: the record may well exist.
+  const unchecked = subjects.filter(isUnchecked);
+  const unknown = subjects.filter((subject) => !isUnchecked(subject) && !isQuietReference(subject)
+    && subject.status === 'unknown' && subject.idKind !== 'speaking');
+  const ambiguous = subjects.filter((subject) => !isUnchecked(subject) && subject.status === 'ambiguous');
+  const labelOf = (subject: ApprovalSubject) => subjectText(subject, subject.label ?? locale.approvalTargetLabel);
+  const uncheckedText = (subject: ApprovalSubject) => `${labelOf(subject)} ${subjectText(subject, subject.id)}`.trim();
   return (
     <div id={id} data-element="id-warning" role="alert">
       <span data-element="warning-icon" aria-hidden="true">{'\u26A0'}</span>
       <div data-element="warning-body">
+        {unchecked.length > 0 && (
+          <p data-element="warning-text" data-check="unchecked">
+            {unchecked.length === 1
+              ? locale.approvalSubjectUncheckedWarning
+                .replace('{label}', labelOf(unchecked[0]!)).replace('{id}', subjectText(unchecked[0]!, unchecked[0]!.id))
+              : locale.approvalSubjectsUncheckedWarning.replace('{ids}', unchecked.map(uncheckedText).join(', '))}
+          </p>
+        )}
         {unknown.length > 0 && (
           <>
             <p data-element="warning-text">
@@ -121,7 +174,11 @@ export function ApprovalIdWarning({ id, subjects }: { id: string; subjects: Read
         {ambiguous.map((subject, i) => (
           <div key={i} data-element="warning-ambiguous" data-candidates={subject.candidates ? '' : undefined}>
             <p data-element="warning-text">
-              {subject.candidates
+              {subject.source === 'server'
+                // Several records matched the server's lookup: their names, not kinds.
+                ? locale.approvalAmbiguousIdWarning.replace('{names}', (subject.names ?? [])
+                  .map((name) => subjectText(subject, name)).join(', '))
+                : subject.candidates
                 ? locale.approvalCollidingIdWarning.replace('{candidates}', subject.candidates
                   .map((candidate) => (candidate.name ? `${candidate.name} (${candidate.label})` : candidate.label)).join(', '))
                 : locale.approvalAmbiguousIdWarning.replace('{names}', (subject.names ?? []).join(', '))}
@@ -129,8 +186,8 @@ export function ApprovalIdWarning({ id, subjects }: { id: string; subjects: Read
             <ul data-element="warning-ids">
               <li data-element="detail-line" data-status="ambiguous">
                 <span data-element="detail-label">{labelOf(subject)}</span>
-                {subject.name !== undefined && <span data-element="detail-value">{subject.name}</span>}
-                <code data-element="subject-id">{subject.id}</code>
+                {subject.name !== undefined && <span data-element="detail-value">{subjectText(subject, subject.name)}</span>}
+                <code data-element="subject-id">{subjectText(subject, subject.id)}</code>
               </li>
             </ul>
           </div>
@@ -154,12 +211,16 @@ export function ApprovalCard({
   className,
   isProcessing,
 }: ApprovalCardProps) {
-  const { classNames, locale } = useChatContext();
+  const { classNames, locale, language } = useChatContext();
   const warningId = useId();
   const subjectLines = approvalSubjectLines(approval, locale);
   const flagged = flaggedApprovalSubjects([approval]);
   const seen = seenApprovalSubjects(approval);
-  const hasDetails = subjectLines.length > 0 || seen.length > 0 || (approval.details?.length ?? 0) > 0;
+  const references = (approval.subjects ?? []).filter(isQuietReference);
+  const preview = (approval.preview ?? []).slice(0, MAX_PREVIEW_ROWS);
+  const previewUnchecked = approval.previewCheck === 'unchecked';
+  const hasDetails = subjectLines.length > 0 || seen.length > 0 || references.length > 0 || preview.length > 0
+    || previewUnchecked || (approval.details?.length ?? 0) > 0;
 
   return (
     <div
@@ -188,13 +249,33 @@ export function ApprovalCard({
           ))}
           {seen.map((subject, i) => (
             <div key={`seen-${i}`} data-element="detail-line" data-subject="" data-status="seen">
-              <span data-element="detail-label">{subject.label ?? locale.approvalTargetLabel}</span>
+              <span data-element="detail-label">{subjectText(subject, subject.label ?? locale.approvalTargetLabel)}</span>
               {subject.fallback
-                ? <span data-element="detail-value">{subject.fallback}</span>
-                : <code data-element="subject-id">{subject.id}</code>}
-              <span data-element="subject-note">{locale.approvalSeenIdNote}</span>
+                ? <span data-element="detail-value">{subjectText(subject, subject.fallback)}</span>
+                : <code data-element="subject-id">{subjectText(subject, subject.id)}</code>}
+              {/* Found by the server: no note about this conversation. */}
+              {subject.source !== 'server' && <span data-element="subject-note">{locale.approvalSeenIdNote}</span>}
             </div>
           ))}
+          {references.map((subject, i) => (
+            <div key={`reference-${i}`} data-element="detail-line" data-subject="" data-status="reference">
+              <span data-element="detail-label">{subject.label ?? locale.approvalTargetLabel}</span>
+              <code data-element="subject-id">{subject.id}</code>
+              <span data-element="subject-note">{locale.approvalReferenceIdNote}</span>
+            </div>
+          ))}
+          {/* The server's preview: looked-up values, plain text only. */}
+          {preview.map((item, i) => (
+            <div key={`preview-${i}`} data-element="detail-line" data-preview="">
+              <span data-element="detail-label">{sanitizeSubjectText(item.label) ?? item.key}</span>
+              <span data-element="detail-value">{previewValueText(item, language)}</span>
+            </div>
+          ))}
+          {previewUnchecked && (
+            <div data-element="detail-line" data-preview="unchecked">
+              <span data-element="subject-note">{locale.approvalPreviewUncheckedNote}</span>
+            </div>
+          )}
           {(approval.details ?? []).map((detail, i) => {
             const colonIndex = detail.indexOf(':');
             if (colonIndex === -1) {

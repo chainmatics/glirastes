@@ -89,6 +89,7 @@ export type {
   UseAiChatReturn,
   PendingApproval,
   ApprovalSubject,
+  ApprovalPreviewItem,
   UseApprovalsReturn,
   UseMentionsReturn,
   UseSuggestionsReturn,
