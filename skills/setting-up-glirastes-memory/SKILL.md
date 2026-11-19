@@ -101,6 +101,10 @@ createAiChatHandler({
 
 - With `memory` set, the handler no longer cuts the history at
   `maxContextMessages`; the summary threshold bounds the context instead.
+- The summary folds lists to a count, so ids of folded turns are gone. For
+  tools with declared identity (`outputEntities`), `history: { seenObjects:
+  true }` (opt-in) keeps their declared id and name in a `<seen-objects>`
+  memo ahead of the history; see `docs/concepts.md`.
 - `chat: false` turns the summary off, omitting `user` and `shared` turns
   notes off. `memory: {}` is the chat summary alone.
 - Roles: `shared.canWrite` decides per request who may add or remove shared

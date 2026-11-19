@@ -86,6 +86,7 @@ import type {
   AiChatErrorInfo,
   AiChatHandlerConfig,
   IntentRoutingResult,
+  ModelInputEvent,
   PipelineStepReport,
   PipelineStreamState,
   PipelineResult,
@@ -99,6 +100,7 @@ import {
   prepareModelMessages,
   wrapToolsForVercelAi,
   type HistoryOptions,
+  type ModelInputBreakdown,
 } from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
 import {
@@ -192,6 +194,14 @@ export interface StreamHandlerContext {
   emitStepReports: boolean;
   /** Optional per-step callback */
   onStepReport?: (report: PipelineStepReport) => void;
+  /** The debug hook `AiChatHandlerConfig.onModelInput` (carries content; local only). */
+  onModelInput?: (event: ModelInputEvent) => void;
+  /**
+   * Set with `history.seenObjects` only: the UI messages ahead of `messages`
+   * that the message window or the chat memory left out. Pass them on as
+   * `prepareModelMessages`' `earlierMessages`; only their tool results are read.
+   */
+  earlierMessages?: unknown[];
   /** Max output tokens */
   maxOutputTokens: number;
   /** Temperature */
@@ -597,7 +607,15 @@ async function defaultStreamHandler(
   if (hideIds) {
     collectIdLabels(ctx.messages, idLabels);
     collectDeclaredIdLabelsFromMessages(ctx.messages, toolEntities, idLabels);
+    // The seen-objects memo shows declared ids of these messages: their labels are learnt too.
+    if (ctx.earlierMessages) collectDeclaredIdLabelsFromMessages(ctx.earlierMessages, toolEntities, idLabels);
   }
+  let breakdown: ModelInputBreakdown | undefined;
+  // Seen objects and the debug hook only; without them the options are as before.
+  const historyExtras = {
+    ...(ctx.earlierMessages ? { earlierMessages: ctx.earlierMessages as UIMessage[] } : {}),
+    ...(ctx.onModelInput ? { onBreakdown: (value: ModelInputBreakdown) => { breakdown = value; } } : {}),
+  };
   const preparedMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
     ctx.memory?.historyTokens
@@ -610,8 +628,9 @@ async function defaultStreamHandler(
             maxTokens: ctx.memory.historyTokens,
           },
           ...(toolEntities ? { entities: toolEntities } : {}),
+          ...historyExtras,
         }
-      : { maxContextMessages: ctx.maxContextMessages, history: ctx.history, ...(toolEntities ? { entities: toolEntities } : {}) },
+      : { maxContextMessages: ctx.maxContextMessages, history: ctx.history, ...(toolEntities ? { entities: toolEntities } : {}), ...historyExtras },
   );
   // User role, not system: memory is background a user could have written.
   const modelMessages = ctx.memory?.preamble
@@ -709,6 +728,32 @@ async function defaultStreamHandler(
     if (masked.report) reportError(error, masked.report.info, masked.report.error);
     return masked.text;
   };
+  /**
+   * The step preparation, then the debug hook (`onModelInput`) with the
+   * messages the step really sends. Local only; a throw from it is ignored.
+   */
+  const withModelInput = <O extends { messages: unknown[]; stepNumber: number }, R>(
+    prepare: (options: O) => Promise<R>,
+  ) => async (options: O): Promise<R> => {
+    const step = await prepare(options);
+    const hook = ctx.onModelInput;
+    if (hook && breakdown) {
+      const messages = (step as { messages?: unknown[] } | undefined)?.messages ?? options.messages;
+      const system = promptCaching ? undefined : systemPrompt;
+      try {
+        hook({
+          stepNumber: options.stepNumber,
+          messages,
+          ...(system ? { system } : {}),
+          breakdown,
+          estimatedTokens: Math.ceil(((JSON.stringify(messages)?.length ?? 0) + (system?.length ?? 0)) / 4),
+        });
+      } catch {
+        // The app's diagnostics failed; the turn goes on.
+      }
+    }
+    return step;
+  };
   const stream = createUIMessageStream({
     // Approval responses continue the last assistant message instead of appending
     // another snapshot with the same tool call IDs.
@@ -774,7 +819,7 @@ async function defaultStreamHandler(
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
-        prepareStep: async ({ messages }) => {
+        prepareStep: withModelInput(async ({ messages }) => {
           if (budgetExhausted()) {
             // The summary call: no tools, and the instruction to close the
             // answer (for this call only; it is no part of the chat).
@@ -794,7 +839,7 @@ async function defaultStreamHandler(
             : permitted ? Object.keys(orderedTools) : undefined;
           if (!active) return {};
           return { activeTools: permitted ? active.filter((name) => permitted.has(name)) : active };
-        },
+        }),
         maxOutputTokens: ctx.maxOutputTokens,
         temperature: ctx.temperature,
         timeout: resolveTurnTimeout(
@@ -1129,6 +1174,17 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   };
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
   const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
+  /**
+   * With `history.seenObjects`: the messages the window or the chat memory
+   * left out ahead of `recent` (a suffix of `all`), for the memo; else none.
+   * They get the same PII treatment as the window (`anonymizeMessages`). The
+   * memo reads only their tool results, which the shield sealed when the
+   * tool ran (`wrapToolsWithShield`), exactly like the tool results the
+   * window sends; shielding them again would map a pseudonym once more.
+   */
+  const seenObjectsSource = (all: unknown[], recent: unknown[]): unknown[] | undefined => (
+    history && history.seenObjects && recent.length < all.length ? all.slice(0, all.length - recent.length) : undefined
+  );
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
   if (attachments?.enabled && piiShield && attachments.allowWithPiiShield !== true) {
     throw new Error(
@@ -1211,7 +1267,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
     };
     return (ctx: StreamHandlerContext) => {
-      const context = { ...ctx, abortSignal: req.signal };
+      // The debug hook comes from the server config only, never from a request.
+      const context = { ...ctx, abortSignal: req.signal, ...(config.onModelInput ? { onModelInput: config.onModelInput } : {}) };
       const texts = textsFor(ctx.locale);
       return customStreamHandler ? customStreamHandler(context) : defaultStreamHandler(
         context, wrappedOnFinish, (error, info) => (info ? onError?.(error, req, info) : onError?.(error, req)),
@@ -2003,10 +2060,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxContextMessages;
         const memory = await prepareMemory(processedMessages, model, sessionId);
         let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
+        let earlierMessages = seenObjectsSource(processedMessages, recentMessages);
 
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
           recentMessages = await anonymizeMessages(recentMessages, piiShield, sessionId);
+          if (earlierMessages) earlierMessages = await anonymizeMessages(earlierMessages, piiShield, sessionId);
           aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
         }
 
@@ -2039,6 +2098,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         locale,
         history,
         memory,
+        ...(earlierMessages ? { earlierMessages } : {}),
         promptCaching,
         hideIds,
           modelTier: pipelineResult.model.modelId,
@@ -2204,10 +2264,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
       const memory = await prepareMemory(processedMessages, model, legacySessionId);
       let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
+      let earlierMessages = seenObjectsSource(processedMessages, recentMessages);
 
       // PII Shield: anonymize message history + wrap tools (legacy mode)
       if (piiShield) {
         recentMessages = await anonymizeMessages(recentMessages, piiShield, legacySessionId);
+        if (earlierMessages) earlierMessages = await anonymizeMessages(earlierMessages, piiShield, legacySessionId);
         aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
       }
 
@@ -2240,6 +2302,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         locale,
         history,
         memory,
+        ...(earlierMessages ? { earlierMessages } : {}),
         promptCaching,
         hideIds,
         modelTier: routing?.modelTier,
