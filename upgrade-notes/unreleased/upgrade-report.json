@@ -1,7 +1,7 @@
 {
   "id": "upgrade-report",
   "kind": "recommended",
-  "summary": "glirastes upgrade report lists release notes between your installed version and the current one, checked against your code, and is the way agents learn what to do after an upgrade.",
+  "summary": "glirastes upgrade report lists release notes since the version this app last reviewed, checked against your code, and is the way agents learn what to do after an upgrade.",
   "howTo": "Run `glirastes upgrade report` once and commit `.glirastes/sdk-baseline.json`. After each glirastes upgrade run it again and follow the upgrading-glirastes skill.",
   "skill": "upgrading-glirastes",
   "affectedWhen": {

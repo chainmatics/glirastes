@@ -38,12 +38,17 @@ Run it:
    nothing to do. `baselineAhead` means the baseline is newer than the installed
    SDK (a downgrade); report that and stop. `baselineMissing` means the review
    starts from the installed skills version, or from `--from <version>` when
-   you pass it.
+   you pass it. With no baseline and no installed skills record, the review
+   starts at the installed version and reports nothing; if the developer knows
+   the version the app used before, run `glirastes upgrade report --from <version>`.
 2. The groups are Must (breaking), Should (deprecated, plus edited skills that
-   are behind), Recommended and Optional, only if wanted. Must, Should and
+   are behind), Recommended and Optional, only if wanted. Should and
    Recommended items the code does not touch (`not-affected`) are not listed.
-   JSON keys: `must`, `should` (plus `keptSkills`), `recommended`, and `offer`
-   (= "Optional, only if wanted").
+   Breaking items without evidence appear under "Checked, no evidence found"
+   (`checkedNotAffected`): name them in one line each, since a barrel
+   re-export can hide a use. They do not block `ack`.
+   JSON keys: `must`, `should` (plus `keptSkills`), `recommended`, `offer`
+   (= "Optional, only if wanted") and `checkedNotAffected`.
 3. For every Must, Should and Recommended item show the developer the id,
    the summary, the evidence (`file:line`) and the referenced skill section
    (`skill`, read it before you propose a change). `status: "unclear"` means
@@ -54,8 +59,9 @@ Run it:
 5. Ask before changing anything. Apply only what the developer accepted, then
    run `glirastes tools refresh` and `glirastes tools check`.
 6. Record each choice: `glirastes upgrade decide <id> adopted`, `declined` or
-   `deferred`. `deferred` keeps the item in the next report; adopted and
-   declined items drop out (`--all` lists them again).
+   `deferred`. `deferred` keeps the item in every later report, also after
+   `glirastes upgrade ack`; adopted and declined items drop out (`--all` lists
+   them again).
 7. Edited skills under Should (`skill:<name>`): `glirastes tools refresh`
    keeps an edited copy and the report names it. Merge the shipped changes
    from `node_modules/glirastes/skills/<name>` into the copy yourself. A copy you
@@ -84,7 +90,8 @@ glirastes upgrade decide <note-id> deferred
 glirastes upgrade ack
 ```
 
-`--brief` lists only Must and Should items. `--fail-on breaking` exits 1 while
+`--brief` lists Must, Should and Recommended items and only counts the
+optional ones. `--fail-on breaking` exits 1 while
 a Must item is open, for CI. `--root <dir>` points any subcommand at another
 app. `GLIRASTES_UPGRADE_HINT=0` removes the summary line from refresh and check.
 
