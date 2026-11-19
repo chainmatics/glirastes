@@ -133,4 +133,67 @@ describe('detect', () => {
       evaluateNote(note({ affectedWhen: { imports: ['glirastes/react'] } }), scan).status,
     ).toBe('not-affected');
   });
+
+  it('scan skips build output, vendored dirs and lockfiles', async () => {
+    for (const dir of ['out', '.output', '.vercel', '.svelte-kit', '.nuxt', '.venv', 'vendor', 'target']) {
+      write(`${dir}/a.ts`, "import x from 'glirastes/react';\n");
+    }
+    write('package-lock.json', '{ "glirastes/react": 1 }\n');
+    write('bun.lock', '{ "glirastes/react": 1 }\n');
+    write('sub/package-lock.json', '{ "glirastes/react": 1 }\n');
+    write('src/keep.ts', "import x from 'glirastes/react';\n");
+    expect((await scanApp(root)).files.map((f) => f.path)).toEqual(['src/keep.ts']);
+  });
+
+  it('scans .mts, .cts and .astro files', async () => {
+    write('a.mts', "import x from 'glirastes/server';\n");
+    write('b.cts', "const g = require('glirastes');\n");
+    write('c.astro', "---\nimport { Chat } from 'glirastes/react';\n---\n");
+    const scan = await scanApp(root);
+    expect(scan.files.map((f) => [f.path, f.glirastesImports])).toEqual([
+      ['a.mts', ['glirastes/server']],
+      ['b.cts', ['glirastes']],
+      ['c.astro', ['glirastes/react']],
+    ]);
+  });
+
+  it('works on hand-built scans without precomputed specifiers', () => {
+    const scan = { files: [{ path: 'a.ts', text: "\nimport x from 'glirastes/react';\n", glirastesImports: ['glirastes/react'] }] };
+    expect(evaluateNote(note({ affectedWhen: { imports: ['glirastes/react'] } }), scan)).toEqual({
+      status: 'affected',
+      evidence: [{ file: 'a.ts', line: 2 }],
+    });
+  });
+
+  // Coarse guard against per-note work over every file (the omnify case: ~1,400
+  // files, 13 notes, 1 s). Files are ~6 KB like a real app. The bounds (1500 ms
+  // in total, 500 ms for evaluation alone) are generous so slow CI machines
+  // pass; per-note line indexing or specifier parsing lands above them.
+  it('scans 2,000 files and evaluates 15 notes in under 1500 ms', async () => {
+    const body = Array.from({ length: 150 }, (_, i) => `export const value${i} = compute(${i}); // filler line\n`).join('');
+    for (let i = 0; i < 2000; i++) {
+      const header = i % 10 === 0 ? "import { AiChatProvider } from 'glirastes/react';\n" : "import { x } from 'other';\n";
+      write(`src/m${i % 40}/f${i}.ts`, header + body);
+    }
+    const notes = Array.from({ length: 15 }, (_, i) =>
+      note({
+        id: `perf-note-${i}`,
+        affectedWhen: {
+          imports: ['glirastes/react'],
+          symbols: [`Symbol${i}`, 'AiChatProvider'],
+          patterns: [`NeverPresent${i}\\b`, ':\\s*ChatLocale\\b'],
+        },
+        adoptedWhen: { patterns: [`alsoNever${i}`] },
+      }),
+    );
+    const started = performance.now();
+    const scan = await scanApp(root);
+    const scanned = performance.now();
+    const results = notes.map((n) => evaluateNote(n, scan));
+    const finished = performance.now();
+    expect(scan.files).toHaveLength(2000);
+    expect(results.every((r) => r.status === 'affected')).toBe(true);
+    expect(finished - scanned).toBeLessThan(500);
+    expect(finished - started).toBeLessThan(1500);
+  }, 20_000);
 });
