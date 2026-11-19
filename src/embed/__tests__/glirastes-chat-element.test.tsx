@@ -3,6 +3,7 @@ import { act, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SttProviderAdapter } from '../../react/stt/controller.js';
 import type { ChatMessage, ChatTransport } from '../../react/types.js';
+import { registerNavigationBridge } from '../../browser/navigation.js';
 import { CHAT_STYLES } from '../chat-styles.generated.js';
 import {
   EMBED_CSS_VARIABLES,
@@ -42,6 +43,22 @@ function sseResponse(text: string): Response {
   });
 }
 
+/** A UI message stream with one executed tool call and its output. */
+function toolStreamResponse(toolName: string, output: unknown): Response {
+  const chunks = [
+    { type: 'start' },
+    { type: 'start-step' },
+    { type: 'tool-input-available', toolCallId: 'call-1', toolName, input: {} },
+    { type: 'tool-output-available', toolCallId: 'call-1', output },
+    { type: 'finish-step' },
+    { type: 'finish' },
+  ];
+  const body = `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('')}data: [DONE]\n\n`;
+  return new Response(body, {
+    headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+  });
+}
+
 async function mount(
   configure: (element: GlirastesChatElement) => void = () => {},
   tag = 'glirastes-chat',
@@ -50,7 +67,7 @@ async function mount(
   const element = document.createElement(tag) as GlirastesChatElement;
   configure(element);
   const events: Array<{ type: string; detail: unknown }> = [];
-  for (const type of ['ready', 'status', 'tool-result', 'error']) {
+  for (const type of ['ready', 'status', 'tool-result', 'ui-action', 'error']) {
     document.addEventListener(`glirastes-chat:${type}`, (event) => {
       events.push({ type: event.type, detail: (event as CustomEvent).detail });
     });
@@ -125,7 +142,20 @@ describe('<glirastes-chat>', () => {
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith({ text: 'Und morgen?' }));
   });
 
-  it('emits tool results for host-side UI actions', async () => {
+  it('emits tool results of the running request for host-side UI actions', async () => {
+    const output = { success: true, uiAction: { type: 'navigate', path: '/tasks' } };
+    vi.stubGlobal('fetch', vi.fn(async () => toolStreamResponse('ui_navigate', output)));
+    const { element, events } = await mount((node) => { node.setAttribute('endpoint', '/api/chat'); });
+    await act(async () => { expect(element.send('Öffne die Aufgaben')).toBe(true); });
+    await waitFor(() => expect(events).toContainEqual({
+      type: 'glirastes-chat:tool-result',
+      detail: { toolName: 'ui_navigate', result: output },
+    }));
+    // A host-side action has no generated UI action, so no outcome event.
+    expect(events.map((event) => event.type)).not.toContain('glirastes-chat:ui-action');
+  });
+
+  it('does not emit tool results of messages a custom transport starts with', async () => {
     const chat = transport([{
       id: 'a1',
       role: 'assistant',
@@ -135,13 +165,37 @@ describe('<glirastes-chat>', () => {
       }],
     } as unknown as ChatMessage]);
     const { events } = await mount((node) => { node.transport = chat; });
-    expect(events).toContainEqual({
-      type: 'glirastes-chat:tool-result',
-      detail: {
-        toolName: 'ui_navigate',
-        result: { success: true, uiAction: { type: 'navigate', path: '/tasks' } },
-      },
-    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(events.map((event) => event.type)).not.toContain('glirastes-chat:tool-result');
+  });
+
+  it('emits the outcome of a generated UI action without its payload', async () => {
+    const output = {
+      success: true,
+      message: 'Handed to the app.',
+      uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks?q=secret' } },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => toolStreamResponse('ui_navigate', output)));
+    const push = vi.fn();
+    const stopBridge = registerNavigationBridge({ push });
+    // A throwing host callback does not stop the DOM event.
+    const onUiActionOutcome = vi.fn(() => { throw new Error('host callback'); });
+    try {
+      const { element, events } = await mount((node) => {
+        node.setAttribute('endpoint', '/api/chat');
+        node.config = { onUiActionOutcome };
+      });
+      await act(async () => { expect(element.send('Zeige erledigte Aufgaben')).toBe(true); });
+      await waitFor(() => expect(events).toContainEqual({
+        type: 'glirastes-chat:ui-action',
+        detail: { toolName: 'ui_navigate', toolCallId: 'call-1', code: 'ok', actionIds: ['glirastes.navigate'] },
+      }));
+      expect(push).toHaveBeenCalledWith('/tasks?q=secret');
+      expect(onUiActionOutcome).toHaveBeenCalledWith(expect.objectContaining({ code: 'ok', toolCallId: 'call-1' }));
+      expect(JSON.stringify(events.filter((event) => event.type === 'glirastes-chat:ui-action'))).not.toContain('secret');
+    } finally {
+      stopBridge();
+    }
   });
 
   it('posts to the endpoint attribute with the config headers and bodyExtras', async () => {

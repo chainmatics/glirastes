@@ -42,7 +42,7 @@ import {
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
-import { dispatchToolResultUiActions } from '../../browser/client-actions.js';
+import { runToolResultUiActions, toolResultUiActions } from '../../browser/client-actions.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
@@ -379,6 +379,33 @@ export interface AiChatProviderProps extends AiChatProviderConfig {
 }
 
 /**
+ * A result with generated UI actions that already carries the browser's
+ * `outcome` object: it ran before and never runs again. Other tools may have
+ * an `outcome` field of their own.
+ */
+function carriesUiOutcome(output: Record<string, unknown>): boolean {
+  return isRecord(output.outcome) && toolResultUiActions(output).length > 0;
+}
+
+/**
+ * True when `messages` continue the messages a request started from: the
+ * same ids in order (a trailing assistant message may be replaced, as a
+ * regenerated answer is). Results of a history the host set while the
+ * request ran (another chat, another tab) do not count as this request's.
+ */
+function continuesRequestBase(
+  messages: ReadonlyArray<{ id: string }>,
+  base: ReadonlyArray<{ id: string; role: string }>,
+): boolean {
+  const kept = base.at(-1)?.role === 'assistant' ? base.length - 1 : base.length;
+  if (messages.length < kept) return false;
+  for (let index = 0; index < kept; index += 1) {
+    if (messages[index]?.id !== base[index]!.id) return false;
+  }
+  return true;
+}
+
+/**
  * Provider component that manages chat state and exposes it to child components.
  *
  * Transport-agnostic: pick a transport hook (Vercel, LangGraph, or your own)
@@ -432,6 +459,8 @@ export function AiChatProvider({
   unstyled = false,
   onToolResult,
   uiActionBus,
+  onUiActionOutcome,
+  uiActionOutcomeTimeoutMs,
   onBeforeSend,
   approvalDescription: userApprovalDescription,
   approvalSubjects = true,
@@ -620,12 +649,62 @@ export function AiChatProvider({
   // Refs for deduplication
   const processedToolCallsRef = useRef<Set<string>>(new Set());
   const handledApprovalIdsRef = useRef<Set<string>>(new Set());
+  // UI actions run one tool result after another, in call order.
+  const uiActionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Set once a UI action started a full page load: nothing after it runs in this document, also not after a reset.
+  const pageLeavingRef = useRef(false);
+  // Live results held back until the earlier calls of their message have results.
+  const deferredResultsRef = useRef<Map<string, {
+    toolName: string;
+    output: Record<string, unknown>;
+    messageId: string;
+  }>>(new Map());
+  // Aborted with each reset so a running result stops before its next action.
+  const uiActionAbortRef = useRef(new AbortController());
+  // Whether the previous run of the tool-result effect saw a request of this instance running.
+  const liveRequestRef = useRef(false);
+  // A request that was running when the chat was reset: its later results belong to the left chat.
+  const staleRequestRef = useRef(false);
+  // Message ids when the running request started; a history set meanwhile does not continue them.
+  const requestBaseRef = useRef<Array<{ id: string; role: string }>>([]);
+  // Bumped by clear(), a session switch and unmount: queued actions of the left chat never start.
+  const uiActionGenerationRef = useRef(0);
+  const resetUiActions = useCallback(() => {
+    uiActionGenerationRef.current += 1;
+    uiActionAbortRef.current.abort();
+    uiActionAbortRef.current = new AbortController();
+    // A request still running now delivers to the left chat.
+    staleRequestRef.current = streamActiveRef.current;
+    liveRequestRef.current = false;
+    uiActionQueueRef.current = Promise.resolve();
+    deferredResultsRef.current.clear();
+  }, []);
+  // Unmount drops queued actions; StrictMode's immediate remount keeps them
+  // (and the running request), so only a provider that stays unmounted resets.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      queueMicrotask(() => {
+        if (mountedRef.current) return;
+        uiActionGenerationRef.current += 1;
+        uiActionAbortRef.current.abort();
+        uiActionQueueRef.current = Promise.resolve();
+      });
+    };
+  }, []);
+
 
   // Stable refs for callbacks to avoid re-creating transport
   const onToolResultRef = useRef(onToolResult);
   onToolResultRef.current = onToolResult;
   const uiActionBusRef = useRef(uiActionBus);
   uiActionBusRef.current = uiActionBus;
+  const onUiActionOutcomeRef = useRef(onUiActionOutcome);
+  onUiActionOutcomeRef.current = onUiActionOutcome;
+  const uiActionOutcomeTimeoutRef = useRef(uiActionOutcomeTimeoutMs);
+  uiActionOutcomeTimeoutRef.current = uiActionOutcomeTimeoutMs;
   const approvalDescriptionRef = useRef(approvalDescriptionFn);
   approvalDescriptionRef.current = approvalDescriptionFn;
   const approvalSubjectsRef = useRef(approvalSubjects);
@@ -741,8 +820,9 @@ export function AiChatProvider({
   useEffect(() => {
     if (approvalSessionRef.current === activeSessionId) return;
     approvalSessionRef.current = activeSessionId;
+    resetUiActions();
     setPendingApprovalsMap(new Map());
-  }, [activeSessionId]);
+  }, [activeSessionId, resetUiActions]);
 
   // Load messages from session whenever the active session changes.
   // Runs on mount and on every switchSession() call.
@@ -819,13 +899,107 @@ export function AiChatProvider({
     );
   }, [rawMessages, isInitialized, activeSessionId, loadedSessionId]);
 
+
+  const runUiActions = useCallback((toolName: string, toolCallId: string, output: unknown) => {
+    const actions = toolResultUiActions(output);
+    if (actions.length === 0) return;
+    const generation = uiActionGenerationRef.current;
+    const { signal } = uiActionAbortRef.current;
+    uiActionQueueRef.current = uiActionQueueRef.current.then(async () => {
+      if (!mountedRef.current || pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
+      const run = await runToolResultUiActions(
+        output,
+        uiActionBusRef.current ?? getDefaultUiActionBus(),
+        {
+          signal,
+          ...(uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {}),
+        },
+      ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }));
+      if (!run || uiActionGenerationRef.current !== generation) return;
+      if (run.code === 'initiated') pageLeavingRef.current = true;
+      if (run.code !== 'ok' && run.code !== 'initiated') {
+        console.warn('[glirastes] A generated UI action was not carried out');
+      }
+      try {
+        onUiActionOutcomeRef.current?.({
+          toolName,
+          toolCallId,
+          code: run.code,
+          actions: actions.map((action) => (typeof action.actionId === 'string'
+            ? { type: action.type, actionId: action.actionId }
+            : { type: action.type })),
+          reported: false,
+          durationMs: run.durationMs,
+          ...(run.error !== undefined ? { error: run.error } : {}),
+        });
+      } catch {
+        console.warn('[glirastes] onUiActionOutcome threw');
+      }
+    });
+  }, []);
+
   // Process tool results and approvals from streaming messages
   useEffect(() => {
-    if (rawMessages.length === 0) return;
-
+    // A tool result runs only in the instance whose request delivered it:
+    // while it streams, or in the render that ends it. A result first seen
+    // otherwise (stored history, messages set by the host or a custom
+    // transport, another tab) is never run later.
+    if (staleRequestRef.current && !isLoading) staleRequestRef.current = false;
+    const wasLive = liveRequestRef.current;
+    liveRequestRef.current = isLoading && !staleRequestRef.current;
+    // The messages a request starts from; its results come in the last one.
+    if (liveRequestRef.current && !wasLive) requestBaseRef.current = rawMessages.map(({ id, role }) => ({ id, role }));
+    // Another history replaced the messages (host, another tab): drop what
+    // the left one queued, and the running request no longer delivers here.
+    const replaced = !continuesRequestBase(rawMessages, requestBaseRef.current);
+    if (replaced) {
+      resetUiActions();
+      requestBaseRef.current = rawMessages.map(({ id, role }) => ({ id, role }));
+    }
+    const live = !replaced && (liveRequestRef.current || wasLive);
     const lastMessage = rawMessages[rawMessages.length - 1];
-    if (lastMessage.role !== 'assistant') return;
 
+    // Held-back results of a message that is no longer the last one run now, in their order.
+    // A message that held results back and is no longer the last one: run its
+    // results now, in call order, including those that arrived with the update
+    // that moved on (a result of a call that never finished stays out).
+    const heldMessageIds = [...new Set([...deferredResultsRef.current.values()].map((held) => held.messageId))]
+      .filter((messageId) => lastMessage?.id !== messageId);
+    for (const messageId of heldMessageIds) {
+      // Gone from the messages, or the messages are no longer this request's: drop them.
+      const message = live ? rawMessages.find((candidate) => candidate.id === messageId) : undefined;
+      const results: Array<{ toolCallId: string; toolName: string; output: Record<string, unknown> }> = [];
+      for (const part of message?.parts ?? []) {
+        const toolPart = part as { type?: unknown; state?: unknown; output?: unknown; toolCallId?: unknown };
+        if (typeof toolPart.type !== 'string' || !toolPart.type.startsWith('tool-')) continue;
+        if (toolPart.state !== 'output-available' || !isRecord(toolPart.output)) continue;
+        const toolCallId = typeof toolPart.toolCallId === 'string' && toolPart.toolCallId
+          ? toolPart.toolCallId
+          : `${messageId}-${toolPart.type}`;
+        results.push({ toolCallId, toolName: toolPart.type.replace('tool-', ''), output: toolPart.output });
+      }
+      if (!message) {
+        for (const [toolCallId, held] of deferredResultsRef.current) {
+          if (held.messageId === messageId) processedToolCallsRef.current.add(toolCallId);
+        }
+      }
+      for (const [toolCallId, held] of deferredResultsRef.current) {
+        if (held.messageId === messageId) deferredResultsRef.current.delete(toolCallId);
+      }
+      for (const result of results) {
+        if (processedToolCallsRef.current.has(result.toolCallId)) continue;
+        processedToolCallsRef.current.add(result.toolCallId);
+        if (carriesUiOutcome(result.output)) continue;
+        onToolResultRef.current?.(result.toolName, result.output);
+        runUiActions(result.toolName, result.toolCallId, result.output);
+      }
+    }
+
+    if (!lastMessage || lastMessage.role !== 'assistant') return;
+
+    // While the request streams, a result waits for every earlier call of the
+    // message to finish, so UI actions run in call order, not arrival order.
+    let earlierCallOpen = false;
     for (const part of lastMessage.parts) {
       if (!('type' in part)) continue;
       const partType = (part as { type: string }).type;
@@ -880,24 +1054,42 @@ export function AiChatProvider({
           setPendingApprovalsMap(prev => new Map(prev).set(toolPart.approval!.id, pending));
         }
 
+        if (
+          toolPart.state === 'input-streaming'
+          || toolPart.state === 'input-available'
+          || toolPart.state === 'approval-requested'
+          || toolPart.state === 'approval-responded'
+        ) {
+          earlierCallOpen = true;
+          continue;
+        }
+
         // Tool result available — call onToolResult
         if (toolPart.state === 'output-available' && isRecord(toolPart.output)) {
           const toolCallId = toolPart.toolCallId || `${lastMessage.id}-${partType}`;
           if (!processedToolCallsRef.current.has(toolCallId)) {
+            // A result that already carries an outcome was run before.
+            if (!live || carriesUiOutcome(toolPart.output)) {
+              processedToolCallsRef.current.add(toolCallId);
+              deferredResultsRef.current.delete(toolCallId);
+              continue;
+            }
+            if (earlierCallOpen && isLoading) {
+              deferredResultsRef.current.set(toolCallId, {
+                toolName, output: toolPart.output, messageId: lastMessage.id,
+              });
+              continue;
+            }
+            deferredResultsRef.current.delete(toolCallId);
             processedToolCallsRef.current.add(toolCallId);
             onToolResultRef.current?.(toolName, toolPart.output);
             // Generated UI tools run in the browser through the app's bridge.
-            void dispatchToolResultUiActions(
-              toolPart.output,
-              uiActionBusRef.current ?? getDefaultUiActionBus(),
-            ).catch(() => {
-              console.warn('[glirastes] A generated UI action failed');
-            });
+            runUiActions(toolName, toolCallId, toolPart.output);
           }
         }
       }
     }
-  }, [rawMessages]);
+  }, [rawMessages, isLoading, runUiActions, resetUiActions]);
 
   // Extract suggestions from suggest_followups tool, with a strict text
   // fallback for models that append a trailing Markdown suggestion section.
@@ -1211,6 +1403,7 @@ export function AiChatProvider({
   }, [transportStop, pipelineSteps.length]);
 
   const clear = useCallback(() => {
+    resetUiActions();
     setMessages([]);
     void Promise.resolve(sessionRef.current?.clear?.(activeSessionId));
     processedToolCallsRef.current.clear();
@@ -1227,7 +1420,7 @@ export function AiChatProvider({
     setIsMentionSearching(false);
     setPendingCommand(null);
     setSuggestionChips(suggestionsConfig.staticChips ?? []);
-  }, [setMessages, activeSessionId, suggestionsConfig.staticChips]);
+  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions]);
 
   // ---------------------------------------------------------------------------
   // Multi-session actions

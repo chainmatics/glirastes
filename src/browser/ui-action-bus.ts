@@ -80,7 +80,12 @@ export class UiActionBus {
     return Array.from(this.handlersById.keys());
   }
 
-  async dispatch(action: UiAction): Promise<void> {
+  /**
+   * Runs every handler of the action's type and id one after another and
+   * resolves the number that ran; `0` means nothing on the page handles it.
+   * The first handler that throws stops the rest and rejects the dispatch.
+   */
+  async dispatch(action: UiAction): Promise<number> {
     const typeHandlers = this.handlersByType.get(action.type);
     const idHandlers = action.actionId
       ? this.handlersById.get(action.actionId)
@@ -94,6 +99,7 @@ export class UiActionBus {
     for (const handler of allHandlers) {
       await handler(action);
     }
+    return allHandlers.size;
   }
 }
 

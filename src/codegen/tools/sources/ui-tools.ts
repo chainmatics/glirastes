@@ -187,18 +187,18 @@ export function importedCalls(source: ts.SourceFile, specs: ReadonlyArray<Import
 
 const BRIDGE_IMPORTS: ReadonlyArray<ImportSpec> = [
   { module: 'glirastes/react', names: ['useGlirastesNavigationBridge'] },
-  { module: 'glirastes/browser', names: ['registerNavigationBridge'] },
+  { module: 'glirastes/browser', names: ['registerNavigationBridge', 'registerDocumentNavigation'] },
 ];
 
 /** True when app code calls the navigation bridge that executes `ui.navigate` and `ui.filter.*`. */
 export function hasNavigationBridge(files: ReadonlyArray<Pick<AppSourceFile, 'path' | 'source'>>): boolean {
   return files.some((file) => (
-    file.source.includes('NavigationBridge') && importedCalls(parseAppSource(file), BRIDGE_IMPORTS).length > 0
+    mentionsNavigationBridge(file.source) && importedCalls(parseAppSource(file), BRIDGE_IMPORTS).length > 0
   ));
 }
 
 export function mentionsNavigationBridge(source: string): boolean {
-  return source.includes('NavigationBridge');
+  return source.includes('NavigationBridge') || source.includes('registerDocumentNavigation');
 }
 
 export interface UiObservationInput {

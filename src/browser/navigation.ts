@@ -1,4 +1,5 @@
 import { getDefaultUiActionBus, type UiAction, type UiActionBus } from './ui-action-bus.js';
+import { markUiActionInitiated, UiActionRejectedError } from './ui-action-signals.js';
 
 /** Action id of every generated navigation and filter tool (`ui.navigate`, `ui.filter.<view>`). */
 export const GLIRASTES_NAVIGATE_ACTION_ID = 'glirastes.navigate';
@@ -66,8 +67,19 @@ export function buildNavigationHref(input: {
 }
 
 export interface NavigationBridgeOptions {
-  /** The router's push, e.g. Next.js `router.push` or vue-router `router.push`. */
+  /**
+   * The router's push, e.g. Next.js `router.push` or vue-router
+   * `router.push`. Returning (or resolving) `false` reports that the
+   * navigation did not happen. vue-router resolves a failed navigation
+   * instead of throwing: pass `async (href) => !(await router.push(href))`.
+   */
   push: (href: string) => unknown;
+  /**
+   * True when `push` loads a new document (`location.assign`, a multi-page
+   * app): the chat then reports the navigation as started, not carried out.
+   * A function decides per target.
+   */
+  reloads?: boolean | ((href: string) => boolean);
   bus?: UiActionBus;
 }
 
@@ -84,7 +96,42 @@ export function registerNavigationBridge(options: NavigationBridgeOptions): () =
   const bus = options.bus ?? getDefaultUiActionBus();
   return bus.subscribeById(GLIRASTES_NAVIGATE_ACTION_ID, async (action) => {
     const href = hrefOf(action);
-    if (!isSafeAppHref(href)) throw new Error('Unsafe navigation target');
-    await options.push(href);
+    if (!isSafeAppHref(href)) throw new UiActionRejectedError('contract', 'Unsafe navigation target');
+    if (await options.push(href) === false) {
+      throw new UiActionRejectedError('handler', `Navigation to ${href} was not carried out`);
+    }
+    const reloads = typeof options.reloads === 'function' ? options.reloads(href) : options.reloads === true;
+    if (reloads) markUiActionInitiated(action);
+  });
+}
+
+/** False for a target that only changes the fragment of the open page: `location.assign` keeps the document. */
+function loadsNewDocument(href: string): boolean {
+  const current = globalThis.location?.href;
+  if (typeof current !== 'string' || !href.includes('#')) return true;
+  try {
+    const from = new URL(current);
+    const to = new URL(href, from);
+    return to.origin !== from.origin || to.pathname !== from.pathname || to.search !== from.search;
+  } catch {
+    return true;
+  }
+}
+
+export interface DocumentNavigationOptions {
+  bus?: UiActionBus;
+}
+
+/**
+ * Navigation bridge for an app without client-side routing: each
+ * `ui.navigate` and `ui.filter.<view>` result loads the page with
+ * `location.assign`. The chat reports it as started (`initiated`), since
+ * the page that would confirm it is gone. Returns the unsubscribe function.
+ */
+export function registerDocumentNavigation(options: DocumentNavigationOptions = {}): () => void {
+  return registerNavigationBridge({
+    push: (href) => { globalThis.location.assign(href); },
+    reloads: loadsNewDocument,
+    ...(options.bus ? { bus: options.bus } : {}),
   });
 }

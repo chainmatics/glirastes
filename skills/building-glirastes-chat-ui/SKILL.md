@@ -71,7 +71,7 @@ component; headless hooks and building blocks for an own chat:
 | `chatInteractions` | derived `@` entities and `/` commands (section below) |
 | `entityLinks` | entity references in answers as chips |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
-| `onBeforeSend`, `onToolResult` | hooks around a turn |
+| `onBeforeSend`, `onToolResult`, `onUiActionOutcome` | hooks around a turn; UI action outcomes in `references/hooks-and-building-blocks.md` |
 | `approvalDescription` | human-readable text for an approval request |
 
 `locale` exists so the SDK never fights the product's i18n stack. Bind it to
@@ -136,7 +136,7 @@ handler runs. An action that lives on one page takes that page's path as fourth 
 runs the action once it is registered. A handler returns `false` if it could not work
 (the dispatch fails; the model is only told "handed to the app"). Never register a global handler that
 only fires a window event for a listener on one page. A chat UI that does not use the SDK provider must
-pass each tool result to `dispatchToolResultUiActions` (`glirastes/browser`), or no UI tool runs.
+pass each tool result to `runToolResultUiActions` (`glirastes/browser`), or no UI tool runs.
 
 ## `@` entities and `/` commands
 

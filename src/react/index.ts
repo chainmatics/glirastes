@@ -77,6 +77,8 @@ export type {
   // Callbacks
   OnBeforeSend,
   OnToolResult,
+  OnUiActionOutcome,
+  UiActionOutcomeEvent,
   ApprovalDescriptionFn,
   ApprovalDescriptionContext,
   PipelineMessageTranslator,

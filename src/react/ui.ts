@@ -200,15 +200,21 @@ export function useAiClientAction<T = Record<string, unknown>>(
 /**
  * Executes the generated `ui.navigate` and `ui.filter.<view>` tools with the
  * app's router, e.g. `useGlirastesNavigationBridge({ push: router.push })`
- * with Next.js `useRouter()`. Always the latest `push` is used.
+ * with Next.js `useRouter()`. Always the latest `push` and `reloads` are used.
  */
 export function useGlirastesNavigationBridge(options: NavigationBridgeOptions): void {
   const pushRef = useRef(options.push);
   pushRef.current = options.push;
   const bus = options.bus;
+  const reloadsRef = useRef(options.reloads);
+  reloadsRef.current = options.reloads;
   useEffect(
     () => registerNavigationBridge({
       push: (href) => pushRef.current(href),
+      reloads: (href) => {
+        const reloads = reloadsRef.current;
+        return typeof reloads === 'function' ? reloads(href) : reloads === true;
+      },
       ...(bus ? { bus } : {}),
     }),
     [bus],

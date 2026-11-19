@@ -231,7 +231,9 @@ is in the package's `docs/tool-policy.md`.
    import { defineQueryFilters, registerAiClientAction, registerNavigationBridge } from 'glirastes/browser';
    import { z } from 'zod';
 
-   registerNavigationBridge({ push: (href) => router.push(href) });
+   // vue-router resolves a failed navigation: `false` reports it as not done.
+   // Without client-side routing: registerDocumentNavigation() instead.
+   registerNavigationBridge({ push: async (href) => !(await router.push(href)) });
    export const taskFilters = defineQueryFilters({
      path: '/tasks',
      filters: { status: ['open', 'done'] },
@@ -249,7 +251,11 @@ is in the package's `docs/tool-policy.md`.
    (`ui-action-indirect`). A handler returns `false` when it could not do its
    work; the dispatch then fails in the browser. The model is not told: a UI
    tool's result only says the action was handed to the app, so the model
-   reports it as requested, not done.
+   reports it as requested, not done. The chat classifies each outcome (`ok`,
+   `rejected-contract`, `rejected-handler`, `unavailable`, `failed`,
+   `initiated`, `timeout`) for `onUiActionOutcome` and the
+   `glirastes-chat:ui-action` event, and runs a UI action only from its own
+   running request, never from a restored history.
 
    Export the zod payload contract from a module that imports only zod and
    pass that export: the generated tool then takes formats, descriptions,
@@ -276,7 +282,7 @@ is in the package's `docs/tool-policy.md`.
    `defineGlirastesChatElement()` from `glirastes/embed` registers
    `<glirastes-chat endpoint="/api/chat">`. It renders in a Shadow DOM,
    themes through `--glirastes-chat-*` CSS variables, emits
-   `glirastes-chat:ready`, `:status`, `:tool-result` and `:error`, and frees
+   `glirastes-chat:ready`, `:status`, `:tool-result`, `:ui-action` and `:error`, and frees
    the microphone when removed. The page needs `react`, `react-dom`,
    `@ai-sdk/react` and `ai` installed. JS-only settings (`headers`,
    `bodyExtras`, the provider fields) go on the element's `config` property

@@ -89,7 +89,7 @@ describe('registerAiClientAction', () => {
     cleanups.push(registerAiClientAction('dialogs.close', async () => true, undefined, { bus }));
     await expect(bus.dispatch({ type: 'glirastes.action', actionId: 'dialogs.open' }))
       .rejects.toThrow('UI action dialogs.open was not executed');
-    await expect(bus.dispatch({ type: 'glirastes.action', actionId: 'dialogs.close' })).resolves.toBeUndefined();
+    await expect(bus.dispatch({ type: 'glirastes.action', actionId: 'dialogs.close' })).resolves.toBe(1);
   });
 });
 

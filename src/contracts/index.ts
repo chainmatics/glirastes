@@ -179,3 +179,15 @@ export {
   resolveLocalizedText,
 } from './localized-text.js';
 export type { LanguageTag, LocalizedText } from './localized-text.js';
+
+export {
+  isUiOutcomeCode,
+  UI_OUTCOME_CODES,
+  UI_OUTCOME_PROTOCOL_VERSION,
+  UiOutcomeCodeSchema,
+  UiOutcomeSchema,
+} from './ui-outcome.js';
+export type {
+  UiOutcome,
+  UiOutcomeCode,
+} from './ui-outcome.js';

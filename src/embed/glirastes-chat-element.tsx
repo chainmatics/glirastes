@@ -17,7 +17,7 @@ import type { ChatInteractionsConfig } from '../react/interactions/registry.js';
 import { AiChatProvider } from '../react/provider/ai-chat-provider.js';
 import { useChatContext } from '../react/provider/chat-context.js';
 import { VercelAiChat } from '../react/transports/vercel/vercel-ai-chat.js';
-import type { AiChatProviderConfig, ChatThemePreset, ChatTransport } from '../react/types.js';
+import type { AiChatProviderConfig, ChatThemePreset, ChatTransport, UiActionOutcomeEvent } from '../react/types.js';
 import { CHAT_STYLES } from './chat-styles.generated.js';
 import { embedThemeCss, isChatThemePreset } from './theme.js';
 
@@ -27,6 +27,13 @@ export interface GlirastesChatEventMap {
   'glirastes-chat:ready': Record<string, never>;
   'glirastes-chat:status': { state: 'idle' | 'busy' | 'error' };
   'glirastes-chat:tool-result': { toolName: string; result: unknown };
+  /** Outcome of the generated UI actions of one tool result; no payload. */
+  'glirastes-chat:ui-action': {
+    toolName: string;
+    toolCallId: string;
+    code: UiActionOutcomeEvent['code'];
+    actionIds: string[];
+  };
   'glirastes-chat:error': { message: string };
 }
 
@@ -95,7 +102,7 @@ function EmbeddedChat({
   emit: Emit;
   onSendReady: (api: EmbedApi | null) => void;
 }) {
-  const { headers, bodyExtras, onToolResult, ...providerConfig } = config;
+  const { headers, bodyExtras, onToolResult, onUiActionOutcome, ...providerConfig } = config;
   const shared = {
     ...providerConfig,
     // Colours come from the shadow-root CSS (`themeScope: 'inherit'` skips the
@@ -105,6 +112,18 @@ function EmbeddedChat({
     onToolResult: (toolName: string, result: unknown) => {
       onToolResult?.(toolName, result);
       emit('glirastes-chat:tool-result', { toolName, result });
+    },
+    onUiActionOutcome: (event: UiActionOutcomeEvent) => {
+      try {
+        onUiActionOutcome?.(event);
+      } finally {
+        emit('glirastes-chat:ui-action', {
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          code: event.code,
+          actionIds: event.actions.flatMap((action) => (action.actionId ? [action.actionId] : [])),
+        });
+      }
     },
   };
   const body = (
@@ -140,7 +159,7 @@ const BaseElement = (typeof HTMLElement === 'undefined'
  * `defineEntity(definition)`, `defineCommand(definition)`,
  * `mentionEntity(type, id)`.
  * Events (bubbling, composed): `glirastes-chat:ready`, `:status`,
- * `:tool-result`, `:error`. Styling: `--glirastes-chat-*` CSS variables.
+ * `:tool-result`, `:ui-action`, `:error`. Styling: `--glirastes-chat-*` CSS variables.
  * Removing the element unmounts React and releases the microphone.
  */
 export class GlirastesChatElement extends BaseElement {
