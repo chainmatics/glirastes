@@ -270,6 +270,18 @@ describe('<glirastes-chat>', () => {
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
   });
 
+  it('awaits an async headers function from the config', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Hallo'));
+    vi.stubGlobal('fetch', fetchMock);
+    const { element } = await mount((node) => {
+      node.setAttribute('endpoint', '/api/chat');
+      node.config = { headers: async () => ({ authorization: 'Bearer t' }) };
+    });
+    await act(async () => { expect(element.send('Hallo')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(new Headers(fetchMock.mock.calls[0]![1]?.headers).get('authorization')).toBe('Bearer t');
+  });
+
   it('posts to the endpoint attribute with the config headers and bodyExtras', async () => {
     const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Hallo zurück'));
     vi.stubGlobal('fetch', fetchMock);
