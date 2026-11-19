@@ -229,7 +229,6 @@ describe('foundation agent skills', () => {
 
     expect(packageJson.files).toContain('skills');
     expect(packageJson.files).not.toContain('!dist/cli/commands');
-    expect(packageJson.files).toContain('!dist/cli/commands/check-upgrade.*');
   });
 
   it('names only React surfaces that actually exist in the chat UI skill', async () => {

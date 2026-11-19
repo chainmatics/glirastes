@@ -228,8 +228,6 @@
     "!dist/cjs/codegen/coverage.*",
     "!dist/codegen/scaffolder.*",
     "!dist/cjs/codegen/scaffolder.*",
-    "!dist/cli/commands/check-upgrade.*",
-    "!dist/cjs/cli/commands/check-upgrade.*",
     "!dist/cli/commands/test.*",
     "!dist/cjs/cli/commands/test.*",
     "!dist/cli/utils",
