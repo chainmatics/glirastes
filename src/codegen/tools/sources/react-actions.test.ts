@@ -365,6 +365,32 @@ describe('react-actions source', () => {
     const findingsOf = (tool: ObservedTool | undefined, code: string) => (tool?.findings ?? [])
       .filter((finding) => finding.code === code);
 
+    it('merges an exported and an identical inline contract of one action, and flags two differing probed ones', async () => {
+      const app = await createAppFixture({
+        'tsconfig.json': TSCONFIG,
+        'src/lib/contracts.ts': "import { z } from 'zod';\n"
+          + 'export const openEntity = z.object({ id: z.string().uuid() });\n'
+          + "export const pickA = z.object({ id: z.string().describe('first') });\n"
+          + "export const pickB = z.object({ id: z.string().describe('second') });\n",
+        'src/a.tsx': "import { useAiClientAction } from 'glirastes/react';\nimport { z } from 'zod';\n"
+          + "import { openEntity, pickA, pickB } from './lib/contracts';\n"
+          + 'export function A() {\n'
+          + "  useAiClientAction('entity.open', (payload) => console.log(payload), openEntity);\n"
+          + "  useAiClientAction('rows.pick', (payload) => console.log(payload), pickA);\n"
+          + '  return null;\n}\n'
+          + 'export function B() {\n'
+          + "  useAiClientAction('entity.open', (payload) => console.log(payload), z.object({ id: z.string().uuid() }));\n"
+          + "  useAiClientAction('rows.pick', (payload) => console.log(payload), pickB);\n"
+          + '  return null;\n}\n',
+      });
+      const tools = byName((await createReactActionSource().observe(context(app.root))).observations);
+      const open = tools.get('ui.entity.open');
+      expect(findingsOf(open, 'ui-action-contract-conflict')).toEqual([]);
+      expect(findingsOf(open, 'ui-action-contract-unprobed')).toHaveLength(1);
+      expect(open?.contract?.input).toMatchObject({ properties: { id: { type: 'string', format: 'uuid' } } });
+      expect(findingsOf(tools.get('ui.rows.pick'), 'ui-action-contract-conflict')).toHaveLength(1);
+    }, 120_000);
+
     it('derives formats, descriptions, enums and bounds from an exported zod contract, input side', async () => {
       const app = await createAppFixture({
         'tsconfig.json': TSCONFIG,

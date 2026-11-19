@@ -300,6 +300,10 @@ function zodNamespaces(source: ts.SourceFile): Set<string> {
 
 interface PayloadResolution {
   schema?: JsonSchemaLike;
+  /** The schema read from the TypeScript type, whether or not the probed one wins. */
+  typed?: JsonSchemaLike;
+  /** `schema` comes from the probed zod contract. */
+  probed?: boolean;
   /** `.describe()` of the probed contract itself. */
   description?: string;
   findings: ToolFinding[];
@@ -322,17 +326,17 @@ function resolvePayload(
   probes: ReadonlyMap<string, SchemaProbeResult>,
 ): PayloadResolution {
   const typed = typedPayloadSchema(app, registration);
-  if (!zod) return { ...(typed ? { schema: typed } : {}), findings: [] };
+  if (!zod) return { ...(typed ? { schema: typed, typed } : {}), findings: [] };
   const subject = actionStableKey(registration.actionId);
   const probed = zod.item
     ? probedPayload(probes.get(probeKey(zod.item)))
     : { ok: false as const, reason: 'is not exported from a module of this app (inline, or in another package)' };
   if (!probed.ok) {
     // An empty object, or an inline contract of type-only calls, has nothing the TypeScript type misses.
-    if (isEmptyObject(typed) || zod.typeOnly) return { ...(typed ? { schema: typed } : {}), findings: [] };
+    if (isEmptyObject(typed) || zod.typeOnly) return { ...(typed ? { schema: typed, typed } : {}), findings: [] };
     const why = zod.item ? `could not be probed (${probed.reason})` : probed.reason;
     return {
-      ...(typed ? { schema: typed } : {}),
+      ...(typed ? { schema: typed, typed } : {}),
       findings: [toolFinding('ui-action-contract-unprobed', 'warning', subject,
         `The zod payload contract of ${registration.actionId} ${why}, so its formats and descriptions are not used; the payload is typed from TypeScript as before.`)],
     };
@@ -340,6 +344,8 @@ function resolvePayload(
   const contradiction = typed ? payloadContradiction(probed.schema, typed) : undefined;
   return {
     schema: probed.schema,
+    ...(typed ? { typed } : {}),
+    probed: true,
     ...(probed.description ? { description: probed.description } : {}),
     findings: contradiction
       ? [toolFinding('ui-action-contract-mismatch', 'warning', subject,
@@ -575,10 +581,17 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
       const stableKey = actionStableKey(actionId);
       const registrations = byId.get(actionId)!;
       const resolved = registrations.map(payloadOf);
-      const typed = [...new Map(resolved
-        .map((payload) => payload.schema)
+      const distinct = (schemas: ReadonlyArray<JsonSchemaLike | undefined>) => [...new Map(schemas
         .filter((schema): schema is JsonSchemaLike => schema !== undefined)
         .map((schema) => [canonicalJson(schema), schema] as const)).values()];
+      // A registration whose zod contract the probe could not load has only its TypeScript type,
+      // which lacks formats and descriptions: that gap is no conflict. Registrations conflict when
+      // their TypeScript types differ (as before the probe) or when two probed schemas differ.
+      const probedSchemas = distinct(resolved.filter((payload) => payload.probed).map((payload) => payload.schema));
+      const typedSchemas = distinct(resolved.map((payload) => payload.typed));
+      const typed = probedSchemas.length > 1 || typedSchemas.length > 1
+        ? (probedSchemas.length >= typedSchemas.length ? probedSchemas : typedSchemas)
+        : probedSchemas.length === 1 ? probedSchemas : typedSchemas;
       const handlers = registrations.map((registration) => functionOf(app, registration.handler));
       const toolFindings: ToolFinding[] = [
         ...controls.byStableKey.get(stableKey) ?? [],
