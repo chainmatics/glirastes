@@ -232,7 +232,7 @@ export interface UpgradeIo {
 
 export const UPGRADE_USAGE = [
   'Usage: glirastes upgrade report [--json] [--all] [--brief] [--from <version>] [--fail-on breaking] [--root <dir>]',
-  '         show what changed in the SDK since this app was last reviewed (never changes your code)',
+  '         show what changed in the SDK since this app was last reviewed (never changes your code; --brief lists only must and should items)',
   '       glirastes upgrade decide <note-id> <adopted|declined|deferred> [--root <dir>]',
   '         record what you decided for one note in .glirastes/sdk-baseline.json',
   '       glirastes upgrade ack [--force] [--root <dir>]',
@@ -285,6 +285,10 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
         return 2;
       }
       const from = args.values.get('--from');
+      if (from !== undefined && !/^\d+\.\d+\.\d+([-+].*)?$/.test(from)) {
+        error(`--from needs a version like 0.17.0, got '${from}'.\n${UPGRADE_USAGE}`);
+        return 2;
+      }
       const report = await createUpgradeReport({
         ...reportOptions,
         ...(from ? { from } : {}),
@@ -322,7 +326,11 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
 
     // ack
     const report = await createUpgradeReport(reportOptions);
-    const baseline = await baselineOrNew(reportOptions);
+    const baseline: SdkBaseline = (await readBaseline(rootDir)) ?? {
+      schemaVersion: 1,
+      reviewedThrough: report.from,
+      decisions: {},
+    };
     const undecided = report.must.filter((item) => !baseline.decisions[item.id]);
     if (undecided.length > 0 && !args.flags.has('--force')) {
       error(
@@ -343,10 +351,11 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
   }
 }
 
-/** The existing baseline, or a new one reviewed through the derived `from` (not yet written). */
+/** The existing baseline, or a new one reviewed through the derived `from`, written to disk. */
 async function baselineOrNew(options: UpgradeReportOptions): Promise<SdkBaseline> {
   const existing = await readBaseline(options.rootDir);
   if (existing) return existing;
-  const { from } = await createUpgradeReport(options);
+  const from =
+    (await installedSkillsVersion(options.rootDir)) ?? options.sdkVersion ?? SDK_VERSION;
   return ensureBaseline(options.rootDir, from);
 }

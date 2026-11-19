@@ -292,6 +292,28 @@ describe('runUpgradeCommand', () => {
     expect(JSON.parse(await readFile(join(root, BASELINE_PATH), 'utf8')).reviewedThrough).toBe('0.20.0');
   });
 
+  it('rejects an invalid --from with exit 2, even with --fail-on breaking', async () => {
+    await seedAllKinds();
+    await baseline('0.18.0');
+    for (const bad of ['v0.17.0', 'latest']) {
+      const a = io();
+      expect(await runUpgradeCommand(['report', '--from', bad, '--fail-on', 'breaking'], a.io)).toBe(2);
+      expect(a.err.join('\n')).toContain('Usage');
+    }
+  });
+
+  it('a refused ack does not create a baseline', async () => {
+    await seedAllKinds();
+    await mkdir(join(root, '.glirastes'), { recursive: true });
+    await writeFile(
+      join(root, '.glirastes/installed-skills.json'),
+      JSON.stringify({ schemaVersion: 1, sdkVersion: '0.18.0', installs: [] }),
+    );
+    const a = io();
+    expect(await runUpgradeCommand(['ack'], a.io)).toBe(1);
+    expect(await readBaseline(root)).toBeUndefined();
+  });
+
   it('rejects unknown subcommands and flags with exit 2', async () => {
     const a = io();
     expect(await runUpgradeCommand(['frobnicate'], a.io)).toBe(2);

@@ -112,6 +112,11 @@ describe('loader strictness', () => {
 });
 
 describe('compareVersions', () => {
+  it('throws on non-numeric versions instead of returning NaN results', () => {
+    expect(() => compareVersions('v0.17.0', '0.18.0')).toThrow(/Invalid version/);
+    expect(() => compareVersions('0.18.0', 'latest')).toThrow(/Invalid version/);
+  });
+
   it('orders 0.9.0 < 0.10.0 < 0.10.1', () => {
     expect(compareVersions('0.9.0', '0.10.0')).toBeLessThan(0);
     expect(compareVersions('0.10.0', '0.10.1')).toBeLessThan(0);

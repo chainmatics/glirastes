@@ -174,10 +174,17 @@ export function findPackageUpgradeNotesDir(): string {
 }
 
 export function compareVersions(a: string, b: string): number {
-  const pa = a.split(/[-+]/)[0]!.split('.').map(Number);
-  const pb = b.split(/[-+]/)[0]!.split('.').map(Number);
+  const parse = (v: string): number[] => {
+    const parts = v.split(/[-+]/)[0]!.split('.');
+    if (parts.length !== 3 || !parts.every((p) => /^\d+$/.test(p))) {
+      throw new Error(`Invalid version '${v}': expected <major>.<minor>.<patch>.`);
+    }
+    return parts.map(Number);
+  };
+  const pa = parse(a);
+  const pb = parse(b);
   for (let i = 0; i < 3; i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    const d = pa[i]! - pb[i]!;
     if (d !== 0) return d < 0 ? -1 : 1;
   }
   return 0;
