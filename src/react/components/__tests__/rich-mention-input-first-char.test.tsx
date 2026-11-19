@@ -98,6 +98,28 @@ describe('RichMentionInput first character', () => {
     expect(value).toBe('Welche');
   });
 
+  it('ignores an initialValue that arrives after mount', () => {
+    function Late({ initialValue }: { initialValue: string }) {
+      const composer = useChatComposerInput({ initialValue });
+      return <RichMentionInput ref={composer.inputRef} {...composer.inputProps} />;
+    }
+    function LateApp({ initialValue }: { initialValue: string }) {
+      const interactions = useMemo(() => ({ entities: [task] }), []);
+      return (
+        <AiChatProvider transport={transport()} chatInteractions={interactions}>
+          <Late initialValue={initialValue} />
+        </AiChatProvider>
+      );
+    }
+    const { rerender } = render(<LateApp initialValue="" />);
+    const editor = screen.getByRole('textbox');
+    expect(editor.textContent).toBe('');
+
+    rerender(<LateApp initialValue="Entwurf" />);
+
+    expect(editor.textContent).toBe('');
+  });
+
   it('plain controlled input keeps typing order from empty', () => {
     function Plain() {
       const [value, setValue] = useState('');
