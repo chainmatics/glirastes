@@ -57,10 +57,12 @@ export function shouldContinueChat(
   const tools = step.filter(isToolPart);
   const waiting = tools.filter(awaitsUiOutcome);
   for (const part of waiting) {
-    const output = part.output as Record<string, unknown>;
-    if (!isRecord(output.outcome)) return false;
-    if (readUiOutcomeCode(output.outcome) === 'initiated') return false;
+    if (!isRecord((part.output as Record<string, unknown>).outcome)) return false;
   }
+  // A page load is under way (also from a report-only result): the next page continues, this one never.
+  const pageLoad = tools.some((part) => isRecord(part.output) && typeof part.output.awaitsOutcome === 'boolean'
+    && readUiOutcomeCode(part.output.outcome) === 'initiated');
+  if (pageLoad) return false;
   // A clarification waits for the user, also next to approvals (a step without UI outcomes keeps the AI SDK's rule).
   if (waiting.length > 0 && tools.some((part) => toolNameOf(part) === CLARIFICATION_TOOL_NAME)) return false;
   // Answered approvals: the AI SDK's own rule (`lastAssistantMessageIsCompleteWithApprovalResponses`).

@@ -40,6 +40,12 @@ describe('shouldContinueChat', () => {
     expect(continues([user, assistant(uiPart('c1', at(Date.now())))])).toBe(false);
   });
 
+  it('never sends while a report-only result started a page load', () => {
+    const loading = uiPart('n1', at(Date.now()), false);
+    expect(continues([user, assistant(loading, uiPart('c1', ok))])).toBe(false);
+    expect(continues([user, assistant(loading, approvalPart('approval-responded'))])).toBe(false);
+  });
+
   it('does not send for report-only results or a turn without UI results', () => {
     expect(continues([user, assistant(uiPart('c1', ok, false))])).toBe(false);
     expect(continues([user, assistant(endpointPart('c1'))])).toBe(false);
