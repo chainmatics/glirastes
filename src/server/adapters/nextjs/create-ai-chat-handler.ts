@@ -225,8 +225,8 @@ export interface StreamHandlerContext {
   earlierMessages?: unknown[];
   /** Max output tokens */
   maxOutputTokens: number;
-  /** Temperature; null sends none */
-  temperature: number | null;
+  /** Temperature; `undefined` when the handler config is `null` (send none). */
+  temperature?: number;
   /** Max context messages for model-message preparation */
   maxContextMessages: number;
   /** Model tier from intent routing or pipeline */
@@ -904,7 +904,7 @@ async function defaultStreamHandler(
           return { activeTools: permitted ? active.filter((name) => permitted.has(name)) : active };
         }),
         maxOutputTokens: ctx.maxOutputTokens,
-        ...(ctx.temperature === null ? {} : { temperature: ctx.temperature }),
+        ...(ctx.temperature === undefined ? {} : { temperature: ctx.temperature }),
         timeout: resolveTurnTimeout(
           ctx.managedTurn?.snapshot.budget.totalTimeoutMs,
         ),
@@ -2267,7 +2267,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           emitStepReports,
           onStepReport,
           maxOutputTokens,
-          temperature,
+          temperature: temperature ?? undefined,
           maxContextMessages,
         locale,
         history,
@@ -2477,7 +2477,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         emitStepReports,
         onStepReport,
         maxOutputTokens,
-        temperature,
+        temperature: temperature ?? undefined,
         maxContextMessages,
         locale,
         history,

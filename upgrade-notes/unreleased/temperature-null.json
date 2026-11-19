@@ -2,10 +2,13 @@
   "id": "temperature-null",
   "kind": "optional",
   "summary": "The Next.js chat handler option `temperature` accepts `null`, which sends no `temperature` to the model (also none to memory summary calls).",
-  "howTo": "Set `temperature: null` for models that reject it (reasoning models) instead of stripping it from the request.",
+  "howTo": "Set `temperature: null` for models that reject it (reasoning models) instead of stripping it from the request. Custom `streamHandler`s still receive `ctx.temperature` as `number | undefined`: `undefined` when the option is `null`, so passing it on to `streamText` keeps compiling.",
   "skill": "integrating-glirastes-nextjs",
   "affectedWhen": {
-    "imports": ["glirastes/server/nextjs", "glirastes/adapter/nextjs"]
+    "imports": [
+      "glirastes/server/nextjs",
+      "glirastes/adapter/nextjs"
+    ]
   },
   "surface": []
 }

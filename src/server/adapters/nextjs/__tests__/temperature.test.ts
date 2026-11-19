@@ -75,6 +75,15 @@ describe('temperature option', () => {
     for (const call of chat.calls) expect('temperature' in call && call.temperature !== undefined).toBe(false);
   });
 
+  it('a custom streamHandler gets ctx.temperature undefined for null and the number otherwise', async () => {
+    const seen: Array<number | undefined> = [];
+    const streamHandler = async (ctx: { temperature?: number }) => { seen.push(ctx.temperature); return new Response('ok'); };
+    const chat = chatModel();
+    await (await createAiChatHandler({ tools: {}, model: chat.model, systemPrompt: 'Help', temperature: null, streamHandler })(request([user('u', 'Hi')]))).text();
+    await (await createAiChatHandler({ tools: {}, model: chat.model, systemPrompt: 'Help', temperature: 0.4, streamHandler })(request([user('u', 'Hi')]))).text();
+    expect(seen).toEqual([undefined, 0.4]);
+  });
+
   it('memory extraction omits temperature when the handler sets null', async () => {
     const chat = chatModel();
     const summary = summaryModel();
