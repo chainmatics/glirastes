@@ -194,6 +194,7 @@ export {
 } from './stt/recorded.js';
 export {
   DeepgramSttAdapter,
+  DEFAULT_AUDIO_WORKLET_URL,
   createDeepgramSegmentParser,
   type DeepgramSttAdapterOptions,
 } from './stt/deepgram.js';

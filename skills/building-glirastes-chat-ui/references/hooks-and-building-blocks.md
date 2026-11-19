@@ -14,6 +14,7 @@ them.
 - UI action outcomes
 - Sessions
 - Theme and keyboard
+- Speech worklet
 
 ## Own provider and transport
 
@@ -373,3 +374,20 @@ the Tailwind config to get `chat-primary`, `chat-border` and the other
 global shortcut (`mod` is ⌘ on macOS, Ctrl elsewhere), `useChatShortcuts`
 the chat window keys, `usePushToTalkHotkey` a hold-to-talk combination, and
 `useFloatingPanel` moves and resizes a floating panel by pointer or keyboard.
+
+## Speech worklet
+
+`DeepgramSttAdapter` captures microphone audio in an AudioWorklet loaded from
+`DEFAULT_AUDIO_WORKLET_URL` (`/audio-worklet-processor.js`, exported from
+`glirastes/react` and `glirastes/stt`). The package ships the file at
+`node_modules/glirastes/dist/react/audio-worklet-processor.js`; the host must
+serve it at that path. Copy it into `public/` on dev and build:
+
+```json
+"scripts": {
+  "predev": "cp node_modules/glirastes/dist/react/audio-worklet-processor.js public/",
+  "prebuild": "cp node_modules/glirastes/dist/react/audio-worklet-processor.js public/"
+}
+```
+
+Serving it elsewhere: construct the adapter with `new DeepgramSttAdapter({ workletUrl: '/static/pcm.js', getToken })` and pass it as the chat's `voice.adapter`; keep that instance stable. The built-in voice path does not take a `workletUrl`.
