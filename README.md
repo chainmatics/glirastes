@@ -267,6 +267,7 @@ glirastes tools refresh           # derive tools (--watch next to `next dev`)
 glirastes tools status            # what the chat can do
 glirastes tools check             # verify committed outputs, no model, no network
 glirastes tools eval              # every example sentence finds its tool
+glirastes upgrade report          # what changed since you last reviewed the SDK (decide, ack)
 ```
 
 **Policy.** Reads run directly, writes ask first, deletes and anything

@@ -58,9 +58,12 @@ The workflow triggers on:
 2. Manual `workflow_dispatch` from the GitHub Actions tab
 
 Release flow:
-1. Bump `version` in `package.json`
-2. Commit via `/commit` and push to `main`
-3. Tag: `git tag v<version> && git push origin v<version>` — CI builds and publishes to npm
+1. Merge `upgrade-notes/unreleased/*.json` into `upgrade-notes/<version>.json` as `{ "version", "notes" }`
+2. Delete the merged unreleased files and keep `.gitkeep`
+3. Run `bun run api-surface` to refresh `upgrade-notes/api-surface.released.json`
+4. Bump `version` in `package.json`
+5. Commit all of it together with the version bump via `/commit` and push to `main`
+6. Tag: `git tag v<version> && git push origin v<version>` — CI builds and publishes to npm
 
 The SDK package lives on public npm. Release CI also tests and publishes the
 public Linux amd64 image `ghcr.io/chainmatics/glirastes-runtime:<version>`.
@@ -99,8 +102,8 @@ src/
 │   └── testing/              — Test helpers without LLM calls
 ├── react/                    — Chat UI components, hooks, provider, STT bridges
 ├── codegen/                  — Scanner, execution inventory, registry generation
-└── cli/                      — scan | sync | setup | validate | build | status |
-                                install-skills | check-upgrade
+└── cli/                      — init | scan | setup | connect | sync | doctor | install |
+                                validate | build | tools | upgrade (report|decide|ack)
 ```
 
 ## Subpath Exports
@@ -167,6 +170,14 @@ result/progress** — comparing tool names alone is not sufficient.
 **Lancer is internal-only** in the published package. `createLancer()` is not exported, and
 the normal managed-local execution path must not send content to Platform
 services.
+
+## Upgrade notes and skills
+
+Every PR that changes public API, defaults or behavior a consumer can notice:
+1. updates the affected skill in `skills/` in the same PR, and
+2. adds one file `upgrade-notes/unreleased/<id>.json` (schema: `src/cli/commands/upgrade/notes.ts`).
+`src/upgrade-notes.test.ts` fails when the public surface changes without a note. Behavior changes
+the snapshot cannot see are a review rule: the reviewer asks for the note.
 
 ## Conventions
 
