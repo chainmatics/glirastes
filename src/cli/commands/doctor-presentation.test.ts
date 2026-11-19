@@ -16,6 +16,18 @@ function report(checks: DoctorCheck[], mode: DoctorReport['mode'] = 'standalone'
 
 describe('Doctor presentation', () => {
   it.each([
+    ['Unknown upgrade note dir', 'could not run: Unknown upgrade note dir. Fix that'],
+    ['Baseline is broken.', 'could not run: Baseline is broken. Fix that'],
+    [undefined, 'could not run: unknown error. Fix that'],
+  ])('ends the upgrade report error %s with one period', (detail, expected) => {
+    const output = formatDoctorReport(report([{
+      name: 'sdk-upgrade', status: 'warn', code: 'E-SETUP-108', remediation: 'repair-sdk-upgrade-report',
+      ...(detail !== undefined ? { detail } : {}),
+    }]));
+    expect(output).toContain(expected);
+  });
+
+  it.each([
     ['create-required-setup-artifact', 'Ask your coding agent'],
     ['rerun-local-setup', 'glirastes setup'],
     ['declare-server-principal', 'server-side'],

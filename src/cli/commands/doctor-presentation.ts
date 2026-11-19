@@ -64,6 +64,12 @@ const NEXT_ACTIONS = new Map([
     'Ask your coding agent to align the local runtime settings with the intended connection. Do not silently switch a connected app to standalone.'],
 ]);
 
+/** Ends an error message with exactly one sentence-final mark. */
+function sentence(text: string): string {
+  const trimmed = text.trimEnd();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 /** Human output uses fixed copy; machine diagnostics remain available as JSON. */
 export function formatDoctorReport(
   report: DoctorReport,
@@ -93,7 +99,7 @@ export function formatDoctorReport(
   const issue = report.checks.find((item) => item.status === 'fail')
     ?? report.checks.find((item) => item.status === 'warn');
   const next = issue?.remediation === 'repair-sdk-upgrade-report'
-    ? `glirastes upgrade report could not run: ${issue.detail ?? 'unknown error'} Fix that, then run glirastes doctor again.`
+    ? `glirastes upgrade report could not run: ${sentence(issue.detail ?? 'unknown error')} Fix that, then run glirastes doctor again.`
     : issue
     ? NEXT_ACTIONS.get(issue.remediation)
       ?? 'Ask your coding agent to inspect glirastes doctor --json for the required local repair.'
