@@ -40,7 +40,7 @@ const PART_SKILLS: Record<
 > = {
   'chat-ui': ['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions'],
   tools: ['maintaining-glirastes-tools', 'describing-glirastes-tools'],
-  setup: ['setting-up-glirastes', 'setting-up-glirastes-memory', 'migrating-to-glirastes'],
+  setup: ['setting-up-glirastes', 'setting-up-glirastes-memory', 'migrating-to-glirastes', 'upgrading-glirastes'],
 };
 
 /** Dependency whose presence proves a stack, rather than a heuristic; Next.js wins. */

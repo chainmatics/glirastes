@@ -4,15 +4,17 @@ import { TOOLS_PATHS } from '../../../codegen/tools/config.js';
 import { findPackageSkillsDir } from '../install-skills.js';
 import { POLICY_SUBCOMMANDS, TOOLS_SUBCOMMANDS } from '../tools/index.js';
 import type { ToolArgsSpec } from '../tools/args.js';
+import { UPGRADE_SUBCOMMANDS } from '../upgrade/report.js';
 
 /** Top-level commands a skill may tell an agent to run (src/cli/index.ts). */
-const COMMANDS = new Set(['init', 'setup', 'connect', 'sync', 'doctor', 'install', 'tools']);
+const COMMANDS = new Set(['init', 'setup', 'connect', 'sync', 'doctor', 'install', 'tools', 'upgrade']);
 const SECTIONS = ['## Boundaries', '## Workflow', '## Commands', '## Verification'] as const;
 const KNOWN_PATHS = new Set<string>([
   ...Object.values(TOOLS_PATHS),
   '.glirastes/platform-connection.json',
   '.glirastes/installed-skills.json',
   '.glirastes/mcp-tool-names.json',
+  '.glirastes/sdk-baseline.json',
   // Chat entity and command overrides, read by createChatInteractionsHandler (P07b).
   '.glirastes/chat-interactions.json',
 ]);
@@ -64,6 +66,11 @@ function commandProblem(argv: ReadonlyArray<string>): string | undefined {
   if (argv[0] !== 'glirastes') return 'starts with something other than glirastes';
   const command = argv[1];
   if (!command || !COMMANDS.has(command)) return `unknown command ${command ?? ''}`;
+  if (command === 'upgrade') {
+    const sub = argv[2];
+    const spec = sub && Object.hasOwn(UPGRADE_SUBCOMMANDS, sub) ? UPGRADE_SUBCOMMANDS[sub] : undefined;
+    return spec ? argsProblem(argv.slice(3), spec) : `unknown upgrade subcommand ${sub ?? ''}`;
+  }
   if (command !== 'tools') return undefined;
   const sub = argv[2];
   if (sub === 'policy') {

@@ -50,6 +50,8 @@ maintains a Node server or imports a generated TypeScript module.
    An edited copy is kept and named; merge the shipped version from
    `node_modules/glirastes/skills/<name>` into it yourself. `--no-skills` or
    `GLIRASTES_SKILLS_AUTO_UPDATE=0` leaves the skills alone.
+   When the refresh prints an upgrade line (`Glirastes 0.16.0 → 0.17.0: …`),
+   follow the skill `upgrading-glirastes` before you change code.
 2. Run `glirastes tools resolve --print` and work through `items`:
    - `owner: "agent"`, `target.kind: "file"`: write the `expected` entry at
      `target.key` of `target.file`. Replace every `<…>` placeholder: `model`

@@ -107,6 +107,7 @@ describe('a fresh app reaches a synced setup run', () => {
         'migrating-to-glirastes',
         'setting-up-glirastes',
         'setting-up-glirastes-memory',
+        'upgrading-glirastes',
       ]);
     await access(join(
       rootDir,
