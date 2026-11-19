@@ -131,7 +131,7 @@ export function useMessageQueueStore(
   const clearGenerationRef = useRef(0);
 
   // One write at a time per conversation, the latest state last: an older write never lands after a newer one.
-  const writesRef = useRef(new Map<string, { running: boolean; next?: QueuedMessage[] }>());
+  const writesRef = useRef(new Map<string, { running: boolean; next?: QueuedMessage[]; idle?: Promise<void> }>());
   const save = useCallback((id: string, next: ReadonlyArray<QueuedMessage>) => {
     const storage = storageRef.current;
     if (!storage || loadedForRef.current !== id) return;
@@ -141,7 +141,7 @@ export function useMessageQueueStore(
     writes.set(id, slot);
     if (slot.running) return;
     slot.running = true;
-    void (async () => {
+    slot.idle = (async () => {
       while (slot.next) {
         const items = slot.next;
         slot.next = undefined;
@@ -152,7 +152,7 @@ export function useMessageQueueStore(
         }
       }
       slot.running = false;
-      writes.delete(id);
+      if (writes.get(id) === slot) writes.delete(id);
     })();
   }, []);
 
@@ -192,6 +192,9 @@ export function useMessageQueueStore(
     void (async () => {
       let stored: QueuedMessage[] = [];
       try {
+        // A write of this conversation still running (left and come back quickly) lands first.
+        await writesRef.current.get(sessionId)?.idle;
+        if (cancelled) return;
         stored = readStoredItems(await Promise.resolve(storage.load(sessionId)));
       } catch {
         console.warn('[glirastes] queue.storage.load failed');

@@ -631,7 +631,7 @@ describe('chat queue enabled', () => {
     const writes: Array<{ items: string[]; done: () => void }> = [];
     const storage: ChatQueueStorage = {
       load: () => [],
-      save: vi.fn((_id, items) => new Promise<void>((resolve) => {
+      save: vi.fn((_id: string, items: ReadonlyArray<QueuedMessage>) => new Promise<void>((resolve) => {
         writes.push({ items: items.map((item) => item.text), done: resolve });
       })),
     };
@@ -646,6 +646,32 @@ describe('chat queue enabled', () => {
     await act(async () => { writes[0]!.done(); await Promise.resolve(); await Promise.resolve(); });
     // Only the latest state follows.
     expect(writes.map((write) => write.items)).toEqual([['a'], []]);
+  });
+
+  it('reads a conversation again only after its pending write landed', async () => {
+    const db = new Map<string, QueuedMessage[]>();
+    const pending: Array<() => void> = [];
+    const storage: ChatQueueStorage = {
+      load: (id) => db.get(id) ?? [],
+      save: (id, items) => new Promise<void>((resolve) => {
+        pending.push(() => { db.set(id, [...items]); resolve(); });
+      }),
+    };
+    const chat = new FakeChat();
+    const config = (activeId: string): Partial<AiChatProviderConfig> => ({
+      queue: { enabled: true, storage }, session: { activeId },
+    });
+    const view = render(<Host chat={chat} config={config('s1')} />);
+    await act(async () => { await Promise.resolve(); });
+    await startRun(chat);
+    await act(async () => { ctx.submit('a'); });
+    await act(async () => { pending.shift()!(); await Promise.resolve(); });
+    // Removing it writes [] slowly; meanwhile the user leaves and comes back.
+    await act(async () => { ctx.removeQueued(ctx.queue.items[0]!.id); });
+    await act(async () => { view.rerender(<Host chat={chat} config={config('s2')} />); });
+    await act(async () => { view.rerender(<Host chat={chat} config={config('s1')} />); });
+    await act(async () => { pending.shift()!(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(ctx.queue.items).toHaveLength(0);
   });
 
   it('never saves file items', async () => {
