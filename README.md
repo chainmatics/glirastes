@@ -471,7 +471,7 @@ existing coding agent (Codex, Claude Code, Gemini): `setting-up-glirastes`,
 `setting-up-glirastes-memory`,
 `integrating-glirastes-nextjs`, `integrating-glirastes-web`,
 `maintaining-glirastes-tools`, `describing-glirastes-tools`,
-`building-glirastes-chat-ui`, `curating-glirastes-chat-interactions` and
+`building-glirastes-chat-ui`, `curating-glirastes-chat-interactions`,
 `migrating-to-glirastes` and `upgrading-glirastes`. `glirastes init`
 installs them; `glirastes install --host codex --with-setup-skills` installs
 them without starting setup. After an SDK upgrade, `glirastes tools refresh`
