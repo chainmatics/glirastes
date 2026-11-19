@@ -398,6 +398,7 @@ export {
   type AttachmentBlobStore,
   type StoredAttachment,
 } from './utils/attachment-blob-store.js';
+export { getChatAttachment, chatAttachmentFormData } from './utils/chat-attachment-registry.js';
 export {
   createLocalMemoryStore,
   type BrowserMemoryStore,
