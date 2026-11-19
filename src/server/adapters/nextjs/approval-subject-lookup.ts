@@ -338,6 +338,24 @@ function sameId(left: string | number, right: string | number, speaking: boolean
   return speaking ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
+/**
+ * The entries the declared path's last list holds in the answer, of any
+ * shape (a `null` or a string counts too): what a complete page must
+ * account for before it proves that a record does not exist.
+ */
+function rawEntryCount(root: unknown, steps: ReadonlyArray<EntityPathStep>): number {
+  if (steps.length === 0) return Array.isArray(root) ? root.length : 1;
+  const last = steps.at(-1)!;
+  const holders = objectsAt(root, steps.slice(0, -1));
+  if (!last.each) return holders.length;
+  let count = 0;
+  for (const holder of holders) {
+    const value = holder[last.key];
+    count += Array.isArray(value) ? value.length : isRecordValue(value) ? Object.keys(value).length : 1;
+  }
+  return count;
+}
+
 /** Whether the list a declaration reads is in the answer at all (possibly empty). */
 function listPresent(root: unknown, steps: ReadonlyArray<EntityPathStep>): boolean {
   if (steps.length === 0) return Array.isArray(root);
@@ -692,10 +710,13 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       if (source.result === 'one') return unchecked(item, values, 'mismatch');
       // A page that may not hold every record says nothing about one that is not on it.
       // Only a page whose every entry has the declared identity proves that the record does not exist.
-      if (source.lookup.complete === true && !overflow && known.length === identities.length) {
+      const entries = steps ? rawEntryCount(outcome.value, steps) : Number.POSITIVE_INFINITY;
+      if (source.lookup.complete === true && !overflow && entries <= MAX_LOOKUP_LIST_ENTRIES && known.length === entries) {
         return { kind: 'deny', code: 'approval_subject_not_found', type };
       }
-      if (known.length !== identities.length) return unchecked(item, values, 'invalid_response');
+      if (known.length !== identities.length || (entries <= MAX_LOOKUP_LIST_ENTRIES && known.length !== entries)) {
+        return unchecked(item, values, 'invalid_response');
+      }
       return unchecked(item, values, 'not_in_page');
     }
     const shownIdentity = (entry: (typeof hits)[number]) => (entry.shown ? declaredIdentityOf(entry.shown, declaration) : undefined);
