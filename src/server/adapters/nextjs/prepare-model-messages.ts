@@ -206,7 +206,7 @@ export async function prepareModelMessages(
   const stripped = stripUiActionsFromToolResults(sanitized);
   const seen = history && limits.seenObjects && options?.entities
     ? await seenObjectsMemo(
-        stripped as ModelMessageLike[], raw as ModelMessageLike[], history.turns, options.earlierMessages,
+        stripped as ModelMessageLike[], raw as ModelMessageLike[], options.earlierMessages,
         options.entities, limits.seenObjects,
       )
     : undefined;
@@ -231,15 +231,14 @@ export async function prepareModelMessages(
 type ResolvedHistory = Required<Omit<HistoryOptions, 'seenObjects'>> & Pick<HistoryOptions, 'seenObjects'>;
 
 /**
- * The seen-objects memo: the declared records of the tool results the
- * history no longer shows (turns sent as text or left out, and
- * `earlierMessages`), without those the returned messages still show, as one
- * user-role message ahead of the history.
+ * The seen-objects memo: the declared records of every tool result of the
+ * conversation (`earlierMessages` and `raw`, the full results) that the
+ * returned messages no longer show (turns sent as text or left out, entries
+ * a compacted result dropped), as one user-role message ahead of the history.
  */
 async function seenObjectsMemo(
   sent: ReadonlyArray<ModelMessageLike>,
   raw: ReadonlyArray<ModelMessageLike>,
-  turns: ModelInputBreakdown['turns'],
   earlierMessages: UIMessage[] | undefined,
   entities: EntityDeclarationsByTool,
   setting: true | SeenObjectsOptions,
@@ -247,11 +246,10 @@ async function seenObjectsMemo(
   const earlier = earlierMessages && earlierMessages.length > 0
     ? await convertToModelMessages(withModelFacingToolErrors(earlierMessages), { ignoreIncompleteToolCalls: true }) as ModelMessageLike[]
     : [];
-  const split = splitTurns([...raw]);
-  const hidden = turns.filter((turn) => turn.mode !== 'compacted').flatMap((turn) => split[turn.index] ?? []);
-  const handles = handleProducersOf([...earlier, ...raw]);
+  const all = [...earlier, ...raw];
+  const handles = handleProducersOf(all);
   const objects = collectSeenObjects(
-    seenSourcesOf([...earlier, ...hidden], entities, handles),
+    seenSourcesOf(all, entities, handles),
     seenObjectKeys(seenSourcesOf(sent, entities, handles)),
   );
   const rendered = renderSeenObjects(objects, setting === true ? {} : setting);

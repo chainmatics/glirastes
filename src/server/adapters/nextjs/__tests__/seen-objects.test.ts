@@ -149,6 +149,24 @@ describe('seen-objects memo', () => {
     expect(memo).not.toContain('ro_abcd1234');
   });
 
+  it('lists the entries a still compacted result had to drop, not those it keeps', async () => {
+    const ids = Array.from({ length: 300 }, (_, index) => index + 1);
+    const messages: UIMessage[] = [
+      user('u0', 'list'),
+      assistant('a0', [{ type: 'step-start' }, toolPart('playlists_list', 'c0', {}, playlistResult(ids)), { type: 'text', text: 'Many.' }]),
+      user('uq', 'rename the last one'),
+    ];
+    let breakdown: ModelInputBreakdown | undefined;
+    const sent = await prepareModelMessages(messages, { entities, history: { seenObjects: true, maxTokens: 1_000 }, onBreakdown: (value) => { breakdown = value; } });
+    expect(breakdown!.turns[0]!.mode).toBe('compacted');
+    const memo = memoText(sent)!;
+    const history = JSON.stringify(sent.slice(1));
+    expect(history).not.toContain('"playlist_id":300');
+    expect(memo).toContain('playlist: {"playlist_id":300,"displayName":"Playlist 300"}');
+    expect(history).toContain('"playlist_id":1,');
+    expect(memo).not.toContain('"playlist_id":1,');
+  });
+
   it('is not built with history: false', async () => {
     const messages = afterThanks(toolPart('playlists_list', 'c0', {}, playlistResult([1])));
     const sent = await prepareModelMessages(messages, { entities, history: false });
