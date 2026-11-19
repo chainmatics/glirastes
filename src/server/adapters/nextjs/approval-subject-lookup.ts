@@ -30,6 +30,8 @@
 import {
   APPROVAL_SUBJECTS_PART_TYPE,
   APPROVAL_SUBJECTS_PART_VERSION,
+  fieldArgsOf,
+  lookupEffectAllowed,
   sanitizeSubjectText,
   validApprovalSubject,
   validEntityLookups,
@@ -203,6 +205,8 @@ interface PlanItem {
    * tool): the subject is `source_unavailable`, and `block` / `recheck` hold.
    */
   readonly source?: LookupSource;
+  /** With a source: the argument path of each id field of the source's entity, in the entity's order. */
+  readonly fieldArgs?: string[];
 }
 
 interface ToolPlan {
@@ -216,7 +220,8 @@ interface ToolPlan {
 
 /** Whether a tool can be a lookup or preview source: provably read-only, or it states `lookupEffect: 'read'`. */
 function isReadSource(tool: Tool): boolean {
-  if (tool.lookupEffect === 'read') return true;
+  // The statement counts only where it may stand: never on a DELETE, PUT or PATCH.
+  if (tool.lookupEffect === 'read' && lookupEffectAllowed(tool.method)) return true;
   const method = tool.method?.toUpperCase();
   return method !== undefined ? method === 'GET' || method === 'HEAD' : !tool.needsApproval;
 }
@@ -277,9 +282,13 @@ export function approvalSubjectPlans(registry: ToolRegistry): Map<string, ToolPl
   const sources = lookupSourcesOf(registry);
   for (const name of Object.keys(registry).sort(compareCodeUnits)) {
     const tool = registry[name]!;
+    if (tool.approvalSubject === false) continue;
+    // An explicit declaration is never dropped: one that does not validate fails closed (`block`).
+    const explicit = tool.approvalSubject !== undefined;
     const option = validApprovalSubject(tool.approvalSubject);
-    if (option === false) continue;
-    const declaration: ApprovalSubjectDeclaration = option ?? {};
+    const declaration: ApprovalSubjectDeclaration = option === undefined
+      ? (explicit ? { onUnavailable: 'block' } : {})
+      : option === false ? {} : option;
     const refs = validInputEntities(tool.inputEntities) ?? [];
     const wanted = (ref: InputEntityRef) => (declaration.refs
       ? declaration.refs.includes(refKey(ref))
@@ -288,12 +297,16 @@ export function approvalSubjectPlans(registry: ToolRegistry): Map<string, ToolPl
     for (const ref of refs) {
       if (!wanted(ref)) continue;
       const args = inputRefArgs(ref);
-      const source = (sources.get(ref.type) ?? []).find((candidate) => (
+      const candidates = (sources.get(ref.type) ?? []).filter((candidate) => (
         candidate.name !== name && entityIdFields(candidate.declaration).length === args.length
       ));
-      if (source) items.push({ ref, args, source });
-      // Declared on the write tool itself: a missing source is "not checkable", never "not declared".
-      else if (option !== undefined) items.push({ ref, args });
+      const mapped = candidates
+        .map((candidate) => ({ source: candidate, fieldArgs: fieldArgsOf(args, entityIdFields(candidate.declaration)) }))
+        .find((entry) => entry.fieldArgs !== undefined);
+      if (mapped) items.push({ ref, args, source: mapped.source, fieldArgs: mapped.fieldArgs! });
+      // A source whose id fields the arguments cannot be mapped to by name, or one declared on the write tool
+      // itself without a source here: "not checkable", never "not declared", never a positional guess.
+      else if (candidates.length > 0 || explicit) items.push({ ref, args });
     }
     const preview = declaration.preview
       ? {
@@ -304,7 +317,8 @@ export function approvalSubjectPlans(registry: ToolRegistry): Map<string, ToolPl
           })(),
         }
       : undefined;
-    if (items.length === 0 && !preview) continue;
+    // Without anything to look up only an explicit declaration keeps a plan (v2, block, recheck stay in force).
+    if (items.length === 0 && !preview && !explicit) continue;
     plans.set(name, {
       items,
       refs,
@@ -349,10 +363,15 @@ function valueAt(root: unknown, path: string): unknown {
 }
 
 /** Equal ids: a number and its decimal text are one id; a speaking id ignores case. */
-function sameId(left: string | number, right: string | number, speaking: boolean): boolean {
-  const a = typeof left === 'string' ? left.trim() : String(left);
-  const b = typeof right === 'string' ? right.trim() : String(right);
-  return speaking ? a.toLowerCase() === b.toLowerCase() : a === b;
+/**
+ * Equal ids. Exact: the same text (a number and its decimal text are one
+ * id). Loose (only where the lookup declares `idCase: 'ignore-case'`, or to
+ * detect a case-only near miss): trimmed and case-insensitive.
+ */
+function sameId(left: string | number, right: string | number, loose: boolean): boolean {
+  const a = String(left);
+  const b = String(right);
+  return loose ? a.trim().toLowerCase() === b.trim().toLowerCase() : a === b;
 }
 
 /**
@@ -774,7 +793,6 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         break;
     }
     const declaration = source.declaration;
-    const speaking = (item.ref.idKind ?? entityIdKindOf(declaration)) === 'speaking';
     // The same path as the model sees the result.
     const steps = entityPathOf(declaration, outcome.value);
     const records = steps ? objectsAt(outcome.value, steps, MAX_LOOKUP_LIST_ENTRIES + 1) : [];
@@ -784,7 +802,15 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       identity: declaredIdentityOf(record, declaration),
     }));
     const known = identities.filter((entry) => entry.identity !== undefined);
-    const hits = known.filter(({ identity }) => identity!.idValues.every((part, index) => sameId(part, wanted[index]!, speaking)));
+    // By field: the record's id parts in its declaration's order against the requested ones in that order.
+    const matching = (loose: boolean) => known.filter(({ identity }) => identity!.idValues.every((part, index) => sameId(part, wanted[index]!, loose)));
+    const ignoreCase = source.lookup.idCase === 'ignore-case';
+    const exact = matching(false);
+    const hits = exact.length > 0 || !ignoreCase ? exact : matching(true);
+    if (hits.length === 0 && !ignoreCase && matching(true).length > 0) {
+      // Only case or whitespace differ: maybe the same record, maybe another one. Never found, never "does not exist".
+      return unchecked(item, values, 'mismatch');
+    }
     if (hits.length === 0) {
       // No record of the declared shape where the declaration says: the answer is not what was declared.
       if (known.length === 0 && (records.length > 0 || source.result === 'one' || !steps || !listPresent(outcome.value, steps))) {
@@ -889,7 +915,9 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     let slots = limits.maxSubjectsPerCall;
     const tasks: Array<Promise<SubjectOutcome>> = [];
     for (const item of plan.items) {
-      const values = item.args.map((arg) => valueAt(input, arg));
+      // In the order of the source entity's id fields (mapped by name), never by position alone.
+      const order = item.fieldArgs ?? item.args;
+      const values = order.map((arg) => valueAt(input, arg));
       // An argument without an id value (absent, a list) has no subject.
       if (!values.every(isEntityIdValue)) continue;
       const ids = values as Array<string | number>;
@@ -902,7 +930,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         tasks.push(Promise.resolve(unchecked(item, ids, shieldFailure)));
         continue;
       }
-      const restored = item.args.map((arg) => valueAt(backendInput, arg));
+      const restored = order.map((arg) => valueAt(backendInput, arg));
       const wanted = restored.every(isEntityIdValue) ? restored as Array<string | number> : ids;
       const source = item.source;
       const params = source ? paramsFor(source, wanted, plan.refs, backendInput) : undefined;
@@ -934,6 +962,11 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     async resolve({ toolName, toolCallId, input }) {
       const plan = plans.get(toolName);
       if (!plan) return undefined;
+      // An explicit declaration with nothing it can look up (refs that match no reference, no valid
+      // inputEntities) fails closed: `block` refuses, otherwise the card has no checked subject.
+      if (plan.items.length === 0 && !plan.preview && plan.onUnavailable === 'block') {
+        return { deny: new ApprovalSubjectRefusedError('approval_subject_unavailable', plan.refs[0]?.type ?? 'record') };
+      }
       const { outcomes, preview } = await subjectsOf(plan, input, true);
       const denied = outcomes.find((outcome): outcome is Extract<SubjectOutcome, { kind: 'deny' }> => outcome.kind === 'deny');
       if (denied) return { deny: new ApprovalSubjectRefusedError(denied.code, denied.type) };
@@ -962,7 +995,9 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
 
     async recheck({ toolName, input, subjectDigest, digestOf }) {
       const plan = plans.get(toolName);
-      if (!plan || plan.recheck === 'none' || plan.items.length === 0) return undefined;
+      if (!plan || plan.recheck === 'none') return undefined;
+      // A recheck with nothing to check again is not a passed recheck.
+      if (plan.items.length === 0) return 'approval_subject_unavailable';
       // The same validated input the approval was decided on (defaults, transforms): the history holds the model's raw one.
       const parsed = options.registry[toolName]?.inputSchema.safeParse(input);
       if (!parsed?.success) return 'approval_subject_unavailable';

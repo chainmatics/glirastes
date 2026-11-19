@@ -546,6 +546,8 @@ export function defineEndpointTool<
 >(
   definition: AiEndpointToolDefinition<TInput, TOutput>,
 ): AiEndpointToolDefinition<TInput, TOutput> {
+  // An approval-subject declaration that cannot hold (refs without a reference, lookupEffect on a write) throws here already.
+  assertApprovalSubjectDeclarations(definition, `defineEndpointTool(${definition.id})`);
   return definition;
 }
 

@@ -267,15 +267,44 @@ describe('resolving approval subjects', () => {
       .toEqual([]);
   });
 
-  it('rejects approvalSubject refs that no inputEntities declare', () => {
+  it('reports approvalSubject refs that no inputEntities declare as a blocking error and keeps the declaration fail-closed', () => {
     const resolved = resolveApprovalSubjects({
       tools: [
         getPlaylist({ declarations: { operation: operation({ entityLookup: LOOKUP }) } }),
-        deletePlaylist({ declarations: { code: code({ approvalSubject: { refs: ['owner_id'] } }) } }),
+        deletePlaylist({ declarations: { code: code({ approvalSubject: { refs: ['owner_id'], recheck: 'exists' } }) } }),
       ],
     });
-    expect(codes(resolved.findings)).toEqual(['approval-subject-invalid']);
-    expect(resolved.byKey.has('DELETE /playlists/{playlist_id}')).toBe(false);
+    expect(codes(resolved.findings)).toEqual(['approval-subject-refs-unmatched']);
+    expect(resolved.findings[0]!.severity).toBe('error');
+    // Never dropped: no ref, onUnavailable block, recheck kept (the runtime refuses what it cannot check).
+    expect(resolved.byKey.get('DELETE /playlists/{playlist_id}')?.approvalSubject).toEqual({ refs: [], recheck: 'exists', onUnavailable: 'block' });
+  });
+
+  it('refuses lookupEffect read on a DELETE, PUT or PATCH and never uses it as a source', () => {
+    const resolved = resolveApprovalSubjects({
+      tools: [
+        getPlaylist({ method: 'DELETE', declarations: { operation: operation({ entityLookup: LOOKUP, lookupEffect: 'read' }) } }),
+        deletePlaylist({}),
+      ],
+    });
+    expect(codes(resolved.findings)).toContain('approval-subject-invalid');
+    expect(resolved.findings.some((finding) => finding.message.includes("lookupEffect: 'read' on DELETE"))).toBe(true);
+    const source = resolved.byKey.get('GET /playlists/{playlist_id}');
+    expect(source?.lookupEffect).toBeUndefined();
+    expect(source?.entityLookup).toBeUndefined();
+  });
+
+  it('reports a composite reference whose argument names disagree with the id fields (never mapped by position)', () => {
+    const resolved = resolveApprovalSubjects({
+      tools: [
+        getPlaylist({
+          outputEntities: [{ type: 'pv', id: ['playlist_id', 'version_id'], path: '' }],
+          declarations: { operation: operation({ entityLookup: { type: 'pv', params: { playlist_id: 'playlist_id' } } }) },
+        }),
+        deletePlaylist({ inputEntities: [{ type: 'pv', args: ['version_id', 'pid'] }] }),
+      ],
+    });
+    expect(resolved.findings.find((finding) => finding.code === 'approval-subject-invalid')?.message).toContain('cannot be matched by name');
   });
 
   describe('previews', () => {

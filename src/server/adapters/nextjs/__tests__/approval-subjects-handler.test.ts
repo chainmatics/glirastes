@@ -272,16 +272,27 @@ describe('server approval subjects in the chat handler', () => {
     expect(backend.calls.map((call) => call.path)).toEqual(['/playlists/3']);
   });
 
-  it('finds a speaking key in a complete list, case-insensitively, and refuses one that is not on it (SA-06)', async () => {
+  it('finds a speaking key in a complete list exactly, never a case-only match, and refuses one that is not on it (SA-06)', async () => {
     const channels = [{ key: 'lobby', title: 'Lobby screens' }, { key: 'cafe', title: 'Cafe' }];
-    const run = async (key: string) => {
+    const run = async (key: string, idCase?: 'ignore-case') => {
       const backend = fakeBackend({ 'GET /channels': () => ok(channels) });
       const { model, prompts } = callingModel([{ toolName: 'delete_channel', input: { key } }]);
-      const { chunks } = await turn({ tools: referenceTools(), model, systemPrompt: 'A', approvalSecret: SECRET, endpointCaller: backend.endpointCaller });
+      const tools = referenceTools();
+      if (idCase) (tools.list_channels as { entityLookup?: unknown }).entityLookup = { type: 'channel', params: {}, complete: true, idCase };
+      const { chunks } = await turn({ tools, model, systemPrompt: 'A', approvalSecret: SECRET, endpointCaller: backend.endpointCaller });
       return { chunks, prompts };
     };
-    const found = await run('LOBBY');
-    expect(subjectsPart(found.chunks)!.data.subjects[0]).toMatchObject({ status: 'named', name: 'Lobby screens', idKind: 'speaking', id: 'LOBBY' });
+    const found = await run('lobby');
+    expect(subjectsPart(found.chunks)!.data.subjects[0]).toMatchObject({ status: 'named', name: 'Lobby screens', idKind: 'speaking', id: 'lobby' });
+    // `LOBBY` may be another record on a backend that tells case apart: not checkable, never named, never refused.
+    const caseOnly = await run('LOBBY');
+    expect(subjectsPart(caseOnly.chunks)!.data.subjects[0]).toMatchObject({ status: 'unknown', check: 'unchecked', reason: 'mismatch' });
+    expect(subjectsPart(caseOnly.chunks)!.data.subjects[0]!.name).toBeUndefined();
+    expect(caseOnly.chunks.some((chunk) => chunk.type === 'tool-approval-request')).toBe(true);
+    expect((await run(' lobby')).chunks.some((chunk) => chunk.type === 'tool-approval-request')).toBe(true);
+    // Only a lookup that declares ids ignore case finds it.
+    const declared = await run('LOBBY', 'ignore-case');
+    expect(subjectsPart(declared.chunks)!.data.subjects[0]).toMatchObject({ status: 'named', name: 'Lobby screens' });
     const missing = await run('garage');
     expect(missing.chunks.some((chunk) => chunk.type === 'tool-approval-request')).toBe(false);
     expect(promptText(missing.prompts)).toContain('approval_subject_not_found');

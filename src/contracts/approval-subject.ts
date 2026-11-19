@@ -74,6 +74,13 @@ export interface EntityLookup {
    * not exist; without it, the subject is "not checkable".
    */
   readonly complete?: boolean;
+  /**
+   * How the source compares ids: `exact` (default; a number and its decimal
+   * text are one id), or `ignore-case` when the backend treats ids that differ
+   * only in case or surrounding whitespace as one record. Without it a
+   * case-only match is never a found record.
+   */
+  readonly idCase?: 'exact' | 'ignore-case';
 }
 
 /** How a preview value is shown. `count` counts an array (affected devices). */
@@ -138,7 +145,8 @@ export const MAX_ENTITY_LOOKUPS = 8;
 export const MAX_PREVIEW_FIELDS = 3;
 /** Parameters per lookup or preview, at most. */
 const MAX_PARAMS = 16;
-const PARAM_PATTERN = /^[A-Za-z_$][\w$-]{0,127}$/;
+/** A parameter name; never one that names an object's prototype machinery. */
+const PARAM_PATTERN = /^(?!(?:__proto__|constructor|prototype)$)[A-Za-z_$][\w$-]{0,127}$/;
 const FIELD_PATTERN = /^[A-Za-z_$][\w$-]{0,63}$/;
 const ARG_PATH_PATTERN = /^[A-Za-z_$][\w$-]{0,63}(?:\.[A-Za-z_$][\w$-]{0,63}){0,7}$/;
 const TOOL_NAME_PATTERN = /^[A-Za-z_$][\w$.:-]{0,199}$/;
@@ -171,7 +179,7 @@ export function isLocalizedLabel(value: unknown): value is LocalizedText {
 /** What is wrong with an `EntityLookup`, in words without its values; undefined when it is valid. */
 export function entityLookupIssue(value: unknown): string | undefined {
   if (!isRecord(value)) return 'is not an object';
-  const extra = unknownKeys(value, ['type', 'params', 'const', 'result', 'complete']);
+  const extra = unknownKeys(value, ['type', 'params', 'const', 'result', 'complete', 'idCase']);
   if (extra) return extra;
   if (typeof value.type !== 'string' || !ENTITY_TYPE_PATTERN.test(value.type)) {
     return 'has no type: a lower-case name of at most 64 characters (letters, digits, _, . and -)';
@@ -208,6 +216,9 @@ export function entityLookupIssue(value: unknown): string | undefined {
   }
   if (value.complete !== undefined && typeof value.complete !== 'boolean') return 'has a complete that is not true or false';
   if (value.complete === true && value.result === 'one') return 'is complete, which only a list can be';
+  if (value.idCase !== undefined && value.idCase !== 'exact' && value.idCase !== 'ignore-case') {
+    return 'has an idCase that is neither exact nor ignore-case';
+  }
   return undefined;
 }
 
@@ -278,6 +289,34 @@ export function approvalSubjectIssue(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether a tool of this HTTP method may state `lookupEffect: 'read'`: a POST
+ * (a dry-run that needs a body), GET/HEAD (where it changes nothing) or a tool
+ * without a method. Never DELETE, PUT or PATCH.
+ */
+export function lookupEffectAllowed(method: unknown): boolean {
+  if (method === undefined) return true;
+  if (typeof method !== 'string') return false;
+  return ['POST', 'GET', 'HEAD'].includes(method.toUpperCase());
+}
+
+/**
+ * The argument of each id field of a looked-up entity: by name when the
+ * arguments' last steps are the id field names (`version_id` → `version_id`,
+ * in any order); in the declared order of `inputEntities` when there is one
+ * argument or no argument is named like any id field; undefined for anything
+ * in between (names that disagree): never a positional guess.
+ */
+export function fieldArgsOf(args: ReadonlyArray<string>, fields: ReadonlyArray<string>): string[] | undefined {
+  if (args.length !== fields.length) return undefined;
+  const last = args.map((arg) => arg.split('.').at(-1)!);
+  if (new Set(last).size === last.length && fields.every((field) => last.includes(field))) {
+    return fields.map((field) => args[last.indexOf(field)]!);
+  }
+  if (args.length === 1 || last.every((name) => !fields.includes(name))) return [...args];
+  return undefined;
+}
+
 /** The lookups of an `entityLookup` option as a list (one object or a list). */
 export function entityLookupsOf(value: EntityLookup | ReadonlyArray<EntityLookup> | undefined): EntityLookup[] {
   if (value === undefined) return [];
@@ -301,9 +340,21 @@ export function validApprovalSubject(value: unknown): ApprovalSubjectOption | un
  * (for `defineTool` and `endpointToolToTool`, like an invalid `outputEntities`).
  */
 export function assertApprovalSubjectDeclarations(
-  value: { entityLookup?: unknown; approvalSubject?: unknown; lookupEffect?: unknown },
+  value: { entityLookup?: unknown; approvalSubject?: unknown; lookupEffect?: unknown; inputEntities?: unknown; method?: unknown },
   label: string,
 ): void {
+  if (value.lookupEffect !== undefined && !lookupEffectAllowed(value.method)) {
+    throw new Error(`${label}: lookupEffect 'read' is only allowed on a POST (or a tool without a method), never on ${String(value.method).toUpperCase()}.`);
+  }
+  if (isRecord(value.approvalSubject) && Array.isArray(value.approvalSubject.refs)) {
+    const keys = new Set((Array.isArray(value.inputEntities) ? value.inputEntities : [])
+      .filter((ref) => isRecord(ref))
+      .map((ref) => (typeof ref.args === 'string' ? ref.args : Array.isArray(ref.args) ? ref.args.join(',') : '')));
+    const unmatched = value.approvalSubject.refs.filter((ref) => typeof ref === 'string' && !keys.has(ref));
+    if (unmatched.length > 0) {
+      throw new Error(`${label}: approvalSubject refs ${unmatched.slice(0, 5).map((ref) => JSON.stringify(String(ref).slice(0, 64))).join(', ')} match no inputEntities reference.`);
+    }
+  }
   if (value.entityLookup !== undefined) {
     const list = Array.isArray(value.entityLookup) ? value.entityLookup : [value.entityLookup];
     if (list.length === 0 || list.length > MAX_ENTITY_LOOKUPS) {
@@ -408,11 +459,18 @@ export const MAX_PART_SUBJECTS = MAX_TOOL_ENTITIES;
 /**
  * Control characters (C0, DEL, C1), bidirectional overrides and isolates
  * (U+202A–U+202E, U+2066–U+2069), the bidi marks (U+200E, U+200F, U+061C),
- * zero-width joiners and the BOM, and line or paragraph separators.
+ * zero-width joiners and the BOM, line or paragraph separators, invisible
+ * operators (U+2060–U+2064), the soft hyphen, the Mongolian vowel separator,
+ * variation selectors (U+FE00–U+FE0F), tag characters (U+E0000–U+E007F) and
+ * the Hangul fillers (U+115F, U+3164). Combining marks stay: many languages
+ * need them.
  */
 const UNSAFE_TEXT = new RegExp(`[${[
+  // Controls, bidi marks, zero-width characters, line and paragraph separators, overrides and isolates.
   [0x00, 0x1f], [0x7f, 0x9f], [0x061c, 0x061c], [0x200b, 0x200f], [0x2028, 0x202e], [0x2066, 0x2069], [0xfeff, 0xfeff],
-].map(([from, to]) => `\\u${from!.toString(16).padStart(4, '0')}-\\u${to!.toString(16).padStart(4, '0')}`).join('')}]`, 'g');
+  // Invisible operators, soft hyphen, Mongolian vowel separator, variation selectors, tags, Hangul fillers.
+  [0x2060, 0x2064], [0x00ad, 0x00ad], [0x180e, 0x180e], [0xfe00, 0xfe0f], [0xe0000, 0xe007f], [0x115f, 0x115f], [0x3164, 0x3164],
+].map(([from, to]) => `\\u{${from!.toString(16)}}-\\u{${to!.toString(16)}}`).join('')}]`, 'gu');
 
 /**
  * A looked-up value as the card may show it: plain text without control or

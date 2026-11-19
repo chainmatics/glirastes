@@ -348,6 +348,91 @@ describe('approval subject lookups', () => {
     expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ reason: 'mismatch' });
   });
 
+  describe('composite keys are mapped by name, never by position', () => {
+    const registryWith = (args: string[], argNames: [string, string]) => endpointToolsToRegistry([
+      defineEndpointTool({
+        id: 'versions.list', toolName: 'list_versions', description: 'List.', method: 'GET', path: '/playlists/:playlist_id/versions',
+        inputSchema: z.object({ playlist_id: z.number() }).strict(),
+        outputEntities: [{ type: 'pv', id: ['playlist_id', 'version_id'], fallback: 'versionNumber', path: 'data[]' }],
+        entityLookup: { type: 'pv', params: { playlist_id: 'playlist_id' }, complete: true },
+      }),
+      defineEndpointTool({
+        id: 'versions.restore', toolName: 'restore_version', description: 'Restore.', method: 'POST', path: '/restore',
+        inputSchema: z.object({ [argNames[0]]: z.number(), [argNames[1]]: z.number() }).strict(),
+        inputEntities: [{ type: 'pv', args }],
+      }),
+    ]);
+    // Playlist 3 has version 9, playlist 9 has version 3: a positional guess finds the foreign one.
+    const routes = {
+      'GET /playlists/3/versions': () => ok([{ playlist_id: 3, version_id: 9, versionNumber: 1 }]),
+      'GET /playlists/9/versions': () => ok([{ playlist_id: 9, version_id: 3, versionNumber: 2 }]),
+    };
+
+    it('maps write arguments in another order to the id fields by name', async () => {
+      const { resolver, backend } = resolverFor(routes, { registry: registryWith(['version_id', 'playlist_id'], ['version_id', 'playlist_id']) });
+      await resolver.resolve({ toolName: 'restore_version', toolCallId: 'c1', input: { version_id: 9, playlist_id: 3 } });
+      expect(backend.calls.map((call) => call.path)).toEqual(['/playlists/3/versions']);
+      expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({
+        status: 'seen', check: 'found', fallbackValue: 1, ids: { playlist_id: '3', version_id: '9' },
+      });
+    });
+
+    it('never guesses by position when the argument names disagree with the id fields', async () => {
+      const { resolver, backend } = resolverFor(routes, { registry: registryWith(['version_id', 'pid'], ['version_id', 'pid']) });
+      expect(resolver.isDeclared('restore_version')).toBe(true);
+      await resolver.resolve({ toolName: 'restore_version', toolCallId: 'c1', input: { version_id: 9, pid: 3 } });
+      expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ check: 'unchecked', reason: 'source_unavailable' });
+      expect(backend.calls).toHaveLength(0);
+    });
+  });
+
+  describe('an explicit declaration is never dropped', () => {
+    it('throws at definition time for refs that match no inputEntities reference', () => {
+      expect(() => defineEndpointTool({
+        id: 'playlists.delete', toolName: 'delete_playlist', description: 'Delete.', method: 'DELETE', path: '/playlists/:playlist_id',
+        inputSchema: z.object({ playlist_id: z.number() }), inputEntities: [{ type: 'playlist', args: 'playlist_id' }],
+        approvalSubject: { refs: ['playlistId'] },
+      })).toThrow(/match no inputEntities/);
+      expect(() => endpointToolsToRegistry([{
+        id: 'playlists.delete', toolName: 'delete_playlist', description: 'Delete.', method: 'DELETE', path: '/playlists/:playlist_id',
+        inputSchema: z.object({ playlist_id: z.number() }), approvalSubject: { refs: ['playlist_id'], onUnavailable: 'block' },
+      } as never])).toThrow(/match no inputEntities/);
+    });
+
+    /** A tool as an artifact or a hand-built registry may hold it, past the definition-time check. */
+    const loaded = (approvalSubject: unknown, inputEntities: unknown) => {
+      const registry = referenceTools();
+      Object.assign(registry.delete_playlist!, { approvalSubject, inputEntities });
+      return registry;
+    };
+
+    it('keeps the plan of a declaration that resolves nothing: v2, block refuses, recheck refuses', async () => {
+      for (const [option, entities] of [
+        [{ refs: ['nothing'], onUnavailable: 'block' }, [{ type: 'playlist', args: 'playlist_id' }]],
+        [{ onUnavailable: 'block' }, [{ type: 'Not A Type', args: 'playlist_id' }]],
+      ] as const) {
+        const { resolver, backend } = resolverFor(playlist, { registry: loaded(option, entities) });
+        expect(resolver.isDeclared('delete_playlist')).toBe(true);
+        const outcome = await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+        expect(outcome?.deny).toMatchObject({ code: 'approval_subject_unavailable' });
+        expect(backend.calls).toHaveLength(0);
+      }
+      const recheck = resolverFor(playlist, { registry: loaded({ refs: ['nothing'], recheck: 'exists' }, [{ type: 'playlist', args: 'playlist_id' }]) });
+      expect(await recheck.resolver.recheck({ toolName: 'delete_playlist', input: { playlist_id: 7 }, digestOf: () => '' }))
+        .toBe('approval_subject_unavailable');
+      // A declaration that does not validate counts as `block`: a lookup that cannot be made refuses.
+      const invalid = resolverFor({ 'GET /playlists/7': () => failure(503) }, {
+        registry: loaded({ onUnavailable: 'nonsense' }, [{ type: 'playlist', args: 'playlist_id' }]),
+      });
+      expect((await invalid.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } }))?.deny)
+        .toMatchObject({ code: 'approval_subject_unavailable' });
+      // `warn`: the card is asked, with a v2 id (its subjects part has nothing checked).
+      const warn = resolverFor(playlist, { registry: loaded({ refs: ['nothing'] }, [{ type: 'playlist', args: 'playlist_id' }]) });
+      expect(await warn.resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } })).toBeUndefined();
+      expect(warn.resolver.take('c1')!.part.subjects).toEqual([]);
+    });
+  });
+
   it('validates its limits', () => {
     expect(resolveApprovalSubjectLimits(undefined)).toEqual({ maxLookupsPerTurn: 32, maxSubjectsPerCall: 4, lookupTimeoutMs: 3000, maxLookupTimePerTurnMs: 10_000 });
     expect(() => resolveApprovalSubjectLimits({ maxLookupsPerTurn: 0 })).toThrow(RangeError);

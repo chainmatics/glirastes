@@ -21,6 +21,8 @@ import {
   approvalPreviewIssue,
   approvalSubjectIssue,
   entityLookupIssue,
+  fieldArgsOf,
+  lookupEffectAllowed,
   MAX_ENTITY_LOOKUPS,
   type ApprovalPreviewDeclaration,
   type ApprovalSubjectDeclaration,
@@ -210,7 +212,7 @@ function isReadMethod(method: string | undefined): boolean {
 
 /** Why a tool is no lookup or preview source; undefined when it provably changes nothing. */
 function notReadOnly(tool: ApprovalResolutionTool, effect: LookupEffect | undefined): string | undefined {
-  if (effect === 'read') return undefined;
+  if (effect === 'read' && lookupEffectAllowed(tool.method)) return undefined;
   if (!isReadMethod(tool.method)) {
     return `is a ${tool.method ?? 'non-GET'} tool without lookupEffect: 'read' (${LOOKUP_EFFECT_EXTENSION}: read)`;
   }
@@ -341,8 +343,18 @@ export function resolveApprovalSubjects(input: {
     });
   }
 
+  // lookupEffect stands only on a POST (or GET/HEAD): on a DELETE, PUT or PATCH it is refused, never written.
+  for (const tool of tools) {
+    const declared = chosen.get(tool.stableKey)!;
+    if (declared.lookupEffect && !lookupEffectAllowed(tool.method)) {
+      invalid(tool.stableKey, `The tool declares lookupEffect: 'read' on ${tool.method}; only a POST (a dry-run) can state it, so it is dropped and the tool is no lookup source.`);
+      delete declared.lookupEffect;
+    }
+  }
+
   // Pass 2: lookups against their source tool.
   const lookupTypes = new Set<string>();
+  const lookupIds = new Map<string, string[][]>();
   for (const tool of tools) {
     const declared = chosen.get(tool.stableKey)!;
     if (!declared.entityLookup) continue;
@@ -382,6 +394,7 @@ export function resolveApprovalSubjects(input: {
       }
       kept.push(lookup);
       lookupTypes.add(lookup.type);
+      lookupIds.set(lookup.type, [...(lookupIds.get(lookup.type) ?? []), ids]);
     }
     if (kept.length > 0) declared.entityLookup = kept;
     else delete declared.entityLookup;
@@ -393,14 +406,29 @@ export function resolveApprovalSubjects(input: {
     const isWrite = !isReadMethod(tool.method) || tool.requiresApproval;
     if (isWrite) for (const ref of tool.inputEntities ?? []) referenced.add(ref.type);
     const declared = chosen.get(tool.stableKey)!;
+    // A composite key whose arguments cannot be mapped to the source's id fields by name is never guessed by position.
+    if (isWrite && declared.approvalSubject !== false) {
+      for (const ref of tool.inputEntities ?? []) {
+        const args = inputRefArgs(ref);
+        const sources = (lookupIds.get(ref.type) ?? []).filter((ids) => ids.length === args.length);
+        if (sources.length > 0 && !sources.some((ids) => fieldArgsOf(args, ids) !== undefined)) {
+          invalid(tool.stableKey, `The reference ${args.join(',')} of type ${ref.type} names its key parts other than the id fields `
+            + `${sources[0]!.join(', ')} of its lookup, so they cannot be matched by name; the server does not look it up ("not checkable"). `
+            + 'Name the arguments like the id fields.');
+        }
+      }
+    }
     const option = declared.approvalSubject;
     if (option === undefined || option === false) continue;
     const subject = tool.stableKey;
     const refArgs = new Set((tool.inputEntities ?? []).map((ref) => inputRefArgs(ref).join(',')));
     const unknownRefs = (option.refs ?? []).filter((ref) => !refArgs.has(ref));
     if (unknownRefs.length > 0) {
-      invalid(subject, `The approvalSubject names the refs ${unknownRefs.join(', ')}, which no inputEntities of the tool declare; the declaration is dropped.`);
-      delete declared.approvalSubject;
+      // Never dropped silently, never fail-open: a blocking error, and the declaration stays in force as `block`.
+      findings.push(toolFinding('approval-subject-refs-unmatched', 'error', subject,
+        `The approvalSubject names the refs ${unknownRefs.join(', ')}, which no inputEntities of the tool declare. `
+        + 'Until it is fixed the tool keeps its declaration without them and refuses a call it cannot check (onUnavailable: block).'));
+      declared.approvalSubject = { ...option, refs: option.refs!.filter((ref) => refArgs.has(ref)), onUnavailable: 'block' };
       continue;
     }
     if (!option.preview) continue;
