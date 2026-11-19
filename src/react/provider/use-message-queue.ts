@@ -99,6 +99,8 @@ export interface MessageQueueStore {
   priorityRef: { current: string | null };
   /** Replaces the queue and reports the change. `persist: false` for a reset that must not overwrite storage. */
   commit(items: ReadonlyArray<QueuedMessage>, paused: boolean, reason: ChatQueueChangeReason, persist?: boolean): void;
+  /** Empties the queue for good: a stored queue still loading is dropped, and an empty one is saved. */
+  clearAll(): void;
 }
 
 /**
@@ -119,12 +121,14 @@ export function useMessageQueueStore(
   const onChangeRef = useRef(config?.onQueueChange);
   onChangeRef.current = config?.onQueueChange;
   const storageRef = useRef<ChatQueueStorage | undefined>(config?.storage);
-  storageRef.current = config?.storage;
+  storageRef.current = enabled ? config?.storage : undefined;
   const hasStorage = enabled && config?.storage !== undefined;
   const sessionRef = useRef(sessionId);
   sessionRef.current = sessionId;
   // The session whose stored queue was read; nothing is saved for a session before that.
   const loadedForRef = useRef<string | null>(null);
+  // Bumped by `clearAll`: a load that started before it must not bring the cleared queue back.
+  const clearGenerationRef = useRef(0);
 
   const save = useCallback((id: string, next: ReadonlyArray<QueuedMessage>) => {
     const storage = storageRef.current;
@@ -170,6 +174,7 @@ export function useMessageQueueStore(
     const storage = storageRef.current;
     if (!hasStorage || !storage) return undefined;
     let cancelled = false;
+    const generation = clearGenerationRef.current;
     void (async () => {
       let stored: QueuedMessage[] = [];
       try {
@@ -177,7 +182,7 @@ export function useMessageQueueStore(
       } catch {
         console.warn('[glirastes] queue.storage.load failed');
       }
-      if (cancelled || sessionRef.current !== sessionId) return;
+      if (cancelled || sessionRef.current !== sessionId || clearGenerationRef.current !== generation) return;
       loadedForRef.current = sessionId;
       if (stored.length === 0) {
         // Queued while the stored queue was read: keep it now.
@@ -191,5 +196,16 @@ export function useMessageQueueStore(
     return () => { cancelled = true; };
   }, [sessionId, hasStorage, commit, save]);
 
-  return useMemo(() => ({ items, paused, itemsRef, pausedRef, priorityRef, commit }), [items, paused, commit]);
+  const clearAll = useCallback(() => {
+    clearGenerationRef.current += 1;
+    // What is cleared now is this conversation's queue, also before its stored one was read.
+    if (storageRef.current) loadedForRef.current = sessionRef.current;
+    if (itemsRef.current.length > 0 || pausedRef.current) commit([], false, 'cleared');
+    else save(sessionRef.current, []);
+  }, [commit, save]);
+
+  return useMemo(
+    () => ({ items, paused, itemsRef, pausedRef, priorityRef, commit, clearAll }),
+    [items, paused, commit, clearAll],
+  );
 }

@@ -590,6 +590,43 @@ describe('chat queue enabled', () => {
     expect(texts(chat)).toEqual([]);
   });
 
+  it('clear() during a slow storage load keeps the cleared queue cleared', async () => {
+    let release!: () => void;
+    const storage: ChatQueueStorage = {
+      load: () => new Promise((resolve) => {
+        release = () => resolve([{ id: 'q1', text: 'old', createdAt: '2026-01-01T00:00:00.000Z' }]);
+      }),
+      save: vi.fn(),
+    };
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true, storage } }} />);
+    await act(async () => { ctx.clear(); });
+    expect(storage.save).toHaveBeenLastCalledWith('default', []);
+    await act(async () => { release(); await Promise.resolve(); });
+    expect(ctx.queue.items).toHaveLength(0);
+  });
+
+  it('a sendNow message whose onBeforeSend throws pauses once and stays queued', async () => {
+    const chat = new FakeChat();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onBeforeSend = vi.fn((text: string) => {
+      if (text === 'bad') throw new Error('app bug');
+      return text;
+    });
+    render(<Host chat={chat} config={{ ...enabled, onBeforeSend }} />);
+    await startRun(chat);
+    await act(async () => { ctx.submit('bad'); ctx.pauseQueue(); });
+    await act(async () => { chat.finish(); });
+    onBeforeSend.mockClear();
+    await act(async () => { ctx.sendNow(ctx.queue.items[0]!.id); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(onBeforeSend).toHaveBeenCalledTimes(1);
+    expect(queuedTexts()).toEqual(['bad']);
+    expect(ctx.queue.paused).toBe(true);
+    expect(texts(chat)).toEqual(['first']);
+    warn.mockRestore();
+  });
+
   it('never saves file items', async () => {
     const storage: ChatQueueStorage = { load: () => [], save: vi.fn() };
     const chat = new FakeChat();

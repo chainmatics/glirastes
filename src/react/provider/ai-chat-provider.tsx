@@ -1934,7 +1934,7 @@ export function AiChatProvider({
     setPendingCommand(null);
     setSuggestionChips(suggestionsConfig.staticChips ?? []);
     // The queue belonged to the cleared conversation.
-    if (queueStore.itemsRef.current.length > 0 || queueStore.pausedRef.current) queueStore.commit([], false, 'cleared');
+    queueStore.clearAll();
   }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions, queueStore]);
 
   // ---------------------------------------------------------------------------
@@ -2194,6 +2194,14 @@ export function AiChatProvider({
       prepared = prepareSend(head.text, { mentions: [...(head.mentions ?? [])], ...(files ? { files } : {}) });
     } catch {
       console.warn('[glirastes] A queued message could not be prepared');
+      // Held until the user acts again: also a `sendNow` message does not retry by itself.
+      queueStore.priorityRef.current = null;
+      queueStore.commit(queued, true, 'paused');
+      return;
+    }
+    if (files && prepared.kind !== 'message') {
+      // Edited into a direct command after it was queued with files: a command would drop them.
+      queueStore.priorityRef.current = null;
       queueStore.commit(queued, true, 'paused');
       return;
     }
@@ -2256,18 +2264,23 @@ export function AiChatProvider({
 
   const editQueued = useCallback((id: string, text: string): boolean => {
     const queued = queueStore.itemsRef.current;
-    if (text.trim() === '' || !queued.some((item) => item.id === id)) return false;
+    const item = queued.find((entry) => entry.id === id);
+    if (text.trim() === '' || !item) return false;
+    if (item.files?.length) {
+      // As on send: a direct command cannot carry the files queued with it.
+      const plan = interactionRegistry?.planMessage(text, [...(item.mentions ?? [])]);
+      if (plan?.status === 'send' || plan?.status === 'needs-args') return false;
+    }
     queueStore.commit(
       queued.map((item) => (item.id === id ? { ...item, text } : item)),
       queueStore.pausedRef.current,
       'edited',
     );
     return true;
-  }, [queueStore]);
+  }, [queueStore, interactionRegistry]);
 
   const clearQueue = useCallback(() => {
-    if (queueStore.itemsRef.current.length === 0 && !queueStore.pausedRef.current) return;
-    queueStore.commit([], false, 'cleared');
+    queueStore.clearAll();
   }, [queueStore]);
 
   const resumeQueue = useCallback(() => {

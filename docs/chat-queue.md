@@ -79,6 +79,8 @@ not paused (except for the one `sendNow` message).
 | Language or locale change | The queue is kept (texts are the user's own and are processed when sent). |
 | Provider unmounts | The queue is dropped. |
 | `onBeforeSend` throws for a queued message | The queue pauses; the message stays. |
+| A queued message with files edited into a direct command | `editQueued` refuses it (a command cannot carry files); should one reach the head anyway, the queue pauses and keeps it. |
+| `clear()` or `clearQueue()` while the stored queue still loads | The late load is dropped and an empty queue is saved. |
 | An emptied queue | No longer paused. |
 
 Processing happens when a queued message is sent, through the same path as a

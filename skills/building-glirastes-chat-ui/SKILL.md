@@ -67,8 +67,7 @@ component; headless hooks and building blocks for an own chat:
 | `mentions` | mention sources and search |
 | `suggestions` | contextual suggestion chips |
 | `voice` | speech-to-text |
-| `attachments` | image and PDF attachments (section below) |
-| `queue` | opt-in message queue: messages sent while busy or during an approval wait and go once idle (`references/composer-chips-attachments.md`, "Message queue") |
+| `attachments`, `queue` | image and PDF attachments (section below); opt-in message queue, messages sent while busy or during an approval go once idle (`references/composer-chips-attachments.md`, "Message queue") |
 | `chatInteractions` | derived `@` entities and `/` commands (section below) |
 | `entityLinks` | entity references in answers as chips (`knownEntities`, `ambiguousNames` (default `'text'`: a shared name stays text; `'first'` = before 0.18.0; markers with an id link by id), `resolveAmbiguous`, `scope`, `mentionMarkers: 'markdown'` + `verifyMentions`); `entityDeclarations` sets declared identity by tool name (`docs/entity-identity.md`) |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
