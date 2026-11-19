@@ -107,6 +107,16 @@ const ESCALATIONS: Array<[string, ToolPolicyDefaultsInput, Expected]> = [
   ['UI external evidence',
     ui('maps.openExternal', { evidence: { externalCall: true } }),
     { operationGroup: 'ui', riskClass: 'external', requiresApproval: true }],
+  // A client action's declared effect (`useAiClientAction(…, { effect })`) reaches the same rule.
+  ['UI declared write',
+    ui('ui.tasks.archive', { declaredEffect: 'write' }),
+    { operationGroup: 'ui', riskClass: 'write', requiresApproval: true }],
+  ['UI declared destructive',
+    ui('ui.tasks.purge', { declaredEffect: 'destructive' }),
+    { operationGroup: 'ui', riskClass: 'delete', requiresApproval: true }],
+  ['UI declared read',
+    ui('ui.rows.track', { declaredEffect: 'read' }),
+    { operationGroup: 'ui', riskClass: 'safe-read', requiresApproval: false }],
 ];
 
 const NEVER_LOWER: Array<[string, ToolPolicyDefaultsInput, Expected]> = [
@@ -118,6 +128,9 @@ const NEVER_LOWER: Array<[string, ToolPolicyDefaultsInput, Expected]> = [
       declaredEffect: 'write',
     }),
     DELETE],
+  ['UI declared read with mutation evidence',
+    ui('ui.tasks.archive', { declaredEffect: 'read', evidence: { uiMutation: true } }),
+    { operationGroup: 'ui', riskClass: 'write', requiresApproval: true }],
 ];
 
 // Review focus: tokens match whole words only, never on reads, and UI ids

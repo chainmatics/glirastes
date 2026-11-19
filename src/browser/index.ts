@@ -15,6 +15,7 @@ export {
 export {
   dispatchToolResultUiActions,
   registerAiClientAction,
+  type ClientActionEffect,
   type ClientActionHandler,
   type ClientActionOptions,
   type DispatchToolResultOptions,

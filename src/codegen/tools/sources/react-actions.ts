@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import type { DeclaredEffect } from '../../../contracts/tool-policy.js';
 import { canonicalJson, compareCodeUnits } from '../canonical.js';
 import { isClientActionRoute } from '../files.js';
 import { toolFinding } from '../findings.js';
@@ -99,6 +100,66 @@ function routeOf(app: AppProgram, raw: ts.Expression | undefined): RouteRead {
   return isClientActionRoute(value)
     ? { kind: 'static', route: value }
     : { kind: 'invalid', reason: `${JSON.stringify(value)} is not a static app path (one leading slash, no query, hash or :param)` };
+}
+
+type EffectRead =
+  | { kind: 'none' }
+  | { kind: 'declared'; effect: DeclaredEffect }
+  | { kind: 'invalid' };
+
+const DECLARED_EFFECTS: ReadonlySet<string> = new Set(['read', 'write', 'destructive', 'external', 'financial']);
+const EFFECT_STRENGTH: Readonly<Record<DeclaredEffect, number>> = {
+  read: 0, write: 1, destructive: 2, external: 2, financial: 2,
+};
+
+/**
+ * `effect` of the options argument. Written in the options object it must
+ * be a literal (or a constant of literal type) of the known set, or the
+ * declaration needs attention. Reached any other way (a spread, a typed
+ * options variable), only a single literal type counts; anything else is
+ * undeclared, so an app that declares nothing reads as before.
+ */
+function effectOf(app: AppProgram, raw: ts.Expression | undefined): EffectRead {
+  if (!raw) return { kind: 'none' };
+  const options = unwrap(raw);
+  const checker = app.checker;
+  const known = (value: string | undefined): EffectRead => (
+    value !== undefined && DECLARED_EFFECTS.has(value) ? { kind: 'declared', effect: value as DeclaredEffect } : { kind: 'invalid' });
+  if (ts.isObjectLiteralExpression(options)) {
+    const members = [...options.properties];
+    /** The static key of a member: its name, a computed key of literal type, else undefined (unknown). */
+    const keyOf = (entry: ts.ObjectLiteralElementLike): string | undefined => {
+      const name = entry.name;
+      if (!name) return undefined;
+      if (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) return name.text;
+      if (ts.isComputedPropertyName(name)) {
+        const type = checker.getTypeAtLocation(name.expression);
+        return type.isStringLiteral() || type.isNumberLiteral() ? String(type.value) : undefined;
+      }
+      return undefined;
+    };
+    const mayCarryEffect = (type: ts.Type): boolean => {
+      if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return true;
+      if (type.isUnionOrIntersection()) return type.types.some(mayCarryEffect);
+      return checker.getPropertyOfType(type, 'effect') !== undefined || checker.getIndexInfosOfType(type).length > 0;
+    };
+    let index = members.length - 1;
+    while (index >= 0 && (ts.isSpreadAssignment(members[index]!) || keyOf(members[index]!) !== 'effect')) index -= 1;
+    const property = index >= 0 ? members[index]! : undefined;
+    if (property) {
+      // A later member that may also set effect (a spread, an unknown computed key) decides at runtime.
+      const overridden = members.slice(index + 1).some((entry) => (
+        ts.isSpreadAssignment(entry) ? mayCarryEffect(checker.getTypeAtLocation(entry.expression)) : keyOf(entry) === undefined));
+      if (overridden || !(ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))) return { kind: 'invalid' };
+      const expression = ts.isPropertyAssignment(property) ? property.initializer : property.name;
+      return known(literalId(expression) ?? stringOfType(checker.getTypeAtLocation(expression)));
+    }
+    // No literal effect: an unknown computed key reads as undeclared, so the guess stays (nothing is lowered).
+  }
+  const symbol = checker.getPropertyOfType(checker.getTypeAtLocation(options), 'effect');
+  if (!symbol) return { kind: 'none' };
+  const value = stringOfType(checker.getNonNullableType(checker.getTypeOfSymbolAtLocation(symbol, options)));
+  return value !== undefined && DECLARED_EFFECTS.has(value) ? { kind: 'declared', effect: value as DeclaredEffect } : { kind: 'none' };
 }
 
 const DISPATCH_RECEIVERS: ReadonlySet<string> = new Set(['window', 'document', 'globalThis', 'self']);
@@ -639,12 +700,31 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
         toolFindings.push(toolFinding('ui-action-indirect', 'warning', stableKey,
           `${actionId} only dispatches a window event, so it works only where a listener for that event is mounted.`));
       }
+      const effects = registrations.map((registration) => effectOf(app, registration.options));
+      if (effects.some((effect) => effect.kind === 'invalid')) {
+        toolFindings.push(toolFinding('ui-action-effect-invalid', 'needs_attention', stableKey,
+          `${actionId} declares an effect that is not a literal read, write, destructive, external or financial, so the declaration is ignored.`));
+      }
+      const declared = [...new Set(effects
+        .flatMap((effect) => (effect.kind === 'declared' ? [effect.effect] : [])))]
+        .sort((left, right) => EFFECT_STRENGTH[right] - EFFECT_STRENGTH[left] || compareCodeUnits(left, right));
+      // Raise-only, like every other declared effect: the strongest declaration applies.
+      const declaredEffect = declared[0];
+      if (declared.length > 1) {
+        toolFindings.push(toolFinding('ui-action-effect-conflict', 'warning', stableKey,
+          `${actionId} is registered with different effects (${[...declared].sort(compareCodeUnits).join(', ')}); the strongest, ${declaredEffect}, applies.`));
+      }
       const evidence = handlers.map((handler) => writeEvidence(app, handler));
       const uiMutation = evidence.some((entry) => entry.writes);
-      const unproven = evidence.find((entry) => entry.unproven)?.unproven;
+      // A declared effect answers the write question for its own registration; the guess stays for the others.
+      const unproven = evidence.find((entry, index) => entry.unproven && effects[index]!.kind !== 'declared')?.unproven;
       if (!uiMutation && unproven) {
         toolFindings.push(toolFinding('ui-action-write-unproven', 'warning', stableKey,
           `${actionId} calls ${unproven}; if that changes data, raise the tool to write so the chat asks first.`));
+      }
+      if (uiMutation && declaredEffect === 'read') {
+        toolFindings.push(toolFinding('ui-action-effect-contradicted', 'warning', stableKey,
+          `${actionId} declares the effect read, but its handler writes (a non-GET request); the tool stays write.`));
       }
       return uiObservation({
         stableKey,
@@ -662,11 +742,13 @@ async function observeActions(ctx: ToolSourceContext, options: ReactActionSource
           files: [...new Set(registrations.map((registration) => registration.file))].sort(compareCodeUnits),
           payloads: typed,
           uiMutation,
+          ...(declaredEffect ? { effect: declaredEffect } : {}),
         },
         findings: toolFindings,
         files: [...new Set(registrations.map((registration) => registration.file))].sort(compareCodeUnits),
         ...(jsDoc ? { jsDoc } : {}),
         ...(uiMutation ? { uiMutation } : {}),
+        ...(declaredEffect ? { declaredEffect } : {}),
         ...(schemaDescription ? { prose: { schemaDescription } } : {}),
       });
     });

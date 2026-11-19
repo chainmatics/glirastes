@@ -258,6 +258,12 @@ is in the package's `docs/tool-policy.md`.
    An inline or unimportable contract is typed from TypeScript as before
    (`ui-action-contract-unprobed`, warning).
 
+   Declare the handler's effect (`ClientActionEffect`) in the same options as a literal:
+   `{ effect: 'write' }` when it changes data (the chat asks first),
+   `'destructive'` when it deletes, `'read'` when it only shows or selects.
+   The declaration replaces the generator's guess (`ui-action-write-unproven`)
+   and can only raise the risk.
+
    Literal ids and literal filter definitions only: the generator reads them
    from code, in `.ts` modules and in the `<script lang="ts">` or
    `<script setup lang="ts">` blocks of `.vue` files (a `src` attribute is

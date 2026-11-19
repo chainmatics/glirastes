@@ -175,7 +175,10 @@ second, hand-maintained catalogue.
    `src/lib/ai-actions.ts`) and pass that export: the tool then gets its
    formats, descriptions, enums and bounds (`z.string().uuid()` is checked
    on the server); an inline or unimportable contract is typed from
-   TypeScript as before (`ui-action-contract-unprobed`). A
+   TypeScript as before (`ui-action-contract-unprobed`). Declare what a
+   handler does in the options, as a literal: `{ effect: 'write' }` for one
+   that changes data (the chat asks first), `'destructive'` for one that
+   deletes, `'read'` for one that only shows or selects. Undeclared, a
    handler that writes through a helper, a Server Action or a mutation hook is
    flagged (`ui-action-write-unproven`); the developer raises it with
    `glirastes tools policy raise <tool> write`.

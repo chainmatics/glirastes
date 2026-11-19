@@ -489,6 +489,30 @@ describe('runToolsPipeline (client actions)', () => {
     expect(tools.get('ui.tasks.select')).toMatchObject({ enabled: false, operationGroup: 'needs_attention' });
     expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
   }, 120_000);
+
+  it('confirms a client action that declares a write effect, whatever its handler shows', async () => {
+    const fixture = await createAppFixture({
+      'src/lib/api.ts': 'export function save(id: string) { console.log(id); }\n',
+      'src/components/task-list.tsx': "'use client';\nimport { useAiClientAction } from 'glirastes/react';\nimport { save } from '../lib/api';\n"
+        + 'export function TaskList() {\n'
+        + "  useAiClientAction('tasks.save', (payload: { taskId: string }) => save(payload.taskId), undefined, { effect: 'write' });\n"
+        + "  useAiClientAction('tasks.purge', (payload: { taskId: string }) => save(payload.taskId), undefined, { effect: 'destructive' });\n"
+        + "  useAiClientAction('tasks.peek', (payload: { taskId: string }) => save(payload.taskId), undefined, { effect: 'read' });\n"
+        + '  return null;\n}\n',
+    }, { toolsConfig: { sources: ['react-actions'] } });
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const tools = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.name, tool] as const));
+    expect(tools.get('ui.tasks.save')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'write', requiresApproval: true, enabled: true,
+    });
+    expect(tools.get('ui.tasks.purge')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'delete', requiresApproval: true, enabled: true,
+    });
+    expect(tools.get('ui.tasks.peek')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'safe-read', requiresApproval: false, enabled: true,
+    });
+    expect(result.findings.filter((finding) => finding.code === 'ui-action-write-unproven')).toEqual([]);
+  }, 120_000);
 });
 
 describe('runToolsPipeline (stage-2 semantics)', () => {

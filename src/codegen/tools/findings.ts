@@ -86,7 +86,10 @@ const NEXT_ACTIONS: Readonly<Record<string, string>> = {
   'ui-action-route-invalid': 'Pass route as a string literal of a static app path, e.g. { route: \'/templates\' } (one leading slash, no query, hash or :param), or remove it when the action works on every page, then run glirastes tools refresh.',
   'ui-action-route-conflict': 'Register the action with the same route everywhere, or only in the page component that owns the effect, then run glirastes tools refresh.',
   'ui-action-indirect': 'Register the action in the component that owns the effect (the dialog or state it changes) instead of relaying a window event; if that component lives on one page, pass its path as route, e.g. useAiClientAction(id, handler, contract, { route: \'/templates\' }).',
-  'ui-action-write-unproven': 'If the handler changes data through a helper, a Server Action or a mutation hook, raise the tool: glirastes tools policy raise <tool> write. Otherwise nothing to do.',
+  'ui-action-effect-invalid': 'Write the effect in the options of the registration as a literal: { effect: \'read\' }, \'write\', \'destructive\', \'external\' or \'financial\', then run glirastes tools refresh. The tool stays disabled until then.',
+  'ui-action-effect-conflict': 'Declare the same effect wherever the action is registered, then run glirastes tools refresh; the strongest declaration applies meanwhile.',
+  'ui-action-effect-contradicted': 'The handler sends a non-GET request, so the tool stays write: correct the declaration to { effect: \'write\' } (or stronger), or stop writing in the handler, then run glirastes tools refresh.',
+  'ui-action-write-unproven':'If the handler changes data through a helper, a Server Action or a mutation hook, raise the tool: glirastes tools policy raise <tool> write. Otherwise nothing to do.',
 };
 
 /**

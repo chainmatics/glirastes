@@ -36,6 +36,43 @@ reports `policy-roles-disjoint` (warning) with the tool and both role sets
 `code-default` while the code roles apply and `local-policy` once
 `tool-policy.json` narrowed them.
 
+## Client actions: declared effect
+
+A generated client action tool (`ui.<actionId>`) is `safe-read` and runs
+directly, unless its handler provably writes (a non-GET `fetch`, an `axios`
+write): then it is `write` and asks first. A call the generator cannot see
+through (a helper from another file, a mutation hook, a computed `fetch`
+method) only warns, `ui-action-write-unproven`. Declare the effect instead of
+leaving it to the code shape, with the same words as `x-glirastes-effect` and
+`contract.ts`:
+
+```ts
+useAiClientAction('tasks.archive', (p) => archiveTask(p.taskId), contract, { effect: 'write' });
+registerAiClientAction('rows.track', handler, contract, { effect: 'read' });
+```
+
+| Declared | Risk class | Confirmation |
+| --- | --- | --- |
+| nothing | as before: `safe-read`, or `write` with write evidence (a destructive id word then raises to `delete`) | as before |
+| `read` | `safe-read`, but never below provable write evidence (`ui-action-effect-contradicted`, warning) | off |
+| `write` | `write` (a destructive id word does not raise it; declare `destructive`) | on; a reviewed pin may switch it off |
+| `destructive` | `delete` | always on |
+| `external`, `financial` | `external`, `financial` | always on |
+
+The declaration replaces the guess for its own registration: no
+`ui-action-write-unproven` for it. It only raises, like every declared effect;
+local policy and the Platform may raise further. It is read statically by
+`glirastes tools refresh` and ignored at runtime: write a literal in the
+options object (or a constant of literal type). A value outside the five
+words, or one that cannot be read there, is `ui-action-effect-invalid` (needs
+attention, the tool stays disabled). Through a spread or a typed options
+variable only a single literal type counts; anything else reads as
+undeclared. Registrations of one action with different effects get the
+strongest and `ui-action-effect-conflict` (warning). `useAiClientActionById`
+and `bus.subscribeById` take no options and keep the heuristic. The UI
+pattern of the tool (operation group `ui`, the browser runs it) is unchanged
+by any effect.
+
 ## OpenAPI source: selection and `x-glirastes-*` extensions
 
 By default the `openapi` source turns every supported operation that no rule
