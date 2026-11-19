@@ -20,9 +20,33 @@ export function isOmittedAttachmentUrl(url: unknown): boolean {
   return url === '';
 }
 
+/** Stable id the chat gives each attached file, so the model can name it later. */
+export const CHAT_ATTACHMENT_ID_PATTERN = /^att_[A-Za-z0-9_-]{16,64}$/;
+
+export function isChatAttachmentId(value: unknown): value is string {
+  return typeof value === 'string' && CHAT_ATTACHMENT_ID_PATTERN.test(value);
+}
+
+export function createChatAttachmentId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `att_${uuid.replaceAll('-', '')}`;
+  let random = '';
+  for (let index = 0; index < 32; index++) random += Math.floor(Math.random() * 36).toString(36);
+  return `att_${random}`;
+}
+
+/** The attachment id a file part carries in its provider metadata, if it is valid. */
+export function attachmentIdOf(part: unknown): string | undefined {
+  if (typeof part !== 'object' || part === null) return undefined;
+  const metadata = (part as { providerMetadata?: { glirastes?: { attachmentId?: unknown } } }).providerMetadata;
+  const id = metadata?.glirastes?.attachmentId;
+  return isChatAttachmentId(id) ? id : undefined;
+}
+
 /** Text that stands in for a file part once its data is no longer sent. */
-export function attachmentPlaceholderText(filename?: string): string {
-  return `[attachment: ${filename && filename.trim() ? filename.trim() : 'file'}]`;
+export function attachmentPlaceholderText(filename?: string, id?: string): string {
+  const name = filename && filename.trim() ? filename.trim() : 'file';
+  return isChatAttachmentId(id) ? `[attachment ${id}: ${name}]` : `[attachment: ${name}]`;
 }
 
 const startsWith = (bytes: Uint8Array, signature: ReadonlyArray<number>, offset = 0) =>
