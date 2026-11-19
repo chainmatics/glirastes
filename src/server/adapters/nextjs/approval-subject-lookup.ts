@@ -663,6 +663,53 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     return params;
   };
 
+  /**
+   * The subject as the card shows it: the looked-up values of exactly the
+   * identified record (name, fallback, candidate names) pass the PII shield,
+   * so the browser gets them in the form it gets that tool's results. The
+   * digest keeps the raw values. A shield that fails or does not answer
+   * makes the subject not checkable; one that removes the name leaves it `seen`.
+   */
+  const present = async (
+    outcome: SubjectOutcome,
+    item: PlanItem,
+    values: Array<string | number>,
+    deadline: number,
+  ): Promise<SubjectOutcome> => {
+    if (outcome.kind !== 'subject' || !options.shield || outcome.subject.check !== 'found') return outcome;
+    const { subject } = outcome;
+    const raw: Record<string, unknown> = {
+      ...(subject.name !== undefined ? { name: subject.name } : {}),
+      ...(subject.fallbackValue !== undefined ? { fallbackValue: subject.fallbackValue } : {}),
+      ...(subject.candidates ? { candidates: [...subject.candidates] } : {}),
+    };
+    if (Object.keys(raw).length === 0) return outcome;
+    const shown = await guarded(options.shield.shield.anonymizeResult(raw, options.shield.sessionId()), deadline);
+    if (shown === SHIELD_TIMEOUT || shown === SHIELD_FAILED) {
+      const failed = unchecked(item, values, shown === SHIELD_TIMEOUT ? 'timeout' : 'unavailable') as Extract<SubjectOutcome, { kind: 'subject' }>;
+      // The digest stays the raw record's: only the card could not get its values.
+      return { ...failed, canonical: outcome.canonical };
+    }
+    const shownRecord = isRecordValue(shown) ? shown : {};
+    const name = sanitizeSubjectText(shownRecord.name);
+    const fallbackValue = typeof shownRecord.fallbackValue === 'number' ? shownRecord.fallbackValue : sanitizeSubjectText(shownRecord.fallbackValue);
+    const candidates = Array.isArray(shownRecord.candidates)
+      ? shownRecord.candidates.map(sanitizeSubjectText).filter((text): text is string => text !== undefined)
+      : [];
+    const { name: _name, fallbackField, fallbackValue: _fallback, candidates: _candidates, ...rest } = subject;
+    const status = subject.status === 'named' && name === undefined ? 'seen' : subject.status;
+    return {
+      ...outcome,
+      subject: {
+        ...rest,
+        status,
+        ...(name !== undefined && status === 'named' ? { name } : {}),
+        ...(fallbackField !== undefined && fallbackValue !== undefined ? { fallbackField, fallbackValue } : {}),
+        ...(candidates.length > 0 ? { candidates } : {}),
+      },
+    };
+  };
+
   /** Finds the record the reference names in a source's answer. */
   const match = (
     item: PlanItem,
@@ -671,7 +718,6 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     values: Array<string | number>,
     outcome: RawOutcome,
     plan: ToolPlan,
-    displayed: unknown,
     /** The ids as the backend knows them (restored by the PII shield), compared with the answer. */
     wanted: Array<string | number>,
   ): SubjectOutcome => {
@@ -691,14 +737,12 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     }
     const declaration = source.declaration;
     const speaking = (item.ref.idKind ?? entityIdKindOf(declaration)) === 'speaking';
-    // The same path as the model sees the result; the display copy is read at the same position.
+    // The same path as the model sees the result.
     const steps = entityPathOf(declaration, outcome.value);
     const records = steps ? objectsAt(outcome.value, steps, MAX_LOOKUP_LIST_ENTRIES + 1) : [];
-    const shown = steps ? objectsAt(displayed, steps, MAX_LOOKUP_LIST_ENTRIES + 1) : [];
     const overflow = records.length > MAX_LOOKUP_LIST_ENTRIES;
-    const identities = records.slice(0, MAX_LOOKUP_LIST_ENTRIES).map((record, index) => ({
+    const identities = records.slice(0, MAX_LOOKUP_LIST_ENTRIES).map((record) => ({
       identity: declaredIdentityOf(record, declaration),
-      shown: shown[index],
     }));
     const known = identities.filter((entry) => entry.identity !== undefined);
     const hits = known.filter(({ identity }) => identity!.idValues.every((part, index) => sameId(part, wanted[index]!, speaking)));
@@ -719,7 +763,8 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       }
       return unchecked(item, values, 'not_in_page');
     }
-    const shownIdentity = (entry: (typeof hits)[number]) => (entry.shown ? declaredIdentityOf(entry.shown, declaration) : undefined);
+    // Raw values of the identified record only; `present` shields them for the card.
+    const shownIdentity = (entry: (typeof hits)[number]) => entry.identity;
     if (hits.length > 1) {
       const subject = baseSubject(item, values, 'ambiguous', 'found');
       const candidates = hits.slice(0, 10)
@@ -822,13 +867,9 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       tasks.push(source === undefined || params === undefined
         ? Promise.resolve(unchecked(item, ids, 'source_unavailable'))
         : lookUp(source.name, source.tool, params, deadline).then(async (outcome) => {
+          const found = match(item, source, ids, outcome, plan, wanted);
           // Only what reaches the browser is shielded (bounded like the lookup); a recheck compares the raw values.
-          const displayed = outcome.kind === 'ok' && forDisplay
-            ? await guarded(displayOf(outcome), deadline)
-            : outcome.kind === 'ok' ? outcome.value : undefined;
-          if (displayed === SHIELD_TIMEOUT) return unchecked(item, ids, 'timeout');
-          if (displayed === SHIELD_FAILED) return unchecked(item, ids, 'unavailable');
-          return match(item, source, ids, outcome, plan, displayed, wanted);
+          return forDisplay ? present(found, item, ids, deadline) : found;
         }));
     }
     const previewTask = plan.preview

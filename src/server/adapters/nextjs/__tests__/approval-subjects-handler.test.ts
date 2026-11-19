@@ -171,6 +171,7 @@ describe('server approval subjects in the chat handler', () => {
       anonymizeResult: async (value: unknown) => {
         const copy = JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
         delete copy.displayName;
+        delete copy.name;
         return copy;
       },
       getComplianceSummary: () => ({}),
@@ -232,6 +233,25 @@ describe('server approval subjects in the chat handler', () => {
     const { chunks } = await turn({ ...config, piiShield: shield });
     expect(subjectsPart(chunks)!.data.subjects[0]).toMatchObject({ status: 'named', name: '[PERSON_1]' });
     expect(JSON.stringify(chunks)).not.toContain('Alice Example');
+  });
+
+  it('shields exactly the identified record: a shield that drops or reorders list entries never names another one', async () => {
+    const shield = {
+      outbound: async (text: string) => text,
+      inbound: (text: string) => text,
+      rehydrateArgs: (args: Record<string, unknown>) => args,
+      // Drops the first entry of any list and reverses the rest, as a careless shield might.
+      anonymizeResult: async (value: unknown) => JSON.parse(JSON.stringify(value), (_key, child: unknown) => (
+        Array.isArray(child) ? child.slice(1).reverse() : child)),
+      getComplianceSummary: () => ({}),
+      clearSession: () => {},
+    } as unknown as PiiShield;
+    const backend = fakeBackend({ 'GET /channels': () => ok([{ key: 'cafe', title: 'Cafe' }, { key: 'lobby', title: 'Lobby screens' }, { key: 'foyer', title: 'Foyer' }]) });
+    const { model } = callingModel([{ toolName: 'delete_channel', input: { key: 'lobby' } }]);
+    const { chunks } = await turn({
+      tools: referenceTools(), model, systemPrompt: 'A', approvalSecret: SECRET, endpointCaller: backend.endpointCaller, piiShield: shield,
+    });
+    expect(subjectsPart(chunks)!.data.subjects[0]).toMatchObject({ status: 'named', name: 'Lobby screens', id: 'lobby' });
   });
 
   it('types the subject by its declaration: playlist 3, never user 3 (SA-05)', async () => {
