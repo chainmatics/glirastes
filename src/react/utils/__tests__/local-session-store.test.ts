@@ -409,6 +409,15 @@ describe('maxMessagesPerSession', () => {
     expect(entry!.messageCount).toBe(2);
   });
 
+  it('keeps the derived title when the trimmed list is saved again', async () => {
+    const s = capped(2);
+    await s.save!('default', [user('Erste Frage'), assistant('b'), user('c'), assistant('d')]);
+    const loaded = (await s.load!('default')) as ChatMessage[];
+    await s.save!('default', [...loaded, user('e'), assistant('f')]);
+    const [entry] = await s.list!();
+    expect(entry!.title).toBe('Erste Frage');
+  });
+
   it('writes no blobs for dropped messages', async () => {
     const files = createMemoryAttachmentStore();
     const put = vi.spyOn(files, 'put');

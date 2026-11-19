@@ -282,7 +282,8 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       const messages = tail(allMessages, maxMessages);
       const list = entries();
       const existing = list.find((entry) => entry.id === conversationId) ?? fresh(conversationId);
-      const derived = existing.named ? null : titleFrom(allMessages);
+      // Derived once: after a trim the first user message is no longer the first question.
+      const derived = existing.named || existing.title !== newTitle ? null : titleFrom(allMessages);
       const entry: Entry = {
         ...existing,
         title: derived ?? existing.title,
