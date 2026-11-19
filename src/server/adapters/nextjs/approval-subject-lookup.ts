@@ -534,13 +534,8 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   };
 
   /** One lookup through a source: validated input, authorization, cache, limits. */
-  const lookUp = async (name: string, tool: Tool, modelParams: Record<string, unknown>, deadline: number): Promise<RawOutcome> => {
+  const lookUp = async (name: string, tool: Tool, params: Record<string, unknown>, deadline: number): Promise<RawOutcome> => {
     options.signal?.throwIfAborted();
-    // The values come from the model's call: with a PII shield they are pseudonyms, restored as for the tool call itself.
-    const restored = await guarded(rehydrate(modelParams), deadline);
-    if (restored === SHIELD_TIMEOUT) return { kind: 'unchecked', reason: 'timeout' };
-    if (restored === SHIELD_FAILED) return { kind: 'unchecked', reason: 'unavailable' };
-    const params = restored;
     const parsed = tool.inputSchema.safeParse(params);
     if (!parsed.success) return { kind: 'invalid' };
     if (rateLimited.has(name)) return { kind: 'unchecked', reason: 'rate_limited' };
@@ -654,10 +649,13 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   const match = (
     item: PlanItem,
     source: LookupSource,
+    /** The ids as the call carries them (shown on the card). */
     values: Array<string | number>,
     outcome: RawOutcome,
     plan: ToolPlan,
     displayed: unknown,
+    /** The ids as the backend knows them (restored by the PII shield), compared with the answer. */
+    wanted: Array<string | number>,
   ): SubjectOutcome => {
     const type = item.ref.type;
     switch (outcome.kind) {
@@ -685,7 +683,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       shown: shown[index],
     }));
     const known = identities.filter((entry) => entry.identity !== undefined);
-    const hits = known.filter(({ identity }) => identity!.idValues.every((part, index) => sameId(part, values[index]!, speaking)));
+    const hits = known.filter(({ identity }) => identity!.idValues.every((part, index) => sameId(part, wanted[index]!, speaking)));
     if (hits.length === 0) {
       // No record of the declared shape where the declaration says: the answer is not what was declared.
       if (known.length === 0 && (records.length > 0 || source.result === 'one' || !steps || !listPresent(outcome.value, steps))) {
@@ -771,6 +769,11 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   }> => {
     const startedAt = now();
     const deadline = startedAt + lookupTimeout();
+    // The model's values are pseudonyms under a PII shield: the backend is asked, and its answer
+    // compared, with the originals of the same shield session, as for the tool call itself.
+    const restoredInput = isRecordValue(input) && options.shield ? await guarded(rehydrate(input), deadline) : input;
+    const shieldFailure = restoredInput === SHIELD_TIMEOUT ? 'timeout' : restoredInput === SHIELD_FAILED ? 'unavailable' : undefined;
+    const backendInput = shieldFailure ? input : restoredInput;
     let slots = limits.maxSubjectsPerCall;
     const tasks: Array<Promise<SubjectOutcome>> = [];
     for (const item of plan.items) {
@@ -783,8 +786,14 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         continue;
       }
       slots -= 1;
+      if (shieldFailure) {
+        tasks.push(Promise.resolve(unchecked(item, ids, shieldFailure)));
+        continue;
+      }
+      const restored = item.args.map((arg) => valueAt(backendInput, arg));
+      const wanted = restored.every(isEntityIdValue) ? restored as Array<string | number> : ids;
       const source = item.source;
-      const params = source ? paramsFor(source, ids, plan.refs, input) : undefined;
+      const params = source ? paramsFor(source, wanted, plan.refs, backendInput) : undefined;
       tasks.push(source === undefined || params === undefined
         ? Promise.resolve(unchecked(item, ids, 'source_unavailable'))
         : lookUp(source.name, source.tool, params, deadline).then(async (outcome) => {
@@ -794,10 +803,14 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
             : outcome.kind === 'ok' ? outcome.value : undefined;
           if (displayed === SHIELD_TIMEOUT) return unchecked(item, ids, 'timeout');
           if (displayed === SHIELD_FAILED) return unchecked(item, ids, 'unavailable');
-          return match(item, source, ids, outcome, plan, displayed);
+          return match(item, source, ids, outcome, plan, displayed, wanted);
         }));
     }
-    const previewTask = plan.preview ? previewOf(plan, input, deadline, slots <= 0) : undefined;
+    const previewTask = plan.preview
+      ? (shieldFailure
+        ? Promise.resolve<ApprovalPreviewData>({ check: 'unchecked', reason: shieldFailure, fields: [] })
+        : previewOf(plan, backendInput, deadline, slots <= 0))
+      : undefined;
     try {
       const [outcomes, preview] = await Promise.all([Promise.all(tasks), previewTask]);
       return { outcomes, ...(preview ? { preview } : {}) };

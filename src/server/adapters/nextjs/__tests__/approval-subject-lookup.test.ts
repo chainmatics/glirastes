@@ -184,8 +184,20 @@ describe('approval subject lookups', () => {
     });
     await byKey.resolver.resolve({ toolName: 'delete_channel', toolCallId: 'c1', input: { key: '[KEY_1]' } });
     expect(byKey.backend.calls.map((call) => call.path)).toEqual(['/channels?key=lobby']);
-    expect(backend.calls).toHaveLength(0);
-    expect(resolver.isDeclared('delete_channel')).toBe(true);
+    // Matched with the original, shown as the call carries it.
+    expect(byKey.resolver.take('c1')!.part.subjects[0]).toMatchObject({ status: 'named', name: 'Lobby screens', id: '[KEY_1]' });
+    // A complete list without a shielded parameter: the original key is found on it, never "not found".
+    expect(await resolver.resolve({ toolName: 'delete_channel', toolCallId: 'c2', input: { key: '[KEY_1]' } })).toBeUndefined();
+    expect(resolver.take('c2')!.part.subjects[0]).toMatchObject({ status: 'named' });
+    expect(backend.calls).toHaveLength(1);
+    // A recheck compares the originals too.
+    const recheckRegistry = referenceTools();
+    (recheckRegistry.delete_channel as { approvalSubject?: unknown }).approvalSubject = { recheck: 'exists' };
+    const rechecked = resolverFor({ 'GET /channels': () => ok([{ key: 'lobby', title: 'Lobby screens' }]) }, {
+      registry: recheckRegistry, shield: { shield, sessionId: () => 's1' },
+    });
+    expect(await rechecked.resolver.recheck({ toolName: 'delete_channel', input: { key: '[KEY_1]' }, digestOf: () => '' })).toBeUndefined();
+    expect(await rechecked.resolver.recheck({ toolName: 'delete_channel', input: { key: 'garage' }, digestOf: () => '' })).toBe('approval_subject_gone');
   });
 
   it('never refuses a call for a preview whose shield fails', async () => {
