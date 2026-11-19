@@ -12,6 +12,7 @@ import { ChatContext, type ChatContextValue } from './chat-context.js';
 import type {
   ActivityLogConfig,
   ActivityLogDetails,
+  ApprovalDisplayConfig,
   AiChatProviderConfig,
   ChatMessage,
   ChatTransport,
@@ -27,9 +28,8 @@ import type {
 import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { resolveAttachmentOptions } from '../utils/attachments.js';
-import { collectEntitySightings, collectSeenEntityIds, isUuidLike, userTextsOf } from '../utils/entity-names.js';
 import { sanitizeEntityDeclarations, type EntityDeclarationsByTool } from '../../contracts/entity-declaration.js';
-import { resolveApprovalSubjects } from '../utils/approval-subjects.js';
+import { describeApprovalCall } from '../utils/describe-approval.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
 import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
 import { resolveToolResultConfig } from '../utils/tool-result-config.js';
@@ -107,6 +107,12 @@ export const DEFAULT_LOCALE: ChatLocale = {
   activityStepCountLabel: '×{count}',
   activitySummarySeparator: ', ',
   activityApprovalNotUsedDetail: 'The approval could not be used',
+  approvalEntryRunningLabel: 'Approved, running',
+  approvalEntryDoneLabel: 'Approved, done',
+  approvalEntryFailedLabel: 'Approved, failed',
+  approvalEntryExpectedLabel: 'Approved, without result',
+  approvalEntryDeclinedLabel: 'Declined',
+  approvalEntryNotRunLabel: 'Approved, not run',
   planTitle: 'Plan',
   chatTitle: 'AI Assistant',
   closeChatAriaLabel: 'Close chat',
@@ -471,6 +477,7 @@ export function AiChatProvider({
   onBeforeSend,
   approvalDescription: userApprovalDescription,
   approvalSubjects = true,
+  approvalDisplay: userApprovalDisplay,
   entityDeclarations,
   continueMessage = 'Please continue.',
   toolLabels: userToolLabels,
@@ -580,6 +587,13 @@ export function AiChatProvider({
     };
   }, [toolLabels, language]);
   const approvalDescriptionFn = userApprovalDescription ?? derivedApprovalDescription;
+  // Keyed on the fields, so an inline `approvalDisplay={{ … }}` does not re-render every message.
+  const approvalDecided = userApprovalDisplay?.decided === 'entry' ? 'entry' : 'none';
+  const approvalOpen = userApprovalDisplay?.open === 'inline' ? 'inline' : 'panel';
+  const approvalDisplayConfig = useMemo<Required<ApprovalDisplayConfig>>(
+    () => ({ decided: approvalDecided, open: approvalOpen }),
+    [approvalDecided, approvalOpen],
+  );
 
   // Approvals state (Map for O(1) lookup)
   const [pendingApprovalsMap, setPendingApprovalsMap] = useState<Map<string, PendingApproval>>(new Map());
@@ -1055,42 +1069,15 @@ export function AiChatProvider({
           !handledApprovalIdsRef.current.has(toolPart.approval.id)
         ) {
           handledApprovalIdsRef.current.add(toolPart.approval.id);
-          const declared = declarationsRef.current;
-          const sightings = collectEntitySightings(rawMessages, declared);
-          const inputEntities = declared && Object.prototype.hasOwnProperty.call(declared, toolName)
-            ? declared[toolName]!.input
-            : undefined;
-          // Display only, from the browser's own history (not a trust boundary):
-          // the approved arguments stay exactly what the call carries.
-          const resolved = resolveApprovalSubjects(toolPart.input, sightings, collectSeenEntityIds(rawMessages, declared), {
+          const pending = describeApprovalCall({
             toolName,
-            ...(inputEntities ? { inputEntities, userTexts: userTextsOf(rawMessages), declarations: declared } : {}),
+            approvalId: toolPart.approval.id,
+            input: toolPart.input,
+            messages: rawMessages,
+            declarations: declarationsRef.current,
+            describe: approvalDescriptionRef.current,
+            withSubjects: approvalSubjectsRef.current,
           });
-          const names = new Map([...sightings].map(([id, seen]) => [id, seen.name]));
-          // An id seen for records of different kinds names the record this call picks, or
-          // none (also when the call uses it for two kinds: `nameLabels` look up by id only).
-          const picked = new Map<string, string | undefined>();
-          for (const subject of resolved) {
-            const key = subject.id.toLowerCase();
-            if (!sightings.get(key)?.kinds) continue;
-            const name = subject.status === 'named' ? subject.name : undefined;
-            picked.set(key, picked.has(key) && picked.get(key) !== name ? undefined : name);
-          }
-          for (const [key, seen] of sightings) {
-            // A UUID is one record wherever it occurs: never a collision.
-            if (!seen.kinds || isUuidLike(key)) continue;
-            const name = picked.get(key);
-            if (name) names.set(key, name);
-            else names.delete(key);
-          }
-          const described = approvalDescriptionRef.current(
-            toolName,
-            toolPart.approval.id,
-            toolPart.input,
-            { names },
-          );
-          const subjects = approvalSubjectsRef.current ? resolved : [];
-          const pending = subjects.length > 0 ? { ...described, subjects } : described;
           setPendingApprovalsMap(prev => new Map(prev).set(toolPart.approval!.id, pending));
         }
 
@@ -1798,6 +1785,8 @@ export function AiChatProvider({
       reject,
       isProcessingApproval: processingApprovalIds.size > 0,
       approvalDescription: approvalDescriptionRef.current,
+      approvalSubjects,
+      approvalDisplay: approvalDisplayConfig,
       truncation,
       continueTruncation,
       dismissTruncation,
@@ -1850,6 +1839,8 @@ export function AiChatProvider({
       toolLabels,
       toolResultConfig,
       activityLogConfig,
+      approvalSubjects,
+      approvalDisplayConfig,
       toolRendererRegistry,
       attachmentOptions,
       voiceConfig,

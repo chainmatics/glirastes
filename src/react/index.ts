@@ -66,6 +66,13 @@ export type {
   MessagePartNodes,
   MessageParts,
   MessagePartsProps,
+  MessagePartEntry,
+  MessagePartKind,
+  ToolPartApproval,
+  ApprovalDecision,
+  ApprovalOutcome,
+  ApprovalEntryProps,
+  ApprovalDisplayConfig,
   VoiceInputConfig,
   VoicePushToTalkConfig,
   // Mention chips
@@ -251,6 +258,7 @@ export { MentionInput } from './components/mention-input.js';
 export { RichMentionInput } from './components/rich-mention-input.js';
 export { ChatWindow } from './components/chat-window.js';
 export { ApprovalCard } from './components/approval-card.js';
+export { ApprovalEntry, approvalOutcomeText } from './components/approval-entry.js';
 export { BulkApprovalCard } from './components/bulk-approval-card.js';
 export { PipelineTimeline } from './components/pipeline-timeline.js';
 export { ActivityLog, TurnNotice, type ActivityLogProps } from './components/activity-log.js';
@@ -329,6 +337,8 @@ export {
 export {
   EntityLinkChip,
   EntityText,
+  MentionMarkers,
+  markdownWithMentionMarkers,
   useChatEntityLinks,
   type ChatEntityLinks,
 } from './entity-links/entity-links-react.js';
