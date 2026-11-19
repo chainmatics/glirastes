@@ -339,20 +339,32 @@ function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultO
     if (!isPlainObject(value)) return undefined;
     const [step, ...rest] = steps;
     const child = value[step!.key];
+    // Lists keep their positions (`undefined` where nothing is declared) until projections are joined.
     const below = step!.each
-      ? (Array.isArray(child) ? child.map((item) => project(item, rest, inner, level)).filter((item) => item !== undefined) : [])
+      ? (Array.isArray(child) ? child.map((item) => project(item, rest, inner, level)) : [])
       : project(child, rest, inner, level);
-    if (below === undefined || (Array.isArray(below) && below.length === 0)) return undefined;
+    if (below === undefined || (Array.isArray(below) && below.every((item) => item === undefined))) return undefined;
     return { [step!.key]: below };
   };
-  /** Joins two projections of one entry (`meta.owner` and `meta.editor`). */
+  /** Joins two projections of one entry (`meta.owner` and `meta.editor`, `items[].owner` and `items[].editor`). */
   const merge = (left: unknown, right: unknown): unknown => {
+    if (left === undefined) return right;
+    if (right === undefined) return left;
     if (isPlainObject(left) && isPlainObject(right)) {
       const output: Record<string, unknown> = { ...left };
       for (const key of Object.keys(right)) setOwn(output, key, key in output ? merge(output[key], right[key]) : right[key]);
       return output;
     }
+    if (Array.isArray(left) && Array.isArray(right)) {
+      return Array.from({ length: Math.max(left.length, right.length) }, (_, index) => merge(left[index], right[index]));
+    }
     return left;
+  };
+  /** A joined projection without the positions nothing was declared at. */
+  const settle = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.filter((item) => item !== undefined).map(settle);
+    if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, settle(item)]));
+    return value;
   };
   const keysInOrder = (kept: ReadonlySet<string>): string[] => [
     ...(declared
@@ -370,6 +382,7 @@ function compactHistoryResultOnce(value: unknown, options: CompactHistoryResultO
       const projected = project(entry, steps, inner, level);
       if (isPlainObject(projected)) extra = merge(extra, projected) as Record<string, unknown>;
     }
+    extra = settle(extra) as Record<string, unknown>;
     for (const key of Object.keys(extra)) fields.push([key, extra[key]]);
     return fields;
   };

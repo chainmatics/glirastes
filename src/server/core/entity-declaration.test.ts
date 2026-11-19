@@ -599,6 +599,29 @@ describe('declared paths of overviews and nested ids in the history', () => {
     });
   });
 
+  it('joins two declarations under one nested list by position', () => {
+    const value = { data: Array.from({ length: 30 }, (_, index) => ({
+      id: index, text: 't'.repeat(80),
+      items: [
+        { owner: { userNo: index, nick: 'o' }, editor: { userNo: 100 + index, nick: 'e' } },
+        { owner: { userNo: 200 + index, nick: 'p' } },
+      ],
+    })) };
+    const compacted = compactHistoryResult(value, {
+      entities: [
+        { type: 'user', id: 'userNo', name: 'nick', path: 'data[].items[].owner' },
+        { type: 'user', id: 'userNo', name: 'nick', path: 'data[].items[].editor' },
+      ],
+    }) as Entry;
+    expect((compacted.data as Entry[])[20]).toEqual({
+      id: 20,
+      items: [
+        { owner: { userNo: 20, nick: 'o' }, editor: { userNo: 120, nick: 'e' } },
+        { owner: { userNo: 220, nick: 'p' } },
+      ],
+    });
+  });
+
   it('drops a guessed name of a composite key part', () => {
     const value = { data: [{ id: 'abc123456', revision: 'def123456', title: 'Dokument' }] };
     const labels: IdLabels = new Map();
