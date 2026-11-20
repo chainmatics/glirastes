@@ -17,6 +17,15 @@ available in `integrating-glirastes-web` when that optional skill is installed.
 3. A real sidecar is an exception for local-only interfaces or coupled lifecycle.
    V1 offers neither HA nor multiple active runtimes in one app/environment.
 
+## Package dependencies in a Node host
+
+The SDK depends on `zod` 4 (`^4.0.0`). An app on zod 4 shares its copy; an app
+on zod 3 gets a second zod 4 copy for the SDK. App schemas keep working because
+the SDK reads schemas by shape; the cost is disk and bundle size, and the zod 4
+contract schemas the SDK exports cannot be nested in zod 3 schemas. Do not
+upgrade the app's zod only for the SDK. `pg` (`>=8.11 <9`) is used only by the
+`glirastes-runtime` binary; any pg 8.11+ the app has is shared.
+
 ## Container input contract
 
 The official public image is
