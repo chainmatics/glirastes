@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UiActionBus } from '../../../browser/ui-action-bus.js';
 import type { EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
@@ -42,11 +42,21 @@ function Chat({ entityLinks, entityDeclarations }: { entityLinks: ChatEntityLink
   );
 }
 
+/**
+ * The "Open Lobby screens" chips once `count` are shown. Waits with a plain selector, then checks the
+ * role once: a *ByRole query computes styles for every element of the panel, and polled on each DOM
+ * change it held the event loop so long under load that the chips it waited for missed the 1 s budget.
+ */
+async function lobbyChips(count: number): Promise<HTMLElement[]> {
+  await waitFor(() => expect(document.querySelectorAll('button[aria-label="Open Lobby screens"]')).toHaveLength(count));
+  return screen.getAllByRole('button', { name: 'Open Lobby screens' });
+}
+
 describe('entity links from declarations', () => {
   it('D1: links the declared records of any tool result; D5 default links in user messages too', async () => {
     const open = vi.fn();
     render(<Chat entityLinks={{ open }} entityDeclarations={DECLARED} />);
-    const chips = await screen.findAllByRole('button', { name: 'Open Lobby screens' });
+    const chips = await lobbyChips(2);
     expect(chips).toHaveLength(2);
     fireEvent.click(chips[1]!);
     expect(open).toHaveBeenCalledWith({ type: 'channel', id: 'lobby', label: 'Lobby screens' });
@@ -60,7 +70,7 @@ describe('entity links from declarations', () => {
 
   it('D5: scope assistant leaves the user message as text', async () => {
     render(<Chat entityLinks={{ open: vi.fn(), scope: 'assistant' }} entityDeclarations={DECLARED} />);
-    expect(await screen.findAllByRole('button', { name: 'Open Lobby screens' })).toHaveLength(1);
+    expect(await lobbyChips(1)).toHaveLength(1);
   });
 
   it('D3 and D4: knownEntities reads the messages and its data reaches open', async () => {
@@ -69,7 +79,7 @@ describe('entity links from declarations', () => {
       ? [{ type: 'channel', id: 'lobby', label: 'Lobby screens', data: { floor: 2 } }]
       : []));
     render(<Chat entityLinks={{ open, knownEntities }} />);
-    const chips = await screen.findAllByRole('button', { name: 'Open Lobby screens' });
+    const chips = await lobbyChips(2);
     fireEvent.click(chips.at(-1)!);
     expect(knownEntities).toHaveBeenCalled();
     expect(open).toHaveBeenCalledWith({ type: 'channel', id: 'lobby', label: 'Lobby screens', data: { floor: 2 } });
@@ -92,6 +102,6 @@ describe('entity links from declarations', () => {
     await screen.findByText('Lobby screens is live.');
     expect(screen.queryByRole('button', { name: 'Open Lobby screens' })).toBeNull();
     act(() => push?.({ type: 'data-tool-entities', data: { tools: DECLARED } }));
-    expect(await screen.findAllByRole('button', { name: 'Open Lobby screens' })).toHaveLength(2);
+    expect(await lobbyChips(2)).toHaveLength(2);
   });
 });
