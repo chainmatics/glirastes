@@ -73,7 +73,7 @@ function renderTrigger(id: string, triggers: ReadonlyArray<ResolvedChatTrigger> 
       data-trigger={trigger.char}
       aria-label={label}
       title={label}
-      disabled={controls.isLoading}
+      disabled={!controls.canCompose}
       onMouseDown={keepFocus}
       onClick={() => controls.openCompletion({ trigger: trigger.char })}
     >

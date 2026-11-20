@@ -285,4 +285,80 @@ describe('composer toolbar', () => {
     expect(sequence(container.querySelector('form')!)).toEqual(['textarea', 'send']);
     expect(warn).not.toHaveBeenCalled();
   });
+
+  describe('gating on canCompose', () => {
+    const triggers = [{ char: '@', label: 'Mention someone' }];
+    const seen: ChatComposerInputControls[] = [];
+    const config: ComposerConfig = {
+      toolbar: { end: ['trigger:@', 'spy', 'send'] },
+      items: { spy: { label: 'Spy', render: (controls) => { seen.push(controls); return null; } } },
+    };
+    function Streaming({ status, queue }: { status: ChatTransport['status']; queue: boolean }) {
+      const chat = useMemo(() => transport(), []);
+      const current = useMemo(() => ({ ...chat, status }), [chat, status]);
+      const chatInteractions = useMemo(() => ({ entities: [person], commands }), []);
+      return (
+        <AiChatProvider
+          transport={current}
+          chatInteractions={chatInteractions}
+          triggers={triggers}
+          composer={config}
+          {...(queue ? { queue: { enabled: true } } : {})}
+        >
+          <MentionInput />
+        </AiChatProvider>
+      );
+    }
+    beforeEach(() => { seen.length = 0; });
+
+    it('keeps the trigger button usable while a turn streams with the queue on', async () => {
+      render(<Streaming status="streaming" queue />);
+      const last = seen[seen.length - 1]!;
+      expect(last.isLoading).toBe(true);
+      expect(last.canCompose).toBe(true);
+      const button = screen.getByRole('button', { name: 'Mention someone' }) as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+      // Stop and send both show, as in the queue's composer.
+      expect(document.querySelector('[data-action="stop"]')).not.toBeNull();
+      expect(document.querySelector('[data-action="send"]')).not.toBeNull();
+      fireEvent.click(button);
+      expect(screen.getByRole('textbox').textContent).toBe('@');
+      await waitFor(() => expect(screen.getByRole('option', { name: /Müller/ })).toBeTruthy());
+    });
+
+    it('disables the trigger button and ignores openCompletion while loading without the queue', () => {
+      render(<Streaming status="streaming" queue={false} />);
+      const last = seen[seen.length - 1]!;
+      expect(last.isLoading).toBe(true);
+      expect(last.canCompose).toBe(false);
+      expect((screen.getByRole('button', { name: 'Mention someone' }) as HTMLButtonElement).disabled).toBe(true);
+      act(() => { last.openCompletion({ trigger: '@' }); });
+      expect(screen.getByRole('textbox').textContent).toBe('');
+      expect(screen.queryByRole('listbox')).toBeNull();
+    });
+
+    it('reports canCompose true while idle without the queue', () => {
+      render(<Streaming status="ready" queue={false} />);
+      const last = seen[seen.length - 1]!;
+      expect(last.isLoading).toBe(false);
+      expect(last.canCompose).toBe(true);
+    });
+
+    it('hands canCompose to items in the plain input', () => {
+      const plain: ChatComposerInputControls[] = [];
+      function Plain({ status }: { status: ChatTransport['status'] }) {
+        const chat = useMemo(() => transport(), []);
+        const current = useMemo(() => ({ ...chat, status }), [chat, status]);
+        const composer = useMemo<ComposerConfig>(() => ({
+          toolbar: { end: ['spy', 'send'] },
+          items: { spy: { label: 'Spy', render: (controls) => { plain.push(controls); return null; } } },
+        }), []);
+        return <AiChatProvider transport={current} composer={composer}><ChatInput /></AiChatProvider>;
+      }
+      const { rerender } = render(<Plain status="ready" />);
+      expect(plain[plain.length - 1]!.canCompose).toBe(true);
+      rerender(<Plain status="streaming" />);
+      expect(plain[plain.length - 1]!.canCompose).toBe(false);
+    });
+  });
 });

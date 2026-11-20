@@ -175,7 +175,11 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
 
   const focus = useCallback(() => { inputRef.current?.focus(); }, []);
 
+  // Read at call time: a toolbar button may hold controls from before the turn started.
+  const canComposeRef = useRef(canCompose);
+  canComposeRef.current = canCompose;
   const openCompletion = useCallback((completion: OpenCompletionOptions) => {
+    if (!canComposeRef.current) return;
     inputRef.current?.openCompletion?.(completion);
   }, []);
 
@@ -249,6 +253,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   const composer: ChatComposerInput = {
     value,
     isLoading,
+    canCompose,
     canSend: (value.trim().length > 0 || attachments.length > 0) && canCompose,
     attachments,
     attachmentError: attachmentProblem ? describeProblem(attachmentProblem, locale) : null,

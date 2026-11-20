@@ -1217,7 +1217,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
      */
     const armTrigger = useCallback((trigger: unknown, query: string, caller: 'open' | 'pick'): string | null => {
       const editor = editableRef.current;
-      if (!hasMentionSupport || !editor) return null;
+      // A locked editor (e.g. a turn without queue) takes no trigger text from code either.
+      if (!hasMentionSupport || !editor || disabled) return null;
       if (typeof trigger !== 'string' || !triggers.has(trigger)) {
         const key = String(trigger);
         if (!warnedTriggersRef.current.has(key)) {
@@ -1285,7 +1286,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       selection?.addRange(caret);
       armedRef.current = { node, start: offset, text, created };
       return trigger;
-    }, [hasMentionSupport, triggers, removeArmed]);
+    }, [hasMentionSupport, disabled, triggers, removeArmed]);
 
     const openCompletion = useCallback((options: OpenCompletionOptions) => {
       if (pickQueueRef.current) {

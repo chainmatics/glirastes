@@ -91,6 +91,7 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
   const controls = useMemo<ChatComposerInputControls>(() => ({
     value,
     isLoading,
+    canCompose,
     canSend: canCompose && value.trim().length > 0,
     attachments: NO_ATTACHMENTS,
     attachmentError: null,

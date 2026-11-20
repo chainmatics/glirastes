@@ -2135,8 +2135,15 @@ export interface UseChatComposerInputOptions {
 export interface ChatComposerInputControls {
   /** Current text including `@`/`/` tokens. */
   readonly value: string;
+  /** A turn is running. Use `canCompose` to ask whether the composer may be changed. */
   readonly isLoading: boolean;
-  /** Non-blank text or an attachment, and not loading. */
+  /**
+   * Whether the editor accepts input, as the built-in input and toolbar use it:
+   * with `queue.enabled` also while a turn streams, without it only while no
+   * turn runs and the session is ready. `openCompletion` does nothing while false.
+   */
+  readonly canCompose: boolean;
+  /** Non-blank text or an attachment, and `canCompose`. */
   readonly canSend: boolean;
   /** Files waiting to be sent with the next message. */
   readonly attachments: ReadonlyArray<ChatAttachment>;
@@ -2160,6 +2167,7 @@ export interface ChatComposerInputControls {
   /**
    * Opens a completion list as if the user typed `trigger` (+ `query`), e.g.
    * from a toolbar button. Closing it untouched removes the inserted text.
+   * Does nothing while `canCompose` is false.
    */
   openCompletion(options: OpenCompletionOptions): void;
 }

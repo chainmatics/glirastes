@@ -345,4 +345,42 @@ describe('composer plus menu', () => {
     fireEvent.click(menuItems()[0]!);
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Hallo');
   });
+
+  it('stays open and usable while a turn streams with the queue on', async () => {
+    function Streaming({ status }: { status: ChatTransport['status'] }) {
+      const chat = useMemo(() => transport(), []);
+      const current = useMemo(() => ({ ...chat, status }), [chat, status]);
+      const chatInteractions = useMemo(() => ({ entities: [person] }), []);
+      return (
+        <AiChatProvider transport={current} attachments chatInteractions={chatInteractions} triggers={TRIGGERS} composer={plusAtStart} queue={{ enabled: true }}>
+          <MentionInput />
+        </AiChatProvider>
+      );
+    }
+    const { rerender } = render(<Streaming status="ready" />);
+    openMenu();
+    rerender(<Streaming status="streaming" />);
+    expect(screen.getByRole('menu')).toBeTruthy();
+    expect((plusButton() as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Mention' }));
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('textbox').textContent).toBe('@');
+    await waitFor(() => expect(screen.getByRole('option', { name: /Müller/ })).toBeTruthy());
+  });
+
+  it('is disabled while loading without the queue', () => {
+    function Streaming() {
+      const chat = useMemo(() => ({ ...transport(), status: 'streaming' as const }), []);
+      return (
+        <AiChatProvider transport={chat} attachments composer={plusAtStart}>
+          <MentionInput />
+        </AiChatProvider>
+      );
+    }
+    render(<Streaming />);
+    expect((plusButton() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(plusButton());
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
 });
+

@@ -7,7 +7,7 @@ import { useChatComposerInput } from '../../hooks/use-chat-composer-input.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import type { ChatCompletionProvider, ChatTransport, MentionResult, RichMentionInputHandle } from '../../types.js';
 import { MentionInput } from '../mention-input.js';
-import { RichMentionInput } from '../rich-mention-input.js';
+import { RichMentionInput, pickCompletionOf } from '../rich-mention-input.js';
 import { createCompletionSearch } from '../../completions/completion-search.js';
 
 function transport(): ChatTransport {
@@ -73,6 +73,20 @@ describe('RichMentionInput openCompletion', () => {
     expect(search).toHaveBeenCalledWith('', '@');
     await screen.findByRole('listbox');
     expect(ref.current!.getValue()).toBe('@');
+  });
+
+  it('does nothing on a disabled editor, neither openCompletion nor pickCompletion', () => {
+    const ref = createRef<RichMentionInputHandle>();
+    const search = vi.fn(async () => results);
+    const onChange = vi.fn();
+    render(<RichMentionInput ref={ref} disabled onSearch={search} onChange={onChange} triggers={['@']} />);
+    const editor = screen.getByRole('textbox');
+    act(() => { ref.current!.openCompletion!({ trigger: '@' }); });
+    act(() => { pickCompletionOf(ref.current)?.(results[0]!, { trigger: '@' }); });
+    expect(editor.textContent).toBe('');
+    expect(search).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole('listbox')).toBeNull();
   });
 
   it('adds a space before the trigger when the text ends without one', async () => {

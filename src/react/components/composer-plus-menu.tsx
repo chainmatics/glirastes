@@ -169,10 +169,11 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
   // Without rows (e.g. a source still loading or empty) no empty menu box is shown.
   const menuShown = open && rowCount > 0;
 
-  // A turn that starts disables the button: the menu closes, so the focus never goes back to it.
+  // A locked composer disables the button: the menu closes, so the focus never goes back to it.
+  // With `queue.enabled` the composer stays open while a turn streams, and so does the menu.
   useEffect(() => {
-    if (controls.isLoading) setOpen(false);
-  }, [controls.isLoading]);
+    if (!controls.canCompose) setOpen(false);
+  }, [controls.canCompose]);
   useEffect(() => {
     if (open && index >= 0) rowRefs.current[index]?.focus();
   }, [open, index]);
@@ -183,6 +184,11 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
   };
 
   const choose = (row: MenuRow) => {
+    // A row chosen in the same tick the composer locked does nothing.
+    if (!controls.canCompose) {
+      close(null);
+      return;
+    }
     close(row.focus);
     row.run();
   };
@@ -255,7 +261,7 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
         // The menu element, not the open state: while it has no rows nothing shows.
         aria-expanded={menuShown}
         {...(menuShown ? { 'aria-controls': menuId } : {})}
-        disabled={controls.isLoading}
+        disabled={!controls.canCompose}
         onClick={() => (open ? close(null) : openMenu('first'))}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
