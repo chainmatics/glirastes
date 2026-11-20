@@ -176,6 +176,9 @@ glirastes doctor
 - In a chat longer than the threshold, a fact from the first message is still
   answered correctly, and the stored assistant messages carry a
   `data-memory-summary` part.
+  A summary that finishes after the answer arrives after `finish`: a custom
+  client reads until the stream closes (see `handler-options.md` in
+  `integrating-glirastes-nextjs`, order of parts at the end of the stream).
 - "Remember that ..." stores a user note; a new chat of the same user knows
   it; another user does not.
 - A shared note asks for confirmation, is stored after it, and a second user
