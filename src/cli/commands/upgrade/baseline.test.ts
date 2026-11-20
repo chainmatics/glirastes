@@ -152,7 +152,7 @@ describe('sdk baseline', () => {
     ).rejects.toThrow(/decision/);
   });
 
-  it('withDeferred replaces the deferred list', () => {
+  it('withDeferred sets exactly the given deferred notes', () => {
     const before: SdkBaseline = {
       schemaVersion: 1,
       reviewedThrough: '0.17.0',

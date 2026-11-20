@@ -126,10 +126,7 @@ export async function ensureBaseline(root: string, version: string): Promise<Sdk
   return created;
 }
 
-/**
- * Pure: the baseline after `glirastes upgrade ack`. The deferred list is
- * replaced, so a note stays deferred only while every ack names it again.
- */
+/** Pure: the baseline after `glirastes upgrade ack`, with exactly the given deferred notes. */
 export function withDeferred(
   baseline: SdkBaseline,
   reviewedThrough: string,

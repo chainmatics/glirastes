@@ -23,7 +23,7 @@ export interface ReportItem {
   skill: string;
   status: 'adopted' | 'affected' | 'not-affected' | 'unclear';
   evidence: Array<{ file: string; line: number }>;
-  /** Deferred at the last `glirastes upgrade ack --defer`; stays listed until an ack no longer names it. */
+  /** Deferred with `glirastes upgrade ack --defer`; stays listed until `--undefer` or until detection settles the note. */
   deferred?: true;
 }
 
@@ -261,9 +261,10 @@ export interface UpgradeIo {
 export const UPGRADE_USAGE = [
   'Usage: glirastes upgrade report [--json] [--brief] [--from <version>] [--fail-on breaking] [--root <dir>]',
   '         show what changed in the SDK since this app was last reviewed (never changes your code; --brief lists must, should and recommended items and counts the rest)',
-  '       glirastes upgrade ack [--defer <note-id>]... [--force] [--root <dir>]',
-  '         mark everything up to the installed SDK as reviewed; each --defer keeps that note listed until an ack no longer names it',
-  '         ack refuses while a breaking item is detected as affected and not deferred; --force acknowledges anyway',
+  '       glirastes upgrade ack [--defer <note-id>]... [--undefer <note-id>]... [--force] [--root <dir>]',
+  '         mark everything up to the installed SDK as reviewed; --defer keeps a note listed in later reports, --undefer drops that again',
+  '         deferrals last until --undefer or until the note is detected as adopted or not affected',
+  '         ack refuses while a breaking item is affected or unclear and not deferred; --force acknowledges anyway',
 ].join('\n');
 
 export const UPGRADE_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
@@ -271,21 +272,21 @@ export const UPGRADE_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
     flags: ['--json', '--brief'],
     values: ['--from', '--fail-on', '--root'],
   },
-  // `--defer` repeats; takeDeferIds reads it before parseToolArgs sees the rest.
-  ack: { flags: ['--force'], values: ['--defer', '--root'] },
+  // `--defer` and `--undefer` repeat; takeRepeated reads them before parseToolArgs sees the rest.
+  ack: { flags: ['--force'], values: ['--defer', '--undefer', '--root'] },
 };
 
-/** Takes every `--defer <id>` out of `argv`; the flag repeats, which `parseToolArgs` does not support. */
-function takeDeferIds(argv: ReadonlyArray<string>): { ids: string[]; rest: string[] } {
+/** Takes every `<flag> <id>` out of `argv`; the flag repeats, which `parseToolArgs` does not support. */
+function takeRepeated(argv: ReadonlyArray<string>, flag: string): { ids: string[]; rest: string[] } {
   const ids: string[] = [];
   const rest: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] !== '--defer') {
+    if (argv[index] !== flag) {
       rest.push(argv[index]!);
       continue;
     }
     const value = argv[index + 1];
-    if (value === undefined || value.startsWith('--')) throw new ToolsUsageError('--defer needs a note id.');
+    if (value === undefined || value.startsWith('--')) throw new ToolsUsageError(`${flag} needs a note id.`);
     ids.push(value);
     index += 1;
   }
@@ -305,10 +306,19 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
   }
   let args: ReturnType<typeof parseToolArgs>;
   let deferIds: string[] = [];
+  let undeferIds: string[] = [];
   try {
-    const taken = sub === 'ack' ? takeDeferIds(rest) : { ids: [], rest: [...rest] };
-    deferIds = taken.ids;
-    args = parseToolArgs(taken.rest, spec);
+    let remaining = [...rest];
+    if (sub === 'ack') {
+      const defer = takeRepeated(remaining, '--defer');
+      const undefer = takeRepeated(defer.rest, '--undefer');
+      deferIds = defer.ids;
+      undeferIds = undefer.ids;
+      remaining = undefer.rest;
+      const both = deferIds.find((id) => undeferIds.includes(id));
+      if (both) throw new ToolsUsageError(`'${both}' is passed to both --defer and --undefer.`);
+    }
+    args = parseToolArgs(remaining, spec);
   } catch (cause) {
     if (!(cause instanceof ToolsUsageError)) throw cause;
     error(`${cause.message}\n${UPGRADE_USAGE}`);
@@ -353,30 +363,42 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
       error(`glirastes upgrade: the installed version '${sdkVersion}' is not semver; ${BASELINE_PATH} was not changed.`);
       return 1;
     }
-    const report = await createUpgradeReport(reportOptions);
-    const baseline: SdkBaseline = (await readBaseline(rootDir)) ?? {
-      schemaVersion: 1,
-      reviewedThrough: report.from,
-      decisions: {},
-    };
-    const deferred: Array<{ id: string; version: string }> = [];
-    if (deferIds.length > 0) {
-      const notesDir = reportOptions.notesDir ?? findPackageUpgradeNotesDir();
-      const { notes } = await loadUpgradeNoteSet(notesDir, sdkVersion);
-      for (const id of new Set(deferIds)) {
-        const target = notes.find((note) => note.id === id);
-        if (!target) {
-          error(`Unknown upgrade note '${id}'. Run glirastes upgrade report --json to list note ids; ${BASELINE_PATH} was not changed.`);
-          return 1;
-        }
-        deferred.push({ id, version: target.version });
+    const notesDir = reportOptions.notesDir ?? findPackageUpgradeNotesDir();
+    const { notes } = await loadUpgradeNoteSet(notesDir, sdkVersion);
+    for (const id of [...deferIds, ...undeferIds]) {
+      if (!notes.some((note) => note.id === id)) {
+        error(`Unknown upgrade note '${id}'. Run glirastes upgrade report --json to list note ids; ${BASELINE_PATH} was not changed.`);
+        return 1;
       }
     }
-    const deferredIds = new Set(deferred.map((entry) => entry.id));
-    const blocking = report.must.filter((item) => item.status === 'affected' && !deferredIds.has(item.id));
+    // One scan serves the report and the deferral check.
+    const baselineNow = await readBaseline(rootDir);
+    const needsScan = deferIds.length > 0 || Object.keys(baselineNow?.decisions ?? {}).length > 0;
+    let scanned: AppScan | undefined;
+    const scan = async (root: string) => (scanned ??= await scanApp(root));
+    const report = await createUpgradeReport({ ...reportOptions, notesDir, scan });
+    const baseline: SdkBaseline = baselineNow ?? { schemaVersion: 1, reviewedThrough: report.from, decisions: {} };
+
+    // Deferrals accumulate; one ends by --undefer or once detection settles the note.
+    const deferred = new Map<string, string>();
+    for (const [id, entry] of Object.entries(baseline.decisions)) deferred.set(id, entry.version);
+    for (const id of deferIds) deferred.set(id, notes.find((note) => note.id === id)!.version);
+    for (const id of undeferIds) deferred.delete(id);
+    if (needsScan && deferred.size > 0) {
+      const appScan = await scan(rootDir);
+      for (const id of [...deferred.keys()]) {
+        const note = notes.find((candidate) => candidate.id === id);
+        if (!note) continue;
+        const { status } = evaluateNote(note, appScan);
+        if (status === 'adopted' || status === 'not-affected') deferred.delete(id);
+      }
+    }
+
+    // Fail closed: a breaking item that is affected or unclear needs a deferral.
+    const blocking = report.must.filter((item) => !deferred.has(item.id));
     if (blocking.length > 0 && !args.flags.has('--force')) {
       error(
-        `Cannot acknowledge: ${blocking.length} breaking item(s) affect this app (${blocking
+        `Cannot acknowledge: ${blocking.length} breaking item(s) are affected or unclear (${blocking
           .map((item) => item.id)
           .join(', ')}). Adopt them, keep them listed with --defer <id>, or pass --force.`,
       );
@@ -384,8 +406,9 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
     }
     const reviewedThrough =
       compareVersions(sdkVersion, baseline.reviewedThrough) > 0 ? sdkVersion : baseline.reviewedThrough;
-    await writeBaseline(rootDir, withDeferred(baseline, reviewedThrough, deferred));
-    const kept = deferred.length > 0 ? `; deferred ${deferred.map((entry) => entry.id).join(', ')}` : '';
+    const entries = [...deferred].map(([id, version]) => ({ id, version }));
+    await writeBaseline(rootDir, withDeferred(baseline, reviewedThrough, entries));
+    const kept = entries.length > 0 ? `; deferred ${entries.map((entry) => entry.id).sort().join(', ')}` : '';
     log(`Reviewed through ${reviewedThrough}${kept}.`);
     return 0;
   } catch (cause) {

@@ -61,8 +61,9 @@ Run it:
 6. Note which items the developer wants to postpone. You record nothing per
    item: an adopted change is detected from the code, and everything else is
    settled by the `ack` in step 9. A postponed item is passed there as
-   `--defer <id>`: it stays in every later report, marked `[deferred]`, as long
-   as each later `ack` names it again. A deferred Must item no longer counts
+   `--defer <id>`: it stays in every later report, marked `[deferred]`, until
+   `glirastes upgrade ack --undefer <id>` or until the code is detected as
+   adopted or not affected. A deferred Must item no longer counts
    as open: `--fail-on breaking` and the doctor warning skip it, and the
    refresh hint labels it (`1 must (1 deferred)`).
 7. Edited skills under Should (`skill:<name>`): `glirastes tools refresh`
@@ -75,9 +76,9 @@ Run it:
    section in `node_modules/glirastes/CHANGELOG.md`, summarize it for the
    developer and make no claim about its impact on the app.
 9. When the developer confirms the review is done, run `glirastes upgrade ack`,
-   adding `--defer <id>` for every postponed item (also for items deferred
-   earlier that should stay listed). It refuses while a breaking item is
-   detected as affected (`status: "affected"`) and not deferred. Show that
+   adding `--defer <id>` for every newly postponed item (earlier deferrals are
+   kept). It refuses while a Must item (`status: "affected"` or `"unclear"`)
+   is not deferred. Show that
    message to the developer instead of working around it. Then commit the app
    changes, the refreshed `.glirastes` outputs and
    `.glirastes/sdk-baseline.json`.
@@ -91,6 +92,7 @@ glirastes upgrade report --from <version>
 glirastes upgrade report --fail-on breaking
 glirastes upgrade ack
 glirastes upgrade ack --defer <note-id> --defer <other-note-id>
+glirastes upgrade ack --undefer <note-id>
 ```
 
 `--brief` lists Must, Should and Recommended items and only counts the
