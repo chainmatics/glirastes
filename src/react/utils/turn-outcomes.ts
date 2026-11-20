@@ -93,16 +93,30 @@ export function withStoredTurnOutcomes(
   });
 }
 
-/** Id of the user message that started the turn `messageId` belongs to (a user message is its own turn). */
+// Per messages array (the context's `messages` is a new array per render): message id -> its turn's user message id.
+const TURN_STARTS = new WeakMap<ReadonlyArray<Pick<ChatMessage, 'id' | 'role'>>, Map<string, string | null>>();
+
+/**
+ * Id of the user message that started the turn `messageId` belongs to (a user
+ * message is its own turn). Built once per messages array and then looked up,
+ * so every bubble of a render asking costs one pass over the history, not one each.
+ */
 export function turnStartId(
   messages: ReadonlyArray<Pick<ChatMessage, 'id' | 'role'>>,
   messageId: string,
 ): string | null {
-  const index = messages.findIndex((message) => message.id === messageId);
-  for (let i = index; i >= 0; i -= 1) {
-    if (messages[i]!.role === 'user') return messages[i]!.id;
+  let starts = TURN_STARTS.get(messages);
+  if (!starts) {
+    starts = new Map();
+    let current: string | null = null;
+    for (const message of messages) {
+      if (message.role === 'user') current = message.id;
+      // The first message with an id wins, as a scan from the start would find it.
+      if (!starts.has(message.id)) starts.set(message.id, current);
+    }
+    TURN_STARTS.set(messages, starts);
   }
-  return null;
+  return starts.get(messageId) ?? null;
 }
 
 /** Id of the latest user message: the turn a running or just ended request belongs to. */
