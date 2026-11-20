@@ -49,6 +49,31 @@ const DetectSchema = z
 
 export type Detect = z.infer<typeof DetectSchema>;
 
+/**
+ * A `surface` entry names the API-surface keys a note covers
+ * (`<subpath>#<Name>` or `<subpath>#<Type>.<member>`, see scripts/api-surface.ts):
+ * - exact: `glirastes/react#ComposerConfig` covers only that key;
+ * - trailing `.*`: `glirastes/react#ComposerConfig.*` covers `ComposerConfig`
+ *   and every `ComposerConfig.<member>`, never `ComposerConfigX`;
+ * - `*` subpath: `*#ComposerConfig.*` covers that symbol in every subpath (one
+ *   type re-exported from `glirastes/server/http`, `/server/nextjs`, …).
+ * No other wildcard: `Composer*` or `glirastes/*#X` are rejected.
+ */
+const SURFACE_ENTRY_RE = /^(?:\*|[^*#\s]+)#[^*#\s]+(?:\.\*)?$/;
+
+export function surfaceCovers(entry: string, key: string): boolean {
+  const hash = entry.indexOf('#');
+  const keyHash = key.indexOf('#');
+  if (hash < 0 || keyHash < 0) return entry === key;
+  const subpath = entry.slice(0, hash);
+  if (subpath !== '*' && subpath !== key.slice(0, keyHash)) return false;
+  const symbol = entry.slice(hash + 1);
+  const keySymbol = key.slice(keyHash + 1);
+  if (!symbol.endsWith('.*')) return keySymbol === symbol;
+  const base = symbol.slice(0, -2);
+  return keySymbol === base || keySymbol.startsWith(`${base}.`);
+}
+
 export const UpgradeNoteSchema = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9-]{2,79}$/),
@@ -58,7 +83,13 @@ export const UpgradeNoteSchema = z
     skill: z.string().regex(/^[a-z0-9][a-z0-9-]*(#[A-Za-z0-9][A-Za-z0-9_.-]*)?$/),
     affectedWhen: DetectSchema.optional(),
     adoptedWhen: DetectSchema.optional(),
-    surface: z.array(z.string().min(1)).optional(),
+    surface: z
+      .array(
+        z.string().regex(SURFACE_ENTRY_RE, {
+          message: 'Surface entry must be <subpath>#<Name>, optionally ending in .* or with * as the subpath',
+        }),
+      )
+      .optional(),
   })
   .strict();
 

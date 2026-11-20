@@ -183,7 +183,8 @@ services.
 Every PR that changes public API, defaults or behavior a consumer can notice:
 1. updates the affected skill in `skills/` in the same PR, and
 2. adds one file `upgrade-notes/unreleased/<id>.json` (schema: `src/cli/commands/upgrade/notes.ts`).
-`src/upgrade-notes.test.ts` fails when the public surface changes without a note. Behavior changes
+`src/upgrade-notes.test.ts` fails when the public surface changes without a note. A note's `surface`
+lists the keys it covers; `X.*` covers a type and all its members, `*#X.*` does so in every subpath. Behavior changes
 the snapshot cannot see are a review rule: the reviewer asks for the note.
 
 ## Conventions

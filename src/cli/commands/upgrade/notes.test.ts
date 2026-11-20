@@ -28,6 +28,23 @@ afterEach(() => rm(dir, { recursive: true, force: true }));
 const write = (rel: string, body: unknown) =>
   writeFile(join(dir, rel), JSON.stringify(body));
 
+describe('surface entries', () => {
+  it('accept exact keys, a trailing .* and a * subpath', async () => {
+    await write('unreleased/first-note.json', note({
+      surface: ['glirastes/react#ComposerConfig', 'glirastes/react#ComposerConfig.*', '*#ComposerConfig.*', 'locale#sendButton'],
+    }));
+    await expect(loadUpgradeNotes(dir, '0.19.0')).resolves.toHaveLength(1);
+  });
+
+  it.each(['glirastes/react#Composer*', 'glirastes/react#*', 'glirastes/*#ComposerConfig', 'ComposerConfig', 'glirastes/react#A.*.b'])(
+    'reject %s',
+    async (entry) => {
+      await write('unreleased/first-note.json', note({ surface: [entry] }));
+      await expect(loadUpgradeNotes(dir, '0.19.0')).rejects.toThrow(/surface/);
+    },
+  );
+});
+
 describe('loadUpgradeNotes', () => {
   it('loads released and unreleased notes, tagging unreleased with the sdk version', async () => {
     await write('0.18.0.json', { version: '0.18.0', notes: [note()] });

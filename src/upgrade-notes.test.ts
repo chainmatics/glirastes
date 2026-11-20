@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { computeApiSurface, githubSlug } from '../scripts/api-surface.js';
 import { evaluateNote } from './cli/commands/upgrade/detect.js';
-import { loadUpgradeNotes } from './cli/commands/upgrade/notes.js';
+import { loadUpgradeNotes, surfaceCovers } from './cli/commands/upgrade/notes.js';
 import { SDK_VERSION } from './runtime/sdk-version.js';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -115,6 +115,36 @@ describe('computeApiSurface', () => {
   });
 });
 
+describe('surfaceCovers', () => {
+  it('an exact entry covers only that key', () => {
+    expect(surfaceCovers('glirastes/react#ComposerConfig', 'glirastes/react#ComposerConfig')).toBe(true);
+    expect(surfaceCovers('glirastes/react#ComposerConfig', 'glirastes/react#ComposerConfig.toolbar')).toBe(false);
+    expect(surfaceCovers('glirastes/react#ComposerConfig', 'glirastes#ComposerConfig')).toBe(false);
+  });
+
+  it('a trailing .* covers the symbol and its members', () => {
+    const entry = 'glirastes/react#ComposerConfig.*';
+    expect(surfaceCovers(entry, 'glirastes/react#ComposerConfig')).toBe(true);
+    expect(surfaceCovers(entry, 'glirastes/react#ComposerConfig.toolbar')).toBe(true);
+    expect(surfaceCovers(entry, 'glirastes/react#ComposerConfig.attachments')).toBe(true);
+  });
+
+  it('a prefix never covers a different symbol that starts with the same letters', () => {
+    expect(surfaceCovers('glirastes/react#Composer.*', 'glirastes/react#ComposerConfig')).toBe(false);
+    expect(surfaceCovers('glirastes/react#Composer.*', 'glirastes/react#ComposerConfig.toolbar')).toBe(false);
+    expect(surfaceCovers('glirastes/react#ComposerConfig.*', 'glirastes/react#ComposerConfigX')).toBe(false);
+    expect(surfaceCovers('glirastes/react#ComposerConfig.*', 'glirastes/react/vercel#ComposerConfig')).toBe(false);
+  });
+
+  it('a * subpath covers the symbol in every subpath, and only that symbol', () => {
+    expect(surfaceCovers('*#ComposerConfig.*', 'glirastes/server/http#ComposerConfig.toolbar')).toBe(true);
+    expect(surfaceCovers('*#ComposerConfig.*', 'glirastes#ComposerConfig')).toBe(true);
+    expect(surfaceCovers('*#ComposerConfig', 'glirastes/react#ComposerConfig')).toBe(true);
+    expect(surfaceCovers('*#ComposerConfig', 'glirastes/react#ComposerConfig.toolbar')).toBe(false);
+    expect(surfaceCovers('*#Composer.*', 'glirastes/react#ComposerConfig')).toBe(false);
+  });
+});
+
 describe('upgrade notes guard', () => {
   let surface: string[];
 
@@ -148,8 +178,8 @@ describe('upgrade notes guard', () => {
     const notes = (await loadUpgradeNotes(notesDir, SDK_VERSION)).filter((n) =>
       unreleased.has(n.id),
     );
-    const covered = new Set(notes.flatMap((n) => n.surface ?? []));
-    const uncovered = changed.filter((c) => !covered.has(c.slice(2)));
+    const entries = notes.flatMap((n) => n.surface ?? []);
+    const uncovered = changed.filter((c) => !entries.some((entry) => surfaceCovers(entry, c.slice(2))));
 
     expect(
       uncovered,
