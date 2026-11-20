@@ -104,7 +104,7 @@ attachments are off, and refused with a direct command.
 | `send(text, options?)` | Unchanged signature; with the queue true when sent or queued, false when refused. |
 | `submit(text, options?)` | `'sent'`, `'queued'` or `'rejected'`; also without the queue (`'sent'`/`'rejected'`). |
 | `submitWithResult(text, options?)` | `submit` with the reason: `{ status: 'sent' \| 'queued' }` or `{ status: 'rejected', reason }` (below). |
-| `lastRejection` | `{ reason, at }` of the latest refused `send`/`submit` (also from the built-in composers), else null. |
+| `lastRejection` | `{ reason, at }` of the latest refused `send`/`submit` (also from the built-in composers), else null; null again after an accepted message, `clear()` or a conversation change. |
 | `queue` | `{ enabled, items, paused, restoring, editingId }`. |
 | `canCompose` | Whether a composer takes input: without the queue `!isLoading`; with it false only while the conversation loads or changes. |
 | `sendNow(id)`, `removeQueued(id)`, `editQueued(id, text)` | `boolean`: false for an unknown id (or an empty text). |
@@ -129,8 +129,9 @@ the queue:
 - `lastRejection` (`{ reason, at }`, `at` from `Date.now()`) is for a notice
   next to the built-in composers, whose return value the app does not see.
   Each refusal sets a new object, also with the same reason; the next
-  accepted (sent or queued) message sets it back to null. Removing or
-  sending queued messages does not touch it.
+  accepted (sent or queued) message sets it back to null, and so do
+  `clear()` and a change of the open conversation (a refusal belongs to the
+  chat it happened in). Removing or sending queued messages does not touch it.
 - Neither carries the text or files. The built-in composers show nothing new
   and keep the draft as before.
 - Other refusals are not submit rejections: `sendNow` with

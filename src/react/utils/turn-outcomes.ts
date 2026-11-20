@@ -2,8 +2,8 @@ import type { ChatMessage, TurnOutcome, TurnOutcomeReason } from '../types.js';
 
 /**
  * Key of the turn outcome in a stored user message's `metadata`. Written only
- * into what `session.save` receives and removed again on load: the transport
- * and the requests never carry it.
+ * into what `session.save` receives; the provider removes it from a history
+ * from `session.load` and from one the app hands to the transport itself.
  */
 export const TURN_OUTCOME_METADATA_KEY = 'glirastesTurnOutcome';
 

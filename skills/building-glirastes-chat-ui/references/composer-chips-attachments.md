@@ -172,7 +172,8 @@ Off by default; `queue={{ enabled: true }}` on the provider (`config.queue` on
   returns `ChatSubmitOutcome` (`{ status: 'sent' | 'queued' }` or
   `{ status: 'rejected', reason }`); `lastRejection` (`ChatSubmitRejection`
   `{ reason, at }` or null; context and `useChatQueue()`) also covers the
-  built-in composers and is null again after the next accepted message.
+  built-in composers and is null again after the next accepted message,
+  `clear()` or a change of the open conversation.
   `ChatSubmitRejectionReason`: `session`, `approval-open` (only without the
   queue), `attachments-off`, `files-with-command`, `queue-full`. No content;
   the built-in UI shows nothing new.
