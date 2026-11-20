@@ -127,7 +127,7 @@ export interface PrepareModelMessagesOptions {
   onBreakdown?: (breakdown: ModelInputBreakdown) => void;
   /**
    * The chat text the app shows for an invalid tool call, when it is not one
-   * of the built-in English or German texts (`streamErrorTexts.invalidToolInput`).
+   * of the built-in English or German texts (`locales.<tag>.invalidToolInput`).
    * Such a call reads as an instruction for the model in later turns.
    */
   invalidToolInputTexts?: ReadonlyArray<string>;

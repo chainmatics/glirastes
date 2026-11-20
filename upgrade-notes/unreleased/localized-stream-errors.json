@@ -1,8 +1,8 @@
 {
   "id": "localized-stream-errors",
   "kind": "recommended",
-  "summary": "The handler now shows its fixed failure texts in the chat language: a German chat gets `KI-Anfrage fehlgeschlagen` instead of `AI request failed`, and the German text for invalid tool input.",
-  "howTo": "Nothing to change for a German UI. Tests or log checks that assert on `AI request failed` in a `de*` chat now see the German text. Override single texts with the `streamErrorTexts` handler option (`generic`, `invalidToolInput`). Some texts stay English in a German chat: the permission and budget denials shown by `toolDenialDisplayText`, the unavailable-tool text and the approval-subject refusal texts are not covered by `streamErrorTexts`.",
+  "summary": "The handler now shows its fixed failure texts in the chat language: a German chat gets `KI-Anfrage fehlgeschlagen` instead of `AI request failed`, and the German text for invalid tool input. Both texts are keys of the handler's `locales` (`streamError`, `invalidToolInput`).",
+  "howTo": "Nothing to change for a German UI. Tests or log checks that assert on `AI request failed` in a `de*` chat now see the German text. Change the texts per language, or add another language, in the handler's `locales` (`locales: { de: { streamError: '...' }, pl: { streamError: '...', invalidToolInput: '...' } }`; in the runtime container `chat.locales`); languages without a table keep English. Some texts stay English in a German chat: the permission and budget denials shown by `toolDenialDisplayText`, the unavailable-tool text and the approval-subject refusal texts are not keys of `locales`.",
   "skill": "integrating-glirastes-nextjs",
   "affectedWhen": {
     "patterns": [
@@ -10,23 +10,11 @@
     ]
   },
   "surface": [
-    "glirastes/adapter/nextjs#AiChatHandlerConfig.streamErrorTexts",
-    "glirastes/adapter/nextjs#AiChatHandlerFullConfig.streamErrorTexts",
+    "glirastes/adapter/nextjs#ChatServerTexts",
     "glirastes/adapter/nextjs#PrepareModelMessagesOptions.invalidToolInputTexts",
-    "glirastes/adapter/nextjs#StreamErrorTexts",
-    "glirastes/adapter/nextjs#StreamErrorTexts.generic",
-    "glirastes/adapter/nextjs#StreamErrorTexts.invalidToolInput",
-    "glirastes/server/http#AiChatHandlerConfig.streamErrorTexts",
-    "glirastes/server/http#AiChatHandlerFullConfig.streamErrorTexts",
+    "glirastes/server/http#ChatServerTexts",
     "glirastes/server/http#PrepareModelMessagesOptions.invalidToolInputTexts",
-    "glirastes/server/http#StreamErrorTexts",
-    "glirastes/server/http#StreamErrorTexts.generic",
-    "glirastes/server/http#StreamErrorTexts.invalidToolInput",
-    "glirastes/server/nextjs#AiChatHandlerConfig.streamErrorTexts",
-    "glirastes/server/nextjs#AiChatHandlerFullConfig.streamErrorTexts",
-    "glirastes/server/nextjs#PrepareModelMessagesOptions.invalidToolInputTexts",
-    "glirastes/server/nextjs#StreamErrorTexts",
-    "glirastes/server/nextjs#StreamErrorTexts.generic",
-    "glirastes/server/nextjs#StreamErrorTexts.invalidToolInput"
+    "glirastes/server/nextjs#ChatServerTexts",
+    "glirastes/server/nextjs#PrepareModelMessagesOptions.invalidToolInputTexts"
   ]
 }

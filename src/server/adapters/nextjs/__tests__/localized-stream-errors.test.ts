@@ -5,12 +5,13 @@ import { defineTool } from '../../../../types.js';
 import { createTurnSnapshot } from '../../../../runtime/turn-snapshot.js';
 import { prepareModelMessages } from '../prepare-model-messages.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
+import { resolveChatServerTexts } from '../chat-texts.js';
+import type { AiChatHandlerConfig } from '../types.js';
 import {
   GENERIC_STREAM_ERROR_TEXT,
   INVALID_TOOL_INPUT_HISTORY_TEXT,
   INVALID_TOOL_INPUT_TEXT,
   INVALID_TOOL_INPUT_TEXT_DE,
-  resolveStreamErrorTexts,
 } from '../stream-error-text.js';
 import { agentRevision, localLimits, manifestRevision, policyRevision, principal, streamChunks } from './command-fixtures.js';
 
@@ -21,22 +22,23 @@ const request = (locale?: string) => new Request('http://localhost/api/ai/chat',
 });
 const failingModel = () => new MockLanguageModelV3({ doStream: async () => { throw new Error('boom'); } });
 
-describe('resolveStreamErrorTexts', () => {
+describe('stream error texts in the server locale table', () => {
+  const texts = (locale: string | undefined, locales?: Parameters<typeof resolveChatServerTexts>[2]) => resolveChatServerTexts(locale, undefined, locales);
   it('is German for de* and English otherwise', () => {
-    expect(resolveStreamErrorTexts('de-DE').generic).toBe('KI-Anfrage fehlgeschlagen');
-    expect(resolveStreamErrorTexts('en-US').generic).toBe(GENERIC_STREAM_ERROR_TEXT);
-    expect(resolveStreamErrorTexts('en-US').invalidToolInput).toBe(INVALID_TOOL_INPUT_TEXT);
-    expect(resolveStreamErrorTexts(undefined).generic).toBe(GENERIC_STREAM_ERROR_TEXT);
+    expect(texts('de-DE').streamError).toBe('KI-Anfrage fehlgeschlagen');
+    expect(texts('de').invalidToolInput).toBe(INVALID_TOOL_INPUT_TEXT_DE);
+    expect(texts('en-US').streamError).toBe(GENERIC_STREAM_ERROR_TEXT);
+    expect(texts('en-US').invalidToolInput).toBe(INVALID_TOOL_INPUT_TEXT);
+    expect(texts(undefined).streamError).toBe(GENERIC_STREAM_ERROR_TEXT);
+    expect(texts('fr-FR').streamError).toBe(GENERIC_STREAM_ERROR_TEXT);
   });
-  it('lets overrides win', () => {
-    expect(resolveStreamErrorTexts('de', { generic: 'Fehler' })).toEqual({
-      generic: 'Fehler',
-      invalidToolInput: resolveStreamErrorTexts('de').invalidToolInput,
+  it('lets a locale table change single texts of a language or add one', () => {
+    expect(texts('de-DE', { de: { streamError: 'Fehler' } })).toMatchObject({
+      streamError: 'Fehler',
+      invalidToolInput: INVALID_TOOL_INPUT_TEXT_DE,
     });
-  });
-  it('throws for an unknown key or an empty text', () => {
-    expect(() => resolveStreamErrorTexts('de', { nope: 'x' } as never)).toThrow(/streamErrorTexts\.nope is not a text key/);
-    expect(() => resolveStreamErrorTexts('de', { generic: ' ' })).toThrow(/non-empty string/);
+    expect(texts('fr-FR', { fr: { streamError: 'La requête a échoué' } }).streamError).toBe('La requête a échoué');
+    expect(texts('en-US', { fr: { streamError: 'La requête a échoué' } }).streamError).toBe(GENERIC_STREAM_ERROR_TEXT);
   });
 });
 
@@ -51,17 +53,44 @@ describe('localized stream failure text in the handler', () => {
     const handler = createAiChatHandler({ tools: {}, systemPrompt: 'A', model: failingModel(), locale: 'en-US', onError: vi.fn() });
     expect(await (await handler(request())).text()).toContain('AI request failed');
   });
-  it('streamErrorTexts override wins', async () => {
+  it('a locales text of the turn language wins', async () => {
     const handler = createAiChatHandler({
       tools: {}, systemPrompt: 'A', model: failingModel(), locale: 'de-DE', onError: vi.fn(),
-      streamErrorTexts: { generic: 'Etwas ging schief' },
+      locales: { de: { streamError: 'Etwas ging schief' } },
     });
     expect(await (await handler(request())).text()).toContain('Etwas ging schief');
   });
-  it('throws at creation for an unknown streamErrorTexts key', () => {
+  it('another language gets English unless locales adds it', async () => {
+    const plain = createAiChatHandler({ tools: {}, systemPrompt: 'A', model: failingModel(), locale: 'fr-FR', onError: vi.fn() });
+    expect(await (await plain(request())).text()).toContain('AI request failed');
+    const french = createAiChatHandler({
+      tools: {}, systemPrompt: 'A', model: failingModel(), locale: 'fr-FR', onError: vi.fn(),
+      locales: { fr: { streamError: 'La requête a échoué' } },
+    });
+    expect(await (await french(request())).text()).toContain('La requête a échoué');
+  });
+  it('the 500 JSON body before streaming stays English', async () => {
+    const handler = createAiChatHandler({
+      tools: {}, systemPrompt: 'A', model: failingModel(), locale: 'de-DE', onError: vi.fn(),
+      locales: { de: { streamError: 'Etwas ging schief' } },
+      streamHandler: () => { throw new Error('boom'); },
+    });
+    const response = await handler(request());
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'AI request failed' });
+  });
+  it('throws at creation for an unknown or empty locales text', () => {
     expect(() => createAiChatHandler({
-      tools: {}, systemPrompt: 'A', model: failingModel(), streamErrorTexts: { bogus: 'x' } as never,
-    })).toThrow(/streamErrorTexts\.bogus/);
+      tools: {}, systemPrompt: 'A', model: failingModel(), locales: { de: { bogus: 'x' } as never },
+    })).toThrow(/locales\.de\.bogus is not a text key/);
+    expect(() => createAiChatHandler({
+      tools: {}, systemPrompt: 'A', model: failingModel(), locales: { de: { streamError: ' ' } },
+    })).toThrow(/locales\.de\.streamError must be a non-empty string/);
+  });
+  it('has no separate streamErrorTexts option', () => {
+    // @ts-expect-error the stream error texts live in `locales`
+    const config: AiChatHandlerConfig = { tools: {}, systemPrompt: 'A', streamErrorTexts: { generic: 'x' } };
+    expect(config).toBeDefined();
   });
 });
 
@@ -132,6 +161,34 @@ describe('invalid-input history swap with localized and overridden texts', () =>
     const prompt = await prepareModelMessages(history('Bitte nochmal') as never, { invalidToolInputTexts: ['Bitte nochmal'] }) as never;
     expect(toolOutputs(prompt)).toEqual([{ type: 'error-text', value: INVALID_TOOL_INPUT_HISTORY_TEXT }]);
     expect(JSON.stringify(prompt)).not.toContain('Bitte nochmal');
+  });
+  it('the handler swaps a locales invalidToolInput text of any language for the English history text', async () => {
+    const usage = {
+      inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+      outputTokens: { total: 1, text: 1, reasoning: undefined },
+    };
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: 'stream-start', warnings: [] },
+          { type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: 'ok' }, { type: 'text-end', id: 't' },
+          { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+        ] as never),
+      }),
+    });
+    const handler = createAiChatHandler({
+      tools: { tasks_list: defineTool({ id: 'tasks.list', description: 'List.', inputSchema: z.object({}).strict(), execute: async () => ({}) }) },
+      systemPrompt: 'A', model, locale: 'de-DE', onError: vi.fn(), resultHandles: false,
+      locales: { pl: { invalidToolInput: 'Nieprawidłowe dane' } },
+    });
+    await (await handler(new Request('http://localhost/api/ai/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: history('Nieprawidłowe dane') }),
+    }))).text();
+    const prompt = JSON.stringify(model.doStreamCalls[0]!.prompt);
+    expect(prompt).toContain(JSON.stringify(INVALID_TOOL_INPUT_HISTORY_TEXT).slice(1, 40));
+    expect(prompt).not.toContain('Nieprawidłowe dane');
   });
   it('an unrelated text is kept', async () => {
     const prompt = await prepareModelMessages(history('Bitte nochmal') as never) as never;

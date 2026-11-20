@@ -1,21 +1,39 @@
 import { isLanguageTag, resolveTextTable } from '../../../contracts/localized-text.js';
 import { DEFAULT_BUDGET_STOP_TEXTS, resolveBudgetStopTexts, type BudgetStopTexts } from './budget-stop-notice.js';
 import { SILENT_TURN_FALLBACK_TEXTS } from './silent-turn-fallback.js';
+import { STREAM_ERROR_TEXTS, type StreamErrorTexts } from './stream-error-text.js';
 
 /**
  * Every text the handler writes into a chat itself, by key: the budget stop
- * notice (`closing`, `closingWithoutAnswer`, one per reason) and the answer
- * of a turn that produced nothing (`silentTurn`). Model hints are not among
- * them: the model reads English only.
+ * notice (`closing`, `closingWithoutAnswer`, one per reason), the answer
+ * of a turn that produced nothing (`silentTurn`) and the fixed failure texts
+ * (`streamError`, `invalidToolInput`). Model hints are not among them: the
+ * model reads English only.
  */
-export type ChatServerTexts = BudgetStopTexts & { silentTurn: string };
+export type ChatServerTexts = BudgetStopTexts & {
+  silentTurn: string;
+  /**
+   * Any failure of a turn or tool call the SDK does not name itself
+   * (English `AI request failed`, German `KI-Anfrage fehlgeschlagen`).
+   * Optional only so a full table typed before it still compiles.
+   */
+  streamError?: string;
+  /**
+   * A model tool call whose arguments do not match the schema. Optional
+   * only so a full table typed before it still compiles.
+   */
+  invalidToolInput?: string;
+};
+
+/** A resolved table: every key has a text. */
+export type ResolvedChatServerTexts = Required<ChatServerTexts>;
 
 /** The app's texts per BCP-47 language tag; each table may hold any subset of keys. */
 export type ChatServerLocales = Readonly<Record<string, Partial<ChatServerTexts>>>;
 
-const BUILT_IN: Readonly<Record<string, ChatServerTexts>> = Object.freeze({
-  en: Object.freeze({ ...DEFAULT_BUDGET_STOP_TEXTS.en, silentTurn: SILENT_TURN_FALLBACK_TEXTS.en }),
-  de: Object.freeze({ ...DEFAULT_BUDGET_STOP_TEXTS.de, silentTurn: SILENT_TURN_FALLBACK_TEXTS.de }),
+const BUILT_IN: Readonly<Record<string, ResolvedChatServerTexts>> = Object.freeze({
+  en: Object.freeze({ ...DEFAULT_BUDGET_STOP_TEXTS.en, silentTurn: SILENT_TURN_FALLBACK_TEXTS.en, ...STREAM_ERROR_TEXTS.en }),
+  de: Object.freeze({ ...DEFAULT_BUDGET_STOP_TEXTS.de, silentTurn: SILENT_TURN_FALLBACK_TEXTS.de, ...STREAM_ERROR_TEXTS.de }),
 });
 
 const KEYS: ReadonlySet<string> = new Set(Object.keys(BUILT_IN.en!));
@@ -50,13 +68,18 @@ export function resolveChatServerTexts(
   locale: string | undefined,
   budgetStopTexts: Partial<BudgetStopTexts> | undefined,
   locales: ChatServerLocales | undefined,
-): ChatServerTexts {
+): ResolvedChatServerTexts {
   // Validates the language-free overrides exactly as before.
   if (budgetStopTexts !== undefined) resolveBudgetStopTexts(locale, budgetStopTexts);
-  return Object.freeze(resolveTextTable<ChatServerTexts>({
+  return Object.freeze(resolveTextTable<ResolvedChatServerTexts>({
     requested: locale,
     builtIn: BUILT_IN,
     ...(locales ? { app: locales } : {}),
-    ...(budgetStopTexts ? { overrides: budgetStopTexts as Partial<ChatServerTexts> } : {}),
+    ...(budgetStopTexts ? { overrides: budgetStopTexts as Partial<ResolvedChatServerTexts> } : {}),
   }));
+}
+
+/** The failure texts of a resolved table. */
+export function streamErrorTextsOf(texts: ResolvedChatServerTexts): StreamErrorTexts {
+  return Object.freeze({ streamError: texts.streamError, invalidToolInput: texts.invalidToolInput });
 }

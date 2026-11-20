@@ -21,7 +21,6 @@ import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions, ModelInputBreakdown } from './prepare-model-messages.js';
 import type { ChatMemoryConfig } from './chat-memory.js';
 import type { BudgetStopTexts } from './budget-stop-notice.js';
-import type { StreamErrorTexts } from './stream-error-text.js';
 import type { ChatServerLocales } from './chat-texts.js';
 import type { UiActionOutcomesOption } from './ui-outcomes.js';
 import type { UiToolResultShapeOption } from '../../core/index.js';
@@ -373,8 +372,10 @@ export interface AiChatHandlerConfig {
   clientLanguage?: boolean;
   /**
    * The handler's own texts per BCP-47 language tag, to add a language
-   * (`pl`) or change single texts of one: the keys of `budgetStopTexts` plus
-   * `silentTurn` (the answer of a turn that produced nothing). Partial tables
+   * (`pl`) or change single texts of one: the keys of `budgetStopTexts`,
+   * `silentTurn` (the answer of a turn that produced nothing), `streamError`
+   * (any failure the SDK does not name itself) and `invalidToolInput` (a
+   * tool call whose arguments do not match the schema). Partial tables
    * fall back per key: the language, another region of it, the built-in
    * German or English texts, English. `budgetStopTexts` stays language-free
    * and wins for every language. An unknown key, an empty text or a key
@@ -392,16 +393,6 @@ export interface AiChatHandlerConfig {
    * English); an unknown key or an empty text throws.
    */
   budgetStopTexts?: Partial<BudgetStopTexts>;
-  /**
-   * The fixed texts the chat shows for a failed turn or tool call: `generic`
-   * (any failure the SDK does not name itself; default `AI request failed`,
-   * German `KI-Anfrage fehlgeschlagen`) and `invalidToolInput` (a tool call
-   * with arguments that do not match the schema). Given keys replace the
-   * defaults of the turn language (German for `de*`, else English); an
-   * unknown key or an empty text throws. The 500 JSON body before streaming
-   * stays English.
-   */
-  streamErrorTexts?: Partial<StreamErrorTexts>;
   uiActionSchema?: SchemaLike;
   maxOutputTokens?: number;
   /**

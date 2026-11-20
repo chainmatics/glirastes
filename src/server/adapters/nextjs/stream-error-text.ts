@@ -13,47 +13,20 @@ export const INVALID_TOOL_INPUT_TEXT_DE = 'Der Assistent hat ungültige Eingaben
 export const GENERIC_STREAM_ERROR_TEXT = 'AI request failed';
 /** The chat's text for a model tool call whose arguments do not match the schema. */
 export const INVALID_TOOL_INPUT_TEXT = 'The assistant sent invalid input for this tool; it was told what to correct.';
-/** The fixed failure texts the chat shows, per chat language. */
+/** The fixed failure texts the chat shows, resolved for one turn language. */
 export interface StreamErrorTexts {
   /** Any failure the SDK does not name itself. */
-  generic: string;
+  streamError: string;
   /** A model tool call whose arguments do not match the schema. */
   invalidToolInput: string;
 }
 
-const EN_STREAM_ERROR_TEXTS: StreamErrorTexts = Object.freeze({
-  generic: GENERIC_STREAM_ERROR_TEXT,
-  invalidToolInput: INVALID_TOOL_INPUT_TEXT,
+/** The built-in texts per language; the handler's `locales` adds or changes them. */
+export const STREAM_ERROR_TEXTS: Readonly<{ en: StreamErrorTexts; de: StreamErrorTexts }> = Object.freeze({
+  en: Object.freeze({ streamError: GENERIC_STREAM_ERROR_TEXT, invalidToolInput: INVALID_TOOL_INPUT_TEXT }),
+  de: Object.freeze({ streamError: GENERIC_STREAM_ERROR_TEXT_DE, invalidToolInput: INVALID_TOOL_INPUT_TEXT_DE }),
 });
-const DE_STREAM_ERROR_TEXTS: StreamErrorTexts = Object.freeze({
-  generic: GENERIC_STREAM_ERROR_TEXT_DE,
-  invalidToolInput: INVALID_TOOL_INPUT_TEXT_DE,
-});
-const STREAM_ERROR_KEYS: ReadonlySet<string> = new Set(Object.keys(EN_STREAM_ERROR_TEXTS));
-
-/**
- * The texts for `locale` (German for `de*`, else English) with `overrides`
- * replacing single keys. Throws for an unknown key or a value that is no
- * non-empty string.
- */
-export function resolveStreamErrorTexts(
-  locale: string | undefined,
-  overrides?: Partial<StreamErrorTexts>,
-  label = 'createAiChatHandler',
-): StreamErrorTexts {
-  const base = locale?.toLowerCase().startsWith('de') ? DE_STREAM_ERROR_TEXTS : EN_STREAM_ERROR_TEXTS;
-  if (overrides === undefined) return base;
-  if (typeof overrides !== 'object' || overrides === null || Array.isArray(overrides)) {
-    throw new Error(`${label}: streamErrorTexts must be an object of texts`);
-  }
-  for (const [key, value] of Object.entries(overrides)) {
-    if (!STREAM_ERROR_KEYS.has(key)) throw new Error(`${label}: streamErrorTexts.${key} is not a text key`);
-    if (value !== undefined && (typeof value !== 'string' || value.trim() === '')) {
-      throw new Error(`${label}: streamErrorTexts.${key} must be a non-empty string`);
-    }
-  }
-  return Object.freeze({ ...base, ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)) });
-}
+const EN_STREAM_ERROR_TEXTS = STREAM_ERROR_TEXTS.en;
 
 /**
  * What the model reads in a later request for a call the chat shows with
@@ -125,7 +98,7 @@ export function streamErrorText(error: unknown, texts: StreamErrorTexts = EN_STR
   if (error instanceof ToolExecutionDeniedError) return toolDenialDisplayText(error);
   if (InvalidToolInputError.isInstance(error)) return texts.invalidToolInput;
   if (NoSuchToolError.isInstance(error)) return UNAVAILABLE_TOOL_TEXT;
-  return texts.generic;
+  return texts.streamError;
 }
 
 export interface MaskedToolError {
@@ -148,7 +121,7 @@ export function createToolStreamErrorMask(texts: StreamErrorTexts = EN_STREAM_ER
   const invalidCallTexts = new Map<string, string>();
   return (error) => {
     if (typeof error === 'string') {
-      return { text: invalidCallTexts.get(error) ?? texts.generic };
+      return { text: invalidCallTexts.get(error) ?? texts.streamError };
     }
     if (error instanceof ToolExecutionDeniedError) {
       const text = toolDenialDisplayText(error);
@@ -172,6 +145,6 @@ export function createToolStreamErrorMask(texts: StreamErrorTexts = EN_STREAM_ER
         },
       };
     }
-    return { text: texts.generic, report: { error, info: { source: 'tool-call', kind: 'failed' } } };
+    return { text: texts.streamError, report: { error, info: { source: 'tool-call', kind: 'failed' } } };
   };
 }
