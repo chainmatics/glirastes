@@ -398,6 +398,28 @@ describe('upgrade baseline and hook on install', () => {
     expect((await readBaseline(rootDir))!.reviewedThrough).toBe(SDK_VERSION);
   });
 
+  it('brings an outdated Glirastes block in AGENTS.md and CLAUDE.md up to date', async () => {
+    const rootDir = await nextAppRoot();
+    const old = '<!-- glirastes:tools -->\n## Glirastes tools\n\nOld text.\n<!-- /glirastes:tools -->';
+    await writeFile(join(rootDir, 'AGENTS.md'), `# Mine\n\n${old}\n`);
+    await writeFile(join(rootDir, 'CLAUDE.md'), '# No block here\n');
+    await installSkills({ rootDir, host: 'claude', quiet: true });
+    const agents = await readFile(join(rootDir, 'AGENTS.md'), 'utf8');
+    expect(agents.startsWith('# Mine\n\n')).toBe(true);
+    expect(agents).not.toContain('Old text.');
+    expect(agents).toContain('glirastes upgrade report');
+    expect(await readFile(join(rootDir, 'CLAUDE.md'), 'utf8')).toBe('# No block here\n');
+  });
+
+  it('leaves the Glirastes block alone on a dry run and a global install', async () => {
+    const rootDir = await nextAppRoot();
+    const old = '<!-- glirastes:tools -->\nOld text.\n<!-- /glirastes:tools -->\n';
+    await writeFile(join(rootDir, 'AGENTS.md'), old);
+    await installSkills({ rootDir, host: 'claude', quiet: true, dryRun: true });
+    await installSkills({ rootDir, host: 'claude', quiet: true, global: true, dryRun: true });
+    expect(await readFile(join(rootDir, 'AGENTS.md'), 'utf8')).toBe(old);
+  });
+
   it('writes no baseline on a dry run', async () => {
     const rootDir = await nextAppRoot();
     await installSkills({ rootDir, host: 'claude', quiet: true, dryRun: true });

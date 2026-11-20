@@ -5,7 +5,6 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { TOOLS_PATHS } from '../../codegen/tools/config.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import { writeArtifactSetAtomically } from './atomic-artifact-write.js';
-import { skillsAutoUpdateDisabled } from './skills-auto-update.js';
 import { detectWorkspaceSources } from './workspace-sources.js';
 
 /**
@@ -248,10 +247,12 @@ async function resolveHintTargets(
 ): Promise<{ targets: Set<string>; notes: string[] }> {
   const targets = new Set<string>();
   const notes: string[] = [];
+  // Compared against the real root, so a root reached through a link (macOS /var -> /private/var) still matches.
+  const realRoot = existsSync(root) ? await realpath(root) : root;
   for (const file of files) {
     const absolute = join(root, file);
     if (!existsSync(absolute) && file !== hostFile) continue;
-    const target = existsSync(absolute) ? relative(root, await realpath(absolute)) : file;
+    const target = existsSync(absolute) ? relative(realRoot, await realpath(absolute)) : file;
     if (target.startsWith('..') || isAbsolute(target)) {
       notes.push(`${file} points outside the app; add the Glirastes tools hint there yourself.`);
       continue;
@@ -296,16 +297,14 @@ function withAgentHint(current: string, options: { insert: boolean }): { text: s
 
 /**
  * Brings existing Glirastes blocks in AGENTS.md / CLAUDE.md up to this SDK
- * (`tools refresh`). Only the text between the markers changes; a file without
- * the block is left alone, init inserts it. Returns the changed app-relative
- * files. `GLIRASTES_SKILLS_AUTO_UPDATE=0` switches it off.
+ * (`glirastes install`, an explicit step; `tools refresh` never touches them).
+ * Only the text between the markers changes; a file without the block is left
+ * alone, init inserts it. Returns the changed app-relative files.
  */
 export async function updateAgentHint(
   root: string,
-  env: NodeJS.ProcessEnv = process.env,
   warn: (line: string) => void = (line) => { console.error(line); },
 ): Promise<string[]> {
-  if (skillsAutoUpdateDisabled(env)) return [];
   const { targets } = await resolveHintTargets(root, ['AGENTS.md', 'CLAUDE.md'], undefined);
   const writes: Array<{ path: string; content: string; preserveMode: true }> = [];
   for (const target of targets) {

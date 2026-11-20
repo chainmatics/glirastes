@@ -172,7 +172,7 @@ describe('agent block update', () => {
     const after = '\n\n## Later\nTail without newline';
     const app = await freshApp({ 'AGENTS.md': `${before}${OLD_BLOCK}${after}` });
 
-    expect(await updateAgentHint(app.root, {})).toEqual(['AGENTS.md']);
+    expect(await updateAgentHint(app.root)).toEqual(['AGENTS.md']);
 
     const text = await app.read('AGENTS.md');
     expect(text.startsWith(before)).toBe(true);
@@ -181,46 +181,40 @@ describe('agent block update', () => {
     expect(text).toContain('run `glirastes upgrade report` (skill `upgrading-glirastes`)');
     expect(text).toContain('When the developer confirms the review, run `glirastes upgrade ack` (`--defer <id>` keeps an item listed).');
     expect(text).not.toContain('upgrade decide');
-    expect(await updateAgentHint(app.root, {})).toEqual([]);
-  });
-
-  it('does nothing when GLIRASTES_SKILLS_AUTO_UPDATE=0', async () => {
-    const app = await freshApp({ 'AGENTS.md': OLD_BLOCK });
-    expect(await updateAgentHint(app.root, { GLIRASTES_SKILLS_AUTO_UPDATE: '0' })).toEqual([]);
-    expect(await app.read('AGENTS.md')).toBe(OLD_BLOCK);
+    expect(await updateAgentHint(app.root)).toEqual([]);
   });
 
   it('never inserts a block into a file without one', async () => {
     const app = await freshApp({ 'AGENTS.md': '# Mine\n', 'CLAUDE.md': '# Other\n' });
-    expect(await updateAgentHint(app.root, {})).toEqual([]);
+    expect(await updateAgentHint(app.root)).toEqual([]);
     expect(await app.read('AGENTS.md')).toBe('# Mine\n');
   });
 
-  it('refresh brings the block up to date in write mode only', async () => {
+  it('refresh never rewrites the block; glirastes install does', async () => {
     const app = await freshApp({ 'AGENTS.md': OLD_BLOCK });
     const deps = (env: NodeJS.ProcessEnv) => ({ cwd: app.root, env, log: () => undefined, error: () => undefined,
       runPipeline: async () => ({ mode: 'write', changes: { added: [], changed: [], removed: [], unchanged: [] }, findings: [], excluded: [], outputs: {}, driftPaths: [], wrote: false } as never) });
     await runToolsCommand(['refresh', '--mode', 'frozen'], deps({}));
-    expect(await app.read('AGENTS.md')).toBe(OLD_BLOCK);
     await runToolsCommand(['refresh', '--mode', 'write'], deps({}));
-    expect(await app.read('AGENTS.md')).toContain('glirastes upgrade report');
+    await runToolsCommand(['refresh', '--mode', 'write', '--json'], deps({}));
+    expect(await app.read('AGENTS.md')).toBe(OLD_BLOCK);
   });
 
   it('normalizes line endings for the comparison and writes the block in the file\'s own', async () => {
     const crlfOld = OLD_BLOCK.replace(/\n/g, '\r\n');
     const app = await freshApp({ 'AGENTS.md': `# Mine\r\n\r\n${crlfOld}\r\ntail\r\n` });
-    expect(await updateAgentHint(app.root, {})).toEqual(['AGENTS.md']);
+    expect(await updateAgentHint(app.root)).toEqual(['AGENTS.md']);
     const text = await app.read('AGENTS.md');
     expect(text.startsWith('# Mine\r\n\r\n')).toBe(true);
     expect(text.endsWith('\r\ntail\r\n')).toBe(true);
     expect(text.replace(/\r\n/g, '')).not.toContain('\n');
-    expect(await updateAgentHint(app.root, {})).toEqual([]);
+    expect(await updateAgentHint(app.root)).toEqual([]);
   });
 
   it('updates every block and warns about a start marker without an end', async () => {
     const app = await freshApp({ 'AGENTS.md': `${OLD_BLOCK}\nmiddle\n${OLD_BLOCK}\n${AGENT_HINT_START}\nbroken` });
     const warnings: string[] = [];
-    expect(await updateAgentHint(app.root, {}, (line) => { warnings.push(line); })).toEqual(['AGENTS.md']);
+    expect(await updateAgentHint(app.root, (line) => { warnings.push(line); })).toEqual(['AGENTS.md']);
     const text = await app.read('AGENTS.md');
     expect(text).not.toContain('Old text.');
     expect(text.split('glirastes upgrade report').length - 1).toBe(2);

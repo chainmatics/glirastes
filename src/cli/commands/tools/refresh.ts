@@ -13,7 +13,6 @@ import {
   skillsAutoUpdateDisabled,
   type SkillsUpdatePlan,
 } from '../skills-auto-update.js';
-import { updateAgentHint } from '../init-scaffold.js';
 import { computeUpgradeHint, printUpgradeHint, withUpgradeJson } from '../upgrade/hint.js';
 
 export const REFRESH_ARGS = {
@@ -77,16 +76,6 @@ async function updateInstalledSkills(root: string, io: ToolsIo, json: boolean): 
   }
 }
 
-/** Rewrites an outdated Glirastes block in AGENTS.md / CLAUDE.md; never fails the refresh. */
-async function updateAgentInstructions(root: string, io: ToolsIo, json: boolean): Promise<void> {
-  try {
-    const changed = await updateAgentHint(root, io.env, io.error);
-    if (!json && changed.length > 0) io.log(`Updated the Glirastes block in ${changed.join(', ')}.`);
-  } catch (error) {
-    io.error(`The agent instructions were not updated: ${(error instanceof Error ? error.message : String(error)).split('\n')[0]}`);
-  }
-}
-
 export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo): Promise<number> {
   const args = parseToolArgs(argv, REFRESH_ARGS);
   const modeFlag = args.values.get('--mode');
@@ -100,15 +89,11 @@ export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo):
   if (args.flags.has('--watch')) {
     if (mode !== 'write') throw new ToolsUsageError('--watch refreshes in write mode only; CI and Docker builds check once.');
     if (json || args.values.has('--adopt')) throw new ToolsUsageError('--watch cannot be combined with --json or --adopt.');
-    if (skills) {
-      await updateInstalledSkills(root, io, false);
-      await updateAgentInstructions(root, io, false);
-    }
+    if (skills) await updateInstalledSkills(root, io, false);
     printUpgradeHint(await computeUpgradeHint(root, io), io);
     return watchRefresh(root, io);
   }
   const skillsPlan = skills ? await updateInstalledSkills(root, io, json) : null;
-  if (skills) await updateAgentInstructions(root, io, json);
   const keepGoing = args.flags.has('--keep-going') && mode === 'write';
   const adoptInventoryPath = args.values.get('--adopt');
   const result = await io.runPipeline({
