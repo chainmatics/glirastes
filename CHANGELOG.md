@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Reason for a refused chat message** (`docs/chat-queue.md`, "Why a message was refused"), with and without the queue: `submitWithResult(text, options?)` on the context and `useChatQueue()` returns `{ status: 'sent' | 'queued' }` or `{ status: 'rejected', reason }`; `lastRejection` (`{ reason, at }` or null) holds the latest refused `send`/`submit`, also from the built-in composers, and is null again after the next accepted message. Reasons (`ChatSubmitRejectionReason`): `session`, `approval-open` (only without the queue), `attachments-off`, `files-with-command`, `queue-full`. New types `ChatSubmitOutcome`, `ChatSubmitRejection`, `ChatSubmitRejectionReason`. `submit` keeps returning `'sent' | 'queued' | 'rejected'` and `send` its boolean; the built-in UI shows nothing new. No message content in either.
+- Locale key `queueApprovalWaitingHint`: the approval notice of `AiChatPanel` while a queued message waits for an open approval, before `approvalPendingHint`. Optional in `ChatLocale` (a full locale object without it still compiles). Order: the app's own text of the new key (`locale` or `locales`), else the app's own `approvalPendingHint` (also over a spread `deChatLocale`), only then the built-in text of the language.
+
+### Changed
+
+- Visible default change for apps with `queue.enabled` and no own `approvalPendingHint` or `queueApprovalWaitingHint`: while a queued message waits behind an open approval, the panel's approval notice now reads "Message waits until the approval is decided." (German: "Nachricht wartet, bis die Freigabe entschieden ist.") instead of "Please approve or reject the open request first." An app with its own `approvalPendingHint` sees no change; a refused send without the queue still shows `approvalPendingHint`.
+
 ### Fixed
 
 - The package now ships the guides under `docs/` that the README, this changelog, the skills and the type comments point to (`docs/chat-queue.md`, `docs/approval-subjects.md`, `docs/tool-policy.md`, `docs/managed-runtime-sync.md`, `docs/support-matrix.md` and the other top-level guides); before, only `docs/README.md` was packed, so those references led nowhere in `node_modules/glirastes`. Acceptance records (`docs/acceptance/`) and design material stay in the repository. A pack test fails when a packed file names a `docs/` path the package does not carry.

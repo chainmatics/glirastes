@@ -168,11 +168,23 @@ Off by default; `queue={{ enabled: true }}` on the provider (`config.queue` on
   `cancelEdit` (an open edit holds the queue at that message; call `beginEdit`
   when a custom UI opens an editor), `clearQueue`, `resumeQueue`, `pauseQueue`.
   `useChatQueue()` returns `ChatQueueApi` (state plus actions).
+- Why a message was refused (also without the queue): `submitWithResult`
+  returns `ChatSubmitOutcome` (`{ status: 'sent' | 'queued' }` or
+  `{ status: 'rejected', reason }`); `lastRejection` (`ChatSubmitRejection`
+  `{ reason, at }` or null; context and `useChatQueue()`) also covers the
+  built-in composers and is null again after the next accepted message.
+  `ChatSubmitRejectionReason`: `session`, `approval-open` (only without the
+  queue), `attachments-off`, `files-with-command`, `queue-full`. No content;
+  the built-in UI shows nothing new.
 - `ChatQueue` (`ChatQueueProps`: `className`, `children(queue)`) renders above
   the composer in `AiChatPanel`; `components.ChatQueue` replaces it, `null`
   hides it. A custom composer locks on `!canCompose`, not on `isLoading`.
 - `clear()` and another active conversation empty the queue; a language
-  change keeps it. A full `ChatLocale` object needs the `queue*` keys.
+  change keeps it. A full `ChatLocale` object needs the `queue*` keys except
+  the optional `queueApprovalWaitingHint` (the panel's approval notice while
+  a queued message waits). Order: the app's own text of that key, else the
+  app's own `approvalPendingHint`, else the built-in "Message waits until the
+  approval is decided." / "Nachricht wartet, bis die Freigabe entschieden ist."
 
 ## A chat without the SDK provider
 
