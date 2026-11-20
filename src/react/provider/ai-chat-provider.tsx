@@ -1444,6 +1444,26 @@ export function AiChatProvider({
     }).finally(() => untrack?.());
   }, [rawMessages, loadedSessionId, activeSessionId, trackUiWork]);
 
+  // A stored history the app handed to the transport itself (not through `session.load`): its outcomes
+  // are read and the key is taken out of the transport's copies (the app's objects stay), so no later
+  // request carries it. Only between requests: a running request already has its messages.
+  useEffect(() => {
+    if (isLoading || sessionNotReady) return;
+    const stored = readStoredTurnOutcomes(rawMessages as unknown as ChatMessage[]);
+    if (stored.messages === (rawMessages as unknown as ChatMessage[])) return;
+    setMessages(stored.messages as unknown as typeof rawMessages);
+    if (stored.outcomes.size === 0) return;
+    setTurnOutcomes((prev) => {
+      let next: Map<string, TurnOutcome> | null = null;
+      for (const [userMessageId, outcome] of stored.outcomes) {
+        if (prev.has(userMessageId)) continue;
+        next ??= new Map(prev);
+        next.set(userMessageId, outcome);
+      }
+      return next ?? prev;
+    });
+  }, [rawMessages, isLoading, sessionNotReady, setMessages]);
+
   // Save messages to session on change (scoped to the active session).
   useEffect(() => {
     if (!isInitialized) return;
