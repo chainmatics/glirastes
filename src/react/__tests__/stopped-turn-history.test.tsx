@@ -125,4 +125,60 @@ it('keeps a turn whose only step failed when the next message is sent', async ()
     { text: '', steps: ['error'], notice: null },
     { text: 'done', steps: [], notice: null },
   ]);
+  // As in 0.19.0, the request leaves it out.
+  expect(shape(chat.requests.at(-1)!)).toEqual(['user:one', 'user:two']);
+});
+
+/** Role and first text (or the first tool part's state) of each message of a request: what the backend receives. */
+function shape(messages: ReadonlyArray<{ role: string; parts: ReadonlyArray<unknown> }>): string[] {
+  return messages.map((message) => {
+    const textPart = message.parts.find((part) => (part as { type?: string }).type === 'text') as { text?: string } | undefined;
+    const tool = message.parts.find((part) => String((part as { type?: string }).type).startsWith('tool-')) as
+      { state?: string } | undefined;
+    return `${message.role}:${textPart?.text ?? (tool ? `tool(${tool.state})` : '')}`;
+  });
+}
+
+describe.each<Mode>(['queue', 'manual'])('the request after a stop is the one of 0.19.0 (%s)', (mode) => {
+  const base: Partial<AiChatProviderConfig> = mode === 'queue' ? { queue: { enabled: true } } : {};
+
+  it('leaves out a stopped message with only an unfinished tool part, also after a reload; keeps it on screen', async () => {
+    const store = storeFor(`request-tool-${mode}`);
+    const chat = new StreamingChat();
+    const view = render(<Host chat={chat} config={{ ...base, session: store }} />);
+    await ready();
+    await act(async () => { ctx.send('one'); });
+    act(() => chat.stream([stepStart, runningTool('call-1')]));
+    await stopThenNext(chat, mode, 'two');
+    expect(shape(chat.requests.at(-1)!)).toEqual(['user:one', 'user:two']);
+    act(() => chat.finish());
+    expect(renderedTurns()[0]).toEqual({ text: '', steps: ['aborted'], notice: STOPPED });
+
+    view.unmount();
+    const reloaded = new StreamingChat();
+    render(<Host chat={reloaded} config={{ ...base, session: store }} />);
+    await waitFor(() => expect(renderedTurns()).toHaveLength(2));
+    expect(renderedTurns()[0]).toEqual({ text: '', steps: ['aborted'], notice: STOPPED });
+    // The transport gets the stored history without it, as 0.19.0 loaded it.
+    expect(shape(reloaded.messages)).toEqual(['user:one', 'user:two', 'assistant:done']);
+    await ready();
+    await act(async () => { ctx.send('three'); });
+    expect(shape(reloaded.requests.at(-1)!)).toEqual(['user:one', 'user:two', 'assistant:done', 'user:three']);
+    act(() => reloaded.finish());
+    // Still shown and stored, never sent.
+    expect(renderedTurns().map((turn) => turn.steps)).toEqual([['aborted'], [], []]);
+    const stored = await store.load!('default') as Array<{ role: string; parts: unknown[] }>;
+    expect(shape(stored)).toEqual([
+      'user:one', 'assistant:tool(input-available)', 'user:two', 'assistant:done', 'user:three', 'assistant:done',
+    ]);
+  });
+
+  it('sends a stopped message with text, as before', async () => {
+    const chat = new StreamingChat();
+    render(<Host chat={chat} config={base} />);
+    await act(async () => { ctx.send('one'); });
+    act(() => chat.stream([stepStart, text('Partial'), runningTool('call-1')]));
+    await stopThenNext(chat, mode, 'two');
+    expect(shape(chat.requests.at(-1)!)).toEqual(['user:one', 'assistant:Partial', 'user:two']);
+  });
 });

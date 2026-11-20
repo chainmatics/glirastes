@@ -18,11 +18,15 @@ export class StreamingChat {
   messages: ChatMessage[] = [];
   status: ChatTransport['status'] = 'ready';
   sent: string[] = [];
+  /** The history each send hands to the backend (the transport's messages with the new one), as `useChat` sends it. */
+  requests: ChatMessage[][] = [];
   error: Error | null = null;
   private listeners = new Set<() => void>();
   private dataHandlers = new Set<ChatTransportDataHandler>();
   private pending: Array<() => void> = [];
-  private counter = 0;
+  // Unique across instances, as the AI SDK's ids are: a reloaded chat never reuses a stored id.
+  private static ids = 0;
+  private get nextId() { StreamingChat.ids += 1; return StreamingChat.ids; }
   private streamingId: string | null = null;
 
   subscribe(listener: () => void) {
@@ -36,8 +40,8 @@ export class StreamingChat {
 
   sendMessage = vi.fn(({ text }: { text: string }) => {
     this.sent.push(text);
-    this.counter += 1;
-    this.messages = [...this.messages, { id: `u${this.counter}`, role: 'user', parts: [{ type: 'text', text }] }];
+    this.messages = [...this.messages, { id: `u${this.nextId}`, role: 'user', parts: [{ type: 'text', text }] }];
+    this.requests.push(this.messages);
     this.status = 'submitted';
     this.error = null;
     this.streamingId = null;
@@ -48,8 +52,7 @@ export class StreamingChat {
   /** The assistant message of the running request, as streamed so far. */
   stream(parts: unknown[]) {
     if (!this.streamingId) {
-      this.counter += 1;
-      this.streamingId = `a${this.counter}`;
+      this.streamingId = `a${this.nextId}`;
       this.messages = [...this.messages, { id: this.streamingId, role: 'assistant', parts: parts as ChatMessage['parts'] }];
     } else {
       const id = this.streamingId;
