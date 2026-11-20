@@ -70,6 +70,18 @@ export interface ChatCommandDefinition {
 
 const MAX_ITEM_TEXT = 200;
 
+/** Length a hit's id, label and description are cut to (`toChatEntityItem`): a label this long may be cut. */
+export const CHAT_ENTITY_ITEM_TEXT_MAX = MAX_ITEM_TEXT;
+
+/**
+ * Internal: a derived entity's search that throws when the endpoint refuses
+ * (non-2xx) instead of returning no hits, so a failure is not mistaken for
+ * "no match". Its public `search` keeps returning `[]` then.
+ */
+export const STRICT_ENTITY_SEARCH: unique symbol = Symbol('glirastes.strictEntitySearch');
+
+class EntitySearchRefused extends Error {}
+
 /** Validates and freezes an entity definition; throws on anything the chat could not use safely. */
 export function defineChatEntity<T extends ChatEntityDefinition>(definition: T): T {
   if (typeof definition.search !== 'function') throw new Error(`Chat entity ${String(definition.type)} needs a search function`);
@@ -120,12 +132,7 @@ export function entitiesFromData(
 ): ChatEntityDefinition[] {
   return data.entities.map((entity) => {
     const search = entity.search;
-    return {
-      type: entity.type,
-      label: entity.label,
-      ...(entity.icon ? { icon: entity.icon } : {}),
-      ...(entity.actions ? { actions: entity.actions } : {}),
-      async search(query, context) {
+    const strict = async (query: string, context: ChatEntitySearchContext): Promise<ChatEntityItem[]> => {
         if (!search) return [];
         const params = new URLSearchParams({ [search.queryParam]: query });
         if (search.limitParam) params.set(search.limitParam, String(context.limit));
@@ -135,7 +142,7 @@ export function entitiesFromData(
           credentials: options.baseUrl ? 'include' : 'same-origin',
           headers: { accept: 'application/json' },
         });
-        if (!response.ok) return [];
+        if (!response.ok) throw new EntitySearchRefused();
         const list = at(await response.json() as unknown, search.itemsPath);
         if (!Array.isArray(list)) return [];
         return list
@@ -146,7 +153,22 @@ export function entitiesFromData(
           }))
           .filter((item): item is ChatEntityItem => item !== undefined)
           .slice(0, context.limit);
+    };
+    return {
+      type: entity.type,
+      label: entity.label,
+      ...(entity.icon ? { icon: entity.icon } : {}),
+      ...(entity.actions ? { actions: entity.actions } : {}),
+      async search(query, context) {
+        try {
+          return await strict(query, context);
+        } catch (error) {
+          // A refused request has always been no hits here.
+          if (error instanceof EntitySearchRefused) return [];
+          throw error;
+        }
       },
-    } satisfies ChatEntityDefinition;
+      [STRICT_ENTITY_SEARCH]: strict,
+    } satisfies ChatEntityDefinition & { [STRICT_ENTITY_SEARCH]: typeof strict };
   });
 }

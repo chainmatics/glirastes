@@ -361,8 +361,10 @@ export {
   EntityText,
   MentionMarkers,
   markdownWithMentionMarkers,
+  UnresolvedMentionMarker,
   useChatEntityLinks,
   type ChatEntityLinks,
+  type MentionMarkerMessage,
 } from './entity-links/entity-links-react.js';
 export {
   useChatInteractionsData,

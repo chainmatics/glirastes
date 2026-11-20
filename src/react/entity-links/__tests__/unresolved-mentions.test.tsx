@@ -8,6 +8,9 @@ import { defineChatEntity, type ChatEntityItem } from '../../interactions/defini
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import type { ChatMessage, ChatTransport } from '../../types.js';
 import { pickExactNameMatch, type ChatEntityLinksConfig } from '../entity-links.js';
+import { useChatEntityLinks } from '../entity-links-react.js';
+import { Host, StreamingChat, ctx } from '../../__tests__/streaming-chat.js';
+import type { ChatInteractionsData } from '../../../contracts/chat-interactions.js';
 
 afterEach(() => {
   cleanup();
@@ -39,15 +42,24 @@ function answer(text: string, user = 'Which playlist?'): ChatMessage[] {
 
 type Search = (query: string) => ReadonlyArray<ChatEntityItem> | Promise<ReadonlyArray<ChatEntityItem>>;
 
+const interactionsBySearch = new WeakMap<Search, { entities: ReturnType<typeof defineChatEntity>[] }>();
+/** One `chatInteractions` object per search function, as an app with `useMemo` passes it. */
+function stableInteractions(search: Search) {
+  let found = interactionsBySearch.get(search);
+  if (!found) {
+    found = { entities: [defineChatEntity({ type: 'playlist', label: 'Playlist', search: (query: string) => search(query) })] };
+    interactionsBySearch.set(search, found);
+  }
+  return found;
+}
+
 function Chat({ messages, entityLinks, search, declarations = DECLARED }: {
   messages: ChatMessage[];
   entityLinks: ChatEntityLinksConfig;
   search?: Search;
   declarations?: EntityDeclarationsByTool;
 }) {
-  const interactions = search
-    ? { entities: [defineChatEntity({ type: 'playlist', label: 'Playlist', search: (query: string) => search(query) })] }
-    : undefined;
+  const interactions = search ? stableInteractions(search) : undefined;
   return (
     <AiChatProvider
       transport={transport(messages)}
@@ -147,6 +159,29 @@ describe("unresolvedMentions: 'text'", () => {
     await textShown('Done.');
     const user = document.querySelector('[data-component="message-bubble"][data-role="user"]')!;
     expect(user.querySelectorAll('[data-component="mention-chip"]')).toHaveLength(1);
+  });
+
+  it('never applies to a marker of a user message, whatever its id (role check)', async () => {
+    const decided: Record<string, string | undefined> = {};
+    function Probe() {
+      const links = useChatEntityLinks();
+      const mention = { type: 'playlist', id: 'pl_404', displayName: 'Lobby Loop', prefix: '@' };
+      decided.user = links.unresolvedMention?.(mention, { id: 'u1', role: 'user' });
+      decided.assistant = links.unresolvedMention?.(mention, { id: 'a1', role: 'assistant' });
+      return null;
+    }
+    render(
+      <AiChatProvider transport={transport(answer('Done.'))} uiActionBus={new UiActionBus()} entityDeclarations={DECLARED} entityLinks={{ unresolvedMentions: 'text' }}>
+        <Probe />
+      </AiChatProvider>,
+    );
+    expect(decided).toEqual({ user: 'keep', assistant: 'text' });
+  });
+
+  it("markdown with verifyMentions: false: 'text' still applies", async () => {
+    render(<Chat messages={answer(WRONG)} entityLinks={{ open: vi.fn(), mentionMarkers: 'markdown', verifyMentions: false, unresolvedMentions: 'text', known: false }} />);
+    await textShown('Found Lobby Loop for you.');
+    expect(chips()).toHaveLength(0);
   });
 });
 
@@ -263,5 +298,243 @@ describe('unresolvedMention hook', () => {
     render(<Chat messages={answer(WRONG)} entityLinks={{ open: vi.fn(), unresolvedMention: () => 'text' }} />);
     await textShown('Found Lobby Loop for you.');
     expect(chips()).toHaveLength(0);
+  });
+});
+
+/** A chat whose host re-renders with new inline objects of equal value, as an app without `useMemo` does. */
+function InlineChat({ messages, entityLinks, search, roles = ['editor'], panel = 'one' }: {
+  messages: ChatMessage[];
+  entityLinks: ChatEntityLinksConfig;
+  search: Search;
+  roles?: string[];
+  /** A new value remounts the panel (and every marker) inside the same provider. */
+  panel?: string;
+}) {
+  return (
+    <AiChatProvider
+      transport={transport(messages)}
+      uiActionBus={new UiActionBus()}
+      entityDeclarations={{ ...DECLARED }}
+      entityLinks={{ ...entityLinks }}
+      completionContext={{ roles: [...roles] }}
+      chatInteractions={{ entities: [defineChatEntity({ type: 'playlist', label: 'Playlist', search: (query: string) => search(query) })] }}
+    >
+      <AiChatPanel key={panel} />
+    </AiChatProvider>
+  );
+}
+
+describe('search cache (review 1, 6, 7)', () => {
+  for (const mentionMarkers of ['plain', 'markdown'] as const) {
+    it(`${mentionMarkers}: new inline objects of equal value neither search again nor drop the chip`, async () => {
+      let finish: (items: ChatEntityItem[]) => void = () => {};
+      const search = vi.fn(() => new Promise<ChatEntityItem[]>((resolve) => { finish = resolve; }));
+      const links: ChatEntityLinksConfig = { open: vi.fn(), mentionMarkers, unresolvedMentions: 'search', known: false };
+      const view = render(<InlineChat messages={answer(WRONG)} search={search} entityLinks={links} />);
+      await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+      for (let i = 0; i < 3; i += 1) view.rerender(<InlineChat messages={answer(WRONG)} search={search} entityLinks={links} />);
+      await act(async () => { finish([{ id: 'pl_7b', label: 'Lobby Loop' }]); });
+      await waitFor(() => expect(chips()).toHaveLength(1));
+      for (let i = 0; i < 3; i += 1) {
+        view.rerender(<InlineChat messages={answer(WRONG)} search={search} entityLinks={links} />);
+        expect(chips()).toHaveLength(1);
+      }
+      await act(async () => { await Promise.resolve(); });
+      expect(chips()).toHaveLength(1);
+      expect(search).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it('searches again and drops the found id when the user context changes by value', async () => {
+    const search = vi.fn()
+      .mockResolvedValueOnce([{ id: 'pl_A', label: 'Lobby Loop' }])
+      .mockResolvedValueOnce([{ id: 'pl_B', label: 'Lobby Loop' }]);
+    const open = vi.fn();
+    const links: ChatEntityLinksConfig = { open, unresolvedMentions: 'search', known: false };
+    const view = render(<InlineChat messages={answer(WRONG)} search={search} entityLinks={links} roles={['a']} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Lobby Loop' }));
+    expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'pl_A' }));
+    view.rerender(<InlineChat messages={answer(WRONG)} search={search} entityLinks={links} roles={['b']} />);
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open Lobby Loop' }));
+      expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'pl_B' }));
+    });
+  });
+
+  it('does not keep a failed search: a later marker with the name searches again', async () => {
+    const search = vi.fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue([{ id: 'pl_7b', label: 'Lobby Loop' }]);
+    const links: ChatEntityLinksConfig = { open: vi.fn(), unresolvedMentions: 'search', known: false };
+    const view = render(<Chat messages={answer(WRONG)} search={search} entityLinks={links} />);
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    await act(async () => { await Promise.resolve(); });
+    expect(chips()).toHaveLength(0);
+    const more = [...answer(WRONG), { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'Again {{mention:playlist:pl_9:Lobby Loop}}.' }] }] as unknown as ChatMessage[];
+    view.rerender(<Chat messages={more} search={search} entityLinks={links} />);
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+    expect(await screen.findAllByRole('button', { name: 'Open Lobby Loop' })).not.toHaveLength(0);
+  });
+
+  it('does not keep a refused derived search (HTTP 500) either', async () => {
+    const data: ChatInteractionsData = {
+      schemaVersion: 1, commands: [],
+      entities: [{ type: 'playlist', label: 'Playlist', search: { tool: 'playlists.list', path: '/api/playlists', queryParam: 'q', itemsPath: ['items'], idField: 'id', labelField: 'name' } }],
+    } as unknown as ChatInteractionsData;
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response('no', { status: 500 }))
+      .mockResolvedValue(new Response(JSON.stringify({ items: [{ id: 'pl_7b', name: 'Lobby Loop' }] }), { status: 200 }));
+    const links: ChatEntityLinksConfig = { open: vi.fn(), unresolvedMentions: 'search', known: false };
+    const derived = { data, fetch: fetcher };
+    const Derived = ({ messages }: { messages: ChatMessage[] }) => (
+      <AiChatProvider transport={transport(messages)} uiActionBus={new UiActionBus()} entityDeclarations={DECLARED} entityLinks={links} chatInteractions={derived}>
+        <AiChatPanel />
+      </AiChatProvider>
+    );
+    const view = render(<Derived messages={answer(WRONG)} />);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await act(async () => { await Promise.resolve(); });
+    const more = [...answer(WRONG), { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'Again {{mention:playlist:pl_9:Lobby Loop}}.' }] }] as unknown as ChatMessage[];
+    view.rerender(<Derived messages={more} />);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(await screen.findAllByRole('button', { name: 'Open Lobby Loop' })).not.toHaveLength(0);
+  });
+
+  it('a remount of the markers while the search runs does not search again', async () => {
+    let finish: (items: ChatEntityItem[]) => void = () => {};
+    const search = vi.fn(() => new Promise<ChatEntityItem[]>((resolve) => { finish = resolve; }));
+    const links: ChatEntityLinksConfig = { open: vi.fn(), unresolvedMentions: 'search', known: false };
+    const view = render(<InlineChat messages={answer(WRONG)} search={search} entityLinks={links} />);
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    view.rerender(<InlineChat messages={answer(WRONG)} search={search} entityLinks={links} panel="two" />);
+    expect(chips()).toHaveLength(0);
+    await act(async () => { finish([{ id: 'pl_7b', label: 'Lobby Loop' }]); });
+    await waitFor(() => expect(chips()).toHaveLength(1));
+    expect(search).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('only messages whose turn had declarations (review 2)', () => {
+  it('keeps stored markers after a reload; handles the wrong marker of a new live turn', async () => {
+    const chat = new StreamingChat();
+    chat.messages = answer('Old {{mention:playlist:pl_7:Lobby Loop}} and {{mention:playlist:pl_8:Lobby Loop}}.');
+    const search = vi.fn(() => []);
+    const config = {
+      entityLinks: { open: vi.fn(), unresolvedMentions: 'search' as const, known: false },
+      chatInteractions: { entities: [defineChatEntity({ type: 'playlist', label: 'Playlist', search })] },
+    };
+    render(<Host chat={chat} config={config} />);
+    await waitFor(() => expect(document.querySelectorAll('[data-component="mention-chip"]')).toHaveLength(2));
+    await act(async () => { void ctx.send('next'); });
+    await act(async () => { chat.emit({ type: 'data-tool-entities', data: { tools: DECLARED } }); });
+    await act(async () => { chat.stream([{ type: 'text', text: 'New {{mention:playlist:pl_9:Lobby Loop}} here.' }]); });
+    await act(async () => { chat.finish([{ type: 'text', text: 'New {{mention:playlist:pl_9:Lobby Loop}} here.' }]); });
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    await act(async () => { await Promise.resolve(); });
+    const bubbles = document.querySelectorAll('[data-component="message-bubble"][data-role="assistant"]');
+    expect(bubbles[0]!.querySelectorAll('[data-component="mention-chip"]')).toHaveLength(2);
+    expect(bubbles[1]!.querySelectorAll('[data-component="mention-chip"]')).toHaveLength(0);
+    expect(bubbles[1]!.textContent).toContain('New Lobby Loop here.');
+  });
+
+  it('keeps every marker of a reloaded history without declarations: no search on load', async () => {
+    const search = vi.fn(() => []);
+    render(<Chat messages={answer(WRONG)} declarations={{}} search={search} entityLinks={{ open: vi.fn(), unresolvedMentions: 'search' }} />);
+    await screen.findByRole('button', { name: 'Open Lobby Loop' });
+    expect(search).not.toHaveBeenCalled();
+  });
+});
+
+describe('interactions still loading (review 3)', () => {
+  const CHANNELS: EntityDeclarationsByTool = { channels_list: { output: [{ type: 'channel', id: 'key', name: 'title' }] } };
+  const loaded = (types: string[]) => ({
+    schemaVersion: 1, commands: [],
+    entities: types.map((type) => ({ type, label: type })),
+  }) as unknown as ChatInteractionsData;
+  const Loading = ({ chatInteractions }: { chatInteractions: Record<string, unknown> }) => (
+    <AiChatProvider transport={transport(answer(WRONG))} uiActionBus={new UiActionBus()} entityDeclarations={CHANNELS} entityLinks={{ open: vi.fn(), unresolvedMentions: 'text' }} chatInteractions={chatInteractions}>
+      <AiChatPanel />
+    </AiChatProvider>
+  );
+
+  it('shows the name as text, never a chip, while derived data is still undefined', async () => {
+    const view = render(<Loading chatInteractions={{ data: undefined }} />);
+    await textShown('Found Lobby Loop for you.');
+    expect(chips()).toHaveLength(0);
+    view.rerender(<Loading chatInteractions={{ data: loaded(['playlist']) }} />);
+    await textShown('Found Lobby Loop for you.');
+    expect(chips()).toHaveLength(0);
+  });
+
+  it('honours an explicit loading flag', async () => {
+    render(<Loading chatInteractions={{ entities: [], loading: true }} />);
+    await textShown('Found Lobby Loop for you.');
+    expect(chips()).toHaveLength(0);
+  });
+
+  it('keeps a loaded but undeclared type a chip', async () => {
+    render(<Loading chatInteractions={{ data: loaded(['person']) }} />);
+    expect(await screen.findByRole('button', { name: 'Open Lobby Loop' })).not.toBeNull();
+  });
+});
+
+describe('search edge cases (review 4, 5, 10)', () => {
+  it('a name at the cut length of a hit label never matches, and is not searched', async () => {
+    const long = 'x'.repeat(200);
+    const search = vi.fn(() => [{ id: 'pl_1', label: 'x'.repeat(250) }]);
+    render(<Chat messages={answer(`See {{mention:playlist:pl_8:${long}}}.`)} search={search} entityLinks={{ open: vi.fn(), unresolvedMentions: 'search', known: false }} />);
+    await textShown(long);
+    await act(async () => { await Promise.resolve(); });
+    expect(chips()).toHaveLength(0);
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it('a hit label at the cut length does not match a shorter name that equals its cut', async () => {
+    const name = 'y'.repeat(199);
+    const search = vi.fn(() => [{ id: 'pl_1', label: `${'y'.repeat(199)} tail` }]);
+    render(<Chat messages={answer(`See {{mention:playlist:pl_8:${name}}}.`)} search={search} entityLinks={{ open: vi.fn(), unresolvedMentions: 'search', known: false }} />);
+    await waitFor(() => expect(search).toHaveBeenCalled());
+    await act(async () => { await Promise.resolve(); });
+    expect(chips()).toHaveLength(0);
+  });
+
+  it('compares the marker type case-insensitively, as the seen check does, without a second search', async () => {
+    const search = vi.fn(() => [{ id: 'pl_7b', label: 'Lobby Loop' }]);
+    const text = '{{mention:Playlist:pl_8:Lobby Loop}} and {{mention:playlist:pl_9:Lobby Loop}}';
+    render(<Chat messages={answer(text)} search={search} entityLinks={{ open: vi.fn(), unresolvedMentions: 'search', known: false }} />);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Open Lobby Loop' })).toHaveLength(2));
+    expect(search).toHaveBeenCalledTimes(1);
+  });
+
+  it('searches at most maxMentionSearches (default 5) distinct names per message; the rest stay text', async () => {
+    const names = ['Aa1x', 'Bb2x', 'Cc3x', 'Dd4x', 'Ee5x', 'Ff6x', 'Gg7x'];
+    const text = names.map((name, i) => `{{mention:playlist:x${i}:${name}}}`).join(' ');
+    const search = vi.fn((query: string) => [{ id: `id-${query}`, label: query }]);
+    render(<Chat messages={answer(text)} search={search} entityLinks={{ open: vi.fn(), unresolvedMentions: 'search', known: false }} />);
+    await waitFor(() => expect(chips()).toHaveLength(5));
+    expect(search.mock.calls.map(([query]) => query)).toEqual(names.slice(0, 5));
+    cleanup();
+    const once = vi.fn((query: string) => [{ id: `id-${query}`, label: query }]);
+    render(<Chat messages={answer(text)} search={once} entityLinks={{ open: vi.fn(), unresolvedMentions: 'search', maxMentionSearches: 1, known: false }} />);
+    await waitFor(() => expect(chips()).toHaveLength(1));
+    expect(once).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs at most two searches at a time', async () => {
+    let running = 0;
+    let most = 0;
+    const resolvers: Array<() => void> = [];
+    const search = vi.fn((query: string) => new Promise<ChatEntityItem[]>((resolve) => {
+      running += 1;
+      most = Math.max(most, running);
+      resolvers.push(() => { running -= 1; resolve([{ id: `id-${query}`, label: query }]); });
+    }));
+    const text = ['Aa1x', 'Bb2x', 'Cc3x', 'Dd4x'].map((name, i) => `{{mention:playlist:x${i}:${name}}}`).join(' ');
+    render(<Chat messages={answer(text)} search={search} entityLinks={{ open: vi.fn(), unresolvedMentions: 'search', known: false }} />);
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+    while (resolvers.length > 0) await act(async () => { resolvers.shift()!(); await new Promise((r) => setTimeout(r, 0)); });
+    await waitFor(() => expect(chips()).toHaveLength(4));
+    expect(most).toBe(2);
   });
 });

@@ -19,6 +19,7 @@ import type {
 import { normalizeMentionSlug } from '../utils/mention-markup.js';
 import {
   entitiesFromData,
+  STRICT_ENTITY_SEARCH,
   toChatEntityItem,
   type ChatCommandDefinition,
   type ChatEntityDefinition,
@@ -37,6 +38,14 @@ export interface ChatInteractionsConfig extends DerivedEntityOptions {
   readonly locale?: ChatLocaleCode;
   /** Passed to entity searches; set by the provider from `completionContext`. */
   readonly context?: CompletionPermissionContext;
+  /**
+   * True while `data` is still loading, so the declared entity types are not
+   * known yet (`entityLinks.unresolvedMentions` then shows a marker of a type
+   * it cannot judge as text). Default: true when `data` is given as a key but
+   * `undefined` (what `useChatInteractionsData` returns until it has loaded,
+   * and after a failed request).
+   */
+  readonly loading?: boolean;
 }
 
 /** A command or entity action that still needs arguments from the user. */
@@ -74,6 +83,10 @@ export interface ChatInteractionRegistry {
   readonly entitySearches: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }>;
   /** Searches one entity type, e.g. for an argument field; failures yield no hits. */
   searchEntity(type: string, query: string, signal: AbortSignal): Promise<ChatEntityItem[]>;
+  /** As `searchEntity`, but `undefined` when the search failed (threw, or a derived endpoint refused). */
+  trySearchEntity?(type: string, query: string, signal: AbortSignal): Promise<ChatEntityItem[] | undefined>;
+  /** `ChatInteractionsConfig.loading`, with its default. */
+  readonly loading?: boolean;
   /**
    * How to send a composed message: `undefined` for a normal model message
    * (no command, several commands, or a command mixed with free text).
@@ -279,6 +292,23 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
     command: (id) => commands.get(id),
     entity: (type) => entities.get(type),
     completeCommand: complete,
+
+    loading: config.loading ?? (Object.prototype.hasOwnProperty.call(config, 'data') && config.data === undefined),
+
+    async trySearchEntity(type, query, signal) {
+      const entity = entities.get(type);
+      if (!entity) return [];
+      const strict = (entity as { [STRICT_ENTITY_SEARCH]?: ChatEntityDefinition['search'] })[STRICT_ENTITY_SEARCH];
+      try {
+        const items = await (strict ?? entity.search)(query, { signal, limit: 8, locale, context: config.context ?? {} });
+        return (Array.isArray(items) ? items : [])
+          .map(toChatEntityItem)
+          .filter((item): item is ChatEntityItem => item !== undefined)
+          .slice(0, 8);
+      } catch {
+        return undefined;
+      }
+    },
 
     async searchEntity(type, query, signal) {
       const entity = entities.get(type);

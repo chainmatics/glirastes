@@ -668,6 +668,23 @@ export function AiChatProvider({
   }, [streamedEntities, entityDeclarations]);
   const declarationsRef = useRef(declarations);
   declarationsRef.current = declarations;
+  // `entityLinks.unresolvedMentions`: the assistant messages of turns that received the server's
+  // declarations in this page life. Tracked only with the option on, so nothing changes without it.
+  const unresolvedMentionsOn = !!entityLinks && ((entityLinks.unresolvedMentions !== undefined && entityLinks.unresolvedMentions !== 'keep')
+    || typeof entityLinks.unresolvedMention === 'function');
+  const unresolvedMentionsOnRef = useRef(unresolvedMentionsOn);
+  unresolvedMentionsOnRef.current = unresolvedMentionsOn;
+  const [declaredTurnMessageIds, setDeclaredTurnMessageIds] = useState<ReadonlySet<string>>(() => new Set());
+  /** The messages a turn started from when its declarations arrived; `null` outside such a turn. */
+  const declaredTurnBaseRef = useRef<Array<{ id: string; role: string }> | null>(null);
+  const appDeclares = useMemo(
+    () => Object.keys(sanitizeEntityDeclarations(entityDeclarations) ?? {}).length > 0,
+    [entityDeclarations],
+  );
+  const declarationCoverage = useMemo(
+    () => ({ all: appDeclares, messageIds: declaredTurnMessageIds }),
+    [appDeclares, declaredTurnMessageIds],
+  );
   const pageLanguage = usePageLanguage();
   // The app's stated language, else the page's (the UI the user reads), the server's tool wording only without one;
   // `languageSource: 'server'` keeps the order before 0.18.0.
@@ -1015,6 +1032,9 @@ export function AiChatProvider({
       const data = dataPart.data as { tools?: unknown } | null;
       const next = sanitizeEntityDeclarations(data?.tools);
       setStreamedEntities((current) => (JSON.stringify(current ?? {}) === JSON.stringify(next) ? current : next));
+      if (unresolvedMentionsOnRef.current) {
+        declaredTurnBaseRef.current = rawMessagesRef.current.map(({ id, role }) => ({ id, role }));
+      }
       return;
     }
     if (dataPart.type === 'data-tool-presentation') {
@@ -1551,6 +1571,23 @@ export function AiChatProvider({
       }
     });
   }, [reportUiOutcome, trackUiWork]);
+
+  // The assistant messages a turn with declarations streams (`entityLinks.unresolvedMentions`).
+  useEffect(() => {
+    const base = declaredTurnBaseRef.current;
+    if (!base) return;
+    // Another history replaced the messages: its messages are not this turn's.
+    if (!continuesRequestBase(rawMessages, base)) {
+      declaredTurnBaseRef.current = null;
+      return;
+    }
+    const before = new Set(base.map(({ id }) => id));
+    const fresh = rawMessages.filter(({ id, role }) => role === 'assistant' && !before.has(id)).map(({ id }) => id);
+    if (fresh.length > 0) {
+      setDeclaredTurnMessageIds((current) => (fresh.every((id) => current.has(id)) ? current : new Set([...current, ...fresh])));
+    }
+    if (!isLoading) declaredTurnBaseRef.current = null;
+  }, [rawMessages, isLoading]);
 
   // Process tool results and approvals from streaming messages
   useEffect(() => {
@@ -2881,7 +2918,12 @@ export function AiChatProvider({
   return (
     <ChatContext.Provider value={contextValue}>
       <ChatComposerQueueProvider onOpenRequest={onOpenRequest}>
-        <ChatEntityLinksProvider config={entityLinks} uiActionBus={uiActionBus}>
+        <ChatEntityLinksProvider
+          config={entityLinks}
+          uiActionBus={uiActionBus}
+          completionContext={completionContext}
+          declarationCoverage={declarationCoverage}
+        >
           {children}
         </ChatEntityLinksProvider>
       </ChatComposerQueueProvider>

@@ -96,15 +96,16 @@ export interface ChatEntityLinksConfig {
    * (an entity of `chatInteractions` or a type the tools' `outputEntities`
    * declare) whose `type`/`id` the conversation never showed as a record,
    * by the same check as `verifyMentions` (e.g. a model that got one
-   * character of the id wrong). Applies with either `mentionMarkers`.
+   * character of the id wrong). Applies with either `mentionMarkers`, and
+   * only to messages whose turn's declarations this page knows (see
+   * docs/entity-identity.md, "A marker with a wrong id").
    * - `'keep'` (default): as before; with `mentionMarkers: 'plain'` a chip by
    *   the marker's id, with `'markdown'` as `verifyMentions` says.
    * - `'text'`: the marker's name as plain text, no chip, no link.
    * - `'search'`: the entity's `search` (`chatInteractions`, with the user's
    *   session) for the name; a chip with the found id only for exactly one
    *   exact name match (see `pickExactNameMatch`), else as `'text'`. The name
-   *   shows as text while it runs; one search per type and name, cached for
-   *   the provider's lifetime.
+   *   shows as text while it runs. Bounded by `maxMentionSearches`.
    * Markers of the user, of `command` and of undeclared types stay as before.
    */
   readonly unresolvedMentions?: ChatUnresolvedMentionPolicy;
@@ -113,6 +114,11 @@ export interface ChatEntityLinksConfig {
    * to); `undefined` (or a throw) leaves it to `unresolvedMentions`.
    */
   unresolvedMention?(marker: ChatEntityReference): ChatUnresolvedMentionPolicy | undefined;
+  /**
+   * `'search'`: distinct names searched per message, in the order of their
+   * markers; the markers of further names stay text. Default 5.
+   */
+  readonly maxMentionSearches?: number;
   /**
    * Opens a reference. Return `false` to fall through to the default: the
    * entity's action that runs `ui.navigate` (a page like `/tasks/:taskId`),
