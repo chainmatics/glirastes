@@ -126,11 +126,23 @@ describe('prepareRelease', () => {
       git('add', '-A');
       git('commit', '-q', '-m', 'bad');
     }, /unreleased\/bad\.json/],
+    ['an existing notes file whose notes are not a list', async () => {
+      await writeFile(join(root, 'upgrade-notes', '0.19.0.json'), JSON.stringify({ version: '0.19.0', notes: {} }));
+      git('add', '-A');
+      git('commit', '-q', '-m', 'odd notes');
+    }, /0\.19\.0\.json is not a valid notes file/],
   ])('refuses %s and changes nothing', async (_name, arrange, message) => {
     await seed({ 'a-note.json': note('a-note') });
     await arrange();
     const before = await snapshot();
     await expect(prepareRelease({ root, version: '0.19.0', surface })).rejects.toThrow(message);
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it.each(['0.18.1', '0.18.0', '0.18.1-rc.1'])('refuses %s, which is not above the current 0.18.1', async (version) => {
+    await seed({ 'a-note.json': note('a-note') });
+    const before = await snapshot();
+    await expect(prepareRelease({ root, version, surface })).rejects.toThrow(/not above the current version 0\.18\.1/);
     expect(await snapshot()).toEqual(before);
   });
 

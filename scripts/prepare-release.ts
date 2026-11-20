@@ -16,7 +16,8 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { UpgradeNoteSchema, isSemver, type UpgradeNote } from '../src/cli/commands/upgrade/notes.js';
+import { z } from 'zod';
+import { UpgradeNoteSchema, compareVersions, isSemver, type UpgradeNote } from '../src/cli/commands/upgrade/notes.js';
 import { computeApiSurface } from './api-surface.js';
 
 export class PrepareReleaseError extends Error {
@@ -48,9 +49,9 @@ function gitStatus(root: string): string {
   }
 }
 
-async function readNotesFile(path: string): Promise<{ notes?: unknown[] }> {
+async function readNotesFile(path: string): Promise<unknown> {
   try {
-    return JSON.parse(await readFile(path, 'utf8')) as { notes?: unknown[] };
+    return JSON.parse(await readFile(path, 'utf8')) as unknown;
   } catch (cause) {
     throw new PrepareReleaseError(`${path} is not valid JSON: ${(cause as Error).message}`);
   }
@@ -66,11 +67,27 @@ export async function prepareRelease(options: PrepareReleaseOptions): Promise<{ 
     throw new PrepareReleaseError('The working tree has uncommitted changes; commit or stash them first.');
   }
 
+  const pkgPath = join(root, 'package.json');
+  const pkg = await readFile(pkgPath, 'utf8');
+  const current = (JSON.parse(pkg) as { version?: unknown }).version;
+  if (typeof current !== 'string' || !PKG_VERSION_RE.test(pkg) || !isSemver(current)) {
+    throw new PrepareReleaseError('package.json has no semver "version" field.');
+  }
+  if (compareVersions(version, current) <= 0) {
+    throw new PrepareReleaseError(`${version} is not above the current version ${current}.`);
+  }
+
   const notesDir = join(root, 'upgrade-notes');
   const notesFile = join(notesDir, `${version}.json`);
   if (existsSync(notesFile)) {
-    const existing = await readNotesFile(notesFile);
-    if ((existing.notes ?? []).length > 0) {
+    const parsed = z
+      .object({ version: z.literal(version), notes: z.array(UpgradeNoteSchema) })
+      .strict()
+      .safeParse(await readNotesFile(notesFile));
+    if (!parsed.success) {
+      throw new PrepareReleaseError(`upgrade-notes/${version}.json is not a valid notes file for ${version}; fix or delete it.`);
+    }
+    if (parsed.data.notes.length > 0) {
       throw new PrepareReleaseError(`upgrade-notes/${version}.json already holds notes; this version looks released.`);
     }
   }
@@ -94,9 +111,6 @@ export async function prepareRelease(options: PrepareReleaseOptions): Promise<{ 
   }
   notes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
-  const pkgPath = join(root, 'package.json');
-  const pkg = await readFile(pkgPath, 'utf8');
-  if (!PKG_VERSION_RE.test(pkg)) throw new PrepareReleaseError('package.json has no "version" field.');
   const sdkVersionPath = join(root, SDK_VERSION_FILE);
   const sdkVersionSource = existsSync(sdkVersionPath) ? await readFile(sdkVersionPath, 'utf8') : '';
   if (!SDK_VERSION_RE.test(sdkVersionSource)) {
