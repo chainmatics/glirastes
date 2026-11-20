@@ -307,7 +307,8 @@
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
     "test": "vitest run",
-    "api-surface": "bun scripts/api-surface.ts --write"
+    "api-surface": "bun scripts/api-surface.ts --write",
+    "release:prepare": "bun scripts/prepare-release.ts"
   },
   "dependencies": {
     "ai": "^6.0.0",

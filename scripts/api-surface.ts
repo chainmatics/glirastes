@@ -4,6 +4,7 @@
  *
  *   bun scripts/api-surface.ts          print the current surface
  *   bun scripts/api-surface.ts --write  write upgrade-notes/api-surface.released.json
+ *   bun scripts/api-surface.ts --check  exit 1 unless the snapshot matches the source (release preflight)
  *
  * Keys:
  *   <subpath>#<Name>             every export of a public JS/TS subpath
@@ -136,9 +137,15 @@ const isMain =
 
 if (isMain) {
   const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+  const out = join(repoRoot, 'upgrade-notes', 'api-surface.released.json');
   const json = `${JSON.stringify(await computeApiSurface(repoRoot), null, 2)}\n`;
-  if (process.argv.includes('--write')) {
-    const out = join(repoRoot, 'upgrade-notes', 'api-surface.released.json');
+  if (process.argv.includes('--check')) {
+    if (json !== (await readFile(out, 'utf8'))) {
+      console.error(`${out} does not match the public API surface of the source. Run bun run release:prepare <version> (or bun run api-surface) and commit the result.`);
+      process.exit(1);
+    }
+    console.log('upgrade-notes/api-surface.released.json matches the source.');
+  } else if (process.argv.includes('--write')) {
     await writeFile(out, json);
     console.log(`Wrote ${out}`);
   } else {

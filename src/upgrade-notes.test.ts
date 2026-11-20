@@ -155,7 +155,7 @@ describe('upgrade notes guard', () => {
       uncovered,
       `Public API surface changed without an upgrade note:\n${uncovered.join('\n')}\n` +
         'Fix: add an upgrade note in upgrade-notes/unreleased/ listing these keys in `surface`, ' +
-        'or run bun run api-surface after release.',
+        'or run bun run release:prepare <version> when releasing.',
     ).toEqual([]);
   });
 

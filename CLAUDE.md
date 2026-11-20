@@ -58,16 +58,19 @@ The workflow triggers on:
 2. Manual `workflow_dispatch` from the GitHub Actions tab
 
 Release flow:
-1. Merge `upgrade-notes/unreleased/*.json` into `upgrade-notes/<version>.json` as `{ "version", "notes" }`
-2. Delete the merged unreleased files and keep `.gitkeep`
-3. Run `bun run api-surface` to refresh `upgrade-notes/api-surface.released.json`
-4. Bump `version` in `package.json`
-5. Commit all of it together with the version bump via `/commit` and push to `main`
-6. Tag: `git tag v<version> && git push origin v<version>` — CI builds and publishes to npm
+1. On a clean tree run `bun run release:prepare <version>` (`scripts/prepare-release.ts`). It merges
+   `upgrade-notes/unreleased/*.json` into `upgrade-notes/<version>.json` as `{ "version", "notes" }`,
+   deletes the merged files (keeps `.gitkeep`), refreshes `upgrade-notes/api-surface.released.json` and
+   sets the version in `package.json` and `src/runtime/sdk-version.ts`. It refuses, changing nothing, on
+   a dirty tree or when `upgrade-notes/<version>.json` already holds notes.
+2. Update `CHANGELOG.md`, run the gate, commit everything in one release commit via `/commit` and push to `main`
+3. Tag: `git tag v<version> && git push origin v<version>` — CI builds and publishes to npm
 
 The `release-preflight` job in `publish.yml` refuses a tag before the image push or npm publish while
-`upgrade-notes/unreleased/*.json` exists or `upgrade-notes/<version>.json` is missing. Every prerelease
-tag also needs its own `upgrade-notes/<rc-version>.json` (e.g. `0.19.0-rc.1.json`; `notes: []` is fine).
+`upgrade-notes/unreleased/*.json` exists, `upgrade-notes/<version>.json` is missing, or
+`upgrade-notes/api-surface.released.json` differs from the source (`bun scripts/api-surface.ts --check`).
+Every prerelease tag also needs its own `upgrade-notes/<rc-version>.json` (e.g. `0.19.0-rc.1.json`;
+`bun run release:prepare 0.19.0-rc.1` writes it, `notes: []` is fine).
 
 The SDK package lives on public npm. Release CI also tests and publishes the
 public Linux amd64 image `ghcr.io/chainmatics/glirastes-runtime:<version>`.
