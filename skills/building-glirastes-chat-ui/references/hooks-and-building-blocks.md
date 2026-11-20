@@ -207,7 +207,14 @@ Defaults keep today's markup; everything below is opt-in.
   (`StepFailure[]`, `{ code: StepFailureCode, values? }`) beside `detail` for
   such a step; `stepFailureText(failures, locale, language?)` renders it, a
   code it does not know as `activityFailureGeneric`. A step without any text
-  shows no detail.
+  shows no detail. The generic failure and invalid input are also recognized
+  when the server wrote them in another wording (a German chat, the
+  handler's own `locales` texts `streamError` / `invalidToolInput`): the
+  server then streams a `data-step-failure` part (`{ toolCallId, code }`,
+  content-free) after the call, and the log shows the client's
+  `activityFailureGeneric` / `activityFailureInvalidInput` (app overrides
+  included) instead of the server text. Outside the log the server text
+  stays.
 - Which table these failure texts follow: the built-in texts of the chat's
   language (German for `de`) when the app states `language`, or when its own
   tables (`locale`, `locales` for that language) set no other `activity…`
