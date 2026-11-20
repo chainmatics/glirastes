@@ -386,6 +386,18 @@ function withHeldMessages(messages: ChatMessage[], held: ReadonlyArray<HeldMessa
 }
 
 /**
+ * The one shape every `session.save` receives: the held messages back at their
+ * place and each recorded turn outcome on its user message.
+ */
+function storedHistory(
+  messages: ChatMessage[],
+  held: ReadonlyArray<HeldMessage>,
+  outcomes: ReadonlyMap<string, TurnOutcome>,
+): ChatMessage[] {
+  return withStoredTurnOutcomes(withHeldMessages(messages, held), outcomes);
+}
+
+/**
  * Merge consecutive assistant messages by keeping only the last one in each run.
  *
  * When a pipeline resumes after approval, `useChat` creates a new assistant
@@ -840,6 +852,11 @@ export function AiChatProvider({
   const [turnOutcomes, setTurnOutcomes] = useState<ReadonlyMap<string, TurnOutcome>>(() => new Map());
   // Messages left out of the transport before a send (as in 0.19.0) that still show a step: shown and stored, never sent.
   const [heldMessages, setHeldMessages] = useState<ReadonlyArray<HeldMessage>>([]);
+  // For a save outside a render (the page-load save): the same state the save on change uses.
+  const heldMessagesRef = useRef(heldMessages);
+  heldMessagesRef.current = heldMessages;
+  const turnOutcomesRef = useRef(turnOutcomes);
+  turnOutcomesRef.current = turnOutcomes;
   // The chat (the session whose history the transport held) and the user message the running or last
   // request was started for, taken when it started: its outcome goes there, not to whatever is open now.
   // `null` ids: the request belongs to nothing that is shown (cleared meanwhile, or started while a chat loaded).
@@ -1209,9 +1226,11 @@ export function AiChatProvider({
           return outcome && isRecord(toolPart.output) ? { ...part, output: { ...toolPart.output, outcome } } : part;
         }),
     })) as ChatMessage[];
+    // The same shape as every other save (a page that goes may not render again).
+    const history = storedHistory(messages, heldMessagesRef.current, turnOutcomesRef.current);
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
-      Promise.resolve(save(activeSessionIdRef.current, messages)),
+      Promise.resolve(save(activeSessionIdRef.current, history)),
       new Promise((resolve) => { timer = setTimeout(resolve, PAGE_LOAD_SAVE_TIMEOUT_MS); }),
     ]).finally(() => clearTimeout(timer));
   }, [reportUiOutcome]);
@@ -1433,10 +1452,7 @@ export function AiChatProvider({
     const cfg = sessionRef.current;
     if (!cfg?.save) return;
     void Promise.resolve(
-      cfg.save(activeSessionId, withStoredTurnOutcomes(
-        withHeldMessages(rawMessages as unknown as ChatMessage[], heldMessages),
-        turnOutcomes,
-      )),
+      cfg.save(activeSessionId, storedHistory(rawMessages as unknown as ChatMessage[], heldMessages, turnOutcomes)),
     );
   }, [rawMessages, heldMessages, turnOutcomes, isInitialized, activeSessionId, loadedSessionId]);
 
