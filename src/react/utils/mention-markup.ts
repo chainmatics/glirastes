@@ -4,6 +4,7 @@ import type {
   MentionResult,
   MentionSerializationConfig,
 } from '../types.js';
+import { escapeCommentDelimiters, escapeJsonAngles } from '../../contracts/delimited-text.js';
 
 const CONTEXT_OPEN_RE = /<!--\s*context:/iy;
 // Bounded parts keep the scan linear on hostile text with many unclosed markers.
@@ -63,8 +64,7 @@ export function describeToolReference(
     return undefined;
   }
   if (json === undefined || json.length > MAX_TOOL_ARGS_LENGTH) return undefined;
-  const safe = json.replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
-  return `tool: ${definitionId}, args: ${safe}`;
+  return `tool: ${definitionId}, args: ${escapeJsonAngles(json)}`;
 }
 
 /**
@@ -198,8 +198,9 @@ function buildContextBlock(
   if (mentions.length === 0) return null;
   const summary = mentions
     .map((m) => {
-      const displayName = m.displayName ?? m.label ?? m.id;
-      return `${displayName} (ID: ${m.id}${m.toolReference ? `, ${m.toolReference}` : ''})`;
+      // A label or id from stored data can never end the comment or open another one.
+      const displayName = escapeCommentDelimiters(m.displayName ?? m.label ?? m.id);
+      return `${displayName} (ID: ${escapeCommentDelimiters(m.id)}${m.toolReference ? `, ${m.toolReference}` : ''})`;
     })
     .join(', ');
   return `<!--context:[${label}: ${summary}]--> `;

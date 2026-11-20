@@ -25,6 +25,7 @@ import {
   type MemorySummary,
 } from '../../../contracts/memory.js';
 import type { MemoryScope, MemoryStore } from '../../core/memory-store.js';
+import { escapeTagInText, unescapeTagInText } from '../../../contracts/delimited-text.js';
 import { compactToolOutput } from './prepare-model-messages.js';
 
 // ---------------------------------------------------------------------------
@@ -365,6 +366,11 @@ function aliasesOf(set: NoteSet): Map<string, MemoryEntry> {
   return aliases;
 }
 
+const MEMORY_TAG = 'memory';
+
+/** A note or summary as the memory block shows it: `<memory>` and `</memory>` inside start with `&lt;`. */
+const inMemoryBlock = (text: string) => escapeTagInText(text, MEMORY_TAG);
+
 function renderPreamble(sets: NoteSet[], summary: string | undefined): string | undefined {
   const sections: string[] = [];
   for (const set of sets) {
@@ -373,10 +379,10 @@ function renderPreamble(sets: NoteSet[], summary: string | undefined): string | 
       set.kind === 'shared'
         ? 'Notes shared by the users of this workspace:'
         : 'Notes about this user from earlier chats:',
-      ...[...aliasesOf(set)].map(([alias, entry]) => `- [${alias}] ${entry.content}`),
+      ...[...aliasesOf(set)].map(([alias, entry]) => `- [${alias}] ${inMemoryBlock(entry.content)}`),
     ].join('\n'));
   }
-  if (summary) sections.push(`Summary of the earlier part of this conversation:\n${summary}`);
+  if (summary) sections.push(`Summary of the earlier part of this conversation:\n${inMemoryBlock(summary)}`);
   if (sections.length === 0) return undefined;
   return [
     '<memory>',
@@ -397,8 +403,12 @@ const REMEMBER_DESCRIPTION = [
 const FORGET_DESCRIPTION =
   'Remove a note from memory when the user asks to forget it or it is no longer true. Pass the id shown in brackets in the memory block and the text of that note exactly as shown.';
 
-const sameNote = (left: string, right: string) =>
+const sameText = (left: string, right: string) =>
   left.replace(/\s+/g, ' ').trim().toLowerCase() === right.replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** The note as stored, or as the memory block showed it (a `<memory>` tag in it escaped). */
+const sameNote = (stored: string, given: string) =>
+  sameText(stored, given) || sameText(stored, unescapeTagInText(given, MEMORY_TAG));
 
 function createNoteTools(
   sets: NoteSet[],

@@ -20,6 +20,7 @@ import {
   type DeclaredRecordIdentity,
   type OutputEntityDeclaration,
 } from '../../../contracts/entity-declaration.js';
+import { escapeJsonForBlock } from '../../../contracts/delimited-text.js';
 import { clipName } from './history-compaction.js';
 
 /** Bounds of the memo. */
@@ -142,10 +143,13 @@ export function collectSeenObjects(
   return [...seen.values()].reverse();
 }
 
-/** `playlist: {"playlist_id":"…","displayName":"…"}`: the type outside, so no field can shadow it. */
+/**
+ * `playlist: {"playlist_id":"…","displayName":"…"}`: the type outside, so no field can shadow it.
+ * `<`, `>`, `&` and line separators in the JSON are escaped, so a value can never close the block.
+ */
 function lineOf(object: SeenObject): string {
   const fields = object.label ? [...object.id, object.label] : object.id;
-  return `${object.type ?? 'object'}: ${JSON.stringify(Object.fromEntries(fields))}`;
+  return `${object.type ?? 'object'}: ${escapeJsonForBlock(JSON.stringify(Object.fromEntries(fields)))}`;
 }
 
 /** The memo text within the bounds (most recently seen kept), with the objects it lists; undefined for none. */

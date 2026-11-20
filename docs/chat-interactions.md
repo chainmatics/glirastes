@@ -220,6 +220,13 @@ component keeps the chips with `useChatEntityLinks().markdownComponents`
 against the ids the conversation showed by declaration (`verifyMentions`,
 default on); see [entity identity](entity-identity.md#entity-link-options).
 
+A picked mention reaches the model as `{{mention:type:id:label}}`; a
+tool-backed command (and every mention with `includeContextBlock`) is also
+listed in a leading `<!--context:[…]-->` block. Inside that block a `-->` or
+`<!--` in a label or id is sent with `\u003e` / `\u003c` (since the release
+after 0.20.0), so stored data cannot end the comment early. The marker itself
+is not escaped: a label with `}}` ends it early and the rest shows as text.
+
 ## Custom composers
 
 An app that replaces the input (`components.ChatInput`) first tries the SDK
