@@ -4,22 +4,12 @@ import { SDK_VERSION } from '../../../runtime/sdk-version.js';
 import { parseToolArgs, ToolsUsageError, type ToolArgsSpec } from '../tools/args.js';
 import { readInstalledSkillsManifest } from '../installed-skills-manifest.js';
 import { planSkillsUpdate, type KeptSkill } from '../skills-auto-update.js';
-import {
-  BASELINE_PATH,
-  ensureBaseline,
-  readBaseline,
-  recordDecision,
-  UPGRADE_DECISIONS,
-  writeBaseline,
-  type SdkBaseline,
-  type UpgradeDecision,
-} from './baseline.js';
+import { BASELINE_PATH, readBaseline, withDeferred, writeBaseline, type SdkBaseline } from './baseline.js';
 import { evaluateNote, scanApp, type AppScan } from './detect.js';
 import {
   compareVersions,
   findPackageUpgradeNotesDir,
   isSemver,
-  loadUpgradeNotes,
   loadUpgradeNoteSet,
   type UpgradeNoteKind,
 } from './notes.js';
@@ -33,7 +23,8 @@ export interface ReportItem {
   skill: string;
   status: 'adopted' | 'affected' | 'not-affected' | 'unclear';
   evidence: Array<{ file: string; line: number }>;
-  decision?: UpgradeDecision;
+  /** Deferred at the last `glirastes upgrade ack --defer`; stays listed until an ack no longer names it. */
+  deferred?: true;
 }
 
 export interface UpgradeReport {
@@ -61,8 +52,6 @@ export interface UpgradeReportOptions {
   changelogPath?: string;
   /** Overrides `reviewedThrough` for this run only. */
   from?: string;
-  /** Include adopted and declined notes. */
-  all?: boolean;
   /** Where shipped skills come from (tests). */
   skillsDir?: string;
   /** Edited skills already planned by the caller (`tools refresh`); spares a second hash pass. */
@@ -131,14 +120,14 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
 
   const notesDir = options.notesDir ?? findPackageUpgradeNotesDir();
   const changelogPath = options.changelogPath ?? join(dirname(notesDir), 'CHANGELOG.md');
-  const decisions = baseline?.decisions ?? {};
+  const deferred = baseline?.decisions ?? {};
   const { notes: allNotes, releasedVersions } = await loadUpgradeNoteSet(notesDir, to);
   const inRange = (version: string) => compareVersions(version, from) > 0 && compareVersions(version, to) <= 0;
   // A deferred note stays visible after ack moved reviewedThrough past it.
   const notes = allNotes.filter(
     (note) =>
       inRange(note.version) ||
-      (decisions[note.id]?.decision === 'deferred' && compareVersions(note.version, to) <= 0),
+      (deferred[note.id] !== undefined && compareVersions(note.version, to) <= 0),
   );
   // Reading the whole app tree is only worth it when a note could match.
   const scan = notes.length > 0 ? await (options.scan ?? scanApp)(options.rootDir) : undefined;
@@ -146,8 +135,6 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
   const report: UpgradeReport = { ...empty, checkedNotAffected: [] };
   for (const note of notes) {
     const { status, evidence } = evaluateNote(note, scan!);
-    const decision = decisions[note.id]?.decision;
-    if (!options.all && (decision === 'adopted' || decision === 'declined')) continue;
     const item: ReportItem = {
       id: note.id,
       version: note.version,
@@ -157,7 +144,7 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
       skill: note.skill,
       status,
       evidence,
-      ...(decision ? { decision } : {}),
+      ...(deferred[note.id] ? { deferred: true as const } : {}),
     };
     const relevant = status === 'affected' || status === 'unclear';
     if (note.kind === 'breaking' && relevant) report.must.push(item);
@@ -185,15 +172,15 @@ export async function createUpgradeReport(options: UpgradeReportOptions): Promis
   return report;
 }
 
-/** Must items without any decision: what `--fail-on breaking`, doctor and ack treat as open. */
+/** Must items not deferred: what `--fail-on breaking` and doctor treat as open. */
 export function openMustItems(report: UpgradeReport): ReportItem[] {
-  return report.must.filter((item) => item.decision === undefined);
+  return report.must.filter((item) => !item.deferred);
 }
 
 function line(item: ReportItem): string {
   const evidence = item.evidence.length > 0 ? ` (${item.evidence.map((e) => `${e.file}:${e.line}`).join(', ')})` : '';
-  const decision = item.decision ? ` [${item.decision}]` : '';
-  return `- [${item.id}] ${item.summary}${evidence}${decision} → ${item.skill}`;
+  const deferred = item.deferred ? ' [deferred]' : '';
+  return `- [${item.id}] ${item.summary}${evidence}${deferred} → ${item.skill}`;
 }
 
 export function formatUpgradeReport(report: UpgradeReport, options: { brief?: boolean }): string {
@@ -240,7 +227,7 @@ export function formatUpgradeReport(report: UpgradeReport, options: { brief?: bo
     checked();
     lines.push(
       '',
-      'This report never changes your code. Record outcomes with `glirastes upgrade decide <id> adopted|declined|deferred`, then `glirastes upgrade ack`.',
+      'This report never changes your code. When the review is done, run `glirastes upgrade ack`; `glirastes upgrade ack --defer <id>` keeps an item listed.',
     );
   }
   return lines.join('\n');
@@ -253,7 +240,7 @@ export function summarizeUpgradeReport(report: UpgradeReport): string | null {
     report.unclassified.length > 0
       ? `, ${report.unclassified.length} ${report.unclassified.length === 1 ? 'version' : 'versions'} without notes`
       : '';
-  const deferred = report.must.filter((item) => item.decision === 'deferred').length;
+  const deferred = report.must.filter((item) => item.deferred).length;
   const must = `${report.must.length} must${deferred > 0 ? ` (${deferred} deferred)` : ''}`;
   return (
     `Glirastes ${report.from} → ${report.to}: ${must}, ${should} should, ` +
@@ -272,22 +259,38 @@ export interface UpgradeIo {
 }
 
 export const UPGRADE_USAGE = [
-  'Usage: glirastes upgrade report [--json] [--all] [--brief] [--from <version>] [--fail-on breaking] [--root <dir>]',
+  'Usage: glirastes upgrade report [--json] [--brief] [--from <version>] [--fail-on breaking] [--root <dir>]',
   '         show what changed in the SDK since this app was last reviewed (never changes your code; --brief lists must, should and recommended items and counts the rest)',
-  '       glirastes upgrade decide <note-id> <adopted|declined|deferred> [--root <dir>]',
-  '         record what you decided for one note in .glirastes/sdk-baseline.json',
-  '       glirastes upgrade ack [--force] [--root <dir>]',
-  '         mark everything up to the installed SDK as reviewed',
+  '       glirastes upgrade ack [--defer <note-id>]... [--force] [--root <dir>]',
+  '         mark everything up to the installed SDK as reviewed; each --defer keeps that note listed until an ack no longer names it',
+  '         ack refuses while a breaking item is detected as affected and not deferred; --force acknowledges anyway',
 ].join('\n');
 
 export const UPGRADE_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
   report: {
-    flags: ['--json', '--all', '--brief'],
+    flags: ['--json', '--brief'],
     values: ['--from', '--fail-on', '--root'],
   },
-  decide: { flags: [], values: ['--root'], positionals: 2 },
-  ack: { flags: ['--force'], values: ['--root'] },
+  // `--defer` repeats; takeDeferIds reads it before parseToolArgs sees the rest.
+  ack: { flags: ['--force'], values: ['--defer', '--root'] },
 };
+
+/** Takes every `--defer <id>` out of `argv`; the flag repeats, which `parseToolArgs` does not support. */
+function takeDeferIds(argv: ReadonlyArray<string>): { ids: string[]; rest: string[] } {
+  const ids: string[] = [];
+  const rest: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== '--defer') {
+      rest.push(argv[index]!);
+      continue;
+    }
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith('--')) throw new ToolsUsageError('--defer needs a note id.');
+    ids.push(value);
+    index += 1;
+  }
+  return { ids, rest };
+}
 
 export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: UpgradeIo = {}): Promise<number> {
   const log = io.log ?? ((l: string) => console.log(l));
@@ -301,8 +304,11 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
     return 2;
   }
   let args: ReturnType<typeof parseToolArgs>;
+  let deferIds: string[] = [];
   try {
-    args = parseToolArgs(rest, spec);
+    const taken = sub === 'ack' ? takeDeferIds(rest) : { ids: [], rest: [...rest] };
+    deferIds = taken.ids;
+    args = parseToolArgs(taken.rest, spec);
   } catch (cause) {
     if (!(cause instanceof ToolsUsageError)) throw cause;
     error(`${cause.message}\n${UPGRADE_USAGE}`);
@@ -333,7 +339,6 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
       const report = await createUpgradeReport({
         ...reportOptions,
         ...(from ? { from } : {}),
-        all: args.flags.has('--all'),
       });
       log(
         args.flags.has('--json')
@@ -341,28 +346,6 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
           : formatUpgradeReport(report, { brief: args.flags.has('--brief') }),
       );
       return failOn === 'breaking' && openMustItems(report).length > 0 ? 1 : 0;
-    }
-
-    if (sub === 'decide') {
-      const [id, decision] = args.positionals;
-      if (!id || !decision) {
-        error(`decide needs a note id and a decision.\n${UPGRADE_USAGE}`);
-        return 2;
-      }
-      if (!(UPGRADE_DECISIONS as ReadonlyArray<string>).includes(decision)) {
-        error(`Unknown decision '${decision}'. Use ${UPGRADE_DECISIONS.join(', ')}.`);
-        return 1;
-      }
-      const notes = await loadUpgradeNotes(reportOptions.notesDir ?? findPackageUpgradeNotesDir(), sdkVersion);
-      const target = notes.find((note) => note.id === id);
-      if (!target) {
-        error(`Unknown upgrade note '${id}'. Run glirastes upgrade report --all to list note ids.`);
-        return 1;
-      }
-      const baseline = await baselineOrNew(reportOptions);
-      await writeBaseline(rootDir, recordDecision(baseline, id, decision as UpgradeDecision, target.version));
-      log(`Recorded ${decision} for ${id} in ${BASELINE_PATH}.`);
-      return 0;
     }
 
     // ack
@@ -376,31 +359,37 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
       reviewedThrough: report.from,
       decisions: {},
     };
-    const undecided = report.must.filter((item) => !baseline.decisions[item.id]);
-    if (undecided.length > 0 && !args.flags.has('--force')) {
+    const deferred: Array<{ id: string; version: string }> = [];
+    if (deferIds.length > 0) {
+      const notesDir = reportOptions.notesDir ?? findPackageUpgradeNotesDir();
+      const { notes } = await loadUpgradeNoteSet(notesDir, sdkVersion);
+      for (const id of new Set(deferIds)) {
+        const target = notes.find((note) => note.id === id);
+        if (!target) {
+          error(`Unknown upgrade note '${id}'. Run glirastes upgrade report --json to list note ids; ${BASELINE_PATH} was not changed.`);
+          return 1;
+        }
+        deferred.push({ id, version: target.version });
+      }
+    }
+    const deferredIds = new Set(deferred.map((entry) => entry.id));
+    const blocking = report.must.filter((item) => item.status === 'affected' && !deferredIds.has(item.id));
+    if (blocking.length > 0 && !args.flags.has('--force')) {
       error(
-        `Cannot acknowledge: ${undecided.length} breaking item(s) have no decision (${undecided
+        `Cannot acknowledge: ${blocking.length} breaking item(s) affect this app (${blocking
           .map((item) => item.id)
-          .join(', ')}). Run glirastes upgrade decide, or pass --force.`,
+          .join(', ')}). Adopt them, keep them listed with --defer <id>, or pass --force.`,
       );
       return 1;
     }
     const reviewedThrough =
       compareVersions(sdkVersion, baseline.reviewedThrough) > 0 ? sdkVersion : baseline.reviewedThrough;
-    await writeBaseline(rootDir, { ...baseline, reviewedThrough });
-    log(`Reviewed through ${reviewedThrough}.`);
+    await writeBaseline(rootDir, withDeferred(baseline, reviewedThrough, deferred));
+    const kept = deferred.length > 0 ? `; deferred ${deferred.map((entry) => entry.id).join(', ')}` : '';
+    log(`Reviewed through ${reviewedThrough}${kept}.`);
     return 0;
   } catch (cause) {
     error(`glirastes upgrade failed: ${(cause as Error).message}`);
     return 1;
   }
-}
-
-/** The existing baseline, or a new one reviewed through the derived `from`, written to disk. */
-async function baselineOrNew(options: UpgradeReportOptions): Promise<SdkBaseline> {
-  const existing = await readBaseline(options.rootDir);
-  if (existing) return existing;
-  const from =
-    (await installedSkillsVersion(options.rootDir)) ?? options.sdkVersion ?? SDK_VERSION;
-  return ensureBaseline(options.rootDir, from);
 }

@@ -179,7 +179,8 @@ describe('agent block update', () => {
     expect(text.endsWith(after)).toBe(true);
     expect(text).not.toContain('Old text.');
     expect(text).toContain('run `glirastes upgrade report` (skill `upgrading-glirastes`)');
-    expect(text).toContain('Record the developer\'s choice with `glirastes upgrade decide <id> adopted|declined|deferred`.');
+    expect(text).toContain('When the developer confirms the review, run `glirastes upgrade ack` (`--defer <id>` keeps an item listed).');
+    expect(text).not.toContain('upgrade decide');
     expect(await updateAgentHint(app.root, {})).toEqual([]);
   });
 

@@ -6,7 +6,7 @@ import {
   BASELINE_PATH,
   ensureBaseline,
   readBaseline,
-  recordDecision,
+  withDeferred,
   writeBaseline,
   type SdkBaseline,
 } from './baseline.js';
@@ -29,8 +29,8 @@ describe('sdk baseline', () => {
       schemaVersion: 1,
       reviewedThrough: '0.17.0',
       decisions: {
-        'zeta-note': { decision: 'declined', version: '0.18.0' },
-        'alpha-note': { decision: 'adopted', version: '0.18.0' },
+        'zeta-note': { decision: 'deferred', version: '0.18.0' },
+        'alpha-note': { decision: 'deferred', version: '0.18.0' },
       },
     };
     await writeBaseline(root, baseline);
@@ -107,16 +107,64 @@ describe('sdk baseline', () => {
     expect(await readBaseline(root)).toBeUndefined();
   });
 
-  it('recordDecision replaces an earlier decision', () => {
+  it('ignores adopted and declined entries written by a pre-release build', async () => {
+    await mkdir(join(root, '.glirastes'));
+    await writeFile(
+      file(),
+      JSON.stringify({
+        schemaVersion: 1,
+        reviewedThrough: '0.18.0',
+        decisions: {
+          'kept-note': { decision: 'deferred', version: '0.18.0' },
+          'old-adopted': { decision: 'adopted', version: '0.18.0' },
+          'old-declined': { decision: 'declined', version: '0.18.0' },
+        },
+      }),
+    );
+
+    expect(await readBaseline(root)).toEqual({
+      schemaVersion: 1,
+      reviewedThrough: '0.18.0',
+      decisions: { 'kept-note': { decision: 'deferred', version: '0.18.0' } },
+    });
+  });
+
+  it('still rejects an unknown decision value', async () => {
+    await mkdir(join(root, '.glirastes'));
+    await writeFile(
+      file(),
+      JSON.stringify({
+        schemaVersion: 1,
+        reviewedThrough: '0.18.0',
+        decisions: { 'some-note': { decision: 'maybe', version: '0.18.0' } },
+      }),
+    );
+    await expect(readBaseline(root)).rejects.toThrow(/decisions/);
+  });
+
+  it('writeBaseline refuses an adopted or declined entry', async () => {
+    await expect(
+      writeBaseline(root, {
+        schemaVersion: 1,
+        reviewedThrough: '0.18.0',
+        decisions: { 'some-note': { decision: 'adopted', version: '0.18.0' } },
+      } as never),
+    ).rejects.toThrow(/decision/);
+  });
+
+  it('withDeferred replaces the deferred list', () => {
     const before: SdkBaseline = {
       schemaVersion: 1,
       reviewedThrough: '0.17.0',
-      decisions: { 'some-note': { decision: 'deferred', version: '0.18.0' } },
+      decisions: { 'old-note': { decision: 'deferred', version: '0.18.0' } },
     };
-    const after = recordDecision(before, 'some-note', 'adopted', '0.18.1');
+    const after = withDeferred(before, '0.19.0', [{ id: 'new-note', version: '0.19.0' }]);
 
-    expect(after.decisions['some-note']).toEqual({ decision: 'adopted', version: '0.18.1' });
-    expect(before.decisions['some-note']).toEqual({ decision: 'deferred', version: '0.18.0' });
-    expect(after).not.toBe(before);
+    expect(after).toEqual({
+      schemaVersion: 1,
+      reviewedThrough: '0.19.0',
+      decisions: { 'new-note': { decision: 'deferred', version: '0.19.0' } },
+    });
+    expect(before.decisions['old-note']).toEqual({ decision: 'deferred', version: '0.18.0' });
   });
 });

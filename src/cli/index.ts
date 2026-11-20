@@ -163,7 +163,7 @@ export const CLI_USAGE =
   + '       glirastes build [--root] [--app-id] [--output]\n'
   + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify|enrich> [options]\n'
   + '         derive chat tools from the code, check them, show them and print agent work lists\n'
-  + '       glirastes upgrade <report|decide|ack> [options]\n'
+  + '       glirastes upgrade <report|ack> [options]\n'
   + '         see what changed in the SDK since this app was last reviewed, record decisions\n';
 
 const HELP_FLAGS = new Set(['--help', '-h', 'help']);

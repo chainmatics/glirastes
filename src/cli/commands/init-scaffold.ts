@@ -37,7 +37,7 @@ const AGENT_HINT = [
   'Never edit `.glirastes/tool-policy.json` or generated files yourself; Glirastes never calls a model.',
   'Before changing code that uses glirastes, run `glirastes upgrade report` (skill `upgrading-glirastes`).',
   "Propose must and should items with reasons, offer optional items only, and change nothing without the developer's consent.",
-  "Record the developer's choice with `glirastes upgrade decide <id> adopted|declined|deferred`.",
+  'When the developer confirms the review, run `glirastes upgrade ack` (`--defer <id>` keeps an item listed).',
   AGENT_HINT_END,
   '',
 ].join('\n');

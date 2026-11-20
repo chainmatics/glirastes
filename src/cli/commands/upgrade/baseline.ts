@@ -6,27 +6,31 @@ import { SEMVER_RE } from './notes.js';
 
 export const BASELINE_PATH = '.glirastes/sdk-baseline.json';
 
-export const UPGRADE_DECISIONS = ['adopted', 'declined', 'deferred'] as const;
-
-export type UpgradeDecision = (typeof UPGRADE_DECISIONS)[number];
-
 const SEMVER = SEMVER_RE;
+const NOTE_ID = /^[a-z0-9][a-z0-9-]{2,79}$/;
 
-const BaselineSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    reviewedThrough: z.string().regex(SEMVER),
-    decisions: z.record(
-      z.string().regex(/^[a-z0-9][a-z0-9-]{2,79}$/),
-      z
-        .object({
-          decision: z.enum(UPGRADE_DECISIONS),
-          version: z.string().regex(SEMVER),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
+/**
+ * `decisions` only holds notes deferred at `glirastes upgrade ack --defer`.
+ * Pre-release builds also wrote `adopted` and `declined`; reading drops those
+ * entries (detection decides adoption now), writing refuses them.
+ */
+const LEGACY_DECISIONS = ['adopted', 'declined'] as const;
+
+function baselineSchema(decision: z.ZodType<string>) {
+  return z
+    .object({
+      schemaVersion: z.literal(1),
+      reviewedThrough: z.string().regex(SEMVER),
+      decisions: z.record(
+        z.string().regex(NOTE_ID),
+        z.object({ decision, version: z.string().regex(SEMVER) }).strict(),
+      ),
+    })
+    .strict();
+}
+
+const BaselineSchema = baselineSchema(z.literal('deferred'));
+const ReadableBaselineSchema = baselineSchema(z.enum(['deferred', ...LEGACY_DECISIONS]));
 
 export type SdkBaseline = z.infer<typeof BaselineSchema>;
 
@@ -68,14 +72,18 @@ export async function readBaseline(root: string): Promise<SdkBaseline | undefine
     );
   }
 
-  const parsed = BaselineSchema.safeParse(json);
+  const parsed = ReadableBaselineSchema.safeParse(json);
   if (!parsed.success) {
     const details = parsed.error.issues
       .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
       .join('; ');
     throw new Error(`${BASELINE_PATH} does not match the expected schema (${details}). ${FIX_HINT}`);
   }
-  return parsed.data;
+  const decisions: SdkBaseline['decisions'] = {};
+  for (const [id, entry] of Object.entries(parsed.data.decisions)) {
+    if (entry.decision === 'deferred') decisions[id] = { decision: 'deferred', version: entry.version };
+  }
+  return { ...parsed.data, decisions };
 }
 
 /**
@@ -118,15 +126,20 @@ export async function ensureBaseline(root: string, version: string): Promise<Sdk
   return created;
 }
 
-/** Pure: returns a new baseline with the decision for `noteId` set. */
-export function recordDecision(
+/**
+ * Pure: the baseline after `glirastes upgrade ack`. The deferred list is
+ * replaced, so a note stays deferred only while every ack names it again.
+ */
+export function withDeferred(
   baseline: SdkBaseline,
-  noteId: string,
-  decision: UpgradeDecision,
-  version: string,
+  reviewedThrough: string,
+  deferred: ReadonlyArray<{ id: string; version: string }>,
 ): SdkBaseline {
   return {
     ...baseline,
-    decisions: { ...baseline.decisions, [noteId]: { decision, version } },
+    reviewedThrough,
+    decisions: Object.fromEntries(
+      deferred.map(({ id, version }) => [id, { decision: 'deferred' as const, version }]),
+    ),
   };
 }

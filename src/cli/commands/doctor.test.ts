@@ -610,6 +610,6 @@ describe('upgrade follow-ups in doctor', () => {
       checks: report.checks.filter((item) => item.name === 'sdk-upgrade'),
     });
     expect(text).toContain('Next: glirastes upgrade report could not run: .glirastes/sdk-baseline.json is not valid JSON');
-    expect(text).not.toContain('see the SDK changes that need a decision');
+    expect(text).not.toContain('see the SDK changes that need your review');
   });
 });

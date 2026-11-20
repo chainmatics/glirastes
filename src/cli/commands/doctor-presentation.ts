@@ -57,7 +57,7 @@ const NEXT_ACTIONS = new Map([
   ['refresh-agent-skills',
     'Run glirastes tools refresh to bring the installed agent skills up to this SDK, then commit them with .glirastes/installed-skills.json.'],
   ['review-sdk-upgrade',
-    'Run glirastes upgrade report to see the SDK changes that need a decision, then ask your coding agent to propose them. Nothing changes without your consent.'],
+    'Run glirastes upgrade report to see the SDK changes that need your review, then ask your coding agent to propose them. Nothing changes without your consent.'],
   ['review-edited-agent-skills',
     'Some installed agent skills were edited and differ from this SDK. Run glirastes tools check for the names, then merge the update or replace them with glirastes install --force.'],
   ['align-explicit-runtime-mode',

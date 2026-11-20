@@ -30,15 +30,20 @@ async function writeNotes(version: string, notes: unknown[]) {
   await writeFile(join(notesDir, `${version}.json`), JSON.stringify({ version, notes }));
 }
 
-async function baseline(reviewedThrough: string, decisions: Record<string, string> = {}) {
+async function baseline(reviewedThrough: string, deferred: string[] = []) {
   await writeBaseline(root, {
     schemaVersion: 1,
     reviewedThrough,
-    decisions: Object.fromEntries(
-      Object.entries(decisions).map(([id, d]) => [id, { decision: d, version: '0.19.0' }]),
-    ) as never,
+    decisions: Object.fromEntries(deferred.map((id) => [id, { decision: 'deferred', version: '0.19.0' }])),
   });
 }
+
+/** An app file that imports glirastes, so `affectedWhen: { imports: ['glirastes'] }` matches. */
+async function appUsesGlirastes() {
+  await writeFile(join(root, 'app.ts'), "import { x } from 'glirastes';\n");
+}
+
+const affected = { affectedWhen: { imports: ['glirastes'] } };
 
 async function seedAllKinds() {
   await writeNotes('0.19.0', [
@@ -83,21 +88,31 @@ describe('createUpgradeReport', () => {
     expect(report.must[0]).toMatchObject({ version: '0.19.0', kind: 'breaking', status: 'unclear', skill: 'some-skill' });
   });
 
-  it('hides adopted and declined decisions, shows deferred', async () => {
+  it('marks deferred items and keeps them listed', async () => {
     await seedAllKinds();
-    await baseline('0.18.0', { 'break-one': 'adopted', 'deprecate-one': 'declined', 'recommend-one': 'deferred' });
+    await baseline('0.18.0', ['recommend-one']);
     const report = await createUpgradeReport(opts());
-    expect(report.must).toEqual([]);
-    expect(report.should).toEqual([]);
-    expect(report.recommended.map((i) => i.decision)).toEqual(['deferred']);
+    expect(report.must.map((i) => i.deferred)).toEqual([undefined]);
+    expect(report.recommended.map((i) => [i.id, i.deferred])).toEqual([['recommend-one', true]]);
   });
 
-  it('--all shows them with decision', async () => {
+  it('shows notes a pre-release build recorded as adopted or declined', async () => {
     await seedAllKinds();
-    await baseline('0.18.0', { 'break-one': 'adopted', 'deprecate-one': 'declined' });
-    const report = await createUpgradeReport(opts({ all: true }));
-    expect(report.must[0]).toMatchObject({ id: 'break-one', decision: 'adopted' });
-    expect(report.should[0]).toMatchObject({ id: 'deprecate-one', decision: 'declined' });
+    await mkdir(join(root, '.glirastes'), { recursive: true });
+    await writeFile(
+      join(root, BASELINE_PATH),
+      JSON.stringify({
+        schemaVersion: 1,
+        reviewedThrough: '0.18.0',
+        decisions: {
+          'break-one': { decision: 'adopted', version: '0.19.0' },
+          'deprecate-one': { decision: 'declined', version: '0.19.0' },
+        },
+      }),
+    );
+    const report = await createUpgradeReport(opts());
+    expect(report.must.map((i) => i.id)).toEqual(['break-one']);
+    expect(report.should.map((i) => i.id)).toEqual(['deprecate-one']);
   });
 
   it('missing baseline: from = installed-skills.json#sdkVersion, else the sdk version (upToDate)', async () => {
@@ -243,6 +258,14 @@ describe('checked, not affected', () => {
     expect(report.checkedNotAffected.map((i) => [i.id, i.status])).toEqual([['break-guarded', 'not-affected']]);
   });
 
+  it('the full report names ack --defer, not decide', async () => {
+    await seedAllKinds();
+    await baseline('0.18.0');
+    const full = formatUpgradeReport(await createUpgradeReport(opts()), {});
+    expect(full).toContain('glirastes upgrade ack --defer <id>');
+    expect(full).not.toContain('decide');
+  });
+
   it('the full report prints one line per item; hint and --brief do not', async () => {
     await guarded();
     await baseline('0.18.0');
@@ -285,7 +308,7 @@ describe('summarizeUpgradeReport', () => {
 
   it('labels deferred must items in the count', async () => {
     await writeNotes('0.19.0', [note('break-one', 'breaking'), note('break-two', 'breaking')]);
-    await baseline('0.18.0', { 'break-one': 'deferred' });
+    await baseline('0.18.0', ['break-one']);
     expect(summarizeUpgradeReport(await createUpgradeReport(opts()))).toBe(
       'Glirastes 0.18.0 → 0.19.0: 2 must (1 deferred), 0 should, 0 recommended, 0 optional. Run `glirastes upgrade report`.',
     );
@@ -337,62 +360,106 @@ describe('runUpgradeCommand', () => {
     expect(a.err.join('\n')).toContain('sdk-baseline.json');
   });
 
-  it('decide rejects an unknown note id', async () => {
-    await seedAllKinds();
-    await baseline('0.18.0');
-    const a = io();
-    expect(await runUpgradeCommand(['decide', 'nope-nope', 'adopted'], a.io)).toBe(1);
-    expect(a.err.join('\n')).toContain('nope-nope');
-    expect((await readBaseline(root))!.decisions).toEqual({});
-  });
-
-  it('decide rejects an unknown decision', async () => {
+  it('decide is not a subcommand', async () => {
     await seedAllKinds();
     const a = io();
-    expect(await runUpgradeCommand(['decide', 'break-one', 'maybe'], a.io)).toBe(1);
+    expect(await runUpgradeCommand(['decide', 'break-one', 'adopted'], a.io)).toBe(2);
+    expect(a.err.join('\n')).not.toContain('upgrade decide');
   });
 
-  it('decide records the note version and creates a baseline when missing', async () => {
+  it('report no longer accepts --all', async () => {
     await seedAllKinds();
     const a = io();
-    expect(await runUpgradeCommand(['decide', 'break-one', 'declined'], a.io)).toBe(0);
-    expect(await readBaseline(root)).toEqual({
-      schemaVersion: 1,
-      reviewedThrough: '0.19.0',
-      decisions: { 'break-one': { decision: 'declined', version: '0.19.0' } },
-    });
+    expect(await runUpgradeCommand(['report', '--all'], a.io)).toBe(2);
   });
 
-  it('ack refuses while a must item has no decision; --force advances reviewedThrough', async () => {
-    await seedAllKinds();
+  it('usage states the ack rule', async () => {
+    const a = io();
+    await runUpgradeCommand(['frobnicate'], a.io);
+    const usage = a.err.join('\n');
+    expect(usage).toContain('glirastes upgrade ack [--defer <note-id>]... [--force]');
+    expect(usage).toMatch(/refuses while a breaking item is detected as affected and not deferred/);
+    expect(usage).not.toContain('decide');
+  });
+
+  it('ack refuses while an affected breaking item is not deferred; --force advances reviewedThrough', async () => {
+    await writeNotes('0.19.0', [note('break-one', 'breaking', affected)]);
+    await appUsesGlirastes();
     await baseline('0.18.0');
     const a = io();
     expect(await runUpgradeCommand(['ack'], a.io)).toBe(1);
+    expect(a.err.join('\n')).toContain('break-one');
+    expect(a.err.join('\n')).toContain('--defer');
     expect((await readBaseline(root))!.reviewedThrough).toBe('0.18.0');
     expect(await runUpgradeCommand(['ack', '--force'], a.io)).toBe(0);
     expect((await readBaseline(root))!.reviewedThrough).toBe('0.19.0');
   });
 
-  it('ack advances once the must item is decided', async () => {
+  it('ack does not block on breaking items detection could not decide', async () => {
     await seedAllKinds();
     await baseline('0.18.0');
     const a = io();
-    await runUpgradeCommand(['decide', 'break-one', 'adopted'], a.io);
     expect(await runUpgradeCommand(['ack'], a.io)).toBe(0);
     expect((await readBaseline(root))!.reviewedThrough).toBe('0.19.0');
   });
 
-  it('a deferred breaking item stays under must after ack moves past its version', async () => {
+  it('ack does not block on a breaking item detected as adopted', async () => {
+    await writeNotes('0.19.0', [
+      note('break-one', 'breaking', { ...affected, adoptedWhen: { patterns: ['newApi\\('] } }),
+    ]);
+    await writeFile(join(root, 'app.ts'), "import { newApi } from 'glirastes';\nnewApi();\n");
+    await baseline('0.18.0');
+    const a = io();
+    expect(await runUpgradeCommand(['ack'], a.io)).toBe(0);
+  });
+
+  it('ack --defer accepts an affected breaking item, which stays under must after ack', async () => {
+    await writeNotes('0.19.0', [note('break-one', 'breaking', affected), note('recommend-one', 'recommended')]);
+    await appUsesGlirastes();
+    await baseline('0.18.0');
+    const a = io();
+    expect(await runUpgradeCommand(['ack', '--defer', 'break-one'], a.io)).toBe(0);
+    expect(await readBaseline(root)).toEqual({
+      schemaVersion: 1,
+      reviewedThrough: '0.19.0',
+      decisions: { 'break-one': { decision: 'deferred', version: '0.19.0' } },
+    });
+    const report = await createUpgradeReport(opts());
+    expect(report.must.map((i) => [i.id, i.deferred])).toEqual([['break-one', true]]);
+    expect(report.recommended).toEqual([]);
+    expect(report.upToDate).toBe(false);
+  });
+
+  it('ack records several --defer ids', async () => {
     await seedAllKinds();
     await baseline('0.18.0');
     const a = io();
-    expect(await runUpgradeCommand(['decide', 'break-one', 'deferred'], a.io)).toBe(0);
-    expect(await runUpgradeCommand(['ack'], a.io)).toBe(0);
-    expect((await readBaseline(root))!.reviewedThrough).toBe('0.19.0');
-    const report = await createUpgradeReport(opts());
-    expect(report.must.map((i) => [i.id, i.decision])).toEqual([['break-one', 'deferred']]);
-    expect(report.recommended).toEqual([]);
-    expect(report.upToDate).toBe(false);
+    expect(await runUpgradeCommand(['ack', '--defer', 'break-one', '--defer', 'optional-one'], a.io)).toBe(0);
+    expect(Object.keys((await readBaseline(root))!.decisions).sort()).toEqual(['break-one', 'optional-one']);
+  });
+
+  it('ack replaces the deferred list: a deferred affected breaking item must be deferred again', async () => {
+    await writeNotes('0.19.0', [note('break-one', 'breaking', affected), note('recommend-one', 'recommended')]);
+    await appUsesGlirastes();
+    await baseline('0.19.0', ['break-one', 'recommend-one']);
+    const a = io();
+    expect(await runUpgradeCommand(['ack'], a.io)).toBe(1);
+    expect(await runUpgradeCommand(['ack', '--defer', 'break-one'], a.io)).toBe(0);
+    expect(Object.keys((await readBaseline(root))!.decisions)).toEqual(['break-one']);
+  });
+
+  it('ack --defer rejects an unknown note id and writes nothing', async () => {
+    await seedAllKinds();
+    await baseline('0.18.0');
+    const a = io();
+    expect(await runUpgradeCommand(['ack', '--defer', 'nope-nope'], a.io)).toBe(1);
+    expect(a.err.join('\n')).toContain('nope-nope');
+    expect(await readBaseline(root)).toEqual({ schemaVersion: 1, reviewedThrough: '0.18.0', decisions: {} });
+  });
+
+  it('ack --defer needs a value', async () => {
+    const a = io();
+    expect(await runUpgradeCommand(['ack', '--defer'], a.io)).toBe(2);
   });
 
   it('ack with an invalid installed version warns and writes nothing', async () => {
@@ -414,18 +481,11 @@ describe('runUpgradeCommand', () => {
 
   it('--fail-on breaking ignores deferred must items, which stay listed', async () => {
     await seedAllKinds();
-    await baseline('0.18.0', { 'break-one': 'deferred' });
+    await baseline('0.18.0', ['break-one']);
     const a = io();
     expect(await runUpgradeCommand(['report', '--fail-on', 'breaking'], a.io)).toBe(0);
     expect(a.out.join('\n')).toContain('[break-one]');
     expect(a.out.join('\n')).toContain('[deferred]');
-  });
-
-  it('--fail-on breaking with --all ignores adopted and declined must items', async () => {
-    await seedAllKinds();
-    await baseline('0.18.0', { 'break-one': 'adopted' });
-    const a = io();
-    expect(await runUpgradeCommand(['report', '--all', '--fail-on', 'breaking'], a.io)).toBe(0);
   });
 
   it('ack never moves reviewedThrough backwards', async () => {
@@ -448,7 +508,8 @@ describe('runUpgradeCommand', () => {
   });
 
   it('a refused ack does not create a baseline', async () => {
-    await seedAllKinds();
+    await writeNotes('0.19.0', [note('break-one', 'breaking', affected)]);
+    await appUsesGlirastes();
     await mkdir(join(root, '.glirastes'), { recursive: true });
     await writeFile(
       join(root, '.glirastes/installed-skills.json'),

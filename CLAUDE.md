@@ -107,7 +107,7 @@ src/
 ├── react/                    — Chat UI components, hooks, provider, STT bridges
 ├── codegen/                  — Scanner, execution inventory, registry generation
 └── cli/                      — init | scan | setup | connect | sync | doctor | install |
-                                validate | build | tools | upgrade (report|decide|ack)
+                                validate | build | tools | upgrade (report|ack)
 ```
 
 ## Subpath Exports

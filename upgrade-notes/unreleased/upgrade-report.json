@@ -2,7 +2,7 @@
   "id": "upgrade-report",
   "kind": "recommended",
   "summary": "glirastes upgrade report lists release notes since the version this app last reviewed, checked against your code, and is the way agents learn what to do after an upgrade.",
-  "howTo": "Run `glirastes upgrade report` once and commit `.glirastes/sdk-baseline.json`. After each glirastes upgrade run it again and follow the upgrading-glirastes skill.",
+  "howTo": "After each glirastes upgrade run `glirastes upgrade report` and follow the upgrading-glirastes skill. When the review is done, `glirastes upgrade ack` (with `--defer <id>` for postponed items) records it in `.glirastes/sdk-baseline.json`; commit that file.",
   "skill": "upgrading-glirastes",
   "affectedWhen": {
     "imports": [

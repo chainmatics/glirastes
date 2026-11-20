@@ -24,10 +24,10 @@ Run it:
   is not consent to apply it.
 - Never apply optional items unasked. Offer them in one line each and stop.
 - Never edit `.glirastes/sdk-baseline.json` by hand. Only `glirastes upgrade
-  decide` and `glirastes upgrade ack` write it.
+  ack` writes it.
 - Run `glirastes upgrade ack` only after the developer confirms the review is
-  done. Never use its force option unasked: it skips open breaking items, and
-  the developer decides that.
+  done. Never use its force option unasked: it skips breaking items that
+  affect the app, and the developer decides that.
 - Never claim an impact the report does not show. Evidence comes from the
   report, not from guesses about the code.
 - Never force-replace an edited installed skill; merge by hand.
@@ -58,12 +58,13 @@ Run it:
    skill section or prepare a change until the developer picks one.
 5. Ask before changing anything. Apply only what the developer accepted, then
    run `glirastes tools refresh` and `glirastes tools check`.
-6. Record each choice: `glirastes upgrade decide <id> adopted`, `declined` or
-   `deferred`. `deferred` keeps the item in every later report, also after
-   `glirastes upgrade ack`; adopted and declined items drop out (`--all` lists
-   them again). A deferred Must item no longer counts as open: `--fail-on
-   breaking` and the doctor warning skip it, and the refresh hint labels it
-   (`1 must (1 deferred)`).
+6. Note which items the developer wants to postpone. You record nothing per
+   item: an adopted change is detected from the code, and everything else is
+   settled by the `ack` in step 9. A postponed item is passed there as
+   `--defer <id>`: it stays in every later report, marked `[deferred]`, as long
+   as each later `ack` names it again. A deferred Must item no longer counts
+   as open: `--fail-on breaking` and the doctor warning skip it, and the
+   refresh hint labels it (`1 must (1 deferred)`).
 7. Edited skills under Should (`skill:<name>`): `glirastes tools refresh`
    keeps an edited copy and the report names it. Merge the shipped changes
    from `node_modules/glirastes/skills/<name>` into the copy yourself. A copy you
@@ -73,28 +74,28 @@ Run it:
 8. `unclassified` lists versions without upgrade notes. Read that version's
    section in `node_modules/glirastes/CHANGELOG.md`, summarize it for the
    developer and make no claim about its impact on the app.
-9. When the developer confirms the review is done, run `glirastes upgrade ack`.
-   It refuses while a Must item has no decision. Show that message to the
-   developer instead of working around it. Then commit the app changes, the
-   refreshed `.glirastes` outputs and `.glirastes/sdk-baseline.json`.
+9. When the developer confirms the review is done, run `glirastes upgrade ack`,
+   adding `--defer <id>` for every postponed item (also for items deferred
+   earlier that should stay listed). It refuses while a breaking item is
+   detected as affected (`status: "affected"`) and not deferred. Show that
+   message to the developer instead of working around it. Then commit the app
+   changes, the refreshed `.glirastes` outputs and
+   `.glirastes/sdk-baseline.json`.
 
 ## Commands
 
 ```bash
 glirastes upgrade report --json
-glirastes upgrade report --all
 glirastes upgrade report --brief
 glirastes upgrade report --from <version>
 glirastes upgrade report --fail-on breaking
-glirastes upgrade decide <note-id> adopted
-glirastes upgrade decide <note-id> declined
-glirastes upgrade decide <note-id> deferred
 glirastes upgrade ack
+glirastes upgrade ack --defer <note-id> --defer <other-note-id>
 ```
 
 `--brief` lists Must, Should and Recommended items and only counts the
 optional ones. `--fail-on breaking` exits 1 while
-a Must item has no decision (deferred counts as a decision), for CI. `--root <dir>` points any subcommand at another
+a Must item is not deferred, for CI. `--root <dir>` points any subcommand at another
 app. `GLIRASTES_UPGRADE_HINT=0` removes the summary line from refresh and check.
 
 `glirastes install --with-upgrade-hook` adds a Claude Code `SessionStart` hook
@@ -103,9 +104,9 @@ it, never add it unasked.
 
 ## Verification
 
-- `glirastes upgrade report` shows no Must or Should item without a recorded
-  decision, and every adopted item changed only after the developer agreed.
+- `glirastes upgrade report` shows no Must or Should item except deferred
+  ones, and every adopted item changed only after the developer agreed.
 - `glirastes tools check` reports `Tool outputs match the code.`
-- `.glirastes/sdk-baseline.json` changed only through `decide` and `ack`.
+- `.glirastes/sdk-baseline.json` changed only through `ack`.
 - The developer saw every optional item as an offer, and none was applied
   unasked.
