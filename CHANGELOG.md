@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The package now ships the guides under `docs/` that the README, this changelog, the skills and the type comments point to (`docs/chat-queue.md`, `docs/approval-subjects.md`, `docs/tool-policy.md`, `docs/managed-runtime-sync.md`, `docs/support-matrix.md` and the other top-level guides); before, only `docs/README.md` was packed, so those references led nowhere in `node_modules/glirastes`. Acceptance records (`docs/acceptance/`) and design material stay in the repository. A pack test fails when a packed file names a `docs/` path the package does not carry.
+
 ## [0.19.0] - 2026-11-20
 
 ### Added
