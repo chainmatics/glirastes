@@ -28,6 +28,9 @@ import type {
   ChatQueuePauseTrigger,
   ChatQueueState,
   ChatSubmitResult,
+  ChatSubmitOutcome,
+  ChatSubmitRejection,
+  ChatSubmitRejectionReason,
   QueuedMessage,
 } from '../types.js';
 import { createQueuedMessage, useMessageQueueStore, useResolvedQueueConfig } from './use-message-queue.js';
@@ -201,7 +204,28 @@ export const DEFAULT_LOCALE: ChatLocale = {
   queueSaveLabel: 'Save',
   queueCancelLabel: 'Cancel',
   queueFilesLabel: '{count} files',
+  queueApprovalWaitingHint: 'Please approve or reject the open request first.',
 };
+
+/** Built-in `approvalPendingHint` → the built-in `queueApprovalWaitingHint` of the same language. */
+const BUILT_IN_QUEUE_APPROVAL_HINTS = new Map<string, string>(
+  [DEFAULT_LOCALE, deChatLocale].map((table) => [table.approvalPendingHint, table.queueApprovalWaitingHint!]),
+);
+const BUILT_IN_QUEUE_APPROVAL_HINT_TEXTS = new Set(BUILT_IN_QUEUE_APPROVAL_HINTS.values());
+
+/**
+ * Fills `queueApprovalWaitingHint`. Before it existed the queued state showed
+ * `approvalPendingHint`, so without an own text for the new key it follows
+ * that key: the app's own `approvalPendingHint` (also over a spread
+ * `deChatLocale`, in `locales` or in a full locale without the new key) is
+ * kept, a built-in one gives the built-in text of the same language.
+ */
+function withQueueApprovalHint(locale: ChatLocale): ChatLocale {
+  const hint = locale.queueApprovalWaitingHint;
+  if (hint !== undefined && !BUILT_IN_QUEUE_APPROVAL_HINT_TEXTS.has(hint)) return locale;
+  const followed = BUILT_IN_QUEUE_APPROVAL_HINTS.get(locale.approvalPendingHint) ?? locale.approvalPendingHint;
+  return followed === hint ? locale : { ...locale, queueApprovalWaitingHint: followed };
+}
 
 // ============================================================================
 // Helpers
@@ -574,8 +598,8 @@ export function AiChatProvider({
     : pageLanguage ?? toolPresentation?.locale ?? null);
   // English defaults, then the built-in texts of the app's language, then the caller's overrides.
   // With `locales`, per key in the language's fallback order (the app's table before the built-in one).
-  const locale = useMemo<ChatLocale>(
-    () => (userLocales
+  const locale = useMemo<ChatLocale>(() => withQueueApprovalHint(
+    userLocales
       ? {
         ...resolveTextTable<ChatLocale>({
           requested: language ?? undefined,
@@ -585,8 +609,7 @@ export function AiChatProvider({
         ...(userLocale ?? {}),
       }
       : { ...DEFAULT_LOCALE, ...languageLocale(language), ...(userLocale ?? {}) }),
-    [userLocale, userLocales, language],
-  );
+  [userLocale, userLocales, language]);
   // Resolve `theme` prop → CSS variables spread onto widget roots.
   const themeVars = useMemo<CSSProperties>(
     () => (themeScope === 'inherit' || unstyled ? {} : getThemeVars(userTheme)) as CSSProperties,
@@ -1731,23 +1754,24 @@ export function AiChatProvider({
 
   // Decides synchronously whether the message is taken, so any composer can
   // keep the typed text when it is not.
+  // Null when taken, else why not.
   const sendDirect = useCallback((
     message: string,
     sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
-  ): boolean => {
-    if (sessionNotReady || sessionMutationRef.current) return false;
+  ): ChatSubmitRejectionReason | null => {
+    if (sessionNotReady || sessionMutationRef.current) return 'session';
     if (pendingApprovalsMap.size > 0) {
       setApprovalReminder(true);
-      return false;
+      return 'approval-open';
     }
     if (sendOptions?.files?.length) {
-      if (!attachmentOptions) return false;
+      if (!attachmentOptions) return 'attachments-off';
       // A direct command runs without the model, which would silently drop the files.
       const plan = interactionRegistry?.planMessage(message, sendOptions.mentions ?? activeMentions);
-      if (plan?.status === 'send' || plan?.status === 'needs-args') return false;
+      if (plan?.status === 'send' || plan?.status === 'needs-args') return 'files-with-command';
     }
     void dispatchSend(message, sendOptions);
-    return true;
+    return null;
   }, [sessionNotReady, pendingApprovalsMap, dispatchSend, attachmentOptions, interactionRegistry, activeMentions]);
 
   // ---------------------------------------------------------------------------
@@ -1780,19 +1804,24 @@ export function AiChatProvider({
     || queueStore.restoring;
   const [flushTick, setFlushTick] = useState(0);
 
-  const submit = useCallback((
+  const submitOutcome = useCallback((
     message: string,
     sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
-  ): ChatSubmitResult => {
-    if (!queueEnabled) return sendDirect(message, sendOptions) ? 'sent' : 'rejected';
-    if (sessionNotReady || sessionMutationRef.current) return 'rejected';
+  ): ChatSubmitOutcome => {
+    if (!queueEnabled) {
+      const refused = sendDirect(message, sendOptions);
+      return refused ? { status: 'rejected', reason: refused } : { status: 'sent' };
+    }
+    if (sessionNotReady || sessionMutationRef.current) return { status: 'rejected', reason: 'session' };
     const mentionsForSend = sendOptions?.mentions ?? activeMentions;
     const files = sendOptions?.files;
     if (files?.length) {
-      if (!attachmentOptions) return 'rejected';
+      if (!attachmentOptions) return { status: 'rejected', reason: 'attachments-off' };
       // A direct command runs without the model, which would silently drop the files.
       const plan = interactionRegistry?.planMessage(message, mentionsForSend);
-      if (plan?.status === 'send' || plan?.status === 'needs-args') return 'rejected';
+      if (plan?.status === 'send' || plan?.status === 'needs-args') {
+        return { status: 'rejected', reason: 'files-with-command' };
+      }
     }
     const queued = queueStore.itemsRef.current;
     const resetComposer = () => {
@@ -1815,9 +1844,9 @@ export function AiChatProvider({
           sendInFlightRef.current = false;
           if (mountedRef.current) setFlushTick((tick) => tick + 1);
         });
-      return 'sent';
+      return { status: 'sent' };
     }
-    if (queued.length >= queueConfig.maxSize) return 'rejected';
+    if (queued.length >= queueConfig.maxSize) return { status: 'rejected', reason: 'queue-full' };
     // The hint shows for the message that starts waiting for the card, not for every one after it.
     if (approvalWaiting && queued.length === 0) setApprovalReminder(true);
     queueStore.commit(
@@ -1826,17 +1855,31 @@ export function AiChatProvider({
       'added',
     );
     resetComposer();
-    return 'queued';
+    return { status: 'queued' };
   }, [
     queueEnabled, sendDirect, sessionNotReady, activeMentions, attachmentOptions, interactionRegistry,
     queueStore, queueBusy, dispatchSend, queueConfig.maxSize, approvalWaiting, clarificationOpen, pendingCommand,
   ]);
 
+  // The latest refused message, for an app to explain it (also one the built-in composers sent).
+  const [lastRejection, setLastRejection] = useState<ChatSubmitRejection | null>(null);
+  const submitWithResult = useCallback((
+    message: string,
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
+  ): ChatSubmitOutcome => {
+    const outcome = submitOutcome(message, sendOptions);
+    // Null stays null without a render.
+    setLastRejection(outcome.status === 'rejected' ? { reason: outcome.reason, at: Date.now() } : null);
+    return outcome;
+  }, [submitOutcome]);
+  const submit = useCallback((
+    message: string,
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
+  ): ChatSubmitResult => submitWithResult(message, sendOptions).status, [submitWithResult]);
   const send = useCallback((
     message: string,
     sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
-  ): boolean => (queueEnabled ? submit(message, sendOptions) !== 'rejected' : sendDirect(message, sendOptions)),
-  [queueEnabled, submit, sendDirect]);
+  ): boolean => submitWithResult(message, sendOptions).status !== 'rejected', [submitWithResult]);
 
   const submitPendingCommand = useCallback((
     values: Readonly<Record<string, string>>,
@@ -2442,6 +2485,8 @@ export function AiChatProvider({
       error: error ?? approvalError,
       send,
       submit,
+      submitWithResult,
+      lastRejection,
       canCompose: queueEnabled
         ? !(isSessionMutating || sessionNotReady)
         : !(isLoading || awaitedOutcomes > 0 || isSessionMutating || sessionNotReady),
@@ -2541,6 +2586,8 @@ export function AiChatProvider({
       approvalError,
       send,
       submit,
+      submitWithResult,
+      lastRejection,
       queueEnabled,
       queueState,
       sendNow,

@@ -11,8 +11,10 @@ import { MentionInput } from '../components/mention-input.js';
 import { UiActionBus } from '../../browser/ui-action-bus.js';
 import { defineChatCommand } from '../interactions/definitions.js';
 import { useChatContext, type ChatContextValue } from '../provider/chat-context.js';
+import { deChatLocale } from '../locale-de.js';
 import type {
   AiChatProviderConfig,
+  ChatLocale,
   ChatMessage,
   ChatQueueChangeEvent,
   ChatQueueStorage,
@@ -927,6 +929,207 @@ describe('chat queue enabled', () => {
     fireEvent.change(box, { target: { value: 'no room' } });
     await act(async () => { fireEvent.submit(box.closest('form')!); });
     expect(box.value).toBe('no room');
+  });
+});
+
+describe('reason of a rejected submit', () => {
+  const file: FilePart = { type: 'file', mediaType: 'text/plain', url: 'data:text/plain;base64,aGk=', filename: 'a.txt' };
+  const ping = defineChatCommand({ id: 'tasks.ping', label: 'Ping', run: { kind: 'tool', tool: 'tasks.ping' } });
+  const pingMention: MentionData = { id: 'tasks.ping', type: 'command', label: 'Ping', prefix: '/', slug: 'ping' };
+  const pending = { session: { load: () => new Promise<never>(() => {}) } };
+
+  it('names every rejection without the queue; submit keeps its three strings', async () => {
+    const loading = new FakeChat();
+    const first = render(<Host chat={loading} config={pending} />);
+    expect(ctx.lastRejection).toBeNull();
+    expect(ctx.submitWithResult('early')).toEqual({ status: 'rejected', reason: 'session' });
+    expect(ctx.submit('early')).toBe('rejected');
+    first.unmount();
+
+    const chat = new FakeChat();
+    const second = render(<Host chat={chat} />);
+    let outcome: unknown;
+    await act(async () => { outcome = ctx.submitWithResult('with file', { files: [file] }); });
+    expect(outcome).toEqual({ status: 'rejected', reason: 'attachments-off' });
+    expect(ctx.lastRejection?.reason).toBe('attachments-off');
+    expect(typeof ctx.lastRejection?.at).toBe('number');
+    await act(async () => { chat.finish({ parts: approvalParts() }); });
+    await waitFor(() => expect(ctx.pendingApprovals).toHaveLength(1));
+    await act(async () => { outcome = ctx.submitWithResult('ja'); });
+    expect(outcome).toEqual({ status: 'rejected', reason: 'approval-open' });
+    expect(ctx.lastRejection?.reason).toBe('approval-open');
+    second.unmount();
+
+    const command = new FakeChat();
+    render(<Host chat={command} config={{ attachments: true, chatInteractions: { commands: [ping] } }} />);
+    await act(async () => { outcome = ctx.submitWithResult('/ping', { mentions: [pingMention], files: [file] }); });
+    expect(outcome).toEqual({ status: 'rejected', reason: 'files-with-command' });
+    // `send` records the reason too: the built-in composers call it.
+    await act(async () => { expect(ctx.send('/ping', { mentions: [pingMention], files: [file] })).toBe(false); });
+    expect(ctx.lastRejection?.reason).toBe('files-with-command');
+    await act(async () => { outcome = ctx.submitWithResult('hello'); });
+    expect(outcome).toEqual({ status: 'sent' });
+    expect(texts(command)).toEqual(['hello']);
+  });
+
+  it('names every rejection with the queue', async () => {
+    const loading = new FakeChat();
+    const first = render(<Host chat={loading} config={{ queue: { enabled: true }, ...pending }} />);
+    expect(ctx.submitWithResult('early')).toEqual({ status: 'rejected', reason: 'session' });
+    first.unmount();
+
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true, maxSize: 1 }, chatInteractions: { commands: [ping] } }} />);
+    await startRun(chat);
+    const outcomes: unknown[] = [];
+    await act(async () => {
+      outcomes.push(
+        ctx.submitWithResult('a'),
+        ctx.submitWithResult('b'),
+        ctx.submitWithResult('with file', { files: [file] }),
+      );
+    });
+    expect(outcomes).toEqual([
+      { status: 'queued' },
+      { status: 'rejected', reason: 'queue-full' },
+      { status: 'rejected', reason: 'attachments-off' },
+    ]);
+    expect(queuedTexts()).toEqual(['a']);
+  });
+
+  it('names a file message with a direct command with the queue', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true }, attachments: true, chatInteractions: { commands: [ping] } }} />);
+    await startRun(chat);
+    let outcome: unknown;
+    await act(async () => { outcome = ctx.submitWithResult('/ping', { mentions: [pingMention], files: [file] }); });
+    expect(outcome).toEqual({ status: 'rejected', reason: 'files-with-command' });
+  });
+
+  it('queues behind an open approval instead of refusing it', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true } }} />);
+    await startRun(chat);
+    await act(async () => { chat.finish({ parts: approvalParts() }); });
+    let outcome: unknown;
+    await act(async () => { outcome = ctx.submitWithResult('later'); });
+    expect(outcome).toEqual({ status: 'queued' });
+    expect(ctx.lastRejection).toBeNull();
+  });
+
+  it('never reports queue-full with maxSize: null', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true, maxSize: null } }} />);
+    await startRun(chat);
+    const outcomes: Array<{ status: string }> = [];
+    await act(async () => { for (let index = 0; index < 25; index += 1) outcomes.push(ctx.submitWithResult(`m${index}`)); });
+    expect(outcomes.every((outcome) => outcome.status === 'queued')).toBe(true);
+    expect(ctx.lastRejection).toBeNull();
+  });
+
+  it('keeps the latest of two rejections in a row, and an accepted submit clears it', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true, maxSize: 0 } }} />);
+    await startRun(chat);
+    await act(async () => { ctx.submit('one'); });
+    const firstRejection = ctx.lastRejection;
+    expect(firstRejection?.reason).toBe('queue-full');
+    await act(async () => { ctx.submit('two', { files: [file] }); });
+    expect(ctx.lastRejection?.reason).toBe('attachments-off');
+    expect(ctx.lastRejection).not.toBe(firstRejection);
+    expect(ctx.lastRejection!.at).toBeGreaterThanOrEqual(firstRejection!.at);
+    // The same reason again is a new rejection (a new object).
+    const second = ctx.lastRejection;
+    await act(async () => { ctx.submit('three', { files: [file] }); });
+    expect(ctx.lastRejection).not.toBe(second);
+
+    await act(async () => { chat.finish(); });
+    await act(async () => { expect(ctx.submit('now idle')).toBe('sent'); });
+    expect(ctx.lastRejection).toBeNull();
+  });
+
+  it('clears it with a queued submit, and useChatQueue exposes both', async () => {
+    let api: ReturnType<typeof useChatQueue> | undefined;
+    function Peek() { api = useChatQueue(); return null; }
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true, maxSize: 1 } }}><Peek /></Host>);
+    await startRun(chat);
+    await act(async () => { api!.submit('a'); });
+    await act(async () => { expect(api!.submitWithResult('b')).toEqual({ status: 'rejected', reason: 'queue-full' }); });
+    expect(api!.lastRejection?.reason).toBe('queue-full');
+    await act(async () => { ctx.removeQueued(ctx.queue.items[0]!.id); });
+    // Removing a message does not clear it: only an accepted submit does.
+    expect(api!.lastRejection?.reason).toBe('queue-full');
+    await act(async () => { expect(api!.submit('c')).toBe('queued'); });
+    expect(api!.lastRejection).toBeNull();
+  });
+
+  it('the built-in composer keeps its markup and draft on a rejection', async () => {
+    const chat = new FakeChat();
+    const view = render(<Host chat={chat} config={{ queue: { enabled: true, maxSize: 0 } }}><ChatInput /></Host>);
+    await startRun(chat);
+    const box = document.querySelector('textarea')!;
+    fireEvent.change(box, { target: { value: 'no room' } });
+    const before = view.container.innerHTML;
+    await act(async () => { fireEvent.submit(box.closest('form')!); });
+    expect(ctx.lastRejection?.reason).toBe('queue-full');
+    expect(box.value).toBe('no room');
+    expect(view.container.innerHTML).toBe(before);
+  });
+});
+
+describe('notice for a message waiting behind an open approval', () => {
+  async function waitingNotice(config: Partial<AiChatProviderConfig>) {
+    const chat = new FakeChat();
+    const view = render(<Host chat={chat} config={{ queue: { enabled: true }, ...config }}><AiChatPanel /></Host>);
+    await startRun(chat);
+    await act(async () => { chat.finish({ parts: approvalParts() }); });
+    await act(async () => { ctx.submit('later'); });
+    const notice = await waitFor(() => {
+      const element = document.querySelector('[data-component="approval-reminder"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    const text = notice.textContent;
+    view.unmount();
+    return text;
+  }
+
+  it('reads queueApprovalWaitingHint; the built-in texts are unchanged', async () => {
+    expect(await waitingNotice({})).toBe('Please approve or reject the open request first.');
+    expect(await waitingNotice({ language: 'de' })).toBe(deChatLocale.approvalPendingHint);
+    expect(await waitingNotice({ locale: { queueApprovalWaitingHint: 'Waits for your decision.' } }))
+      .toBe('Waits for your decision.');
+  });
+
+  it("falls back to the app's own approvalPendingHint when the new key is not set", async () => {
+    expect(await waitingNotice({ locale: { approvalPendingHint: 'Decide first.' } })).toBe('Decide first.');
+    expect(await waitingNotice({ locale: { ...deChatLocale, approvalPendingHint: 'Erst entscheiden.' } }))
+      .toBe('Erst entscheiden.');
+    expect(await waitingNotice({ language: 'de', locales: { de: { approvalPendingHint: 'Erst entscheiden.' } } }))
+      .toBe('Erst entscheiden.');
+    expect(await waitingNotice({
+      locale: { approvalPendingHint: 'Decide first.', queueApprovalWaitingHint: 'Waits for your decision.' },
+    })).toBe('Waits for your decision.');
+  });
+
+  it('keeps approvalPendingHint without the queue', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ locale: { queueApprovalWaitingHint: 'Waits.' } }}><AiChatPanel /></Host>);
+    await act(async () => { ctx.send('first'); });
+    await act(async () => { chat.finish({ parts: approvalParts() }); });
+    await waitFor(() => expect(ctx.pendingApprovals).toHaveLength(1));
+    await act(async () => { ctx.send('ja'); });
+    await waitFor(() => expect(document.querySelector('[data-component="approval-reminder"]')?.textContent)
+      .toBe('Please approve or reject the open request first.'));
+  });
+
+  it('a full ChatLocale without the new key typechecks and keeps its language', async () => {
+    const { queueApprovalWaitingHint: _omitted, ...full } = deChatLocale;
+    const locale: ChatLocale = full;
+    expect(await waitingNotice({ locale })).toBe(deChatLocale.approvalPendingHint);
+    expect(await waitingNotice({ locale: { ...locale, approvalPendingHint: 'Eigener Hinweis.' } }))
+      .toBe('Eigener Hinweis.');
   });
 });
 

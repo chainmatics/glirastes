@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Reason for a refused chat message** (`docs/chat-queue.md`, "Why a message was refused"), with and without the queue: `submitWithResult(text, options?)` on the context and `useChatQueue()` returns `{ status: 'sent' | 'queued' }` or `{ status: 'rejected', reason }`; `lastRejection` (`{ reason, at }` or null) holds the latest refused `send`/`submit`, also from the built-in composers, and is null again after the next accepted message. Reasons (`ChatSubmitRejectionReason`): `session`, `approval-open` (only without the queue), `attachments-off`, `files-with-command`, `queue-full`. New types `ChatSubmitOutcome`, `ChatSubmitRejection`, `ChatSubmitRejectionReason`. `submit` keeps returning `'sent' | 'queued' | 'rejected'` and `send` its boolean; the built-in UI shows nothing new. No message content in either.
+- Locale key `queueApprovalWaitingHint` (English, German): the approval notice of `AiChatPanel` while a queued message waits for an open approval, before `approvalPendingHint`. Optional in `ChatLocale` (a full locale object without it still compiles). Without an own text it follows `approvalPendingHint`, so an app that set its own `approvalPendingHint` keeps that text; the built-in texts equal those of `approvalPendingHint`, so the notice reads as before.
+
 ## [0.19.0] - 2026-11-20
 
 ### Added

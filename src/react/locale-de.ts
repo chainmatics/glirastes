@@ -122,4 +122,5 @@ export const deChatLocale: ChatLocale = {
   queueSaveLabel: 'Speichern',
   queueCancelLabel: 'Abbrechen',
   queueFilesLabel: '{count} Dateien',
+  queueApprovalWaitingHint: 'Bitte bestätige oder lehne zuerst die offene Anfrage ab.',
 };

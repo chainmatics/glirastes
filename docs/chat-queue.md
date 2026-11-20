@@ -61,7 +61,7 @@ not paused (except for the one `sendNow` message).
 | Send while a run is loading | Queued (`submit` returns `'queued'`, `send` true, the composer clears its draft). |
 | Send while idle and the queue is empty | Sent at once (`'sent'`). |
 | Send while idle and messages are queued | Queued behind them (order is kept). |
-| Send while an approval is open | Queued; the approval hint (`approvalReminder`) shows for the first queued message. Held until every approval is decided. |
+| Send while an approval is open | Queued; the approval hint (`approvalReminder`, text `queueApprovalWaitingHint`) shows for the first queued message. Held until every approval is decided. |
 | Approval decided, transport continues by itself | Held until that continuation ended. |
 | Approval decided, transport does not continue (`autoResumeOnApproval: false`) | Sent 1.5 s after the answer: the queue never waits forever. |
 | `sendNow` while an approval is open | `'refuse'` (default): false and the hint. `'reject-approval'`: rejects them, then sends. |
@@ -102,14 +102,42 @@ attachments are off, and refused with a direct command.
 | --- | --- |
 | `send(text, options?)` | Unchanged signature; with the queue true when sent or queued, false when refused. |
 | `submit(text, options?)` | `'sent'`, `'queued'` or `'rejected'`; also without the queue (`'sent'`/`'rejected'`). |
+| `submitWithResult(text, options?)` | `submit` with the reason: `{ status: 'sent' \| 'queued' }` or `{ status: 'rejected', reason }` (below). |
+| `lastRejection` | `{ reason, at }` of the latest refused `send`/`submit` (also from the built-in composers), else null. |
 | `queue` | `{ enabled, items, paused, restoring, editingId }`. |
 | `canCompose` | Whether a composer takes input: without the queue `!isLoading`; with it false only while the conversation loads or changes. |
 | `sendNow(id)`, `removeQueued(id)`, `editQueued(id, text)` | `boolean`: false for an unknown id (or an empty text). |
 | `beginEdit(id)`, `cancelEdit()` | Open / close the editor of a queued message (one at a time); while open, the queue holds at it. Call `beginEdit` when your UI opens an editor, so a run that ends meanwhile does not send the old text. |
 | `clearQueue()`, `resumeQueue()`, `pauseQueue()` | |
 
-`useChatQueue()` returns just the queue state and those actions, for a
-headless UI:
+### Why a message was refused
+
+`submit` keeps its three strings. The reason is additive, with and without
+the queue:
+
+| `reason` | When |
+| --- | --- |
+| `session` | The conversation is not loaded yet or is changing (`canCompose` false). |
+| `approval-open` | An approval waits; only without the queue (with it the message is queued). |
+| `attachments-off` | `files` while attachments are off. |
+| `files-with-command` | `files` with a direct `/` command (it runs without the model). |
+| `queue-full` | The queue holds `maxSize` messages; never with `maxSize: null`. |
+
+- `submitWithResult` is the way for a composer of the app's own: the outcome
+  of exactly that call, synchronously.
+- `lastRejection` (`{ reason, at }`, `at` from `Date.now()`) is for a notice
+  next to the built-in composers, whose return value the app does not see.
+  Each refusal sets a new object, also with the same reason; the next
+  accepted (sent or queued) message sets it back to null. Removing or
+  sending queued messages does not touch it.
+- Neither carries the text or files. The built-in composers show nothing new
+  and keep the draft as before.
+- Other refusals are not submit rejections: `sendNow` with
+  `sendNowDuringApproval: 'refuse'` returns false and shows the approval
+  hint; a message sent while `queue.storage` reads is queued.
+
+`useChatQueue()` returns just the queue state and those actions (with
+`submitWithResult` and `lastRejection`), for a headless UI:
 
 ```tsx
 import { useChatQueue } from 'glirastes/react';
@@ -155,6 +183,16 @@ A custom composer uses `canCompose` instead of `isLoading` to lock itself.
   `queueRemoveLabel`, `queuePausedLabel`, `queueResumeLabel`,
   `queueSaveLabel`, `queueCancelLabel`, `queueFilesLabel` (`{count}`);
   English defaults, German in `deChatLocale`.
+- The approval notice of `AiChatPanel` (`data-component="approval-reminder"`)
+  while a queued message waits for an open approval reads
+  `queueApprovalWaitingHint`; without a queued message (a refused send) it
+  stays `approvalPendingHint`. The new key is optional in `ChatLocale`, so a
+  full locale object without it still compiles. Not set (or set to a built-in
+  text), it follows `approvalPendingHint`: the app's own text of that key
+  (in `locale`, over a spread `deChatLocale` or in `locales`) is kept, a
+  built-in one gives the built-in text of the same language. The built-in
+  English and German texts equal those of `approvalPendingHint`, so the
+  notice reads as before.
 
 ## Persistence adapter
 
