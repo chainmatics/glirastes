@@ -321,14 +321,11 @@ function sanitizeMessages<T extends { role: string; parts: unknown[] }>(msgs: T[
         isRecord(part) && typeof part.text === 'string' &&
         (part.text as string).trim().length > 0
       );
-      const hasToolOutput = message.parts.some((part) => {
-        if (isRecord(part)) {
-          const partType = typeof part.type === 'string' ? part.type : '';
-          return partType.startsWith('tool-') && part.state === 'output-available';
-        }
-        return false;
-      });
-      return hasContent || hasToolOutput || message.parts.length === 0;
+      // Any tool part left is a step of the turn's log (also a call a stop cut off): the turn stays in the history.
+      const hasToolPart = message.parts.some((part) => (
+        isRecord(part) && typeof part.type === 'string' && part.type.startsWith('tool-')
+      ));
+      return hasContent || hasToolPart || message.parts.length === 0;
     }
     return true;
   }) as T[];

@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A turn stopped while a tool call was running, before any text, disappeared from the chat once the next message was sent (typed, from the message queue, or `sendNow` with `'abort'`), and the session store saved the history without it, so it stayed lost after a reload. Before each send the chat removed every assistant message with no text and no finished tool result; it now keeps a message that still has a tool part, so the stopped turn keeps its activity log with the call shown as stopped. The same applied to a turn whose only steps failed or were declined. Such a message is now also part of the history sent with the next request, as a stopped turn with text already was (the Glirastes server adapters skip a call without a result). The stop notice is unchanged: it belongs to the latest turn and goes with the next one, with and without the queue.
 - The package now ships the guides under `docs/` that the README, this changelog, the skills and the type comments point to (`docs/chat-queue.md`, `docs/approval-subjects.md`, `docs/tool-policy.md`, `docs/managed-runtime-sync.md`, `docs/support-matrix.md` and the other top-level guides); before, only `docs/README.md` was packed, so those references led nowhere in `node_modules/glirastes`. Acceptance records (`docs/acceptance/`) and design material stay in the repository. A pack test fails when a packed file names a `docs/` path the package does not carry.
 
 ## [0.19.0] - 2026-11-20
