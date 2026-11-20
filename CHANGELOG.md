@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-20
+
 ### Added
 
 - **Reason for a refused chat message** (`docs/chat-queue.md`, "Why a message was refused"), with and without the queue: `submitWithResult(text, options?)` on the context and `useChatQueue()` returns `{ status: 'sent' | 'queued' }` or `{ status: 'rejected', reason }`; `lastRejection` (`{ reason, at }` or null) holds the latest refused `send`/`submit`, also from the built-in composers, and is null again after the next accepted message, after `clear()` and when the open conversation changes (a refusal belongs to the chat it happened in). Reasons (`ChatSubmitRejectionReason`): `session`, `approval-open` (only without the queue), `attachments-off`, `files-with-command`, `queue-full`. New types `ChatSubmitOutcome`, `ChatSubmitRejection`, `ChatSubmitRejectionReason`. `submit` keeps returning `'sent' | 'queued' | 'rejected'` and `send` its boolean; the built-in UI shows nothing new. No message content in either.
@@ -1084,3 +1086,4 @@ No code changes — patch-level docs release.
 [0.18.0]: https://github.com/chainmatics/glirastes/compare/v0.17.3...v0.18.0
 [0.18.1]: https://github.com/chainmatics/glirastes/compare/v0.18.0...v0.18.1
 [0.19.0]: https://github.com/chainmatics/glirastes/compare/v0.18.1...v0.19.0
+[0.20.0]: https://github.com/chainmatics/glirastes/compare/v0.19.0...v0.20.0
