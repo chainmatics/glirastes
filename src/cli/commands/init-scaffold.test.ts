@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createAppFixture, removeAppFixtures } from '../../codegen/tools/__tests__/app-fixture.js';
 import { ToolsConfigSchema } from '../../codegen/tools/config.js';
 import { LocalPromptBundleSchema } from './validate-build.js';
-import { AGENT_HINT_START, scaffoldToolsInputs, updateAgentHint } from './init-scaffold.js';
+import { AGENT_HINT_END, AGENT_HINT_START, scaffoldToolsInputs, updateAgentHint } from './init-scaffold.js';
+import { installSkills } from './install-skills.js';
 import { runToolsPipeline } from '../../codegen/tools/pipeline.js';
 import { runToolsCommand } from './tools/index.js';
 
@@ -222,13 +223,25 @@ describe('agent block update', () => {
     expect(warnings).toEqual([expect.stringContaining('without')]);
   });
 
-  it('re-running init refreshes an old block', async () => {
-    const app = await freshApp({ 'AGENTS.md': `# Mine\n\n${OLD_BLOCK}\n` });
+  it('re-running init leaves an existing, edited block byte-identical; install updates it', async () => {
+    const edited = `# Mine\r\n\n${OLD_BLOCK}\nmy own line\n`;
+    const app = await freshApp({ 'AGENTS.md': edited });
     const scaffold = await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
-    expect(scaffold.written).toContain('AGENTS.md');
+    expect(scaffold.written).not.toContain('AGENTS.md');
+    expect(await app.read('AGENTS.md')).toBe(edited);
+
+    await installSkills({ rootDir: app.root, host: 'codex', quiet: true });
     const text = await app.read('AGENTS.md');
     expect(text).not.toContain('Old text.');
     expect(text).toContain('glirastes upgrade report');
-    expect(text.split(AGENT_HINT_START).length - 1).toBe(1);
+    expect(text.endsWith('\nmy own line\n')).toBe(true);
+  }, 60_000);
+
+  it('init appends the block as on main: LF, after the existing text', async () => {
+    const app = await freshApp({ 'AGENTS.md': '# Mine\r\n' });
+    await scaffoldToolsInputs({ root: app.root, host: 'codex', createAppId: () => APP_ID });
+    const text = await app.read('AGENTS.md');
+    expect(text.startsWith(`# Mine\r\n\n${AGENT_HINT_START}\n## Glirastes tools\n`)).toBe(true);
+    expect(text.endsWith(`${AGENT_HINT_END}\n`)).toBe(true);
   }, 60_000);
 });

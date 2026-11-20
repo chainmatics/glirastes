@@ -199,10 +199,12 @@ export async function scaffoldToolsInputs(options: {
   const hint = await resolveHintTargets(root, [hostFile, 'AGENTS.md', 'CLAUDE.md'], hostFile);
   notes.push(...hint.notes);
   const hintTargets = hint.targets;
+  // Insert only (as released): an existing block, edited or not, stays; `glirastes install` updates it.
   for (const target of hintTargets) {
     const current = await readText(join(root, target)) ?? '';
-    const next = withAgentHint(current, { insert: true });
-    if (next.text !== current) add(target, next.text);
+    if (current.includes(AGENT_HINT_START)) continue;
+    const separator = current === '' || current.endsWith('\n\n') ? '' : current.endsWith('\n') ? '\n' : '\n\n';
+    add(target, `${current}${separator}${AGENT_HINT}`);
   }
 
   if (packageRaw !== undefined) {
@@ -265,20 +267,16 @@ async function resolveHintTargets(
 const LF_BLOCK = AGENT_HINT.slice(0, AGENT_HINT.lastIndexOf(AGENT_HINT_END) + AGENT_HINT_END.length);
 
 /**
- * The instruction text with the current Glirastes block: every marker span
- * that differs is replaced (compared without line-ending differences, written
- * in the file's own line ending), text outside the markers stays byte for
- * byte. Without any block, `insert` appends one (init); a start marker
- * without an end marker is left alone and counted.
+ * The instruction text with the current Glirastes block (`glirastes install`):
+ * every marker span that differs is replaced (compared without line-ending
+ * differences, written in the file's own line ending), text outside the
+ * markers stays byte for byte. A file without a block is returned unchanged;
+ * a start marker without an end marker is left alone and counted.
  */
-function withAgentHint(current: string, options: { insert: boolean }): { text: string; unterminated: number } {
+function withAgentHint(current: string): { text: string; unterminated: number } {
   const eol = current.includes('\r\n') ? '\r\n' : '\n';
   const block = LF_BLOCK.split('\n').join(eol);
-  if (!current.includes(AGENT_HINT_START)) {
-    if (!options.insert) return { text: current, unterminated: 0 };
-    const separator = current === '' || current.endsWith(`${eol}${eol}`) ? '' : current.endsWith('\n') ? eol : `${eol}${eol}`;
-    return { text: `${current}${separator}${block}${eol}`, unterminated: 0 };
-  }
+  if (!current.includes(AGENT_HINT_START)) return { text: current, unterminated: 0 };
   let text = '';
   let cursor = 0;
   let unterminated = 0;
@@ -310,7 +308,7 @@ export async function updateAgentHint(
   for (const target of targets) {
     const current = await readText(join(root, target));
     if (current === undefined) continue;
-    const next = withAgentHint(current, { insert: false });
+    const next = withAgentHint(current);
     if (next.unterminated > 0) warn(`${target} has a "${AGENT_HINT_START}" marker without "${AGENT_HINT_END}"; the block was not updated there.`);
     if (next.text !== current) writes.push({ path: join(root, target), content: next.text, preserveMode: true });
   }
