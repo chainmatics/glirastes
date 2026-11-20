@@ -164,6 +164,9 @@ const composer = useChatComposerInput();
   keeps it; a pick the app handles (`onCompletionSelect` returns `true`) removes it.
 - A second call while untouched replaces the first one's text. An unknown
   trigger warns once in the console and does nothing.
+- While the composer is locked (`controls.canCompose` false: a turn runs
+  without `queue.enabled`, the session loads or changes) it does nothing,
+  also on a disabled `RichMentionInput`.
 - `useChatComposer().openCompletion` works from anywhere below
   `AiChatProvider` and waits until a composer is mounted, like `insertText`.
   `ChatComposerInputControls.openCompletion` is the same on the composer, and
@@ -195,13 +198,16 @@ const composer = useMemo<ComposerConfig>(() => ({
 - `trigger:<char>` is a button named after the trigger's `label` (else the
   char) that calls `openCompletion({ trigger })` and keeps the caret in the
   editor. The plain input (no completion) leaves it out. A second click does
-  not close the list.
+  not close the list. It is disabled exactly when the editor is
+  (`!controls.canCompose`); with `queue.enabled` it stays usable while a turn
+  streams.
 - An item (`ComposerToolbarItem`) takes `label` (accessible name), `icon`,
   `onSelect(controls)`, `hidden` (boolean or `(controls) => boolean`) and
   `render(controls)`, which replaces the button. An item key equal to a
   builtin id replaces the builtin. Unknown ids warn once and are skipped.
-  Items stay enabled while a turn streams; check `controls.isLoading` in
-  `hidden` or `onSelect` when that matters.
+  App items are never disabled by the SDK; check `controls.canCompose`
+  (not `isLoading`) in `hidden` or `onSelect` before writing into the
+  composer, so they follow the queue like the editor.
 - `components.ComposerToolbar` (`ComposerToolbarProps`) gets the rendered
   `start` and `end` arrays, the `editor` and the `controls`, e.g. for a second
   row below the editor. It renders inside the form. Define it once at module
@@ -240,6 +246,9 @@ const composer = useMemo<ComposerConfig>(() => ({
   `onCompletionSelect` runs first. No entries, no section; with no rows at
   all (e.g. while the source loads) no menu box shows, `aria-expanded` stays
   `false` until it does, and Escape closes it.
+- The "+" button is disabled, and an open menu closes, while
+  `controls.canCompose` is false; with `queue.enabled` both stay usable while
+  a turn streams.
 - Keyboard: ArrowDown/ArrowUp (wrapping), Home/End, Enter/Space choose,
   Escape closes and returns focus to the "+" button, Tab closes; a press
   outside closes. ArrowDown/ArrowUp on the button open on the first/last row.
