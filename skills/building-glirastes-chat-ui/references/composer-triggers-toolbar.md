@@ -10,6 +10,7 @@ All names below come from `glirastes/react` unless noted.
 - Opening a list from a button
 - Toolbar
 - Plus menu
+- End-to-end example
 
 ## Triggers
 
@@ -213,3 +214,61 @@ const composer = useMemo<ComposerConfig>(() => ({
   and `locale.plusMenuAttachLabel` (`Attach file`, de `Datei anhängen`).
 - A custom handle offers the `source` picks through the optional
   `RichMentionInputHandle.pickCompletion(item, { trigger })`.
+
+## End-to-end example
+
+A toolbar with "+", an `@` and a `/` button before the editor, `mic` and
+`send` after it, and prompt templates listed in the "+" menu. Picking a
+template puts its text into the editor (`select: 'text'`), where the user can
+edit it before sending. `mic` renders only with `voice.enabled`.
+
+```tsx
+import { useMemo } from 'react';
+import {
+  AiChatProvider,
+  MentionInput,
+  type ChatCompletionProvider,
+  type ChatTransport,
+  type ChatTriggerDefinition,
+  type ComposerConfig,
+} from 'glirastes/react';
+
+const triggers: ReadonlyArray<ChatTriggerDefinition> = [
+  { char: '@', label: 'Person erwähnen' },
+  { char: '/', label: 'Vorlagen' },
+];
+
+const templates: ChatCompletionProvider = {
+  id: 'templates',
+  trigger: '/',
+  search: () => [
+    { id: 'summary', type: 'template', label: 'Auftrag zusammenfassen', select: 'text', insertText: 'Fasse den Auftrag zusammen' },
+  ],
+};
+
+const composer: ComposerConfig = {
+  toolbar: { start: ['plus', 'trigger:@', 'trigger:/'], end: ['mic', 'send'] },
+  plusMenu: {
+    items: ['attach'],
+    source: { trigger: '/', source: 'templates', label: 'Vorlagen' },
+  },
+};
+
+export function Chat({ transport }: { transport: ChatTransport }) {
+  const providers = useMemo(() => [templates, peopleProvider], []);
+  return (
+    <AiChatProvider
+      transport={transport}
+      completionProviders={providers}
+      triggers={triggers}
+      composer={composer}
+    >
+      <MentionInput />
+    </AiChatProvider>
+  );
+}
+```
+
+`peopleProvider` is your own `ChatCompletionProvider` with `trigger: '@'`;
+keep `triggers`, `composer` and the providers at module level or memoized.
+`src/react/components/__tests__/composer-example.test.tsx` renders this config.

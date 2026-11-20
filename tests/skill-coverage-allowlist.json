@@ -75,7 +75,6 @@
   "ChatCommandDefinition": "Chat interactions wire type or parser; createChatInteractionsHandler, defineChatEntity and defineChatCommand cover it.",
   "ChatCommandInvocation": "Chat interactions wire type or parser; createChatInteractionsHandler, defineChatEntity and defineChatCommand cover it.",
   "ChatCommandRun": "Chat interactions wire type or parser; createChatInteractionsHandler, defineChatEntity and defineChatCommand cover it.",
-  "ChatCompletionProvider": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "ChatComponents": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "ChatComposer": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "ChatComposerEntity": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
