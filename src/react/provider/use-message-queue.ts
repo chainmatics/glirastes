@@ -158,6 +158,35 @@ export function useMessageQueueStore(
   const save = useCallback((id: string, next: ReadonlyArray<QueuedMessage>) => {
     const storage = storageRef.current;
     if (!storage || loadedForRef.current !== id) return;
+    write(storage, id, next);
+  }, []);
+
+  // Queued in a conversation that was left before its stored queue was read: added to it in storage.
+  const mergesRef = useRef(new Map<string, Promise<void>>());
+  const keepUnloaded = useCallback((id: string, pending: ReadonlyArray<QueuedMessage>) => {
+    const storage = storageRef.current;
+    const kept = persistable(pending);
+    if (!storage || kept.length === 0) return;
+    const earlier = mergesRef.current.get(id);
+    const merge = (async () => {
+      await earlier;
+      await writesRef.current.get(id)?.idle;
+      let stored: QueuedMessage[] = [];
+      try {
+        stored = readStoredItems(await Promise.resolve(storage.load(id)));
+      } catch {
+        console.warn('[glirastes] queue.storage.load failed');
+        return;
+      }
+      const known = new Set(stored.map((item) => item.id));
+      write(storage, id, [...stored, ...kept.filter((item) => !known.has(item.id))]);
+      await writesRef.current.get(id)?.idle;
+    })();
+    mergesRef.current.set(id, merge);
+    void merge.finally(() => { if (mergesRef.current.get(id) === merge) mergesRef.current.delete(id); });
+  }, []);
+
+  function write(storage: ChatQueueStorage, id: string, next: ReadonlyArray<QueuedMessage>) {
     const writes = writesRef.current;
     const slot = writes.get(id) ?? { running: false };
     slot.next = persistable(next);
@@ -177,7 +206,7 @@ export function useMessageQueueStore(
       slot.running = false;
       if (writes.get(id) === slot) writes.delete(id);
     })();
-  }, []);
+  }
 
   const commit = useCallback((
     next: ReadonlyArray<QueuedMessage>,
@@ -205,6 +234,9 @@ export function useMessageQueueStore(
   const queueSessionRef = useRef(sessionId);
   useEffect(() => {
     if (queueSessionRef.current !== sessionId) {
+      const left = queueSessionRef.current;
+      // Left before its stored queue was read: what was queued meanwhile is not lost.
+      if (loadedForRef.current !== left && itemsRef.current.length > 0) keepUnloaded(left, itemsRef.current);
       queueSessionRef.current = sessionId;
       if (itemsRef.current.length > 0 || pausedRef.current) commit([], false, 'cleared', false);
     }
@@ -216,7 +248,8 @@ export function useMessageQueueStore(
     void (async () => {
       let stored: QueuedMessage[] = [];
       try {
-        // A write of this conversation still running (left and come back quickly) lands first.
+        // A write or merge of this conversation still running (left and come back quickly) lands first.
+        await mergesRef.current.get(sessionId);
         await writesRef.current.get(sessionId)?.idle;
         if (cancelled) return;
         stored = readStoredItems(await Promise.resolve(storage.load(sessionId)));
@@ -235,7 +268,7 @@ export function useMessageQueueStore(
       commit([...stored.filter((item) => !known.has(item.id)), ...itemsRef.current], true, 'restored');
     })();
     return () => { cancelled = true; };
-  }, [sessionId, hasStorage, commit, save, markLoaded]);
+  }, [sessionId, hasStorage, commit, save, markLoaded, keepUnloaded]);
 
   const clearAll = useCallback(() => {
     clearGenerationRef.current += 1;

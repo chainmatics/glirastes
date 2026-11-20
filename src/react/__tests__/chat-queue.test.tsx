@@ -755,6 +755,33 @@ describe('chat queue enabled', () => {
     releaseS2();
   });
 
+  it('keeps a message queued during a slow load when the user switches conversation meanwhile', async () => {
+    const db = new Map<string, QueuedMessage[]>([['s1', [{ id: 'q1', text: 'stored', createdAt: '2026-01-01T00:00:00.000Z' }]]]);
+    let slow = true;
+    const waiting: Array<() => void> = [];
+    const storage: ChatQueueStorage = {
+      load: (id) => {
+        const read = () => [...(db.get(id) ?? [])];
+        if (id === 's1' && slow) return new Promise((resolve) => { waiting.push(() => resolve(read())); });
+        return read();
+      },
+      save: (id, items) => { db.set(id, [...items]); },
+    };
+    const chat = new FakeChat();
+    const config = (activeId: string): Partial<AiChatProviderConfig> => ({
+      queue: { enabled: true, storage }, session: { activeId },
+    });
+    const view = render(<Host chat={chat} config={config('s1')} />);
+    await act(async () => { expect(ctx.submit('typed during load')).toBe('queued'); });
+    await act(async () => { view.rerender(<Host chat={chat} config={config('s2')} />); });
+    slow = false;
+    await act(async () => { for (const release of waiting.splice(0)) release(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(db.get('s1')!.map((item) => item.text)).toEqual(['stored', 'typed during load']);
+    await act(async () => { view.rerender(<Host chat={chat} config={config('s1')} />); });
+    await waitFor(() => expect(queuedTexts()).toEqual(['stored', 'typed during load']));
+    expect(texts(chat)).toEqual([]);
+  });
+
   it('sends nothing while the stored queue loads, also with nothing stored', async () => {
     let release!: () => void;
     const storage: ChatQueueStorage = {

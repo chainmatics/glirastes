@@ -85,6 +85,7 @@ not paused (except for the one `sendNow` message).
 | An emptied queue | No longer paused. |
 | A message open in an editor (`beginEdit`) | The queue holds when it reaches it: neither it nor a later message is sent until `editQueued` (saves and ends the edit), `cancelEdit` or removing it. Messages before it still go. `sendNow` refuses it while open. |
 | `queue.storage` still reading the conversation's queue (`queue.restoring`) | Nothing is sent; a message sent meanwhile is queued behind the stored ones. |
+| Conversation left before its stored queue was read | What was queued meanwhile is added to that conversation's stored queue (read, appended, saved); it comes back, paused, on return. |
 
 Processing happens when a queued message is sent, through the same path as a
 typed one: `/` commands, mention serialization, `onBeforeSend` and the
