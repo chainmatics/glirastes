@@ -104,13 +104,39 @@ size, and the zod 4 contract schemas the SDK exports cannot be nested inside
 zod 3 schemas. `pg` (`>=8.11 <9`) is used only by the `glirastes-runtime`
 binary, so any pg 8.11+ in the app is shared.
 
-Upgrading from 0.19.0 or older with an existing `bun.lock`: the lockfile keeps a
-nested `glirastes/pg` entry (the old range was `^8.23.1`) and, after
-`bun update`, possibly a nested `glirastes/zod`, because bun keeps such entries
-while they satisfy the new range. To share the app's copies, run
+Upgrading from 0.19.0 or older with an existing bun lockfile: the lockfile keeps a
+nested `glirastes/pg` (the old range was `^8.23.1`), because bun keeps such entries
+while they satisfy the new range. `bun install --force` and `bun update glirastes`
+do not remove it. With a text `bun.lock`, run
 `bun remove glirastes && bun add glirastes@<version>`, or delete the
-`"glirastes/pg"` and `"glirastes/zod"` lines from `bun.lock` and run
-`bun install`. `bun install --force` and `bun update glirastes` do not remove them.
+`"glirastes/pg"` line and run `bun install`. With a binary `bun.lockb`, remove and
+add was not enough in our tests (bun 1.4.3); convert first with
+`bun install --save-text-lockfile` (it replaces `bun.lockb` with `bun.lock`), then
+remove and add, or run `bun update pg` (raises the app's own pg range).
+
+A nested `glirastes/zod` has a different cause and comes back on every remove and
+add, in both lockfile formats: bun resolves the SDK's `^4.0.0` to the newest zod
+already in the lockfile, not to the app's top-level copy. So when another
+dependency needs a newer zod than the app's locked one (app 4.3.6, a package with
+`4.4.3` or `^4.4.3`), the SDK gets that newer copy. Fixes, verified for both formats:
+
+- Raise the app's own zod to that version: `bun add zod@^4.4.3`. One copy for
+  the app, the SDK and that package.
+- `bun update zod`: the app moves to the newest zod in its range (and its range in
+  `package.json` with it); the SDK shares it, a package that pins an older exact
+  zod keeps its own copy.
+- `"overrides": { "zod": "4.4.3" }` in the app's `package.json`: one copy, but it
+  also replaces the zod of packages that declare zod 3.
+- Text `bun.lock` only: delete the `"glirastes/zod"` line and run `bun install`;
+  the next `bun add glirastes@…` brings it back.
+- Delete the lockfile and run `bun install`: works, but re-resolves every
+  dependency to the newest version in its range.
+
+`bun add zod@latest` and converting to `bun.lock` alone do not remove it. Check with `bun pm ls --all | grep -E 'zod@|pg@'`: bun leaves the old nested
+folder in `node_modules`, so delete `node_modules` and run `bun install` before
+looking there. Two zod 4 copies work: the SDK reads schemas by shape, and zod 4
+shares its metadata registry and `instanceof` checks across copies; the cost is
+disk and client bundle size.
 
 **2. Initialize.** Run it inside your Codex or Claude Code session, or from a
 terminal with `--agent codex|claude`:
