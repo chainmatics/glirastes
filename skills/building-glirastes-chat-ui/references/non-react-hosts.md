@@ -102,7 +102,7 @@ required APIs. The configured V1 service does not add those routes automatically
   dispose when the view is removed and remount on identity changes.
 - **Layout without React slots:** `config.activityLog` (`expandWhileRunning`,
   `runningProgress`, `noticePlacement: 'message'`, `details`, `grouping`),
-  `config.approvalDisplay` (`decided: 'entry'`, `open: 'inline'`),
+  `config.approvalDisplay` (`decided: 'entry'`, `open: 'inline'`; leave `decided` off if the host draws its own entry for decided approvals, both would show),
   `config.queue` (message queue, `docs/chat-queue.md`),
   `config.entityLinks.mentionMarkers` and the `data-*` hooks of
   the shadow root cover what `components.TurnNotice`/`MessageParts` do in

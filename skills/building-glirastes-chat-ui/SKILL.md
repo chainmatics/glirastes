@@ -72,7 +72,7 @@ component; headless hooks and building blocks for an own chat:
 | `entityLinks` | entity references in answers as chips (`knownEntities`, `ambiguousNames` (default `'text'`: a shared name stays text; `'first'` = before 0.18.0; markers with an id link by id), `resolveAmbiguous`, `scope`, `mentionMarkers: 'markdown'` + `verifyMentions`); `entityDeclarations` sets declared identity by tool name (`docs/entity-identity.md`) |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
 | `onBeforeSend`, `onToolResult`, `onUiActionOutcome` | hooks around a turn; UI action outcomes in `references/hooks-and-building-blocks.md` |
-| `approvalDescription`, `approvalDisplay` | human-readable text for an approval request; `approvalDisplay` (`decided: 'entry'`, `open: 'inline'`) places approvals at their tool part (`MessageParts.parts`) |
+| `approvalDescription`, `approvalDisplay` | human-readable text for an approval request; `approvalDisplay` (`decided: 'entry'`, `open: 'inline'`) places approvals at their tool part (`MessageParts.parts`); do not set `decided: 'entry'` if the app draws its own entry from `parts[].approval` (both would show) |
 
 `locale` exists so the SDK never fights the product's i18n stack. Bind it to
 whatever the app already uses:
