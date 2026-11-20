@@ -183,7 +183,7 @@ function line(item: ReportItem): string {
   return `- [${item.id}] ${item.summary}${evidence}${deferred} → ${item.skill}`;
 }
 
-export function formatUpgradeReport(report: UpgradeReport, options: { brief?: boolean }): string {
+export function formatUpgradeReport(report: UpgradeReport): string {
   const lines: string[] = [];
   if (report.baselineAhead) {
     lines.push(`Glirastes ${report.to}: baseline is ahead of the installed version (reviewed through ${report.from}). Nothing pending.`);
@@ -202,7 +202,7 @@ export function formatUpgradeReport(report: UpgradeReport, options: { brief?: bo
     );
   if (report.upToDate) {
     lines.push('Nothing to review.');
-    if (!options.brief) checked();
+    checked();
     return lines.join('\n');
   }
   section('Must (breaking)', report.must.map(line));
@@ -213,23 +213,16 @@ export function formatUpgradeReport(report: UpgradeReport, options: { brief?: bo
     ),
   ]);
   section('Recommended', report.recommended.map(line));
-  if (options.brief) {
-    const counts: string[] = [];
-    if (report.offer.length > 0) counts.push(`${report.offer.length} optional item(s)`);
-    if (report.unclassified.length > 0) counts.push(`${report.unclassified.length} version(s) without notes`);
-    if (counts.length > 0) lines.push('', `Also ${counts.join(' and ')}. Run \`glirastes upgrade report\` for details.`);
-  } else {
-    section('Optional, only if wanted', report.offer.map(line));
-    section(
-      'Unclassified (no upgrade notes, read the changelog)',
-      report.unclassified.map((u) => `- ${u.changelogHeading}`),
-    );
-    checked();
-    lines.push(
-      '',
-      'This report never changes your code. When the review is done, run `glirastes upgrade ack`; `glirastes upgrade ack --defer <id>` keeps an item listed.',
-    );
-  }
+  section('Optional, only if wanted', report.offer.map(line));
+  section(
+    'Unclassified (no upgrade notes, read the changelog)',
+    report.unclassified.map((u) => `- ${u.changelogHeading}`),
+  );
+  checked();
+  lines.push(
+    '',
+    'This report never changes your code. When the review is done, run `glirastes upgrade ack`; `glirastes upgrade ack --defer <id>` keeps an item listed.',
+  );
   return lines.join('\n');
 }
 
@@ -259,8 +252,8 @@ export interface UpgradeIo {
 }
 
 export const UPGRADE_USAGE = [
-  'Usage: glirastes upgrade report [--json] [--brief] [--from <version>] [--fail-on breaking] [--root <dir>]',
-  '         show what changed in the SDK since this app was last reviewed (never changes your code; --brief lists must, should and recommended items and counts the rest)',
+  'Usage: glirastes upgrade report [--json] [--from <version>] [--fail-on breaking] [--root <dir>]',
+  '         show what changed in the SDK since this app was last reviewed (never changes your code)',
   '       glirastes upgrade ack [--defer <note-id>]... [--undefer <note-id>]... [--force] [--root <dir>]',
   '         mark everything up to the installed SDK as reviewed; --defer keeps a note listed in later reports, --undefer drops that again',
   '         deferrals last until --undefer or until the note is detected as adopted or not affected',
@@ -270,7 +263,7 @@ export const UPGRADE_USAGE = [
 
 export const UPGRADE_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
   report: {
-    flags: ['--json', '--brief'],
+    flags: ['--json'],
     values: ['--from', '--fail-on', '--root'],
   },
   // `--defer` and `--undefer` repeat; takeRepeated reads them before parseToolArgs sees the rest.
@@ -354,7 +347,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
       log(
         args.flags.has('--json')
           ? JSON.stringify(report, null, 2)
-          : formatUpgradeReport(report, { brief: args.flags.has('--brief') }),
+          : formatUpgradeReport(report),
       );
       return failOn === 'breaking' && openMustItems(report).length > 0 ? 1 : 0;
     }

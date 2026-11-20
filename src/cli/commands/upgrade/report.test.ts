@@ -185,7 +185,7 @@ describe('createUpgradeReport', () => {
     const report = await createUpgradeReport(opts({ skillsDir }));
     expect(report.keptSkills).toEqual([{ host: 'claude', name: 'alpha', reason: 'behind' }]);
     expect(report.upToDate).toBe(false);
-    expect(formatUpgradeReport(report, {})).toContain('alpha');
+    expect(formatUpgradeReport(report)).toContain('alpha');
   });
 
   it('downgrade: installed below reviewedThrough has nothing pending', async () => {
@@ -194,7 +194,7 @@ describe('createUpgradeReport', () => {
     const report = await createUpgradeReport(opts());
     expect(report.upToDate).toBe(true);
     expect(report.must).toEqual([]);
-    expect(formatUpgradeReport(report, {})).toContain('baseline is ahead of the installed version');
+    expect(formatUpgradeReport(report)).toContain('baseline is ahead of the installed version');
   });
 
   it('a prerelease review does not hide the final release notes', async () => {
@@ -222,27 +222,6 @@ describe('createUpgradeReport', () => {
   });
 });
 
-describe('--brief', () => {
-  it('lists must, should and recommended items, optional only as a count', async () => {
-    await seedAllKinds();
-    await baseline('0.18.0');
-    const text = formatUpgradeReport(await createUpgradeReport(opts()), { brief: true });
-    expect(text).toContain('[break-one]');
-    expect(text).toContain('[deprecate-one]');
-    expect(text).toContain('[recommend-one]');
-    expect(text).not.toContain('[optional-one]');
-    expect(text).toContain('1 optional item');
-  });
-
-  it('prints recommended items when they are the only ones', async () => {
-    await writeNotes('0.19.0', [note('recommend-one', 'recommended')]);
-    await baseline('0.18.0');
-    const text = formatUpgradeReport(await createUpgradeReport(opts()), { brief: true });
-    expect(text).toContain('Recommended:');
-    expect(text).toContain('[recommend-one]');
-  });
-});
-
 describe('checked, not affected', () => {
   const guarded = () =>
     writeNotes('0.19.0', [
@@ -261,19 +240,18 @@ describe('checked, not affected', () => {
   it('the full report names ack --defer, not decide', async () => {
     await seedAllKinds();
     await baseline('0.18.0');
-    const full = formatUpgradeReport(await createUpgradeReport(opts()), {});
+    const full = formatUpgradeReport(await createUpgradeReport(opts()));
     expect(full).toContain('glirastes upgrade ack --defer <id>');
     expect(full).not.toContain('decide');
   });
 
-  it('the full report prints one line per item; hint and --brief do not', async () => {
+  it('the full report prints one line per item; the hint does not', async () => {
     await guarded();
     await baseline('0.18.0');
     const report = await createUpgradeReport(opts());
-    const full = formatUpgradeReport(report, {});
+    const full = formatUpgradeReport(report);
     expect(full).toContain('Checked, no evidence found:');
     expect(full).toContain('- [break-guarded] break-guarded summary');
-    expect(formatUpgradeReport(report, { brief: true })).not.toContain('break-guarded');
     expect(summarizeUpgradeReport(report)).toBeNull();
   });
 

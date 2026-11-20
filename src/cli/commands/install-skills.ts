@@ -1,6 +1,5 @@
-import { mkdir, readdir, copyFile, readFile, stat, symlink, lstat, unlink, rm, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readdir, copyFile, readFile, stat, symlink, lstat, unlink, rm } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, relative, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,8 +52,6 @@ export interface InstallSkillsOptions {
   dryRun?: boolean;
   /** Project root — defaults to cwd */
   rootDir?: string;
-  /** Add a Claude Code SessionStart hook that runs `glirastes upgrade report --brief`; opt-in. */
-  withUpgradeHook?: boolean;
   /** Suppress installer progress when embedded in a machine-readable workflow. */
   quiet?: boolean;
 }
@@ -372,16 +369,6 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
     }
   }
 
-  if (opts.withUpgradeHook && !opts.dryRun) {
-    if (opts.global || !hosts.includes('claude')) {
-      console.error('glirastes install: --with-upgrade-hook writes the project .claude/settings.json and needs a project install for the claude host; no hook was added.');
-    } else {
-      const outcome = await addUpgradeHook(rootDir);
-      if (outcome === 'added') log(`  ${dim('Hook:')}    SessionStart runs "${UPGRADE_HOOK_COMMAND}" (.claude/settings.json)`);
-      else if (outcome !== 'present') console.error(outcome);
-    }
-  }
-
   log('');
   log(separator());
   log(
@@ -393,57 +380,6 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
     log('');
     log(`  ${dim('Re-run with --force to overwrite skipped skills.')}`);
   }
-}
-
-export const UPGRADE_HOOK_COMMAND = 'npx --no-install glirastes upgrade report --brief';
-
-/**
- * Merges the SessionStart hook into `.claude/settings.json`: other keys and
- * hooks stay, a second run adds nothing. A settings file that is not valid
- * JSON is never overwritten; the returned text says why nothing was written.
- */
-async function addUpgradeHook(rootDir: string): Promise<'added' | 'present' | string> {
-  const path = join(rootDir, '.claude/settings.json');
-  const refused = (why: string) => `glirastes install: .claude/settings.json ${why}, so the upgrade hook was not added. Fix the file and run the install again with --with-upgrade-hook.`;
-  const isObject = (value: unknown): value is Record<string, unknown> =>
-    typeof value === 'object' && value !== null && !Array.isArray(value);
-  let settings: Record<string, unknown> = {};
-  if (await pathExists(path)) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await readFile(path, 'utf8'));
-    } catch {
-      return refused('is not valid JSON');
-    }
-    if (!isObject(parsed)) return refused('is not a JSON object');
-    settings = parsed;
-  }
-  if (settings.hooks !== undefined && !isObject(settings.hooks)) return refused('has a "hooks" value that is not an object');
-  const hooks = (settings.hooks ?? {}) as Record<string, unknown>;
-  if (hooks.SessionStart !== undefined && !Array.isArray(hooks.SessionStart)) {
-    return refused('has a "hooks.SessionStart" value that is not an array');
-  }
-  const sessionStart = (hooks.SessionStart ?? []) as unknown[];
-  const present = sessionStart.some((entry) => isObject(entry) && Array.isArray(entry.hooks)
-    && entry.hooks.some((hook) => isObject(hook) && hook.command === UPGRADE_HOOK_COMMAND));
-  if (present) return 'present';
-  const next = {
-    ...settings,
-    hooks: {
-      ...hooks,
-      SessionStart: [...sessionStart, { hooks: [{ type: 'command', command: UPGRADE_HOOK_COMMAND }] }],
-    },
-  };
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-  try {
-    await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-    await rename(temporary, path);
-  } catch (cause) {
-    await unlink(temporary).catch(() => undefined);
-    throw cause;
-  }
-  return 'added';
 }
 
 /** One host stays the default; `hosts` accepts several without repeating work. */

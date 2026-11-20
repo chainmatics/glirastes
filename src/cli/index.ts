@@ -304,7 +304,6 @@ async function runInstall(
     dryRun: hasFlag(rest, '--dry-run'),
     includeSetupSkills,
     hosts,
-    withUpgradeHook: hasFlag(rest, '--with-upgrade-hook'),
   });
 }
 
