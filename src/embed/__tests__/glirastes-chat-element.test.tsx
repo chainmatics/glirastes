@@ -253,6 +253,23 @@ describe('<glirastes-chat>', () => {
     }
   });
 
+  it('passes config.onTurnEnd through to the chat: called once when the turn ended', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse('Hallo')));
+    const onTurnEnd = vi.fn();
+    const { element } = await mount((node) => {
+      node.setAttribute('endpoint', '/api/chat');
+      node.config = { onTurnEnd };
+    });
+    await act(async () => { expect(element.send('Hallo?')).toBe(true); });
+    await waitFor(() => expect(onTurnEnd).toHaveBeenCalledTimes(1));
+    expect(onTurnEnd).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'completed', reason: 'finished' }),
+      { sessionId: expect.any(String) },
+    );
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(onTurnEnd).toHaveBeenCalledTimes(1);
+  });
+
   it('posts to the endpoint attribute with the config headers and bodyExtras', async () => {
     const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Hallo zurück'));
     vi.stubGlobal('fetch', fetchMock);

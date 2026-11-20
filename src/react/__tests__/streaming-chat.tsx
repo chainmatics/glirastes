@@ -98,12 +98,20 @@ export class StreamingChat {
     this.notify();
   }
 
+  /** A new request that continues the history as it is (the AI SDK's request after an approval answer). */
+  resume() {
+    this.status = 'submitted';
+    this.error = null;
+    this.streamingId = null;
+    this.notify();
+  }
+
   setMessages = vi.fn((messages: ChatMessage[]) => {
     this.messages = messages;
     this.notify();
   });
 
-  addToolApprovalResponse = vi.fn(async () => {});
+  addToolApprovalResponse = vi.fn(async (_response: { id: string; approved: boolean; reason?: string }) => {});
 
   subscribeToData = (handler: ChatTransportDataHandler) => {
     this.dataHandlers.add(handler);

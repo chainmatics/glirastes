@@ -80,6 +80,8 @@ export type {
   TurnOutcome,
   TurnOutcomeReason,
   TurnOutcomeStatus,
+  TurnEndInfo,
+  OnTurnEnd,
   MessagePartNodes,
   MessageParts,
   MessagePartsProps,

@@ -661,6 +661,19 @@ export interface TurnOutcome {
   at: string;
 }
 
+/** The second argument of `onTurnEnd`. */
+export interface TurnEndInfo {
+  /** The chat the turn belongs to (`session.activeId`, else `'default'`); always the chat that is open. */
+  sessionId: string;
+}
+
+/**
+ * Called once when a turn of the open chat ends, with its recorded outcome
+ * (the same object `turnOutcomes` holds by then). See
+ * `AiChatProviderConfig.onTurnEnd`.
+ */
+export type OnTurnEnd = (outcome: TurnOutcome, info: TurnEndInfo) => void;
+
 /**
  * The rendered parts of one message, each `null` when absent. Order of the
  * default bubble: plan, activity, notice, attachments, text, toolResults.
@@ -1551,6 +1564,29 @@ export interface AiChatProviderConfig {
    * see `UiActionOutcomeEvent`. A throw inside is caught.
    */
   onUiActionOutcome?: OnUiActionOutcome;
+  /**
+   * Called once when a turn of the open chat ends, with its `TurnOutcome`
+   * (every status: `completed`, `aborted` also by `sendNow` with `'abort'`,
+   * `safety-stop`, `error` also before the first token or without any
+   * assistant message), after the outcome is in `turnOutcomes`, with the
+   * outcome `turnOutcomes` then holds. A turn ends when its last request is
+   * over: not while it asks for an approval (also not after a safety stop on
+   * that step: the decided run reports), not while a UI action outcome is
+   * awaited (the continuation request belongs to the same turn), not on a
+   * page a UI action is leaving with a page load (the next page continues the
+   * turn and reports it), not at a stop or error the server reports while the
+   * run still streams. A turn left at an undecided approval for a new message
+   * reports what it recorded, if anything, when the new request starts. A
+   * retry (`regenerate`) of the same user message is a new attempt and
+   * reports its own end. Not called for outcomes read from a stored history
+   * (`session.load`, a reload, a history the app hands its transport), for a
+   * turn whose chat is not the open one when the turn ends (its outcome joins
+   * that chat later without a call; a chat left and opened again before its
+   * turn ended does report it), or for a run cleared with `clear()`. The
+   * latest function passed is used; a throw inside, and the rejection of a
+   * returned promise, is caught and logged. Local only.
+   */
+  onTurnEnd?: OnTurnEnd;
   /**
    * How long the handlers of one tool result may take before the outcome is
    * `timeout`; default 10 000 ms. Page-bound client actions get their route
