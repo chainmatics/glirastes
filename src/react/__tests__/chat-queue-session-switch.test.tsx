@@ -19,6 +19,15 @@ const approvalParts = (id = 'approval-1') => [{
 }];
 const file = { type: 'file' as const, mediaType: 'text/plain', url: 'data:text/plain;base64,aGk=', filename: 'a.txt' };
 
+/**
+ * The user messages each request carried to the backend. Only user messages: the answer of a request that
+ * ends after a host switch is not kept apart from the new chat yet (left-chat-answer repro), so assistant
+ * messages are deliberately not asserted here.
+ */
+const carriedUsers = (chat: StreamingChat) => chat.requests.map((request) => request
+  .filter((message) => message.role === 'user')
+  .map((message) => (message.parts[0] as { text: string }).text));
+
 /** Which chat was open when each message reached the transport. */
 class SessionChat extends StreamingChat {
   sentIn: Array<{ text: string; session: string }> = [];
@@ -73,6 +82,14 @@ async function switchTo(chat: SessionChat, sessions: ReturnType<typeof store>, v
 }
 
 /** Lets a flush that would be triggered by the last change run, without a timer the code under test depends on. */
+/** Decides the approval of the left chat (the id is all a stale card or a custom UI would hold), lets its resumed run end. */
+async function decideLeftApproval(chat: SessionChat, decision: 'approve' | 'reject') {
+  await act(async () => { await ctx[decision]('approval-1'); });
+  expect(chat.addToolApprovalResponse).toHaveBeenCalledWith(expect.objectContaining({ id: 'approval-1' }));
+  await act(async () => { chat.finish(); });
+  await settle();
+}
+
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 
 async function ready(chat: SessionChat, sessions: ReturnType<typeof store>, queue: object = enabled) {
@@ -82,7 +99,7 @@ async function ready(chat: SessionChat, sessions: ReturnType<typeof store>, queu
 }
 
 describe('queue flush versus session switch: running turn', () => {
-  it('(a, b, e) the queue of the left chat is emptied; the end of its turn sends nothing anywhere', async () => {
+  it('(a, b, e) the queue of the left chat is emptied; after the end of its turn no further request is made', async () => {
     const sessions = store({ A: [], B });
     const chat = new SessionChat();
     const events: string[] = [];
@@ -102,6 +119,7 @@ describe('queue flush versus session switch: running turn', () => {
     await act(async () => { chat.finish(); });
     await settle();
     expect(chat.sentIn).toEqual([{ text: 'first', session: 'A' }]);
+    expect(carriedUsers(chat)).toEqual([['first']]);
     expect(ctx.queue.items).toHaveLength(0);
     // Its outcome is not recorded on B's turn.
     expect(ctx.turnOutcomes?.get('b-u1')).toBeUndefined();
@@ -112,6 +130,7 @@ describe('queue flush versus session switch: running turn', () => {
     await settle();
     expect(ctx.queue.items).toHaveLength(0);
     expect(chat.sentIn).toEqual([{ text: 'first', session: 'A' }]);
+    expect(carriedUsers(chat)).toEqual([['first']]);
     expect(events).toEqual(['added', 'added', 'cleared']);
   });
 
@@ -145,6 +164,7 @@ describe('queue flush versus session switch: running turn', () => {
     await waitFor(() => expect(chat.sentIn).toEqual([
       { text: 'first', session: 'A' }, { text: 'queued in A', session: 'A' },
     ]));
+    expect(carriedUsers(chat)).toEqual([['first'], ['first', 'queued in A']]);
     expect(db.get('A') ?? []).toEqual([]);
     // B never saw it.
     expect(db.get('B') ?? []).toEqual([]);
@@ -170,6 +190,8 @@ describe('queue flush versus session switch: running turn', () => {
       { text: 'first', session: 'A' }, { text: 'queued in B', session: 'B' },
     ]));
     expect(ctx.queue.items).toHaveLength(0);
+    // The request carries B's history and the new text, nothing the user typed in A.
+    expect(carriedUsers(chat)).toEqual([['first'], ['b question', 'queued in B']]);
     // The end of A's request was not booked on B's old turn; only B's own new turn has an outcome.
     expect(ctx.turnOutcomes?.get('b-u1')).toBeUndefined();
     await act(async () => { chat.finish(); });
@@ -181,7 +203,7 @@ describe('queue flush versus session switch: running turn', () => {
     expect(chat.sentIn).toHaveLength(2);
   });
 
-  it('(c) A to B to A while the request of A runs: both queues are gone, only the first message was ever sent', async () => {
+  it('(c) A to B to A while the request of A runs: both queues are gone, no further request is made', async () => {
     const sessions = store({ A: [], B });
     const chat = new SessionChat();
     const view = await ready(chat, sessions);
@@ -195,10 +217,11 @@ describe('queue flush versus session switch: running turn', () => {
     await act(async () => { chat.finish(); });
     await settle();
     expect(chat.sentIn).toEqual([{ text: 'first', session: 'A' }]);
+    expect(carriedUsers(chat)).toEqual([['first']]);
     expect(ctx.queue.items).toHaveLength(0);
   });
 
-  it('(f) switching while a flush is in flight: that message is not sent again, the rest of the old queue is dropped', async () => {
+  it('(f) switching while a flush is in flight: that message is not sent again, the rest of the old queue is dropped, and B\'s message carries none of A\'s texts', async () => {
     const sessions = store({ A: [], B });
     const chat = new SessionChat();
     const view = await ready(chat, sessions);
@@ -220,27 +243,38 @@ describe('queue flush versus session switch: running turn', () => {
     await act(async () => { chat.finish(); });
     await settle();
     expect(chat.sentIn).toHaveLength(3);
+    expect(carriedUsers(chat)).toEqual([['first'], ['first', 'flushed'], ['b question', 'queued in B']]);
     expect(ctx.queue.items).toHaveLength(0);
   });
 
-  it('(f) switching in the render the request ends: nothing of the old queue goes out', async () => {
+  // The old queue is also guarded by the in-flight flag and the immediate clear; this pins the outcome.
+  it.each([
+    ['the switch first, then the end of the request', true],
+    ['the end of the request first, then the switch', false],
+  ])('(f) the switch and the end of the request in one batch (%s): nothing of the old queue goes out', async (_name, switchFirst) => {
     const sessions = store({ A: [], B });
     const chat = new SessionChat();
     const view = await ready(chat, sessions);
     await act(async () => { ctx.send('first'); });
     await act(async () => { ctx.send('queued in A'); });
     await act(async () => {
-      chat.finish();
-      open(chat, sessions, 'B', enabled, view);
+      if (switchFirst) {
+        open(chat, sessions, 'B', enabled, view);
+        chat.finish();
+      } else {
+        chat.finish();
+        open(chat, sessions, 'B', enabled, view);
+      }
     });
     await waitFor(() => expect(ctx.activeSessionId).toBe('B'));
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     await settle();
     expect(chat.sentIn).toEqual([{ text: 'first', session: 'A' }]);
+    expect(carriedUsers(chat)).toEqual([['first']]);
     expect(ctx.queue.items).toHaveLength(0);
   });
 
-  it('(a) a message queued while the new chat still loads is sent into it, after the load', async () => {
+  it('(a, d) while the new chat loads a message is refused with reason session, nothing of the old queue is sent after the load', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const sessions = store({ A: [], B });
@@ -262,6 +296,7 @@ describe('queue flush versus session switch: running turn', () => {
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     await settle();
     expect(chat.sentIn).toEqual([{ text: 'first', session: 'A' }]);
+    expect(carriedUsers(chat)).toEqual([['first']]);
     expect(ctx.queue.items).toHaveLength(0);
   });
 });
@@ -281,8 +316,9 @@ describe('queue flush versus session switch: open approval', () => {
     expect(ctx.queue.items).toHaveLength(0);
     expect(ctx.pendingApprovals).toHaveLength(0);
     expect(ctx.approvalReminder).toBe(false);
-    await settle();
+    await decideLeftApproval(chat, 'approve');
     expect(chat.sentIn).toEqual([{ text: 'first', session: 'A' }]);
+    expect(carriedUsers(chat)).toEqual([['first']]);
 
     // Back in A the queue is empty (an open approval is not part of the stored history), so nothing is sent.
     await switchTo(chat, sessions, view, 'A');
@@ -374,7 +410,7 @@ describe('queue flush versus session switch: switchSession, createSession, clear
     expect(chat.sentIn.every((entry) => entry.session === 'A')).toBe(true);
   });
 
-  it('(a, b) switchSession while an approval is open drops the queue; the approval of A sends nothing into B', async () => {
+  it('(a, b) switchSession while an approval is open drops the queue; approving the left chat\'s approval afterwards sends nothing', async () => {
     const chat = new SessionChat();
     await mount(chat, uncontrolled({ A: [], B }));
     await act(async () => { ctx.send('first'); });
@@ -385,11 +421,13 @@ describe('queue flush versus session switch: switchSession, createSession, clear
     await waitFor(() => expect(ctx.activeSessionId).toBe('B'));
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     expect(ctx.queue.items).toHaveLength(0);
-    await settle();
+    await decideLeftApproval(chat, 'approve');
     expect(chat.sentIn).toEqual([{ text: 'first', session: 'A' }]);
+    expect(carriedUsers(chat)).toEqual([['first']]);
+    expect(ctx.queue.items).toHaveLength(0);
   });
 
-  it('(a, b) createSession while an approval is open drops the queue and sends nothing into the new chat', async () => {
+  it('(a, b) createSession while an approval is open drops the queue; rejecting the left approval afterwards sends nothing into the new chat', async () => {
     const chat = new SessionChat();
     await mount(chat, uncontrolled({ A: [] }));
     await act(async () => { ctx.send('first'); });
@@ -401,14 +439,16 @@ describe('queue flush versus session switch: switchSession, createSession, clear
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     expect(ctx.queue.items).toHaveLength(0);
     expect(idsOf()).toEqual([]);
-    await settle();
+    await decideLeftApproval(chat, 'reject');
     expect(chat.sentIn).toEqual([{ text: 'first', session: 'A' }]);
+    expect(carriedUsers(chat)).toEqual([['first']]);
     // The new chat works as a fresh one.
     await act(async () => { expect(ctx.submit('hello new')).toBe('sent'); });
     expect(chat.sentIn[1]).toEqual({ text: 'hello new', session: 'N1' });
+    expect(carriedUsers(chat)[1]).toEqual(['hello new']);
   });
 
-  it('(a, b) removing the active chat while an approval is open drops its queue', async () => {
+  it('(a, b) removing the active chat while an approval is open drops its queue; rejecting afterwards sends nothing', async () => {
     const chat = new SessionChat();
     await mount(chat, uncontrolled({ A: [], B }));
     await act(async () => { ctx.send('first'); });
@@ -419,8 +459,9 @@ describe('queue flush versus session switch: switchSession, createSession, clear
     await waitFor(() => expect(ctx.activeSessionId).toBe('B'));
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     expect(ctx.queue.items).toHaveLength(0);
-    await settle();
+    await decideLeftApproval(chat, 'reject');
     expect(chat.sentIn).toEqual([{ text: 'first', session: 'A' }]);
+    expect(carriedUsers(chat)).toEqual([['first']]);
   });
 
   it('(b, e) clear() while a request runs drops the queue; the end of the cleared run sends nothing and records no outcome', async () => {
@@ -439,7 +480,7 @@ describe('queue flush versus session switch: switchSession, createSession, clear
     expect(chat.sentIn.map((entry) => entry.text)).toEqual(['first', 'after clear']);
   });
 
-  it('(b) clear() while an approval is open drops the queue; deciding the approval sends nothing', async () => {
+  it('(b) clear() while an approval is open drops the queue; approving afterwards sends nothing', async () => {
     const chat = new SessionChat();
     await mount(chat, uncontrolled({ A: [] }));
     await act(async () => { ctx.send('first'); });
@@ -448,8 +489,10 @@ describe('queue flush versus session switch: switchSession, createSession, clear
     await act(async () => { ctx.send('queued behind approval'); });
     await act(async () => { ctx.clear(); });
     expect(ctx.queue.items).toHaveLength(0);
-    await settle();
+    await decideLeftApproval(chat, 'approve');
     expect(chat.sentIn.map((entry) => entry.text)).toEqual(['first']);
+    expect(carriedUsers(chat)).toEqual([['first']]);
+    expect(ctx.queue.items).toHaveLength(0);
   });
 });
 
