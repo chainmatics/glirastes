@@ -20,13 +20,14 @@ export function escapeJsonAngles(json: string): string {
 }
 
 /**
- * JSON text for a line inside a tag-delimited block: `<`, `>`, `&`, U+2028
- * and U+2029 as `\u...` escapes. These characters only occur inside JSON
- * strings, so the result is valid JSON that parses to the same value.
- * Bidi controls and zero-width characters are left as they are.
+ * JSON text for a line inside a tag-delimited block: `<`, U+2028 and U+2029
+ * as `\u...` escapes. No tag can be closed or opened without `<`, so `>`
+ * and `&` stay as they are. These characters only occur inside JSON strings,
+ * so the result is valid JSON that parses to the same value. Bidi controls
+ * and zero-width characters are left as they are.
  */
 export function escapeJsonForBlock(json: string): string {
-  return json.replace(/[<>&\u2028\u2029]/g, unicodeEscape);
+  return json.replace(/[<\u2028\u2029]/g, unicodeEscape);
 }
 
 // At most 64 whitespace characters between `<`, `/` and the name keep the scan linear.
