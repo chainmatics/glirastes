@@ -99,7 +99,7 @@ Defaults keep today's markup; everything below is opt-in.
 - Turn outcomes: `useTurnOutcome(message)` returns the `TurnOutcome`
   (`{ userMessageId, status, reason, at }`; `TurnOutcomeStatus` `completed` |
   `aborted` | `safety-stop` | `error`, `TurnOutcomeReason` `finished` |
-  `stopped` | `send-now` | `request-failed` | `pipeline`) of the turn a user
+  `stopped` | `send-now` | `request-failed` | `pipeline` | `chat-left`) of the turn a user
   or assistant message belongs to, or null; `useTurnOutcomes()` all of them
   by user message id. Recorded also when the turn has no assistant message
   (stop or network error before the first token), kept after later turns
@@ -109,8 +109,15 @@ Defaults keep today's markup; everything below is opt-in.
   unstored). The provider takes the key out of a history from `session.load`
   and out of one the app hands to its own transport, so the chat's requests
   do not carry it; the app's own code reading the store does see it. An
-  outcome stays with the chat its request started in (a host switch while it
-  runs records nothing on the new chat). A retry of the turn replaces it. A custom `MessageBubble` also gets it as `turnOutcome`. Draw a
+  outcome stays with the chat its request started in. A host that changes
+  `session.activeId` to another chat while a request runs on the same
+  transport stops it (with `load`: decided by the new id's history; without:
+  when the host sets another history; renaming a draft is not a leave): the left chat's turn is
+  `aborted` / `chat-left` and is stored with that chat at once through
+  `session.save(leftChatId, …)` (write to the id passed). Nothing of it
+  reaches the new chat, its store or its requests. The server request is
+  aborted mid-turn; a backend action it already ran is not undone. Append
+  own messages to the transport only while `isLoading` is false. A retry of the turn replaces it. A custom `MessageBubble` also gets it as `turnOutcome`. Draw a
   per-turn notice from this, not from `pipelineState` (only the latest run's).
 - To act once when a turn ends (refresh data, play a sound, log), pass
   `onTurnEnd(outcome, info)` (`OnTurnEnd`; `info` is `TurnEndInfo`

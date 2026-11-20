@@ -607,6 +607,77 @@ function continuesRequestBase(
   return true;
 }
 
+/**
+ * The removal window of a request of a chat the host left while it ran (`session.activeId` changed). The
+ * request is stopped at the switch, but a transport that shares one history (the AI SDK's `Chat`) may still
+ * write into the history it holds now, the newly opened chat's: a chunk already on its way, or every chunk of a
+ * transport whose `stop` cannot cancel. The window is open from the switch until that request is over (the
+ * transport no longer loading, then one more task for a chunk already queued), or until the open chat starts a
+ * request of its own. `leftIds` are the messages of the left turn after its user message, as the transport held
+ * them at the switch; `base` the ids of the history the open chat was given (a `session.load` result, a history
+ * the host set), in order, `null` until known. A given history is never changed.
+ */
+interface LeftRequest {
+  leftIds: ReadonlySet<string>;
+  base: readonly ChatMessage[] | null;
+}
+
+/** The transport's messages continue the given history `base` (same ids in order) with messages appended after it, none of them a user message. */
+function appendsToBase(messages: ReadonlyArray<{ id: string; role: string }>, base: ReadonlyArray<{ id: string }>): boolean {
+  if (messages.length < base.length || base.some((message, index) => messages[index]!.id !== message.id)) return false;
+  return messages.slice(base.length).every((message) => message.role !== 'user');
+}
+
+/**
+ * `messages` without what the left request wrote after the switch: messages appended after the open chat's
+ * given history that are not user messages (the left request's answer; the open chat's own turns start with a
+ * user message, and a history set otherwise is a given one, kept whole), and a given message the left request
+ * replaced (an answer whose id equals the given last message's id: the given one is restored). Before the given
+ * history is known, the left turn's own messages. The same array when nothing changes.
+ */
+function withoutLeftRequest<T extends { id: string; role: string }>(messages: T[], left: LeftRequest): T[] {
+  const base = left.base as unknown as T[] | null;
+  if (!base) {
+    const kept = messages.filter((message) => !left.leftIds.has(message.id));
+    return kept.length === messages.length ? messages : kept;
+  }
+  if (!appendsToBase(messages, base)) return messages;
+  if (messages.length === base.length && base.every((message, index) => messages[index] === message)) return messages;
+  return base.slice();
+}
+
+/**
+ * A request still running when the host changed `session.activeId`, before it is known whether the chat was
+ * left: `sessionId` the chat that showed it, `userMessageId` its turn, `history` that chat's messages as the
+ * transport held them (updated while the transport continues them), `extra` what the request wrote after the
+ * provider cleared the transport for a `session.load`, `held` and `outcomes` that chat's held messages and
+ * outcomes at the switch.
+ */
+interface PendingLeave {
+  sessionId: string;
+  userMessageId: string;
+  viaLoad: boolean;
+  history: ChatMessage[];
+  extra: ChatMessage[];
+  held: ReadonlyArray<HeldMessage>;
+  outcomes: ReadonlyMap<string, TurnOutcome>;
+}
+
+/** The pending chat's history with what its request wrote after the transport was cleared (same id: the later one). */
+function pendingHistory(pending: PendingLeave): ChatMessage[] {
+  if (pending.extra.length === 0) return pending.history;
+  const extraIds = new Set(pending.extra.map((message) => message.id));
+  return [...pending.history.filter((message) => !extraIds.has(message.id)), ...pending.extra];
+}
+
+/** Longest the SDK waits for its earlier saves of a left chat, and a load of that chat for its save. */
+const LEAVE_SAVE_WAIT_MS = 500;
+
+/** Resolves after `ms` (a bound for a wait on an app's store). */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
 /** A message after commands, mentions, `onBeforeSend` and the clarification answer. */
 type PreparedSend =
   | { kind: 'needs-args'; request: PendingChatCommand }
@@ -755,6 +826,8 @@ export function AiChatProvider({
     () => ({ enabled: true, count: 3, autoSuggest: true, ...userSuggestions }),
     [userSuggestions],
   );
+  const staticChipsRef = useRef(suggestionsConfig.staticChips);
+  staticChipsRef.current = suggestionsConfig.staticChips;
   const toolResultConfig = useMemo(
     () => resolveToolResultConfig(userToolResults, Boolean(toolRenderers && toolRenderers.length > 0)),
     [userToolResults, toolRenderers],
@@ -1077,6 +1150,8 @@ export function AiChatProvider({
 
   // Data part handler — processes pipeline and truncation events from any transport
   const handleDataPart = useCallback((dataPart: { type: string; data: unknown }) => {
+    // A part of a request whose chat the host left (`LeftRequest`): not the open chat's timeline.
+    if (leftRequestRef.current) return;
     if (dataPart.type === 'data-tool-entities') {
       const data = dataPart.data as { tools?: unknown } | null;
       const next = sanitizeEntityDeclarations(data?.tools);
@@ -1132,7 +1207,7 @@ export function AiChatProvider({
   }, [resolvedTransport, handleDataPart]);
 
   const {
-    messages: rawMessages,
+    messages: transportMessages,
     sendMessage,
     status,
     error: transportError,
@@ -1141,10 +1216,43 @@ export function AiChatProvider({
     addToolApprovalResponse,
   } = resolvedTransport;
 
+  // A request of a chat the host left while it ran (see `LeftRequest`); `null` while there is none. Everything
+  // below reads the transport's messages without what that request wrote (an effect also takes it out of the
+  // transport, so no request carries it). Without such a switch `rawMessages` is the transport's array.
+  const leftRequestRef = useRef<LeftRequest | null>(null);
+  // Counts the switches that opened a window, so a timer of an earlier one does not end a later one.
+  const leftGenerationRef = useRef(0);
+  const leftStripRef = useRef<{ input: unknown; left: LeftRequest; output: typeof transportMessages } | null>(null);
+  // The messages of the previous render: an unchanged result of the removal keeps that array, so a late chunk
+  // that is taken out again causes no render work, effect or save of its own.
+  const previousRawRef = useRef<typeof transportMessages | null>(null);
+  let rawMessages = transportMessages;
+  const leftRequest = leftRequestRef.current;
+  if (leftRequest) {
+    const cached = leftStripRef.current;
+    if (cached && cached.input === transportMessages && cached.left === leftRequest) {
+      rawMessages = cached.output;
+    } else {
+      rawMessages = withoutLeftRequest(transportMessages, leftRequest);
+      const previous = previousRawRef.current;
+      if (previous && previous !== rawMessages && previous.length === rawMessages.length
+        && previous.every((message, index) => message === rawMessages[index])) {
+        rawMessages = previous;
+      }
+      leftStripRef.current = { input: transportMessages, left: leftRequest, output: rawMessages };
+    }
+  }
+  previousRawRef.current = rawMessages;
+
   const isLoading = status === 'submitted' || status === 'streaming';
   const streamActiveRef = useRef(isLoading);
   streamActiveRef.current = isLoading;
   const sessionNotReady = Boolean(session?.load && loadedSessionId !== activeSessionId);
+  // The open chat's history as last shown, for a request that is still running when the host leaves it.
+  const ownHistoryRef = useRef<{ sessionId: string; messages: ChatMessage[] } | null>(null);
+  if (loadedSessionId !== null && loadedSessionId === activeSessionId) {
+    ownHistoryRef.current = { sessionId: loadedSessionId, messages: rawMessages as unknown as ChatMessage[] };
+  }
 
   // ---------------------------------------------------------------------------
   // Outcome protocol: write each marked result's outcome through the transport.
@@ -1227,6 +1335,8 @@ export function AiChatProvider({
       && last.parts.some((part) => (part as { toolCallId?: unknown }).toolCallId === toolCallId);
     if (!inLast) return undefined;
     reportedOutcomesRef.current.set(toolCallId, outcome);
+    // Writing the outcome continues the open chat's turn with a request of its own (see `LeftRequest`).
+    leftRequestRef.current = null;
     try {
       await write.call(transportRef.current, { tool: toolName, toolCallId, output: { ...output, outcome } });
       return outcome;
@@ -1395,18 +1505,217 @@ export function AiChatProvider({
     }
   }, []);
 
+  // The SDK's own saves of a chat still in flight, per chat id (bookkeeping only: nothing waits for them, except
+  // the save of a left chat below), and that save per chat id until it is done (its chat's `load` waits for it,
+  // `removeSession` and `clear()` of that chat cancel it if it has not gone out yet).
+  const pendingSavesRef = useRef(new Map<string, Set<Promise<unknown>>>());
+  const leaveSavesRef = useRef(new Map<string, { done: Promise<unknown>; cancelled: boolean }>());
+  const trackSave = useCallback((id: string, saving: Promise<unknown>) => {
+    const pending = pendingSavesRef.current;
+    const entries = pending.get(id) ?? new Set<Promise<unknown>>();
+    pending.set(id, entries);
+    const tracked = saving.then(() => undefined, () => undefined);
+    entries.add(tracked);
+    void tracked.then(() => {
+      entries.delete(tracked);
+      if (entries.size === 0 && pending.get(id) === entries) pending.delete(id);
+    });
+    return tracked;
+  }, []);
+  const cancelLeaveSave = useCallback((id: string) => {
+    const entry = leaveSavesRef.current.get(id);
+    if (entry) entry.cancelled = true;
+  }, []);
+
+  /** Stores a left chat's history (what it held, its held messages and outcomes) with that chat, after the SDK's earlier saves of it. */
+  const saveLeftChat = useCallback((pending: PendingLeave, history: ChatMessage[]) => {
+    const save = sessionRef.current?.save;
+    if (!save || !history.some((message) => message.id === pending.userMessageId)) return;
+    const outcomes = new Map(pending.outcomes);
+    for (const [userMessageId, outcome] of leftChatOutcomesRef.current.get(pending.sessionId) ?? []) {
+      outcomes.set(userMessageId, outcome);
+    }
+    const stored = storedHistory(history, pending.held, outcomes);
+    // After the SDK's earlier saves of that chat (a store may complete them out of order), at most a short wait.
+    const earlier = [...(pendingSavesRef.current.get(pending.sessionId) ?? [])];
+    const entry = { done: Promise.resolve() as Promise<unknown>, cancelled: false };
+    const saving = Promise.race([Promise.all(earlier), delay(LEAVE_SAVE_WAIT_MS)])
+      .then(() => (entry.cancelled ? undefined : save(pending.sessionId, stored)))
+      .catch(() => { console.warn('[AiChatProvider] session.save failed'); });
+    entry.done = trackSave(pending.sessionId, saving);
+    leaveSavesRef.current.set(pending.sessionId, entry);
+    void entry.done.then(() => {
+      if (leaveSavesRef.current.get(pending.sessionId) === entry) leaveSavesRef.current.delete(pending.sessionId);
+    });
+  }, [trackSave]);
+
+  /**
+   * The chat a running request belongs to was left (see the switch below). Its turn ends here as `aborted` /
+   * `chat-left`, is stored with that chat at once (`session.save` with its id: the history it held, the partial
+   * answer included), and the request is stopped. What it still writes into the transport's history is taken
+   * out again (`LeftRequest`).
+   */
+  const leaveRunningRequest = useCallback((pending: PendingLeave) => {
+    const history = pendingHistory(pending);
+    const current = rawMessagesRef.current as unknown as ChatMessage[];
+    const leftIds = new Set<string>();
+    const turnStart = history.findIndex((message) => message.id === pending.userMessageId);
+    if (turnStart >= 0) {
+      for (const message of history.slice(turnStart + 1)) leftIds.add(message.id);
+    }
+    // The outcome goes to the chat that was left (also when the request started under an earlier id of it).
+    requestTurnRef.current = { sessionId: pending.sessionId, userMessageId: pending.userMessageId };
+    recordTurnOutcome('aborted', 'chat-left');
+    saveLeftChat(pending, history);
+    // Nothing the request still reports is recorded (it ended here).
+    requestTurnRef.current = { sessionId: null, userMessageId: null };
+    // Without `session.load` the host sets the new chat's history itself: what the transport holds is given.
+    const base = pending.viaLoad ? null : current.filter((message) => !leftIds.has(message.id));
+    leftRequestRef.current = { leftIds, base };
+    leftGenerationRef.current += 1;
+    // The left chat's timeline is not the new chat's.
+    setTruncation(null);
+    setPipelineSteps([]);
+    setPipelineState(null);
+    setSuggestionChips(staticChipsRef.current ?? []);
+    try {
+      void Promise.resolve(transportRef.current.stop()).catch(() => {});
+    } catch {
+      // A transport whose stop throws: what it still writes is taken out as above.
+    }
+  }, [recordTurnOutcome, saveLeftChat]);
+
+  // A running request whose chat may have been left (`PendingLeave`): with `session.load` decided when the new
+  // chat's history arrives, without it when the host sets a history that does not continue the request's.
+  const pendingLeaveRef = useRef<PendingLeave | null>(null);
+  useEffect(() => {
+    const pending = pendingLeaveRef.current;
+    if (!pending) return;
+    const messages = transportMessages as unknown as ChatMessage[];
+    if (continuesRequestBase(messages, pending.history)) {
+      pending.history = messages;
+    } else if (pending.viaLoad) {
+      // The transport was cleared for the load: what appears now is the request's.
+      pending.extra = messages.filter((message) => message.role !== 'user');
+    } else if (streamActiveRef.current) {
+      pendingLeaveRef.current = null;
+      leaveRunningRequest(pending);
+      return;
+    }
+    // Ended before anything decided it: without `session.load` the id change was not a leave (as before).
+    if (!isLoading && !pending.viaLoad) pendingLeaveRef.current = null;
+  }, [transportMessages, isLoading, leaveRunningRequest]);
+
+  // What the left request wrote into the transport's history goes out of it again (so no request carries it).
+  // A history set otherwise (the host, a load) is the open chat's own and becomes the new `base`, whole.
+  useEffect(() => {
+    const left = leftRequestRef.current;
+    if (!left) return;
+    const messages = transportMessages as unknown as ChatMessage[];
+    if (!left.base || !appendsToBase(messages, left.base)) {
+      leftRequestRef.current = { leftIds: left.leftIds, base: messages };
+      return;
+    }
+    // By content: a transport that copies the array it is given (the AI SDK does) differs by identity only.
+    const differs = transportMessages.length !== rawMessages.length
+      || transportMessages.some((message, index) => message !== rawMessages[index]);
+    if (differs) setMessages(rawMessages);
+  }, [transportMessages, rawMessages, setMessages]);
+
+  // The window ends once the left request is over: the transport no longer loads, and one more task has passed
+  // (a chunk the transport had already queued is written by then), or when the open chat starts a request of
+  // its own (`endLeftWindow`). A transport whose `stop` cannot cancel keeps it open until its request ends.
+  useEffect(() => {
+    if (!leftRequestRef.current || isLoading) return undefined;
+    const generation = leftGenerationRef.current;
+    const timer = setTimeout(() => {
+      if (leftGenerationRef.current === generation && !streamActiveRef.current) leftRequestRef.current = null;
+    }, 0);
+    return () => clearTimeout(timer);
+  });
+
   // An open approval belongs to the chat that asked for it. A host that owns
   // the active id switches chats without switchSession(), so drop it here.
   const approvalSessionRef = useRef(activeSessionId);
+  // The transport of the last commit: a host that gives each chat its own transport switches it with the chat.
+  // "The same transport" means the same `setMessages` (stable for one underlying chat: the AI SDK's `useChat`
+  // keeps it, and an unstable one would already reload the chat on every render); a transport object, or a
+  // wrapper around it, may be new on every render.
+  const committedSetMessagesRef = useRef(setMessages);
   useEffect(() => {
-    if (approvalSessionRef.current === activeSessionId) return;
+    const previousId = approvalSessionRef.current;
+    if (previousId === activeSessionId) return;
     approvalSessionRef.current = activeSessionId;
+    // A request of the chat that was open is still running, on the same transport: the transport has one history
+    // and would write its answer into the chat open now. With `session.load` the new chat's history decides when
+    // it arrives; without it, a history the host sets that does not continue the request's (also right now).
+    const target = requestTurn();
+    const own = ownHistoryRef.current;
+    const current = rawMessagesRef.current as unknown as ChatMessage[];
+    const shownHere = own !== null && own.sessionId === previousId
+      && target !== null && own.messages.some((message) => message.id === target.userMessageId);
+    if (
+      streamActiveRef.current
+      && committedSetMessagesRef.current === setMessages
+      && target !== null
+      && (target.sessionId === previousId || shownHere)
+    ) {
+      const continued = own !== null && own.sessionId === previousId && continuesRequestBase(current, own.messages);
+      const earlier = pendingLeaveRef.current;
+      const pending: PendingLeave = earlier ?? {
+        sessionId: previousId,
+        userMessageId: target.userMessageId,
+        viaLoad: Boolean(sessionRef.current?.load),
+        history: own !== null && own.sessionId === previousId && !continued ? own.messages : current,
+        extra: [],
+        held: heldMessagesRef.current,
+        outcomes: turnOutcomesRef.current,
+      };
+      // A chat renamed before (no leave then) is left under the id it had last.
+      if (earlier && continuesRequestBase(current, earlier.history)) earlier.sessionId = previousId;
+      if (!pending.viaLoad && !continuesRequestBase(current, pending.history)) {
+        pendingLeaveRef.current = null;
+        leaveRunningRequest(pending);
+      } else {
+        pendingLeaveRef.current = pending;
+      }
+    }
     resetUiActions();
     setPendingApprovalsMap(new Map());
     // Held messages and a refused message belong to the chat that was left.
     setHeldMessages([]);
     setLastRejection(null);
   }, [activeSessionId, resetUiActions]);
+  useEffect(() => {
+    committedSetMessagesRef.current = setMessages;
+  });
+
+  /** The open chat starts a request of its own: what appears now is its own. */
+  const endLeftWindow = useCallback(() => {
+    leftRequestRef.current = null;
+  }, []);
+
+  /**
+   * A request still running when the host changed `session.activeId` with a `session.load` configured: the new
+   * chat's history decides. One that continues the request's history up to its turn is the same chat under a
+   * new id (a draft renamed while its first request runs): nothing happens, as before. Any other history is
+   * another chat: the request is left (or, if it ended meanwhile, what it wrote is stored with its chat).
+   * Returns the history to show instead of `loaded` when the request's own chat opened again meanwhile.
+   */
+  const decidePendingLeave = useCallback((loaded: ChatMessage[], loadedId: string): ChatMessage[] | null => {
+    const pending = pendingLeaveRef.current;
+    if (!pending?.viaLoad) return null;
+    pendingLeaveRef.current = null;
+    const turnEnd = pending.history.findIndex((message) => message.id === pending.userMessageId);
+    const turn = turnEnd >= 0 ? pending.history.slice(0, turnEnd + 1) : null;
+    if (turn && continuesRequestBase(loaded, turn)) return null;
+    // The chat of the request opened again before another history arrived: it was not left. Its store may not
+    // have the running turn yet; the history the transport held for it is used.
+    if (loadedId === pending.sessionId) return turn ? pendingHistory(pending) : null;
+    if (streamActiveRef.current) leaveRunningRequest(pending);
+    else saveLeftChat(pending, pendingHistory(pending));
+    return null;
+  }, [leaveRunningRequest, saveLeftChat]);
 
   // Load messages from session whenever the active session changes.
   // Runs on mount and on every switchSession() call.
@@ -1428,9 +1737,15 @@ export function AiChatProvider({
     }
 
     let cancelled = false;
+    // The history the open chat is given here is its own (not what a left request wrote).
+    const setOwnMessages = (messages: ChatMessage[]) => {
+      const left = leftRequestRef.current;
+      if (left) leftRequestRef.current = { leftIds: left.leftIds, base: messages };
+      setMessages(messages as unknown as typeof rawMessages);
+    };
     setLoadedSessionId(null);
     setSessionLoadFailure(null);
-    setMessages([] as unknown as typeof rawMessages);
+    setOwnMessages([]);
     setTurnOutcomes(new Map());
     // What the loaded history brings was not recorded now: nothing of it is reported.
     turnEndPendingRef.current.clear();
@@ -1438,8 +1753,16 @@ export function AiChatProvider({
 
     (async () => {
       try {
+        // The save of this chat when the host left it while its request ran: its load reads what it wrote.
+        // At most a short wait: a save that never settles does not keep the chat from opening.
+        const leaveSave = leaveSavesRef.current.get(activeSessionId);
+        if (leaveSave) await Promise.race([leaveSave.done, delay(LEAVE_SAVE_WAIT_MS)]);
+        if (cancelled) return;
         const loaded = await Promise.resolve(cfg.load!(activeSessionId));
         if (cancelled) return;
+        const rows = loaded ? coerceLoadedMessages(loaded as unknown[]) : [];
+        // Back in the chat whose request still runs, before any history decided a leave: what the transport held.
+        const resumed = decidePendingLeave(rows, activeSessionId);
         processedToolCallsRef.current.clear();
         handledApprovalIdsRef.current.clear();
         // The transport may still have held the previous chat's messages
@@ -1447,7 +1770,7 @@ export function AiChatProvider({
         setPendingApprovalsMap(new Map());
         // Coerce wire-shape rows (with `content: string`) into SDK
         // messages (with `parts: [...]`) so bridges don't have to.
-        const stored = readStoredTurnOutcomes(loaded ? coerceLoadedMessages(loaded as unknown[]) : []);
+        const stored = readStoredTurnOutcomes(resumed ?? rows);
         const coerced = stored.messages;
         // A request of this chat that ended while another one was open: its outcome joins the turn it was for.
         const left = leftChatOutcomesRef.current.get(activeSessionId);
@@ -1461,19 +1784,20 @@ export function AiChatProvider({
         if (coerced.length > 0) {
           markStoredMessagesAsProcessed(coerced as unknown[]);
           const sanitized = sanitizeMessages(coerced as unknown as ChatMessage[]);
-          setMessages(sanitized.messages as unknown as typeof rawMessages);
+          setOwnMessages(sanitized.messages);
           setHeldMessages(sanitized.held);
           // A turn whose UI action loaded this page may continue once (see below).
           loadedHistoryRef.current = activeSessionId;
         } else {
-          setMessages([] as unknown as typeof rawMessages);
+          setOwnMessages([]);
         }
         setLoadedSessionId(activeSessionId);
       } catch {
         if (cancelled) return;
+        decidePendingLeave([], activeSessionId);
         console.warn('[AiChatProvider] session.load failed');
         setSessionLoadFailure({ id: activeSessionId, error: new Error('Chat history could not be loaded. Reopen this chat to retry.') });
-        setMessages([] as unknown as typeof rawMessages);
+        setOwnMessages([]);
       } finally {
         if (!cancelled) setIsInitialized(true);
       }
@@ -1507,10 +1831,12 @@ export function AiChatProvider({
       // Without storage the in-memory guard holds for this page.
     }
     const untrack = queueEnabledRef.current ? trackUiWork() : undefined;
+    // The open chat's own request (see `LeftRequest`).
+    endLeftWindow();
     void Promise.resolve(continueTurn.call(transportRef.current)).catch(() => {
       console.warn('[glirastes] The turn could not be continued after the page load');
     }).finally(() => untrack?.());
-  }, [rawMessages, loadedSessionId, activeSessionId, trackUiWork]);
+  }, [rawMessages, loadedSessionId, activeSessionId, trackUiWork, endLeftWindow]);
 
   // A stored history the app handed to the transport itself (not through `session.load`): its outcomes
   // are read and the key is taken out of the transport's copies (the app's objects stay), so no later
@@ -1539,9 +1865,12 @@ export function AiChatProvider({
     if (rawMessages.length === 0) return;
     const cfg = sessionRef.current;
     if (!cfg?.save) return;
-    void Promise.resolve(
+    const saving = Promise.resolve(
       cfg.save(activeSessionId, storedHistory(rawMessages as unknown as ChatMessage[], heldMessages, turnOutcomes)),
     );
+    void trackSave(activeSessionId, saving);
+    // A failed save stays an unhandled rejection, as before the bookkeeping.
+    void saving.then(() => undefined);
   }, [rawMessages, heldMessages, turnOutcomes, isInitialized, activeSessionId, loadedSessionId]);
 
 
@@ -1901,8 +2230,11 @@ export function AiChatProvider({
     // Sanitize messages before sending to prevent AI_MissingToolResultsError
     const currentMessages = rawMessages;
     const { messages: sanitized, held } = sanitizeMessages(currentMessages as unknown as ChatMessage[]);
+    // The open chat's own turn: a left request's answer is no longer expected (and not in what is sent).
+    leftRequestRef.current = null;
     if (
-      sanitized.length !== currentMessages.length
+      transportMessages !== rawMessages
+      || sanitized.length !== currentMessages.length
       || sanitized.some((message, index) => message !== (currentMessages[index] as unknown))
     ) {
       // What is left out is not sent; a message that still shows a step stays on screen and in the store.
@@ -1921,6 +2253,7 @@ export function AiChatProvider({
     return true;
   }, [
     rawMessages,
+    transportMessages,
     setMessages,
     sendMessage,
     pendingApprovalsMap,
@@ -2214,6 +2547,8 @@ export function AiChatProvider({
 
   const clear = useCallback(() => {
     resetUiActions();
+    // A save of this chat still waiting from when it was left would bring the cleared history back.
+    cancelLeaveSave(activeSessionId);
     // A request still running belonged to the cleared history: its outcome is recorded nowhere.
     if (streamActiveRef.current) requestTurnRef.current = { sessionId: null, userMessageId: null };
     setLastRejection(null);
@@ -2238,7 +2573,7 @@ export function AiChatProvider({
     setSuggestionChips(suggestionsConfig.staticChips ?? []);
     // The queue belonged to the cleared conversation.
     queueStore.clearAll();
-  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions, queueStore]);
+  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions, queueStore, cancelLeaveSave]);
 
   // ---------------------------------------------------------------------------
   // Multi-session actions
@@ -2351,6 +2686,8 @@ export function AiChatProvider({
       if (!cfg?.remove) return;
       sessionMutationRef.current = true;
       setIsSessionMutating(true);
+      // A save of this chat still waiting from when it was left would bring it back in a store that upserts.
+      cancelLeaveSave(id);
       try {
         await cfg.remove(id);
         // Re-fetch first so the fallback target reflects reality
@@ -2373,7 +2710,7 @@ export function AiChatProvider({
         setIsSessionMutating(false);
       }
     },
-    [activeSessionId, switchSession, isLoading],
+    [activeSessionId, switchSession, isLoading, cancelLeaveSave],
   );
 
   const renameSession = useCallback(
@@ -2425,6 +2762,12 @@ export function AiChatProvider({
     const started = isLoading && !outcomeRunLoadingRef.current;
     outcomeRunLoadingRef.current = isLoading;
     if (!started) return;
+    // The left request writing again (its chat was left; the open chat's own requests end `leftRequestRef`):
+    // it belongs to no turn shown here.
+    if (leftRequestRef.current) {
+      requestTurnRef.current = { sessionId: null, userMessageId: null };
+      return;
+    }
     const userMessageId = latestUserMessageId(rawMessagesRef.current as unknown as ChatMessage[]);
     requestTurnRef.current = { sessionId: loadedSessionIdRef.current, userMessageId };
     if (!userMessageId) return;
@@ -2500,6 +2843,8 @@ export function AiChatProvider({
     setProcessingApprovalIds((prev) => new Set(prev).add(id));
     setResendApprovalIds((prev) => new Set(prev).add(id));
     if (queueEnabledRef.current) setDecisionResend(true);
+    // The open chat's own request goes on (see `LeftRequest`).
+    leftRequestRef.current = null;
     try {
       await addToolApprovalResponse({ id, approved: true });
       setPendingApprovalsMap((prev) => {
@@ -2522,6 +2867,7 @@ export function AiChatProvider({
     setApprovalError(null);
     setProcessingApprovalIds((prev) => new Set(prev).add(id));
     if (queueEnabledRef.current) setDecisionResend(true);
+    leftRequestRef.current = null;
     try {
       await addToolApprovalResponse({
         id,
@@ -2713,6 +3059,7 @@ export function AiChatProvider({
   // Truncation
   const continueTruncation = useCallback(async () => {
     setTruncation(null);
+    leftRequestRef.current = null;
     await sendMessage({ text: continueMessage });
   }, [sendMessage, continueMessage]);
 
