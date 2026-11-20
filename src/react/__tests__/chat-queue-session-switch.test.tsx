@@ -20,19 +20,24 @@ const approvalParts = (id = 'approval-1') => [{
 const file = { type: 'file' as const, mediaType: 'text/plain', url: 'data:text/plain;base64,aGk=', filename: 'a.txt' };
 
 /**
- * The user messages each request carried to the backend. Only user messages: the answer of a request that
- * ends after a host switch is not kept apart from the new chat yet (left-chat-answer repro), so assistant
- * messages are deliberately not asserted here.
+ * The user messages each request carried to the backend. What else a request carries after a host switch (no
+ * answer of the left chat) is asserted in left-chat-turn.test.tsx; (e) checks it here once.
  */
 const carriedUsers = (chat: StreamingChat) => chat.requests.map((request) => request
   .filter((message) => message.role === 'user')
   .map((message) => (message.parts[0] as { text: string }).text));
 
-/** Which chat was open when each message reached the transport. */
+/**
+ * Which chat was open when each message reached the transport. Its `stop` does not end the request (a
+ * transport that cannot cancel, or the AI SDK's stop before its abort settled): the provider stops the left
+ * chat's request at a host switch, and these tests pin the queue while that request still runs until the
+ * test ends it.
+ */
 class SessionChat extends StreamingChat {
   sentIn: Array<{ text: string; session: string }> = [];
   constructor() {
     super();
+    this.stop = vi.fn(() => {});
     const base = this.sendMessage;
     this.sendMessage = vi.fn((message: { text: string }) => {
       this.sentIn.push({ text: message.text, session: ctx.activeSessionId });
@@ -190,8 +195,11 @@ describe('queue flush versus session switch: running turn', () => {
       { text: 'first', session: 'A' }, { text: 'queued in B', session: 'B' },
     ]));
     expect(ctx.queue.items).toHaveLength(0);
-    // The request carries B's history and the new text, nothing the user typed in A.
+    // The request carries B's history and the new text, nothing the user typed in A, and not A's answer.
     expect(carriedUsers(chat)).toEqual([['first'], ['b question', 'queued in B']]);
+    expect(chat.requests[1]!.slice(0, 2).map((message) => message.id)).toEqual(['b-u1', 'b-a1']);
+    expect(chat.requests[1]).toHaveLength(3);
+    expect(chat.stop).toHaveBeenCalledTimes(1);
     // The end of A's request was not booked on B's old turn; only B's own new turn has an outcome.
     expect(ctx.turnOutcomes?.get('b-u1')).toBeUndefined();
     await act(async () => { chat.finish(); });

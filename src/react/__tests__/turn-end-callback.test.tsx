@@ -258,7 +258,8 @@ describe('onTurnEnd: not for history, other chats or a cleared run', () => {
     await settle();
     expect(calls).toEqual([]);
     view.rerender(<Host chat={chat} config={{ session: session('A'), onTurnEnd }} />);
-    await waitFor(() => expect(ctx.turnOutcomes.get(aUser)?.status).toBe('error'));
+    // The switch stopped A's request: its turn is aborted (chat-left), the later failure is not its.
+    await waitFor(() => expect(ctx.turnOutcomes.get(aUser)?.status).toBe('aborted'));
     await settle();
     expect(calls).toEqual([]);
     // A turn of the open chat reports with that chat's id.
@@ -268,7 +269,7 @@ describe('onTurnEnd: not for history, other chats or a cleared run', () => {
     expect(calls.map((call) => [call.outcome.status, call.info.sessionId])).toEqual([['completed', 'A']]);
   });
 
-  it('A to B to A while A runs, then it fails: once, because A is the open chat when its turn ends', async () => {
+  it('A to B to A while A runs, then it fails: no call, A\'s turn ended (chat-left) when A was left', async () => {
     const histories: Record<string, ChatMessage[]> = {
       A: [],
       B: [{ id: 'b-u1', role: 'user', parts: [{ type: 'text', text: 'b' }] }],
@@ -290,8 +291,8 @@ describe('onTurnEnd: not for history, other chats or a cleared run', () => {
     await waitFor(() => expect(ctx.messages.map((message) => message.id)).toEqual([aUser]));
     await act(async () => { chat.fail(); });
     await settle();
-    expect(calls.map((call) => [call.outcome.userMessageId, call.outcome.status, call.outcome.reason, call.info.sessionId]))
-      .toEqual([[aUser, 'error', 'request-failed', 'A']]);
+    expect(calls).toEqual([]);
+    expect(ctx.turnOutcomes.get(aUser)).toMatchObject({ status: 'aborted', reason: 'chat-left' });
   });
 
   it('clear() while a request runs: its end reports nothing', async () => {

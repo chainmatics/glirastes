@@ -8,7 +8,7 @@ import type { ChatMessage, TurnOutcome, TurnOutcomeReason } from '../types.js';
 export const TURN_OUTCOME_METADATA_KEY = 'glirastesTurnOutcome';
 
 const STATUSES = new Set<TurnOutcome['status']>(['completed', 'aborted', 'error', 'safety-stop']);
-const REASONS = new Set<TurnOutcomeReason>(['finished', 'stopped', 'send-now', 'request-failed', 'pipeline']);
+const REASONS = new Set<TurnOutcomeReason>(['finished', 'stopped', 'send-now', 'request-failed', 'pipeline', 'chat-left']);
 
 /**
  * Set in the stored outcome when the SDK created the `metadata` object for it

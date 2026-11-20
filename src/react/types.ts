@@ -486,7 +486,12 @@ export interface WireChatMessage {
  * component renders.
  */
 export interface SessionConfig {
-  /** Persist messages for a session. Called after each message change. */
+  /**
+   * Persist messages for a session. Called after each message change of the
+   * open chat, and once for a chat the host left (`activeId` changed) while
+   * its request ran, with that chat's id, after the new one is open: write to
+   * the id passed, not to the chat open now.
+   */
   save?: (conversationId: string, messages: ChatMessage[]) => void | Promise<void>;
   /**
    * Load previously-stored messages for a session. Called on mount and
@@ -637,9 +642,11 @@ export type TurnOutcomeStatus = 'completed' | TurnNoticeStatus;
  * Why a turn ended so: `finished` the run ended by itself, `stopped` the
  * user's `stop()`, `send-now` a `sendNow` with `sendNowBehavior: 'abort'`,
  * `request-failed` a transport error, `pipeline` a stop, safety stop or error
- * the server reported (`data-pipeline-state`).
+ * the server reported (`data-pipeline-state`), `chat-left` the host opened
+ * another chat (`session.activeId`) while the turn's request ran: the
+ * request was stopped then (status `aborted`).
  */
-export type TurnOutcomeReason = 'finished' | 'stopped' | 'send-now' | 'request-failed' | 'pipeline';
+export type TurnOutcomeReason = 'finished' | 'stopped' | 'send-now' | 'request-failed' | 'pipeline' | 'chat-left';
 
 /**
  * The recorded end of a turn, keyed by the user message that started it, also

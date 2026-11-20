@@ -40,31 +40,34 @@ async function runningInA() {
 }
 
 describe('a turn outcome belongs to the chat and the user message its request was started for', () => {
-  it("a failure of chat A's request after a host switch to B is not recorded on B, and lands on A when A opens again", async () => {
+  it("a failure of chat A's request after a host switch to B is not recorded on B; A keeps the stop of the switch", async () => {
     const { histories, saves, session } = store({ A: [], B });
     const chat = new StreamingChat();
     const view = render(<Host chat={chat} config={{ session: session('A') }} />);
     const aUser = await runningInA();
     view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
     await waitFor(() => expect(ctx.messages.map((m) => m.id)).toEqual(['b-u1', 'b-a1']));
+    // The switch stopped A's request and stored its turn with A.
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(storedOutcome(histories.A, aUser)?.status).toBe('aborted'));
     await act(async () => { chat.fail(); });
     expect(ctx.turnOutcomes?.get('b-u1')).toBeUndefined();
     expect(saves.filter((entry) => entry.id === 'B').every((entry) => !storedOutcome(entry.messages, 'b-u1'))).toBe(true);
-    // Back to A: its turn shows the failure and the store gets it.
+    // Back to A: its turn shows the stop of the switch, not the later failure.
     view.rerender(<Host chat={chat} config={{ session: session('A') }} />);
     await waitFor(() => expect(ctx.messages.map((m) => m.id)).toEqual([aUser]));
-    await waitFor(() => expect(ctx.turnOutcomes?.get(aUser)?.status).toBe('error'));
-    await waitFor(() => expect(storedOutcome(histories.A, aUser)?.status).toBe('error'));
+    await waitFor(() => expect(ctx.turnOutcomes?.get(aUser)).toMatchObject({ status: 'aborted', reason: 'chat-left' }));
+    expect(storedOutcome(histories.A, aUser)?.status).toBe('aborted');
   });
 
-  it("stop() of chat A's running request after a host switch records nothing on B's turn", async () => {
+  it("stop() after a host switch has nothing left to stop and records nothing on B's turn", async () => {
     const { saves, session } = store({ A: [], B });
     const chat = new StreamingChat();
     const view = render(<Host chat={chat} config={{ session: session('A') }} />);
     await runningInA();
     view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
     await waitFor(() => expect(ctx.messages.map((m) => m.id)).toEqual(['b-u1', 'b-a1']));
-    expect(ctx.isLoading).toBe(true);
+    expect(ctx.isLoading).toBe(false);
     await act(async () => { ctx.stop(); });
     expect(ctx.turnOutcomes?.get('b-u1')).toBeUndefined();
     expect(saves.filter((entry) => entry.id === 'B').every((entry) => !storedOutcome(entry.messages, 'b-u1'))).toBe(true);
@@ -84,7 +87,7 @@ describe('a turn outcome belongs to the chat and the user message its request wa
     expect(ctx.turnOutcomes?.get('b-u1')).toBeUndefined();
   });
 
-  it('A to B to A while A runs: the outcome lands on A\'s turn and is stored for A', async () => {
+  it('A to B to A while A runs: A\'s turn was stopped by the first switch and is stored for A; a later failure lands nowhere', async () => {
     const { histories, session } = store({ A: [], B });
     const chat = new StreamingChat();
     const view = render(<Host chat={chat} config={{ session: session('A') }} />);
@@ -94,8 +97,8 @@ describe('a turn outcome belongs to the chat and the user message its request wa
     view.rerender(<Host chat={chat} config={{ session: session('A') }} />);
     await waitFor(() => expect(ctx.messages.map((m) => m.id)).toEqual([aUser]));
     await act(async () => { chat.fail(); });
-    await waitFor(() => expect(ctx.turnOutcomes?.get(aUser)?.status).toBe('error'));
-    await waitFor(() => expect(storedOutcome(histories.A, aUser)?.status).toBe('error'));
+    await waitFor(() => expect(ctx.turnOutcomes?.get(aUser)).toMatchObject({ status: 'aborted', reason: 'chat-left' }));
+    await waitFor(() => expect(storedOutcome(histories.A, aUser)?.status).toBe('aborted'));
     expect(storedOutcome(histories.B, 'b-u1')).toBeUndefined();
   });
 
