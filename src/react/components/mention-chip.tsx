@@ -1,6 +1,7 @@
 import type { MentionChipProps, MentionChipListProps } from '../types.js';
 import { useContext } from 'react';
 import { ChatContext } from '../provider/chat-context.js';
+import { composerContextOf } from '../provider/composer-context.js';
 import { inferMentionPrefix } from '../utils/mention-markup.js';
 
 /**
@@ -24,7 +25,7 @@ export function MentionChip({
 }: MentionChipProps) {
   const size = inline ? 'inline' : compact ? 'compact' : 'default';
   // Outside a chat (or without `triggers` types) the prefix comes from the type alone.
-  const prefixOf = useContext(ChatContext)?.mentionPrefix ?? inferMentionPrefix;
+  const prefixOf = composerContextOf(useContext(ChatContext)).mentionPrefix ?? inferMentionPrefix;
   const prefix = mention.prefix ?? prefixOf(mention.type);
   const name = (
     <span data-element="display-name">

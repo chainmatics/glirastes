@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { getThemeEffect, getThemeVars } from '../themes.js';
 import { ChatContext, type ChatContextValue } from './chat-context.js';
+import type { ComposerContextValue } from './composer-context.js';
 import type {
   ActivityLogConfig,
   ActivityLogDetails,
@@ -2821,7 +2822,7 @@ export function AiChatProvider({
   }, []);
 
   // Build context value
-  const contextValue = useMemo<ChatContextValue>(
+  const contextValue = useMemo<ChatContextValue & ComposerContextValue>(
     () => ({
       classNames,
       components,

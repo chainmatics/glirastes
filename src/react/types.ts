@@ -471,12 +471,6 @@ export interface ChatTriggerDefinition {
   types?: ReadonlyArray<string>;
 }
 
-/** A trigger with its defaults applied (`resolveChatTriggers`). */
-export type ResolvedChatTrigger = Required<Pick<ChatTriggerDefinition, 'char' | 'prefix' | 'select'>> & {
-  label?: string;
-  types?: ReadonlyArray<string>;
-};
-
 /** A catalog UI tool offered as a `/` command. */
 export interface UiToolCommandSource {
   readonly definitionId: string;
@@ -2220,13 +2214,6 @@ export interface RichMentionInputHandle {
    * handles stay valid; `RichMentionInput` always has it.
    */
   openCompletion?: (options: OpenCompletionOptions) => void;
-  /**
-   * Applies an entry as if it was picked from the `trigger` list at the
-   * caret (focusing the editor): `onCompletionSelect` first, then the
-   * entry's `select` behavior. Used by the composer's "+" menu. Optional so
-   * custom handles stay valid; `RichMentionInput` always has it.
-   */
-  pickCompletion?: (item: MentionResult, options: { trigger: string }) => void;
 }
 
 /** ARIA wiring of one option in the `@`/`/` list; spread it onto the clickable element. */
@@ -2262,15 +2249,8 @@ export interface RichMentionInputProps {
   onChange?: (nextValue: string) => void;
   /** Receives the text and the structured mentions (chips and commands) still in it. Return `false` to keep the text. */
   onSubmit?: (message: string, mentions: MentionData[]) => void | boolean;
-  /**
-   * Search callback for mention autocomplete (BYOS). Return matching results for the given query and trigger character.
-   * After a `select: 'list'` pick it gets `{ source }` (the entry's `listSource`) until the list closes.
-   */
-  onSearch?: (
-    query: string,
-    trigger: string,
-    options?: { source?: string | ReadonlyArray<string> },
-  ) => Promise<MentionResult[]> | MentionResult[];
+  /** Search callback for mention autocomplete (BYOS). Return matching results for the given query and trigger character. */
+  onSearch?: (query: string, trigger: string) => Promise<MentionResult[]> | MentionResult[];
   /**
    * Runs first when an entry is picked; return `true` to skip its `select`
    * behavior (the list closes). The provider's `onCompletionSelect` adds the

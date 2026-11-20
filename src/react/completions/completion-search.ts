@@ -18,18 +18,28 @@ export interface CompletionSearchOptions {
   onProviderError?: (providerId: string, error: unknown) => void;
 }
 
-/** Narrows one search call. */
-export interface CompletionSearchQueryOptions {
-  /** Only these provider ids (of the trigger) are asked; omitted: all of them. */
-  source?: string | ReadonlyArray<string>;
-}
-
 /** Compatible with `RichMentionInput`'s `onSearch`. */
-export type CompletionSearch = (
-  query: string,
-  trigger: string,
-  options?: CompletionSearchQueryOptions,
-) => Promise<MentionResult[]>;
+export type CompletionSearch = (query: string, trigger: string) => Promise<MentionResult[]>;
+
+/** Provider ids of one trigger that a search asks; omitted: all of them. */
+export type CompletionSource = string | ReadonlyArray<string>;
+
+/**
+ * Internal: the same search, narrowed to provider ids (`openCompletion({ source })`
+ * and the plus menu's `source` section). It hangs on a search made by
+ * `createCompletionSearch` under a symbol, so the public call signature stays
+ * `(query, trigger)`; not exported from `glirastes/react`.
+ */
+const SOURCE_SEARCH = Symbol('glirastes.completionSearch.source');
+
+type SourceSearch = (query: string, trigger: string, source: CompletionSource | undefined) => Promise<MentionResult[]>;
+
+/** The source-narrowing variant of a search from `createCompletionSearch`; undefined for any other function. */
+export function sourceSearchOf(search: unknown): SourceSearch | undefined {
+  if (typeof search !== 'function') return undefined;
+  const narrowed = (search as { [SOURCE_SEARCH]?: unknown })[SOURCE_SEARCH];
+  return typeof narrowed === 'function' ? narrowed as SourceSearch : undefined;
+}
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
@@ -136,7 +146,7 @@ export function createCompletionSearch(
   const context = Object.freeze({ ...(options.context ?? {}) });
   let current: AbortController | null = null;
 
-  return async (query, trigger, { source } = {}) => {
+  const searchSources: SourceSearch = async (query, trigger, source) => {
     current?.abort();
     const controller = new AbortController();
     current = controller;
@@ -183,4 +193,6 @@ export function createCompletionSearch(
     }
     return grouped(results);
   };
+  const search: CompletionSearch = (query, trigger) => searchSources(query, trigger, undefined);
+  return Object.assign(search, { [SOURCE_SEARCH]: searchSources });
 }

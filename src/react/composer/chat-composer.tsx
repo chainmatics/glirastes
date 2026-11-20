@@ -14,6 +14,7 @@ import { useOptionalAssistantLayout } from '../assistant/assistant-layout.js';
 import { toChatEntityItem, type ChatCommandDefinition } from '../interactions/definitions.js';
 import type { ChatInteractionRegistry } from '../interactions/registry.js';
 import { ChatContext } from '../provider/chat-context.js';
+import { composerContextOf } from '../provider/composer-context.js';
 import type { MentionData, OpenCompletionOptions, RichMentionInputHandle } from '../types.js';
 import { normalizeMentionSlug } from '../utils/mention-markup.js';
 
@@ -192,7 +193,7 @@ export function useOptionalChatComposer(): ChatComposer | null {
   const requestOpen = queue?.requestOpen;
   const interactions = chat?.interactions;
   const chatAboutLabel = chat?.locale.chatAboutLabel ?? '';
-  const entityPrefix = chat?.triggers?.find((trigger) => trigger.char === '@')?.prefix ?? '@';
+  const entityPrefix = composerContextOf(chat).triggers?.find((trigger) => trigger.char === '@')?.prefix ?? '@';
   const entityPrefixRef = useRef(entityPrefix);
   entityPrefixRef.current = entityPrefix;
   const registryRef = useRef(interactions);

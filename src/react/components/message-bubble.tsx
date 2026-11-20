@@ -3,6 +3,7 @@ import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
+import { useComposerContext } from '../provider/composer-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
 import {
   EntityText,
@@ -307,7 +308,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     language,
     turnOutcomes,
     mentionPrefix,
-  } = useChatContext();
+  } = useComposerContext();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
   const MarkdownComponent = components.Markdown ?? DefaultMarkdown;

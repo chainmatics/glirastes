@@ -8,13 +8,14 @@ import {
   type ReactNode,
 } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
+import { sourceSearchOf } from '../completions/completion-search.js';
 import type {
   ChatComposerInputControls,
   ComposerPlusMenuConfig,
   ComposerToolbarItem,
   MentionResult,
-  ResolvedChatTrigger,
 } from '../types.js';
+import type { ResolvedChatTrigger } from '../completions/triggers.js';
 
 const TRIGGER_PREFIX = 'trigger:';
 const DEFAULT_SOURCE_LIMIT = 8;
@@ -139,7 +140,9 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
     // `completionSearch` is the editor's instance too: this search and one of the editor abort each
     // other. Harmless: the press outside the editor that opens this menu closes the editor's list first.
     const max = limit !== undefined && Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : DEFAULT_SOURCE_LIMIT;
-    completionSearch('', sourceTrigger, filter === undefined ? undefined : { source: filter })
+    // Narrowed through the internal source search; a search without it lists all entries of the trigger.
+    const narrowed = filter === undefined ? undefined : sourceSearchOf(completionSearch);
+    (narrowed ? narrowed('', sourceTrigger, filter) : completionSearch('', sourceTrigger))
       .then((results) => { if (current) setSourceItems(results.slice(0, max)); })
       .catch(() => { if (current) setSourceItems([]); });
     return () => {

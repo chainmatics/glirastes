@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatCompletionProvider } from '../../types.js';
-import { createCompletionSearch } from '../completion-search.js';
+import { createCompletionSearch, sourceSearchOf } from '../completion-search.js';
 
 const people: ChatCompletionProvider = {
   id: 'people',
@@ -185,11 +185,20 @@ describe('createCompletionSearch source filter', () => {
       search: vi.fn(() => [{ id: '8', type: 'doc', label: 'Bug notes' }]),
     };
     const search = createCompletionSearch([tickets, docs, people]);
+    // Internal channel: the public search keeps `(query, trigger)`.
+    const narrowed = sourceSearchOf(search)!;
 
-    expect((await search('bug', '#', { source: 'tickets' })).map((result) => result.key)).toEqual(['tickets:ticket:7']);
+    expect(search.length).toBe(2);
+    expect((await narrowed('bug', '#', 'tickets')).map((result) => result.key)).toEqual(['tickets:ticket:7']);
     expect(docs.search).not.toHaveBeenCalled();
-    expect((await search('bug', '#', { source: ['docs', 'people'] })).map((result) => result.key)).toEqual(['docs:doc:8']);
+    expect((await narrowed('bug', '#', ['docs', 'people'])).map((result) => result.key)).toEqual(['docs:doc:8']);
     expect((await search('bug', '#')).map((result) => result.key)).toEqual(['tickets:ticket:7', 'docs:doc:8']);
+    expect((await narrowed('bug', '#', undefined)).map((result) => result.key)).toEqual(['tickets:ticket:7', 'docs:doc:8']);
+  });
+
+  it('has no source search for a function it did not make', () => {
+    expect(sourceSearchOf(async () => [])).toBeUndefined();
+    expect(sourceSearchOf(undefined)).toBeUndefined();
   });
 });
 

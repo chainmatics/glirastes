@@ -189,6 +189,20 @@ describe('upgrade notes guard', () => {
     ).toEqual([]);
   });
 
+  it('every surface key of an unreleased note is an actual change since the released snapshot', async () => {
+    const released = new Set(JSON.parse(
+      await readFile(join(notesDir, 'api-surface.released.json'), 'utf8'),
+    ) as string[]);
+    const current = new Set(surface);
+    const unreleased = await unreleasedNoteIds();
+    const notes = (await loadUpgradeNotes(notesDir, SDK_VERSION)).filter((n) => unreleased.has(n.id));
+    // A key neither added nor removed names API that is not there (removed again before release) or unchanged.
+    const stale = notes.flatMap((n) => (n.surface ?? [])
+      .filter((key) => current.has(key) === released.has(key))
+      .map((key) => `${n.id}: ${key}`));
+    expect(stale, `Unreleased notes list surface keys that did not change:\n${stale.join('\n')}`).toEqual([]);
+  });
+
   it('every note\'s skill and anchor exist in skills/', async () => {
     const notes = await loadUpgradeNotes(notesDir, SDK_VERSION);
     const problems: string[] = [];

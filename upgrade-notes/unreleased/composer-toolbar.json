@@ -12,7 +12,6 @@
     "glirastes/react#AiChatProviderConfig.composer",
     "glirastes/react#AiChatProviderProps.composer",
     "glirastes/react#ChatComponents.ComposerToolbar",
-    "glirastes/react#ChatContextValue.composer",
     "glirastes/react#ComposerConfig",
     "glirastes/react#ComposerConfig.items",
     "glirastes/react#ComposerConfig.toolbar",

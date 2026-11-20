@@ -8,6 +8,7 @@ import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import type { ChatCompletionProvider, ChatTransport, MentionResult, RichMentionInputHandle } from '../../types.js';
 import { MentionInput } from '../mention-input.js';
 import { RichMentionInput } from '../rich-mention-input.js';
+import { createCompletionSearch } from '../../completions/completion-search.js';
 
 function transport(): ChatTransport {
   return {
@@ -52,7 +53,7 @@ afterEach(async () => {
 describe('RichMentionInput openCompletion', () => {
   const results: MentionResult[] = [{ id: '7', type: 'person', label: 'Müller' }];
 
-  function renderEditor(search = vi.fn(async (_query: string, _trigger: string, _options?: unknown) => results)) {
+  function renderEditor(search = vi.fn(async (_query: string, _trigger: string) => results)) {
     const ref = createRef<RichMentionInputHandle>();
     const onChange = vi.fn();
     render(<RichMentionInput ref={ref} onSearch={search} onChange={onChange} triggers={['@', '/', '#']} />);
@@ -165,11 +166,26 @@ describe('RichMentionInput openCompletion', () => {
     expect(editor.querySelector('[data-mention-id="7"]')).not.toBeNull();
   });
 
-  it('searches the query and passes source to onSearch', async () => {
+  it('searches the query; an own onSearch gets only query and trigger, also with a source', async () => {
     const { ref, search } = renderEditor();
     act(() => { ref.current!.openCompletion!({ trigger: '@', query: 'Mül', source: 'people' }); });
-    expect(search).toHaveBeenCalledWith('Mül', '@', { source: 'people' });
+    expect(search).toHaveBeenCalledWith('Mül', '@');
+    expect(search.mock.calls.at(-1)).toHaveLength(2);
     await screen.findByRole('listbox');
+  });
+
+  it('narrows a search from createCompletionSearch to the source providers, also while typing on', async () => {
+    const people: ChatCompletionProvider = { id: 'people', trigger: '@', search: vi.fn(() => [{ id: '1', type: 'person', label: 'Anna Müller' }]) };
+    const teams: ChatCompletionProvider = { id: 'teams', trigger: '@', search: vi.fn(() => [{ id: '2', type: 'team', label: 'Müller Team' }]) };
+    const ref = createRef<RichMentionInputHandle>();
+    render(<RichMentionInput ref={ref} onSearch={createCompletionSearch([people, teams])} />);
+    const editor = screen.getByRole('textbox');
+    act(() => { ref.current!.openCompletion!({ trigger: '@', source: 'people' }); });
+    expect((await screen.findAllByRole('option')).map((option) => option.textContent)).toEqual([expect.stringContaining('Anna Müller')]);
+    expect(teams.search).not.toHaveBeenCalled();
+    typeAtCaret(editor, 'Mü');
+    await waitFor(() => expect(people.search).toHaveBeenCalledTimes(2));
+    expect(teams.search).not.toHaveBeenCalled();
   });
 
   it('a second call while armed replaces the armed text', async () => {

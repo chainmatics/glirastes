@@ -1,12 +1,12 @@
 import { Fragment, type MouseEvent, type ReactNode } from 'react';
-import { useChatContext } from '../provider/chat-context.js';
+import { useComposerContext } from '../provider/composer-context.js';
 import { ComposerPlusMenu } from './composer-plus-menu.js';
 import type {
   ChatComposerInputControls,
   ComposerToolbarItem,
   MentionResult,
-  ResolvedChatTrigger,
 } from '../types.js';
+import type { ResolvedChatTrigger } from '../completions/triggers.js';
 
 const DEFAULT_START: ReadonlyArray<string> = ['attach'];
 const DEFAULT_END: ReadonlyArray<string> = ['mic', 'actions', 'extra', 'send'];
@@ -100,7 +100,7 @@ export interface ComposerToolbarLayoutProps {
  * so the default layout is the same markup as before the toolbar existed.
  */
 export function ComposerToolbarLayout({ builtins, editor, controls, triggers, pickCompletion, attachInput }: ComposerToolbarLayoutProps) {
-  const { composer, components } = useChatContext();
+  const { composer, components } = useComposerContext();
   const items = composer?.items;
   const hasItem = (id: string) => !!items && Object.prototype.hasOwnProperty.call(items, id) && !!items[id];
   const startIds = composer?.toolbar?.start ?? DEFAULT_START;

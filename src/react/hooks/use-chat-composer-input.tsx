@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandArgumentsForm as DefaultCommandArgumentsForm } from '../components/command-arguments-form.js';
 import { useChatComposerTarget } from '../composer/chat-composer.js';
-import { useChatContext } from '../provider/chat-context.js';
+import { useComposerContext } from '../provider/composer-context.js';
 import type {
   ChatAttachment,
   ChatComposerInput,
@@ -9,10 +9,10 @@ import type {
   ChatLocale,
   MentionData,
   OpenCompletionOptions,
-  ResolvedChatTrigger,
   RichMentionInputHandle,
   UseChatComposerInputOptions,
 } from '../types.js';
+import type { ResolvedChatTrigger } from '../completions/triggers.js';
 import { formatBytes, readAttachments, toFilePart, type AttachmentProblem } from '../utils/attachments.js';
 
 function describeProblem(problem: AttachmentProblem, locale: ChatLocale): string {
@@ -61,7 +61,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     cancelPendingCommand,
     attachments: attachmentOptions,
     interactions,
-  } = useChatContext();
+  } = useComposerContext();
   // A hand-built context without `canCompose` locks while loading, as before.
   const canCompose = composable ?? !isLoading;
   const { onSubmit, initialValue } = options;

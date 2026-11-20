@@ -54,14 +54,10 @@ const triggers = useMemo(() => [{ char: '#', label: 'Tickets', types: ['ticket']
 - An invalid `char`, an empty `prefix`, an unknown `select`, two
   definitions of one char or one type in two triggers' `types` throw when the
   provider renders. `command` cannot be claimed; commands always show `/`.
-- `resolveChatTriggers(triggers, providers)` returns the resolved list
-  (`ResolvedChatTrigger[]`, defaults filled in); the composer reads it from the
-  chat context. `useChatComposerInput().inputProps` carries `triggers` only when
-  the list differs from the default `@` and `/` (an explicit definition or a
-  provider with another char), so an input's own `triggers` prop still applies.
-- `createCompletionSearch(providers)(query, trigger, { source })` asks only
-  the providers whose ids are in `source` (a string or an array,
-  `CompletionSearchQueryOptions`).
+- `useChatComposerInput().inputProps` carries `triggers` only when the
+  provider's list differs from the default `@` and `/` (an explicit definition
+  or a provider with another char), so an input's own `triggers` prop still
+  applies.
 - A standalone `RichMentionInput` takes `triggers` as chars or definitions
   (default `['@', '/']`), e.g. `['@', { char: '#', prefix: 'tag:' }]`, and
   throws on an invalid entry like the provider.
@@ -72,8 +68,8 @@ const triggers = useMemo(() => [{ char: '#', label: 'Tickets', types: ['ticket']
 ### Sent mentions and `types`
 
 The wire format (`{{mention:type:id:label}}`) carries no prefix. The sent
-bubble, restored history and `MentionChip` look the prefix up by type through
-the chat context (`mentionPrefix`): a type in a trigger's `types` shows that
+bubble, restored history and `MentionChip` look the prefix up by type from
+the provider's `triggers`: a type in a trigger's `types` shows that
 trigger's `prefix`, `command` shows `/`, any other type `@`. Without `types`
 nothing changes. Chat titles in the switcher come from the store, so pass
 the same array there: `createLocalSessionStore({ storageKey, triggers })`
@@ -135,7 +131,10 @@ const composer = useChatComposerInput();
 - It focuses the editor and inserts at the caret; when the editor had no
   focus, at the end. After a non-space it adds a space (`Hallo` → `Hallo @`).
 - It searches `query` at once, without the typing debounce. `source` (a
-  provider id or ids) limits the list until it closes, like a `list` pick.
+  provider id or ids of the trigger) limits the list until it closes. It
+  narrows the composer's search (`completionProviders`) and a search made by
+  `createCompletionSearch`; an own `onSearch` of a standalone input still gets
+  `(query, trigger)` and lists everything.
 - While the user has neither typed nor picked, closing the list (Escape,
   outside click, blur, or no results) removes exactly the inserted text and
   restores the caret; so do Enter before results show (nothing is sent) and
@@ -222,8 +221,6 @@ const composer = useMemo<ComposerConfig>(() => ({
   outside closes. ArrowDown/ArrowUp on the button open on the first/last row.
 - Texts: `locale.plusMenuButtonLabel` (`More actions`, de `Mehr Aktionen`)
   and `locale.plusMenuAttachLabel` (`Attach file`, de `Datei anhängen`).
-- A custom handle offers the `source` picks through the optional
-  `RichMentionInputHandle.pickCompletion(item, { trigger })`.
 
 ## End-to-end example
 

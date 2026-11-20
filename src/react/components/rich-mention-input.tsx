@@ -21,6 +21,7 @@ import type {
   RichMentionInputProps,
 } from '../types.js';
 import { normalizeTrigger } from '../completions/triggers.js';
+import { sourceSearchOf } from '../completions/completion-search.js';
 import {
   inferMentionPrefix,
   mentionDataFromResult,
@@ -86,6 +87,22 @@ interface ArmedCompletion {
   start: number;
   text: string;
   created: boolean;
+}
+
+/**
+ * Internal: the handle `RichMentionInput` really has. `pickCompletion` applies
+ * an entry as if it was picked from the `trigger` list at the caret
+ * (`onCompletionSelect` first, then its `select` behavior); the composer's "+"
+ * menu uses it. Not part of the public `RichMentionInputHandle`.
+ */
+export interface InternalRichMentionInputHandle extends RichMentionInputHandle {
+  pickCompletion: (item: MentionResult, options: { trigger: string }) => void;
+}
+
+/** `pickCompletion` of a handle when it is the built-in editor's. */
+export function pickCompletionOf(handle: RichMentionInputHandle | null | undefined): InternalRichMentionInputHandle['pickCompletion'] | undefined {
+  const pick = (handle as Partial<InternalRichMentionInputHandle> | null | undefined)?.pickCompletion;
+  return typeof pick === 'function' ? pick : undefined;
 }
 
 function isChip(node: Node | null | undefined): node is HTMLElement {
@@ -455,7 +472,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         lastSearchRef.current = { query, trigger };
         setIsSearching(true);
         try {
-          const results = await (source === undefined ? onSearch(query, trigger) : onSearch(query, trigger, { source }));
+          // A source narrows only a search from `createCompletionSearch` (the composer's); any other `onSearch` gets all entries.
+          const narrowed = source === undefined ? undefined : sourceSearchOf(onSearch);
+          const results = await (narrowed ? narrowed(query, trigger, source) : onSearch(query, trigger));
           if (searchVersionRef.current !== version) return;
           // A list opened by `openCompletion` that finds nothing goes away with its text.
           const removed = results.length === 0 && removeArmed();
@@ -1205,7 +1224,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
     useImperativeHandle(
       ref,
-      () => ({
+      (): InternalRichMentionInputHandle => ({
         focus: () => {
           const editor = editableRef.current;
           if (!editor) return;

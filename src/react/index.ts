@@ -36,7 +36,6 @@ export type {
   CompletionSelectContext,
   OpenCompletionOptions,
   ChatTriggerDefinition,
-  ResolvedChatTrigger,
   UiToolCommandSource,
   // Attachments
   ChatAttachment,
@@ -323,9 +322,7 @@ export {
   createCompletionSearch,
   type CompletionSearch,
   type CompletionSearchOptions,
-  type CompletionSearchQueryOptions,
 } from './completions/completion-search.js';
-export { resolveChatTriggers } from './completions/triggers.js';
 export { createUiToolCommandProvider } from './completions/ui-tool-command-provider.js';
 export { CommandArgumentsForm } from './components/command-arguments-form.js';
 

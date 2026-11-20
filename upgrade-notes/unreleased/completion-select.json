@@ -14,7 +14,6 @@
     "glirastes/embed#GlirastesChatElementConfig.onCompletionSelect",
     "glirastes/react#AiChatProviderConfig.onCompletionSelect",
     "glirastes/react#AiChatProviderProps.onCompletionSelect",
-    "glirastes/react#ChatContextValue.onCompletionSelect",
     "glirastes/react#CompletionItem.insertText",
     "glirastes/react#CompletionItem.listSource",
     "glirastes/react#CompletionItem.select",

@@ -1,11 +1,12 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { MentionChipList } from './mention-chip.js';
-import { RichMentionInput } from './rich-mention-input.js';
+import { RichMentionInput, pickCompletionOf } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
 import { ComposerToolbarLayout } from './composer-toolbar.js';
 import { AttachmentButton as DefaultAttachmentButton, AttachmentTray as DefaultAttachmentTray } from './attachments.js';
 import { useChatComposerInput } from '../hooks/use-chat-composer-input.js';
 import { useChatContext } from '../provider/chat-context.js';
+import { useComposerContext } from '../provider/composer-context.js';
 import { inferMentionPrefix, normalizeMentionSlug } from '../utils/mention-markup.js';
 import type {
   MentionInputProps,
@@ -38,7 +39,7 @@ function ProviderMentionInput({
   renderActions,
   renderSubmit,
 }: MentionInputProps) {
-  const { classNames, locale, components, voice, triggers, canCompose: composable, queue } = useChatContext();
+  const { classNames, locale, components, voice, triggers, canCompose: composable, queue } = useComposerContext();
   const composer = useChatComposerInput({
     onSubmit: onSubmit ? (message) => onSubmit(message) : undefined,
     initialValue,
@@ -66,7 +67,7 @@ function ProviderMentionInput({
         <ComposerToolbarLayout
           controls={composer}
           triggers={triggers ?? []}
-          pickCompletion={(item, options) => composer.inputRef.current?.pickCompletion?.(item, options)}
+          pickCompletion={(item, options) => pickCompletionOf(composer.inputRef.current)?.(item, options)}
           attachInput={composer.attachmentsEnabled && <input {...composer.attachmentInputProps} />}
           builtins={{
             attach: composer.attachmentsEnabled && (

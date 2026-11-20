@@ -1,5 +1,15 @@
-import type { ChatTriggerDefinition, CompletionSelectKind, ResolvedChatTrigger } from '../types.js';
+/**
+ * Internal: trigger resolution of the composer. Nothing here is exported from
+ * `glirastes/react`; apps describe triggers with `ChatTriggerDefinition`.
+ */
+import type { ChatTriggerDefinition, CompletionSelectKind } from '../types.js';
 import { inferMentionPrefix } from '../utils/mention-markup.js';
+
+/** A trigger with its defaults applied (`resolveChatTriggers`). */
+export type ResolvedChatTrigger = Required<Pick<ChatTriggerDefinition, 'char' | 'prefix' | 'select'>> & {
+  label?: string;
+  types?: ReadonlyArray<string>;
+};
 
 const SELECT_KINDS: ReadonlyArray<CompletionSelectKind> = ['chip', 'text', 'run', 'list'];
 
