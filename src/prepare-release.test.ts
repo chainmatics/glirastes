@@ -154,12 +154,3 @@ describe('checkApiSurface', () => {
     expect(await checkApiSurface({ root, surface: async () => [] })).toEqual(['- glirastes#A']);
   });
 });
-
-describe('release preflight', () => {
-  it('checks the api-surface snapshot before anything is published', async () => {
-    const workflow = await readFile(join(repoRoot, '.github', 'workflows', 'publish.yml'), 'utf8');
-    const preflight = workflow.slice(workflow.indexOf('release-preflight:'), workflow.indexOf('\n  runtime-container:'));
-    expect(preflight).toContain('bun scripts/api-surface.ts --check');
-    expect(preflight).toContain('bun install --frozen-lockfile');
-  });
-});

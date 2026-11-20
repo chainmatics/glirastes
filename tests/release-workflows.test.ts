@@ -111,6 +111,9 @@ describe('release workflows', () => {
     expect(jobStepNames(workflow, 'release-preflight')).toEqual([
       'Checkout',
       'Verify upgrade notes are released for this version',
+      'Setup Bun',
+      'Install dependencies',
+      'Verify the api-surface snapshot matches the source',
     ]);
     // The image is pushed inside runtime-container, so it must wait for the preflight too.
     expect(jobNeeds(workflow, 'runtime-container')).toEqual(['release-preflight']);
@@ -119,6 +122,9 @@ describe('release workflows', () => {
     expect(step).toContain('ls upgrade-notes/unreleased/*.json');
     expect(step).toContain('[ ! -f "upgrade-notes/$PKG_VERSION.json" ]');
     expect(step.match(/exit 1/g)).toHaveLength(2);
+    expect(jobStep(workflow, 'release-preflight', 'Install dependencies')).toContain('bun install --frozen-lockfile');
+    expect(jobStep(workflow, 'release-preflight', 'Verify the api-surface snapshot matches the source'))
+      .toContain('bun scripts/api-surface.ts --check');
   });
 });
 
