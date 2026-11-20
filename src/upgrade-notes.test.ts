@@ -194,12 +194,14 @@ describe('upgrade notes guard', () => {
       await readFile(join(notesDir, 'api-surface.released.json'), 'utf8'),
     ) as string[]);
     const current = new Set(surface);
+    const changed = [...surface.filter((k) => !released.has(k)), ...[...released].filter((k) => !current.has(k))];
     const unreleased = await unreleasedNoteIds();
     const notes = (await loadUpgradeNotes(notesDir, SDK_VERSION)).filter((n) => unreleased.has(n.id));
-    // A key neither added nor removed names API that is not there (removed again before release) or unchanged.
+    // An entry that covers no added or removed key names API that is not there (removed again before
+    // release) or unchanged. A `.*` or `*#` entry counts when it covers at least one changed key.
     const stale = notes.flatMap((n) => (n.surface ?? [])
-      .filter((key) => current.has(key) === released.has(key))
-      .map((key) => `${n.id}: ${key}`));
+      .filter((entry) => !changed.some((key) => surfaceCovers(entry, key)))
+      .map((entry) => `${n.id}: ${entry}`));
     expect(stale, [
       `Unreleased notes list surface keys that did not change:\n${stale.join('\n')}`,
       '`surface` lists only keys added or removed since api-surface.released.json; a changed signature of an',
