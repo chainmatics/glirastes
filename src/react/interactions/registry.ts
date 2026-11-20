@@ -40,9 +40,10 @@ export interface ChatInteractionsConfig extends DerivedEntityOptions {
   /**
    * True while `data` is still loading, so the declared entity types are not
    * known yet (`entityLinks.unresolvedMentions` then shows a marker of a type
-   * it cannot judge as text). Default: true when `data` is given as a key but
-   * `undefined` (what `useChatInteractionsData` returns until it has loaded,
-   * and after a failed request).
+   * it cannot judge as text); false: judge with what is known. Default: true
+   * while `data` is given as a key but `undefined` and a
+   * `useChatInteractionsData` load of this page is still waiting for its
+   * answer; not after a failed request or with its endpoint off.
    */
   readonly loading?: boolean;
 }
@@ -82,8 +83,10 @@ export interface ChatInteractionRegistry {
   readonly entitySearches: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }>;
   /** Searches one entity type, e.g. for an argument field; failures yield no hits. */
   searchEntity(type: string, query: string, signal: AbortSignal): Promise<ChatEntityItem[]>;
-  /** `ChatInteractionsConfig.loading`, with its default. */
+  /** `ChatInteractionsConfig.loading` as given (no default). */
   readonly loading?: boolean;
+  /** `data` is given as a key but `undefined` (the default of `loading` reads it). */
+  readonly awaitsData?: boolean;
   /**
    * How to send a composed message: `undefined` for a normal model message
    * (no command, several commands, or a command mixed with free text).
@@ -290,7 +293,8 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
     entity: (type) => entities.get(type),
     completeCommand: complete,
 
-    loading: config.loading ?? (Object.prototype.hasOwnProperty.call(config, 'data') && config.data === undefined),
+    ...(typeof config.loading === 'boolean' ? { loading: config.loading } : {}),
+    awaitsData: Object.prototype.hasOwnProperty.call(config, 'data') && config.data === undefined,
 
     async searchEntity(type, query, signal) {
       const entity = entities.get(type);

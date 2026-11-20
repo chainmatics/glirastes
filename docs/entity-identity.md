@@ -158,39 +158,58 @@ What happens without the option (`'keep'`, the default):
 | `'markdown'` with `verifyMentions: false` | A chip with the marker's id |
 
 `unresolvedMentions: 'text'` shows such a marker's name as plain text (no
-chip, no link), in both modes, when all of these hold:
+chip, no link), in both modes. The rule: a marker in an assistant message is
+judged only if that message and every assistant message before it that holds
+a tool result have declarations to be read by; otherwise it stays as without
+the option. A judged marker becomes text only if its type is declared and
+no message up to and including its own showed its `type`/`id` (each tool
+result read with the declarations of its own message, a `read_result` with
+those of the message that produced the result), and it is no `command`.
 
-1. It is in an **assistant** message. A user's markers come from the `@`
-   list and never change.
-2. Its message has **declarations to judge it by**:
-   - an assistant message streamed in this page life by a turn that
-     received the server's declarations (`data-tool-entities`): that turn's
-     declarations, merged with the app's own `entityDeclarations`. A later
-     turn, a retry of another turn or another chat never changes them; an
-     approval continuation of the message keeps those of its first request;
-   - any other message, only when the app passes `entityDeclarations` to
-     `AiChatProvider` itself: those.
-   Otherwise the marker stays as before. Limit: the server's declarations
-   are sent only while a turn runs and are not stored, so a history loaded
-   from the session store or set by the host is not judged without the
-   `entityDeclarations` prop; a stored marker with a wrong id then shows as
-   before (with `'plain'` a chip to the wrong id).
-3. Its type is **declared**: an entity of `chatInteractions` or a `type` the
-   message's declarations give in `outputEntities`. A type neither declares
-   stays as before. While `chatInteractions` data is still loading
-   (`loading: true`, or `data` given as `undefined`, which is what
-   `useChatInteractionsData` returns until it has loaded and after a failed
-   request) a type that is not declared yet shows as text, never as a chip
-   that disappears after the load; once loaded, it is judged again (after a
-   failed load it stays text).
-4. The id was never shown (see above), and it is no `command`.
+Declarations of a message:
 
-The decision for a message depends only on its declarations, the messages
-up to it and the declared entity types, so it does not change when later
+- an assistant message streamed in this page life by a turn that received
+  the server's declarations (`data-tool-entities`): those, with the app's
+  current `entityDeclarations` merged over them (the app's win per tool).
+  A later turn or a retry never changes them; an approval continuation of
+  the message keeps those of its first request;
+- otherwise the app's own `entityDeclarations` prop, when it passes one;
+- otherwise none.
+
+A message without declarations is not judged, and neither is any later
+message once an earlier assistant message holds a tool result nobody can
+read (it might have shown the id). Limits: the server's declarations are
+sent only while a turn runs and are not stored, so a history loaded from the
+session store or set by the host, and every turn after a stored tool result,
+is not judged without the `entityDeclarations` prop; a stored marker with a
+wrong id then shows as before (with `'plain'` a chip to the wrong id).
+Another history (another chat, `clear()`, a host's `setMessages` whose
+messages up to the latest user message are not the same objects) drops the
+turn declarations of the left one, also when message ids repeat across
+chats; back in a left chat its markers are judged only by the prop. A
+transport that hands new objects for unchanged messages therefore never
+keeps turn declarations.
+
+A user's markers come from the `@` list and never change. A **declared**
+type is an entity of `chatInteractions` or a `type` the message's
+declarations give in `outputEntities`; a type neither declares stays as
+before. While `chatInteractions` data is still loading a type that is not
+declared yet shows as text, never as a chip that disappears after the load;
+once loaded it is judged again. "Loading" is `chatInteractions.loading` when
+given; by default it is true while `data` is given as `undefined` and a
+`useChatInteractionsData` load of the page still waits for its answer (not
+after a failed request, not with its endpoint off: then the types known so
+far count). `<glirastes-chat>` sets it while its own GET of the
+interactions waits.
+
+The decision for a message depends only on the declarations and messages
+up to it and on the declared entity types, so it does not change when later
 turns run.
 
 `unresolvedMention(marker)` gets `{ type, id, label }` for each marker the
-option applies to and returns `'keep'` or `'text'` for it. A `:` in a name
+option applies to and returns `'keep'` or `'text'` for it. Keep it pure: it
+may be called on every render, also while a turn streams, and its answers
+are not cached. A `:` in a name
 is fine; a `:` in an id or a `}` in a name do not parse as a marker.
 
 A custom bubble honours the option through

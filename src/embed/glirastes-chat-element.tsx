@@ -178,6 +178,8 @@ export class GlirastesChatElement extends BaseElement {
   #interactions: ChatInteractionsData | undefined;
   #interactionsFromProperty = false;
   #interactionsLoad: AbortController | null = null;
+  /** True while its own GET of the interactions waits for an answer (`chatInteractions.loading`). */
+  #interactionsPending = false;
   // The nearest `lang` the last render used; a page (or a region of it) may set or change it later.
   #renderedLang: string | null = null;
   #langObserver: MutationObserver | null = null;
@@ -215,6 +217,7 @@ export class GlirastesChatElement extends BaseElement {
 
   set interactions(value: ChatInteractionsData | null | undefined) {
     this.#interactionsLoad?.abort();
+    this.#interactionsPending = false;
     this.#interactions = value ? parseChatInteractions(value) : undefined;
     this.#interactionsFromProperty = Boolean(value);
     this.#render();
@@ -305,11 +308,13 @@ export class GlirastesChatElement extends BaseElement {
     if (this.#interactionsFromProperty || !this.isConnected) return;
     this.#interactionsLoad?.abort();
     this.#interactionsLoad = null;
+    this.#interactionsPending = false;
     const attribute = this.getAttribute('interactions');
     const url = attribute === null ? '' : attribute || this.getAttribute('endpoint') || '';
     if (!url) return;
     const controller = new AbortController();
     this.#interactionsLoad = controller;
+    this.#interactionsPending = true;
     void (async () => {
       try {
         const response = await fetch(url, {
@@ -322,19 +327,38 @@ export class GlirastesChatElement extends BaseElement {
         const data = parseChatInteractions(await response.json());
         if (controller.signal.aborted) return;
         this.#interactions = data;
+        this.#interactionsPending = false;
         this.#render();
       } catch {
-        if (!controller.signal.aborted) this.#emit('glirastes-chat:error', { message: 'Chat interactions unavailable' });
+        if (!controller.signal.aborted) {
+          // Failed: judged with what is known from now on.
+          const pending = this.#interactionsPending;
+          this.#interactionsPending = false;
+          this.#emit('glirastes-chat:error', { message: 'Chat interactions unavailable' });
+          if (pending && this.#unresolvedMentionsOn()) this.#render();
+        }
       }
     })();
+  }
+
+  /** Whether `config.entityLinks` judges markers (`unresolvedMentions` or its hook). */
+  #unresolvedMentionsOn(): boolean {
+    const links = this.#config.entityLinks;
+    return !!links && ((links.unresolvedMentions !== undefined && links.unresolvedMentions !== 'keep')
+      || typeof links.unresolvedMention === 'function');
   }
 
   #chatInteractions(): ChatInteractionsConfig | undefined {
     const base = this.#config.chatInteractions;
     const data = this.#interactions ?? base?.data;
-    if (!base && !data && this.#entities.length === 0 && this.#commands.length === 0) return undefined;
+    // Only `entityLinks.unresolvedMentions` reads it: while its own GET waits, the entity types are not known yet.
+    const loading = this.#unresolvedMentionsOn() && base?.loading === undefined && !data
+      ? { loading: this.#interactionsPending }
+      : {};
+    if (!base && !data && this.#entities.length === 0 && this.#commands.length === 0 && !('loading' in loading && loading.loading)) return undefined;
     return {
       ...base,
+      ...loading,
       locale: base?.locale ?? this.#locale(),
       ...(data ? { data } : {}),
       entities: [...(base?.entities ?? []), ...this.#entities],

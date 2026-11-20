@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import { GLIRASTES_NAVIGATE_ACTION_ID } from '../../browser/navigation.js';
@@ -18,10 +19,16 @@ import { MentionChip as DefaultMentionChip } from '../components/mention-chip.js
 import { useChatContext } from '../provider/chat-context.js';
 import type { Mention } from '../types.js';
 import type { EntityDeclarationsByTool } from '../../contracts/entity-declaration.js';
+import { hasPendingChatInteractionsLoad, subscribeChatInteractionsLoads } from '../interactions/use-chat-interactions-data.js';
+
+const noSubscription = () => () => {};
+const noPendingLoad = () => false;
 import {
   collectKnownEntities,
   collectSeenReferenceKeys,
   declaredOutputTypes,
+  indexSeenReferences,
+  isSeenBy,
   entityNavigationHref,
   isSeenReference,
   isUnresolvedMentionPolicy,
@@ -78,14 +85,15 @@ export function WithoutEntityLinks({ children }: { children: ReactNode }) {
 }
 
 /**
- * The declarations `unresolvedMentions` judges a message's markers by: the
- * app's own `entityDeclarations` for every message, and for each assistant
- * message streamed in this page life by a turn that received the server's
- * declarations, that turn's (they win, and never change afterwards).
+ * The declarations `unresolvedMentions` reads a message by: the app's own
+ * `entityDeclarations` (live), merged over the server's declarations of the
+ * turn that streamed the message in this page life, when it has them. An
+ * entry of another `generation` (a left history) does not count.
  */
 export interface MentionDeclarationCoverage {
   readonly app?: EntityDeclarationsByTool;
-  readonly byMessage: ReadonlyMap<string, EntityDeclarationsByTool>;
+  readonly byMessage: ReadonlyMap<string, { readonly declarations: EntityDeclarationsByTool; readonly generation: number }>;
+  readonly generation: number;
 }
 
 /** The message a marker belongs to: its id and role. */
@@ -144,14 +152,36 @@ export function ChatEntityLinksProvider({
   // Without the option the links do not depend on these (as before).
   const coverage = unresolvedOn ? declarationCoverage : undefined;
   const markerMessages = unresolvedOn ? messages : undefined;
-  /** Per message: the seen keys of the messages up to it, by its declarations; reused while they are the same objects. */
-  const prefixKeys = useRef(new Map<string, {
-    declarations: EntityDeclarationsByTool;
-    searches: unknown;
-    prefix: ReadonlyArray<unknown>;
-    keys: Set<string>;
-  }>());
   const outputTypesOf = useRef(new WeakMap<EntityDeclarationsByTool, Set<string>>());
+  /** The server's declarations of a turn merged with the app's, one object per pair (so caches can compare them). */
+  const mergedOf = useRef(new WeakMap<EntityDeclarationsByTool, { app: EntityDeclarationsByTool | undefined; merged: EntityDeclarationsByTool }>());
+  /** What each message object contributes, while its declarations and searches stay the same (weak: a left chat goes). */
+  const messageKeys = useRef(new WeakMap<object, never>());
+  const declarationsOf = useCallback((message: { id?: string } | undefined): EntityDeclarationsByTool | undefined => {
+    if (!coverage || !message || typeof message.id !== 'string') return undefined;
+    const entry = coverage.byMessage.get(message.id);
+    const server = entry && entry.generation === coverage.generation ? entry.declarations : undefined;
+    if (!server) return coverage.app;
+    if (!coverage.app) return server;
+    let found = mergedOf.current.get(server);
+    // The app's own win per tool, as in the declarations the chat uses.
+    if (!found || found.app !== coverage.app) mergedOf.current.set(server, found = { app: coverage.app, merged: { ...server, ...coverage.app } });
+    return found.merged;
+  }, [coverage]);
+  // One pass per conversation: where each reference was first shown, each tool result read by its own message's declarations.
+  const seenIndex = useMemo(
+    () => (coverage && markerMessages
+      ? indexSeenReferences(markerMessages, searches ?? [], (index) => declarationsOf(markerMessages[index]), messageKeys.current as WeakMap<object, never>)
+      : undefined),
+    [coverage, markerMessages, searches, declarationsOf],
+  );
+  // Default of `chatInteractions.loading`: `data` given as `undefined` while a load of it still waits.
+  const loadPending = useSyncExternalStore(
+    unresolvedOn ? subscribeChatInteractionsLoads : noSubscription,
+    unresolvedOn ? hasPendingChatInteractionsLoad : noPendingLoad,
+    noPendingLoad,
+  );
+  const interactionsLoading = interactions?.loading ?? (!!interactions?.awaitsData && loadPending);
 
   const canOpen = useCallback((type: string) => {
     const current = configRef.current;
@@ -174,29 +204,24 @@ export function ChatEntityLinksProvider({
   const value = useMemo<ChatEntityLinks>(() => {
     /** `unresolvedMentions`: the policy of a marker, by the declarations and messages of its own turn. */
     const unresolvedMention = (mention: Mention, message?: MentionMarkerMessage): ChatUnresolvedMentionPolicy => {
-      if (!config || !coverage || !markerMessages || mention.type === 'command') return 'keep';
-      // An assistant's marker, of a message whose turn's declarations this page knows.
+      if (!config || !seenIndex || !markerMessages || mention.type === 'command') return 'keep';
+      // An assistant's marker, of a message with declarations to read it by.
       if (!message || message.role !== 'assistant') return 'keep';
-      const declarations = coverage.byMessage.get(message.id) ?? coverage.app;
+      const index = seenIndex.indexOf.get(message.id);
+      if (index === undefined) return 'keep';
+      const declarations = declarationsOf(markerMessages[index]);
       if (!declarations) return 'keep';
-      const index = markerMessages.findIndex((entry) => entry.id === message.id);
-      if (index < 0) return 'keep';
+      // A tool result up to this message that nothing can read might have shown the id: not judged.
+      if (seenIndex.firstUnreadable <= index) return 'keep';
       // Only what the conversation showed up to this message: a later turn never changes the decision.
-      const prefix = markerMessages.slice(0, index + 1);
-      let cached = prefixKeys.current.get(message.id);
-      if (!cached || cached.declarations !== declarations || cached.searches !== searches
-        || cached.prefix.length !== prefix.length || cached.prefix.some((entry, at) => entry !== prefix[at])) {
-        cached = { declarations, searches, prefix, keys: collectSeenReferenceKeys(prefix, searches ?? [], declarations) };
-        prefixKeys.current.set(message.id, cached);
-      }
-      if (isSeenReference(cached.keys, mention.type, mention.id)) return 'keep';
+      if (isSeenBy(seenIndex, index, mention.type, mention.id)) return 'keep';
       // Entity and declaration types are lower-case: the marker's type is compared case-insensitively, as the seen check does.
       const type = mention.type.toLowerCase();
       let outputTypes = outputTypesOf.current.get(declarations);
       if (!outputTypes) outputTypesOf.current.set(declarations, outputTypes = declaredOutputTypes(declarations));
       const declared = interactions?.entity(type) !== undefined || outputTypes.has(type);
       // Undeclared: as before, unless the declared types are still loading (then never a chip that later goes).
-      if (!declared) return interactions?.loading ? 'text' : 'keep';
+      if (!declared) return interactionsLoading ? 'text' : 'keep';
       let decided: unknown;
       try {
         decided = config.unresolvedMention?.({ type: mention.type, id: mention.id, label: mention.displayName });
@@ -265,7 +290,7 @@ export function ChatEntityLinksProvider({
         createElement(tag, props, linkifyChildren(children as ReactNode, links))]),
     );
     return links;
-  }, [config, known, seenKeys, unresolvedOn, interactions, searches, coverage, markerMessages, canOpen, open, locale.openEntityLabel]);
+  }, [config, known, seenKeys, unresolvedOn, interactions, seenIndex, markerMessages, declarationsOf, interactionsLoading, canOpen, open, locale.openEntityLabel]);
 
   return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
 }

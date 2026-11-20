@@ -118,9 +118,11 @@ function Chat() {
 ```
 
 App definitions replace derived ones with the same id or type.
-`loading` (default: `data` given as `undefined`, as above until the GET has
-answered) tells `entityLinks.unresolvedMentions` that the entity types are
-not known yet (see [entity-identity.md](entity-identity.md)).
+`loading` tells `entityLinks.unresolvedMentions` that the entity types are
+not known yet (see [entity-identity.md](entity-identity.md)). Default: true
+while `data` is given as `undefined` and a `useChatInteractionsData` load
+still waits for its answer; not after a failed request or with the endpoint
+off.
 `useChatContext().mentionEntity('task', id)` puts a reference to one entity
 into the composer (through the entity's `resolve`). `chatInteractions` already
 offers the generated UI tools as `/` commands; drop an earlier

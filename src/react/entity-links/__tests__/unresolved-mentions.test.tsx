@@ -11,6 +11,7 @@ import type { ChatEntityLinksConfig } from '../entity-links.js';
 import { useChatEntityLinks } from '../entity-links-react.js';
 import { Host, StreamingChat, ctx } from '../../__tests__/streaming-chat.js';
 import type { ChatInteractionsData } from '../../../contracts/chat-interactions.js';
+import { useChatInteractionsData } from '../../interactions/use-chat-interactions-data.js';
 
 afterEach(() => {
   cleanup();
@@ -200,13 +201,18 @@ describe('interactions still loading (review 3)', () => {
     </AiChatProvider>
   );
 
-  it('shows the name as text, never a chip, while derived data is still undefined', async () => {
-    const view = render(<Loading chatInteractions={{ data: undefined }} />);
+  it('shows the name as text, never a chip, while derived data is still loading', async () => {
+    const view = render(<Loading chatInteractions={{ data: undefined, loading: true }} />);
     await textShown('Found Lobby Loop for you.');
     expect(chips()).toHaveLength(0);
     view.rerender(<Loading chatInteractions={{ data: loaded(['playlist']) }} />);
     await textShown('Found Lobby Loop for you.');
     expect(chips()).toHaveLength(0);
+  });
+
+  it('data given as undefined without a pending load is judged with what is known: a chip', async () => {
+    render(<Loading chatInteractions={{ data: undefined }} />);
+    expect(await screen.findByRole('button', { name: 'Open Lobby Loop' })).not.toBeNull();
   });
 
   it('honours an explicit loading flag', async () => {
@@ -272,7 +278,7 @@ describe('a message keeps the declarations of its own turn (review 2: finding 1)
     });
   }
 
-  it('switching to another chat, a turn there, and back keeps the decisions (session switch)', async () => {
+  it('a session switch drops the turn declarations: back in the first chat its markers are not judged any more', async () => {
     const chat = new StreamingChat();
     const open = liveHost(chat, 'plain');
     await liveTurn(chat, DECLARED, TURN_ONE);
@@ -282,9 +288,53 @@ describe('a message keeps the declarations of its own turn (review 2: finding 1)
     await liveTurn(chat, CHANNELS_ONLY, [{ type: 'text', text: 'Elsewhere.' }]);
     await act(async () => { chat.setMessages(first); });
     await waitFor(() => expect(assistantBubbles()).toHaveLength(1));
-    const back = bubbleState(0, open);
-    expect(back.ids).toEqual(['pl_7']);
-    expect(back.text).toContain('not Lobby Loop.');
+    // Not judged: as without the option, both markers are chips.
+    await waitFor(() => expect(bubbleState(0, open).ids).toEqual(['pl_7', 'pl_8']));
+  });
+
+  it('with the app\'s own entityDeclarations a chat switched back to is judged by them', async () => {
+    const chat = new StreamingChat();
+    const open = vi.fn();
+    const config = {
+      entityLinks: { open, unresolvedMentions: 'text' as const, known: false },
+      chatInteractions: playlistInteractions,
+      entityDeclarations: DECLARED,
+    };
+    render(<Host chat={chat} config={config} />);
+    await liveTurn(chat, CHANNELS_ONLY, TURN_ONE);
+    const first = chat.messages;
+    await act(async () => { chat.setMessages([]); });
+    await act(async () => { chat.setMessages(first); });
+    await waitFor(() => expect(assistantBubbles()).toHaveLength(1));
+    expect(bubbleState(0, open).ids).toEqual(['pl_7']);
+  });
+
+  it('a history with the same message ids in another chat is not judged by the left chat\'s declarations', async () => {
+    const chat = new StreamingChat();
+    const open = liveHost(chat, 'plain');
+    await liveTurn(chat, DECLARED, TURN_ONE);
+    await waitFor(() => expect(bubbleState(0, open).ids).toEqual(['pl_7']));
+    // Another chat whose store numbers its messages alike: same ids, other objects, no tool result.
+    const other = chat.messages.map((message) => (message.role === 'assistant'
+      ? { ...message, parts: [{ type: 'text', text: 'Elsewhere {{mention:playlist:pl_8:Lobby Loop}}.' }] }
+      : { ...message, parts: [...message.parts] })) as ChatMessage[];
+    await act(async () => { chat.setMessages(other); });
+    await waitFor(() => expect(assistantBubbles()[0]!.textContent).toContain('Elsewhere'));
+    expect(bubbleState(0, open).ids).toEqual(['pl_8']);
+  });
+
+  it('turn 2 shows the id turn 1 got wrong: turn 1 stays text (only what came before a message counts)', async () => {
+    const chat = new StreamingChat();
+    const open = liveHost(chat, 'plain');
+    await liveTurn(chat, DECLARED, TURN_ONE);
+    await liveTurn(chat, DECLARED, [
+      { ...listed, toolCallId: 'c9', output: { playlists: [{ id: 'pl_8', name: 'Lobby Loop' }] } },
+      { type: 'text', text: 'Listed again.' },
+    ]);
+    await waitFor(() => expect(assistantBubbles()).toHaveLength(2));
+    const first = bubbleState(0, open);
+    expect(first.ids).toEqual(['pl_7']);
+    expect(first.text).toContain('not Lobby Loop.');
   });
 
   it('a retried turn: the new answer is judged by its own declarations', async () => {
@@ -329,7 +379,10 @@ describe('a message keeps the declarations of its own turn (review 2: finding 1)
 describe('reloaded history (coverage)', () => {
   it('keeps stored markers after a reload; judges the wrong marker of a new live turn', async () => {
     const chat = new StreamingChat();
-    chat.messages = answer('Old {{mention:playlist:pl_7:Lobby Loop}} and {{mention:playlist:pl_8:Lobby Loop}}.');
+    chat.messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Which playlist?' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Old {{mention:playlist:pl_7:Lobby Loop}} and {{mention:playlist:pl_8:Lobby Loop}}.' }] },
+    ] as unknown as ChatMessage[];
     const open = liveHost(chat, 'plain');
     await waitFor(() => expect(bubbleState(0, open).ids).toEqual(['pl_7', 'pl_8']));
     await liveTurn(chat, DECLARED, [{ type: 'text', text: 'New {{mention:playlist:pl_9:Lobby Loop}} here.' }]);
@@ -338,6 +391,15 @@ describe('reloaded history (coverage)', () => {
     const fresh = bubbleState(1, open);
     expect(fresh.ids).toEqual([]);
     expect(fresh.text).toContain('New Lobby Loop here.');
+  });
+
+  it('a live turn after a stored tool result it cannot read is not judged', async () => {
+    const chat = new StreamingChat();
+    chat.messages = answer('Stored answer.');
+    const open = liveHost(chat, 'plain');
+    await liveTurn(chat, DECLARED, [{ type: 'text', text: 'New {{mention:playlist:pl_7:Lobby Loop}} and {{mention:playlist:pl_99:Lobby Loop}}.' }]);
+    await waitFor(() => expect(assistantBubbles()).toHaveLength(2));
+    expect(bubbleState(1, open).ids).toEqual(['pl_7', 'pl_99']);
   });
 
   it('keeps every marker of a reloaded history without the app\'s declarations', async () => {
@@ -350,7 +412,7 @@ describe('outputEntities while chatInteractions data loads (review 2: c)', () =>
   const loaded = { schemaVersion: 1, commands: [], entities: [{ type: 'person', label: 'Person' }] } as unknown as ChatInteractionsData;
   const text = 'A {{mention:playlist:pl_7:Lobby Loop}} B {{mention:playlist:pl_8:Lobby Loop}} C {{mention:robot:r1:Robo Arm}}.';
   const View = ({ data }: { data: ChatInteractionsData | undefined }) => (
-    <AiChatProvider transport={transport(answer(text))} uiActionBus={new UiActionBus()} entityDeclarations={DECLARED} entityLinks={{ open: vi.fn(), unresolvedMentions: 'text', known: false }} chatInteractions={{ data }}>
+    <AiChatProvider transport={transport(answer(text))} uiActionBus={new UiActionBus()} entityDeclarations={DECLARED} entityLinks={{ open: vi.fn(), unresolvedMentions: 'text', known: false }} chatInteractions={{ data, loading: data === undefined }}>
       <AiChatPanel />
     </AiChatProvider>
   );
@@ -364,5 +426,47 @@ describe('outputEntities while chatInteractions data loads (review 2: c)', () =>
     await waitFor(() => expect(chips()).toHaveLength(2));
     expect(screen.getByRole('button', { name: 'Open Robo Arm' })).not.toBeNull();
     expect(bubble().textContent).toContain('B Lobby Loop C');
+  });
+});
+
+describe('each tool result read with its own turn\'s declarations (review 3: 1)', () => {
+  for (const mentionMarkers of ['plain', 'markdown'] as const) {
+    it(`${mentionMarkers}: a marker of turn 2 names a record turn 1's tools showed`, async () => {
+      const chat = new StreamingChat();
+      const open = liveHost(chat, mentionMarkers);
+      await liveTurn(chat, DECLARED, [listed, { type: 'text', text: 'Listed.' }]);
+      await liveTurn(chat, CHANNELS_ONLY, [{ type: 'text', text: 'It is {{mention:playlist:pl_7:Lobby Loop}}, not {{mention:playlist:pl_8:Lobby Loop}}.' }]);
+      await waitFor(() => expect(assistantBubbles()).toHaveLength(2));
+      const second = bubbleState(1, open);
+      expect(second.ids).toEqual(['pl_7']);
+      expect(second.text).toContain('not Lobby Loop.');
+    });
+  }
+});
+
+describe('loading by default only while a load is pending (review 3: 4)', () => {
+  const robot = 'Ask {{mention:robot:r9:Robo Arm}} now.';
+  function HookChat({ endpoint, fetcher }: { endpoint: string | undefined; fetcher: typeof fetch }) {
+    const data = useChatInteractionsData(endpoint, { fetch: fetcher });
+    return (
+      <AiChatProvider transport={transport(answer(robot))} uiActionBus={new UiActionBus()} entityDeclarations={DECLARED} entityLinks={{ open: vi.fn(), unresolvedMentions: 'text' }} chatInteractions={{ data }}>
+        <AiChatPanel />
+      </AiChatProvider>
+    );
+  }
+
+  it('text while the GET is pending, a chip once it failed', async () => {
+    let refuse: () => void = () => {};
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { refuse = () => resolve(new Response('no', { status: 500 })); }));
+    render(<HookChat endpoint="/chat" fetcher={fetcher as unknown as typeof fetch} />);
+    await textShown('Ask Robo Arm now.');
+    expect(chips()).toHaveLength(0);
+    await act(async () => { refuse(); });
+    expect(await screen.findByRole('button', { name: 'Open Robo Arm' })).not.toBeNull();
+  });
+
+  it('a chip when the endpoint is off', async () => {
+    render(<HookChat endpoint={undefined} fetcher={vi.fn() as unknown as typeof fetch} />);
+    expect(await screen.findByRole('button', { name: 'Open Robo Arm' })).not.toBeNull();
   });
 });

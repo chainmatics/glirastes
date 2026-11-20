@@ -135,3 +135,30 @@ describe('<glirastes-chat> chat interactions', () => {
     expect(element.interactions).toEqual(data);
   });
 });
+
+describe('<glirastes-chat> entityLinks.unresolvedMentions while it loads interactions', () => {
+  it('shows a marker of a type not declared yet as text while its GET is pending, a chip after it loaded', async () => {
+    let answer: () => void = () => {};
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { answer = () => resolve(Response.json(data)); })));
+    const { element } = await mount((node) => {
+      node.setAttribute('endpoint', '/chat');
+      node.setAttribute('interactions', '');
+      node.transport = {
+        ...transport(),
+        messages: [
+          { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Who?' }] },
+          { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Ask {{mention:robot:r9:Robo Arm}} now.' }] },
+        ],
+      } as ChatTransport;
+      node.config = {
+        entityLinks: { open: vi.fn(), unresolvedMentions: 'text' },
+        entityDeclarations: { channels_list: { output: [{ type: 'channel', id: 'key', name: 'title' }] } },
+      };
+    });
+    const chips = () => element.shadowRoot!.querySelectorAll('[data-component="message-bubble"][data-role="assistant"] [data-component="mention-chip"]');
+    await waitFor(() => expect(element.shadowRoot!.textContent).toContain('Ask Robo Arm now.'));
+    expect(chips()).toHaveLength(0);
+    await act(async () => { answer(); });
+    await waitFor(() => expect(chips()).toHaveLength(1));
+  });
+});
