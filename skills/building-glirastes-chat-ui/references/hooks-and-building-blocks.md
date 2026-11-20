@@ -170,22 +170,43 @@ Defaults keep today's markup; everything below is opt-in.
   `activitySummarySeparator` (`, `) and `activityApprovalNotUsedDetail`.
   `{count}` of `activityDoneLabel` and `activityRunningProgressLabel` is the
   number of done steps.
-- A failed step's detail whose text the SDK wrote itself shows in the chat's
-  language: the server's text of a refused call (tool not available, not
+- A failed step's detail whose text the SDK wrote itself can show in the
+  chat's language. Covered, each through the channel the SDK writes it:
+  the server's `errorText` of a refused call (tool not available, not
   permitted, user not identified, account, disabled, refused), invalid tool
   input, a turn limit (one key per limit, `{limit}`), a record refused before
-  its approval card, the generic "AI request failed", the endpoint caller's
-  fixed texts (`Endpoint failed ({status})`, path refused, timeout and
-  response too large with `{tool}`) and the memory tools' texts. Keys
-  `activityFailure…` (all optional in `ChatLocale`, see its JSDoc), English
-  word for word as the server writes it, German in `deChatLocale`. Which
+  its approval card and the generic "AI request failed"; in the tool's
+  result, the endpoint caller's fixed texts (`Endpoint failed ({status})`
+  with three digits matching the result's `status`, path refused, timeout
+  and response too large with the step's own tool as `{tool}`) and the texts
+  of the memory tools `memory_remember` / `memory_forget` (only for those
+  two). Keys `activityFailure…` (all optional in `ChatLocale`, see its
+  JSDoc), English word for word as the server writes it, German in
+  `deChatLocale`. `{limit}` and `{max}` use the chat language's number
+  format (`0,5 USD`, `1,5 s`) except in the English built-in text. Which
   steps show a detail is unchanged (`details`); the English text is
-  unchanged. A text of the app's backend or tool, and a text this version
-  does not know (a newer server), is shown as it is. `readActivitySteps` sets
-  `failures` (`StepFailure[]`, `{ code: StepFailureCode, values? }`) beside
-  `detail` for such a step; `stepFailureText(failures, locale)` renders it,
-  a code it does not know as `activityFailureGeneric`. A step without any
-  text shows no detail.
+  unchanged. Not covered (shown as before): the generated UI tool's "This
+  action is not available on the page the user has open. …" and the codes a
+  direct command returns (`command_failed`, `command_tool_unavailable`,
+  `approval_already_used`, `approval_binding_unavailable`, denial reasons).
+  A text of the app's backend or tool is shown as it is, and so is a text
+  this version does not know (a newer server); the one exception is an app
+  backend that answers an endpoint tool with the endpoint caller's own
+  wording (`Endpoint failed (503)`, `Endpoint path is not allowed`), which
+  cannot be told apart from it. `readActivitySteps` sets `failures`
+  (`StepFailure[]`, `{ code: StepFailureCode, values? }`) beside `detail` for
+  such a step; `stepFailureText(failures, locale, language?)` renders it, a
+  code it does not know as `activityFailureGeneric`. A step without any text
+  shows no detail.
+- Which table these failure texts follow: the built-in texts of the chat's
+  language (German for `de`) when the app states `language`, or when its own
+  tables (`locale`, `locales` for that language) set no other `activity…`
+  key with a text of their own (a text other than the built-in one of the
+  language). An app that words the activity log itself and lets the
+  language come from the page `lang` or the server's tool labels keeps the
+  English failure texts it showed before. To opt in: state `language`, set
+  the `activityFailure…` keys in its own table (any language, also
+  `locales.pl`), or spread `deChatLocale` into it.
 - Order per text key: the app's `locale`, then `locales[tag]` along the
   language fallback, then the built-in table of the language (`en`, `de`),
   then English. Step titles are not locale keys: the app's `toolLabels`

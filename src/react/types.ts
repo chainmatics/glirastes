@@ -1016,7 +1016,9 @@ export interface ChatLocale {
   /*
    * Detail of a failed step whose text the SDK wrote itself (`StepFailureCode`,
    * `ActivityStep.failures`), shown instead of that English text. Each is
-   * optional: a locale without it takes the built-in text of the language.
+   * optional: a locale without it takes the built-in text of the language,
+   * except where the app's own table words the activity log itself and the
+   * language is not stated (`language`): then English, as before the keys.
    * A text of the app's backend or tool is shown as it is.
    */
   /** `failed`, and any code this version does not know: "AI request failed". */

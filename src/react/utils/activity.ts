@@ -198,7 +198,10 @@ export function readActivitySteps(
     }
     if (typeof detail === 'string' && detail.trim() && allowDetail(toolName, status, source)) {
       step.detail = detail.trim();
-      const failures = status === 'error' || status === 'expected' ? readStepFailures(step.detail) : undefined;
+      const resultStatus = isRecord(part.output) && typeof part.output.status === 'number' ? part.output.status : undefined;
+      const failures = status === 'error' || status === 'expected'
+        ? readStepFailures(step.detail, { source, toolName, ...(source === 'output' && resultStatus !== undefined ? { status: resultStatus } : {}) })
+        : undefined;
       if (failures) step.failures = failures;
     }
     steps.push(step);

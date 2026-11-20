@@ -33,8 +33,8 @@ export function TurnNotice({ text, status, placement }: TurnNoticeProps) {
 }
 
 /** The detail line of a step: an SDK failure in the locale's words, else its own text, else a UI action's outcome. */
-function stepDetailText(step: ActivityStep, locale: ChatLocale): string | undefined {
-  if (step.failures && step.failures.length > 0) return stepFailureText(step.failures, locale);
+function stepDetailText(step: ActivityStep, locale: ChatLocale, language: string | undefined): string | undefined {
+  if (step.failures && step.failures.length > 0) return stepFailureText(step.failures, locale, language);
   return step.detail ?? uiOutcomeText(step, locale);
 }
 
@@ -95,7 +95,7 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
  * Keeps styling neutral via `data-*` attributes.
  */
 export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, noticeOutcome, className }: ActivityLogProps) {
-  const { locale, toolLabels, components, activityLog } = useChatContext();
+  const { locale, toolLabels, components, activityLog, language } = useChatContext();
   // Once the turn no longer runs: a UI action still waiting was never confirmed, a call still running was stopped
   // (a step waiting for approval stays waiting).
   const steps = active ? allSteps : allSteps.map((step) => (step.uiOutcome === 'pending'
@@ -179,8 +179,8 @@ export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, not
             {count > 1 && (
               <span data-element="count">{fillLocaleText(locale.activityStepCountLabel ?? '×{count}', { count })}</span>
             )}
-            {stepDetailText(step, locale) && (
-              <span data-element="detail">{stepDetailText(step, locale)}</span>
+            {stepDetailText(step, locale, language) && (
+              <span data-element="detail">{stepDetailText(step, locale, language)}</span>
             )}
           </li>
         ))}
