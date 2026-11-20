@@ -13,7 +13,7 @@ The report never changes code: you propose, the developer decides.
 
 Run it:
 
-- when `glirastes tools refresh` or `glirastes tools check` prints a line like
+- when `glirastes tools refresh` prints a line like
   `Glirastes 0.16.0 → 0.17.0: 1 must, 2 should, 0 recommended, 3 optional`;
 - after the `glirastes` version in `package.json` changed;
 - before you change code that uses glirastes.
@@ -65,7 +65,7 @@ Run it:
    `--defer <id>`: it stays in every later report, marked `[deferred]`, until
    `glirastes upgrade ack --undefer <id>` or until the code is detected as
    adopted or not affected. A deferred Must item no longer counts
-   as open: `--fail-on breaking` and the doctor warning skip it, and the
+   as open: `--fail-on breaking` skips it, and the
    refresh hint labels it (`1 must (1 deferred)`).
 7. Edited skills under Should (`skill:<name>`): `glirastes tools refresh`
    keeps an edited copy and the report names it. Merge the shipped changes
@@ -92,7 +92,6 @@ Run it:
 
 ```bash
 glirastes upgrade report --json
-glirastes upgrade report --brief
 glirastes upgrade report --from <version>
 glirastes upgrade report --fail-on breaking
 glirastes upgrade ack
@@ -100,14 +99,9 @@ glirastes upgrade ack --defer <note-id> --defer <other-note-id>
 glirastes upgrade ack --undefer <note-id>
 ```
 
-`--brief` lists Must, Should and Recommended items and only counts the
-optional ones. `--fail-on breaking` exits 1 while
+`--fail-on breaking` exits 1 while
 a Must item is not deferred, for CI. `--root <dir>` points any subcommand at another
-app. `GLIRASTES_UPGRADE_HINT=0` removes the summary line from refresh and check.
-
-`glirastes install --with-upgrade-hook` adds a Claude Code `SessionStart` hook
-to `.claude/settings.json` that runs `glirastes upgrade report --brief`; offer
-it, never add it unasked.
+app. `GLIRASTES_UPGRADE_HINT=0` removes the summary line from refresh.
 
 ## Verification
 
