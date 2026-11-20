@@ -661,6 +661,19 @@ export interface TurnOutcome {
   at: string;
 }
 
+/** The second argument of `onTurnEnd`. */
+export interface TurnEndInfo {
+  /** The chat the turn belongs to (`session.activeId`, else `'default'`); always the chat that is open. */
+  sessionId: string;
+}
+
+/**
+ * Called once when a turn of the open chat ends, with its recorded outcome
+ * (the same object `turnOutcomes` holds by then). See
+ * `AiChatProviderConfig.onTurnEnd`.
+ */
+export type OnTurnEnd = (outcome: TurnOutcome, info: TurnEndInfo) => void;
+
 /**
  * The rendered parts of one message, each `null` when absent. Order of the
  * default bubble: plan, activity, notice, attachments, text, toolResults.
@@ -1490,6 +1503,22 @@ export interface AiChatProviderConfig {
    * see `UiActionOutcomeEvent`. A throw inside is caught.
    */
   onUiActionOutcome?: OnUiActionOutcome;
+  /**
+   * Called once when a turn of the open chat ends, with its `TurnOutcome`
+   * (every status: `completed`, `aborted` also by `sendNow` with `'abort'`,
+   * `safety-stop`, `error` also before the first token or without any
+   * assistant message), after the outcome is in `turnOutcomes`. A turn ends
+   * when its last request is over: not while a run waits for an approval or
+   * for the outcome of a UI action (the continuation request belongs to the
+   * same turn), not at a stop or error the server reports while the run still
+   * streams. A retry (`regenerate`) of the same user message is a new attempt
+   * and reports its own end. Not called for outcomes read from a stored
+   * history (`session.load`, a reload, a history the app hands its
+   * transport), for a turn whose chat was left before it ended (also not when
+   * that chat opens again), or for a run cleared with `clear()`. The latest
+   * function passed is used; a throw inside is caught. Local only.
+   */
+  onTurnEnd?: OnTurnEnd;
   /**
    * How long the handlers of one tool result may take before the outcome is
    * `timeout`; default 10 000 ms. Page-bound client actions get their route
