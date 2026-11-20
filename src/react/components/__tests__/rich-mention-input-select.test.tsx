@@ -259,6 +259,53 @@ describe('standalone RichMentionInput pick behavior', () => {
     expect(chip(editor, '9')).not.toBeNull();
   });
 
+  it("'run' with commandPills={false} sends the command mention", async () => {
+    const onSubmit = vi.fn();
+    const command: MentionResult[] = [{ id: 'done', type: 'command', label: 'Erledigte filtern', select: 'run' }];
+    render(<RichMentionInput onSearch={() => command} onSubmit={onSubmit} commandPills={false} />);
+    const editor = screen.getByRole('textbox');
+
+    typeInto(editor, '/erl');
+    await waitFor(() => expect(option('Erledigte filtern')).toBeTruthy());
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('/erledigte-filtern', [
+      expect.objectContaining({ id: 'done', type: 'command', prefix: '/' }),
+    ]);
+  });
+
+  it("'list' without listSource behaves like 'chip'", async () => {
+    const onSearch = vi.fn((): MentionResult[] => [{ id: '5', type: 'ticket', label: 'Bug fuenf', select: 'list' }]);
+    render(<RichMentionInput onSearch={onSearch} triggers={['#']} />);
+    const editor = screen.getByRole('textbox');
+
+    typeInto(editor, '#bug');
+    await waitFor(() => expect(option('Bug fuenf')).toBeTruthy());
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(chip(editor, '5')).not.toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(onSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a pending debounced search does not reopen the list after a text pick', async () => {
+    const onSearch = vi.fn((): MentionResult[] => [{ id: 't', type: 'prompt', label: 'Vorlage', select: 'text' }]);
+    render(<RichMentionInput onSearch={onSearch} />);
+    const editor = screen.getByRole('textbox');
+
+    typeInto(editor, '/vo');
+    await waitFor(() => expect(option('Vorlage')).toBeTruthy());
+    // Typing schedules a search; the pick happens inside its debounce window.
+    typeInto(editor, '/vor');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(editor.textContent).toBe('Vorlage');
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(onSearch).toHaveBeenCalledTimes(1);
+  });
+
   it('takes onCompletionSelect with trigger and query', async () => {
     const onCompletionSelect = vi.fn(() => true);
     render(<RichMentionInput onSearch={() => results} triggers={['#']} onCompletionSelect={onCompletionSelect} />);

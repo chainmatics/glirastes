@@ -83,7 +83,7 @@ does; without it the trigger's `select` applies, default `chip`.
 | `chip` | A pill, as before |
 | `text` | `insertText` (default: the label) replaces trigger and query as plain text; caret behind it, list closes |
 | `run` | A pill, then sends exactly like the send button. While a turn streams nothing is sent and the pill stays |
-| `list` | The trigger stays, the query is cleared, and the list shows the providers in `listSource` (provider id or ids of the same trigger). Typing searches only them until the list closes (Escape) |
+| `list` | The trigger stays, the query is cleared, and the list shows the providers in `listSource` (provider id or ids of the same trigger). Typing searches only them until the list closes (Escape). Without `listSource` the pick inserts a pill like `chip` |
 
 ```tsx
 const prompts = {

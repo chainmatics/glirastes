@@ -385,6 +385,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // -----------------------------------------------------------------------
 
     const closeDropdown = useCallback(() => {
+      // A debounced search still pending must not reopen the list.
+      clearTimeout(searchTimeoutRef.current);
       searchVersionRef.current++;
       listSourceRef.current = undefined;
       setDropdownOpen(false);
@@ -459,14 +461,14 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // -----------------------------------------------------------------------
 
     const insertMention = useCallback(
-      (result: MentionResult): boolean => {
-        if (!editableRef.current) return false;
+      (result: MentionResult): MentionData | null => {
+        if (!editableRef.current) return null;
 
         const selection = editorSelection(editableRef.current);
-        if (!selection || selection.rangeCount === 0) return false;
+        if (!selection || selection.rangeCount === 0) return null;
 
         const range = selection.getRangeAt(0);
-        if (range.startContainer.nodeType !== Node.TEXT_NODE) return false;
+        if (range.startContainer.nodeType !== Node.TEXT_NODE) return null;
 
         const textNode = range.startContainer as Text;
         const text = textNode.textContent || '';
@@ -484,7 +486,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             }
           }
         }
-        if (triggerPos === -1) return false;
+        if (triggerPos === -1) return null;
 
         // The trigger the user typed: an entity found with `@` stays `@` whatever its type.
         const char = text[triggerPos]!;
@@ -514,7 +516,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           requestAnimationFrame(() => {
             onChange?.(getFullValue());
           });
-          return true;
+          return mentionData;
         }
 
         // Non-command: insert chip element
@@ -524,7 +526,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         const afterText = text.slice(cursorPos);
 
         const parent = textNode.parentNode;
-        if (!parent) return false;
+        if (!parent) return null;
 
         const beforeNode = document.createTextNode(beforeText);
         const afterNode = document.createTextNode(' ' + afterText);
@@ -546,7 +548,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         requestAnimationFrame(() => {
           onChange?.(getFullValue());
         });
-        return true;
+        return mentionData;
       },
       [triggers, commandPills, createChipElement, closeDropdown, onChange, getFullValue],
     );
@@ -683,12 +685,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
      * present. A command that was restored as a chip (setValue) is still in
      * the state too; the chip is its entry, so it is not listed twice.
      */
-    const collectMentions = useCallback((text: string): MentionData[] => {
+    const collectMentions = useCallback((text: string, inserted: ReadonlyArray<MentionData> = []): MentionData[] => {
       if (!hasMentionSupport) return [];
       const chips = getMentionsFromDOM();
       const chipped = new Set(chips.map((chip) => `${chip.type}\u0000${chip.id}`));
       const tokens = new Set(text.split(/\s+/));
-      const commands = mentions.filter((mention) =>
+      const commands = [...mentions, ...inserted].filter((mention) =>
         mention.type === 'command'
         && !chipped.has(`${mention.type}\u0000${mention.id}`)
         && typeof mention.prefix === 'string'
@@ -697,7 +699,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       return [...chips, ...commands];
     }, [hasMentionSupport, mentions, getMentionsFromDOM]);
 
-    const submit = useCallback(() => {
+    /** `inserted`: mentions added in this tick, not yet in the `mentions` state (a `run` pick). */
+    const submit = useCallback((inserted: ReadonlyArray<MentionData> = []) => {
       if (disabled) return;
 
       const text = hasMentionSupport
@@ -706,7 +709,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
       if (!text && !allowEmptySubmit) return;
 
-      if (onSubmit?.(text, text ? collectMentions(text) : []) === false) return;
+      if (onSubmit?.(text, text ? collectMentions(text, inserted) : []) === false) return;
       setValue('');
       if (hasMentionSupport) {
         setMentions([]);
@@ -723,7 +726,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         closeDropdown();
         return;
       }
-      const kind = result.select ?? triggers.get(active.trigger)?.select ?? 'chip';
+      const selected = result.select ?? triggers.get(active.trigger)?.select ?? 'chip';
+      // A `list` without a sub-list would show the same list again: it inserts a pill instead.
+      const kind = selected === 'list' && result.listSource === undefined ? 'chip' : selected;
       if (kind === 'text') {
         if (replaceQuery(() => result.insertText ?? result.label) === null) return;
         closeDropdown();
@@ -743,7 +748,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         return;
       }
       // `run` sends through the same path as Enter, so a disabled (streaming) composer sends nothing.
-      if (insertMention(result) && kind === 'run') submit();
+      const inserted = insertMention(result);
+      if (inserted && kind === 'run') submit([inserted]);
     }, [detectTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, performSearch, insertMention, submit]);
 
     const handleKeyDown = useCallback(
