@@ -1,6 +1,6 @@
 import { useState, type SyntheticEvent } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
-import type { ChatLocale, TurnNoticeProps, TurnNoticeStatus } from '../types.js';
+import type { ChatLocale, TurnNoticeProps, TurnNoticeStatus, TurnOutcome } from '../types.js';
 import type { ActivityStep, ActivityStepStatus } from '../utils/activity.js';
 import { StatusIcon, type StatusIconKind } from './status-icon.js';
 
@@ -12,6 +12,8 @@ export interface ActivityLogProps {
   notice?: string;
   /** Status behind `notice`, handed to a `components.TurnNotice` slot (default `'error'`). */
   noticeStatus?: TurnNoticeStatus;
+  /** The recorded outcome of the turn, handed to a `components.TurnNotice` slot. */
+  noticeOutcome?: TurnOutcome;
   className?: string;
 }
 
@@ -85,7 +87,7 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
  *
  * Keeps styling neutral via `data-*` attributes.
  */
-export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, className }: ActivityLogProps) {
+export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, noticeOutcome, className }: ActivityLogProps) {
   const { locale, toolLabels, components, activityLog } = useChatContext();
   // Once the turn no longer runs: a UI action still waiting was never confirmed, a call still running was stopped
   // (a step waiting for approval stays waiting).
@@ -176,7 +178,14 @@ export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, cla
           </li>
         ))}
       </ol>
-      {notice && <NoticeComponent text={notice} status={noticeStatus ?? 'error'} placement="log" />}
+      {notice && (
+        <NoticeComponent
+          text={notice}
+          status={noticeStatus ?? 'error'}
+          placement="log"
+          {...(noticeOutcome ? { outcome: noticeOutcome } : {})}
+        />
+      )}
     </details>
   );
 }

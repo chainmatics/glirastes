@@ -23,6 +23,8 @@ import type {
   TruncationInfo,
   PipelineState,
   PipelineStepReport,
+  TurnOutcome,
+  TurnOutcomeReason,
   SessionSummary,
   ChatQueueApi,
   ChatQueuePauseTrigger,
@@ -72,6 +74,7 @@ import { continuesAfterPageLoad, shouldContinueChat, waitingToolCallIds } from '
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
+import { latestUserMessageId, readStoredTurnOutcomes, withStoredTurnOutcomes } from '../utils/turn-outcomes.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
   parseClarificationAnswer,
@@ -294,12 +297,28 @@ function getMentionTypesForTrigger(types: string[], trigger: MentionTrigger): st
   return types;
 }
 
+/** A message kept out of the transport (and so out of every request) but still shown and stored, after `afterId`. */
+interface HeldMessage {
+  message: ChatMessage;
+  afterId: string | null;
+}
+
 /**
  * Remove orphaned tool calls (approval-requested without response)
  * from message history to prevent AI_MissingToolResultsError.
+ *
+ * `messages` is what the transport keeps and sends (unchanged since 0.19.0:
+ * an assistant message without text and without a finished tool result is
+ * left out). `held` are the left-out messages that still show a tool step
+ * (a call a stop cut off, a failed or declined one): the chat keeps showing
+ * and storing them, at their place, without sending them.
  */
-function sanitizeMessages<T extends { role: string; parts: unknown[] }>(msgs: T[]): T[] {
-  return msgs.map((message) => {
+function sanitizeMessages<T extends { id?: string; role: string; parts: unknown[] }>(
+  msgs: T[],
+): { messages: T[]; held: HeldMessage[] } {
+  const held: HeldMessage[] = [];
+  let previousId: string | null = null;
+  const messages = msgs.map((message) => {
     if (message.role !== 'assistant') return message;
 
     const sanitizedParts = message.parts.filter((part) => {
@@ -316,6 +335,9 @@ function sanitizeMessages<T extends { role: string; parts: unknown[] }>(msgs: T[
     // Same object when unchanged, so callers compare by identity, not by serializing file data.
     return sanitizedParts.length === message.parts.length ? message : { ...message, parts: sanitizedParts };
   }).filter((message) => {
+    const afterId = previousId;
+    // The anchor of a later held message: a message that is kept or held.
+    if (typeof message.id === 'string') previousId = message.id;
     if (message.role === 'assistant') {
       const hasContent = message.parts.some((part) =>
         isRecord(part) && typeof part.text === 'string' &&
@@ -328,10 +350,39 @@ function sanitizeMessages<T extends { role: string; parts: unknown[] }>(msgs: T[
         }
         return false;
       });
-      return hasContent || hasToolOutput || message.parts.length === 0;
+      const kept = hasContent || hasToolOutput || message.parts.length === 0;
+      if (!kept && typeof message.id === 'string' && message.parts.some((part) => (
+        isRecord(part) && typeof part.type === 'string' && part.type.startsWith('tool-')
+      ))) {
+        held.push({ message: message as unknown as ChatMessage, afterId });
+      } else if (!kept) {
+        previousId = afterId;
+      }
+      return kept;
     }
     return true;
   }) as T[];
+  return { messages, held };
+}
+
+/** The transport's messages with the held ones back at their place; a held message whose anchor is gone is dropped. */
+function withHeldMessages(messages: ChatMessage[], held: ReadonlyArray<HeldMessage>): ChatMessage[] {
+  if (held.length === 0) return messages;
+  const result: ChatMessage[] = [];
+  const pending = held.filter((entry) => !messages.some((message) => message.id === entry.message.id));
+  const place = (afterId: string | null) => {
+    for (const entry of pending) {
+      if (entry.afterId !== afterId || result.includes(entry.message)) continue;
+      result.push(entry.message);
+      place(entry.message.id);
+    }
+  };
+  place(null);
+  for (const message of messages) {
+    result.push(message);
+    place(message.id);
+  }
+  return result;
 }
 
 /**
@@ -651,13 +702,16 @@ export function AiChatProvider({
     ? userActivityLog!.details!
     : 'auto';
   const activityGrouping = userActivityLog?.grouping === 'sections' ? 'sections' : 'message';
+  const activityNoticeScope = userActivityLog?.noticeScope === 'latest' ? 'latest' : 'every';
   const activityLogConfig = useMemo<Required<ActivityLogConfig>>(() => ({
     expandWhileRunning: activityExpandWhileRunning,
     runningProgress: activityRunningProgress,
     noticePlacement: activityNoticePlacement,
     details: activityDetails,
     grouping: activityGrouping,
-  }), [activityExpandWhileRunning, activityRunningProgress, activityNoticePlacement, activityDetails, activityGrouping]);
+    noticeScope: activityNoticeScope,
+  }), [activityExpandWhileRunning, activityRunningProgress, activityNoticePlacement, activityDetails, activityGrouping,
+    activityNoticeScope]);
   const toolRendererRegistry = useMemo(
     () => (toolRenderers && toolRenderers.length > 0
       ? createToolResultRendererRegistry(toolRenderers)
@@ -782,6 +836,25 @@ export function AiChatProvider({
   const [truncation, setTruncation] = useState<TruncationInfo | null>(null);
   const [pipelineSteps, setPipelineSteps] = useState<PipelineStepReport[]>([]);
   const [pipelineState, setPipelineState] = useState<PipelineState | null>(null);
+  // How each turn ended, keyed by the user message that started it; stored with the history.
+  const [turnOutcomes, setTurnOutcomes] = useState<ReadonlyMap<string, TurnOutcome>>(() => new Map());
+  // Messages left out of the transport before a send (as in 0.19.0) that still show a step: shown and stored, never sent.
+  const [heldMessages, setHeldMessages] = useState<ReadonlyArray<HeldMessage>>([]);
+  /**
+   * Records how the turn of the latest user message ended. A later report of the same status keeps the first;
+   * `onlyIfNone` (a run that ended by itself) never replaces a stop or failure recorded during the run.
+   */
+  const recordTurnOutcome = useCallback((status: TurnOutcome['status'], reason: TurnOutcomeReason, onlyIfNone = false) => {
+    const userMessageId = latestUserMessageId(rawMessagesRef.current as unknown as ChatMessage[]);
+    if (!userMessageId) return;
+    setTurnOutcomes((prev) => {
+      const current = prev.get(userMessageId);
+      if (current?.status === status || (onlyIfNone && current)) return prev;
+      const next = new Map(prev);
+      next.set(userMessageId, { userMessageId, status, reason, at: new Date().toISOString() });
+      return next;
+    });
+  }, []);
 
   // Pagination
   const [visibleMessageCount, setVisibleMessageCount] = useState(30);
@@ -933,9 +1006,14 @@ export function AiChatProvider({
       const nextState = normalizePipelineState(dataPart.data);
       if (nextState) {
         setPipelineState(nextState);
+        // A request of a chat that was left reports to that chat, not to the latest turn here.
+        if (!staleRequestRef.current
+          && (nextState.status === 'aborted' || nextState.status === 'error' || nextState.status === 'safety-stop')) {
+          recordTurnOutcome(nextState.status, 'pipeline');
+        }
       }
     }
-  }, []);
+  }, [recordTurnOutcome]);
 
   const resolvedTransport = transport;
 
@@ -1158,6 +1236,11 @@ export function AiChatProvider({
   }, [settleForPageLoad]);
   const error = transportError ?? (sessionLoadFailure?.id === activeSessionId ? sessionLoadFailure.error : null);
 
+  // A request that failed: its turn keeps the failure (also without an assistant message).
+  useEffect(() => {
+    if (transportError) recordTurnOutcome('error', 'request-failed');
+  }, [transportError, recordTurnOutcome]);
+
   useEffect(() => {
     if (!error) return;
     setPipelineState((prev) => ({
@@ -1208,6 +1291,8 @@ export function AiChatProvider({
     approvalSessionRef.current = activeSessionId;
     resetUiActions();
     setPendingApprovalsMap(new Map());
+    // Held messages belong to the chat that was left.
+    setHeldMessages([]);
   }, [activeSessionId, resetUiActions]);
 
   // Load messages from session whenever the active session changes.
@@ -1233,6 +1318,8 @@ export function AiChatProvider({
     setLoadedSessionId(null);
     setSessionLoadFailure(null);
     setMessages([] as unknown as typeof rawMessages);
+    setTurnOutcomes(new Map());
+    setHeldMessages([]);
 
     (async () => {
       try {
@@ -1245,13 +1332,14 @@ export function AiChatProvider({
         setPendingApprovalsMap(new Map());
         // Coerce wire-shape rows (with `content: string`) into SDK
         // messages (with `parts: [...]`) so bridges don't have to.
-        const coerced = loaded ? coerceLoadedMessages(loaded as unknown[]) : [];
+        const stored = readStoredTurnOutcomes(loaded ? coerceLoadedMessages(loaded as unknown[]) : []);
+        const coerced = stored.messages;
+        setTurnOutcomes(stored.outcomes);
         if (coerced.length > 0) {
           markStoredMessagesAsProcessed(coerced as unknown[]);
-          const sanitized = sanitizeMessages(
-            coerced as unknown as Array<{ role: string; parts: unknown[] }>,
-          );
-          setMessages(sanitized as unknown as typeof rawMessages);
+          const sanitized = sanitizeMessages(coerced as unknown as ChatMessage[]);
+          setMessages(sanitized.messages as unknown as typeof rawMessages);
+          setHeldMessages(sanitized.held);
           // A turn whose UI action loaded this page may continue once (see below).
           loadedHistoryRef.current = activeSessionId;
         } else {
@@ -1309,9 +1397,12 @@ export function AiChatProvider({
     const cfg = sessionRef.current;
     if (!cfg?.save) return;
     void Promise.resolve(
-      cfg.save(activeSessionId, rawMessages as unknown as ChatMessage[]),
+      cfg.save(activeSessionId, withStoredTurnOutcomes(
+        withHeldMessages(rawMessages as unknown as ChatMessage[], heldMessages),
+        turnOutcomes,
+      )),
     );
-  }, [rawMessages, isInitialized, activeSessionId, loadedSessionId]);
+  }, [rawMessages, heldMessages, turnOutcomes, isInitialized, activeSessionId, loadedSessionId]);
 
 
   const runUiActions = useCallback((toolName: string, toolCallId: string, output: unknown) => {
@@ -1669,11 +1760,13 @@ export function AiChatProvider({
 
     // Sanitize messages before sending to prevent AI_MissingToolResultsError
     const currentMessages = rawMessages;
-    const sanitized = sanitizeMessages(currentMessages as unknown as Array<{ role: string; parts: unknown[] }>);
+    const { messages: sanitized, held } = sanitizeMessages(currentMessages as unknown as ChatMessage[]);
     if (
       sanitized.length !== currentMessages.length
       || sanitized.some((message, index) => message !== (currentMessages[index] as unknown))
     ) {
+      // What is left out is not sent; a message that still shows a step stays on screen and in the store.
+      if (held.length > 0) setHeldMessages((prev) => [...prev, ...held]);
       setMessages(sanitized as unknown as typeof rawMessages);
       setPendingApprovalsMap(new Map());
     }
@@ -1958,6 +2051,8 @@ export function AiChatProvider({
   const consumeComposerMentions = useCallback(() => setComposerMentions([]), []);
 
   const stop = useCallback(() => {
+    // The running turn keeps that it was stopped, also when nothing of its answer arrived yet.
+    if (streamActiveRef.current) recordTurnOutcome('aborted', selfAbortRef.current ? 'send-now' : 'stopped');
     // The user stopped the run: what is queued waits (unless `sendNow` stopped it to go next).
     if (
       queueEnabledRef.current && !selfAbortRef.current && queueConfig.pauseOn.has('aborted')
@@ -1975,7 +2070,7 @@ export function AiChatProvider({
       message: 'Stopped by user.',
     }));
     transportStop();
-  }, [transportStop, pipelineSteps.length, queueConfig.pauseOn, queueStore]);
+  }, [transportStop, pipelineSteps.length, queueConfig.pauseOn, queueStore, recordTurnOutcome]);
 
   const clear = useCallback(() => {
     resetUiActions();
@@ -1988,6 +2083,8 @@ export function AiChatProvider({
     setTruncation(null);
     setPipelineSteps([]);
     setPipelineState(null);
+    setTurnOutcomes(new Map());
+    setHeldMessages([]);
     setMentionQuery('');
     setMentionTrigger(null);
     setMentionResults([]);
@@ -2146,7 +2243,7 @@ export function AiChatProvider({
   );
 
   // Pagination + consolidation (removes duplicate assistant bubbles from pipeline resumes)
-  const allMessages = rawMessages as unknown as ChatMessage[];
+  const allMessages = withHeldMessages(rawMessages as unknown as ChatMessage[], heldMessages);
   const consolidated = consolidateAssistantMessages(allMessages);
   const hasMore = consolidated.length > visibleMessageCount;
   const visibleMessages = hasMore
@@ -2156,6 +2253,40 @@ export function AiChatProvider({
   const loadMore = useCallback(() => {
     setVisibleMessageCount(prev => prev + 10);
   }, []);
+
+  // A run ended by itself: its turn completed, unless it stopped or failed meanwhile, or an approval holds it.
+  const outcomeRunEndRef = useRef(isLoading);
+  useEffect(() => {
+    const ended = outcomeRunEndRef.current && !isLoading;
+    outcomeRunEndRef.current = isLoading;
+    if (!ended || staleRequestRef.current) return;
+    if (status === 'error' || transportError) {
+      recordTurnOutcome('error', 'request-failed');
+      return;
+    }
+    // The turn goes on once the approval is decided.
+    const current = rawMessagesRef.current;
+    const turnStart = current.map((message) => message.role).lastIndexOf('user');
+    const waiting = current.slice(turnStart + 1).some((message) => message.role === 'assistant'
+      && (message.parts as unknown[]).some((part) => isRecord(part) && part.state === 'approval-requested'));
+    if (!waiting) recordTurnOutcome('completed', 'finished', true);
+  }, [isLoading, status, transportError, recordTurnOutcome]);
+
+  // A request started for a turn that already ended (a retry): its outcome follows the new attempt.
+  const outcomeRunLoadingRef = useRef(isLoading);
+  useEffect(() => {
+    const started = isLoading && !outcomeRunLoadingRef.current;
+    outcomeRunLoadingRef.current = isLoading;
+    if (!started) return;
+    const userMessageId = latestUserMessageId(rawMessagesRef.current as unknown as ChatMessage[]);
+    if (!userMessageId) return;
+    setTurnOutcomes((prev) => {
+      if (!prev.has(userMessageId)) return prev;
+      const next = new Map(prev);
+      next.delete(userMessageId);
+      return next;
+    });
+  }, [isLoading]);
 
   // A request started: every answer before it was sent.
   useEffect(() => {
@@ -2522,6 +2653,7 @@ export function AiChatProvider({
       hasMore,
       pipelineSteps,
       pipelineState,
+      turnOutcomes,
       pendingApprovals,
       approvalReminder,
       approve,
@@ -2621,6 +2753,7 @@ export function AiChatProvider({
       hasMore,
       pipelineSteps,
       pipelineState,
+      turnOutcomes,
       pendingApprovals,
       approvalReminder,
       approve,

@@ -40,7 +40,9 @@ import type {
   TextPart,
   ToolPartApproval,
   TurnNoticeStatus,
+  TurnOutcome,
 } from '../types.js';
+import { turnStartId } from '../utils/turn-outcomes.js';
 
 // Lazy-load react-markdown — keeps it out of the synchronous import graph so
 // server-only consumers don't pay for it, and gracefully degrades to raw text
@@ -162,7 +164,15 @@ function pipelineNotice(
   state: PipelineState | null,
   locale: ChatLocale,
 ): { text: string; status: TurnNoticeStatus } | undefined {
-  switch (state?.status) {
+  return statusNotice(state?.status, locale);
+}
+
+/** Locale text of a turn notice status. */
+export function statusNotice(
+  status: string | undefined,
+  locale: ChatLocale,
+): { text: string; status: TurnNoticeStatus } | undefined {
+  switch (status) {
     case 'safety-stop':
       return { text: locale.pipelineSafetyStopLabel, status: 'safety-stop' };
     case 'aborted':
@@ -292,6 +302,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     approvalDisplay,
     entityDeclarations,
     language,
+    turnOutcomes,
   } = useChatContext();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
@@ -354,8 +365,19 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   const planItems = isAssistant ? readLatestPlan(message.parts) : null;
   const hasPlan = (planItems?.length ?? 0) >= 2;
   const turnActive = isLatestMessage && isLoading;
-  // Only an assistant turn carries the notice; a stored turn (not the latest) has none.
-  const notice = isAssistant && isLatestMessage ? pipelineNotice(pipelineState, locale) : undefined;
+  const turnId = turnOutcomes && turnOutcomes.size > 0 ? turnStartId(messages ?? [message], message.id) : null;
+  const turnOutcome: TurnOutcome | null = (turnId ? turnOutcomes?.get(turnId) : undefined) ?? null;
+  // `noticeScope: 'every'` (default): an earlier turn shows its recorded outcome, the latest one too once its
+  // pipeline state is gone (a reload). `'latest'`: only the latest turn's pipeline state, as before 0.20.0.
+  const storedNotice = (activityLog?.noticeScope ?? 'every') === 'every' && turnOutcome && !turnActive
+    ? statusNotice(turnOutcome.status, locale)
+    : undefined;
+  // Only an assistant message carries the notice in the bubble (a turn without one: `MessageList`).
+  const notice = isAssistant
+    ? (isLatestMessage ? pipelineNotice(pipelineState, locale) ?? storedNotice : storedNotice)
+    : undefined;
+  const noticeOutcome = notice && turnOutcome ? { outcome: turnOutcome } : {};
+  const logNoticeOutcome = notice && turnOutcome ? { noticeOutcome: turnOutcome } : {};
   // Inside the log by default; outside it on request, and always when there is no log to hold it.
   const noticeInLog = notice !== undefined
     && (activityLog?.noticePlacement ?? 'log') === 'log'
@@ -609,7 +631,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         steps={section.steps}
         // An earlier section with a call still running is part of the running turn too (not stopped).
         active={turnActive && (last || section.steps.some((step) => step.status === 'running'))}
-        {...(last && notice && noticeInLog ? { notice: notice.text, noticeStatus: notice.status } : {})}
+        {...(last && notice && noticeInLog ? { notice: notice.text, noticeStatus: notice.status, ...logNoticeOutcome } : {})}
       />
     );
     logsAt.set(section.start, scoped(log));
@@ -623,12 +645,12 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         <ActivityLog
           steps={activitySteps}
           active={turnActive}
-          {...(notice && noticeInLog ? { notice: notice.text, noticeStatus: notice.status } : {})}
+          {...(notice && noticeInLog ? { notice: notice.text, noticeStatus: notice.status, ...logNoticeOutcome } : {})}
         />
       )
       : null,
     notice: notice && !noticeInLog
-      ? <TurnNoticeComponent text={notice.text} status={notice.status} placement="message" />
+      ? <TurnNoticeComponent text={notice.text} status={notice.status} placement="message" {...noticeOutcome} />
       : null,
     attachments: fileParts.length > 0
       ? (
@@ -677,6 +699,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   return {
     visible,
     parts,
+    turnOutcome,
     logsAt,
     plan: scoped(nodes.plan),
     activity: scoped(nodes.activity),
@@ -699,7 +722,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
  */
 export function MessageBubble({ message, className }: MessageBubbleProps) {
   const { classNames, components, approvalDisplay } = useChatContext();
-  const { visible, parts, logsAt, ...nodes } = useMessagePartsWithLogs(message);
+  const { visible, parts, logsAt, turnOutcome, ...nodes } = useMessagePartsWithLogs(message);
   if (!visible) return null;
   // With `approvalDisplay` placing approvals at their tool part, a message that
   // has one renders its text and tool parts in message order, so the approval
@@ -741,7 +764,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
       data-component="message-bubble"
       data-role={message.role}
     >
-      {Arrange ? <Arrange message={message} parts={parts} {...nodes}>{ordered}</Arrange> : ordered}
+      {Arrange ? <Arrange message={message} parts={parts} turnOutcome={turnOutcome} {...nodes}>{ordered}</Arrange> : ordered}
     </div>
   );
 }

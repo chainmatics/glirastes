@@ -84,16 +84,34 @@ Defaults keep today's markup; everything below is opt-in.
   step, `'all'` / `'none'` show every / no detail. `grouping: 'sections'`
   renders one log per run of steps at its place between the texts of a
   message (text, steps, text); with it the logs are part of the `text` node
-  and `activity` is `null` for such a message.
-- `components.TurnNotice` receives `{ text, status, placement }` (`status` is a
+  and `activity` is `null` for such a message. `noticeScope` (default `'every'`)
+  keeps the notice on every stopped, failed or safety-stopped turn, after
+  later turns and a reload, in the same place as for the latest turn; a turn
+  that ended before an assistant message existed shows it as
+  `turn-notice` right after its question. `'latest'` is the behaviour
+  before 0.20.0 (latest turn only). An app that draws its own notice sets
+  `'latest'` or `components.TurnNotice: () => null`, else both show.
+- `components.TurnNotice` receives `{ text, status, placement, outcome? }` (`status` is a
   `TurnNoticeStatus`)
-  (`placement` is `'log'` inside the log, `'message'` outside). The default
+  (`placement` is `'log'` inside the log, `'message'` outside; `outcome` the
+  turn's `TurnOutcome` when one is recorded). The default
   is exported as `TurnNotice` for wrapping.
+- Turn outcomes: `useTurnOutcome(message)` returns the `TurnOutcome`
+  (`{ userMessageId, status, reason, at }`; `TurnOutcomeStatus` `completed` |
+  `aborted` | `safety-stop` | `error`, `TurnOutcomeReason` `finished` |
+  `stopped` | `send-now` | `request-failed` | `pipeline`) of the turn a user
+  or assistant message belongs to, or null; `useTurnOutcomes()` all of them
+  by user message id. Recorded also when the turn has no assistant message
+  (stop or network error before the first token), kept after later turns
+  and, with a session store, after a reload (`metadata.glirastesTurnOutcome`
+  of the stored user message, never in a request). A retry of the turn
+  replaces it. A custom `MessageBubble` also gets it as `turnOutcome`. Draw a
+  per-turn notice from this, not from `pipelineState` (only the latest run's).
 - `components.MessageParts` arranges the parts inside the bubble root and
   receives `message`, the nodes (`MessagePartNodes`) `plan`, `activity`, `notice`, `attachments`,
   `text`, `toolResults` (each `null` when absent) and `children` (all of them
-  in the default order). `useMessageParts(message)` returns the same nodes
-  plus `visible` for a custom `MessageBubble`.
+  in the default order) and `turnOutcome`. `useMessageParts(message)` returns the same nodes
+  plus `visible` and `turnOutcome` for a custom `MessageBubble`.
 - `parts` (in `MessagePartsProps` and from `useMessageParts`): every part of
   the message in message order as a `MessagePartEntry` `{ key, index, kind,
   part, toolName?, toolCallId?, node, approval? }` (`MessagePartKind`

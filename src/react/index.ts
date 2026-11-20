@@ -77,6 +77,9 @@ export type {
   ActivityLogDetails,
   TurnNoticeProps,
   TurnNoticeStatus,
+  TurnOutcome,
+  TurnOutcomeReason,
+  TurnOutcomeStatus,
   MessagePartNodes,
   MessageParts,
   MessagePartsProps,
@@ -268,6 +271,7 @@ export { AiChatPanel } from './components/ai-chat-panel.js';
 export { FloatingChatUI, type FloatingChatUIProps } from './components/floating-chat-ui.js';
 export { MessageList } from './components/message-list.js';
 export { MessageBubble, useMessageParts } from './components/message-bubble.js';
+export { useTurnOutcome, useTurnOutcomes } from './hooks/use-turn-outcome.js';
 export { ChatInput } from './components/chat-input.js';
 export { ChatQueue, useChatQueue } from './components/chat-queue.js';
 export { MentionInput } from './components/mention-input.js';
