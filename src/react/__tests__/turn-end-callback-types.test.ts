@@ -21,6 +21,15 @@ describe('onTurnEnd types', () => {
     expectTypeOf(config).toMatchTypeOf<AiChatProviderConfig>();
   });
 
+  it('takes a sync and an async function (a rejection is caught at runtime)', () => {
+    const sync: OnTurnEnd = (_outcome, _info) => {};
+    const async: OnTurnEnd = async (_outcome, _info) => {};
+    const config: AiChatProviderConfig = { onTurnEnd: async (outcome) => { void outcome.status; } };
+    expectTypeOf(sync).toMatchTypeOf<OnTurnEnd>();
+    expectTypeOf(async).toMatchTypeOf<OnTurnEnd>();
+    expectTypeOf(config.onTurnEnd).toEqualTypeOf<OnTurnEnd | undefined>();
+  });
+
   it('passes through the <glirastes-chat> config', () => {
     expectTypeOf<GlirastesChatElementConfig['onTurnEnd']>().toEqualTypeOf<OnTurnEnd | undefined>();
   });

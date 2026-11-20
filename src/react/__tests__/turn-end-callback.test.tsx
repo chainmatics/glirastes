@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GLIRASTES_NAVIGATE_ACTION_ID, registerNavigationBridge, UiActionBus } from '../../browser/index.js';
+import { GLIRASTES_NAVIGATE_ACTION_ID, registerDocumentNavigation, registerNavigationBridge, UiActionBus } from '../../browser/index.js';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import { clearLocalSessionStore, createLocalSessionStore } from '../utils/local-session-store.js';
 import type {
@@ -15,6 +15,8 @@ import type {
   TurnOutcome,
 } from '../types.js';
 import { ctx, Host, memoryStorage, Probe, StreamingChat } from './streaming-chat.js';
+
+const RENDERS_IN_0_20_0 = 13;
 
 type Call = { outcome: TurnOutcome; info: TurnEndInfo; inState: TurnOutcome | undefined; loading: boolean };
 
@@ -266,6 +268,32 @@ describe('onTurnEnd: not for history, other chats or a cleared run', () => {
     expect(calls.map((call) => [call.outcome.status, call.info.sessionId])).toEqual([['completed', 'A']]);
   });
 
+  it('A to B to A while A runs, then it fails: once, because A is the open chat when its turn ends', async () => {
+    const histories: Record<string, ChatMessage[]> = {
+      A: [],
+      B: [{ id: 'b-u1', role: 'user', parts: [{ type: 'text', text: 'b' }] }],
+    };
+    const session = (activeId: string): SessionConfig => ({
+      activeId,
+      load: async (id: string) => histories[id] ?? [],
+      save: (id: string, messages: ChatMessage[]) => { histories[id] = messages; },
+    });
+    const { calls, onTurnEnd } = recorder();
+    const chat = new StreamingChat();
+    const view = render(<Host chat={chat} config={{ session: session('A'), onTurnEnd }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    const aUser = userId(chat);
+    view.rerender(<Host chat={chat} config={{ session: session('B'), onTurnEnd }} />);
+    await waitFor(() => expect(ctx.messages.map((message) => message.id)).toEqual(['b-u1']));
+    view.rerender(<Host chat={chat} config={{ session: session('A'), onTurnEnd }} />);
+    await waitFor(() => expect(ctx.messages.map((message) => message.id)).toEqual([aUser]));
+    await act(async () => { chat.fail(); });
+    await settle();
+    expect(calls.map((call) => [call.outcome.userMessageId, call.outcome.status, call.outcome.reason, call.info.sessionId]))
+      .toEqual([[aUser, 'error', 'request-failed', 'A']]);
+  });
+
   it('clear() while a request runs: its end reports nothing', async () => {
     const { calls, onTurnEnd } = recorder();
     const chat = new StreamingChat();
@@ -309,6 +337,24 @@ describe('onTurnEnd: robustness', () => {
     expect(ctx.turnOutcomes.size).toBe(2);
   });
 
+  it('an async callback that rejects is caught and reported like a throw', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const onTurnEnd = vi.fn(async () => { throw new Error('async app bug'); });
+      const chat = new StreamingChat();
+      render(<Host chat={chat} config={{ onTurnEnd }} />);
+      await act(async () => { ctx.send('one'); });
+      act(() => chat.finish());
+      await settle(30);
+      expect(onTurnEnd).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('[glirastes] onTurnEnd threw');
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
   it('uses the latest callback without a stale closure', async () => {
     const first = vi.fn();
     const second = vi.fn();
@@ -320,6 +366,33 @@ describe('onTurnEnd: robustness', () => {
     await settle();
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it('without onTurnEnd the provider renders as often as in 0.20.0 (no extra render)', async () => {
+    let renders = 0;
+    const chat = new StreamingChat();
+    // Every commit of the provider's tree, also the ones its own state updates cause.
+    function CountingHost() {
+      const [, force] = React.useReducer((count: number) => count + 1, 0);
+      React.useEffect(() => chat.subscribe(force), []);
+      return (
+        <React.Profiler id="chat" onRender={() => { renders += 1; }}>
+          <AiChatProvider transport={chat.transport}><Probe /></AiChatProvider>
+        </React.Profiler>
+      );
+    }
+    render(<CountingHost />);
+    await settle();
+    const start = renders;
+    await act(async () => { ctx.send('one'); });
+    await act(async () => { ctx.stop(); });
+    await act(async () => { ctx.send('two'); });
+    act(() => chat.finish());
+    await act(async () => { ctx.send('three'); });
+    act(() => chat.fail());
+    await settle();
+    // Measured with the provider of 0.20.0 (origin/main before this change) for the same sequence.
+    expect(renders - start).toBe(RENDERS_IN_0_20_0);
   });
 
   it('without onTurnEnd the outcomes and the requests are as before', async () => {
@@ -343,9 +416,12 @@ describe('onTurnEnd: a turn whose UI action outcome continues it with a second r
   };
   let control: { set(messages: ChatMessage[], status?: ChatTransport['status']): void };
 
-  /** Like the bundled transport: writing the outcome starts the continuation request at once. */
-  function OutcomeHost({ config }: { config: AiChatProviderConfig }) {
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /**
+   * Like the bundled transport: writing the outcome puts it into the result and starts the continuation
+   * request at once, except for a page load (`initiated`: the next page continues with `continueTurn`).
+   */
+  function OutcomeHost({ config, initial = [] }: { config: AiChatProviderConfig; initial?: ChatMessage[] }) {
+    const [messages, setMessages] = useState<ChatMessage[]>(initial);
     const [status, setStatus] = useState<ChatTransport['status']>('ready');
     control = { set: (next, nextStatus) => { setMessages(next); if (nextStatus) setStatus(nextStatus); } };
     const transport = useMemo<ChatTransport>(() => ({
@@ -356,7 +432,16 @@ describe('onTurnEnd: a turn whose UI action outcome continues it with a second r
       stop: () => {},
       setMessages,
       addToolApprovalResponse: () => {},
-      addToolOutput: async () => { setStatus('submitted'); },
+      addToolOutput: async (value: { tool: string; toolCallId: string; output: unknown }) => {
+        setMessages((current) => current.map((message, index) => (index !== current.length - 1 ? message : {
+          ...message,
+          parts: message.parts.map((part) => ((part as { toolCallId?: string }).toolCallId === value.toolCallId
+            ? { ...part, output: value.output }
+            : part)),
+        }) as ChatMessage));
+        if (((value.output as { outcome?: { code?: string } }).outcome)?.code !== 'initiated') setStatus('submitted');
+      },
+      continueTurn: () => { setStatus('submitted'); },
       setUiOutcomeReporting: () => {},
     }), [messages, status]);
     return <AiChatProvider transport={transport} {...config}><Probe /></AiChatProvider>;
@@ -386,4 +471,121 @@ describe('onTurnEnd: a turn whose UI action outcome continues it with a second r
     expect(seen()).toEqual(['completed/finished']);
     stopBridge();
   });
+
+  it('a UI action that loads a new page: nothing on the page that is left, once on the page that continues the turn', async () => {
+    sessionStorage.clear();
+    const stored: Record<string, ChatMessage[]> = {};
+    const session: SessionConfig = {
+      load: async (id: string) => stored[id] ?? [],
+      save: (id: string, messages: ChatMessage[]) => { stored[id] = messages; },
+    };
+    const pagePart = { ...uiPart, toolCallId: 'c-page' };
+    const first = { id: 'a1', role: 'assistant', parts: [{ type: 'step-start' }, pagePart] } as unknown as ChatMessage;
+    const bus = new UiActionBus();
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    const stopNavigation = registerDocumentNavigation({ bus });
+    const page1 = recorder();
+    const view = render(<OutcomeHost config={{ uiActionBus: bus, session, onTurnEnd: page1.onTurnEnd }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { control.set([user], 'submitted'); });
+    await act(async () => { control.set([user, first], 'streaming'); });
+    await act(async () => { control.set([user, first], 'ready'); });
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    await settle(60);
+    // The page goes: the turn goes on on the next page.
+    expect(page1.seen()).toEqual([]);
+    view.unmount();
+    stopNavigation();
+    vi.unstubAllGlobals();
+
+    const page2 = recorder();
+    render(<OutcomeHost config={{ session, onTurnEnd: page2.onTurnEnd }} />);
+    await waitFor(() => expect(ctx.isLoading).toBe(true));
+    const saved = ctx.messages;
+    await settle();
+    expect(page2.seen()).toEqual([]);
+    const answer = { id: 'a2', role: 'assistant', parts: [{ type: 'step-start' }, { type: 'text', text: 'Opened.' }] } as unknown as ChatMessage;
+    await act(async () => { control.set([...saved, answer], 'streaming'); });
+    await act(async () => { control.set([...saved, answer], 'ready'); });
+    await settle();
+    expect(page2.seen()).toEqual(['completed/finished']);
+    expect(page2.calls[0]!.outcome.userMessageId).toBe('u1');
+  });
+});
+
+describe('onTurnEnd: a turn that reaches an approval', () => {
+  const approvalPart = (state: string, approval: Record<string, unknown> = { id: 'ap-1' }) =>
+    tool('c1', state, { approval });
+  const answerApproval = (chat: StreamingChat, approved: boolean) => {
+    chat.messages = chat.messages.map((message) => (message.role !== 'assistant' ? message : {
+      ...message,
+      parts: message.parts.map((part) => ((part as { state?: string }).state === 'approval-requested'
+        ? { ...part, state: 'approval-responded', approval: { id: 'ap-1', approved } }
+        : part)),
+    }) as ChatMessage);
+  };
+
+  /** The server's safety stop on the last allowed step, which asks for an approval (finishReason 'tool-calls'). */
+  async function safetyStopAtApproval(chat: StreamingChat) {
+    await act(async () => { ctx.send('one'); });
+    act(() => chat.stream([stepStart, approvalPart('input-available')]));
+    act(() => chat.emit(pipelineState('safety-stop')));
+    act(() => chat.finish([stepStart, approvalPart('approval-requested')]));
+    await settle();
+  }
+
+  it.each([true, false])('safety stop at an open approval: nothing while it is open; once after the decided run (approved %s)', async (approved) => {
+    const { calls, seen, onTurnEnd } = recorder();
+    const chat = new StreamingChat();
+    render(<Host chat={chat} config={{ onTurnEnd }} />);
+    await safetyStopAtApproval(chat);
+    expect(ctx.turnOutcomes.get(userId(chat))?.status).toBe('safety-stop');
+    expect(seen()).toEqual([]);
+    answerApproval(chat, approved);
+    act(() => chat.resume());
+    act(() => chat.finish([stepStart, text(approved ? 'Deleted' : 'Not deleted')]));
+    await settle();
+    expect(seen()).toEqual(['completed/finished']);
+    expect(calls[0]!.inState).toBe(calls[0]!.outcome);
+  });
+
+  it('an approval never decided, then the session is cleared: no call, nothing stays pending', async () => {
+    const { seen, onTurnEnd } = recorder();
+    const chat = new StreamingChat();
+    render(<Host chat={chat} config={{ onTurnEnd }} />);
+    await safetyStopAtApproval(chat);
+    await act(async () => { ctx.clear(); });
+    await settle();
+    expect(seen()).toEqual([]);
+    await act(async () => { ctx.send('two'); });
+    act(() => chat.finish());
+    await settle();
+    expect(seen()).toEqual(['completed/finished']);
+    expect(chat.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  });
+
+  it("the user sends a new message instead of deciding (queue, 'reject-approval', no resend): each turn once", async () => {
+    const { calls, seen, onTurnEnd } = recorder();
+    const chat = new StreamingChat();
+    render(<Host chat={chat} config={{ onTurnEnd, queue: { enabled: true, sendNowDuringApproval: 'reject-approval' } }} />);
+    // A transport that answers the call but does not send on by itself (`autoResumeOnApproval: false`).
+    chat.addToolApprovalResponse.mockImplementation(async (response: { approved: boolean }) => {
+      answerApproval(chat, response.approved);
+      chat.setMessages(chat.messages);
+    });
+    await safetyStopAtApproval(chat);
+    expect(seen()).toEqual([]);
+    const first = userId(chat);
+    await act(async () => { ctx.submit('two'); });
+    await act(async () => { ctx.sendNow(ctx.queue.items[0]!.id); });
+    // The rejected call is not continued; the queue sends after its grace period.
+    await waitFor(() => expect(chat.sent).toEqual(['one', 'two']), { timeout: 4000 });
+    await settle();
+    act(() => chat.finish());
+    await settle();
+    // The left turn ends with what it recorded, once; the new turn once.
+    expect(seen()).toEqual(['safety-stop/pipeline', 'completed/finished']);
+    expect(calls.map((call) => call.outcome.userMessageId)).toEqual([first, userId(chat, 1)]);
+  }, 10_000);
 });

@@ -1507,16 +1507,23 @@ export interface AiChatProviderConfig {
    * Called once when a turn of the open chat ends, with its `TurnOutcome`
    * (every status: `completed`, `aborted` also by `sendNow` with `'abort'`,
    * `safety-stop`, `error` also before the first token or without any
-   * assistant message), after the outcome is in `turnOutcomes`. A turn ends
-   * when its last request is over: not while a run waits for an approval or
-   * for the outcome of a UI action (the continuation request belongs to the
-   * same turn), not at a stop or error the server reports while the run still
-   * streams. A retry (`regenerate`) of the same user message is a new attempt
-   * and reports its own end. Not called for outcomes read from a stored
-   * history (`session.load`, a reload, a history the app hands its
-   * transport), for a turn whose chat was left before it ended (also not when
-   * that chat opens again), or for a run cleared with `clear()`. The latest
-   * function passed is used; a throw inside is caught. Local only.
+   * assistant message), after the outcome is in `turnOutcomes`, with the
+   * outcome `turnOutcomes` then holds. A turn ends when its last request is
+   * over: not while it asks for an approval (also not after a safety stop on
+   * that step: the decided run reports), not while a UI action outcome is
+   * awaited (the continuation request belongs to the same turn), not on a
+   * page a UI action is leaving with a page load (the next page continues the
+   * turn and reports it), not at a stop or error the server reports while the
+   * run still streams. A turn left at an undecided approval for a new message
+   * reports what it recorded, if anything, when the new request starts. A
+   * retry (`regenerate`) of the same user message is a new attempt and
+   * reports its own end. Not called for outcomes read from a stored history
+   * (`session.load`, a reload, a history the app hands its transport), for a
+   * turn whose chat is not the open one when the turn ends (its outcome joins
+   * that chat later without a call; a chat left and opened again before its
+   * turn ended does report it), or for a run cleared with `clear()`. The
+   * latest function passed is used; a throw inside, and the rejection of a
+   * returned promise, is caught and logged. Local only.
    */
   onTurnEnd?: OnTurnEnd;
   /**

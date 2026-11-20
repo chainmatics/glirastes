@@ -111,7 +111,7 @@ export class StreamingChat {
     this.notify();
   });
 
-  addToolApprovalResponse = vi.fn(async () => {});
+  addToolApprovalResponse = vi.fn(async (_response: { id: string; approved: boolean; reason?: string }) => {});
 
   subscribeToData = (handler: ChatTransportDataHandler) => {
     this.dataHandlers.add(handler);

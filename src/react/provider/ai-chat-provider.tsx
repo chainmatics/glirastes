@@ -575,6 +575,17 @@ type PreparedSend =
 /** How long the queue waits after an answered approval for the transport to send it on by itself. */
 const APPROVAL_RESEND_GRACE_MS = 1500;
 
+/** An assistant message of the turn the user message started (up to the next user message) asks for an approval. */
+function turnAwaitsApproval(messages: ReadonlyArray<{ id?: string; role: string; parts: ReadonlyArray<unknown> }>, userMessageId: string): boolean {
+  const start = messages.findIndex((message) => message.role === 'user' && message.id === userMessageId);
+  if (start < 0) return false;
+  for (const message of messages.slice(start + 1)) {
+    if (message.role === 'user') return false;
+    if (message.role === 'assistant' && message.parts.some((part) => isRecord(part) && part.state === 'approval-requested')) return true;
+  }
+  return false;
+}
+
 /** The last assistant message still asks for an approval (before the approval map has it). */
 function lastStepAwaitsApproval(messages: ReadonlyArray<{ role: string; parts: ReadonlyArray<unknown> }>): boolean {
   const last = messages.at(-1);
@@ -2387,7 +2398,9 @@ export function AiChatProvider({
   // `onTurnEnd`: after every commit (declared after the run start and end above, so it sees what they bound),
   // report each live-recorded outcome whose state update is applied, once its turn is over: its request is
   // no longer the running one (a queued `sendNow` started the next), or nothing runs and no UI action outcome
-  // is awaited (a continuation of the same turn would follow). Only for the chat that is open.
+  // is awaited (a continuation of the same turn would follow). Held while the turn asks for an approval (the
+  // decided run goes on with it) and once a UI action started a page load (the next page continues and
+  // reports the turn). Only for the chat that is open.
   useEffect(() => {
     const pending = turnEndPendingRef.current;
     if (pending.size === 0) return;
@@ -2413,9 +2426,16 @@ export function AiChatProvider({
       // Not committed yet, or taken out by a new request for the same turn (that request reports).
       if (!outcome || outcome.status !== recorded.status || outcome.reason !== recorded.reason) continue;
       if (busy && runningFor === userMessageId) continue;
+      if (pageLeavingRef.current) continue;
+      if (turnAwaitsApproval(rawMessagesRef.current, userMessageId)) continue;
       pending.delete(userMessageId);
       try {
-        onTurnEndRef.current?.(outcome, { sessionId });
+        // An async callback's rejection is caught as a throw is.
+        const returned: unknown = onTurnEndRef.current?.(outcome, { sessionId });
+        if ((typeof returned === 'object' || typeof returned === 'function') && returned !== null
+          && typeof (returned as { then?: unknown }).then === 'function') {
+          (returned as PromiseLike<unknown>).then(undefined, () => { console.warn('[glirastes] onTurnEnd threw'); });
+        }
       } catch {
         console.warn('[glirastes] onTurnEnd threw');
       }

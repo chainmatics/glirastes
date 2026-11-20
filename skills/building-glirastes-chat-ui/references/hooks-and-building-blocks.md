@@ -117,9 +117,10 @@ Defaults keep today's markup; everything below is opt-in.
   `{ sessionId }`) to the provider instead of diffing `turnOutcomes`: called
   once per turn of the open chat for every status, after the outcome is in
   `turnOutcomes`, when its last request is over (not at an open approval, not
-  before a UI action outcome continuation). Not for stored history, a chat
-  left before its turn ended, or a run cleared with `clear()`; a retry
-  reports its own end. A throw is caught. Details: `docs/concepts.md`.
+  before a UI action outcome continuation, not on a page a UI action leaves
+  with a page load). Not for stored history, a turn whose chat is not the open
+  one when it ends, or a run cleared with `clear()`; a retry reports its own
+  end. A throw or a rejected promise is caught. Details: `docs/concepts.md`.
 - `components.MessageParts` arranges the parts inside the bubble root and
   receives `message`, the nodes (`MessagePartNodes`) `plan`, `activity`, `notice`, `attachments`,
   `text`, `toolResults` (each `null` when absent) and `children` (all of them
