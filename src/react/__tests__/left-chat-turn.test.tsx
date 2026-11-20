@@ -7,7 +7,8 @@ import React from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, SessionConfig, TurnEndInfo, TurnOutcome } from '../types.js';
-import { ctx, Host, renderedTurns, StreamingChat } from './streaming-chat.js';
+import { AiChatProvider } from '../provider/ai-chat-provider.js';
+import { ctx, Host, Probe, renderedTurns, StreamingChat } from './streaming-chat.js';
 
 let warn: ReturnType<typeof vi.spyOn>;
 beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
@@ -217,7 +218,7 @@ describe('counter-examples', () => {
     expect(ids(chat.requests.at(-1))).toEqual([aUser, chat.requests.at(-1)!.at(-1)!.id]);
   });
 
-  it('two quick switches A to B to C: neither B nor C gets anything of A; A is stored once with its outcome', async () => {
+  it('two quick switches A to B to C, the request ends before C\'s history arrives: neither B nor C gets anything of A; A keeps its finished answer', async () => {
     const { histories, saves, session } = store({ A: [], B, C }, { delay: 5 });
     const chat = new StreamingChat();
     const view = render(<Host chat={chat} config={{ session: session('A') }} />);
@@ -231,13 +232,16 @@ describe('counter-examples', () => {
     expect(texts(histories.B)).not.toContain('of A');
     expect(texts(histories.C)).not.toContain('of A');
     expect(saves.filter((entry) => entry.id === 'B')).toEqual([]);
-    expect(storedOutcome(histories.A, aUser)?.reason).toBe('chat-left');
+    // Nothing decided the leave before the request ended by itself: it was not stopped, its answer is stored with A.
+    expect(chat.stop).not.toHaveBeenCalled();
+    expect(texts(histories.A)).toContain('ANSWER OF A');
+    expect(storedOutcome(histories.A, aUser)).toBeUndefined();
     await act(async () => { ctx.send('c follow-up'); });
     expect(ids(chat.requests.at(-1)).slice(0, 2)).toEqual(['c-u1', 'c-a1']);
     expect(chat.requests.at(-1)).toHaveLength(3);
   });
 
-  it('slow async storage: a chunk during B\'s load and the save of A in flight write nothing into B', async () => {
+  it('slow async storage: the request ends during B\'s load; nothing reaches B, A keeps what it showed', async () => {
     const { histories, saves, session } = store({ A: [], B }, { delay: 30 });
     const chat = new StreamingChat();
     const view = render(<Host chat={chat} config={{ session: session('A') }} />);
@@ -250,9 +254,10 @@ describe('counter-examples', () => {
     await settle(80);
     expect(texts(ctx.messages)).not.toContain('of A');
     expect(saves.filter((entry) => entry.id === 'B').every((entry) => !texts(entry.messages).includes('of A'))).toBe(true);
-    expect(storedOutcome(histories.A, aUser)?.reason).toBe('chat-left');
+    expect(storedOutcome(histories.A, aUser)).toBeUndefined();
+    // (This test transport writes its later chunks only into a message it still holds: the cleared one is gone.)
+    expect(ids(histories.A)[0]).toBe(aUser);
     expect(texts(histories.A)).toContain('partial of A');
-    expect(texts(histories.A)).not.toContain('ANSWER OF A');
     await act(async () => { ctx.send('b follow-up'); });
     expect(chat.requests.at(-1)).toHaveLength(3);
   });
@@ -557,11 +562,307 @@ describe('review: save order with a store that completes out of order', () => {
     const aAnswer = chat.messages.at(-1)!.id;
     fast();
     view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    // Back before A's earlier (slow) saves completed.
     view.rerender(<Host chat={chat} config={{ session: session('A') }} />);
     await waitFor(() => expect(ids(ctx.messages)).toEqual([aUser, aAnswer]));
     await settle(150);
     expect(ctx.turnOutcomes.get(aUser)?.reason).toBe('chat-left');
     expect(ids(histories.A)).toEqual([aUser, aAnswer]);
+    expect(storedOutcome(histories.A, aUser)?.reason).toBe('chat-left');
+  });
+});
+
+describe('review 2: an id change that is not a leave', () => {
+  /** What a store saw, as `id[ids]` with `!` on a stored outcome. */
+  const trace = (saves: Array<{ id: string; messages: ChatMessage[] }>, map: (id: string) => string) => saves.map((entry) =>
+    `${entry.id}[${entry.messages.map((message) => map(message.id) + (storedOutcome([message], message.id) ? '!' : '')).join(',')}]`);
+
+  it('a host without load renames the draft while the first request runs: as on main, the answer finishes in that chat', async () => {
+    const { histories, saves, session } = store({}, { load: false });
+    const chat = new StreamingChat();
+    const view = render(<Host chat={chat} config={{ session: session('draft') }} />);
+    const u = await sendInA('q');
+    act(() => chat.stream([{ type: 'text', text: 'part' }]));
+    const a = chat.messages.at(-1)!.id;
+    view.rerender(<Host chat={chat} config={{ session: session('chat-1') }} />);
+    await settle();
+    await act(async () => { chat.finish([{ type: 'text', text: 'ANSWER' }]); });
+    await settle();
+    const name = (id: string) => (id === u ? 'u' : id === a ? 'a' : id);
+    // Observed on main's provider with the same steps.
+    expect(chat.stop).not.toHaveBeenCalled();
+    expect(ids(ctx.messages)).toEqual([u, a]);
+    expect(texts(ctx.messages)).toContain('ANSWER');
+    expect([...ctx.turnOutcomes.values()]).toEqual([]);
+    expect(trace(saves, name)).toEqual(['draft[u]', 'draft[u,a]', 'chat-1[u,a]', 'chat-1[u,a]']);
+    expect(texts(histories['chat-1'])).toContain('ANSWER');
+    expect(storedOutcome(histories.draft, u)).toBeUndefined();
+    await act(async () => { ctx.send('q2'); });
+    expect(ids(chat.requests.at(-1)).slice(0, 2)).toEqual([u, a]);
+  });
+
+  it('a host with load renames the draft and load returns the same messages: as on main, the answer finishes in that chat', async () => {
+    const { histories, session } = store({});
+    const aliasing = (activeId: string): SessionConfig => ({
+      ...session(activeId),
+      load: async (id: string) => histories[id] ?? histories.draft ?? [],
+    });
+    const chat = new StreamingChat();
+    const view = render(<Host chat={chat} config={{ session: aliasing('draft') }} />);
+    const u = await sendInA('q');
+    act(() => chat.stream([{ type: 'text', text: 'part' }]));
+    view.rerender(<Host chat={chat} config={{ session: aliasing('chat-1') }} />);
+    await waitFor(() => expect(ids(ctx.messages)[0]).toBe(u));
+    await act(async () => { chat.finish([{ type: 'text', text: 'ANSWER' }]); });
+    await settle();
+    expect(chat.stop).not.toHaveBeenCalled();
+    expect(texts(ctx.messages)).toContain('ANSWER');
+    expect(texts(histories['chat-1'])).toContain('ANSWER');
+    expect(storedOutcome(histories.draft, u)).toBeUndefined();
+  });
+
+  it('a host without load that sets B\'s history a render after the id change: stopped then, B clean', async () => {
+    const { histories, session } = store({ A: [], B }, { load: false });
+    const chat = new NoCancelChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    const aUser = await sendInA();
+    act(() => chat.stream([{ type: 'text', text: 'partial of A' }]));
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await settle();
+    expect(chat.stop).not.toHaveBeenCalled();
+    await act(async () => { chat.setMessages(B); });
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    await act(async () => { chat.finish([{ type: 'text', text: 'ANSWER OF A' }]); });
+    await settle();
+    expect(ids(chat.messages)).toEqual(['b-u1', 'b-a1']);
+    expect(texts(histories.B)).not.toContain('of A');
+    expect(storedOutcome(histories.A, aUser)?.reason).toBe('chat-left');
+    expect(texts(histories.A)).toContain('partial of A');
+  });
+});
+
+describe('review 2: same transport, waits and other requests', () => {
+  it('a host that wraps the transport (`{ ...t, stop }` per render) still gets the left request stopped', async () => {
+    const { histories, session } = store({ A: [], B });
+    const chat = new StreamingChat();
+    function Wrapped({ id }: { id: string }) {
+      const [, force] = React.useReducer((count: number) => count + 1, 0);
+      React.useEffect(() => chat.subscribe(force), []);
+      const t = chat.transport;
+      return <AiChatProvider transport={{ ...t, stop: () => t.stop() }} session={session(id)}><Probe /></AiChatProvider>;
+    }
+    const view = render(<Wrapped id="A" />);
+    const aUser = await sendInA();
+    view.rerender(<Wrapped id="B" />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(storedOutcome(histories.A, aUser)?.reason).toBe('chat-left'));
+  });
+
+  it('one transport per chat: B sends, back to A while both run: neither is stopped', async () => {
+    const { session } = store({ A: [], B });
+    const chats: Record<string, StreamingChat> = { A: new StreamingChat(), B: new StreamingChat() };
+    const view = render(<Host chat={chats.A!} config={{ session: session('A') }} />);
+    await sendInA();
+    view.rerender(<Host chat={chats.B!} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    await act(async () => { ctx.send('b question 2'); });
+    expect(chats.B!.status).toBe('submitted');
+    view.rerender(<Host chat={chats.A!} config={{ session: session('A') }} />);
+    await settle();
+    expect(chats.A!.stop).not.toHaveBeenCalled();
+    expect(chats.B!.stop).not.toHaveBeenCalled();
+  });
+
+  it('a leave save of A that never settles does not keep A from loading on return', async () => {
+    const histories: Record<string, ChatMessage[]> = { A: [], B };
+    let hang = false;
+    const session = (activeId: string): SessionConfig => ({
+      activeId,
+      load: async (id: string) => histories[id] ?? [],
+      save: (id: string, messages: ChatMessage[]) => (hang && id === 'A' ? new Promise<void>(() => {}) : void (histories[id] = messages)),
+    });
+    const chat = new StreamingChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    const aUser = await sendInA();
+    hang = true;
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    view.rerender(<Host chat={chat} config={{ session: session('A') }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true), { timeout: 3000 });
+    expect(ids(ctx.messages)).toEqual([aUser]);
+  });
+
+  it('removeSession(A) while A\'s leave save still waits: no save of A after the removal', async () => {
+    const histories: Record<string, ChatMessage[]> = { A: [], B };
+    const calls: string[] = [];
+    let slow = true;
+    const session = (activeId: string): SessionConfig => ({
+      activeId,
+      load: async (id: string) => histories[id] ?? [],
+      save: (id: string, messages: ChatMessage[]) => {
+        calls.push(`save:${id}`);
+        return new Promise<void>((resolve) => setTimeout(() => { histories[id] = messages; resolve(); }, slow ? 80 : 1));
+      },
+      list: async () => Object.keys(histories).map((id) => ({ id, title: id })),
+      create: async () => ({ id: 'N', title: 'N' }),
+      remove: async (id: string) => { calls.push(`remove:${id}`); delete histories[id]; },
+    });
+    const chat = new StreamingChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    await sendInA();
+    act(() => chat.stream([{ type: 'text', text: 'partial of A' }]));
+    slow = false;
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    await act(async () => { await ctx.removeSession('A'); });
+    await settle(200);
+    const removed = calls.indexOf('remove:A');
+    expect(removed).toBeGreaterThan(-1);
+    expect(calls.slice(removed + 1)).not.toContain('save:A');
+  });
+
+  it('a page-load continuation of the newly opened chat is its own request, also while the window is open', async () => {
+    const at = Date.now();
+    const uiPart = {
+      type: 'tool-ui_navigate', toolCallId: 'c-b', state: 'output-available', input: {},
+      output: { handedOff: true, message: 'Handed to the app.', awaitsOutcome: true, uiAction: { type: 'glirastes.navigate' }, outcome: { v: 1, code: 'initiated', at } },
+    };
+    const bWaiting = [user('b-u1', 'open tasks'), { id: 'b-a1', role: 'assistant', parts: [{ type: 'step-start' }, uiPart] } as unknown as ChatMessage];
+    const { histories, session } = store({ A: [], B: bWaiting });
+    class ContinuingChat extends NoCancelChat {
+      continued = 0;
+      override get transport() {
+        return {
+          ...super.transport,
+          addToolOutput: async () => {},
+          setUiOutcomeReporting: () => {},
+          continueTurn: () => { this.continued += 1; this.resume(); },
+        };
+      }
+    }
+    const chat = new ContinuingChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    await sendInA();
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    // B's history arrives while the left request still runs (the window is open); B continues once.
+    await waitFor(() => expect(chat.continued).toBe(1));
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    act(() => chat.emit({ type: 'data-pipeline-state', data: { status: 'running', totalSteps: 1, maxSteps: 5, stepLimitSource: 'safety' } }));
+    expect(ctx.pipelineState?.status).toBe('running');
+    await act(async () => { chat.finish([{ type: 'text', text: 'B continued' }]); });
+    await settle();
+    expect(texts(chat.messages)).toContain('B continued');
+    expect(texts(histories.B)).toContain('B continued');
+  });
+
+  it('a loaded history that starts with an assistant message is kept while the window is open', async () => {
+    const greeting = [answer('c-greet', 'Hello, how can I help?')];
+    // A load that takes a moment: the cleared transport is shown before the history arrives.
+    const { histories, session } = store({ A: [], B, C: greeting }, { delay: 10 });
+    const chat = new NoCancelChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    await sendInA();
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ids(chat.messages)).toEqual(['b-u1', 'b-a1']));
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    // The left request still runs: the window is open when C's history arrives.
+    view.rerender(<Host chat={chat} config={{ session: session('C') }} />);
+    await waitFor(() => expect(ids(chat.messages)).toEqual(['c-greet']));
+    await settle();
+    expect(ids(ctx.messages)).toEqual(['c-greet']);
+    await act(async () => { chat.finish([{ type: 'text', text: 'ANSWER OF A' }]); });
+    await settle();
+    expect(ids(chat.messages)).toEqual(['c-greet']);
+    expect(histories.C).toEqual(greeting);
+  });
+});
+
+describe('review 2: robustness of the leave', () => {
+  it('resets the truncation notice of the left chat', async () => {
+    const { session } = store({ A: [], B });
+    const chat = new NoCancelChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    await sendInA();
+    act(() => chat.emit({ type: 'data-truncation', data: { completedTools: [], message: 'cut' } }));
+    expect(ctx.truncation).not.toBeNull();
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    expect(ctx.truncation).toBeNull();
+  });
+
+  it('a leave save that rejects is reported and does not stick: A loads again and later saves go out', async () => {
+    const histories: Record<string, ChatMessage[]> = { A: [], B };
+    let reject = false;
+    const session = (activeId: string): SessionConfig => ({
+      activeId,
+      load: async (id: string) => histories[id] ?? [],
+      save: async (id: string, messages: ChatMessage[]) => {
+        if (reject && id === 'A') throw new Error('offline');
+        histories[id] = messages;
+      },
+    });
+    const chat = new StreamingChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    const aUser = await sendInA();
+    reject = true;
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    await settle();
+    expect(warn).toHaveBeenCalledWith('[AiChatProvider] session.save failed');
+    reject = false;
+    view.rerender(<Host chat={chat} config={{ session: session('A') }} />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual([aUser]));
+    await act(async () => { ctx.send('again'); });
+    await waitFor(() => expect(ids(histories.A)).toHaveLength(2));
+  });
+
+  it('a transport whose stop throws: the turn is still stored with A and B stays clean', async () => {
+    const { histories, session } = store({ A: [], B });
+    const chat = new NoCancelChat();
+    chat.stop.mockImplementation(() => { throw new Error('cannot stop'); });
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    const aUser = await sendInA();
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    await act(async () => { chat.finish([{ type: 'text', text: 'ANSWER OF A' }]); });
+    await settle();
+    expect(texts(histories.B)).not.toContain('ANSWER OF A');
+    expect(storedOutcome(histories.A, aUser)?.reason).toBe('chat-left');
+  });
+
+  it('under StrictMode: stopped once, A saved once with its outcome', async () => {
+    const { saves, session } = store({ A: [], B });
+    const chat = new StreamingChat();
+    const view = render(<React.StrictMode><Host chat={chat} config={{ session: session('A') }} /></React.StrictMode>);
+    const aUser = await sendInA();
+    view.rerender(<React.StrictMode><Host chat={chat} config={{ session: session('B') }} /></React.StrictMode>);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    await settle();
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    expect(saves.filter((entry) => entry.id === 'A' && storedOutcome(entry.messages, aUser))).toHaveLength(1);
+  });
+
+  it('unmounting while the leave save waits: the save of A still goes out, nothing throws', async () => {
+    const histories: Record<string, ChatMessage[]> = { A: [], B };
+    let slow = true;
+    const session = (activeId: string): SessionConfig => ({
+      activeId,
+      load: async (id: string) => histories[id] ?? [],
+      save: (id: string, messages: ChatMessage[]) => new Promise<void>((resolve) => {
+        setTimeout(() => { histories[id] = messages; resolve(); }, slow ? 60 : 1);
+      }),
+    });
+    const chat = new StreamingChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    const aUser = await sendInA();
+    slow = false;
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ids(ctx.messages)).toEqual(['b-u1', 'b-a1']));
+    expect(histories.A).toEqual([]);
+    view.unmount();
+    await settle(150);
     expect(storedOutcome(histories.A, aUser)?.reason).toBe('chat-left');
   });
 });

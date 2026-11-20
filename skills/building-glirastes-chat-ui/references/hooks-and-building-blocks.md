@@ -110,7 +110,9 @@ Defaults keep today's markup; everything below is opt-in.
   and out of one the app hands to its own transport, so the chat's requests
   do not carry it; the app's own code reading the store does see it. An
   outcome stays with the chat its request started in. A host that changes
-  `session.activeId` while a request runs stops it: the left chat's turn is
+  `session.activeId` to another chat while a request runs on the same
+  transport stops it (with `load`: decided by the new id's history; without:
+  when the host sets another history; renaming a draft is not a leave): the left chat's turn is
   `aborted` / `chat-left` and is stored with that chat at once through
   `session.save(leftChatId, …)` (write to the id passed). Nothing of it
   reaches the new chat, its store or its requests. The server request is

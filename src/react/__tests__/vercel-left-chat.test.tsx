@@ -12,10 +12,13 @@ import type { ChatMessage, SessionConfig } from '../types.js';
 
 const bodies: Array<{ messages: Array<{ id: string; role: string; parts: unknown[] }> }> = [];
 const streams: Array<{ push: (chunk: string) => void; end: () => void; aborted: () => boolean }> = [];
+/** A server that goes on streaming after the browser aborted (its abort does not reach the body). */
+let ignoreAbort = false;
 
 beforeEach(() => {
   bodies.length = 0;
   streams.length = 0;
+  ignoreAbort = false;
   vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: RequestInit) => {
     bodies.push(JSON.parse(String(init?.body)));
     let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -24,6 +27,7 @@ beforeEach(() => {
     const encoder = new TextEncoder();
     // As a real fetch does: an aborted request's body errors.
     init?.signal?.addEventListener('abort', () => {
+      if (ignoreAbort) return;
       aborted = true;
       try { controller.error(new DOMException('The operation was aborted.', 'AbortError')); } catch { /* closed */ }
     });
@@ -126,5 +130,42 @@ describe('Vercel transport: the host opens another chat while a request runs', (
     expect(ctx.messages.map((message) => message.id)).toEqual(shown);
     expect(histories.A.map((message) => message.id)).toEqual(shown);
     expect(JSON.stringify(histories.A)).toContain('partial of A');
+  });
+
+  it('a left request whose server message id equals B\'s last message id does not overwrite that message', async () => {
+    ignoreAbort = true;
+    const histories: Record<string, ChatMessage[]> = { A: [], B };
+    const session = (activeId: string): SessionConfig => ({
+      activeId,
+      load: async (id) => histories[id] ?? [],
+      save: (id, messages) => { histories[id] = messages; },
+    });
+    const view = render(<App session={session('A')} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { void ctx.send('a question'); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    await act(async () => {
+      // Deterministic server ids: A's answer has the id B's stored answer has.
+      for (const chunk of ['{"type":"start","messageId":"b-a1"}', '{"type":"start-step"}', '{"type":"text-start","id":"t"}',
+        '{"type":"text-delta","id":"t","delta":"partial of A"}']) streams[0]!.push(chunk);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    view.rerender(<App session={session('B')} />);
+    await waitFor(() => expect(ctx.messages.map((message) => message.id)).toEqual(['b-u1', 'b-a1']));
+    await act(async () => {
+      streams[0]!.push('{"type":"text-delta","id":"t","delta":" ANSWER OF A"}');
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(JSON.stringify(ctx.messages)).toContain('b answer');
+    expect(JSON.stringify(ctx.messages)).not.toContain('of A');
+    expect(JSON.stringify(histories.B)).not.toContain('of A');
+    await act(async () => {
+      streams[0]!.push('{"type":"text-end","id":"t"}');
+      streams[0]!.push('{"type":"finish"}');
+      streams[0]!.end();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(JSON.stringify(ctx.messages)).toContain('b answer');
+    expect(JSON.stringify(histories.B)).not.toContain('of A');
   });
 });
