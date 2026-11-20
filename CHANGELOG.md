@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Chat queue (`docs/chat-queue.md`): what happens to the queue when a turn of the left chat ends after a session switch and when the first chat is opened again.
 - README install section: an app upgrading from 0.19.0 or older with an existing `bun.lock` keeps a nested `glirastes/pg` (and possibly `glirastes/zod`) entry; how to remove them so the app's copies are shared.
 
 ## [0.20.0] - 2026-11-20
