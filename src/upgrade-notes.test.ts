@@ -241,4 +241,22 @@ describe('shipped note detection', () => {
       });
     }
   });
+
+  it('chat-locale-new-required-keys is adopted once a full ChatLocale has the new keys', async () => {
+    const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === 'chat-locale-new-required-keys')!;
+    const before = scanOf({
+      'app/locale.ts': "import type { ChatLocale } from 'glirastes/react';\nconst de: ChatLocale = {\n  sendButton: 'Senden',\n};\n",
+    });
+    expect(evaluateNote(note, before).status).toBe('affected');
+
+    const after = scanOf({
+      'app/locale.ts':
+        "import type { ChatLocale } from 'glirastes/react';\nconst de: ChatLocale = {\n  sendButton: 'Senden',\n" +
+        "  approvalSubjectsUncheckedWarning: 'Nicht geprüft',\n};\n",
+    });
+    expect(evaluateNote(note, after)).toMatchObject({
+      status: 'adopted',
+      evidence: [{ file: 'app/locale.ts', line: 4 }],
+    });
+  });
 });

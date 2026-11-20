@@ -19,7 +19,8 @@ const KNOWN_PATHS = new Set<string>([
   '.glirastes/chat-interactions.json',
 ]);
 const FORBIDDEN: ReadonlyArray<readonly [RegExp, string]> = [
-  [/--force\b/, 'never teaches --force'],
+  // One exception: `glirastes upgrade ack --force` is the documented path for a verified, undetected adoption.
+  [/(?<!glirastes upgrade ack )--force\b/, 'never teaches --force'],
   [/sk-or-v1-\w/, 'never shows a key'],
   [/OPENROUTER_API_KEY=\S/, 'never writes a key value'],
   [/@AiTool|@AiModule|@AiParam/, 'never teaches decorators'],

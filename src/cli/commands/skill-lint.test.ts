@@ -47,6 +47,11 @@ describe('skill lint', () => {
     ]);
   });
 
+  it('allows only glirastes upgrade ack --force', () => {
+    expect(lintSkill('example-skill', `${VALID}\nThen run \`glirastes upgrade ack --force\`.\n`)).toEqual([]);
+    expect(lintSkill('example-skill', `${VALID}\nRun glirastes upgrade report --force.\n`).join('\n')).toContain('never teaches --force');
+  });
+
   it.each([
     ['an unknown subcommand', VALID.replace('glirastes tools refresh\n', 'glirastes tools generate\n'), 'command "glirastes tools generate": unknown tools subcommand generate'],
     ['an unknown flag', VALID.replace('--print <tool>', '--prints <tool>'), 'unknown option --prints'],

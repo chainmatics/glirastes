@@ -483,6 +483,42 @@ describe('runUpgradeCommand', () => {
     expect(Object.keys((await readBaseline(root))!.decisions)).toEqual(['break-one']);
   });
 
+  it('the ack refusal names --force as the path for an item implemented but not detected', async () => {
+    await writeNotes('0.19.0', [note('break-one', 'breaking', affected)]);
+    await appUsesGlirastes();
+    await baseline('0.18.0');
+    const a = io();
+    expect(await runUpgradeCommand(['ack'], a.io)).toBe(1);
+    expect(a.err).toEqual([
+      'Cannot acknowledge: 1 breaking item(s) are affected or unclear (break-one). Adopt them, or keep them listed with --defer <id>. '
+        + 'If an item is already implemented but detection cannot tell, verify the change in the code, then run glirastes upgrade ack --force.',
+    ]);
+  });
+
+  it('ack says when a --defer is dropped as settled and when an --undefer id was not deferred', async () => {
+    await writeNotes('0.19.0', [
+      note('break-guarded', 'breaking', { affectedWhen: { patterns: ['Never[I]nThisApp'] } }),
+      note('recommend-one', 'recommended'),
+    ]);
+    await baseline('0.18.0');
+    const a = io();
+    expect(await runUpgradeCommand(['ack', '--defer', 'break-guarded', '--undefer', 'recommend-one'], a.io)).toBe(0);
+    expect(a.out).toEqual([
+      'Not deferred: recommend-one was not deferred.',
+      'Not deferred: break-guarded is already adopted or not affected.',
+      'Reviewed through 0.19.0.',
+    ]);
+    expect((await readBaseline(root))!.decisions).toEqual({});
+  });
+
+  it('ack drops a deferral whose note no longer exists', async () => {
+    await writeNotes('0.19.0', [note('recommend-one', 'recommended')]);
+    await baseline('0.19.0', ['gone-note', 'recommend-one']);
+    const a = io();
+    expect(await runUpgradeCommand(['ack'], a.io)).toBe(0);
+    expect(Object.keys((await readBaseline(root))!.decisions)).toEqual(['recommend-one']);
+  });
+
   it('ack rejects the same id in --defer and --undefer', async () => {
     await seedAllKinds();
     const a = io();

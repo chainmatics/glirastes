@@ -265,6 +265,7 @@ export const UPGRADE_USAGE = [
   '         mark everything up to the installed SDK as reviewed; --defer keeps a note listed in later reports, --undefer drops that again',
   '         deferrals last until --undefer or until the note is detected as adopted or not affected',
   '         ack refuses while a breaking item is affected or unclear and not deferred; --force acknowledges anyway',
+  '         (the intended path for an item already implemented in code that detection cannot recognize)',
 ].join('\n');
 
 export const UPGRADE_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
@@ -383,14 +384,20 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
     const deferred = new Map<string, string>();
     for (const [id, entry] of Object.entries(baseline.decisions)) deferred.set(id, entry.version);
     for (const id of deferIds) deferred.set(id, notes.find((note) => note.id === id)!.version);
-    for (const id of undeferIds) deferred.delete(id);
+    for (const id of undeferIds) {
+      if (!deferred.delete(id)) log(`Not deferred: ${id} was not deferred.`);
+    }
+    // A deferral of a note this SDK no longer ships would stay invisible forever.
+    for (const id of [...deferred.keys()]) {
+      if (!notes.some((note) => note.id === id)) deferred.delete(id);
+    }
     if (needsScan && deferred.size > 0) {
       const appScan = await scan(rootDir);
       for (const id of [...deferred.keys()]) {
-        const note = notes.find((candidate) => candidate.id === id);
-        if (!note) continue;
-        const { status } = evaluateNote(note, appScan);
-        if (status === 'adopted' || status === 'not-affected') deferred.delete(id);
+        const { status } = evaluateNote(notes.find((candidate) => candidate.id === id)!, appScan);
+        if (status !== 'adopted' && status !== 'not-affected') continue;
+        deferred.delete(id);
+        if (deferIds.includes(id)) log(`Not deferred: ${id} is already adopted or not affected.`);
       }
     }
 
@@ -400,7 +407,8 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
       error(
         `Cannot acknowledge: ${blocking.length} breaking item(s) are affected or unclear (${blocking
           .map((item) => item.id)
-          .join(', ')}). Adopt them, keep them listed with --defer <id>, or pass --force.`,
+          .join(', ')}). Adopt them, or keep them listed with --defer <id>. `
+          + 'If an item is already implemented but detection cannot tell, verify the change in the code, then run glirastes upgrade ack --force.',
       );
       return 1;
     }
