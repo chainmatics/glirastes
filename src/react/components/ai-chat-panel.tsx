@@ -7,6 +7,7 @@ import { MentionInput } from './mention-input.js';
 import { SuggestionBar } from './suggestion-bar.js';
 import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
 import { BulkApprovalCard as DefaultBulkApprovalCard } from './bulk-approval-card.js';
+import { ChatQueue as DefaultChatQueue } from './chat-queue.js';
 import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
 import type { AiChatPanelProps, ChatMessage, PendingApproval } from '../types.js';
 
@@ -59,10 +60,13 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     unstyled,
     attachments,
     approvalDisplay,
+    queue,
   } = useChatContext();
 
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const BulkApprovalCardComponent = components.BulkApprovalCard ?? DefaultBulkApprovalCard;
+  // `components.ChatQueue: null` hides it (the app renders the queue itself).
+  const ChatQueueComponent = components.ChatQueue === null ? null : components.ChatQueue ?? DefaultChatQueue;
   // The work log lives in each assistant bubble; a pipeline bar only shows
   // when the app supplies its own component.
   const PipelineTimelineComponent = components.PipelineTimeline;
@@ -206,6 +210,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
       )}
 
       {!isLoading && !showTypingIndicator && <SuggestionBar />}
+      {queue?.enabled && ChatQueueComponent && <ChatQueueComponent />}
       <InputComponent />
     </div>
   );

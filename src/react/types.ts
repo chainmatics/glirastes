@@ -825,6 +825,8 @@ export interface ChatClassNames {
   triggerPill?: string;
   /** The session switcher dropdown root. */
   switcher?: string;
+  /** The message queue above the composer (`ChatQueue`). */
+  chatQueue?: string;
   [key: string]: string | undefined;
 }
 
@@ -862,6 +864,11 @@ export interface ChatComponents {
   MessageParts?: ComponentType<MessagePartsProps>;
   /** Lasting entry of a decided approval (`approvalDisplay.decided: 'entry'`). */
   ApprovalEntry?: ComponentType<ApprovalEntryProps>;
+  /**
+   * The message queue above the composer (`queue.enabled`). Replaces the
+   * default `ChatQueue`; `null` hides it (the app renders the queue itself).
+   */
+  ChatQueue?: ComponentType<ChatQueueProps> | null;
 }
 
 export interface CommandArgumentsFormProps {
@@ -1063,6 +1070,16 @@ export interface ChatLocale {
   attachmentReadFailed: string;       // supports `{name}`
   attachmentCommandRefused: string;
   attachmentUnsupported: string;
+  // Message queue (`queue.enabled`)
+  queueTitle: string;                 // supports `{count}`
+  queueSendNowLabel: string;
+  queueEditLabel: string;
+  queueRemoveLabel: string;
+  queuePausedLabel: string;
+  queueResumeLabel: string;
+  queueSaveLabel: string;
+  queueCancelLabel: string;
+  queueFilesLabel: string;            // supports `{count}`
 }
 
 // ============================================================================
@@ -1128,6 +1145,122 @@ export type PipelineMessageTranslator = (message: string) => string;
 export type StepSummaryFormatter = (step: PipelineStepReport) => string;
 
 // ============================================================================
+// Message queue
+// ============================================================================
+
+/** A message the user sent while the chat was busy; it is processed when it is sent. */
+export interface QueuedMessage {
+  readonly id: string;
+  /** The text as typed: commands, mention tokens and `onBeforeSend` apply when it is sent. */
+  readonly text: string;
+  /** ISO time it was queued. */
+  readonly createdAt: string;
+  /** The mentions active when it was queued. */
+  readonly mentions?: ReadonlyArray<MentionData>;
+  /** Attachments queued with it; never persisted through `queue.storage`. */
+  readonly files?: ReadonlyArray<FilePart>;
+}
+
+/** Run endings that pause the queue (`queue.pauseOn`). `truncation`: the run left a continue prompt. */
+export type ChatQueuePauseTrigger = 'error' | 'aborted' | 'safety-stop' | 'truncation';
+
+export type ChatQueueChangeReason =
+  | 'added'
+  | 'removed'
+  | 'edited'
+  | 'reordered'
+  | 'sent'
+  | 'cleared'
+  | 'paused'
+  | 'resumed'
+  | 'restored';
+
+/** Passed to `queue.onQueueChange`; local only, nothing goes to the Platform. */
+export interface ChatQueueChangeEvent {
+  readonly queued: ReadonlyArray<QueuedMessage>;
+  readonly paused: boolean;
+  readonly reason: ChatQueueChangeReason;
+}
+
+/**
+ * Keeps the queue of a conversation across reloads. Items with files are
+ * left out (file data and object URLs do not survive a reload). A restored
+ * queue starts paused.
+ */
+export interface ChatQueueStorage {
+  load(sessionId: string): ReadonlyArray<QueuedMessage> | Promise<ReadonlyArray<QueuedMessage>>;
+  save(sessionId: string, items: ReadonlyArray<QueuedMessage>): void | Promise<void>;
+}
+
+export interface ChatQueueConfig {
+  /** Default false: without it nothing changes (the composer locks while busy, `send` refuses). */
+  enabled?: boolean;
+  /** Default true: send the next queued message once the chat is idle, one run at a time. */
+  autoFlush?: boolean;
+  /**
+   * `sendNow(id)`: `'next'` (default) moves the message to the head and sends
+   * it once idle (also when paused or without `autoFlush`); `'abort'` also
+   * stops the running run first (that stop does not pause the queue).
+   */
+  sendNowBehavior?: 'next' | 'abort';
+  /**
+   * Most messages the queue holds; further sends are refused. Default 10
+   * (each queued message is a model call nobody watches start); `Infinity`
+   * or `null` lifts the limit.
+   */
+  maxSize?: number | null;
+  /** Run endings that pause the queue until `resumeQueue()`. Default all four. */
+  pauseOn?: ReadonlyArray<ChatQueuePauseTrigger>;
+  /**
+   * `sendNow` while an approval is open: `'refuse'` (default) returns false
+   * and shows the approval hint; `'reject-approval'` rejects the open
+   * approvals first.
+   */
+  sendNowDuringApproval?: 'refuse' | 'reject-approval';
+  /** Optional persistence per conversation. */
+  storage?: ChatQueueStorage;
+  /** Called after every change; a throw is ignored. */
+  onQueueChange?: (event: ChatQueueChangeEvent) => void;
+}
+
+/** What `submit` did with a message. */
+export type ChatSubmitResult = 'sent' | 'queued' | 'rejected';
+
+/** `ChatContextValue.queue`. */
+export interface ChatQueueState {
+  readonly enabled: boolean;
+  readonly items: ReadonlyArray<QueuedMessage>;
+  readonly paused: boolean;
+  /**
+   * True while `queue.storage` is still reading the active conversation's
+   * queue: nothing is sent meanwhile, new messages queue behind the stored ones.
+   */
+  readonly restoring: boolean;
+  /** The message open in an editor (`beginEdit`); the queue holds when it reaches it. */
+  readonly editingId: string | null;
+}
+
+/** The queue state and its actions (`useChatQueue`, `ChatQueue`'s render prop). */
+export interface ChatQueueApi extends ChatQueueState {
+  submit(message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }): ChatSubmitResult;
+  sendNow(id: string): boolean;
+  removeQueued(id: string): boolean;
+  editQueued(id: string, text: string): boolean;
+  /** Opens a queued message for editing: it is not sent until `editQueued` or `cancelEdit` ends the edit. */
+  beginEdit(id: string): boolean;
+  cancelEdit(): void;
+  clearQueue(): void;
+  resumeQueue(): void;
+  pauseQueue(): void;
+}
+
+export interface ChatQueueProps {
+  className?: string;
+  /** Renders the queue yourself; receives the state and actions. */
+  children?: (queue: ChatQueueApi) => ReactNode;
+}
+
+// ============================================================================
 // Provider Config
 // ============================================================================
 
@@ -1169,6 +1302,12 @@ export interface AiChatProviderConfig {
   toolResults?: ToolResultDisplayConfig;
   /** Work log layout: open while running, running progress, notice placement. All off by default. */
   activityLog?: ActivityLogConfig;
+  /**
+   * Message queue, off by default: with `enabled: true` a message sent while
+   * a run is busy or an approval is open is queued instead of refused, and
+   * the composer stays usable. See `docs/chat-queue.md`.
+   */
+  queue?: ChatQueueConfig;
   /**
    * File and image attachments in the composer (paste, drop, picker); off by
    * default. The server handler needs `attachments.enabled` too.

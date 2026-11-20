@@ -309,6 +309,8 @@ two jobs:
 - A per-message work log of tool calls and an optional plan checklist.
 - Opt-in image and PDF attachments (paperclip, paste, drop;
   [docs/chat-attachments.md](docs/chat-attachments.md)).
+- Opt-in message queue: send while a turn runs or an approval waits, the
+  message goes once the chat is idle ([docs/chat-queue.md](docs/chat-queue.md)).
 - `unstyled` to bring your own CSS; `deChatLocale` for German texts.
 - Push-to-talk speech input through one STT controller (`voice` config,
   `glirastes/stt` adapters, `createRecordingTranscriptionHandler` for a
@@ -460,6 +462,7 @@ installed SDK version. The versioned source guides remain available below.
 - [Chat route security](docs/chat-route-security.md)
 - [Chat interactions (`@` and `/`)](docs/chat-interactions.md)
 - [Chat attachments](docs/chat-attachments.md)
+- [Chat message queue](docs/chat-queue.md)
 - [Managed runtime sync](docs/managed-runtime-sync.md)
 - [Runtime persistence](docs/runtime-persistence.md)
 - [0.5.0 acceptance](docs/acceptance/0.5.0-acceptance.md)

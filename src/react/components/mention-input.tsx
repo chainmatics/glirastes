@@ -37,12 +37,13 @@ function ProviderMentionInput({
   renderActions,
   renderSubmit,
 }: MentionInputProps) {
-  const { classNames, locale, components, voice } = useChatContext();
+  const { classNames, locale, components, voice, canCompose: composable, queue } = useChatContext();
   const composer = useChatComposerInput({
     onSubmit: onSubmit ? (message) => onSubmit(message) : undefined,
     initialValue,
   });
   const { isLoading } = composer;
+  const canCompose = composable ?? !isLoading;
   const InputExtra = components.InputExtra;
   const DropdownItem = inputComponents?.DropdownItem ?? components.MentionDropdownItem;
   const Tray = components.AttachmentTray ?? DefaultAttachmentTray;
@@ -64,7 +65,7 @@ function ProviderMentionInput({
         {composer.attachmentsEnabled && (
           <>
             <input {...composer.attachmentInputProps} />
-            <AttachButton onClick={composer.openFilePicker} disabled={isLoading} />
+            <AttachButton onClick={composer.openFilePicker} disabled={!canCompose} />
           </>
         )}
         <RichMentionInput
@@ -77,7 +78,7 @@ function ProviderMentionInput({
         />
         {voice.enabled && (
           <VoiceInputAddon
-            disabled={isLoading}
+            disabled={!canCompose}
             language={voice.language ?? 'de'}
             baseUrl={voice.baseUrl}
             getToken={voice.getToken}
@@ -92,14 +93,19 @@ function ProviderMentionInput({
         )}
         {renderActions?.(composer)}
         {InputExtra && <InputExtra />}
-        {renderSubmit ? renderSubmit(composer) : isLoading ? (
-          <button type="button" onClick={composer.stop} data-action="stop">
-            {locale.stopButton}
-          </button>
-        ) : (
-          <button type="submit" disabled={!composer.canSend} data-action="send">
-            {locale.sendButton}
-          </button>
+        {renderSubmit ? renderSubmit(composer) : (
+          <>
+            {isLoading && (
+              <button type="button" onClick={composer.stop} data-action="stop">
+                {locale.stopButton}
+              </button>
+            )}
+            {(!isLoading || queue?.enabled) && (
+              <button type="submit" disabled={!composer.canSend} data-action="send">
+                {locale.sendButton}
+              </button>
+            )}
+          </>
         )}
       </form>
     </div>
@@ -111,6 +117,8 @@ function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
     send,
     stop,
     isLoading,
+    canCompose: composable,
+    queue,
     classNames,
     locale,
     components,
@@ -130,6 +138,7 @@ function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
   const [value, setValue] = useState('');
   const inputRef = useRef<RichMentionInputHandle | null>(null);
   const InputExtra = components.InputExtra;
+  const canCompose = composable ?? !isLoading;
 
   const detectMentionQuery = useCallback((text: string) => {
     const match = text.match(/(?:^|\s)([@/])([a-zA-Z0-9._-]{1,80})$/);
@@ -153,7 +162,7 @@ function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
 
   const handleSubmit = useCallback((message: string) => {
     const trimmed = message.trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed || !canCompose) return;
     if (onSubmit) {
       onSubmit(trimmed);
     } else if (!send(trimmed)) {
@@ -162,7 +171,7 @@ function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
     setValue('');
     clearMentionSearch();
     clearActiveMentions();
-  }, [clearActiveMentions, clearMentionSearch, isLoading, onSubmit, send]);
+  }, [clearActiveMentions, clearMentionSearch, canCompose, onSubmit, send]);
 
   const selectedMentionIds = useMemo(
     () => new Set(activeMentions.map((mention) => String(mention.id))),
@@ -244,12 +253,12 @@ function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
           onChange={updateValue}
           onSubmit={handleSubmit}
           placeholder={locale.placeholder}
-          disabled={isLoading}
+          disabled={!canCompose}
         />
 
         {voice.enabled && (
           <VoiceInputAddon
-            disabled={isLoading}
+            disabled={!canCompose}
             language={voice.language ?? 'de'}
             baseUrl={voice.baseUrl}
             getToken={voice.getToken}
@@ -266,12 +275,13 @@ function LegacyMentionInput({ className, onSubmit }: MentionInputProps) {
           />
         )}
         {InputExtra && <InputExtra />}
-        {isLoading ? (
+        {isLoading && (
           <button type="button" onClick={stop} data-action="stop">
             {locale.stopButton}
           </button>
-        ) : (
-          <button type="submit" disabled={!value.trim()} data-action="send">
+        )}
+        {(!isLoading || queue?.enabled) && (
+          <button type="submit" disabled={!value.trim() || !canCompose} data-action="send">
             {locale.sendButton}
           </button>
         )}

@@ -24,6 +24,8 @@ import type {
   StepSummaryFormatter,
   SessionSummary,
   FilePart,
+  ChatQueueState,
+  ChatSubmitResult,
 } from '../types.js';
 import type { CompletionSearch } from '../completions/completion-search.js';
 import type { ResolvedAttachmentOptions } from '../utils/attachments.js';
@@ -87,6 +89,39 @@ export interface ChatContextValue {
    * attachments are off); the composer should then keep text and files.
    */
   send: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => boolean;
+  /**
+   * `send` that tells what happened: `'sent'`, `'queued'` (only with
+   * `queue.enabled`) or `'rejected'`. `send` returns true for the first two.
+   */
+  submit: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => ChatSubmitResult;
+  /**
+   * Whether a composer takes input now. Without the queue false while
+   * `isLoading`; with `queue.enabled` false only while the conversation
+   * loads or changes (a message sent meanwhile is queued).
+   */
+  canCompose: boolean;
+  /** The message queue (`queue` option); `enabled` false and no items without it. */
+  queue: ChatQueueState;
+  /**
+   * Sends a queued message next (`queue.sendNowBehavior`). False when it is
+   * unknown or an approval is open with `sendNowDuringApproval: 'refuse'`.
+   */
+  sendNow: (id: string) => boolean;
+  removeQueued: (id: string) => boolean;
+  /** Replaces the text of a queued message; false for an empty text or an unknown id. */
+  editQueued: (id: string, text: string) => boolean;
+  /**
+   * Opens a queued message for editing (one at a time): the queue holds when
+   * it reaches it, so neither it nor a later one is sent past the open edit.
+   * `editQueued` for that id, `cancelEdit` or removing it ends the edit.
+   */
+  beginEdit: (id: string) => boolean;
+  cancelEdit: () => void;
+  clearQueue: () => void;
+  /** Lets a paused queue send again. */
+  resumeQueue: () => void;
+  /** Holds the queue until `resumeQueue()`. */
+  pauseQueue: () => void;
   stop: () => void;
   clear: () => void;
   loadMore: () => void;

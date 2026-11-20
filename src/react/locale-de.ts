@@ -113,4 +113,13 @@ export const deChatLocale: ChatLocale = {
   attachmentReadFailed: '{name} konnte nicht gelesen werden.',
   attachmentCommandRefused: 'Befehle können keine Anhänge mitnehmen. Entferne sie oder schreibe eine Nachricht.',
   attachmentUnsupported: 'Dieser Chat kann keine Anhänge senden.',
+  queueTitle: 'In der Warteschlange ({count})',
+  queueSendNowLabel: 'Jetzt senden',
+  queueEditLabel: 'Bearbeiten',
+  queueRemoveLabel: 'Entfernen',
+  queuePausedLabel: 'Die Warteschlange ist angehalten.',
+  queueResumeLabel: 'Fortsetzen',
+  queueSaveLabel: 'Speichern',
+  queueCancelLabel: 'Abbrechen',
+  queueFilesLabel: '{count} Dateien',
 };

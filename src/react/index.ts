@@ -60,6 +60,17 @@ export type {
   ToolResultDisplayConfig,
   // Message layout
   ActivityLogConfig,
+  // Message queue
+  QueuedMessage,
+  ChatQueueConfig,
+  ChatQueueStorage,
+  ChatQueueChangeEvent,
+  ChatQueueChangeReason,
+  ChatQueuePauseTrigger,
+  ChatQueueState,
+  ChatQueueApi,
+  ChatQueueProps,
+  ChatSubmitResult,
   ActivityLogDetails,
   TurnNoticeProps,
   TurnNoticeStatus,
@@ -255,6 +266,7 @@ export { FloatingChatUI, type FloatingChatUIProps } from './components/floating-
 export { MessageList } from './components/message-list.js';
 export { MessageBubble, useMessageParts } from './components/message-bubble.js';
 export { ChatInput } from './components/chat-input.js';
+export { ChatQueue, useChatQueue } from './components/chat-queue.js';
 export { MentionInput } from './components/mention-input.js';
 export { RichMentionInput } from './components/rich-mention-input.js';
 export { ChatWindow } from './components/chat-window.js';

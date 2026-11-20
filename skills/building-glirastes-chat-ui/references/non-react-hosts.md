@@ -103,6 +103,7 @@ required APIs. The configured V1 service does not add those routes automatically
 - **Layout without React slots:** `config.activityLog` (`expandWhileRunning`,
   `runningProgress`, `noticePlacement: 'message'`, `details`, `grouping`),
   `config.approvalDisplay` (`decided: 'entry'`, `open: 'inline'`),
+  `config.queue` (message queue, `docs/chat-queue.md`),
   `config.entityLinks.mentionMarkers` and the `data-*` hooks of
   the shadow root cover what `components.TurnNotice`/`MessageParts` do in
   React; the shadow-root styles carry the same `prefers-reduced-motion` rules.

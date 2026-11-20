@@ -1619,6 +1619,82 @@
   font-size: 0.8125rem;
 }
 
+/* ---------- Message queue (`queue.enabled`) ---------- */
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) {
+  margin: 0 1rem 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-bg-muted);
+  color: var(--cm-text);
+  font-size: 0.8125rem;
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="title"] {
+  margin: 0 0 0.25rem;
+  color: var(--cm-text-muted);
+  font-weight: 600;
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="paused"] {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-primary-tint);
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="items"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="item"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="files"] {
+  color: var(--cm-text-muted);
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="actions"] {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="edit"] {
+  display: flex;
+  flex: 1 1 100%;
+  gap: 0.25rem;
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="edit"] textarea {
+  flex: 1 1 auto;
+  font: inherit;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  resize: vertical;
+}
+[data-component="chat-queue"]:where(:not([data-unstyled], [data-unstyled] *)) button {
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-bg);
+  color: var(--cm-text);
+  font: inherit;
+  cursor: pointer;
+}
+
 /* ---------------------------------------------------------------------------
    AssistantShell — docked sidebar or detached window. The handle geometry
    is inline, so it also works unstyled; these rules are only the look.
