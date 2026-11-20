@@ -8,6 +8,7 @@ All names below come from `glirastes/react` unless noted.
   - Sent mentions and `types`
 - What a pick does
 - Opening a list from a button
+- Toolbar
 
 ## Triggers
 
@@ -139,3 +140,38 @@ const composer = useChatComposerInput();
   `ChatComposerInputControls.openCompletion` is the same on the composer, and
   `RichMentionInputHandle.openCompletion` on a standalone input (optional on
   the handle type, so custom handles stay valid).
+
+## Toolbar
+
+`AiChatProvider` takes `composer` (`ComposerConfig`) to arrange the row of
+`ChatInput` and `MentionInput`. `toolbar.start` renders before the editor,
+`toolbar.end` after it. Ids are builtins (`ComposerToolbarBuiltin`) or keys of
+`items`. Memoize the object.
+
+```tsx
+const composer = useMemo<ComposerConfig>(() => ({
+  toolbar: { start: ['attach', 'templates'], end: ['trigger:@', 'mic', 'send'] },
+  items: {
+    templates: { label: 'Vorlagen', icon: <TemplateIcon />, onSelect: (c) => c.openCompletion({ trigger: '/', source: 'templates' }) },
+  },
+}), []);
+<AiChatProvider composer={composer} triggers={[{ char: '@', label: 'Person erwähnen' }]} …>
+```
+
+- Default `{ start: ['attach'], end: ['mic', 'actions', 'extra', 'send'] }`,
+  today's markup exactly; a side you leave out keeps its default.
+- `attach` renders only with attachments, `mic` only with `voice.enabled`,
+  `actions` is `renderActions`, `extra` is `components.InputExtra`, `send` is
+  `renderSubmit` or the send/stop button.
+- `trigger:<char>` is a button named after the trigger's `label` (else the
+  char) that calls `openCompletion({ trigger })` and keeps the caret in the
+  editor. The plain input (no completion) leaves it out. A second click does
+  not close the list.
+- An item (`ComposerToolbarItem`) takes `label` (accessible name), `icon`,
+  `onSelect(controls)`, `hidden` (boolean or `(controls) => boolean`) and
+  `render(controls)`, which replaces the button. An item key equal to a
+  builtin id replaces the builtin. Unknown ids warn once and are skipped.
+- `components.ComposerToolbar` (`ComposerToolbarProps`) gets the rendered
+  `start` and `end` arrays, the `editor` and the `controls`, e.g. for a second
+  row below the editor. It renders inside the form.
+- The legacy `mentions` input ignores `composer`.

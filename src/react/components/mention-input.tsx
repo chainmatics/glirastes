@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useMemo } from 'react';
 import { MentionChipList } from './mention-chip.js';
 import { RichMentionInput } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
+import { ComposerToolbarLayout } from './composer-toolbar.js';
 import { AttachmentButton as DefaultAttachmentButton, AttachmentTray as DefaultAttachmentTray } from './attachments.js';
 import { useChatComposerInput } from '../hooks/use-chat-composer-input.js';
 import { useChatContext } from '../provider/chat-context.js';
@@ -37,7 +38,7 @@ function ProviderMentionInput({
   renderActions,
   renderSubmit,
 }: MentionInputProps) {
-  const { classNames, locale, components, voice, canCompose: composable, queue } = useChatContext();
+  const { classNames, locale, components, voice, triggers, canCompose: composable, queue } = useChatContext();
   const composer = useChatComposerInput({
     onSubmit: onSubmit ? (message) => onSubmit(message) : undefined,
     initialValue,
@@ -62,52 +63,60 @@ function ProviderMentionInput({
         }}
         className={className ?? classNames.input}
       >
-        {composer.attachmentsEnabled && (
-          <>
-            <input {...composer.attachmentInputProps} />
-            <AttachButton onClick={composer.openFilePicker} disabled={!canCompose} />
-          </>
-        )}
-        <RichMentionInput
-          ref={composer.inputRef}
-          {...composer.inputProps}
-          initialMentions={initialMentions}
-          wrapperClassName={inputClassName}
-          className={editorClassName}
-          {...(DropdownItem ? { components: { DropdownItem } } : {})}
+        <ComposerToolbarLayout
+          controls={composer}
+          triggers={triggers ?? []}
+          builtins={{
+            attach: composer.attachmentsEnabled && (
+              <>
+                <input {...composer.attachmentInputProps} />
+                <AttachButton onClick={composer.openFilePicker} disabled={!canCompose} />
+              </>
+            ),
+            mic: voice.enabled && (
+              <VoiceInputAddon
+                disabled={!canCompose}
+                language={voice.language ?? 'de'}
+                baseUrl={voice.baseUrl}
+                workletUrl={voice.workletUrl}
+                getToken={voice.getToken}
+                onTranscript={composer.appendText}
+                onError={voice.onError}
+                showRecordingBar={voice.recordingBar?.enabled ?? true}
+                recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
+                adapter={voice.adapter}
+                pushToTalk={voice.pushToTalk}
+                routeKey={voice.routeKey}
+              />
+            ),
+            actions: renderActions?.(composer),
+            extra: InputExtra && <InputExtra />,
+            send: renderSubmit ? renderSubmit(composer) : (
+              <>
+                {isLoading && (
+                  <button type="button" onClick={composer.stop} data-action="stop">
+                    {locale.stopButton}
+                  </button>
+                )}
+                {(!isLoading || queue?.enabled) && (
+                  <button type="submit" disabled={!composer.canSend} data-action="send">
+                    {locale.sendButton}
+                  </button>
+                )}
+              </>
+            ),
+          }}
+          editor={(
+            <RichMentionInput
+              ref={composer.inputRef}
+              {...composer.inputProps}
+              initialMentions={initialMentions}
+              wrapperClassName={inputClassName}
+              className={editorClassName}
+              {...(DropdownItem ? { components: { DropdownItem } } : {})}
+            />
+          )}
         />
-        {voice.enabled && (
-          <VoiceInputAddon
-            disabled={!canCompose}
-            language={voice.language ?? 'de'}
-            baseUrl={voice.baseUrl}
-            workletUrl={voice.workletUrl}
-            getToken={voice.getToken}
-            onTranscript={composer.appendText}
-            onError={voice.onError}
-            showRecordingBar={voice.recordingBar?.enabled ?? true}
-            recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
-            adapter={voice.adapter}
-            pushToTalk={voice.pushToTalk}
-            routeKey={voice.routeKey}
-          />
-        )}
-        {renderActions?.(composer)}
-        {InputExtra && <InputExtra />}
-        {renderSubmit ? renderSubmit(composer) : (
-          <>
-            {isLoading && (
-              <button type="button" onClick={composer.stop} data-action="stop">
-                {locale.stopButton}
-              </button>
-            )}
-            {(!isLoading || queue?.enabled) && (
-              <button type="submit" disabled={!composer.canSend} data-action="send">
-                {locale.sendButton}
-              </button>
-            )}
-          </>
-        )}
       </form>
     </div>
   );

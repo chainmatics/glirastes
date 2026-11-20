@@ -992,6 +992,58 @@ export interface ChatComponents {
    * default `ChatQueue`; `null` hides it (the app renders the queue itself).
    */
   ChatQueue?: ComponentType<ChatQueueProps> | null;
+  /**
+   * Arranges the composer row: the rendered `start` and `end` items of
+   * `composer.toolbar` around the editor. Without it they render in a row
+   * inside the input's form: `start`, editor, `end`.
+   */
+  ComposerToolbar?: ComponentType<ComposerToolbarProps>;
+}
+
+/**
+ * A built-in item of the composer toolbar. `attach` renders only when
+ * attachments are enabled, `mic` only with `voice.enabled`, `actions` is the
+ * input's `renderActions`, `extra` is `components.InputExtra`, `send` is
+ * `renderSubmit` or the default send/stop button. `trigger:<char>` is a
+ * button that opens the completion list of that trigger char (label from the
+ * trigger definition, else the char); the plain input, which has no
+ * completion, leaves it out.
+ */
+export type ComposerToolbarBuiltin = 'attach' | 'mic' | 'actions' | 'extra' | 'send' | `trigger:${string}`;
+
+/** An app item of the composer toolbar (`composer.items`). */
+export interface ComposerToolbarItem {
+  /** Accessible name of the button; its text when there is no `icon`. */
+  label: string;
+  icon?: ReactNode;
+  onSelect?: (controls: ChatComposerInputControls) => void;
+  /** Renders the item yourself; wins over `icon` and `onSelect`. */
+  render?: (controls: ChatComposerInputControls) => ReactNode;
+  hidden?: boolean | ((controls: ChatComposerInputControls) => boolean);
+}
+
+/** Layout and app items of the composer (`AiChatProvider` `composer`). */
+export interface ComposerConfig {
+  /**
+   * Item ids before (`start`) and after (`end`) the editor: builtin ids
+   * (`ComposerToolbarBuiltin`) or keys of `items`. An item key equal to a
+   * builtin id replaces the builtin. Unknown ids warn once and are skipped.
+   * Default `{ start: ['attach'], end: ['mic', 'actions', 'extra', 'send'] }`;
+   * a side left out keeps its default.
+   */
+  toolbar?: { start?: ReadonlyArray<string>; end?: ReadonlyArray<string> };
+  items?: Readonly<Record<string, ComposerToolbarItem>>;
+}
+
+/** Props of `components.ComposerToolbar`. */
+export interface ComposerToolbarProps {
+  /** Rendered items before the editor, in `toolbar.start` order; hidden and unavailable ones are left out. */
+  start: ReactNode[];
+  /** Rendered items after the editor, in `toolbar.end` order. */
+  end: ReactNode[];
+  /** The editor (the pill editor or the plain textarea). */
+  editor: ReactNode;
+  controls: ChatComposerInputControls;
 }
 
 export interface CommandArgumentsFormProps {
@@ -1506,6 +1558,11 @@ export interface AiChatProviderConfig {
    * Memoize the array.
    */
   triggers?: ReadonlyArray<ChatTriggerDefinition>;
+  /**
+   * Toolbar layout and app items of `ChatInput`/`MentionInput`. Without it
+   * the composer renders as before. Memoize the object.
+   */
+  composer?: ComposerConfig;
   completionContext?: CompletionPermissionContext;
   onCompletionProviderError?: (providerId: string, error: unknown) => void;
   /**

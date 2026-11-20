@@ -4,14 +4,18 @@ import {
   useRef,
   useContext,
   useLayoutEffect,
+  useMemo,
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
 import { MentionInput } from './mention-input.js';
+import { ComposerToolbarLayout } from './composer-toolbar.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
-import type { ChatInputProps } from '../types.js';
+import type { ChatAttachment, ChatComposerInputControls, ChatInputProps } from '../types.js';
+
+const NO_ATTACHMENTS: ReadonlyArray<ChatAttachment> = [];
 
 /**
  * The chat's input. With `@`/`/` search (`chatInteractions` or
@@ -49,19 +53,24 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
     }
   }, [value]);
 
+  const submitValue = useCallback((): boolean => {
+    const trimmed = value.trim();
+    if (!trimmed || !canCompose) return false;
+    if (onSubmit) {
+      onSubmit(trimmed);
+    } else if (!send(trimmed)) {
+      return false;
+    }
+    setValue('');
+    return true;
+  }, [value, canCompose, onSubmit, send]);
+
   const handleSubmit = useCallback(
     (e: FormEvent) => {
       e.preventDefault();
-      const trimmed = value.trim();
-      if (!trimmed || !canCompose) return;
-      if (onSubmit) {
-        onSubmit(trimmed);
-      } else if (!send(trimmed)) {
-        return;
-      }
-      setValue('');
+      submitValue();
     },
-    [value, canCompose, onSubmit, send],
+    [submitValue],
   );
 
   const handleKeyDown = useCallback(
@@ -74,52 +83,86 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
     [handleSubmit],
   );
 
+  const appendText = useCallback((text: string) => {
+    setValue((prev) => (prev.length > 0 ? `${prev} ${text}` : text));
+  }, []);
+
+  // The plain field has no attachments and no completion; those controls do nothing.
+  const controls = useMemo<ChatComposerInputControls>(() => ({
+    value,
+    isLoading,
+    canSend: canCompose && value.trim().length > 0,
+    attachments: NO_ATTACHMENTS,
+    attachmentError: null,
+    attachmentsEnabled: false,
+    addFiles: async () => {},
+    removeAttachment: () => {},
+    openFilePicker: () => {},
+    submit: submitValue,
+    stop,
+    setText: setValue,
+    appendText,
+    focus: () => textareaRef.current?.focus(),
+    openCompletion: () => {},
+  }), [value, isLoading, canCompose, submitValue, stop, appendText]);
+
   return (
     <form
       onSubmit={handleSubmit}
       className={className ?? classNames.input}
       data-component="chat-input"
     >
-      <textarea
-        ref={textareaRef}
-        autoFocus={visible}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={locale.placeholder}
-        disabled={!canCompose}
-        rows={1}
-        data-state={isLoading ? 'loading' : 'idle'}
+      <ComposerToolbarLayout
+        controls={controls}
+        builtins={{
+          attach: null,
+          mic: voice.enabled && (
+            <VoiceInputAddon
+              disabled={!canCompose}
+              language={voice.language ?? 'de'}
+              baseUrl={voice.baseUrl}
+              workletUrl={voice.workletUrl}
+              getToken={voice.getToken}
+              onTranscript={appendText}
+              onError={voice.onError}
+              showRecordingBar={voice.recordingBar?.enabled ?? true}
+              recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
+              adapter={voice.adapter}
+              pushToTalk={voice.pushToTalk}
+              routeKey={voice.routeKey}
+            />
+          ),
+          actions: null,
+          extra: InputExtra && <InputExtra />,
+          send: (
+            <>
+              {isLoading && (
+                <button type="button" onClick={stop} data-action="stop">
+                  {locale.stopButton}
+                </button>
+              )}
+              {(!isLoading || queue?.enabled) && (
+                <button type="submit" disabled={!value.trim() || !canCompose} data-action="send">
+                  {locale.sendButton}
+                </button>
+              )}
+            </>
+          ),
+        }}
+        editor={(
+          <textarea
+            ref={textareaRef}
+            autoFocus={visible}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={locale.placeholder}
+            disabled={!canCompose}
+            rows={1}
+            data-state={isLoading ? 'loading' : 'idle'}
+          />
+        )}
       />
-      {voice.enabled && (
-        <VoiceInputAddon
-          disabled={!canCompose}
-          language={voice.language ?? 'de'}
-          baseUrl={voice.baseUrl}
-          workletUrl={voice.workletUrl}
-          getToken={voice.getToken}
-          onTranscript={(text) => {
-            setValue((prev) => (prev.length > 0 ? `${prev} ${text}` : text));
-          }}
-          onError={voice.onError}
-          showRecordingBar={voice.recordingBar?.enabled ?? true}
-          recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
-          adapter={voice.adapter}
-          pushToTalk={voice.pushToTalk}
-          routeKey={voice.routeKey}
-        />
-      )}
-      {InputExtra && <InputExtra />}
-      {isLoading && (
-        <button type="button" onClick={stop} data-action="stop">
-          {locale.stopButton}
-        </button>
-      )}
-      {(!isLoading || queue?.enabled) && (
-        <button type="submit" disabled={!value.trim() || !canCompose} data-action="send">
-          {locale.sendButton}
-        </button>
-      )}
     </form>
   );
 }

@@ -32,6 +32,7 @@ import type {
   ChatSubmitRejection,
   TurnOutcome,
   ResolvedChatTrigger,
+  ComposerConfig,
 } from '../types.js';
 import type { CompletionSearch } from '../completions/completion-search.js';
 import type { ResolvedAttachmentOptions } from '../utils/attachments.js';
@@ -202,6 +203,8 @@ export interface ChatContextValue {
   hasCompletions: boolean;
   /** The composer's trigger chars with prefix and pick behavior (`triggers` of the provider). */
   triggers?: ReadonlyArray<ResolvedChatTrigger>;
+  /** Toolbar layout and app items of the composer (`composer` of the provider). */
+  composer?: ComposerConfig;
   /** The provider's `onCompletionSelect`; the composer adds its controls. */
   onCompletionSelect?: (item: CompletionItem, context: CompletionSelectContext) => boolean | void;
   /** Visible prefix of a sent mention by type: a trigger's `types`, else `inferMentionPrefix`. */
