@@ -350,8 +350,6 @@ export interface MentionResult {
   select?: CompletionSelectKind;
   /** `select: 'text'`: the text put in place of trigger and query; default `label`. */
   insertText?: string;
-  /** `select: 'list'`: provider id(s) of the trigger whose entries the list shows next. */
-  listSource?: string | ReadonlyArray<string>;
 }
 
 export interface MentionData {
@@ -408,8 +406,6 @@ export interface CompletionItem {
   select?: CompletionSelectKind;
   /** `select: 'text'`: the text put in place of trigger and query; default `label`. */
   insertText?: string;
-  /** `select: 'list'`: provider id(s) of the trigger whose entries the list shows next. */
-  listSource?: string | ReadonlyArray<string>;
 }
 
 export interface CompletionItemAction {
@@ -446,10 +442,10 @@ export interface ChatCompletionProvider {
  * pill. `text` replaces trigger and query with the entry's `insertText`
  * (default: its label) as plain text. `run` inserts the pill and sends like
  * the send button (nothing is sent while a turn streams; the pill stays).
- * `list` keeps the trigger, clears the query and shows the entries of the
- * providers in `listSource`.
+ * For a sub-list, handle the pick in `onCompletionSelect`: call
+ * `controls.openCompletion({ trigger, source })` and return `true`.
  */
-export type CompletionSelectKind = 'chip' | 'text' | 'run' | 'list';
+export type CompletionSelectKind = 'chip' | 'text' | 'run';
 
 /** A character that opens a completion list in the composer. */
 export interface ChatTriggerDefinition {
@@ -2164,7 +2160,11 @@ export interface OpenCompletionOptions {
   trigger: string;
   /** Text inserted after the trigger and searched at once. Default: empty. */
   query?: string;
-  /** Searches only these provider ids (as `listSource` of a `list` pick). */
+  /**
+   * Searches only these provider ids of the trigger until the list closes,
+   * e.g. a sub-list from `onCompletionSelect`. Applies to the composer's
+   * search and one made by `createCompletionSearch`; another `onSearch` lists all.
+   */
   source?: string | ReadonlyArray<string>;
 }
 

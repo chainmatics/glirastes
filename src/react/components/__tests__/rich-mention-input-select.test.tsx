@@ -31,7 +31,7 @@ const prompts: ChatCompletionProvider = {
   trigger: '/',
   search: () => [
     { id: 'sum', type: 'prompt', label: 'Zusammenfassen', select: 'text', insertText: 'Fasse den Auftrag zusammen' },
-    { id: 'templates', type: 'prompt', label: 'Vorlagen', select: 'list', listSource: 'templates' },
+    { id: 'templates', type: 'prompt', label: 'Vorlagen' },
   ],
 };
 const templates: ChatCompletionProvider = {
@@ -142,14 +142,21 @@ describe('completion pick behavior (select)', () => {
     expect(chip(editor, '9')).not.toBeNull();
   });
 
-  it("'list' keeps the trigger, clears the query and shows the listSource provider", async () => {
-    render(<Composer chat={transport()} />);
+  it('a sub-list: onCompletionSelect opens the list of another provider and returns true', async () => {
+    // The recipe instead of a `list` pick kind.
+    const onCompletionSelect = vi.fn<NonNullable<AiChatProviderConfig['onCompletionSelect']>>((item, { trigger, controls }) => {
+      if (item.id !== 'templates') return undefined;
+      controls.openCompletion({ trigger, source: 'templates' });
+      return true;
+    });
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
     const editor = screen.getByRole('textbox', { name: 'Type a message...' });
 
     typeInto(editor, 'Bitte /vor');
     await waitFor(() => expect(option('Vorlagen')).toBeTruthy());
     fireEvent.click(option('Vorlagen'));
 
+    // One trigger in place of `/vor`, and only the `templates` provider's entries.
     await waitFor(() => expect(option('Mail')).toBeTruthy());
     expect(editor.textContent).toBe('Bitte /');
     expect(screen.queryByRole('option', { name: 'Zusammenfassen' })).toBeNull();
@@ -159,7 +166,26 @@ describe('completion pick behavior (select)', () => {
     await waitFor(() => expect(option('Mail ang')).toBeTruthy());
     expect(screen.queryByRole('option', { name: 'Zusammenfassen' })).toBeNull();
 
+    fireEvent.click(option('Mail ang'));
+    expect(editor.textContent).toBe('Bitte Mail ang');
+    expect(onCompletionSelect).toHaveBeenCalledTimes(2);
+  });
+
+  it('a sub-list closed untouched leaves the text before the pick', async () => {
+    const onCompletionSelect = vi.fn<NonNullable<AiChatProviderConfig['onCompletionSelect']>>((item, { trigger, controls }) => {
+      if (item.id !== 'templates') return undefined;
+      controls.openCompletion({ trigger, source: 'templates' });
+      return true;
+    });
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, 'Bitte /vor');
+    await waitFor(() => expect(option('Vorlagen')).toBeTruthy());
+    fireEvent.click(option('Vorlagen'));
+    await waitFor(() => expect(option('Mail')).toBeTruthy());
     fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(editor.textContent).toBe('Bitte ');
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
@@ -305,8 +331,8 @@ describe('standalone RichMentionInput pick behavior', () => {
     ]);
   });
 
-  it("'list' without listSource behaves like 'chip'", async () => {
-    const onSearch = vi.fn((): MentionResult[] => [{ id: '5', type: 'ticket', label: 'Bug fuenf', select: 'list' }]);
+  it('an unknown select (such as the dropped list kind) inserts a pill', async () => {
+    const onSearch = vi.fn((): MentionResult[] => [{ id: '5', type: 'ticket', label: 'Bug fuenf', select: 'list' as never }]);
     render(<RichMentionInput onSearch={onSearch} triggers={['#']} />);
     const editor = screen.getByRole('textbox');
 

@@ -72,24 +72,15 @@ function isItem(value: unknown): value is CompletionItem {
 }
 
 /** The pick fields that are valid; an invalid one is left out, so the item falls back to its default. */
-function pickFields(item: CompletionItem): Pick<MentionResult, 'select' | 'insertText' | 'listSource'> {
-  const { select, insertText, listSource } = item as { select?: unknown; insertText?: unknown; listSource?: unknown };
+function pickFields(item: CompletionItem): Pick<MentionResult, 'select' | 'insertText'> {
+  const { select, insertText } = item as { select?: unknown; insertText?: unknown };
   return {
     ...(typeof select === 'string' && SELECT_KINDS.has(select) ? { select: select as CompletionItem['select'] } : {}),
     ...(typeof insertText === 'string' && insertText.trim().length > 0 ? { insertText } : {}),
-    ...(listSource !== undefined && isListSource(listSource)
-      ? { listSource: typeof listSource === 'string' ? listSource : [...(listSource as string[])] }
-      : {}),
   };
 }
 
-const SELECT_KINDS = new Set<string>(['chip', 'text', 'run', 'list']);
-
-function isListSource(value: unknown): boolean {
-  if (value === undefined) return true;
-  const ids = typeof value === 'string' ? [value] : value;
-  return Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === 'string' && PROVIDER_ID.test(id));
-}
+const SELECT_KINDS = new Set<string>(['chip', 'text', 'run']);
 
 function groupOf(value: unknown): { group?: string } {
   if (typeof value !== 'string') return {};

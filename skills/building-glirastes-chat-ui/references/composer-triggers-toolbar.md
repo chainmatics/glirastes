@@ -7,6 +7,7 @@ All names below come from `glirastes/react` unless noted.
 - Triggers
   - Sent mentions and `types`
 - What a pick does
+  - Sub-lists
 - Opening a list from a button
 - Toolbar
 - Plus menu
@@ -85,7 +86,6 @@ does; without it the trigger's `select` applies, default `chip`.
 | `chip` | A pill, as before |
 | `text` | `insertText` (default: the label) replaces trigger and query as plain text; caret behind it, list closes |
 | `run` | A pill, then sends exactly like the send button. While a turn streams nothing is sent and the pill stays |
-| `list` | The trigger stays, the query is cleared, and the list shows the providers in `listSource` (provider id or ids of the same trigger). Typing searches only them until the list closes (Escape). Without `listSource` the pick inserts a pill like `chip` |
 
 ```tsx
 const prompts = {
@@ -93,14 +93,13 @@ const prompts = {
   trigger: '/',
   search: () => [
     { id: 'summary', type: 'prompt', label: 'Zusammenfassen', select: 'text', insertText: 'Fasse den Auftrag zusammen' },
-    { id: 'more', type: 'prompt', label: 'Vorlagen', select: 'list', listSource: 'templates' },
+    { id: 'more', type: 'prompt', label: 'Vorlagen' },
   ],
 };
 ```
 
 A prompt template as `select: 'text'` replaces rewriting a chip into text in
-`onBeforeSend`: the user sees and edits the text before sending. Items of a
-`list` sub-list need their own `select` when the trigger default is `list`.
+`onBeforeSend`: the user sees and edits the text before sending.
 
 `onCompletionSelect(item, { trigger, query, controls })` (`CompletionSelectContext`) on the provider runs
 before the built-in behavior; `controls` is the composer
@@ -108,12 +107,31 @@ before the built-in behavior; `controls` is the composer
 when the app handled the pick: the typed trigger and query (or the text
 `openCompletion` inserted) leave the editor, the caret stays where they were
 and the list closes. A standalone `RichMentionInput` takes `onCompletionSelect` with
-`{ trigger, query }` only, and its `onSearch` receives a third argument
-`{ source }` after a `list` pick; forward it to the search of
-`createCompletionSearch`. An unknown `select`, an empty `insertText` or an
-invalid `listSource` id is left out of the item, which stays in the list with
-the trigger's default pick. `onCompletionSelect` receives the normalized item
+`{ trigger, query }` only. An unknown `select` or an empty `insertText` is
+left out of the item, which stays in the list with the trigger's default pick. `onCompletionSelect` receives the normalized item
 (`MentionResult`), not the provider's raw `CompletionItem`.
+
+### Sub-lists
+
+There is no sub-list pick kind. Handle the entry in `onCompletionSelect`:
+open the other provider's list with `controls.openCompletion` and return
+`true`. The typed `/vor` goes, a fresh `/` lists only `templates`, typing on
+searches only them, and Escape removes the `/` again.
+
+```tsx
+const onCompletionSelect = useCallback<NonNullable<AiChatProviderConfig['onCompletionSelect']>>(
+  (item, { trigger, controls }) => {
+    if (item.id !== 'more') return;
+    controls.openCompletion({ trigger, source: 'templates' });
+    return true;
+  },
+  [],
+);
+<AiChatProvider completionProviders={providers} onCompletionSelect={onCompletionSelect} />
+```
+
+`templates` is a second provider on the same trigger. The same works for an
+entry of the "+" menu's `source` section.
 
 ## Opening a list from a button
 
@@ -214,7 +232,7 @@ const composer = useMemo<ComposerConfig>(() => ({
   directly in the menu, searched with an empty query when it opens, at most
   `limit` (default 8), under the heading `label`. Choosing one does what
   picking it in the list does: `chip` inserts a pill at the caret, `text` its
-  `insertText`, `run` inserts and sends, `list` opens the `listSource` list.
+  `insertText`, `run` inserts and sends.
   `onCompletionSelect` runs first. No entries, no section; with no rows at
   all (e.g. while the source loads) no menu box shows, and Escape closes it.
 - Keyboard: ArrowDown/ArrowUp (wrapping), Home/End, Enter/Space choose,

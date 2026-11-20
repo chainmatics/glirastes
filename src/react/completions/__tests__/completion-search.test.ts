@@ -203,28 +203,29 @@ describe('createCompletionSearch source filter', () => {
 });
 
 describe('createCompletionSearch pick fields', () => {
-  it('keeps select, insertText and listSource and strips only invalid ones, keeping the item', async () => {
+  it('keeps select and insertText and strips only invalid ones, keeping the item', async () => {
     const search = createCompletionSearch([{
       id: 'prompts',
       trigger: '/',
       search: () => [
         { id: 'text', type: 'prompt', label: 'Text', select: 'text', insertText: 'Fasse zusammen' },
-        { id: 'list', type: 'prompt', label: 'List', select: 'list', listSource: ['templates'] },
+        { id: 'run', type: 'prompt', label: 'Run', select: 'run' },
         { id: 'bad-select', type: 'prompt', label: 'Bad', select: 'open' as never },
         { id: 'bad-text', type: 'prompt', label: 'Bad', select: 'text', insertText: '  ' },
-        { id: 'bad-source', type: 'prompt', label: 'Bad', select: 'list', listSource: 'No Id' },
+        // `list` is no pick kind: the item stays and picks with the trigger default.
+        { id: 'old-list', type: 'prompt', label: 'Old', select: 'list', listSource: 'templates' } as never,
       ],
     }]);
 
     const results = await search('', '/');
-    expect(results.map((result) => result.id)).toEqual(['text', 'list', 'bad-select', 'bad-text', 'bad-source']);
+    expect(results.map((result) => result.id)).toEqual(['text', 'run', 'bad-select', 'bad-text', 'old-list']);
     expect(results[0]).toMatchObject({ select: 'text', insertText: 'Fasse zusammen' });
-    expect(results[1]).toMatchObject({ select: 'list', listSource: ['templates'] });
+    expect(results[1]).toMatchObject({ select: 'run' });
     // The invalid field goes; the item falls back to the trigger default (select) or its label (insertText).
     expect('select' in results[2]!).toBe(false);
     expect(results[3]).toMatchObject({ select: 'text' });
     expect('insertText' in results[3]!).toBe(false);
-    expect(results[4]).toMatchObject({ select: 'list' });
+    expect('select' in results[4]!).toBe(false);
     expect('listSource' in results[4]!).toBe(false);
   });
 });

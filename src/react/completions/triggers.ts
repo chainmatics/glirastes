@@ -11,7 +11,7 @@ export type ResolvedChatTrigger = Required<Pick<ChatTriggerDefinition, 'char' | 
   types?: ReadonlyArray<string>;
 };
 
-const SELECT_KINDS: ReadonlyArray<CompletionSelectKind> = ['chip', 'text', 'run', 'list'];
+const SELECT_KINDS: ReadonlyArray<CompletionSelectKind> = ['chip', 'text', 'run'];
 
 /** `@` and `/` always open a list, as before `triggers` existed. */
 const BUILT_IN_CHARS = ['@', '/'] as const;

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineChatEntity } from '../../interactions/definitions.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import type {
+  AiChatProviderConfig,
   ChatCompletionProvider,
   ChatComposerInputControls,
   ChatTransport,
@@ -278,7 +279,7 @@ describe('composer plus menu', () => {
     expect(document.activeElement).toBe(editor);
   });
 
-  it('opens the sub-list of a list entry, which closes away untouched', async () => {
+  it('opens a sub-list from a source entry through onCompletionSelect, which closes away untouched', async () => {
     const composer: ComposerConfig = {
       toolbar: { start: ['plus'], end: ['send'] },
       plusMenu: { items: [], source: { trigger: '/', source: 'others' } },
@@ -286,12 +287,17 @@ describe('composer plus menu', () => {
     const groups: ChatCompletionProvider = {
       id: 'others',
       trigger: '/',
-      search: () => [{ id: 'all', type: 'group', label: 'All templates', select: 'list', listSource: 'templates' }],
+      search: () => [{ id: 'all', type: 'group', label: 'All templates' }],
+    };
+    const onCompletionSelect: NonNullable<AiChatProviderConfig['onCompletionSelect']> = (item, { trigger, controls }) => {
+      if (item.id !== 'all') return undefined;
+      controls.openCompletion({ trigger, source: 'templates' });
+      return true;
     };
     function WithGroups() {
       const providers = useMemo(() => [templates, groups], []);
       return (
-        <AiChatProvider transport={transport()} completionProviders={providers} composer={composer}>
+        <AiChatProvider transport={transport()} completionProviders={providers} composer={composer} onCompletionSelect={onCompletionSelect}>
           <MentionInput />
         </AiChatProvider>
       );
@@ -304,6 +310,7 @@ describe('composer plus menu', () => {
     expect(editor.textContent).toBe('/');
     expect(document.activeElement).toBe(editor);
     await waitFor(() => expect(screen.getByRole('option', { name: /Summarize/ })).toBeTruthy());
+    expect(screen.queryByRole('option', { name: /All templates/ })).toBeNull();
     fireEvent.keyDown(editor, { key: 'Escape' });
     expect(editor.textContent).toBe('');
   });

@@ -250,8 +250,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // Refs for stale-closure avoidance and debounce
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
     const searchVersionRef = useRef(0);
-    // Set by a `select: 'list'` pick: the providers searched until the list closes.
-    const listSourceRef = useRef<string | ReadonlyArray<string> | undefined>(undefined);
+    // Set by `openCompletion({ source })`: the providers searched until the list closes.
+    const sourceRef = useRef<string | ReadonlyArray<string> | undefined>(undefined);
     const lastSearchRef = useRef<{ query: string; trigger: string }>({ query: '', trigger: '' });
     // Set by `openCompletion` until the user types or picks.
     const armedRef = useRef<ArmedCompletion | null>(null);
@@ -423,7 +423,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       // A debounced search still pending must not reopen the list.
       clearTimeout(searchTimeoutRef.current);
       searchVersionRef.current++;
-      listSourceRef.current = undefined;
+      sourceRef.current = undefined;
       setDropdownOpen(false);
       setSearchResults([]);
       setNoMatches(false);
@@ -481,7 +481,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           if (searchVersionRef.current !== version) return;
           // A list opened by `openCompletion` that finds nothing goes away with its text.
           const removed = results.length === 0 && removeArmed();
-          if (removed) listSourceRef.current = undefined;
+          if (removed) sourceRef.current = undefined;
           setSearchResults(results);
           setSelectedIndex(0);
           setSelectedAction(-1);
@@ -489,7 +489,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           setNoMatches(results.length === 0 && !removed);
         } catch {
           if (searchVersionRef.current !== version) return;
-          if (removeArmed()) listSourceRef.current = undefined;
+          if (removeArmed()) sourceRef.current = undefined;
           setSearchResults([]);
           setDropdownOpen(false);
           setNoMatches(false);
@@ -752,7 +752,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       if (triggerState) {
         clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = setTimeout(() => {
-          void performSearch(triggerState.query, triggerState.trigger, listSourceRef.current);
+          void performSearch(triggerState.query, triggerState.trigger, sourceRef.current);
         }, SEARCH_DEBOUNCE_MS);
       } else {
         clearTimeout(searchTimeoutRef.current);
@@ -805,8 +805,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     /**
      * One entry of the list was picked: the app's handler first, then the
      * entry's `select` behavior. `fromCode` (`pickCompletion`): the trigger was
-     * inserted armed for this pick; when nothing replaces it, it goes again,
-     * and a `list` keeps it armed.
+     * inserted armed for this pick; when nothing replaces it, it goes again.
      */
     const pickResult = useCallback((result: MentionResult, fromCode = false) => {
       const armed = armedRef.current;
@@ -840,28 +839,13 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         openDeferred();
         return;
       }
-      const selected = result.select ?? triggers.get(active.trigger)?.select ?? 'chip';
-      // A `list` without a sub-list would show the same list again: it inserts a pill instead.
-      const kind = selected === 'list' && result.listSource === undefined ? 'chip' : selected;
+      // Any other value (an own `onSearch` may return one) picks as `chip`.
+      const kind = result.select ?? triggers.get(active.trigger)?.select ?? 'chip';
       if (kind === 'text') {
         if (replaceQuery(() => result.insertText ?? result.label) === null) dropArmed();
         else {
           closeDropdown();
           onChange?.(getFullValue());
-        }
-      } else if (kind === 'list') {
-        const char = replaceQuery((trigger) => trigger);
-        if (char === null) dropArmed();
-        else {
-          // The text is the same, so an armed trigger still closes away untouched.
-          if (fromCode) armedRef.current = armed;
-          clearTimeout(searchTimeoutRef.current);
-          // Searching again clears the list state but keeps it open; the source sticks until it closes.
-          listSourceRef.current = result.listSource;
-          setSelectedIndex(0);
-          setSelectedAction(-1);
-          onChange?.(getFullValue());
-          void performSearch('', char, result.listSource);
         }
       } else {
         // `run` sends through the same path as Enter, so a disabled (streaming) composer sends nothing.
@@ -870,7 +854,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         else if (kind === 'run') submit([inserted]);
       }
       openDeferred();
-    }, [detectTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, performSearch, insertMention, submit, removeArmed]);
+    }, [detectTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, insertMention, submit, removeArmed]);
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
@@ -1226,7 +1210,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       );
       if (trigger === null) return;
       clearTimeout(searchTimeoutRef.current);
-      listSourceRef.current = options.source;
+      sourceRef.current = options.source;
       setSelectedIndex(0);
       setSelectedAction(-1);
       onChange?.(getFullValue());

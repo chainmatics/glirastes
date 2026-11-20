@@ -52,8 +52,9 @@ describe('resolveChatTriggers', () => {
       'Invalid chat trigger "#": `prefix` must be a non-empty string without whitespace',
     );
     expect(() => resolveChatTriggers([{ char: '#', select: 'open' as never }], [])).toThrow(
-      'Invalid chat trigger "#": `select` must be one of chip, text, run, list',
+      'Invalid chat trigger "#": `select` must be one of chip, text, run',
     );
+    expect(() => resolveChatTriggers([{ char: '#', select: 'list' as never }], [])).toThrow(/`select` must be one of/);
   });
 });
 
