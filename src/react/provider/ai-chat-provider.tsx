@@ -204,7 +204,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   queueSaveLabel: 'Save',
   queueCancelLabel: 'Cancel',
   queueFilesLabel: '{count} files',
-  queueApprovalWaitingHint: 'Please approve or reject the open request first.',
+  queueApprovalWaitingHint: 'Message waits until the approval is decided.',
 };
 
 /** Built-in `approvalPendingHint` → the built-in `queueApprovalWaitingHint` of the same language. */
@@ -214,17 +214,33 @@ const BUILT_IN_QUEUE_APPROVAL_HINTS = new Map<string, string>(
 const BUILT_IN_QUEUE_APPROVAL_HINT_TEXTS = new Set(BUILT_IN_QUEUE_APPROVAL_HINTS.values());
 
 /**
- * Fills `queueApprovalWaitingHint`. Before it existed the queued state showed
- * `approvalPendingHint`, so without an own text for the new key it follows
- * that key: the app's own `approvalPendingHint` (also over a spread
- * `deChatLocale`, in `locales` or in a full locale without the new key) is
- * kept, a built-in one gives the built-in text of the same language.
+ * Fills `queueApprovalWaitingHint`: the app's own text of that key, else the
+ * app's own `approvalPendingHint` (the queued state showed it before the key
+ * existed; also over a spread `deChatLocale`, in `locales` or in a full
+ * locale without the new key), only then the built-in text of the language.
+ * `explicitHint` is what the app itself passed for the new key: a built-in
+ * text there counts as its own, except next to an own `approvalPendingHint`,
+ * which is what a spread `deChatLocale` with one override looks like.
  */
-function withQueueApprovalHint(locale: ChatLocale): ChatLocale {
+function withQueueApprovalHint(locale: ChatLocale, explicitHint: string | undefined): ChatLocale {
   const hint = locale.queueApprovalWaitingHint;
   if (hint !== undefined && !BUILT_IN_QUEUE_APPROVAL_HINT_TEXTS.has(hint)) return locale;
+  const ownApprovalHint = !BUILT_IN_QUEUE_APPROVAL_HINTS.has(locale.approvalPendingHint);
+  if (hint !== undefined && hint === explicitHint && !ownApprovalHint) return locale;
   const followed = BUILT_IN_QUEUE_APPROVAL_HINTS.get(locale.approvalPendingHint) ?? locale.approvalPendingHint;
   return followed === hint ? locale : { ...locale, queueApprovalWaitingHint: followed };
+}
+
+/** The app's own value of `queueApprovalWaitingHint` (`locale`, else its `locales` tables), without built-ins. */
+function explicitQueueApprovalHint(
+  locale: Partial<ChatLocale> | undefined,
+  locales: Readonly<Record<string, Partial<ChatLocale>>> | undefined,
+  language: string | null,
+): string | undefined {
+  if (locale?.queueApprovalWaitingHint !== undefined) return locale.queueApprovalWaitingHint;
+  if (!locales) return undefined;
+  return resolveTextTable<Partial<ChatLocale>>({ requested: language ?? undefined, builtIn: { en: {} }, app: locales })
+    .queueApprovalWaitingHint;
 }
 
 // ============================================================================
@@ -608,8 +624,9 @@ export function AiChatProvider({
         }),
         ...(userLocale ?? {}),
       }
-      : { ...DEFAULT_LOCALE, ...languageLocale(language), ...(userLocale ?? {}) }),
-  [userLocale, userLocales, language]);
+      : { ...DEFAULT_LOCALE, ...languageLocale(language), ...(userLocale ?? {}) },
+    explicitQueueApprovalHint(userLocale, userLocales, language),
+  ), [userLocale, userLocales, language]);
   // Resolve `theme` prop → CSS variables spread onto widget roots.
   const themeVars = useMemo<CSSProperties>(
     () => (themeScope === 'inherit' || unstyled ? {} : getThemeVars(userTheme)) as CSSProperties,

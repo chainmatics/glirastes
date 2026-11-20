@@ -182,7 +182,9 @@ Off by default; `queue={{ enabled: true }}` on the provider (`config.queue` on
 - `clear()` and another active conversation empty the queue; a language
   change keeps it. A full `ChatLocale` object needs the `queue*` keys except
   the optional `queueApprovalWaitingHint` (the panel's approval notice while
-  a queued message waits; without it the app's own `approvalPendingHint`).
+  a queued message waits). Order: the app's own text of that key, else the
+  app's own `approvalPendingHint`, else the built-in "Message waits until the
+  approval is decided." / "Nachricht wartet, bis die Freigabe entschieden ist."
 
 ## A chat without the SDK provider
 

@@ -1095,22 +1095,54 @@ describe('notice for a message waiting behind an open approval', () => {
     return text;
   }
 
-  it('reads queueApprovalWaitingHint; the built-in texts are unchanged', async () => {
-    expect(await waitingNotice({})).toBe('Please approve or reject the open request first.');
-    expect(await waitingNotice({ language: 'de' })).toBe(deChatLocale.approvalPendingHint);
-    expect(await waitingNotice({ locale: { queueApprovalWaitingHint: 'Waits for your decision.' } }))
-      .toBe('Waits for your decision.');
+  const EN_WAITING = 'Message waits until the approval is decided.';
+  const DE_WAITING = 'Nachricht wartet, bis die Freigabe entschieden ist.';
+
+  it('shows the built-in text of the new key without an own text (level 3), in English and German', async () => {
+    expect(await waitingNotice({})).toBe(EN_WAITING);
+    expect(await waitingNotice({ language: 'de' })).toBe(DE_WAITING);
+    expect(await waitingNotice({ locale: deChatLocale })).toBe(DE_WAITING);
+    expect(await waitingNotice({ language: 'de', locales: { de: { sendButton: 'Los' } } })).toBe(DE_WAITING);
+    expect(EN_WAITING).not.toBe('Please approve or reject the open request first.');
+    expect(DE_WAITING).not.toBe(deChatLocale.approvalPendingHint);
   });
 
-  it("falls back to the app's own approvalPendingHint when the new key is not set", async () => {
+  it("falls back to the app's own approvalPendingHint (level 2), in English and German", async () => {
     expect(await waitingNotice({ locale: { approvalPendingHint: 'Decide first.' } })).toBe('Decide first.');
+    expect(await waitingNotice({ language: 'de', locale: { approvalPendingHint: 'Erst entscheiden.' } }))
+      .toBe('Erst entscheiden.');
     expect(await waitingNotice({ locale: { ...deChatLocale, approvalPendingHint: 'Erst entscheiden.' } }))
       .toBe('Erst entscheiden.');
     expect(await waitingNotice({ language: 'de', locales: { de: { approvalPendingHint: 'Erst entscheiden.' } } }))
       .toBe('Erst entscheiden.');
+    expect(await waitingNotice({ locales: { en: { approvalPendingHint: 'Decide first.' } } })).toBe('Decide first.');
+  });
+
+  it("uses the app's own text of the new key first (level 1), in English and German", async () => {
+    expect(await waitingNotice({ locale: { queueApprovalWaitingHint: 'Waits for your decision.' } }))
+      .toBe('Waits for your decision.');
     expect(await waitingNotice({
       locale: { approvalPendingHint: 'Decide first.', queueApprovalWaitingHint: 'Waits for your decision.' },
     })).toBe('Waits for your decision.');
+    expect(await waitingNotice({
+      language: 'de',
+      locale: { approvalPendingHint: 'Erst entscheiden.', queueApprovalWaitingHint: 'Wartet auf deine Entscheidung.' },
+    })).toBe('Wartet auf deine Entscheidung.');
+    expect(await waitingNotice({
+      language: 'de',
+      locales: { de: { approvalPendingHint: 'Erst entscheiden.', queueApprovalWaitingHint: 'Wartet.' } },
+    })).toBe('Wartet.');
+  });
+
+  it('honours an explicitly set built-in text of the new key', async () => {
+    // The German built-in text on an English chat, and the English one on a German chat.
+    expect(await waitingNotice({ locale: { queueApprovalWaitingHint: DE_WAITING } })).toBe(DE_WAITING);
+    expect(await waitingNotice({ language: 'de', locale: { queueApprovalWaitingHint: EN_WAITING } })).toBe(EN_WAITING);
+    expect(await waitingNotice({ language: 'de', locales: { de: { queueApprovalWaitingHint: EN_WAITING } } }))
+      .toBe(EN_WAITING);
+    // Next to an own approvalPendingHint a built-in text reads as a spread deChatLocale: the own hint wins.
+    expect(await waitingNotice({ locale: { approvalPendingHint: 'Decide first.', queueApprovalWaitingHint: EN_WAITING } }))
+      .toBe('Decide first.');
   });
 
   it('keeps approvalPendingHint without the queue', async () => {
@@ -1127,7 +1159,7 @@ describe('notice for a message waiting behind an open approval', () => {
   it('a full ChatLocale without the new key typechecks and keeps its language', async () => {
     const { queueApprovalWaitingHint: _omitted, ...full } = deChatLocale;
     const locale: ChatLocale = full;
-    expect(await waitingNotice({ locale })).toBe(deChatLocale.approvalPendingHint);
+    expect(await waitingNotice({ locale })).toBe('Nachricht wartet, bis die Freigabe entschieden ist.');
     expect(await waitingNotice({ locale: { ...locale, approvalPendingHint: 'Eigener Hinweis.' } }))
       .toBe('Eigener Hinweis.');
   });

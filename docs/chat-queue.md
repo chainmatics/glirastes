@@ -187,12 +187,17 @@ A custom composer uses `canCompose` instead of `isLoading` to lock itself.
   while a queued message waits for an open approval reads
   `queueApprovalWaitingHint`; without a queued message (a refused send) it
   stays `approvalPendingHint`. The new key is optional in `ChatLocale`, so a
-  full locale object without it still compiles. Not set (or set to a built-in
-  text), it follows `approvalPendingHint`: the app's own text of that key
-  (in `locale`, over a spread `deChatLocale` or in `locales`) is kept, a
-  built-in one gives the built-in text of the same language. The built-in
-  English and German texts equal those of `approvalPendingHint`, so the
-  notice reads as before.
+  full locale object without it still compiles. Order:
+  1. the app's own text of the new key (`locale` or `locales`);
+  2. else the app's own `approvalPendingHint` (in `locale`, over a spread
+     `deChatLocale`, in `locales` or in a full locale without the new key), so
+     an app that set it sees no change;
+  3. only then the built-in text: "Message waits until the approval is
+     decided." (German: "Nachricht wartet, bis die Freigabe entschieden ist.").
+
+  A built-in text set explicitly for the new key is honoured, except next to
+  an own `approvalPendingHint` (that is what a spread `deChatLocale` with one
+  override looks like): then the own `approvalPendingHint` wins.
 
 ## Persistence adapter
 

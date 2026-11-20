@@ -1083,7 +1083,8 @@ export interface ChatLocale {
   /**
    * The approval notice while a queued message waits for an open approval.
    * Optional: without it the chat uses the app's own `approvalPendingHint`
-   * when it set one, else the built-in text.
+   * when it set one, else the built-in text ("Message waits until the
+   * approval is decided.").
    */
   queueApprovalWaitingHint?: string;
 }
