@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Turn end callback** (`docs/concepts.md`, message layout): `onTurnEnd(outcome, info)` on `AiChatProvider` (and `config.onTurnEnd` on `<glirastes-chat>`) is called once when a turn of the open chat ends, with its `TurnOutcome` (the same object `turnOutcomes` holds by then) and `info` (`TurnEndInfo` `{ sessionId }`). Every status: `completed`, `aborted` (also the turn a `sendNow` with `'abort'` interrupts), `safety-stop`, `error` (also before the first token or without an assistant message). Called when the turn's last request is over: not while the run streams after a server-reported stop or error, not while the turn asks for an approval (also after a safety stop on that step; the decided run reports), not between a UI action outcome and its continuation request, not on a page a UI action leaves with a page load (the next page reports the turn it continues). A retry reports its own end. Not called for outcomes from a stored history (`session.load`, a reload, a history the app hands its transport), for a turn whose chat is not the open one when the turn ends (also not when that chat opens again later; a chat left and reopened before its turn ended reports it), or for a run cleared with `clear()`; once per turn under StrictMode; the latest function is used; a throw and the rejection of a returned promise are caught and logged. New types `OnTurnEnd`, `TurnEndInfo`. Without `onTurnEnd` nothing changes (also no extra render); the requests are unchanged. Local only.
+
 ### Documentation
 
 - README install section: an app upgrading from 0.19.0 or older with an existing `bun.lock` keeps a nested `glirastes/pg` (and possibly `glirastes/zod`) entry; how to remove them so the app's copies are shared.

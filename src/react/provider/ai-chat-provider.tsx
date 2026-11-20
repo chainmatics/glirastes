@@ -575,6 +575,17 @@ type PreparedSend =
 /** How long the queue waits after an answered approval for the transport to send it on by itself. */
 const APPROVAL_RESEND_GRACE_MS = 1500;
 
+/** An assistant message of the turn the user message started (up to the next user message) asks for an approval. */
+function turnAwaitsApproval(messages: ReadonlyArray<{ id?: string; role: string; parts: ReadonlyArray<unknown> }>, userMessageId: string): boolean {
+  const start = messages.findIndex((message) => message.role === 'user' && message.id === userMessageId);
+  if (start < 0) return false;
+  for (const message of messages.slice(start + 1)) {
+    if (message.role === 'user') return false;
+    if (message.role === 'assistant' && message.parts.some((part) => isRecord(part) && part.state === 'approval-requested')) return true;
+  }
+  return false;
+}
+
 /** The last assistant message still asks for an approval (before the approval map has it). */
 function lastStepAwaitsApproval(messages: ReadonlyArray<{ role: string; parts: ReadonlyArray<unknown> }>): boolean {
   const last = messages.at(-1);
@@ -642,6 +653,7 @@ export function AiChatProvider({
   onToolResult,
   uiActionBus,
   onUiActionOutcome,
+  onTurnEnd,
   uiActionOutcomeTimeoutMs,
   uiActionOutcomes = true,
   onBeforeSend,
@@ -866,6 +878,13 @@ export function AiChatProvider({
   const leftChatOutcomesRef = useRef(new Map<string, ReadonlyMap<string, TurnOutcome>>());
   const loadedSessionIdRef = useRef(loadedSessionId);
   loadedSessionIdRef.current = loadedSessionId;
+  // `onTurnEnd`: outcomes of the open chat recorded live and not reported yet (with the status and reason
+  // they were recorded with), and the ones whose state update is not applied yet. Restored outcomes never get here.
+  const turnEndPendingRef = useRef(new Map<string, { sessionId: string; status: TurnOutcome['status']; reason: TurnOutcomeReason }>());
+  const turnEndQueuedRef = useRef(new Set<string>());
+  const onTurnEndRef = useRef(onTurnEnd);
+  onTurnEndRef.current = onTurnEnd;
+  const [, setTurnEndCheck] = useState(0);
   /** Where the outcome of the running or last request goes, and whether that chat is the one open. */
   const requestTurn = useCallback(() => {
     const bound = requestTurnRef.current ?? {
@@ -886,15 +905,21 @@ export function AiChatProvider({
     const target = requestTurn();
     if (!target) return;
     const { userMessageId } = target;
-    const apply = (prev: ReadonlyMap<string, TurnOutcome>) => {
+    const apply = (prev: ReadonlyMap<string, TurnOutcome>, notify = false) => {
+      if (notify) turnEndQueuedRef.current.delete(userMessageId);
       const current = prev.get(userMessageId);
       if (current?.status === status || (onlyIfNone && current)) return prev;
       const next = new Map(prev);
       next.set(userMessageId, { userMessageId, status, reason, at: new Date().toISOString() });
+      // A change of the open chat's outcome: `onTurnEnd` reports it once the turn is over (idempotent, so a
+      // StrictMode double call of this updater sets the same entry).
+      if (notify) turnEndPendingRef.current.set(userMessageId, { sessionId: target.sessionId, status, reason });
       return next;
     };
     if (target.open) {
-      setTurnOutcomes(apply);
+      // Until this update is applied, the outcome in state may still change: no report before.
+      turnEndQueuedRef.current.add(userMessageId);
+      setTurnOutcomes((prev) => apply(prev, true));
       return;
     }
     const left = leftChatOutcomesRef.current;
@@ -1366,6 +1391,8 @@ export function AiChatProvider({
     setSessionLoadFailure(null);
     setMessages([] as unknown as typeof rawMessages);
     setTurnOutcomes(new Map());
+    // What the loaded history brings was not recorded now: nothing of it is reported.
+    turnEndPendingRef.current.clear();
     setHeldMessages([]);
 
     (async () => {
@@ -2159,6 +2186,7 @@ export function AiChatProvider({
     setPipelineSteps([]);
     setPipelineState(null);
     setTurnOutcomes(new Map());
+    turnEndPendingRef.current.clear();
     setHeldMessages([]);
     setMentionQuery('');
     setMentionTrigger(null);
@@ -2366,6 +2394,56 @@ export function AiChatProvider({
       return next;
     });
   }, [isLoading]);
+
+  // `onTurnEnd`: after every commit (declared after the run start and end above, so it sees what they bound),
+  // report each live-recorded outcome whose state update is applied, once its turn is over: its request is
+  // no longer the running one (a queued `sendNow` started the next), or nothing runs and no UI action outcome
+  // is awaited (a continuation of the same turn would follow). Held while the turn asks for an approval (the
+  // decided run goes on with it) and once a UI action started a page load (the next page continues and
+  // reports the turn). Only for the chat that is open.
+  useEffect(() => {
+    const pending = turnEndPendingRef.current;
+    if (pending.size === 0) return;
+    // Without a callback nothing is reported later either (and no extra render happens).
+    if (!onTurnEndRef.current) {
+      pending.clear();
+      return;
+    }
+    const busy = isLoading || awaitedOutcomes > 0;
+    const runningFor = requestTurnRef.current?.userMessageId ?? null;
+    const sessionId = loadedSessionIdRef.current;
+    let applyPending = false;
+    for (const [userMessageId, recorded] of [...pending]) {
+      if (turnEndQueuedRef.current.has(userMessageId)) {
+        applyPending = true;
+        continue;
+      }
+      if (recorded.sessionId !== sessionId || sessionId !== activeSessionIdRef.current) {
+        pending.delete(userMessageId);
+        continue;
+      }
+      const outcome = turnOutcomes.get(userMessageId);
+      // Not committed yet, or taken out by a new request for the same turn (that request reports).
+      if (!outcome || outcome.status !== recorded.status || outcome.reason !== recorded.reason) continue;
+      if (busy && runningFor === userMessageId) continue;
+      if (pageLeavingRef.current) continue;
+      if (turnAwaitsApproval(rawMessagesRef.current, userMessageId)) continue;
+      pending.delete(userMessageId);
+      try {
+        // An async callback's rejection is caught as a throw is.
+        const returned: unknown = onTurnEndRef.current?.(outcome, { sessionId });
+        if ((typeof returned === 'object' || typeof returned === 'function') && returned !== null
+          && typeof (returned as { then?: unknown }).then === 'function') {
+          (returned as PromiseLike<unknown>).then(undefined, () => { console.warn('[glirastes] onTurnEnd threw'); });
+        }
+      } catch {
+        console.warn('[glirastes] onTurnEnd threw');
+      }
+    }
+    // A record still to be applied may leave the state as it is, and React then runs no effect: look again
+    // after it was applied.
+    if (applyPending) setTurnEndCheck((count) => count + 1);
+  });
 
   // A request started: every answer before it was sent.
   useEffect(() => {
