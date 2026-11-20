@@ -30,12 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Visible change for German chats whose activity wording is the built-in German one: the failure texts listed under Added are German instead of English, e.g. "Endpoint failed (503)" → "Endpunkt fehlgeschlagen (503)", "The note could not be saved." → "Die Notiz konnte nicht gespeichert werden.", "You are not permitted to use this tool." → "Du darfst dieses Tool nicht verwenden." (the server texts only where the detail is shown: displayed results or `details: 'all'`). Such a chat is German when the app states `language: 'de'`, else when the page `lang` is German, else (no `language`, no page `lang`) when the server's tool labels are German (`languageSource: 'server'` puts the tool labels before the page). An app whose own `locale` or `locales` table words the activity log itself (any other `activity…` key with a text that is not the built-in German one) keeps the English failure texts unless it states `language`, sets the `activityFailure…` keys or spreads `deChatLocale`. English chats see no change. A language without a built-in table (an app's own `locales.pl`) keeps the English texts unless it sets the new keys.
-- Next.js handler: the fixed stream failure texts follow the chat language (German `KI-Anfrage fehlgeschlagen`), with a `streamErrorTexts` override. Permission and budget denials, the unavailable-tool text and approval-subject refusals stay English.
 - Next.js handler: the fixed stream failure texts follow the chat language (German `KI-Anfrage fehlgeschlagen`). They are keys of the handler's `locales` (`streamError`, `invalidToolInput`; also `chat.locales` in the runtime container), so an app can change them per language or add another language. Permission and budget denials, the unavailable-tool text and approval-subject refusals stay English.
 
 ### Removed
 
 - The legacy `glirastes check-upgrade` command. It was never shipped in the package.
+
+### Fixed
+
+- Chat composer: `useChatComposerInput({ initialValue })` applies the value only on mount, as documented. A consumer that passed its live, controlled draft there had the first typed character re-applied after the first keystroke and the caret reset, so typing `Welche` into the empty input ended as `elcheW W`.
 
 ### Security
 
