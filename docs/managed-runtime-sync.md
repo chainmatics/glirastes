@@ -756,6 +756,10 @@ that wants its own hint can read the `data-pipeline-state` part: `status:
 'safety-stop'` and the dimension codes in `message`; there is no separate
 machine-readable reason field.
 
+The final `data-pipeline-state` comes right before `finish` or `abort`; for the
+full order of parts at the end of the stream see
+`skills/integrating-glirastes-nextjs/references/handler-options.md`.
+
 Every tool result of a turn is sent again with every later model step, so
 `maxInputTokens` counts it once per remaining step. Paging through a large
 result with `read_result` (pages of up to `maxResultChars`, default 16,000

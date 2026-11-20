@@ -13,6 +13,7 @@ it. The type's JSDoc carries the full detail.
 - Approvals
 - Request safety
 - Callbacks and observability
+- Order of parts at the end of the stream
 - Legacy and Pro
 
 ## Tools and routing
@@ -133,6 +134,20 @@ card's wording and the handler's own texts (with `locales`); the order is
 | `onAudit` | `AuditEmitter` for all audit events; forward to logs or a SIEM |
 | `metrics` | content-free turn metrics, e.g. from `createGlirastes(...).chatTurn()`; a continuation is a `turn.continued` event (`TurnContinuedEvent`, `TurnContinuedEventSchema`, `TurnContinuation`, `TurnContinuationSchema`) instead of `turn.finished`, in batches of its own, with an opaque `turnId` (HMAC keyed by the approval secret, never the client's message id) shared by every continuation of the turn |
 | `modelPricing` | price table for providers that report no cost |
+
+### Order of parts at the end of the stream
+
+Since 0.18.1 the order is fixed (0.17.x and the 0.18.0 image: timing-dependent):
+
+- A `data-step-report` comes right before the `finish-step` of its step, after
+  every chunk of that step, a `tool-approval-request` included.
+- The final `data-pipeline-state` comes right before `finish` (or `abort`), so
+  the terminal part is last among these.
+- Exception: a chat memory summary (`data-memory-summary`, `memory.chat`) whose
+  model call ends after the answer arrives after `finish`; `finish` does not
+  wait for it. A custom client reads until the stream closes and does not stop
+  at `finish`. The packaged React chat uses the AI SDK `useChat`, which reads
+  the response to its end and does not act on `finish`.
 
 ## Legacy and Pro
 
