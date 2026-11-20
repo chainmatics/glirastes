@@ -1,0 +1,119 @@
+{
+  "version": "0.19.0",
+  "notes": [
+    {
+      "id": "chat-locale-queue-keys",
+      "kind": "breaking",
+      "summary": "ChatLocale gained nine required queue keys. A hand-written full ChatLocale object no longer compiles until it has them. Partial<ChatLocale> overrides are unaffected.",
+      "howTo": "Add these keys to every full ChatLocale object: queueTitle, queueSendNowLabel, queueEditLabel, queueRemoveLabel, queuePausedLabel, queueResumeLabel, queueSaveLabel, queueCancelLabel, queueFilesLabel. The locale and locales props of AiChatProvider take Partial<ChatLocale>, so partial tables and overrides need no change.",
+      "skill": "building-glirastes-chat-ui#configuration",
+      "adoptedWhen": {
+        "patterns": [
+          "\\bqueueFilesLabel\\s*:"
+        ]
+      },
+      "affectedWhen": {
+        "patterns": [
+          ":\\s*ChatLocale\\b",
+          "\\bsatisfies\\s+ChatLocale\\b",
+          "\\bas\\s+ChatLocale\\b",
+          "(?<![\\w$])<ChatLocale>",
+          ",\\s*ChatLocale>"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ChatLocale.queueTitle",
+        "glirastes/react#ChatLocale.queueSendNowLabel",
+        "glirastes/react#ChatLocale.queueEditLabel",
+        "glirastes/react#ChatLocale.queueRemoveLabel",
+        "glirastes/react#ChatLocale.queuePausedLabel",
+        "glirastes/react#ChatLocale.queueResumeLabel",
+        "glirastes/react#ChatLocale.queueSaveLabel",
+        "glirastes/react#ChatLocale.queueCancelLabel",
+        "glirastes/react#ChatLocale.queueFilesLabel",
+        "locale#queueTitle",
+        "locale#queueSendNowLabel",
+        "locale#queueEditLabel",
+        "locale#queueRemoveLabel",
+        "locale#queuePausedLabel",
+        "locale#queueResumeLabel",
+        "locale#queueSaveLabel",
+        "locale#queueCancelLabel",
+        "locale#queueFilesLabel"
+      ]
+    },
+    {
+      "id": "chat-message-queue",
+      "kind": "optional",
+      "summary": "Opt-in message queue: with queue: { enabled: true } a message sent while a run is busy or an approval is open is queued and sent once the chat is idle, instead of being refused.",
+      "howTo": "Set queue: { enabled: true } on AiChatProvider (config.queue on <glirastes-chat>). Read and steer it with useChatQueue() or the context's submit, sendNow, editQueued and removeQueued; hide the default list with components.ChatQueue: null. Without queue nothing changes. See docs/chat-queue.md.",
+      "skill": "building-glirastes-chat-ui#message-queue",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react",
+          "glirastes/embed"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "useChatQueue",
+          "ChatQueueConfig"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ChatQueue",
+        "glirastes/react#ChatQueueApi.*",
+        "glirastes/react#ChatQueueChangeEvent.*",
+        "glirastes/react#ChatQueueChangeReason",
+        "glirastes/react#ChatQueueConfig.*",
+        "glirastes/react#ChatQueuePauseTrigger",
+        "glirastes/react#ChatQueueProps.*",
+        "glirastes/react#ChatQueueState.*",
+        "glirastes/react#ChatQueueStorage.*",
+        "glirastes/react#ChatSubmitResult",
+        "glirastes/react#QueuedMessage.*",
+        "glirastes/react#useChatQueue",
+        "glirastes/react#AiChatProviderConfig.queue",
+        "glirastes/react#AiChatProviderProps.queue",
+        "glirastes/react/vercel#VercelAiChatProps.queue",
+        "glirastes/embed#GlirastesChatElementConfig.queue",
+        "glirastes/react#ChatClassNames.chatQueue",
+        "glirastes/react#ChatComponents.ChatQueue",
+        "glirastes/react#ChatContextValue.beginEdit",
+        "glirastes/react#ChatContextValue.canCompose",
+        "glirastes/react#ChatContextValue.cancelEdit",
+        "glirastes/react#ChatContextValue.clearQueue",
+        "glirastes/react#ChatContextValue.editQueued",
+        "glirastes/react#ChatContextValue.pauseQueue",
+        "glirastes/react#ChatContextValue.queue",
+        "glirastes/react#ChatContextValue.removeQueued",
+        "glirastes/react#ChatContextValue.resumeQueue",
+        "glirastes/react#ChatContextValue.sendNow",
+        "glirastes/react#ChatContextValue.submit"
+      ]
+    },
+    {
+      "id": "model-input-unresolved-mention-markers",
+      "kind": "optional",
+      "summary": "onModelInput and prepareModelMessages onBreakdown report unresolvedMentionMarkers: how many mention markers in earlier assistant text no declared record or user mention carries. A count only.",
+      "howTo": "Read breakdown.unresolvedMentionMarkers in an onModelInput hook to spot answers whose mention markers the chat shows as plain text under entityLinks.verifyMentions. Computed only when the hook is set; nothing leaves the server.",
+      "skill": "integrating-glirastes-nextjs#callbacks-and-observability",
+      "affectedWhen": {
+        "symbols": [
+          "onModelInput",
+          "onBreakdown"
+        ]
+      },
+      "surface": [
+        "*#ModelInputBreakdown.unresolvedMentionMarkers"
+      ]
+    },
+    {
+      "id": "generated-labels-region-variants",
+      "kind": "recommended",
+      "summary": "Generated labels per language no longer repeat a region variant whose labels equal its base language (de-DE next to de). Generated outputs change once; glirastes tools check reports drift until you refresh.",
+      "howTo": "Run `glirastes tools refresh` as a developer, review the diff (the duplicate variant leaves tool-contracts.json labels, toolTexts and the runtime artifact) and commit it. Lookups fall back from de-DE to de, so the chat shows the same labels.",
+      "skill": "maintaining-glirastes-tools"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "id": "turn-end-callback",
+  "kind": "optional",
+  "summary": "onTurnEnd(outcome, info) on AiChatProvider (config.onTurnEnd on <glirastes-chat>) is called once when a turn of the open chat ends, with its TurnOutcome and { sessionId }.",
+  "howTo": "Pass onTurnEnd instead of diffing turnOutcomes to react once per finished, stopped or failed turn. It is not called at an open approval, for stored history, for a chat that is not open or after clear(). Without it nothing changes.",
+  "skill": "building-glirastes-chat-ui#message-layout",
+  "affectedWhen": {
+    "symbols": [
+      "turnOutcomes",
+      "useTurnOutcomes"
+    ]
+  },
+  "adoptedWhen": {
+    "symbols": [
+      "onTurnEnd"
+    ]
+  },
+  "surface": [
+    "glirastes/react#OnTurnEnd",
+    "glirastes/react#TurnEndInfo.*",
+    "glirastes/react#AiChatProviderConfig.onTurnEnd",
+    "glirastes/react#AiChatProviderProps.onTurnEnd",
+    "glirastes/react/vercel#VercelAiChatProps.onTurnEnd",
+    "glirastes/embed#GlirastesChatElementConfig.onTurnEnd"
+  ]
+}
