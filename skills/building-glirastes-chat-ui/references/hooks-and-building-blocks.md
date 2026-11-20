@@ -120,7 +120,17 @@ Defaults keep today's markup; everything below is opt-in.
   replaceable as `components.ApprovalEntry`, props `ApprovalEntryProps`;
   texts `approvalEntryRunningLabel`, `…DoneLabel`, `…FailedLabel`,
   `…ExpectedLabel`, `…DeclinedLabel`, `…NotRunLabel`, `approvalOutcomeText`)
-  at the tool part; `open: 'inline'` draws the open `ApprovalCard` at its
+  at the tool part. The built-in entry sits inside the message at its tool
+  part, one per tool call (calls of one tool are not merged); it shows the
+  label, subject names, preview and field details (`detail-line`,
+  `detail-label`, `detail-value`; hooks `data-decision`, `data-outcome`). It
+  has no link to a created object, and its field labels come from the tool
+  declaration (and `approvalDescription`), not app-defined ones. An app that
+  needs those builds its own entry from `parts[].approval` or
+  `components.ApprovalEntry`. An app that already draws its own entry for
+  decided approvals (for example from `useMessageParts` /
+  `components.MessageParts`) must not also set `decided: 'entry'`: both
+  would show, side by side. `open: 'inline'` draws the open `ApprovalCard` at its
   tool part instead of below the messages (one card per call, no bulk
   card). With either option the default bubble renders the text and tool
   parts of a message with an approval in message order. A custom bubble that renders neither `toolResults` nor `parts`

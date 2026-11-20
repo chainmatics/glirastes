@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- `approvalDisplay`: do not turn on `decided: 'entry'` when the app already draws its own entry for decided approvals (both would show side by side); and what the built-in entry does (inside the message at its tool part, one per call, label, subjects, preview and field details, no link to a created object, field labels from the tool declaration) and does not do.
 - The order of parts at the end of the chat stream (fixed since 0.18.1): a `data-step-report` right before its step's `finish-step`, the final `data-pipeline-state` right before `finish` or `abort`, and a late `data-memory-summary` after `finish`, so a custom client reads until the stream closes.
 - How an app whose user language is stored in its database gets tool labels, the approval card and built-in texts in that language: `requestLocale` on the handler (`chat.requestLocaleHeader` in the container), `language` on the provider; and that a fixed `locale` wins over the page language the chat sends (`sendLanguage`, `clientLanguage`, `Content-Language`).
 
