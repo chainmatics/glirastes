@@ -74,6 +74,7 @@ import { continuesAfterPageLoad, shouldContinueChat, waitingToolCallIds } from '
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
+import { STEP_FAILURE_TEXTS_EN } from '../utils/step-failure.js';
 import { latestUserMessageId, readStoredTurnOutcomes, withStoredTurnOutcomes } from '../utils/turn-outcomes.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
@@ -139,6 +140,8 @@ export const DEFAULT_LOCALE: ChatLocale = {
   activityStepCountLabel: '×{count}',
   activitySummarySeparator: ', ',
   activityApprovalNotUsedDetail: 'The approval could not be used',
+  // Word for word the texts the server and the SDK's tools write (`activityFailure…`).
+  ...STEP_FAILURE_TEXTS_EN,
   activityUiPendingLabel: 'Waiting for the app',
   activityUiRejectedContract: 'Rejected by the app (invalid input)',
   activityUiRejectedHandler: 'Not carried out by the app',

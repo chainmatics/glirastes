@@ -170,6 +170,29 @@ Defaults keep today's markup; everything below is opt-in.
   `activitySummarySeparator` (`, `) and `activityApprovalNotUsedDetail`.
   `{count}` of `activityDoneLabel` and `activityRunningProgressLabel` is the
   number of done steps.
+- A failed step's detail whose text the SDK wrote itself shows in the chat's
+  language: the server's text of a refused call (tool not available, not
+  permitted, user not identified, account, disabled, refused), invalid tool
+  input, a turn limit (one key per limit, `{limit}`), a record refused before
+  its approval card, the generic "AI request failed", the endpoint caller's
+  fixed texts (`Endpoint failed ({status})`, path refused, timeout and
+  response too large with `{tool}`) and the memory tools' texts. Keys
+  `activityFailure…` (all optional in `ChatLocale`, see its JSDoc), English
+  word for word as the server writes it, German in `deChatLocale`. Which
+  steps show a detail is unchanged (`details`); the English text is
+  unchanged. A text of the app's backend or tool, and a text this version
+  does not know (a newer server), is shown as it is. `readActivitySteps` sets
+  `failures` (`StepFailure[]`, `{ code: StepFailureCode, values? }`) beside
+  `detail` for such a step; `stepFailureText(failures, locale)` renders it,
+  a code it does not know as `activityFailureGeneric`. A step without any
+  text shows no detail.
+- Order per text key: the app's `locale`, then `locales[tag]` along the
+  language fallback, then the built-in table of the language (`en`, `de`),
+  then English. Step titles are not locale keys: the app's `toolLabels`
+  (per tool) win, then the label the server sends for the turn
+  (`data-tool-presentation`: the manifest's wording when it is in the turn
+  language, else the generated labels of that language, another region of
+  it, `en`, the first one), else the tool name.
 - The chat's language: `language` (stated by the app) wins, else the page's
   `lang` (also when the page sets or changes it after the chat mounted),
   else the language of the server's tool labels;

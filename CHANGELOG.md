@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Localized failure details in the activity log: a failed step whose detail text the SDK wrote itself now shows it in the chat's language. Locale keys `activityFailure…` (optional in `ChatLocale`, so a full locale object without them still compiles; English word for word as the server writes it, German in `deChatLocale`): `Generic`, `InvalidInput`, `ToolUnavailable`, `NotPermitted`, `IdentityMissing`, `AccountRefused`, `ToolDisabled`, `Refused`, `LimitReached`, `LimitToolCalls`, `LimitModelSteps`, `LimitTime`, `LimitInputTokens`, `LimitOutputTokens`, `LimitCost`, `LimitRepeatedCalls`, `LimitConsecutiveErrors` (`{limit}`), `RecordNotFound`, `RecordInvalidId`, `RecordUnchecked`, `EndpointFailed` (`{status}`), `EndpointPathNotRelative`, `EndpointPathNotAllowed`, `EndpointTimeout`, `EndpointResponseTooLarge` (`{tool}`), `MemoryKindUnavailable`, `MemoryFull` (`{max}`), `MemorySaveFailed`, `MemoryNoteMismatch`, `MemoryRemoveFailed`, `MemoryNoteNotFound`. `ActivityStep.failures` (`StepFailure[]`, `{ code: StepFailureCode, values? }`) is set beside `detail` for such a step; `stepFailureText(failures, locale)` renders it, an unknown code as `activityFailureGeneric`. Which steps show a detail is unchanged; a text of the app's backend or tool, or one this version does not know, is shown as it is.
+
+### Changed
+
+- Visible change for chats in German (`deChatLocale`, or a page/`language` `de`): the SDK's own failure texts in the activity log are German instead of English, e.g. "Endpoint failed (503)" → "Endpunkt fehlgeschlagen (503)", "The note could not be saved." → "Die Notiz konnte nicht gespeichert werden.", "You are not permitted to use this tool." → "Du darfst dieses Tool nicht verwenden." (the last only where the detail is shown: displayed results or `details: 'all'`). English chats see no change. A language without a built-in table (an app's own `locales.pl`) keeps the English texts unless it sets the new keys.
+
 ### Documentation
 
 - README install section: an app upgrading from 0.19.0 or older with an existing `bun.lock` keeps a nested `glirastes/pg` (and possibly `glirastes/zod`) entry; how to remove them so the app's copies are shared.
