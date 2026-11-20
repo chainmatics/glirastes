@@ -1,0 +1,27 @@
+{
+  "id": "composer-triggers",
+  "kind": "optional",
+  "summary": "Completion providers may use any single trigger character, e.g. `#` for tickets, not only `@` and `/`. The new provider option `triggers` sets a char's label, pill prefix and default pick behavior; `createCompletionSearch` takes a `source` filter per call.",
+  "howTo": "Set `trigger: '#'` on a `ChatCompletionProvider` to open its list with `#`; add `triggers={[{ char: '#', label, prefix }]}` (memoized) to AiChatProvider only to change the defaults. Nothing changes without it: `@` and `/` keep their behavior.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": ["completionProviders", "ChatCompletionProvider"]
+  },
+  "surface": [
+    "glirastes/embed#GlirastesChatElementConfig.triggers",
+    "glirastes/react#AiChatProviderConfig.triggers",
+    "glirastes/react#AiChatProviderProps.triggers",
+    "glirastes/react#ChatContextValue.triggers",
+    "glirastes/react#ChatTriggerDefinition",
+    "glirastes/react#ChatTriggerDefinition.char",
+    "glirastes/react#ChatTriggerDefinition.label",
+    "glirastes/react#ChatTriggerDefinition.prefix",
+    "glirastes/react#ChatTriggerDefinition.select",
+    "glirastes/react#CompletionSearchQueryOptions",
+    "glirastes/react#CompletionSearchQueryOptions.source",
+    "glirastes/react#CompletionSelectKind",
+    "glirastes/react#ResolvedChatTrigger",
+    "glirastes/react#resolveChatTriggers",
+    "glirastes/react/vercel#VercelAiChatProps.triggers"
+  ]
+}

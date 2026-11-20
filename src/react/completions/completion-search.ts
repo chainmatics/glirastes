@@ -18,8 +18,18 @@ export interface CompletionSearchOptions {
   onProviderError?: (providerId: string, error: unknown) => void;
 }
 
+/** Narrows one search call. */
+export interface CompletionSearchQueryOptions {
+  /** Only these provider ids (of the trigger) are asked; omitted: all of them. */
+  source?: string | ReadonlyArray<string>;
+}
+
 /** Compatible with `RichMentionInput`'s `onSearch`. */
-export type CompletionSearch = (query: string, trigger: string) => Promise<MentionResult[]>;
+export type CompletionSearch = (
+  query: string,
+  trigger: string,
+  options?: CompletionSearchQueryOptions,
+) => Promise<MentionResult[]>;
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
@@ -81,7 +91,7 @@ function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 /**
- * Merges `/` and `@` providers into one async search. Item ids stay the
+ * Merges the providers of a trigger (`@`, `/`, `#`, …) into one async search. Item ids stay the
  * app's ids (they reach the model through mention markers); `key` is the
  * stable list identity `providerId:type:itemId`. A newer search aborts the older
  * one, and a failing or slow provider never empties the others.
@@ -106,12 +116,13 @@ export function createCompletionSearch(
   const context = Object.freeze({ ...(options.context ?? {}) });
   let current: AbortController | null = null;
 
-  return async (query, trigger) => {
+  return async (query, trigger, { source } = {}) => {
     current?.abort();
     const controller = new AbortController();
     current = controller;
+    const sources = source === undefined ? undefined : new Set<string>(typeof source === 'string' ? [source] : source);
     const settled = await Promise.all(providers
-      .filter((provider) => provider.trigger === trigger)
+      .filter((provider) => provider.trigger === trigger && (!sources || sources.has(provider.id)))
       .map(async (provider) => {
         try {
           const items = await withTimeout(Promise.resolve(provider.search({

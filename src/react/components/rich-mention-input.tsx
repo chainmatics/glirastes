@@ -18,6 +18,7 @@ import type {
   MentionResult,
   RichMentionInputHandle,
   RichMentionInputProps,
+  ResolvedChatTrigger,
 } from '../types.js';
 import {
   inferMentionPrefix,
@@ -28,7 +29,7 @@ import {
 } from '../utils/mention-markup.js';
 import { fillTemplate } from '../utils/fill-template.js';
 
-const DEFAULT_TRIGGERS = ['@', '/'];
+const DEFAULT_TRIGGERS: ReadonlyArray<string> = ['@', '/'];
 const SEARCH_DEBOUNCE_MS = 100;
 
 /**
@@ -174,7 +175,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onSubmit,
       onSearch,
       initialMentions,
-      triggers = DEFAULT_TRIGGERS,
+      triggers: triggerConfig = DEFAULT_TRIGGERS,
       components,
       onEntityAction,
       listLabel = 'Suggestions',
@@ -189,6 +190,18 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     ref,
   ) {
     const [dragOver, setDragOver] = useState(false);
+    // Each trigger char with its pill prefix; `select` is kept for the pick behavior.
+    const triggers = useMemo(
+      () => new Map<string, ResolvedChatTrigger>(triggerConfig.map((trigger) => (typeof trigger === 'string'
+        ? [trigger, { char: trigger, prefix: trigger, select: 'chip' }]
+        : [trigger.char, {
+            char: trigger.char,
+            prefix: trigger.prefix ?? trigger.char,
+            select: trigger.select ?? 'chip',
+            ...(trigger.label !== undefined ? { label: trigger.label } : {}),
+          }]))),
+      [triggerConfig],
+    );
     const hasMentionSupport = typeof onSearch === 'function';
     const isControlled = value !== undefined;
     const [internalValue, setInternalValue] = useState(defaultValue);
@@ -429,7 +442,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       for (let i = before.length - 1; i >= 0; i--) {
         const char = before[i];
         if (isSpace(char)) break;
-        if (triggers.includes(char)) {
+        if (triggers.has(char)) {
           if (i === 0 || isSpace(before[i - 1])) {
             return { trigger: char, query: before.slice(i + 1), triggerPos: i };
           }
@@ -461,7 +474,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         for (let i = cursorPos - 1; i >= 0; i--) {
           const char = text[i];
           if (isSpace(char)) break;
-          if (triggers.includes(char)) {
+          if (triggers.has(char)) {
             if (i === 0 || isSpace(text[i - 1])) {
               triggerPos = i;
               break;
@@ -471,7 +484,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         if (triggerPos === -1) return;
 
         // The trigger the user typed: an entity found with `@` stays `@` whatever its type.
-        const prefix = result.type === 'command' ? '/' : text[triggerPos]!;
+        const char = text[triggerPos]!;
+        const prefix = result.type === 'command' ? '/' : triggers.get(char)?.prefix ?? char;
         const slug = typeof result.slug === 'string' && result.slug.trim().length > 0
           ? normalizeMentionSlug(result.slug)
           : normalizeMentionSlug(result.label);
@@ -587,7 +601,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           for (let i = cursorPos - 1; i >= 0; i--) {
             const char = text[i];
             if (isSpace(char)) break;
-            if (triggers.includes(char) && (i === 0 || isSpace(text[i - 1]))) {
+            if (triggers.has(char) && (i === 0 || isSpace(text[i - 1]))) {
               textNode.textContent = text.slice(0, i) + text.slice(cursorPos);
               // Replacing the data pulls the live range to offset 0: put the caret back where the `@query` was.
               range.setStart(textNode, i);

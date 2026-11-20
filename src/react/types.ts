@@ -418,11 +418,40 @@ export interface CompletionSearchRequest {
 export interface ChatCompletionProvider {
   /** Stable, unique provider id (`[a-z0-9-]`, max 40). */
   id: string;
-  trigger: '@' | '/';
+  /**
+   * The character that opens this provider's list: `@`, `/` or any other
+   * single non-whitespace character (e.g. `#`). Describe a new one in
+   * `AiChatProviderConfig.triggers` to set its prefix or pick behavior.
+   */
+  trigger: string;
   search(
     request: CompletionSearchRequest,
   ): Promise<ReadonlyArray<CompletionItem>> | ReadonlyArray<CompletionItem>;
 }
+
+/**
+ * What picking an entry of a trigger's list does. `chip` (default) inserts a
+ * pill. `text`, `run` and `list` are reserved for the pick behaviors of later
+ * releases; today every kind inserts a pill.
+ */
+export type CompletionSelectKind = 'chip' | 'text' | 'run' | 'list';
+
+/** A character that opens a completion list in the composer. */
+export interface ChatTriggerDefinition {
+  /** Exactly one character, not whitespace, e.g. `#`. */
+  char: string;
+  /** Name of the trigger in composer menus. */
+  label?: string;
+  /** Visible prefix of a picked pill; defaults to `char`. Commands keep `/`. */
+  prefix?: string;
+  /** Default pick behavior of the trigger's entries; default `chip`. */
+  select?: CompletionSelectKind;
+}
+
+/** A trigger with its defaults applied (`resolveChatTriggers`). */
+export type ResolvedChatTrigger = Required<Pick<ChatTriggerDefinition, 'char' | 'prefix' | 'select'>> & {
+  label?: string;
+};
 
 /** A catalog UI tool offered as a `/` command. */
 export interface UiToolCommandSource {
@@ -1445,6 +1474,14 @@ export interface AiChatProviderConfig {
    * keyboard navigation and keeps structured ids on send.
    */
   completionProviders?: ReadonlyArray<ChatCompletionProvider>;
+  /**
+   * Trigger characters of the composer beyond the provider's own: label,
+   * pill prefix and pick behavior per char. `@` and `/` always open a list;
+   * a provider's char without a definition gets `{ prefix: char, select: 'chip' }`.
+   * An invalid or duplicate definition throws when the provider renders.
+   * Memoize the array.
+   */
+  triggers?: ReadonlyArray<ChatTriggerDefinition>;
   completionContext?: CompletionPermissionContext;
   onCompletionProviderError?: (providerId: string, error: unknown) => void;
   /**
@@ -1999,7 +2036,7 @@ export interface ChatComposerInput extends ChatComposerInputControls {
   /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
   readonly inputRef: RefObject<RichMentionInputHandle | null>;
   readonly inputProps: Pick<RichMentionInputProps,
-    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit'>;
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers'>;
   /** Spread onto a hidden `<input>` rendered next to the editor; `openFilePicker` clicks it. */
   readonly attachmentInputProps: ChatAttachmentInputProps;
   readonly pendingCommand: PendingChatCommand | null;
@@ -2063,8 +2100,11 @@ export interface RichMentionInputProps {
   onSearch?: (query: string, trigger: string) => Promise<MentionResult[]> | MentionResult[];
   /** Mention data to render as inline chips on mount (e.g. pre-filled context from a detail view). */
   initialMentions?: MentionData[];
-  /** Characters that open the autocomplete dropdown. Defaults to `['@', '/']`. */
-  triggers?: string[];
+  /**
+   * Characters that open the autocomplete dropdown. Defaults to `['@', '/']`.
+   * An entry can be a definition to set the pill prefix (default: the char).
+   */
+  triggers?: ReadonlyArray<string | ChatTriggerDefinition>;
   /** Component overrides for the autocomplete dropdown. */
   components?: RichMentionInputComponents;
   /** An entity action picked next to a result (mouse, or ArrowRight then Enter). */

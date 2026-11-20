@@ -48,6 +48,7 @@ import { resolveToolResultConfig } from '../utils/tool-result-config.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
+import { resolveChatTriggers } from '../completions/triggers.js';
 import { toChatEntityItem } from '../interactions/definitions.js';
 import {
   createChatInteractionRegistry,
@@ -325,7 +326,7 @@ function coerceLoadedMessages(rows: unknown[]): ChatMessage[] {
   return result;
 }
 
-type MentionTrigger = '@' | '/' | null;
+type MentionTrigger = string | null;
 
 function getMentionTypesForTrigger(types: string[], trigger: MentionTrigger): string[] {
   if (trigger === '/') {
@@ -670,6 +671,7 @@ export function AiChatProvider({
   transport,
   mentions,
   completionProviders,
+  triggers: triggerDefinitions,
   completionContext,
   onCompletionProviderError,
   chatInteractions,
@@ -998,6 +1000,12 @@ export function AiChatProvider({
     () => [...(completionProviders ?? []), ...(interactionRegistry?.providers ?? [])],
     [completionProviders, interactionRegistry],
   );
+  // Throws on an invalid or duplicate definition, so a bad config fails at once.
+  const triggers = useMemo(
+    () => resolveChatTriggers(triggerDefinitions, allCompletionProviders),
+    [triggerDefinitions, allCompletionProviders],
+  );
+  const entityPrefix = triggers.find((trigger) => trigger.char === '@')?.prefix ?? '@';
   const completionSearch = useMemo(
     () => (allCompletionProviders.length > 0
       ? createCompletionSearch(allCompletionProviders, {
@@ -2184,11 +2192,11 @@ export function AiChatProvider({
       type,
       label: resolved.label,
       displayName: resolved.label,
-      prefix: '@',
+      prefix: entityPrefix,
       slug: normalizeMentionSlug(resolved.label),
     }]);
     return true;
-  }, [interactionRegistry]);
+  }, [interactionRegistry, entityPrefix]);
 
   const consumeComposerMentions = useCallback(() => setComposerMentions([]), []);
 
@@ -2880,6 +2888,7 @@ export function AiChatProvider({
       hasMentions: !!mentions,
       completionSearch,
       hasCompletions: completionSearch !== undefined,
+      triggers,
       interactions: interactionRegistry,
       pendingCommand,
       submitPendingCommand,
@@ -2975,6 +2984,7 @@ export function AiChatProvider({
       clearActiveMentions,
       isMentionSearching,
       completionSearch,
+      triggers,
       interactionRegistry,
       pendingCommand,
       submitPendingCommand,

@@ -29,13 +29,15 @@ import type {
   ChatSubmitOutcome,
   ChatSubmitRejection,
   TurnOutcome,
+  ResolvedChatTrigger,
 } from '../types.js';
 import type { CompletionSearch } from '../completions/completion-search.js';
 import type { ResolvedAttachmentOptions } from '../utils/attachments.js';
 import type { ChatInteractionRegistry, PendingChatCommand } from '../interactions/registry.js';
 import type { ToolResultRendererRegistry } from '../tool-renderers/registry.js';
 
-type MentionTrigger = '@' | '/' | null;
+/** The trigger char of the legacy `mentions` search (`@` or `/`); null when none is active. */
+type MentionTrigger = string | null;
 
 export interface ChatContextValue {
   // Config
@@ -196,6 +198,8 @@ export interface ChatContextValue {
   // Completion providers
   completionSearch?: CompletionSearch;
   hasCompletions: boolean;
+  /** The composer's trigger chars with prefix and pick behavior (`triggers` of the provider). */
+  triggers?: ReadonlyArray<ResolvedChatTrigger>;
 
   // Declarative chat interactions (`chatInteractions`)
   /** `@` entities and `/` commands; absent without `chatInteractions`. */

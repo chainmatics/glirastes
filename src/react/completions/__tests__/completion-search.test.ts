@@ -171,3 +171,24 @@ describe('createCompletionSearch', () => {
     expect((await search('', '/')).map((result) => result.id)).toEqual(['ok']);
   });
 });
+
+describe('createCompletionSearch source filter', () => {
+  it('limits the fan-out to the given provider ids of the trigger', async () => {
+    const tickets: ChatCompletionProvider = {
+      id: 'tickets',
+      trigger: '#',
+      search: vi.fn(() => [{ id: '7', type: 'ticket', label: 'Bug 7' }]),
+    };
+    const docs: ChatCompletionProvider = {
+      id: 'docs',
+      trigger: '#',
+      search: vi.fn(() => [{ id: '8', type: 'doc', label: 'Bug notes' }]),
+    };
+    const search = createCompletionSearch([tickets, docs, people]);
+
+    expect((await search('bug', '#', { source: 'tickets' })).map((result) => result.key)).toEqual(['tickets:ticket:7']);
+    expect(docs.search).not.toHaveBeenCalled();
+    expect((await search('bug', '#', { source: ['docs', 'people'] })).map((result) => result.key)).toEqual(['docs:doc:8']);
+    expect((await search('bug', '#')).map((result) => result.key)).toEqual(['tickets:ticket:7', 'docs:doc:8']);
+  });
+});

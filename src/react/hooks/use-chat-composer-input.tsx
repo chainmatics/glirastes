@@ -40,6 +40,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     locale,
     components,
     completionSearch,
+    triggers,
     runEntityAction,
     composerMentions,
     consumeComposerMentions,
@@ -166,6 +167,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     onChange: setValue,
     onSubmit: (text, mentions) => submitText(text, mentions),
     onSearch: completionSearch,
+    ...(triggers ? { triggers } : {}),
     placeholder: locale.placeholder,
     disabled: !canCompose,
     onEntityAction: (result, actionId) => runEntityAction(
@@ -183,7 +185,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
           allowEmptySubmit: attachments.length > 0,
         }
       : {}),
-  }), [completionSearch, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
+  }), [completionSearch, triggers, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
 
   const attachmentInputProps = useMemo<ChatComposerInput['attachmentInputProps']>(() => ({
     ref: fileInputRef,

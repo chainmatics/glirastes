@@ -66,14 +66,14 @@ export interface ChatComposer {
   readonly chatAboutLabel: string;
 }
 
-/** The `@` pill of an entity, shaped like a mention picked from the list. */
-export function entityMention(entity: ChatComposerEntity & { readonly label: string }): MentionData {
+/** The `@` pill of an entity, shaped like a mention picked from the list; `prefix` is the `@` trigger's. */
+export function entityMention(entity: ChatComposerEntity & { readonly label: string }, prefix = '@'): MentionData {
   return {
     id: entity.id,
     type: entity.type,
     label: entity.label,
     displayName: entity.label,
-    prefix: '@',
+    prefix,
     slug: normalizeMentionSlug(entity.label) || normalizeMentionSlug(entity.id) || entity.type,
   };
 }
@@ -186,6 +186,9 @@ export function useOptionalChatComposer(): ChatComposer | null {
   const requestOpen = queue?.requestOpen;
   const interactions = chat?.interactions;
   const chatAboutLabel = chat?.locale.chatAboutLabel ?? '';
+  const entityPrefix = chat?.triggers?.find((trigger) => trigger.char === '@')?.prefix ?? '@';
+  const entityPrefixRef = useRef(entityPrefix);
+  entityPrefixRef.current = entityPrefix;
   const registryRef = useRef(interactions);
   registryRef.current = interactions;
   const languageRef = useRef<ChatLocaleCode>(interactions?.locale ?? 'en');
@@ -199,7 +202,7 @@ export function useOptionalChatComposer(): ChatComposer | null {
     };
     const mention = async (entity: ChatComposerEntity) => {
       const label = await labelOf(entity, registryRef.current);
-      return label ? entityMention({ ...entity, label }) : undefined;
+      return label ? entityMention({ ...entity, label }, entityPrefixRef.current) : undefined;
     };
     return {
       open: requestOpen,
