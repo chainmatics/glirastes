@@ -8,6 +8,7 @@ import type {
   ChatComposerInputControls,
   ChatLocale,
   MentionData,
+  OpenCompletionOptions,
   RichMentionInputHandle,
   UseChatComposerInputOptions,
 } from '../types.js';
@@ -165,6 +166,10 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
 
   const focus = useCallback(() => { inputRef.current?.focus(); }, []);
 
+  const openCompletion = useCallback((completion: OpenCompletionOptions) => {
+    inputRef.current?.openCompletion?.(completion);
+  }, []);
+
   // The controls returned below, read when an entry is picked (after this render).
   const controlsRef = useRef<ChatComposerInputControls | null>(null);
 
@@ -247,6 +252,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     setText,
     appendText,
     focus,
+    openCompletion,
     inputRef,
     inputProps,
     pendingCommand,

@@ -7,6 +7,7 @@ All names below come from `glirastes/react` unless noted.
 - Triggers
   - Sent mentions and `types`
 - What a pick does
+- Opening a list from a button
 
 ## Triggers
 
@@ -109,3 +110,32 @@ the editor. A standalone `RichMentionInput` takes `onCompletionSelect` with
 `{ source }` after a `list` pick; forward it to the search of
 `createCompletionSearch`. An item with an unknown `select`, an empty
 `insertText` or an invalid `listSource` id is dropped from the list.
+
+## Opening a list from a button
+
+`openCompletion({ trigger, query?, source? })` (`OpenCompletionOptions`)
+opens a list as if the user typed the trigger. Do not write the trigger into
+the editor and dispatch a synthetic `InputEvent`.
+
+```tsx
+const composer = useChatComposerInput();
+<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />
+<button type="button" onClick={() => composer.openCompletion({ trigger: '@', source: 'people' })}>
+  Person
+</button>
+```
+
+- It focuses the editor and inserts at the caret; when the editor had no
+  focus, at the end. After a non-space it adds a space (`Hallo` → `Hallo @`).
+- It searches `query` at once, without the typing debounce. `source` (a
+  provider id or ids) limits the list until it closes, like a `list` pick.
+- While the user has neither typed nor picked, closing the list (Escape,
+  outside click, blur, or no results) removes exactly the inserted text and
+  restores the caret. Typing or a pick keeps it.
+- A second call while untouched replaces the first one's text. An unknown
+  trigger warns once in the console and does nothing.
+- `useChatComposer().openCompletion` works from anywhere below
+  `AiChatProvider` and waits until a composer is mounted, like `insertText`.
+  `ChatComposerInputControls.openCompletion` is the same on the composer, and
+  `RichMentionInputHandle.openCompletion` on a standalone input (optional on
+  the handle type, so custom handles stay valid).

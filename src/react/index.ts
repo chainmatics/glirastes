@@ -34,6 +34,7 @@ export type {
   CompletionSearchRequest,
   CompletionSelectKind,
   CompletionSelectContext,
+  OpenCompletionOptions,
   ChatTriggerDefinition,
   ResolvedChatTrigger,
   UiToolCommandSource,

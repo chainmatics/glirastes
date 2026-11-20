@@ -14,7 +14,7 @@ import { useOptionalAssistantLayout } from '../assistant/assistant-layout.js';
 import { toChatEntityItem, type ChatCommandDefinition } from '../interactions/definitions.js';
 import type { ChatInteractionRegistry } from '../interactions/registry.js';
 import { ChatContext } from '../provider/chat-context.js';
-import type { MentionData, RichMentionInputHandle } from '../types.js';
+import type { MentionData, OpenCompletionOptions, RichMentionInputHandle } from '../types.js';
 import { normalizeMentionSlug } from '../utils/mention-markup.js';
 
 /** Something the user can talk about: a task, a team, a person. */
@@ -31,7 +31,8 @@ export type ChatComposerOperation =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'draft'; readonly text: string; readonly mentions: ReadonlyArray<MentionData> }
   | { readonly kind: 'clear' }
-  | { readonly kind: 'focus' };
+  | { readonly kind: 'focus' }
+  | { readonly kind: 'completion'; readonly options: OpenCompletionOptions };
 
 export interface ChatAboutOptions {
   /** A `/` command placed before the entity, e.g. `taskDetails.open` or a prompt command. */
@@ -54,6 +55,11 @@ export interface ChatComposer {
   /** Adds text at the end of the draft. */
   insertText(text: string): void;
   clear(): void;
+  /**
+   * Opens a completion list in the composer as if `trigger` (+ `query`) was
+   * typed, e.g. from a toolbar button; closing it untouched removes the text.
+   */
+  openCompletion(options: OpenCompletionOptions): void;
   /** Adds an `@` pill. False when no label is given and the entity cannot `resolve` one. */
   insertMention(entity: ChatComposerEntity): Promise<boolean>;
   /** Adds a `/` pill for a known command. False when the chat has no such command. */
@@ -210,6 +216,7 @@ export function useOptionalChatComposer(): ChatComposer | null {
       setDraft: (text, mentions = []) => push([{ kind: 'draft', text, mentions }]),
       insertText: (text) => push([{ kind: 'text', text }]),
       clear: () => push([{ kind: 'clear' }]),
+      openCompletion: (options) => push([{ kind: 'completion', options }]),
       async insertMention(entity) {
         const pill = await mention(entity);
         if (!pill) return false;
@@ -263,6 +270,7 @@ export function useChatComposerTarget(
     const operations = take();
     if (operations.length === 0) return;
     let focus = false;
+    let completion: OpenCompletionOptions | undefined;
     for (const operation of operations) {
       switch (operation.kind) {
         case 'insert':
@@ -282,8 +290,13 @@ export function useChatComposerTarget(
         case 'focus':
           focus = true;
           break;
+        case 'completion':
+          completion = operation.options;
+          break;
       }
     }
+    // Last, so the list belongs to the final text; it focuses the editor itself.
+    if (completion) handle.openCompletion?.(completion);
     onChangeRef.current?.(handle.getValue());
     if (focus) requestAnimationFrame(() => handle.focus());
   }, [version, take, handleRef, enabled]);

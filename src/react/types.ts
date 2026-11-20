@@ -2061,6 +2061,21 @@ export interface ChatComposerInputControls {
   /** Appends with one space, e.g. a voice transcript; references stay. */
   appendText(text: string): void;
   focus(): void;
+  /**
+   * Opens a completion list as if the user typed `trigger` (+ `query`), e.g.
+   * from a toolbar button. Closing it untouched removes the inserted text.
+   */
+  openCompletion(options: OpenCompletionOptions): void;
+}
+
+/** What `openCompletion` puts into the editor and searches. */
+export interface OpenCompletionOptions {
+  /** A trigger char of the composer, e.g. `@` or `#`. Unknown chars warn once and do nothing. */
+  trigger: string;
+  /** Text inserted after the trigger and searched at once. Default: empty. */
+  query?: string;
+  /** Searches only these provider ids (as `listSource` of a `list` pick). */
+  source?: string | ReadonlyArray<string>;
 }
 
 /** Where an entry was picked (`AiChatProviderConfig.onCompletionSelect`). */
@@ -2102,6 +2117,14 @@ export interface RichMentionInputHandle {
    * becomes a command pill, any other type an entity pill.
    */
   insertMention: (mention: MentionData) => void;
+  /**
+   * Focuses the editor, inserts `trigger` + `query` at the caret (at the end
+   * when the editor had no focus; a space first when needed) and searches at
+   * once. When the list closes before the user typed or picked anything, the
+   * inserted text is removed again and the caret restored. Optional so custom
+   * handles stay valid; `RichMentionInput` always has it.
+   */
+  openCompletion?: (options: OpenCompletionOptions) => void;
 }
 
 /** ARIA wiring of one option in the `@`/`/` list; spread it onto the clickable element. */

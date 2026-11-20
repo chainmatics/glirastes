@@ -373,7 +373,6 @@
   "RevisionSignature": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "RevisionSignatureSchema": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "RichMentionInputComponents": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
-  "RichMentionInputHandle": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "RiskTier": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "RouteScanUpload": "Managed-mode sync client internals; glirastes connect and sync drive them.",
   "RoutingResult": "Pre-Foundation root-barrel API (hand-written tool definitions, pipeline, PII); Foundation apps derive tools with glirastes tools refresh.",
