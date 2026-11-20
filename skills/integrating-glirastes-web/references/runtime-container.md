@@ -7,18 +7,18 @@ compatible. The container is one independent service per application and
 environment. It is not a sidecar per backend replica and does not offer HA.
 
 The official public Linux amd64 image is
-`ghcr.io/chainmatics/glirastes-runtime:0.19.0`; pulling needs no registry login.
+`ghcr.io/chainmatics/glirastes-runtime:0.20.0`; pulling needs no registry login.
 For this release, the verified immutable image reference is:
 
 ```sh
-export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime@sha256:3a3ec47fa055cbe692dd593f5f1b0f2fcd1b77eca1da9a89c2b970a9f68afd22
+export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime@sha256:6a180c90ae923566d357eb15f1297640cba57c24bc49e3a8d2baad514335d925
 docker pull "$GLIRASTES_RUNTIME_IMAGE"
 ```
 
-Use the exact matching SDK version (0.19.0 for this image) for artifact builds
+Use the exact matching SDK version (0.20.0 for this image) for artifact builds
 and browser code. Do not substitute a newer CLI merely because it is available.
-The [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.19.0/examples/php-runtime)
-and [browser host examples](https://github.com/chainmatics/glirastes/tree/v0.19.0/examples/frontend-frameworks)
+The [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.20.0/examples/php-runtime)
+and [browser host examples](https://github.com/chainmatics/glirastes/tree/v0.20.0/examples/frontend-frameworks)
 are runnable references. PHP has real API/approval tests; Angular/SvelteKit/Nuxt
 have browser host tests. Neither establishes a full Rust/Java stack acceptance.
 

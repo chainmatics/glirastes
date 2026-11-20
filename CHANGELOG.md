@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- README install section: an app upgrading from 0.19.0 or older with an existing `bun.lock` keeps a nested `glirastes/pg` (and possibly `glirastes/zod`) entry; how to remove them so the app's copies are shared.
+
 ## [0.20.0] - 2026-11-20
 
 ### Added
