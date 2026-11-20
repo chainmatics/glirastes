@@ -321,12 +321,14 @@ describe('schema probe', () => {
       'src/hangs.ts': 'setInterval(() => {}, 1_000);\nawait new Promise(() => {});\nexport const schema = 1;\n',
       'src/fine.ts': "import { z } from 'zod';\nexport const schema = z.object({ q: z.string() });\n",
     });
-    const results = await createSchemaProbe({ timeoutMs: 1_500 }).probe(app.root, [
+    // The budget covers the whole child: Node start, TS loader, zod import. The retried fine.ts needs all of
+    // that within it, and on a loaded runner (full suite, parallel workers) that took more than 1.5 s.
+    const results = await createSchemaProbe({ timeoutMs: 6_000 }).probe(app.root, [
       schemaItem('src/hangs.ts'),
       schemaItem('src/fine.ts'),
     ]);
     expect(results.map((result) => (result.ok ? 'ok' : result.reason))).toEqual(['timeout', 'ok']);
-  }, 30_000);
+  }, 60_000);
 
   it('digests zod v3 schemas and leaves JSON Schema empty without zod-to-json-schema', async () => {
     const app = await createAppFixture({

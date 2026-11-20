@@ -4,6 +4,7 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -834,8 +835,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // Side effects (mention mode)
     // -----------------------------------------------------------------------
 
-    // Close dropdown on outside click
-    useEffect(() => {
+    // Close dropdown on outside click. A layout effect, so the listener is in place in the same commit
+    // that shows the list: a passive effect can run a frame later, and a press outside in between was lost.
+    useLayoutEffect(() => {
       if (!dropdownOpen) return;
 
       const handleClickOutside = (e: MouseEvent) => {
