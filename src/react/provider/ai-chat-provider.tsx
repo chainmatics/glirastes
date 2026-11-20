@@ -680,22 +680,24 @@ export function AiChatProvider({
   }, [streamedEntities, entityDeclarations]);
   const declarationsRef = useRef(declarations);
   declarationsRef.current = declarations;
-  // `entityLinks.unresolvedMentions`: the assistant messages of turns that received the server's
-  // declarations in this page life. Tracked only with the option on, so nothing changes without it.
+  // `entityLinks.unresolvedMentions`: the declarations each assistant message's own turn received from
+  // the server in this page life. Tracked only with the option on, so nothing changes without it.
   const unresolvedMentionsOn = !!entityLinks && ((entityLinks.unresolvedMentions !== undefined && entityLinks.unresolvedMentions !== 'keep')
     || typeof entityLinks.unresolvedMention === 'function');
   const unresolvedMentionsOnRef = useRef(unresolvedMentionsOn);
   unresolvedMentionsOnRef.current = unresolvedMentionsOn;
-  const [declaredTurnMessageIds, setDeclaredTurnMessageIds] = useState<ReadonlySet<string>>(() => new Set());
-  /** The messages a turn started from when its declarations arrived; `null` outside such a turn. */
-  const declaredTurnBaseRef = useRef<Array<{ id: string; role: string }> | null>(null);
-  const appDeclares = useMemo(
-    () => Object.keys(sanitizeEntityDeclarations(entityDeclarations) ?? {}).length > 0,
-    [entityDeclarations],
-  );
+  const [turnDeclarations, setTurnDeclarations] = useState<ReadonlyMap<string, EntityDeclarationsByTool>>(() => new Map());
+  /** The messages a turn started from when its declarations arrived, and those declarations; `null` outside such a turn. */
+  const declaredTurnRef = useRef<{ base: Array<{ id: string; role: string }>; declarations: EntityDeclarationsByTool } | null>(null);
+  const appDeclarations = useMemo(() => {
+    const own = sanitizeEntityDeclarations(entityDeclarations);
+    return Object.keys(own).length > 0 ? own : undefined;
+  }, [entityDeclarations]);
+  const appDeclarationsRef = useRef(appDeclarations);
+  appDeclarationsRef.current = appDeclarations;
   const declarationCoverage = useMemo(
-    () => ({ all: appDeclares, messageIds: declaredTurnMessageIds }),
-    [appDeclares, declaredTurnMessageIds],
+    () => ({ ...(appDeclarations ? { app: appDeclarations } : {}), byMessage: turnDeclarations }),
+    [appDeclarations, turnDeclarations],
   );
   const pageLanguage = usePageLanguage();
   // The app's stated language, else the page's (the UI the user reads), the server's tool wording only without one;
@@ -1058,7 +1060,11 @@ export function AiChatProvider({
       const next = sanitizeEntityDeclarations(data?.tools);
       setStreamedEntities((current) => (JSON.stringify(current ?? {}) === JSON.stringify(next) ? current : next));
       if (unresolvedMentionsOnRef.current) {
-        declaredTurnBaseRef.current = rawMessagesRef.current.map(({ id, role }) => ({ id, role }));
+        declaredTurnRef.current = {
+          base: rawMessagesRef.current.map(({ id, role }) => ({ id, role })),
+          // As `declarations` merges them: the app's own win per tool.
+          declarations: { ...next, ...(appDeclarationsRef.current ?? {}) },
+        };
       }
       return;
     }
@@ -1601,19 +1607,25 @@ export function AiChatProvider({
 
   // The assistant messages a turn with declarations streams (`entityLinks.unresolvedMentions`).
   useEffect(() => {
-    const base = declaredTurnBaseRef.current;
-    if (!base) return;
+    const turn = declaredTurnRef.current;
+    if (!turn) return;
     // Another history replaced the messages: its messages are not this turn's.
-    if (!continuesRequestBase(rawMessages, base)) {
-      declaredTurnBaseRef.current = null;
+    if (!continuesRequestBase(rawMessages, turn.base)) {
+      declaredTurnRef.current = null;
       return;
     }
-    const before = new Set(base.map(({ id }) => id));
+    const before = new Set(turn.base.map(({ id }) => id));
     const fresh = rawMessages.filter(({ id, role }) => role === 'assistant' && !before.has(id)).map(({ id }) => id);
     if (fresh.length > 0) {
-      setDeclaredTurnMessageIds((current) => (fresh.every((id) => current.has(id)) ? current : new Set([...current, ...fresh])));
+      // A message keeps the declarations of the turn that streamed it; a later turn never replaces them.
+      setTurnDeclarations((current) => {
+        if (fresh.every((id) => current.has(id))) return current;
+        const next = new Map(current);
+        for (const id of fresh) if (!next.has(id)) next.set(id, turn.declarations);
+        return next;
+      });
     }
-    if (!isLoading) declaredTurnBaseRef.current = null;
+    if (!isLoading) declaredTurnRef.current = null;
   }, [rawMessages, isLoading]);
 
   // Process tool results and approvals from streaming messages
@@ -2999,7 +3011,6 @@ export function AiChatProvider({
         <ChatEntityLinksProvider
           config={entityLinks}
           uiActionBus={uiActionBus}
-          completionContext={completionContext}
           declarationCoverage={declarationCoverage}
         >
           {children}

@@ -17,8 +17,7 @@ import { getDefaultUiActionBus, type UiActionBus } from '../../browser/ui-action
 import { MentionChip as DefaultMentionChip } from '../components/mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import type { Mention } from '../types.js';
-import { CHAT_ENTITY_ITEM_TEXT_MAX, type ChatEntityItem } from '../interactions/definitions.js';
-import { parseMentionSegments } from '../utils/mention-markup.js';
+import type { EntityDeclarationsByTool } from '../../contracts/entity-declaration.js';
 import {
   collectKnownEntities,
   collectSeenReferenceKeys,
@@ -26,7 +25,6 @@ import {
   entityNavigationHref,
   isSeenReference,
   isUnresolvedMentionPolicy,
-  pickExactNameMatch,
   splitEntityText,
   type ChatEntityLinksConfig,
   type ChatEntityReference,
@@ -58,18 +56,12 @@ export interface ChatEntityLinks {
   /** Whether a marker of the assistant becomes a chip (`entityLinks.verifyMentions`). */
   showsMention(mention: Mention): boolean;
   /**
-   * `entityLinks.unresolvedMentions` (and its hook and bounds) for a marker
+   * `entityLinks.unresolvedMentions` (and its hook) for a marker
    * of `message`: `'keep'` for a user's marker, a marker of a turn whose
    * declarations this page does not know, one whose id the conversation
    * showed, of an undeclared type, a command, or without the option.
    */
   unresolvedMention?(mention: Mention, message?: MentionMarkerMessage): ChatUnresolvedMentionPolicy;
-  /** Looks a marker up by name for `'search'`: the one exact match, cached per type and name; `undefined` for none or a failure. */
-  searchMention?(mention: Mention): Promise<ChatEntityReference | undefined>;
-  /** The settled result of `searchMention` (`null`: no match), `undefined` while unknown or after a failure. */
-  cachedMention?(mention: Mention): ChatEntityReference | null | undefined;
-  /** Identifies a marker's search: its type, name and the user context. */
-  mentionSearchKey?(mention: Mention): string;
 }
 
 const ChatEntityLinksContext = createContext<ChatEntityLinks | null>(null);
@@ -86,49 +78,30 @@ export function WithoutEntityLinks({ children }: { children: ReactNode }) {
 }
 
 /**
- * Which messages' markers `unresolvedMentions` may judge: every message when
- * the app passes `entityDeclarations` itself, else only the assistant
- * messages of turns that received the server's declarations in this page life.
+ * The declarations `unresolvedMentions` judges a message's markers by: the
+ * app's own `entityDeclarations` for every message, and for each assistant
+ * message streamed in this page life by a turn that received the server's
+ * declarations, that turn's (they win, and never change afterwards).
  */
 export interface MentionDeclarationCoverage {
-  readonly all: boolean;
-  readonly messageIds: ReadonlySet<string>;
+  readonly app?: EntityDeclarationsByTool;
+  readonly byMessage: ReadonlyMap<string, EntityDeclarationsByTool>;
 }
 
-/** The message a marker belongs to. */
+/** The message a marker belongs to: its id and role. */
 export interface MentionMarkerMessage {
   readonly id: string;
   readonly role: string;
 }
 
-/** Distinct names `'search'` looks up per message by default (`maxMentionSearches`). */
-export const DEFAULT_MAX_MENTION_SEARCHES = 5;
-/** Searches that run at once, per provider. */
-export const MENTION_SEARCH_CONCURRENCY = 2;
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'null';
-}
-
-function comparableMentionName(value: string): string {
-  return value.normalize('NFC').trim().replace(/\s+/g, ' ');
-}
-
 export function ChatEntityLinksProvider({
   config,
   uiActionBus,
-  completionContext,
   declarationCoverage,
   children,
 }: {
   config?: ChatEntityLinksConfig;
   uiActionBus?: UiActionBus;
-  /** The user context entity searches get; it keys the `'search'` cache by value. */
-  completionContext?: unknown;
   declarationCoverage?: MentionDeclarationCoverage;
   children: ReactNode;
 }) {
@@ -161,34 +134,24 @@ export function ChatEntityLinksProvider({
   }, [knownEnabled, messages, searches, entityDeclarations, knownHook]);
 
   const verify = !!config && config.mentionMarkers === 'markdown' && config.verifyMentions !== false;
-  // Only an app that sets `unresolvedMentions` (other than `keep`) or its hook checks plain markers.
+  const seenKeys = useMemo(
+    () => (verify ? collectSeenReferenceKeys(messages, searches ?? [], entityDeclarations) : undefined),
+    [verify, messages, searches, entityDeclarations],
+  );
+  // Only an app that sets `unresolvedMentions` (other than `keep`) or its hook judges markers.
   const unresolvedOn = !!config && ((config.unresolvedMentions !== undefined && config.unresolvedMentions !== 'keep')
     || typeof config.unresolvedMention === 'function');
-  const checkedKeys = useMemo(
-    () => (verify || unresolvedOn ? collectSeenReferenceKeys(messages, searches ?? [], entityDeclarations) : undefined),
-    [verify, unresolvedOn, messages, searches, entityDeclarations],
-  );
-  const seenKeys = verify ? checkedKeys : undefined;
-  const outputTypes = useMemo(
-    () => (unresolvedOn ? declaredOutputTypes(entityDeclarations) : undefined),
-    [unresolvedOn, entityDeclarations],
-  );
   // Without the option the links do not depend on these (as before).
   const coverage = unresolvedOn ? declarationCoverage : undefined;
   const markerMessages = unresolvedOn ? messages : undefined;
-  const interactionsRef = useRef(interactions);
-  interactionsRef.current = interactions;
-  // One search per type and name while the user context stays the same by value; never a failed one.
-  const contextKey = unresolvedOn ? stableJson(completionContext ?? {}) : '';
-  const searchCache = useRef<{
-    contextKey: string;
-    pending: Map<string, Promise<ChatEntityReference | undefined>>;
-    settled: Map<string, ChatEntityReference | null>;
-  } | null>(null);
-  if (!searchCache.current || searchCache.current.contextKey !== contextKey) {
-    searchCache.current = { contextKey, pending: new Map(), settled: new Map() };
-  }
-  const searchSlots = useRef({ running: 0, waiting: [] as Array<() => void> });
+  /** Per message: the seen keys of the messages up to it, by its declarations; reused while they are the same objects. */
+  const prefixKeys = useRef(new Map<string, {
+    declarations: EntityDeclarationsByTool;
+    searches: unknown;
+    prefix: ReadonlyArray<unknown>;
+    keys: Set<string>;
+  }>());
+  const outputTypesOf = useRef(new WeakMap<EntityDeclarationsByTool, Set<string>>());
 
   const canOpen = useCallback((type: string) => {
     const current = configRef.current;
@@ -209,120 +172,40 @@ export function ChatEntityLinksProvider({
   }, [interactions]);
 
   const value = useMemo<ChatEntityLinks>(() => {
-    /** `unresolvedMentions`: the policy of a marker, the search by name and its bounds. */
-    function unresolvedMentionLinks(): Pick<ChatEntityLinks, 'unresolvedMention' | 'searchMention' | 'cachedMention' | 'mentionSearchKey'> {
-      const cache = searchCache.current!;
-      const maxSearches = typeof config?.maxMentionSearches === 'number' && config.maxMentionSearches >= 0
-        ? Math.floor(config.maxMentionSearches)
-        : DEFAULT_MAX_MENTION_SEARCHES;
-      const nameKey = (mention: Mention) => `${mention.type.toLowerCase()}\u0000${comparableMentionName(mention.displayName)}`;
-      /** The policy before the search bounds. */
-      const policyOf = (mention: Mention, message: MentionMarkerMessage | undefined): ChatUnresolvedMentionPolicy => {
-        if (!config || !checkedKeys || mention.type === 'command') return 'keep';
-        // An assistant's marker, of a turn whose declarations this page knows.
-        if (!message || message.role !== 'assistant') return 'keep';
-        if (!coverage || !(coverage.all || coverage.messageIds.has(message.id))) return 'keep';
-        if (isSeenReference(checkedKeys, mention.type, mention.id)) return 'keep';
-        // Entity and declaration types are lower-case: the marker's type is compared case-insensitively, as the seen check does.
-        const type = mention.type.toLowerCase();
-        const declared = interactions?.entity(type) !== undefined || !!outputTypes?.has(type);
-        // Undeclared: as before, unless the declared types are still loading (then never a chip that later goes).
-        if (!declared) return interactions?.loading ? 'text' : 'keep';
-        let decided: unknown;
-        try {
-          decided = config.unresolvedMention?.({ type: mention.type, id: mention.id, label: mention.displayName });
-        } catch {
-          decided = undefined;
-        }
-        if (isUnresolvedMentionPolicy(decided)) return decided;
-        return isUnresolvedMentionPolicy(config.unresolvedMentions) ? config.unresolvedMentions : 'keep';
-      };
-      const searchable = (mention: Mention) => {
-        const name = comparableMentionName(mention.displayName);
-        return name.length > 0 && name.length < CHAT_ENTITY_ITEM_TEXT_MAX;
-      };
-      /** Per message: its distinct searched names in marker order. */
-      const orders = new Map<string, string[]>();
-      const searchOrder = (message: MentionMarkerMessage): string[] => {
-        let order = orders.get(message.id);
-        if (order) return order;
-        order = [];
-        const found = markerMessages?.find((entry) => (entry as { id?: unknown }).id === message.id);
-        for (const part of found?.parts ?? []) {
-          const text = (part as { type?: unknown; text?: unknown });
-          if (text.type !== 'text' || typeof text.text !== 'string') continue;
-          for (const segment of parseMentionSegments(text.text)) {
-            if (segment.kind !== 'mention' || !searchable(segment.mention)) continue;
-            if (policyOf(segment.mention, message) !== 'search') continue;
-            const key = nameKey(segment.mention);
-            if (!order.includes(key)) order.push(key);
-          }
-        }
-        orders.set(message.id, order);
-        return order;
-      };
-      const slots = searchSlots.current;
-      const inSlot = <T,>(run: () => Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
-        const start = () => {
-          slots.running += 1;
-          run().then(resolve, reject).finally(() => {
-            slots.running -= 1;
-            slots.waiting.shift()?.();
-          });
-        };
-        if (slots.running < MENTION_SEARCH_CONCURRENCY) start();
-        else slots.waiting.push(start);
-      });
-      return {
-        unresolvedMention: (mention, message) => {
-          const policy = policyOf(mention, message);
-          if (policy !== 'search') return policy;
-          if (!searchable(mention)) return 'text';
-          const index = searchOrder(message!).indexOf(nameKey(mention));
-          return index >= 0 && index < maxSearches ? 'search' : 'text';
-        },
-        mentionSearchKey: (mention) => `${cache.contextKey}\u0001${nameKey(mention)}`,
-        cachedMention: (mention) => cache.settled.get(nameKey(mention)),
-        searchMention(mention) {
-          const key = nameKey(mention);
-          const settledHit = cache.settled.get(key);
-          if (settledHit !== undefined) return Promise.resolve(settledHit ?? undefined);
-          let pending = cache.pending.get(key);
-          if (!pending) {
-            const type = mention.type.toLowerCase();
-            const name = mention.displayName;
-            const query = comparableMentionName(name);
-            // The entity's own search, with the user's session: what the user may see, the app decides.
-            pending = inSlot(async () => {
-              const registry = interactionsRef.current;
-              if (!registry?.entity(type) || !searchable(mention)) return [] as ChatEntityItem[];
-              const signal = new AbortController().signal;
-              return registry.trySearchEntity
-                ? registry.trySearchEntity(type, query, signal)
-                : registry.searchEntity(type, query, signal);
-            }).then((items) => {
-              if (items === undefined) {
-                // A failure is not "no match": the next marker with this name searches again.
-                cache.pending.delete(key);
-                return undefined;
-              }
-              // A label at the cut length may be longer than shown: never an exact match.
-              const whole = items.filter((item) => typeof item.label === 'string' && item.label.length < CHAT_ENTITY_ITEM_TEXT_MAX);
-              const hit = pickExactNameMatch(name, whole);
-              const reference = hit ? { type, id: hit.id, label: name } : undefined;
-              cache.settled.set(key, reference ?? null);
-              return reference;
-            }, () => {
-              cache.pending.delete(key);
-              return undefined;
-            });
-            cache.pending.set(key, pending);
-          }
-          return pending;
-        },
-      };
-    }
-
+    /** `unresolvedMentions`: the policy of a marker, by the declarations and messages of its own turn. */
+    const unresolvedMention = (mention: Mention, message?: MentionMarkerMessage): ChatUnresolvedMentionPolicy => {
+      if (!config || !coverage || !markerMessages || mention.type === 'command') return 'keep';
+      // An assistant's marker, of a message whose turn's declarations this page knows.
+      if (!message || message.role !== 'assistant') return 'keep';
+      const declarations = coverage.byMessage.get(message.id) ?? coverage.app;
+      if (!declarations) return 'keep';
+      const index = markerMessages.findIndex((entry) => entry.id === message.id);
+      if (index < 0) return 'keep';
+      // Only what the conversation showed up to this message: a later turn never changes the decision.
+      const prefix = markerMessages.slice(0, index + 1);
+      let cached = prefixKeys.current.get(message.id);
+      if (!cached || cached.declarations !== declarations || cached.searches !== searches
+        || cached.prefix.length !== prefix.length || cached.prefix.some((entry, at) => entry !== prefix[at])) {
+        cached = { declarations, searches, prefix, keys: collectSeenReferenceKeys(prefix, searches ?? [], declarations) };
+        prefixKeys.current.set(message.id, cached);
+      }
+      if (isSeenReference(cached.keys, mention.type, mention.id)) return 'keep';
+      // Entity and declaration types are lower-case: the marker's type is compared case-insensitively, as the seen check does.
+      const type = mention.type.toLowerCase();
+      let outputTypes = outputTypesOf.current.get(declarations);
+      if (!outputTypes) outputTypesOf.current.set(declarations, outputTypes = declaredOutputTypes(declarations));
+      const declared = interactions?.entity(type) !== undefined || outputTypes.has(type);
+      // Undeclared: as before, unless the declared types are still loading (then never a chip that later goes).
+      if (!declared) return interactions?.loading ? 'text' : 'keep';
+      let decided: unknown;
+      try {
+        decided = config.unresolvedMention?.({ type: mention.type, id: mention.id, label: mention.displayName });
+      } catch {
+        decided = undefined;
+      }
+      if (isUnresolvedMentionPolicy(decided)) return decided;
+      return isUnresolvedMentionPolicy(config.unresolvedMentions) ? config.unresolvedMentions : 'keep';
+    };
     const matchers = config?.matchers ?? [];
     const keyOf = (segment: { matcher: number; text: string; match?: string }) => `${segment.matcher}\u0000${segment.match ?? segment.text}`;
     const links: ChatEntityLinks = {
@@ -375,14 +258,14 @@ export function ChatEntityLinksProvider({
         if (mention.type === 'command') return true;
         return !seenKeys || isSeenReference(seenKeys, mention.type, mention.id);
       },
-      ...(unresolvedOn ? unresolvedMentionLinks() : {}),
+      ...(unresolvedOn ? { unresolvedMention } : {}),
     };
     (links as { markdownComponents: ChatEntityLinks['markdownComponents'] }).markdownComponents = Object.fromEntries(
       LINKIFIED_TAGS.map((tag) => [tag, ({ node: _node, children, ...props }: Record<string, unknown>) =>
         createElement(tag, props, linkifyChildren(children as ReactNode, links))]),
     );
     return links;
-  }, [config, known, seenKeys, checkedKeys, unresolvedOn, outputTypes, interactions, coverage, markerMessages, contextKey, canOpen, open, locale.openEntityLabel]);
+  }, [config, known, seenKeys, unresolvedOn, interactions, searches, coverage, markerMessages, canOpen, open, locale.openEntityLabel]);
 
   return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
 }
@@ -551,8 +434,8 @@ function MarkerText({ text }: { text: string }) {
     const label = found[2] ?? '';
     const mention = mentions[markerIndexOf(found[1] ?? '')];
     const policy = mention ? links.unresolvedMention?.(mention, markers?.message) ?? 'keep' : 'keep';
-    nodes.push(mention && policy !== 'keep'
-      ? <UnresolvedMentionMarker key={`m${found.index}`} mention={mention} policy={policy} text={label} />
+    nodes.push(mention && policy === 'text'
+      ? <Fragment key={`m${found.index}`}>{label}</Fragment>
       : mention && links.showsMention(mention)
         ? <MarkerChip key={`m${found.index}`} mention={mention} />
         : <Fragment key={`m${found.index}`}>{label}</Fragment>);
@@ -576,37 +459,4 @@ function MarkerChip({ mention }: { mention: Mention }) {
         : {})}
     />
   );
-}
-
-/**
- * An assistant's marker `entityLinks.unresolvedMentions` applies to: `text`
- * renders its name; `search` its name until the search found exactly one
- * record with that name, then a chip with that record's id. For a custom
- * bubble: render it where `useChatEntityLinks().unresolvedMention(mention,
- * message)` is not `'keep'`.
- */
-export function UnresolvedMentionMarker({ mention, policy, text }: {
-  mention: Mention;
-  policy: Exclude<ChatUnresolvedMentionPolicy, 'keep'>;
-  /** What shows instead of a chip; default the marker's name. */
-  text?: string;
-}) {
-  const links = useChatEntityLinks();
-  const searching = policy === 'search' && !!links.searchMention;
-  const key = searching ? links.mentionSearchKey?.(mention) ?? '' : '';
-  // A result belongs to the type, name and user context it was found for.
-  const [found, setFound] = useState<{ key: string; reference: ChatEntityReference | null } | undefined>(undefined);
-  const reference = found && found.key === key ? found.reference : (searching ? links.cachedMention?.(mention) : null);
-  const { type, id, displayName } = mention;
-  useEffect(() => {
-    if (!searching || reference !== undefined) return;
-    let live = true;
-    void links.searchMention!({ ...mention, type, id, displayName }).then((hit) => {
-      if (live) setFound({ key, reference: hit ?? null });
-    });
-    return () => { live = false; };
-    // The marker's fields, not its object: a re-render parses a new one.
-  }, [links, searching, key, type, id, displayName, reference]);
-  if (!searching || !reference) return <>{text ?? displayName}</>;
-  return <MarkerChip mention={{ ...mention, type: reference.type, id: reference.id }} />;
 }

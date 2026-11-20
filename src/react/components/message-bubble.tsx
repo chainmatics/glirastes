@@ -6,7 +6,6 @@ import {
   EntityText,
   MentionMarkers,
   markdownWithMentionMarkers,
-  UnresolvedMentionMarker,
   useChatEntityLinks,
   WithoutEntityLinks,
 } from '../entity-links/entity-links-react.js';
@@ -500,8 +499,8 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
 
           // `entityLinks.unresolvedMentions`: an assistant's marker with an id the conversation never showed.
           const unresolved = linkText ? links.unresolvedMention?.(segment.mention, markerMessage) ?? 'keep' : 'keep';
-          if (unresolved !== 'keep') {
-            return <UnresolvedMentionMarker key={`segment-mention-${index}`} mention={segment.mention} policy={unresolved} />;
+          if (unresolved === 'text') {
+            return <Fragment key={`segment-mention-${index}`}>{segment.mention.displayName}</Fragment>;
           }
 
           return (

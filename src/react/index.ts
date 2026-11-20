@@ -350,7 +350,6 @@ export {
 export {
   collectKnownEntities,
   entityNavigationHref,
-  pickExactNameMatch,
   splitEntityText,
   type ChatEntityLinksConfig,
   type ChatEntityMatcher,
@@ -363,7 +362,6 @@ export {
   EntityText,
   MentionMarkers,
   markdownWithMentionMarkers,
-  UnresolvedMentionMarker,
   useChatEntityLinks,
   type ChatEntityLinks,
   type MentionMarkerMessage,

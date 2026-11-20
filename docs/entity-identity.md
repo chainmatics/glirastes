@@ -134,22 +134,20 @@ per tool), e.g. for a server that is not `createAiChatHandler`.
 | `ChatEntityReference.data` | none | Free data from `resolve`, `knownEntities` or `resolveAmbiguous`, passed to `open` |
 | `mentionMarkers` | `'plain'` | `{{mention:type:id:label}}` markers in an assistant's text: `plain` renders such a text part without Markdown, each marker a chip (as before); `markdown` keeps the Markdown and puts each marker as an inline chip inside it (a custom `Markdown` keeps them through `markdownComponents`; without them it shows the label) |
 | `verifyMentions` | `true` | With `mentionMarkers: 'markdown'`: a marker becomes a chip only for an id the conversation showed as a record by declaration (`outputEntities` of a tool result, a `@` mention the user picked, a hit of an entity search tool), never by a field-name guess; otherwise its label stays text. `false` turns the check off |
-| `unresolvedMentions` | `'keep'` | An assistant's marker whose id the conversation never showed, see below. `'keep'` (as before), `'text'` or `'search'` |
-| `unresolvedMention(marker)` | none | Decides `'keep'`, `'text'` or `'search'` per such marker; `undefined` (or a throw) leaves it to `unresolvedMentions` |
-| `maxMentionSearches` | `5` | `'search'`: distinct names searched per message, in marker order; the markers of further names stay text |
+| `unresolvedMentions` | `'keep'` | An assistant's marker whose id the conversation never showed, see below. `'keep'` (as before) or `'text'` |
+| `unresolvedMention(marker)` | none | Decides `'keep'` or `'text'` per such marker; `undefined` (or a throw) leaves it to `unresolvedMentions` |
 
 ### A marker with a wrong id
 
 A model sometimes writes a `{{mention:type:id:label}}` marker whose name is
 right but whose id is not (one character off, cut short, invented). The id
-is "unresolved" when the conversation never showed that `type`/`id` pair as
-a record, by the same check as `verifyMentions`: a declared record of a tool
-result (`outputEntities`), a `@` mention the user picked, or a hit of an
-entity search tool. The id is compared as text, exactly; nothing assumes a
-shape (UUID, integer and slug ids are treated alike; an integer `42` in a
-result and `42` in a marker are one id). The type is compared
-case-insensitively, as in that check (entity and declaration types are
-lower-case; `Playlist` is `playlist`).
+is "unresolved" when the conversation up to and including the marker's
+message never showed that `type`/`id` pair as a record, by the same check as
+`verifyMentions`: a declared record of a tool result (`outputEntities`), a
+`@` mention the user picked, or a hit of an entity search tool. The id is
+compared as text, exactly; nothing assumes a shape (UUID, integer and slug
+ids are treated alike; an integer `42` in a result and `42` in a marker are
+one id). The type is compared case-insensitively, as in that check.
 
 What happens without the option (`'keep'`, the default):
 
@@ -159,73 +157,50 @@ What happens without the option (`'keep'`, the default):
 | `'markdown'` with `verifyMentions` (default) | Its name as plain text |
 | `'markdown'` with `verifyMentions: false` | A chip with the marker's id |
 
-`unresolvedMentions` changes this in both modes for a marker that meets all of:
+`unresolvedMentions: 'text'` shows such a marker's name as plain text (no
+chip, no link), in both modes, when all of these hold:
 
 1. It is in an **assistant** message. A user's markers come from the `@`
    list and never change.
-2. Its message is one whose turn's declarations this page knows: every
-   message when the app passes `entityDeclarations` to `AiChatProvider`
-   itself; otherwise only the assistant messages streamed in this page life
-   by a turn that received the server's declarations (`data-tool-entities`,
-   sent only while a turn runs and not stored). A history loaded from the
-   session store or set by the host keeps every marker as before, also next
-   to a new turn. Limit: such a stored marker with a wrong id still shows as
-   before (with `'plain'` a chip to the wrong id) until declarations are
-   kept with the stored session; pass `entityDeclarations` to cover it.
+2. Its message has **declarations to judge it by**:
+   - an assistant message streamed in this page life by a turn that
+     received the server's declarations (`data-tool-entities`): that turn's
+     declarations, merged with the app's own `entityDeclarations`. A later
+     turn, a retry of another turn or another chat never changes them; an
+     approval continuation of the message keeps those of its first request;
+   - any other message, only when the app passes `entityDeclarations` to
+     `AiChatProvider` itself: those.
+   Otherwise the marker stays as before. Limit: the server's declarations
+   are sent only while a turn runs and are not stored, so a history loaded
+   from the session store or set by the host is not judged without the
+   `entityDeclarations` prop; a stored marker with a wrong id then shows as
+   before (with `'plain'` a chip to the wrong id).
 3. Its type is **declared**: an entity of `chatInteractions` or a `type` the
-   tools' `outputEntities` declare. A type neither declares stays as before.
-   While `chatInteractions` data is still loading (`loading: true`, or `data`
-   given as `undefined`, which is what `useChatInteractionsData` returns
-   until it has loaded and after a failed request) a type that is not
-   declared yet shows as text, never as a chip that disappears after the
-   load; after a failed load it stays text.
-4. The conversation never showed its `type`/`id`, and it is no `command`.
+   message's declarations give in `outputEntities`. A type neither declares
+   stays as before. While `chatInteractions` data is still loading
+   (`loading: true`, or `data` given as `undefined`, which is what
+   `useChatInteractionsData` returns until it has loaded and after a failed
+   request) a type that is not declared yet shows as text, never as a chip
+   that disappears after the load; once loaded, it is judged again (after a
+   failed load it stays text).
+4. The id was never shown (see above), and it is no `command`.
 
-Then:
-
-- `'text'`: the name as plain text, no chip, no link.
-- `'search'`: the entity's own `search` of `chatInteractions` runs for the
-  name, in the browser with the user's session, against the app's endpoint
-  (the same path as the `@` list; the app decides what the user may see,
-  nothing goes to the Platform). A chip with the found id appears only when
-  exactly one record's label equals the name; in every other case the name
-  stays text. A type without an entity `search` (only `outputEntities`)
-  stays text.
-
-Name matching (`pickExactNameMatch`, exported): both sides Unicode NFC,
-leading and trailing whitespace removed, inner whitespace runs as one
-space; then compared case-sensitively and in full. No prefix, substring,
-case-insensitive or fuzzy match. Two records (two ids) with that name: no
-match, the name stays text. One record listed twice counts once. The search
-sees at most 8 hits (`searchEntity`); a second record with the same name
-beyond them is not seen. Hit labels are cut to 200 characters
-(`toChatEntityItem`): a hit label of 200 characters or more never matches,
-and a name of 200 characters or more is not searched (it stays text).
-
-Bounds of `'search'`: at most `maxMentionSearches` (default 5) distinct
-names per message, in the order of their markers (later names stay text);
-at most 2 searches run at once per provider (the rest wait); the query is
-the normalised name, under 200 characters.
-
-While the search runs the name shows as text, then the chip replaces it; a
-chip never shows first and disappears. A found or "no match" result is kept
-per type and normalised name while the provider stays mounted and the
-user context (`completionContext`) stays the same by value: re-renders with
-new but equal `chatInteractions`, `completionContext` or `entityLinks`
-objects and a remount of the markers do not search again. A new user
-context (by value) drops the results and searches again. A failed search
-(the entity's `search` throws, or a derived endpoint answers with an error
-status) is not kept: the marker shows the name, the next marker with that
-name searches again. A marker only exists once its closing `}}` has
-streamed, so a half-streamed marker is never searched.
+The decision for a message depends only on its declarations, the messages
+up to it and the declared entity types, so it does not change when later
+turns run.
 
 `unresolvedMention(marker)` gets `{ type, id, label }` for each marker the
-option applies to and returns the policy for it. A name the model writes
-cannot contain `}` (the marker would not parse); a `:` in the name is fine,
-a `:` in the id is not.
+option applies to and returns `'keep'` or `'text'` for it. A `:` in a name
+is fine; a `:` in an id or a `}` in a name do not parse as a marker.
 
-A custom bubble gets this through `useChatEntityLinks().unresolvedMention(mention, { id, role })`:
-render `UnresolvedMentionMarker` (`mention`, `policy`, optional `text`)
-where it returns `'text'` or `'search'`, and its own chip for `'keep'`.
-With `mentionMarkers: 'markdown'`, pass `message={{ id, role }}` to
+A custom bubble honours the option through
+`useChatEntityLinks().unresolvedMention(mention, { id, role })` (type
+`MentionMarkerMessage`): where it returns `'text'`, render
+`mention.displayName` as plain text instead of a chip. With
+`mentionMarkers: 'markdown'`, pass `message={{ id, role }}` to
 `MentionMarkers`; without it the markers render as before.
+
+Existing, unchanged: `verifyMentions` (markdown mode) checks against the
+current declarations of the whole conversation, which the server replaces
+each turn; a later turn whose tools declare other types can turn an earlier
+correct chip into text there.
