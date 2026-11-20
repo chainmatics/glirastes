@@ -9,6 +9,7 @@ All names below come from `glirastes/react` unless noted.
 - What a pick does
 - Opening a list from a button
 - Toolbar
+- Plus menu
 
 ## Triggers
 
@@ -175,3 +176,40 @@ const composer = useMemo<ComposerConfig>(() => ({
   `start` and `end` arrays, the `editor` and the `controls`, e.g. for a second
   row below the editor. It renders inside the form.
 - The legacy `mentions` input ignores `composer`.
+
+## Plus menu
+
+Put `'plus'` into `toolbar.start` or `toolbar.end` for a "+" button with a
+menu (`aria-haspopup="menu"`). `composer.plusMenu` (`ComposerPlusMenuConfig`)
+sets its rows; without `'plus'` in the toolbar nothing renders.
+
+```tsx
+const composer = useMemo<ComposerConfig>(() => ({
+  toolbar: { start: ['plus'], end: ['mic', 'send'] },
+  plusMenu: {
+    items: ['attach', 'trigger:@'],
+    source: { trigger: '/', source: 'templates', label: 'Vorlagen' },
+  },
+}), []);
+```
+
+- `items` ids: `attach` (only with attachments; opens the file picker, and
+  the menu brings the hidden file input when `attach` is not in the toolbar),
+  `trigger:<char>` (named after the trigger's `label`, else the char; closes
+  the menu and opens that list with the focus in the editor) and keys of
+  `composer.items` (their `label`, `icon`, `onSelect(controls)`, `hidden`).
+  `render` items cannot be rows; they and unknown ids warn once and are
+  skipped. Default: `attach`, then one `trigger:<char>` per trigger.
+- `source` lists entries of `trigger` (only the provider ids in `source`)
+  directly in the menu, searched with an empty query when it opens, at most
+  `limit` (default 8), under the heading `label`. Choosing one does what
+  picking it in the list does: `chip` inserts a pill at the caret, `text` its
+  `insertText`, `run` inserts and sends, `list` opens the `listSource` list.
+  `onCompletionSelect` runs first. No entries, no section.
+- Keyboard: ArrowDown/ArrowUp (wrapping), Home/End, Enter/Space choose,
+  Escape closes and returns focus to the "+" button, Tab closes; a press
+  outside closes. ArrowDown/ArrowUp on the button open on the first/last row.
+- Texts: `locale.plusMenuButtonLabel` (`More actions`, de `Mehr Aktionen`)
+  and `locale.plusMenuAttachLabel` (`Attach file`, de `Datei anhängen`).
+- A custom handle offers the `source` picks through the optional
+  `RichMentionInputHandle.pickCompletion(item, { trigger })`.

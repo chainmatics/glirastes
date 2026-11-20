@@ -1,8 +1,10 @@
 import { Fragment, type MouseEvent, type ReactNode } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
+import { ComposerPlusMenu } from './composer-plus-menu.js';
 import type {
   ChatComposerInputControls,
   ComposerToolbarItem,
+  MentionResult,
   ResolvedChatTrigger,
 } from '../types.js';
 
@@ -85,6 +87,10 @@ export interface ComposerToolbarLayoutProps {
   controls: ChatComposerInputControls;
   /** Trigger chars of the editor; undefined when the input has no completion. */
   triggers?: ReadonlyArray<ResolvedChatTrigger>;
+  /** The "+" menu applies a listed entry with it; undefined without completion. */
+  pickCompletion?: (item: MentionResult, options: { trigger: string }) => void;
+  /** The hidden file input of `attach`; the "+" menu renders it when the `attach` item does not. */
+  attachInput?: ReactNode;
 }
 
 /**
@@ -92,9 +98,14 @@ export interface ComposerToolbarLayoutProps {
  * the editor, or `components.ComposerToolbar` when set. Renders no wrapper,
  * so the default layout is the same markup as before the toolbar existed.
  */
-export function ComposerToolbarLayout({ builtins, editor, controls, triggers }: ComposerToolbarLayoutProps) {
+export function ComposerToolbarLayout({ builtins, editor, controls, triggers, pickCompletion, attachInput }: ComposerToolbarLayoutProps) {
   const { composer, components } = useChatContext();
   const items = composer?.items;
+  const hasItem = (id: string) => !!items && Object.prototype.hasOwnProperty.call(items, id) && !!items[id];
+  const startIds = composer?.toolbar?.start ?? DEFAULT_START;
+  const endIds = composer?.toolbar?.end ?? DEFAULT_END;
+  // The attach builtin brings the file input; without it the "+" menu does.
+  const attachBuiltinShown = !hasItem('attach') && (startIds.includes('attach') || endIds.includes('attach'));
 
   const build = (ids: ReadonlyArray<string>): ReactNode[] => {
     const nodes: ReactNode[] = [];
@@ -103,6 +114,18 @@ export function ComposerToolbarLayout({ builtins, editor, controls, triggers }: 
       const item = items && Object.prototype.hasOwnProperty.call(items, id) ? items[id] : undefined;
       if (item) node = renderItem(id, item, controls);
       else if (isBuiltin(id)) node = builtins[id];
+      else if (id === 'plus') {
+        node = (
+          <ComposerPlusMenu
+            config={composer?.plusMenu}
+            items={items}
+            controls={controls}
+            triggers={triggers}
+            pickCompletion={pickCompletion}
+            attachInput={attachBuiltinShown ? undefined : attachInput}
+          />
+        );
+      }
       else if (id.startsWith(TRIGGER_PREFIX)) node = renderTrigger(id, triggers, controls);
       else warnOnce(id, 'unknown');
       if (node === null || node === undefined || node === false) continue;
@@ -111,8 +134,8 @@ export function ComposerToolbarLayout({ builtins, editor, controls, triggers }: 
     return nodes;
   };
 
-  const start = build(composer?.toolbar?.start ?? DEFAULT_START);
-  const end = build(composer?.toolbar?.end ?? DEFAULT_END);
+  const start = build(startIds);
+  const end = build(endIds);
   const Toolbar = components.ComposerToolbar;
   if (Toolbar) return <Toolbar start={start} end={end} editor={editor} controls={controls} />;
   return <>{start}{editor}{end}</>;

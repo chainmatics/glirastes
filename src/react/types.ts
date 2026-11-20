@@ -1007,9 +1007,10 @@ export interface ChatComponents {
  * `renderSubmit` or the default send/stop button. `trigger:<char>` is a
  * button that opens the completion list of that trigger char (label from the
  * trigger definition, else the char); the plain input, which has no
- * completion, leaves it out.
+ * completion, leaves it out. `plus` is a "+" button with a menu
+ * (`ComposerConfig.plusMenu`).
  */
-export type ComposerToolbarBuiltin = 'attach' | 'mic' | 'actions' | 'extra' | 'send' | `trigger:${string}`;
+export type ComposerToolbarBuiltin = 'attach' | 'mic' | 'actions' | 'extra' | 'send' | 'plus' | `trigger:${string}`;
 
 /** An app item of the composer toolbar (`composer.items`). */
 export interface ComposerToolbarItem {
@@ -1033,6 +1034,39 @@ export interface ComposerConfig {
    */
   toolbar?: { start?: ReadonlyArray<string>; end?: ReadonlyArray<string> };
   items?: Readonly<Record<string, ComposerToolbarItem>>;
+  /** Rows of the `plus` toolbar item; without it the default rows. */
+  plusMenu?: ComposerPlusMenuConfig;
+}
+
+/**
+ * The menu of the `plus` toolbar item. Rows run in `items` order; the
+ * `source` section comes after them.
+ */
+export interface ComposerPlusMenuConfig {
+  /**
+   * Row ids: `attach` (only when attachments are enabled; opens the file
+   * picker), `trigger:<char>` (opens that trigger's list in the editor,
+   * labeled by the trigger's `label`, else the char) or keys of
+   * `composer.items` (their `label`, `icon`, `onSelect`, `hidden`; `render`
+   * items cannot be rows). Unknown ids warn once and are skipped.
+   * Default: `attach`, then one `trigger:<char>` per trigger of the composer.
+   */
+  items?: ReadonlyArray<string>;
+  /**
+   * A section listing completion entries directly, searched with an empty
+   * query when the menu opens. Choosing one does what picking it in the
+   * `trigger` list does (its `select`). No entries: no section.
+   */
+  source?: {
+    /** The trigger whose providers are searched, e.g. `/`. */
+    trigger: string;
+    /** Only these provider ids of the trigger. */
+    source?: string | ReadonlyArray<string>;
+    /** Heading of the section. */
+    label?: string;
+    /** Most entries shown; default 8. */
+    limit?: number;
+  };
 }
 
 /** Props of `components.ComposerToolbar`. */
@@ -1295,6 +1329,10 @@ export interface ChatLocale {
   chatAboutLabel: string;             // a "Chat about this" menu entry (`useChatComposer`)
   // Attachments
   attachButtonLabel: string;
+  /** Accessible name of the composer's "+" menu button; default `More actions`. */
+  plusMenuButtonLabel?: string;
+  /** The `attach` row of the "+" menu; default `Attach file`. */
+  plusMenuAttachLabel?: string;
   attachmentsLabel: string;
   removeAttachmentLabel: string;      // supports `{name}`
   openAttachmentLabel: string;        // supports `{name}`
@@ -2182,6 +2220,13 @@ export interface RichMentionInputHandle {
    * handles stay valid; `RichMentionInput` always has it.
    */
   openCompletion?: (options: OpenCompletionOptions) => void;
+  /**
+   * Applies an entry as if it was picked from the `trigger` list at the
+   * caret (focusing the editor): `onCompletionSelect` first, then the
+   * entry's `select` behavior. Used by the composer's "+" menu. Optional so
+   * custom handles stay valid; `RichMentionInput` always has it.
+   */
+  pickCompletion?: (item: MentionResult, options: { trigger: string }) => void;
 }
 
 /** ARIA wiring of one option in the `@`/`/` list; spread it onto the clickable element. */

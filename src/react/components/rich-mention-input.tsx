@@ -779,10 +779,21 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions, allowEmptySubmit]);
 
     /** One entry of the list was picked: the app's handler first, then the entry's `select` behavior. */
-    const pickResult = useCallback((result: MentionResult) => {
+    /**
+     * `fromCode` (`pickCompletion`): the trigger was inserted armed for this
+     * pick; when nothing replaces it, it goes again, and a `list` keeps it armed.
+     */
+    const pickResult = useCallback((result: MentionResult, fromCode = false) => {
+      const armed = armedRef.current;
       armedRef.current = null;
+      const dropArmed = () => {
+        if (!fromCode) return;
+        armedRef.current = armed;
+        removeArmed();
+      };
       const active = detectTrigger() ?? lastSearchRef.current;
       if (onCompletionSelect?.(result, { trigger: active.trigger, query: active.query }) === true) {
+        dropArmed();
         closeDropdown();
         return;
       }
@@ -790,14 +801,16 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       // A `list` without a sub-list would show the same list again: it inserts a pill instead.
       const kind = selected === 'list' && result.listSource === undefined ? 'chip' : selected;
       if (kind === 'text') {
-        if (replaceQuery(() => result.insertText ?? result.label) === null) return;
+        if (replaceQuery(() => result.insertText ?? result.label) === null) return dropArmed();
         closeDropdown();
         onChange?.(getFullValue());
         return;
       }
       if (kind === 'list') {
         const char = replaceQuery((trigger) => trigger);
-        if (char === null) return;
+        if (char === null) return dropArmed();
+        // The text is the same, so an armed trigger still closes away untouched.
+        if (fromCode) armedRef.current = armed;
         clearTimeout(searchTimeoutRef.current);
         // Searching again clears the list state but keeps it open; the source sticks until it closes.
         listSourceRef.current = result.listSource;
@@ -809,8 +822,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       }
       // `run` sends through the same path as Enter, so a disabled (streaming) composer sends nothing.
       const inserted = insertMention(result);
-      if (inserted && kind === 'run') submit([inserted]);
-    }, [detectTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, performSearch, insertMention, submit]);
+      if (!inserted) return dropArmed();
+      if (kind === 'run') submit([inserted]);
+    }, [detectTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, performSearch, insertMention, submit, removeArmed]);
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
@@ -1074,18 +1088,18 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
      * focus, else at the end; a space first after a non-space) and searches
      * at once. The text stays armed until the user types or picks.
      */
-    const openCompletion = useCallback((options: OpenCompletionOptions) => {
+    const armTrigger = useCallback((trigger: unknown, query: string, caller: 'open' | 'pick'): string | null => {
       const editor = editableRef.current;
-      if (!hasMentionSupport || !editor) return;
-      const trigger = options?.trigger;
+      if (!hasMentionSupport || !editor) return null;
       if (typeof trigger !== 'string' || !triggers.has(trigger)) {
         const key = String(trigger);
         if (!warnedTriggersRef.current.has(key)) {
           warnedTriggersRef.current.add(key);
           // Static text only: the argument may come from app data (React diagnostics rule).
-          console.warn('[glirastes] openCompletion: the trigger is not one of this composer; nothing was opened.');
+          if (caller === 'pick') console.warn('[glirastes] pickCompletion: the trigger is not one of this composer; nothing was picked.');
+          else console.warn('[glirastes] openCompletion: the trigger is not one of this composer; nothing was opened.');
         }
-        return;
+        return null;
       }
       // A second call replaces the text of the first.
       removeArmed();
@@ -1110,7 +1124,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         range.collapse(true);
       }
       const before = charBefore(range, editor);
-      const text = `${before && !isSpace(before) ? ' ' : ''}${trigger}${options.query ?? ''}`;
+      const text = `${before && !isSpace(before) ? ' ' : ''}${trigger}${query}`;
 
       // Into a text node, so typing on and trigger detection work as if typed.
       let node: Text;
@@ -1143,14 +1157,37 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       selection?.removeAllRanges();
       selection?.addRange(caret);
       armedRef.current = { node, start: offset, text, created };
+      return trigger;
+    }, [hasMentionSupport, triggers, removeArmed]);
 
+    const openCompletion = useCallback((options: OpenCompletionOptions) => {
+      const trigger = armTrigger(
+        options?.trigger,
+        options?.query ?? '',
+        'open',
+      );
+      if (trigger === null) return;
       clearTimeout(searchTimeoutRef.current);
       listSourceRef.current = options.source;
       setSelectedIndex(0);
       setSelectedAction(-1);
       onChange?.(getFullValue());
       void performSearch(options.query ?? '', trigger, options.source);
-    }, [hasMentionSupport, triggers, removeArmed, onChange, getFullValue, performSearch]);
+    }, [armTrigger, onChange, getFullValue, performSearch]);
+
+    /** A pick from outside the list (the "+" menu): the trigger goes in at the caret, then the normal pick runs. */
+    const pickCompletion = useCallback((item: MentionResult, options: { trigger: string }) => {
+      const trigger = armTrigger(
+        options?.trigger,
+        '',
+        'pick',
+      );
+      if (trigger === null) return;
+      clearTimeout(searchTimeoutRef.current);
+      closeDropdown();
+      lastSearchRef.current = { query: '', trigger };
+      pickResult(item, true);
+    }, [armTrigger, closeDropdown, pickResult]);
 
     // -----------------------------------------------------------------------
     // Imperative handle
@@ -1241,8 +1278,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           setMentions((prev) => [...prev, mention]);
         },
         openCompletion,
+        pickCompletion,
       }),
-      [hasMentionSupport, setValue, getFullValue, collectMentions, createChipElement, closeDropdown, insertPill, openCompletion],
+      [hasMentionSupport, setValue, getFullValue, collectMentions, createChipElement, closeDropdown, insertPill, openCompletion, pickCompletion],
     );
 
     // -----------------------------------------------------------------------

@@ -66,6 +66,8 @@ function ProviderMentionInput({
         <ComposerToolbarLayout
           controls={composer}
           triggers={triggers ?? []}
+          pickCompletion={(item, options) => composer.inputRef.current?.pickCompletion?.(item, options)}
+          attachInput={composer.attachmentsEnabled && <input {...composer.attachmentInputProps} />}
           builtins={{
             attach: composer.attachmentsEnabled && (
               <>

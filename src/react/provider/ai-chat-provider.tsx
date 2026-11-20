@@ -192,6 +192,8 @@ export const DEFAULT_LOCALE: ChatLocale = {
   openEntityLabel: 'Open {label}',
   chatAboutLabel: 'Chat about this',
   attachButtonLabel: 'Attach files',
+  plusMenuButtonLabel: 'More actions',
+  plusMenuAttachLabel: 'Attach file',
   attachmentsLabel: 'Attachments',
   removeAttachmentLabel: 'Remove {name}',
   openAttachmentLabel: 'Open {name}',

@@ -133,6 +133,8 @@ export const deChatLocale: ChatLocale = {
   commandArgumentsAnyOption: 'Beliebig',
   commandArgumentsNoMatches: 'Keine Treffer',
   attachButtonLabel: 'Dateien anhängen',
+  plusMenuButtonLabel: 'Mehr Aktionen',
+  plusMenuAttachLabel: 'Datei anhängen',
   attachmentsLabel: 'Anhänge',
   removeAttachmentLabel: '{name} entfernen',
   openAttachmentLabel: '{name} öffnen',
