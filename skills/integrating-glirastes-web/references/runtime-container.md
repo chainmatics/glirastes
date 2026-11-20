@@ -7,18 +7,18 @@ compatible. The container is one independent service per application and
 environment. It is not a sidecar per backend replica and does not offer HA.
 
 The official public Linux amd64 image is
-`ghcr.io/chainmatics/glirastes-runtime:0.17.3`; pulling needs no registry login.
+`ghcr.io/chainmatics/glirastes-runtime:0.18.1`; pulling needs no registry login.
 For this release, the verified immutable image reference is:
 
 ```sh
-export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime@sha256:cfc4864e0fbe738b6bbacee7f09a22fd77c952b426dc5b61511b149def909fcc
+export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime@sha256:b61a3889c7df344d905ba7571428e71eb1a2fa02f1a89dc81cf344cbf63e8fd8
 docker pull "$GLIRASTES_RUNTIME_IMAGE"
 ```
 
-Use the exact matching SDK version (0.17.3 for this image) for artifact builds
+Use the exact matching SDK version (0.18.1 for this image) for artifact builds
 and browser code. Do not substitute a newer CLI merely because it is available.
-The [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.17.3/examples/php-runtime)
-and [browser host examples](https://github.com/chainmatics/glirastes/tree/v0.17.3/examples/frontend-frameworks)
+The [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.18.1/examples/php-runtime)
+and [browser host examples](https://github.com/chainmatics/glirastes/tree/v0.18.1/examples/frontend-frameworks)
 are runnable references. PHP has real API/approval tests; Angular/SvelteKit/Nuxt
 have browser host tests. Neither establishes a full Rust/Java stack acceptance.
 
@@ -174,7 +174,12 @@ e.g. `x-app-language` sent by the chat's transport). With neither set, the
 turn's language is the one the chat UI names in each request
 (`Content-Language`, sent by the React/Vercel transport and
 `<glirastes-chat>`; one BCP-47 tag, anything else ignored), else English;
-`chat.locale` or `chat.requestLocaleHeader` replaces it. `chat.locales` adds or
+`chat.locale` or `chat.requestLocaleHeader` replaces it: a fixed `chat.locale`
+wins over the page language the chat sends, so set it only for a
+single-language app. A language stored per user (the app's database) goes
+into a header the chat's transport sends (`headers: { 'x-app-language':
+user.language }`), named in `chat.requestLocaleHeader`; pass the same value as
+the chat's `language` so its built-in texts match. `chat.locales` adds or
 changes the runtime's own texts per language (`{"pl": {"closing": "...",
 "silentTurn": "..."}}`, keys of the SDK handler's `locales`; partial tables
 fall back per key, an unknown key fails at start). The artifact carries the

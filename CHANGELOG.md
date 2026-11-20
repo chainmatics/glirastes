@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Message queue in the chat** (`docs/chat-queue.md`), opt-in: `queue: { enabled: true }` on `AiChatProvider` (and `config.queue` on `<glirastes-chat>`). A message sent while a run is busy or an approval is open is queued instead of refused and sent once the chat is fully idle (FIFO, one run at a time, processed like a typed message when sent; never as a clarification answer or approval decision). Options `autoFlush` (true), `sendNowBehavior` (`'next'` / `'abort'`), `maxSize` (10, `null` lifts it), `pauseOn` (`error`, `aborted`, `safety-stop`, `truncation`), `sendNowDuringApproval` (`'refuse'` / `'reject-approval'`), `storage` (file items are not persisted; a restored queue starts paused), `onQueueChange`. Context: `submit()` (`'sent' | 'queued' | 'rejected'`), `queue` (`{ enabled, items, paused, restoring, editingId }`), `canCompose`, `sendNow`, `removeQueued`, `editQueued`, `beginEdit`/`cancelEdit` (an open edit holds the queue at that message), `clearQueue`, `resumeQueue`, `pauseQueue`; `useChatQueue()`; default `ChatQueue` component (slot `components.ChatQueue`, `null` hides it; `classNames.chatQueue`). With the queue on, the built-in composers stay usable while loading and show send and stop. Without `queue` nothing changes. New locale keys `queueTitle`, `queueSendNowLabel`, `queueEditLabel`, `queueRemoveLabel`, `queuePausedLabel`, `queueResumeLabel`, `queueSaveLabel`, `queueCancelLabel`, `queueFilesLabel` (English, German): a custom full `ChatLocale` object needs them. Local only; nothing goes to the Platform.
+- `ModelInputBreakdown.unresolvedMentionMarkers` (`onModelInput`, `prepareModelMessages` `onBreakdown`): the number of `{{mention:type:id:label}}` markers in the assistant's earlier text of the request whose type and id no declared record of a tool result (`earlierMessages` included) and no `@` mention of the user carries, i.e. the markers the chat shows as plain text under `entityLinks.verifyMentions` (for example an id the model shortened). A count only, never an id or a label; computed only when the hook is set; local, never in the stream, the browser or the Platform. A marker of the latest answer shows at the next request; the chat may still draw a chip for one an entity search hit or `knownEntities` supplies.
+
+### Fixed
+
+- Generated labels per language no longer repeat a region variant whose labels equal its base language (`de-DE` next to `de`): the variant is left out of `tool-contracts.json` `labels`, `toolTexts` and the runtime artifact, and every lookup falls back from `de-DE` to `de` as before. A variant that differs (`pt-BR` next to `pt`) or has no base tag stays. Generated outputs of such apps change once on the next `glirastes tools refresh` (`glirastes tools check` reports drift until then); the chat shows the same labels.
+- The activity log summary showed a check mark when no step succeeded (every step stopped, declined or a neutral outcome). The check mark now needs at least one done step and no failed one; with none done and none failed the summary shows the steps' own neutral icon (`aborted`, `declined` or `notice`), and `notice` for a mix of them. A failed step still shows the error icon. Text and `data-state` are unchanged.
+- The lasting approval entry (`approvalDisplay.decided: 'entry'`, `components.ApprovalEntry` keeps its props) left out the call's field details the approval card showed (`details`, e.g. `Title: Weekly sync`); it now shows them as `detail-line` elements with `detail-label` and `detail-value`, after the subject names and the preview.
+
+### Documentation
+
+- How an app whose user language is stored in its database gets tool labels, the approval card and built-in texts in that language: `requestLocale` on the handler (`chat.requestLocaleHeader` in the container), `language` on the provider; and that a fixed `locale` wins over the page language the chat sends (`sendLanguage`, `clientLanguage`, `Content-Language`).
+
+## [0.18.1] - 2026-11-19
+
+0.18.0 was tagged but never published to npm: its publish run failed on this ordering race. 0.18.1 is the first published 0.18 release and contains everything listed under 0.18.0.
+
+### Fixed
+
+- `createAiChatHandler`: the parts the handler writes from the model's step and finish callbacks no longer land wherever the scheduler puts them. A `data-step-report` now comes right before the `finish-step` of its step, after every chunk of that step (its approval requests included), and never before the step's own tool parts. The final `data-pipeline-state` comes right before `finish` or `abort` (and before the stop notice or silent-turn text), so the terminal part is always last. Before, both were written beside the merged model stream, and the order changed with the runtime and the number of stream transforms: `finish` could arrive before the final state.
 
 ## [0.18.0] - 2026-11-19
 
@@ -1038,3 +1057,4 @@ No code changes — patch-level docs release.
 [0.17.2]: https://github.com/chainmatics/glirastes/compare/v0.17.1...v0.17.2
 [0.17.3]: https://github.com/chainmatics/glirastes/compare/v0.17.2...v0.17.3
 [0.18.0]: https://github.com/chainmatics/glirastes/compare/v0.17.3...v0.18.0
+[0.18.1]: https://github.com/chainmatics/glirastes/compare/v0.18.0...v0.18.1

@@ -15,6 +15,7 @@
 
 import {
   declaredRecordsOf,
+  entityIdText,
   entityLookupId,
   type DeclaredRecordIdentity,
   type OutputEntityDeclaration,
@@ -96,6 +97,26 @@ export function seenObjectKeys(sources: ReadonlyArray<SeenObjectSource>): Set<st
   const keys = new Set<string>();
   for (const source of sources) for (const identity of recordsOf(source)) keys.add(keyOf(identity));
   return keys;
+}
+
+/**
+ * The declared records of `sources` as a mention marker names them: the
+ * type in lower case (`''` for a declaration without one) and the id's
+ * display form (`lobby/4` for a composite key). Key of `mentionReferenceKey`.
+ */
+export function seenReferenceKeys(sources: ReadonlyArray<SeenObjectSource>): Set<string> {
+  const keys = new Set<string>();
+  for (const source of sources) {
+    for (const identity of recordsOf(source)) {
+      keys.add(mentionReferenceKey(identity.declaration.type ?? '', entityIdText(identity.idValues)));
+    }
+  }
+  return keys;
+}
+
+/** Type (case-insensitive) and id of a reference, as the chat UI compares a marker with the records it showed. */
+export function mentionReferenceKey(type: string, id: string): string {
+  return `${type.toLowerCase()}\u0000${id}`;
 }
 
 /**

@@ -125,7 +125,10 @@ export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, cla
     summaryIcon = 'pending';
     summaryText = locale.activityWaitingLabel;
   } else {
-    summaryIcon = failed > 0 ? 'error' : 'check';
+    // A check mark only when a step succeeded; with none done and none failed, the neutral outcome's own icon
+    // (all stopped, all declined, all expected) or the notice for a mix of them.
+    const neutral = new Set(steps.map((step) => STEP_ICONS[step.status]));
+    summaryIcon = failed > 0 ? 'error' : done > 0 ? 'check' : neutral.size === 1 ? [...neutral][0]! : 'notice';
     const counts: string[] = [];
     if (done > 0) {
       counts.push(done === 1 ? locale.activityDoneOneLabel : fillLocaleText(locale.activityDoneLabel, { count: done }));

@@ -34,8 +34,10 @@ import {
 } from './history-compaction.js';
 import {
   collectSeenObjects,
+  mentionReferenceKey,
   renderSeenObjects,
   seenObjectKeys,
+  seenReferenceKeys,
   type SeenObject,
   type SeenObjectSource,
   type SeenObjectsOptions,
@@ -157,6 +159,17 @@ export interface ModelInputBreakdown {
   seenObjects?: { objects: SeenObject[]; omitted: number; estimatedTokens: number };
   /** Estimated tokens of the returned messages (4 characters per token, a flat 1,000 per file part). */
   estimatedTokens: number;
+  /**
+   * `{{mention:type:id:label}}` markers in the assistant's earlier text of
+   * `uiMessages` (command markers aside) whose type and id no declared record
+   * of a tool result (`entities`, `earlierMessages` included) and no `@`
+   * mention of the user carries: the markers the chat shows as plain text
+   * with `entityLinks.verifyMentions` (the default), e.g. an id the model
+   * shortened. The chat UI may still show a chip for one an entity search hit
+   * or `knownEntities` supplies. A count only, of the whole conversation at
+   * this step: a marker of the latest answer shows at the next model input.
+   */
+  unresolvedMentionMarkers: number;
 }
 
 const CHARS_PER_TOKEN = 4;
@@ -221,6 +234,7 @@ export async function prepareModelMessages(
   const result = seen ? [seen.message as (typeof stripped)[number], ...stripped] : stripped;
   if (options?.onBreakdown) {
     try {
+      const unresolvedMentionMarkers = await unresolvedMarkerCount(raw as ModelMessageLike[], options.earlierMessages, options.entities);
       options.onBreakdown({
         pipeline: legacy ? 'legacy' : 'turn-aware',
         toolTurnCounting: limits.toolTurnCounting,
@@ -228,6 +242,7 @@ export async function prepareModelMessages(
         earlierMessages: options.earlierMessages?.length ?? 0,
         ...(seen ? { seenObjects: { objects: seen.objects, omitted: seen.omitted, estimatedTokens: estimateTokens([seen.message]) } } : {}),
         estimatedTokens: estimateTokens(result),
+        unresolvedMentionMarkers,
       });
     } catch {
       // Diagnostics only; the turn goes on.
@@ -290,6 +305,46 @@ function seenSourcesOf(
 interface ModelMessageLike {
   role: string;
   content: unknown;
+}
+
+/** `{{mention:type:id:label}}`, as the chat UI parses it. */
+const MENTION_MARKER = /\{\{mention:([^:}]{1,200}):([^:}]{1,200}):([^}]{1,1000})\}\}/g;
+
+function textsOf(message: ModelMessageLike): string[] {
+  if (typeof message.content === 'string') return [message.content];
+  if (!Array.isArray(message.content)) return [];
+  return (message.content as Array<Record<string, unknown>>)
+    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text as string);
+}
+
+/**
+ * The markers of the assistant's text whose type and id no declared record
+ * of a tool result and no `@` mention of the user carries (see
+ * `ModelInputBreakdown.unresolvedMentionMarkers`). Debug hook only.
+ */
+async function unresolvedMarkerCount(
+  raw: ReadonlyArray<ModelMessageLike>,
+  earlierMessages: UIMessage[] | undefined,
+  entities: EntityDeclarationsByTool | undefined,
+): Promise<number> {
+  const markers = raw.filter((message) => message.role === 'assistant')
+    .flatMap((message) => textsOf(message).flatMap((text) => [...text.matchAll(MENTION_MARKER)]))
+    .filter((match) => match[1] !== 'command');
+  if (markers.length === 0) return 0;
+  const earlier = earlierMessages && earlierMessages.length > 0
+    ? await convertToModelMessages(withModelFacingToolErrors(withoutApprovalSubjectParts(earlierMessages)), { ignoreIncompleteToolCalls: true }) as ModelMessageLike[]
+    : [];
+  const all = [...earlier, ...raw];
+  const seen = entities ? seenReferenceKeys(seenSourcesOf(all, entities, handleProducersOf(all))) : new Set<string>();
+  // The user's `@` mentions of the whole conversation, also those the window already left out.
+  for (const message of all) {
+    if (message.role !== 'user') continue;
+    for (const text of textsOf(message)) {
+      for (const [, type, id] of text.matchAll(MENTION_MARKER)) seen.add(mentionReferenceKey(type!, id!));
+    }
+  }
+  return markers.filter(([, type, id]) => !seen.has(mentionReferenceKey(type!, id!)) && !seen.has(mentionReferenceKey('', id!))).length;
 }
 
 /**

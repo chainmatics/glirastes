@@ -42,10 +42,10 @@ function toolOutput(record: CaseRecord): Json {
 }
 
 /**
- * A record in the form the golden test compares. `data-step-report` is
- * written from the step callback next to the model's merged stream, so
- * where it lands among the model's chunks depends on the scheduler (0.17.3
- * does the same; CI and a local run place it differently). Every other
+ * A record in the form the golden test compares. 0.17.3 wrote
+ * `data-step-report` next to the model's merged stream, so the golden has
+ * it where the scheduler put it; it now comes right before its step's
+ * `finish-step` (`side-part-order.test.ts`). Every other
  * chunk is compared in exact order, the step reports in their own order,
  * every chunk byte for byte.
  */

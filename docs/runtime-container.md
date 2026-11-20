@@ -6,7 +6,7 @@ configuration; they do not write a Node server. A suitable existing Node/Next.js
 server can continue embedding the SDK instead. `glirastes/server/http` is an
 alias for the framework-neutral handler exports previously named `/server/nextjs`.
 
-The official image is `ghcr.io/chainmatics/glirastes-runtime:0.17.3` for
+The official image is `ghcr.io/chainmatics/glirastes-runtime:0.18.1` for
 Linux amd64. Use a pinned version (or digest) with matching artifact SDK version;
 ARM users can build the supplied Dockerfile locally.
 
@@ -195,7 +195,12 @@ e.g. `x-app-language` sent by the chat's transport). With neither set, the
 turn's language is the one the chat UI names in each request
 (`Content-Language`, sent by the React/Vercel transport and
 `<glirastes-chat>`; one BCP-47 tag, anything else ignored), else English;
-`chat.locale` or `chat.requestLocaleHeader` replaces it. `chat.locales` adds or
+`chat.locale` or `chat.requestLocaleHeader` replaces it: a fixed `chat.locale`
+wins over the page language the chat sends, so set it only for a
+single-language app. A language stored per user (the app's database) goes
+into a header the chat's transport sends (`headers: { 'x-app-language':
+user.language }`), named in `chat.requestLocaleHeader`; pass the same value as
+the chat's `language` so its built-in texts match. `chat.locales` adds or
 changes the runtime's own texts per language (`{"pl": {"closing": "...",
 "silentTurn": "..."}}`, keys of the SDK handler's `locales`; partial tables
 fall back per key, an unknown key fails at start). The artifact carries the
