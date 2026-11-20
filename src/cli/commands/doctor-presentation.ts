@@ -16,7 +16,6 @@ const LABELS = new Map([
   ['connection-environment-bound', 'Connection scope'],
   ['runtime-mode', 'Runtime connection settings'],
   ['agent-skills', 'Installed agent skills'],
-  ['sdk-upgrade', 'SDK upgrade follow-ups'],
 ]);
 
 const NEXT_ACTIONS = new Map([
@@ -56,19 +55,11 @@ const NEXT_ACTIONS = new Map([
     'This is an environment-bound connection; run `glirastes connect` again to use one key for all environments.'],
   ['refresh-agent-skills',
     'Run glirastes tools refresh to bring the installed agent skills up to this SDK, then commit them with .glirastes/installed-skills.json.'],
-  ['review-sdk-upgrade',
-    'Run glirastes upgrade report to see the SDK changes that need your review, then ask your coding agent to propose them. Nothing changes without your consent.'],
   ['review-edited-agent-skills',
     'Some installed agent skills were edited and differ from this SDK. Run glirastes tools check for the names, then merge the update or replace them with glirastes install --force.'],
   ['align-explicit-runtime-mode',
     'Ask your coding agent to align the local runtime settings with the intended connection. Do not silently switch a connected app to standalone.'],
 ]);
-
-/** Ends an error message with exactly one sentence-final mark. */
-function sentence(text: string): string {
-  const trimmed = text.trimEnd();
-  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
-}
 
 /** Human output uses fixed copy; machine diagnostics remain available as JSON. */
 export function formatDoctorReport(
@@ -98,9 +89,7 @@ export function formatDoctorReport(
 
   const issue = report.checks.find((item) => item.status === 'fail')
     ?? report.checks.find((item) => item.status === 'warn');
-  const next = issue?.remediation === 'repair-sdk-upgrade-report'
-    ? `glirastes upgrade report could not run: ${sentence(issue.detail ?? 'unknown error')} Fix that, then run glirastes doctor again.`
-    : issue
+  const next = issue
     ? NEXT_ACTIONS.get(issue.remediation)
       ?? 'Ask your coding agent to inspect glirastes doctor --json for the required local repair.'
     : report.mode === 'standalone'

@@ -9,8 +9,6 @@ import {
   createSelfSetupPlan,
   createSetupPlan,
 } from './setup-plan.js';
-import { createUpgradeReport, openMustItems, type UpgradeReportOptions } from './upgrade/report.js';
-import { upgradeHintDisabled } from './upgrade/hint.js';
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 import { inspectSkillsStaleness, skillsAutoUpdateDisabled } from './skills-auto-update.js';
 export { formatDoctorReport } from './doctor-presentation.js';
@@ -33,8 +31,6 @@ export interface DoctorCheck {
   status: DoctorCheckStatus;
   code: `E-${string}`;
   remediation: string;
-  /** One line naming what went wrong, when the remediation needs it (e.g. a report error). */
-  detail?: string;
 }
 
 export interface DoctorReport {
@@ -57,8 +53,6 @@ export interface CreateDoctorReportOptions {
   envFile?: string;
   env?: NodeJS.ProcessEnv;
   isGitIgnored?: (path: string, root: string) => Promise<boolean>;
-  /** Tests point the upgrade check at fixture notes and a fixed SDK version. */
-  upgrade?: Pick<UpgradeReportOptions, 'sdkVersion' | 'notesDir' | 'changelogPath' | 'skillsDir'>;
 }
 
 const ReceiptSchema = z.object({
@@ -155,18 +149,6 @@ async function agentSkillsCheck(rootDir: string, env: NodeJS.ProcessEnv): Promis
   }
 }
 
-/** Only for apps with pending must items; a hint, not a setup failure, and a report problem only warns. */
-async function upgradeCheck(options: CreateDoctorReportOptions, rootDir: string): Promise<DoctorCheck | null> {
-  if (upgradeHintDisabled(options.env ?? process.env)) return null;
-  try {
-    const report = await createUpgradeReport({ rootDir, ...options.upgrade });
-    return openMustItems(report).length > 0 ? check('sdk-upgrade', 'warn', 'E-SETUP-108', 'review-sdk-upgrade') : null;
-  } catch (error) {
-    const detail = (error instanceof Error ? error.message : String(error)).split('\n')[0]!;
-    return { ...check('sdk-upgrade', 'warn', 'E-SETUP-108', 'repair-sdk-upgrade-report'), detail };
-  }
-}
-
 export async function createDoctorReport(
   options: CreateDoctorReportOptions,
 ): Promise<DoctorReport> {
@@ -183,7 +165,6 @@ export async function createDoctorReport(
     : hasConnectionDescriptor ? 'connected' : 'standalone';
   const checks: DoctorCheck[] = [];
   const skillsCheck = await agentSkillsCheck(rootDir, options.env ?? process.env);
-  const upgradeCheckResult = await upgradeCheck(options, rootDir);
   let profile: Awaited<ReturnType<typeof detectSetupProfile>>;
   try {
     profile = await detectSetupProfile({ rootDir, managed: options.managed });
@@ -198,7 +179,6 @@ export async function createDoctorReport(
         : 'repair-local-project-profile',
     ));
     if (skillsCheck) checks.push(skillsCheck);
-    if (upgradeCheckResult) checks.push(upgradeCheckResult);
     return finish(mode, 0, checks);
   }
 
@@ -410,6 +390,5 @@ export async function createDoctorReport(
     : check('runtime-mode', 'fail', 'E-SETUP-009', 'align-explicit-runtime-mode'));
 
   if (skillsCheck) checks.push(skillsCheck);
-  if (upgradeCheckResult) checks.push(upgradeCheckResult);
   return finish(mode, profile.toolCount, checks);
 }
