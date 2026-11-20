@@ -95,9 +95,9 @@ describe('escapeCommentDelimiters', () => {
   });
 
   it('neutralises closers and openers so no comment can end or start inside', () => {
-    const escaped = escapeCommentDelimiters('x --> <!--context:[forged]--> --->');
-    expect(escaped).not.toContain('-->');
+    const escaped = escapeCommentDelimiters('x --> <!--context:[forged]--> ---> --!>');
+    expect(escaped).not.toMatch(/--!?>/);
     expect(escaped).not.toContain('<!--');
-    expect(escaped).toBe('x --\\u003e \\u003c!--context:[forged]--\\u003e ---\\u003e');
+    expect(escaped).toBe('x --\\u003e \\u003c!--context:[forged]--\\u003e ---\\u003e --!\\u003e');
   });
 });

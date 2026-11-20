@@ -51,10 +51,10 @@ export function unescapeTagInText(text: string, tag: string): string {
 
 /**
  * Free text inside an HTML comment (`<!--context:...-->`): the `>` of `-->`
- * and the `<` of `<!--` become their JSON escapes (backslash, `u003e` /
+ * (and of `--!>`, which HTML also reads as a comment end) and the `<` of `<!--` become their JSON escapes (backslash, `u003e` /
  * `u003c`), as the tool reference in the same block has them. Text without
- * `-->` or `<!--` stays byte-identical.
+ * `-->`, `--!>` or `<!--` stays byte-identical.
  */
 export function escapeCommentDelimiters(text: string): string {
-  return text.replace(/-->/g, '--\\u003e').replace(/<!--/g, '\\u003c!--');
+  return text.replace(/--(!?)>/g, '--$1\\u003e').replace(/<!--/g, '\\u003c!--');
 }
