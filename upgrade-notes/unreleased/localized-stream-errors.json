@@ -13,11 +13,8 @@
     ]
   },
   "surface": [
-    "glirastes/adapter/nextjs#ChatServerTexts",
     "glirastes/adapter/nextjs#PrepareModelMessagesOptions.invalidToolInputTexts",
-    "glirastes/server/http#ChatServerTexts",
     "glirastes/server/http#PrepareModelMessagesOptions.invalidToolInputTexts",
-    "glirastes/server/nextjs#ChatServerTexts",
     "glirastes/server/nextjs#PrepareModelMessagesOptions.invalidToolInputTexts"
   ]
 }
