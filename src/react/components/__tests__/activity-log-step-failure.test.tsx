@@ -119,3 +119,81 @@ describe('localized failure details of the activity log', () => {
     expect(stepLines()).toEqual([['Aufgabe löschen', 'Service unavailable (503)']]);
   });
 });
+
+describe('a failure text the server wrote in another wording (data-step-failure)', () => {
+  const failedDe = { type: 'tool-tasks_list', toolCallId: 'call-g', state: 'output-error', errorText: 'KI-Anfrage fehlgeschlagen' };
+  const invalidDe = {
+    type: 'tool-tasks_update',
+    toolCallId: 'call-v',
+    state: 'output-error',
+    errorText: 'Der Assistent hat ungültige Angaben für dieses Tool gesendet; ihm wurde gesagt, was zu korrigieren ist.',
+  };
+  const ownServerText = { type: 'tool-tasks_list', toolCallId: 'call-o', state: 'output-error', errorText: 'Bad arguments, retrying' };
+  const kind = (toolCallId: string, code: string) => ({ type: 'data-step-failure', id: toolCallId, data: { toolCallId, code } });
+
+  it("a German turn: the client locale's activityFailure texts", () => {
+    chatContext.current.locale = deChatLocale;
+    chatContext.current.activityLog = { details: 'all' };
+    render(<MessageBubble message={message([failedDe, kind('call-g', 'failed'), invalidDe, kind('call-v', 'invalid-input')])} />);
+    expect(stepLines()).toEqual([
+      ['tasks_list', deChatLocale.activityFailureGeneric!],
+      ['tasks_update', deChatLocale.activityFailureInvalidInput!],
+    ]);
+  });
+
+  it("the app's own activityFailure texts win over the server's German text", () => {
+    chatContext.current.locale = {
+      ...deChatLocale,
+      activityFailureGeneric: 'Hat nicht geklappt',
+      activityFailureInvalidInput: 'Falsche Angaben, wird korrigiert',
+    };
+    chatContext.current.activityLog = { details: 'all' };
+    render(<MessageBubble message={message([failedDe, kind('call-g', 'failed'), invalidDe, kind('call-v', 'invalid-input')])} />);
+    expect(stepLines()).toEqual([
+      ['tasks_list', 'Hat nicht geklappt'],
+      ['tasks_update', 'Falsche Angaben, wird korrigiert'],
+    ]);
+  });
+
+  it("an app whose own locale words the log in English gets its English text, not the server's German", () => {
+    chatContext.current.locale = DEFAULT_LOCALE;
+    chatContext.current.activityLog = { details: 'all' };
+    render(<MessageBubble message={message([failedDe, kind('call-g', 'failed')])} />);
+    expect(stepLines()).toEqual([['tasks_list', 'AI request failed']]);
+  });
+
+  it("a server's own locales text is recognized by its named kind", () => {
+    chatContext.current.locale = deChatLocale;
+    chatContext.current.activityLog = { details: 'all' };
+    render(<MessageBubble message={message([ownServerText, kind('call-o', 'invalid-input')])} />);
+    expect(stepLines()).toEqual([['tasks_list', deChatLocale.activityFailureInvalidInput!]]);
+  });
+
+  it('also in a run of steps after a text, where the part sits elsewhere in the message', () => {
+    chatContext.current.locale = deChatLocale;
+    chatContext.current.activityLog = { details: 'all', grouping: 'sections' };
+    render(<MessageBubble message={message([
+      { type: 'text', text: 'Erst das.' },
+      failedDe,
+      { type: 'text', text: 'Dann das.' },
+      ownServerText,
+      { type: 'text', text: 'Fertig.' },
+      kind('call-g', 'failed'),
+      kind('call-o', 'failed'),
+    ])} />);
+    expect(stepLines()).toEqual([
+      ['tasks_list', deChatLocale.activityFailureGeneric!],
+      ['tasks_list', deChatLocale.activityFailureGeneric!],
+    ]);
+  });
+
+  it('without a part, or with one for another call or an unknown code, the text stays as it is', () => {
+    chatContext.current.locale = deChatLocale;
+    chatContext.current.activityLog = { details: 'all' };
+    render(<MessageBubble message={message([ownServerText, kind('call-x', 'failed'), failedDe, kind('call-g', 'bogus')])} />);
+    expect(stepLines()).toEqual([
+      ['tasks_list', 'Bad arguments, retrying'],
+      ['tasks_list', 'KI-Anfrage fehlgeschlagen'],
+    ]);
+  });
+});

@@ -69,7 +69,7 @@ import {
   type IdLabels,
 } from './hide-ids.js';
 import { entityDeclarationsOfTools, TOOL_ENTITIES_PART_TYPE } from './tool-entities.js';
-import { builtInStreamErrorTexts, createToolStreamErrorMask, streamErrorText, type StreamErrorTexts } from './stream-error-text.js';
+import { builtInStreamErrorTexts, createToolStreamErrorMask, streamErrorText, withStepFailureParts, type StreamErrorTexts } from './stream-error-text.js';
 import {
   budgetStopText,
   resolveBudgetStopTexts,
@@ -1091,7 +1091,10 @@ async function defaultStreamHandler(
       // Settles once the turn has written its final state, the error state included.
       let settleTurn!: () => void;
       const turnSettled = new Promise<void>((resolve) => { settleTurn = resolve; });
-      const modelStream = sideParts.sequence(result.toUIMessageStream({ onError: maskToolStreamError }), turnSettled);
+      const modelStream = sideParts.sequence(
+        withStepFailureParts(result.toUIMessageStream({ onError: maskToolStreamError }), streamErrorTexts),
+        turnSettled,
+      );
       const answerStream = withStopNotice(modelStream, stopNotice);
       const uiStream = resumedApprovals
         ? answerStream

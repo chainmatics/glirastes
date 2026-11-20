@@ -5,10 +5,12 @@ import { ToolInputValidationError } from '../../../runtime/tool-input-error.js';
 import type { AiChatErrorInfo } from './types.js';
 import { isGermanTextLocale } from './budget-stop-notice.js';
 import { APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS, ApprovalSubjectRefusedError } from './approval-subject-lookup.js';
+import { STEP_FAILURE_PART_TYPE, type StepFailurePartCode } from '../../../contracts/step-failure.js';
 
 /** The chat's German texts, for a `de*` chat language. */
 export const GENERIC_STREAM_ERROR_TEXT_DE = 'KI-Anfrage fehlgeschlagen';
-export const INVALID_TOOL_INPUT_TEXT_DE = 'Der Assistent hat ungültige Eingaben für dieses Werkzeug gesendet; er wurde zur Korrektur aufgefordert.';
+// Word for word the activity log's German text (`deChatLocale.activityFailureInvalidInput`).
+export const INVALID_TOOL_INPUT_TEXT_DE = 'Der Assistent hat ungültige Angaben für dieses Tool gesendet; ihm wurde gesagt, was zu korrigieren ist.';
 
 /** What the chat shows for any failure the SDK does not name itself. */
 export const GENERIC_STREAM_ERROR_TEXT = 'AI request failed';
@@ -153,4 +155,41 @@ export function createToolStreamErrorMask(texts: StreamErrorTexts = EN_STREAM_ER
     }
     return { text: texts.streamError, report: { error, info: { source: 'tool-call', kind: 'failed' } } };
   };
+}
+
+/**
+ * The UI stream with a `data-step-failure` part after each failed tool call
+ * whose `errorText` is this turn's generic or invalid-input text in a
+ * wording other than the English built-in (a `de*` chat, the handler's own
+ * `locales`). The browser recognizes the English texts by their wording;
+ * for the others the part names the kind, so the activity log shows its own
+ * locale text (`activityFailure…`) whatever the server's language. A turn
+ * with the English built-in texts streams exactly as before.
+ */
+export function withStepFailureParts<T>(stream: ReadableStream<T>, texts: StreamErrorTexts): ReadableStream<T> {
+  const codes = new Map<string, StepFailurePartCode>();
+  // Invalid input first: with one text for both, the call's kind is unknown and that text is not signalled.
+  if (texts.streamError !== texts.invalidToolInput) {
+    if (texts.invalidToolInput !== INVALID_TOOL_INPUT_TEXT) codes.set(texts.invalidToolInput, 'invalid-input');
+    if (texts.streamError !== GENERIC_STREAM_ERROR_TEXT) codes.set(texts.streamError, 'failed');
+  }
+  if (codes.size === 0) return stream;
+  const signalled = new Set<string>();
+  return stream.pipeThrough(new TransformStream<T, T>({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+      const record = chunk as unknown as Record<string, unknown>;
+      if (record.type !== 'tool-output-error' && record.type !== 'tool-input-error') return;
+      if (typeof record.toolCallId !== 'string' || typeof record.errorText !== 'string') return;
+      const code = codes.get(record.errorText);
+      // The AI SDK reports an invalid call as an input error and again as a tool error: one part.
+      if (!code || signalled.has(record.toolCallId)) return;
+      signalled.add(record.toolCallId);
+      controller.enqueue({
+        type: STEP_FAILURE_PART_TYPE,
+        id: record.toolCallId,
+        data: { toolCallId: record.toolCallId, code },
+      } as unknown as T);
+    },
+  }));
 }

@@ -203,3 +203,96 @@ describe('invalid-input history swap with localized and overridden texts', () =>
     expect(JSON.stringify(prompt)).toContain('Bitte nochmal');
   });
 });
+
+describe('the kind of a localized failure text for the activity log (data-step-failure)', () => {
+  const usage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 1, text: 1, reasoning: undefined },
+  };
+  /** One turn whose model calls `tasks_list` once with `input`; the tool times out (generic failure). */
+  async function turn(input: unknown, config: Partial<AiChatHandlerConfig>) {
+    let call = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: call++ === 0
+          ? convertArrayToReadableStream([
+              { type: 'stream-start', warnings: [] },
+              { type: 'tool-call', toolCallId: 'c1', toolName: 'tasks_list', input: JSON.stringify(input) },
+              { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+            ] as never)
+          : convertArrayToReadableStream([
+              { type: 'stream-start', warnings: [] },
+              { type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: 'ok' }, { type: 'text-end', id: 't' },
+              { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+            ] as never),
+      }),
+    });
+    const handler = createAiChatHandler({
+      tools: {
+        tasks_list: defineTool({
+          id: 'tasks.list', description: 'Fails.', inputSchema: z.object({ query: z.string() }).strict(),
+          execute: () => new Promise((resolve) => setTimeout(() => resolve({ tasks: [] }), 500)),
+        }),
+      },
+      systemPrompt: 'A', model, onError: vi.fn(), resultHandles: false,
+      managedRuntime: {
+        resolvePrincipal: async () => principal(),
+        resolveTurnSnapshot: async ({ turnId }) => createTurnSnapshot({
+          turnId, agentRevision, manifestRevision, policyRevision: policyRevision(), principal: principal(),
+          localLimits: { ...localLimits, toolTimeoutMs: 20 },
+        }),
+        loadRevocations: async () => [],
+      },
+      ...config,
+    });
+    const chunks = await streamChunks(await handler(request()));
+    return {
+      errorTexts: chunks.filter((chunk) => chunk.type === 'tool-output-error' || chunk.type === 'tool-input-error')
+        .map((chunk) => chunk.errorText),
+      kinds: chunks.filter((chunk) => chunk.type === 'data-step-failure').map((chunk) => ({ id: chunk.id, data: chunk.data })),
+      order: chunks.map((chunk) => chunk.type).filter((type) => type === 'tool-output-error' || type === 'data-step-failure'),
+    };
+  }
+
+  it('a German turn names the generic failure right after its errorText', async () => {
+    const result = await turn({ query: 'q' }, { locale: 'de-DE' });
+    expect(result.errorTexts).toEqual(['KI-Anfrage fehlgeschlagen']);
+    expect(result.kinds).toEqual([{ id: 'c1', data: { toolCallId: 'c1', code: 'failed' } }]);
+    expect(result.order).toEqual(['tool-output-error', 'data-step-failure']);
+  });
+  it('a German turn names invalid tool input once, with the activity log\'s German wording', async () => {
+    const result = await turn({}, { locale: 'de-DE' });
+    expect(new Set(result.errorTexts)).toEqual(new Set([INVALID_TOOL_INPUT_TEXT_DE]));
+    expect(INVALID_TOOL_INPUT_TEXT_DE).toBe('Der Assistent hat ungültige Angaben für dieses Tool gesendet; ihm wurde gesagt, was zu korrigieren ist.');
+    expect(result.kinds).toEqual([{ id: 'c1', data: { toolCallId: 'c1', code: 'invalid-input' } }]);
+  });
+  it('an English turn streams exactly as before: no part', async () => {
+    expect((await turn({ query: 'q' }, { locale: 'en-US' })).kinds).toEqual([]);
+    expect((await turn({}, { locale: 'en-US' })).kinds).toEqual([]);
+  });
+  it('an own locales text is named too, in any language', async () => {
+    const result = await turn({}, { locale: 'en-US', locales: { en: { invalidToolInput: 'Bad arguments, retrying' } } });
+    expect(result.errorTexts).toContain('Bad arguments, retrying');
+    expect(result.kinds).toEqual([{ id: 'c1', data: { toolCallId: 'c1', code: 'invalid-input' } }]);
+    const failed = await turn({ query: 'q' }, { locale: 'fr-FR', locales: { fr: { streamError: 'La requête a échoué' } } });
+    expect(failed.kinds).toEqual([{ id: 'c1', data: { toolCallId: 'c1', code: 'failed' } }]);
+  });
+  it('the part stays out of the model\'s history', async () => {
+    const prompt = await prepareModelMessages([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Show' }] },
+      { id: 'a1', role: 'assistant', parts: [
+        { type: 'step-start' },
+        { type: 'tool-tasks_list', toolCallId: 'c1', state: 'output-error', rawInput: {}, errorText: 'KI-Anfrage fehlgeschlagen' },
+        { type: 'data-step-failure', id: 'c1', data: { toolCallId: 'c1', code: 'failed' } },
+      ] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'Again' }] },
+    ] as never);
+    expect(JSON.stringify(prompt)).not.toContain('step-failure');
+    expect(JSON.stringify(prompt)).not.toContain('"code"');
+  });
+  it('one own text for both kinds names neither', async () => {
+    const result = await turn({}, { locale: 'de-DE', locales: { de: { streamError: 'Fehler', invalidToolInput: 'Fehler' } } });
+    expect(result.errorTexts).toContain('Fehler');
+    expect(result.kinds).toEqual([]);
+  });
+});
