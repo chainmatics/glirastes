@@ -56,7 +56,9 @@ const triggers = useMemo(() => [{ char: '#', label: 'Tickets', types: ['ticket']
   provider renders. `command` cannot be claimed; commands always show `/`.
 - `resolveChatTriggers(triggers, providers)` returns the resolved list
   (`ResolvedChatTrigger[]`, defaults filled in); the composer reads it from the
-  chat context (`useChatComposerInput().inputProps.triggers`).
+  chat context. `useChatComposerInput().inputProps` carries `triggers` only when
+  the list differs from the default `@` and `/` (an explicit definition or a
+  provider with another char), so an input's own `triggers` prop still applies.
 - `createCompletionSearch(providers)(query, trigger, { source })` asks only
   the providers whose ids are in `source` (a string or an array,
   `CompletionSearchQueryOptions`).
@@ -111,8 +113,10 @@ when the app handled the pick: the list closes and trigger and query stay in
 the editor. A standalone `RichMentionInput` takes `onCompletionSelect` with
 `{ trigger, query }` only, and its `onSearch` receives a third argument
 `{ source }` after a `list` pick; forward it to the search of
-`createCompletionSearch`. An item with an unknown `select`, an empty
-`insertText` or an invalid `listSource` id is dropped from the list.
+`createCompletionSearch`. An unknown `select`, an empty `insertText` or an
+invalid `listSource` id is left out of the item, which stays in the list with
+the trigger's default pick. `onCompletionSelect` receives the normalized item
+(`MentionResult`), not the provider's raw `CompletionItem`.
 
 ## Opening a list from a button
 
@@ -134,7 +138,8 @@ const composer = useChatComposerInput();
   provider id or ids) limits the list until it closes, like a `list` pick.
 - While the user has neither typed nor picked, closing the list (Escape,
   outside click, blur, or no results) removes exactly the inserted text and
-  restores the caret. Typing or a pick keeps it.
+  restores the caret; so do Enter before results show (nothing is sent) and
+  an inserted mention (`insertMention`, `chatAbout`). Typing or a pick keeps it.
 - A second call while untouched replaces the first one's text. An unknown
   trigger warns once in the console and does nothing.
 - `useChatComposer().openCompletion` works from anywhere below
@@ -173,9 +178,13 @@ const composer = useMemo<ComposerConfig>(() => ({
   `onSelect(controls)`, `hidden` (boolean or `(controls) => boolean`) and
   `render(controls)`, which replaces the button. An item key equal to a
   builtin id replaces the builtin. Unknown ids warn once and are skipped.
+  Items stay enabled while a turn streams; check `controls.isLoading` in
+  `hidden` or `onSelect` when that matters.
 - `components.ComposerToolbar` (`ComposerToolbarProps`) gets the rendered
   `start` and `end` arrays, the `editor` and the `controls`, e.g. for a second
-  row below the editor. It renders inside the form.
+  row below the editor. It renders inside the form. Define it once at module
+  level (or memoize it): an inline component remounts the editor and loses
+  the draft.
 - The legacy `mentions` input ignores `composer`.
 
 ## Plus menu
@@ -206,7 +215,8 @@ const composer = useMemo<ComposerConfig>(() => ({
   `limit` (default 8), under the heading `label`. Choosing one does what
   picking it in the list does: `chip` inserts a pill at the caret, `text` its
   `insertText`, `run` inserts and sends, `list` opens the `listSource` list.
-  `onCompletionSelect` runs first. No entries, no section.
+  `onCompletionSelect` runs first. No entries, no section; with no rows at
+  all (e.g. while the source loads) no menu box shows, and Escape closes it.
 - Keyboard: ArrowDown/ArrowUp (wrapping), Home/End, Enter/Space choose,
   Escape closes and returns focus to the "+" button, Tab closes; a press
   outside closes. ArrowDown/ArrowUp on the button open on the first/last row.
@@ -271,4 +281,3 @@ export function Chat({ transport }: { transport: ChatTransport }) {
 
 `peopleProvider` is your own `ChatCompletionProvider` with `trigger: '@'`;
 keep `triggers`, `composer` and the providers at module level or memoized.
-`src/react/components/__tests__/composer-example.test.tsx` renders this config.
