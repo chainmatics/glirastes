@@ -198,21 +198,38 @@ describe('prefix of sent mentions', () => {
     expect(prefixes()).toEqual(['T-', '@']);
   });
 
-  it('names a stored chat with the claimed prefix', async () => {
+  function memoryStorage() {
     const data = new Map<string, string>();
-    const storage = {
+    return {
       getItem: (key: string) => data.get(key) ?? null,
       setItem: (key: string, value: string) => { data.set(key, value); },
       removeItem: (key: string) => { data.delete(key); },
     };
-    const sessions = createLocalSessionStore({
-      storageKey: 'app:u1', storage, attachmentStore: null, triggers: [{ char: '#', types: ['ticket'] }],
-    });
-    await sessions.save!('default', [sentMessage]);
-    expect((await sessions.list!())[0]!.title).toMatch(/^#Bug bug von @Alice Doe \/Erledigte/);
+  }
 
-    const plain = createLocalSessionStore({ storageKey: 'app:u2', storage, attachmentStore: null });
-    await plain.save!('default', [sentMessage]);
-    expect((await plain.list!())[0]!.title).toMatch(/^@Bug bug von @Alice Doe \/Erledigte/);
+  it('names a stored chat with the claimed prefix from the provider, without store config', async () => {
+    const sessions = createLocalSessionStore({ storageKey: 'app:u1', storage: memoryStorage(), attachmentStore: null });
+    const triggers: ChatTriggerDefinition[] = [{ char: '#', types: ['ticket'] }];
+    render(<AiChatProvider transport={{ ...transport(), messages: [sentMessage] }} triggers={triggers} session={sessions}>{null}</AiChatProvider>);
+    await waitFor(async () => expect((await sessions.list!())[0]?.title).toMatch(/^#Bug bug von @Alice Doe \/Erledigte/));
+  });
+
+  it('saves exactly as before without trigger types', async () => {
+    const sessions = createLocalSessionStore({ storageKey: 'app:u2', storage: memoryStorage(), attachmentStore: null });
+    const save = vi.spyOn(sessions, 'save');
+    render(<AiChatProvider transport={{ ...transport(), messages: [sentMessage] }} triggers={[{ char: '#' }]} session={sessions}>{null}</AiChatProvider>);
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls.every((call) => call.length === 2)).toBe(true);
+    expect((await sessions.list!())[0]!.title).toMatch(/^@Bug bug von @Alice Doe \/Erledigte/);
+  });
+
+  it('createLocalSessionStore takes the prefix lookup on save and falls back to inferMentionPrefix', async () => {
+    const storage = memoryStorage();
+    const sessions = createLocalSessionStore({ storageKey: 'app:u3', storage, attachmentStore: null });
+    await sessions.save!('a', [sentMessage], { mentionPrefix: (type) => (type === 'ticket' ? '#' : type === 'command' ? '/' : '@') });
+    await sessions.save!('b', [sentMessage]);
+    const titles = Object.fromEntries((await sessions.list!()).map((entry) => [entry.id, entry.title]));
+    expect(titles.a).toMatch(/^#Bug bug von @Alice Doe \/Erledigte/);
+    expect(titles.b).toMatch(/^@Bug bug von @Alice Doe \/Erledigte/);
   });
 });

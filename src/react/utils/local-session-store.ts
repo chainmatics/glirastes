@@ -1,10 +1,9 @@
-import type { ChatMessage, ChatTriggerDefinition, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
+import type { ChatMessage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
 import { attachmentIdOf } from '../../contracts/attachments.js';
 import { fileToDataUrl, omitAttachmentData } from './attachments.js';
 import { createIndexedDbAttachmentStore, dataUrlToBlob, type AttachmentBlobStore } from './attachment-blob-store.js';
 import { sanitizeStoredMessages } from './sanitize-stored-messages.js';
-import { parseMentionSegments } from './mention-markup.js';
-import { createMentionPrefixLookup } from '../completions/triggers.js';
+import { inferMentionPrefix, parseMentionSegments } from './mention-markup.js';
 
 type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & Partial<Pick<Storage, 'length' | 'key'>>;
 
@@ -32,11 +31,6 @@ export interface LocalSessionStoreOptions {
    * is set; `null` keeps no files.
    */
   attachmentStore?: AttachmentBlobStore | null;
-  /**
-   * The provider's `triggers` (same array): a title shows a mention of a
-   * trigger's `types` with its prefix (`#Bug 7`) instead of `@`.
-   */
-  triggers?: ReadonlyArray<ChatTriggerDefinition>;
   now?: () => number;
   createId?: () => string;
 }
@@ -159,7 +153,6 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     ? Infinity : Math.max(1, Math.floor(options.maxMessagesPerSession));
   const now = options.now ?? (() => Date.now());
   const createId = options.createId ?? randomId;
-  const prefixOf = createMentionPrefixLookup(options.triggers);
   const files = options.attachmentStore === undefined
     ? (storage ? createIndexedDbAttachmentStore({ storageKey: options.storageKey }) : null)
     : options.attachmentStore;
@@ -287,13 +280,16 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       if (next === '') return;
       persist(entries().map((entry) => (entry.id === conversationId ? { ...entry, title: next, named: true } : entry)));
     },
-    save(conversationId, allMessages) {
+    save(conversationId, allMessages, saveOptions) {
       if (!storage) return;
       const messages = tail(allMessages, maxMessages);
       const list = entries();
       const existing = list.find((entry) => entry.id === conversationId) ?? fresh(conversationId);
       // Once a save has trimmed the chat, the first stored user message is no longer the first question.
-      const derived = existing.named || existing.trimmed ? null : titleFrom(allMessages, prefixOf);
+      // Mentions show the prefix of the provider's `triggers` types (`#Bug 7`); without them `@` and `/`.
+      const derived = existing.named || existing.trimmed
+        ? null
+        : titleFrom(allMessages, saveOptions?.mentionPrefix ?? inferMentionPrefix);
       const entry: Entry = {
         ...existing,
         ...(messages.length < allMessages.length ? { trimmed: true } : {}),

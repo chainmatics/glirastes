@@ -536,8 +536,18 @@ export interface WireChatMessage {
  * component renders.
  */
 export interface SessionConfig {
-  /** Persist messages for a session. Called after each message change. */
-  save?: (conversationId: string, messages: ChatMessage[]) => void | Promise<void>;
+  /**
+   * Persist messages for a session. Called after each message change. Only
+   * when a `triggers` definition claims mention `types`, a third argument
+   * carries `mentionPrefix` (visible prefix by mention type, e.g. `#` for
+   * `ticket`), so a store that names chats from the first question shows
+   * mentions as sent; `createLocalSessionStore` uses it. Other stores may ignore it.
+   */
+  save?: (
+    conversationId: string,
+    messages: ChatMessage[],
+    options?: { mentionPrefix?: (type: string) => string },
+  ) => void | Promise<void>;
   /**
    * Load previously-stored messages for a session. Called on mount and
    * on switch. Return either full SDK `ChatMessage`s (with `parts`) or

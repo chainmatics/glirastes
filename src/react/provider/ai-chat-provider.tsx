@@ -37,7 +37,7 @@ import type {
   QueuedMessage,
 } from '../types.js';
 import { createQueuedMessage, useMessageQueueStore, useResolvedQueueConfig } from './use-message-queue.js';
-import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
+import { inferMentionPrefix, normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { resolveAttachmentOptions } from '../utils/attachments.js';
 import { clearChatAttachmentSource, setActiveChatAttachmentSource } from '../utils/chat-attachment-registry.js';
@@ -1012,6 +1012,9 @@ export function AiChatProvider({
   );
   const entityPrefix = triggers.find((trigger) => trigger.char === '@')?.prefix ?? '@';
   const mentionPrefix = useMemo(() => createMentionPrefixLookup(triggers), [triggers]);
+  // What `session.save` gets as its third argument: only when a trigger claims `types`, so saves stay as before otherwise.
+  const saveOptionsRef = useRef<{ mentionPrefix: (type: string) => string } | undefined>(undefined);
+  saveOptionsRef.current = mentionPrefix === inferMentionPrefix ? undefined : { mentionPrefix };
   const completionSearch = useMemo(
     () => (allCompletionProviders.length > 0
       ? createCompletionSearch(allCompletionProviders, {
@@ -1312,7 +1315,9 @@ export function AiChatProvider({
     const history = storedHistory(messages, heldMessagesRef.current, turnOutcomesRef.current);
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
-      Promise.resolve(save(activeSessionIdRef.current, history)),
+      Promise.resolve(saveOptionsRef.current
+        ? save(activeSessionIdRef.current, history, saveOptionsRef.current)
+        : save(activeSessionIdRef.current, history)),
       new Promise((resolve) => { timer = setTimeout(resolve, PAGE_LOAD_SAVE_TIMEOUT_MS); }),
     ]).finally(() => clearTimeout(timer));
   }, [reportUiOutcome]);
@@ -1556,7 +1561,9 @@ export function AiChatProvider({
     const cfg = sessionRef.current;
     if (!cfg?.save) return;
     void Promise.resolve(
-      cfg.save(activeSessionId, storedHistory(rawMessages as unknown as ChatMessage[], heldMessages, turnOutcomes)),
+      saveOptionsRef.current
+        ? cfg.save(activeSessionId, storedHistory(rawMessages as unknown as ChatMessage[], heldMessages, turnOutcomes), saveOptionsRef.current)
+        : cfg.save(activeSessionId, storedHistory(rawMessages as unknown as ChatMessage[], heldMessages, turnOutcomes)),
     );
   }, [rawMessages, heldMessages, turnOutcomes, isInitialized, activeSessionId, loadedSessionId]);
 

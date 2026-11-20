@@ -72,9 +72,10 @@ The wire format (`{{mention:type:id:label}}`) carries no prefix. The sent
 bubble, restored history and `MentionChip` look the prefix up by type from
 the provider's `triggers`: a type in a trigger's `types` shows that
 trigger's `prefix`, `command` shows `/`, any other type `@`. Without `types`
-nothing changes. Chat titles in the switcher come from the store, so pass
-the same array there: `createLocalSessionStore({ storageKey, triggers })`
-names a chat `#Bug 7 …` instead of `@Bug 7 …`.
+nothing changes. Chat titles of `createLocalSessionStore` follow without
+further config (`#Bug 7 …` instead of `@Bug 7 …`): with claimed `types` the
+provider calls `session.save(id, messages, { mentionPrefix })`. A custom
+store may use that third argument for its titles or ignore it.
 
 ## What a pick does
 
