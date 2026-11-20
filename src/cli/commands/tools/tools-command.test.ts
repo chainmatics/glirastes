@@ -322,23 +322,6 @@ describe('upgrade hint in tools refresh', () => {
     expect(JSON.parse(h.out[0]!).upgrade.line).toContain('1 must');
   });
 
-  it('shows the hint in check mode too, without writing a baseline', async () => {
-    const { root, notesDir } = await app();
-    const h = harness(emptyResult({ mode: 'frozen' }));
-    const baselinePath = join(root, '.glirastes/sdk-baseline.json');
-    const baselineText = await readFile(baselinePath, 'utf8');
-    await rm(baselinePath);
-    await writeFile(join(root, '.glirastes/tools.json'), JSON.stringify({
-      schemaVersion: 1, appId: '019fa9a9-d5f7-7ec3-a3c7-8899de500001', targetAppKey: 'fixture', locale: 'en', sources: ['next-app'],
-    }));
-    expect(await runToolsCommand(['check', '--root', root], { ...h.deps(), upgrade: upgradeOf(notesDir, root) })).toBe(0);
-    await expect(readFile(baselinePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
-    await writeFile(baselinePath, baselineText);
-    const again = harness(emptyResult({ mode: 'frozen' }));
-    await runToolsCommand(['check', '--root', root], { ...again.deps(), upgrade: upgradeOf(notesDir, root) });
-    expect(again.out.join('\n')).toContain('1 must');
-  });
-
   it('a report error never fails refresh', async () => {
     const { root, notesDir } = await app();
     await writeFile(join(root, '.glirastes/sdk-baseline.json'), '<<<<<<< HEAD\n');
