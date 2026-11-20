@@ -74,6 +74,7 @@ const entityLinks = useMemo(() => ({
 | `canOpen(type)` | which types `open` handles; default all |
 | `mentionMarkers` | `'plain'` (default, as before): a text part with a `{{mention:…}}` marker renders without Markdown; `'markdown'`: Markdown stays, each marker an inline chip (`MentionMarkers` and `markdownWithMentionMarkers` for a custom bubble) |
 | `verifyMentions` | default `true` with `'markdown'`: a chip only for an id the conversation showed by declaration (`outputEntities`, a user's `@` mention, a search hit), never a field-name guess; else the label stays text; `false` turns it off |
+| `unresolvedMentions` | an assistant's marker of a declared type whose id the conversation never showed (same check, either `mentionMarkers`): `'keep'` (default, as before), `'text'` (the name, no chip), `'search'` (the entity's `search` by name; a chip only for exactly one exact match, `pickExactNameMatch`, else text). Type `ChatUnresolvedMentionPolicy`; `unresolvedMention(marker)` decides per marker, `undefined` falls back |
 
 - Without `open` and without a derived "Open" page a chip shows but is not
   clickable. Opening never sends a chat message. `@` pills in sent messages

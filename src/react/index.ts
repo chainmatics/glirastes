@@ -348,11 +348,13 @@ export {
 export {
   collectKnownEntities,
   entityNavigationHref,
+  pickExactNameMatch,
   splitEntityText,
   type ChatEntityLinksConfig,
   type ChatEntityMatcher,
   type ChatEntityReference,
   type ChatEntityTextSegment,
+  type ChatUnresolvedMentionPolicy,
 } from './entity-links/entity-links.js';
 export {
   EntityLinkChip,

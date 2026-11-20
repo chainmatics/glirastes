@@ -92,6 +92,28 @@ export interface ChatEntityLinksConfig {
    */
   readonly verifyMentions?: boolean;
   /**
+   * An assistant's `{{mention:type:id:label}}` marker of a declared type
+   * (an entity of `chatInteractions` or a type the tools' `outputEntities`
+   * declare) whose `type`/`id` the conversation never showed as a record,
+   * by the same check as `verifyMentions` (e.g. a model that got one
+   * character of the id wrong). Applies with either `mentionMarkers`.
+   * - `'keep'` (default): as before; with `mentionMarkers: 'plain'` a chip by
+   *   the marker's id, with `'markdown'` as `verifyMentions` says.
+   * - `'text'`: the marker's name as plain text, no chip, no link.
+   * - `'search'`: the entity's `search` (`chatInteractions`, with the user's
+   *   session) for the name; a chip with the found id only for exactly one
+   *   exact name match (see `pickExactNameMatch`), else as `'text'`. The name
+   *   shows as text while it runs; one search per type and name, cached for
+   *   the provider's lifetime.
+   * Markers of the user, of `command` and of undeclared types stay as before.
+   */
+  readonly unresolvedMentions?: ChatUnresolvedMentionPolicy;
+  /**
+   * Decides for one such marker (only those `unresolvedMentions` applies
+   * to); `undefined` (or a throw) leaves it to `unresolvedMentions`.
+   */
+  unresolvedMention?(marker: ChatEntityReference): ChatUnresolvedMentionPolicy | undefined;
+  /**
    * Opens a reference. Return `false` to fall through to the default: the
    * entity's action that runs `ui.navigate` (a page like `/tasks/:taskId`),
    * through the app's navigation bridge. Without either a chip is not clickable.
@@ -99,6 +121,42 @@ export interface ChatEntityLinksConfig {
   open?(reference: ChatEntityReference): boolean | void;
   /** Whether `open` handles this type; default: every type. */
   canOpen?(type: string): boolean;
+}
+
+/** What happens to a marker whose id the conversation never showed (`unresolvedMentions`). */
+export type ChatUnresolvedMentionPolicy = 'keep' | 'text' | 'search';
+
+const UNRESOLVED_POLICIES: ReadonlySet<unknown> = new Set(['keep', 'text', 'search']);
+
+/** Whether a value is a {@link ChatUnresolvedMentionPolicy}. */
+export function isUnresolvedMentionPolicy(value: unknown): value is ChatUnresolvedMentionPolicy {
+  return UNRESOLVED_POLICIES.has(value);
+}
+
+function comparableName(value: string): string {
+  return value.normalize('NFC').trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * The one search hit whose label is exactly `name`: compared after Unicode
+ * NFC normalisation, with leading and trailing whitespace removed and inner
+ * whitespace runs as one space; case-sensitive, never a prefix, part or
+ * fuzzy match. Hits with one id count once. `undefined` for no hit and for
+ * two or more records with that name.
+ */
+export function pickExactNameMatch<T extends { readonly id: string; readonly label: string }>(
+  name: string,
+  items: ReadonlyArray<T>,
+): T | undefined {
+  const wanted = comparableName(name);
+  if (!wanted) return undefined;
+  const found = new Map<string, T>();
+  for (const item of items) {
+    if (typeof item?.label !== 'string' || comparableName(item.label) !== wanted) continue;
+    const id = String(item.id);
+    if (!found.has(id)) found.set(id, item);
+  }
+  return found.size === 1 ? [...found.values()][0] : undefined;
 }
 
 export type ChatEntityTextSegment =
@@ -375,6 +433,17 @@ export function collectSeenReferenceKeys(
     }
   }
   return keys;
+}
+
+/** The lower-cased types the tools' `outputEntities` declare. */
+export function declaredOutputTypes(declarations: EntityDeclarationsByTool | undefined): Set<string> {
+  const types = new Set<string>();
+  for (const tool of Object.values(declarations ?? {})) {
+    for (const declaration of tool?.output ?? []) {
+      if (typeof declaration?.type === 'string') types.add(declaration.type.toLowerCase());
+    }
+  }
+  return types;
 }
 
 /** Key of `collectSeenReferenceKeys`; the type compares case-insensitively. */

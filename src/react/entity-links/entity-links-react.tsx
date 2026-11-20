@@ -20,12 +20,16 @@ import type { Mention } from '../types.js';
 import {
   collectKnownEntities,
   collectSeenReferenceKeys,
+  declaredOutputTypes,
   entityNavigationHref,
   isSeenReference,
+  isUnresolvedMentionPolicy,
+  pickExactNameMatch,
   splitEntityText,
   type ChatEntityLinksConfig,
   type ChatEntityReference,
   type ChatEntityTextSegment,
+  type ChatUnresolvedMentionPolicy,
 } from './entity-links.js';
 
 export interface ChatEntityLinks {
@@ -51,6 +55,16 @@ export interface ChatEntityLinks {
   readonly mentionMarkers?: 'plain' | 'markdown';
   /** Whether a marker of the assistant becomes a chip (`entityLinks.verifyMentions`). */
   showsMention(mention: Mention): boolean;
+  /**
+   * `entityLinks.unresolvedMentions` (and its hook) for an assistant's
+   * marker: `'keep'` for one whose id the conversation showed, of an
+   * undeclared type, a command, or without the option.
+   */
+  unresolvedMention?(mention: Mention): ChatUnresolvedMentionPolicy;
+  /** Looks a marker up by name for `'search'`: the one exact match, cached per type and name. */
+  searchMention?(mention: Mention): Promise<ChatEntityReference | undefined>;
+  /** The settled result of `searchMention`, when it is already known. */
+  cachedMention?(mention: Mention): ChatEntityReference | null | undefined;
 }
 
 const ChatEntityLinksContext = createContext<ChatEntityLinks | null>(null);
@@ -104,10 +118,23 @@ export function ChatEntityLinksProvider({
   }, [knownEnabled, messages, searches, entityDeclarations, knownHook]);
 
   const verify = !!config && config.mentionMarkers === 'markdown' && config.verifyMentions !== false;
-  const seenKeys = useMemo(
-    () => (verify ? collectSeenReferenceKeys(messages, searches ?? [], entityDeclarations) : undefined),
-    [verify, messages, searches, entityDeclarations],
+  // Only an app that sets `unresolvedMentions` (other than `keep`) or its hook checks plain markers.
+  const unresolvedOn = !!config && ((config.unresolvedMentions !== undefined && config.unresolvedMentions !== 'keep')
+    || typeof config.unresolvedMention === 'function');
+  const checkedKeys = useMemo(
+    () => (verify || unresolvedOn ? collectSeenReferenceKeys(messages, searches ?? [], entityDeclarations) : undefined),
+    [verify, unresolvedOn, messages, searches, entityDeclarations],
   );
+  const seenKeys = verify ? checkedKeys : undefined;
+  const outputTypes = useMemo(
+    () => (unresolvedOn ? declaredOutputTypes(entityDeclarations) : undefined),
+    [unresolvedOn, entityDeclarations],
+  );
+  // One search per type and name for the registry's lifetime (its user context included).
+  const mentionSearches = useMemo(() => ({
+    pending: new Map<string, Promise<ChatEntityReference | undefined>>(),
+    settled: new Map<string, ChatEntityReference | null>(),
+  }), [interactions]);
 
   const canOpen = useCallback((type: string) => {
     const current = configRef.current;
@@ -180,13 +207,49 @@ export function ChatEntityLinksProvider({
         if (mention.type === 'command') return true;
         return !seenKeys || isSeenReference(seenKeys, mention.type, mention.id);
       },
+      unresolvedMention: (mention) => {
+        if (!config || !unresolvedOn || !checkedKeys || mention.type === 'command') return 'keep';
+        const declared = interactions?.entity(mention.type) !== undefined || !!outputTypes?.has(mention.type.toLowerCase());
+        if (!declared || isSeenReference(checkedKeys, mention.type, mention.id)) return 'keep';
+        let decided: unknown;
+        try {
+          decided = config.unresolvedMention?.({ type: mention.type, id: mention.id, label: mention.displayName });
+        } catch {
+          decided = undefined;
+        }
+        if (isUnresolvedMentionPolicy(decided)) return decided;
+        return isUnresolvedMentionPolicy(config.unresolvedMentions) ? config.unresolvedMentions : 'keep';
+      },
+      cachedMention: (mention) => mentionSearches.settled.get(mentionSearchKey(mention)),
+      searchMention(mention) {
+        const key = mentionSearchKey(mention);
+        let pending = mentionSearches.pending.get(key);
+        if (!pending) {
+          const type = mention.type;
+          const name = mention.displayName;
+          const query = name.normalize('NFC').trim().replace(/\s+/g, ' ');
+          // The entity's own search, with the user's session: what the user may see, the app decides.
+          pending = Promise.resolve()
+            .then(() => (interactions?.entity(type) && query
+              ? interactions.searchEntity(type, query, new AbortController().signal)
+              : []))
+            .then((items) => {
+              const found = pickExactNameMatch(name, items);
+              return found ? { type, id: found.id, label: name } : undefined;
+            })
+            .catch(() => undefined);
+          pending.then((reference) => { mentionSearches.settled.set(key, reference ?? null); });
+          mentionSearches.pending.set(key, pending);
+        }
+        return pending;
+      },
     };
     (links as { markdownComponents: ChatEntityLinks['markdownComponents'] }).markdownComponents = Object.fromEntries(
       LINKIFIED_TAGS.map((tag) => [tag, ({ node: _node, children, ...props }: Record<string, unknown>) =>
         createElement(tag, props, linkifyChildren(children as ReactNode, links))]),
     );
     return links;
-  }, [config, known, seenKeys, canOpen, open, locale.openEntityLabel]);
+  }, [config, known, seenKeys, checkedKeys, unresolvedOn, outputTypes, interactions, mentionSearches, canOpen, open, locale.openEntityLabel]);
 
   return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
 }
@@ -344,9 +407,12 @@ function MarkerText({ text }: { text: string }) {
     plain(text.slice(cursor, found.index), `t${cursor}`);
     const label = found[2] ?? '';
     const mention = mentions[markerIndexOf(found[1] ?? '')];
-    nodes.push(mention && links.showsMention(mention)
-      ? <MarkerChip key={`m${found.index}`} mention={mention} />
-      : <Fragment key={`m${found.index}`}>{label}</Fragment>);
+    const policy = mention ? links.unresolvedMention?.(mention) ?? 'keep' : 'keep';
+    nodes.push(mention && policy !== 'keep'
+      ? <UnresolvedMentionMarker key={`m${found.index}`} mention={mention} policy={policy} text={label} />
+      : mention && links.showsMention(mention)
+        ? <MarkerChip key={`m${found.index}`} mention={mention} />
+        : <Fragment key={`m${found.index}`}>{label}</Fragment>);
     cursor = found.index + found[0].length;
   }
   plain(text.slice(cursor), `t${cursor}`);
@@ -367,4 +433,36 @@ function MarkerChip({ mention }: { mention: Mention }) {
         : {})}
     />
   );
+}
+
+function mentionSearchKey(mention: Mention): string {
+  return `${mention.type.toLowerCase()}\u0000${mention.displayName.normalize('NFC').trim().replace(/\s+/g, ' ')}`;
+}
+
+/**
+ * An assistant's marker `entityLinks.unresolvedMentions` applies to: `text`
+ * renders its name; `search` its name until the search found exactly one
+ * record with that name, then a chip with that record's id.
+ */
+export function UnresolvedMentionMarker({ mention, policy, text }: {
+  mention: Mention;
+  policy: Exclude<ChatUnresolvedMentionPolicy, 'keep'>;
+  /** What shows instead of a chip; default the marker's name. */
+  text?: string;
+}) {
+  const links = useChatEntityLinks();
+  const searching = policy === 'search' && !!links.searchMention;
+  const [reference, setReference] = useState<ChatEntityReference | null | undefined>(
+    () => (searching ? links.cachedMention?.(mention) : null),
+  );
+  const { type, id, displayName } = mention;
+  useEffect(() => {
+    if (!searching || reference !== undefined) return;
+    let live = true;
+    void links.searchMention!({ ...mention, type, id, displayName }).then((found) => { if (live) setReference(found ?? null); });
+    return () => { live = false; };
+    // The marker's fields, not its object: a re-render parses a new one.
+  }, [links, searching, type, id, displayName, reference]);
+  if (!searching || !reference) return <>{text ?? displayName}</>;
+  return <MarkerChip mention={{ ...mention, id: reference.id }} />;
 }

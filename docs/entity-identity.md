@@ -134,3 +134,61 @@ per tool), e.g. for a server that is not `createAiChatHandler`.
 | `ChatEntityReference.data` | none | Free data from `resolve`, `knownEntities` or `resolveAmbiguous`, passed to `open` |
 | `mentionMarkers` | `'plain'` | `{{mention:type:id:label}}` markers in an assistant's text: `plain` renders such a text part without Markdown, each marker a chip (as before); `markdown` keeps the Markdown and puts each marker as an inline chip inside it (a custom `Markdown` keeps them through `markdownComponents`; without them it shows the label) |
 | `verifyMentions` | `true` | With `mentionMarkers: 'markdown'`: a marker becomes a chip only for an id the conversation showed as a record by declaration (`outputEntities` of a tool result, a `@` mention the user picked, a hit of an entity search tool), never by a field-name guess; otherwise its label stays text. `false` turns the check off |
+| `unresolvedMentions` | `'keep'` | An assistant's marker whose id the conversation never showed, see below. `'keep'` (as before), `'text'` or `'search'` |
+| `unresolvedMention(marker)` | none | Decides `'keep'`, `'text'` or `'search'` per such marker; `undefined` (or a throw) leaves it to `unresolvedMentions` |
+
+### A marker with a wrong id
+
+A model sometimes writes a `{{mention:type:id:label}}` marker whose name is
+right but whose id is not (one character off, cut short, invented). The id
+is "unresolved" when the conversation never showed that `type`/`id` pair as
+a record, by the same check as `verifyMentions`: a declared record of a tool
+result (`outputEntities`), a `@` mention the user picked, or a hit of an
+entity search tool. The id is compared as text, exactly; nothing assumes a
+shape (UUID, integer and slug ids are treated alike; an integer `42` in a
+result and `42` in a marker are one id).
+
+What happens without the option (`'keep'`, the default):
+
+| `mentionMarkers` | Unresolved marker |
+| --- | --- |
+| `'plain'` (default) | A chip with the marker's id; clickable when the type can be opened, and opens that (wrong) id |
+| `'markdown'` with `verifyMentions` (default) | Its name as plain text |
+| `'markdown'` with `verifyMentions: false` | A chip with the marker's id |
+
+`unresolvedMentions` changes this in both modes, for the assistant's markers
+of a **declared type** only (an entity of `chatInteractions`, or a `type`
+the tools' `outputEntities` declare):
+
+- `'text'`: the name as plain text, no chip, no link.
+- `'search'`: the entity's own `search` of `chatInteractions` runs for the
+  name, in the browser with the user's session, against the app's endpoint
+  (the same path as the `@` list; the app decides what the user may see,
+  nothing goes to the Platform). A chip with the found id appears only when
+  exactly one record's label equals the name; in every other case the name
+  stays text. A type without an entity `search` (only `outputEntities`)
+  stays text.
+
+Name matching (`pickExactNameMatch`, exported): both sides Unicode NFC,
+leading and trailing whitespace removed, inner whitespace runs as one
+space; then compared case-sensitively and in full. No prefix, substring,
+case-insensitive or fuzzy match. Two records (two ids) with that name: no
+match, the name stays text. One record listed twice counts once. The search
+sees at most 8 hits (`searchEntity`); a second record with the same name
+beyond them is not seen.
+
+While the search runs the name shows as text, then the chip replaces it; a
+chip never shows first and disappears. One search per type and name
+(whitespace-normalised) for the provider's lifetime, also for stored
+history and re-renders; a failed search counts as no match until
+`chatInteractions` changes. A marker only exists once its closing `}}` has
+streamed, so a half-streamed marker is never searched.
+
+Unchanged in every setting: markers in the user's messages (they come from
+the `@` list, so their id is seen), `command` markers, markers of types
+neither `chatInteractions` nor `outputEntities` declare, and markers whose
+id the conversation showed. `unresolvedMention(marker)` gets
+`{ type, id, label }` for each marker the option applies to and returns the
+policy for it. A name the model writes cannot contain `}` (the marker would
+not parse); a `:` in the name is fine, a `:` in the id is not.
+

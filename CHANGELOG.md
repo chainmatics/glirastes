@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `entityLinks.unresolvedMentions` (`docs/entity-identity.md`, "A marker with a wrong id"): what an assistant's `{{mention:type:id:label}}` marker of a declared type shows when the conversation never showed its `type`/`id` as a record (the `verifyMentions` check: declared tool results, the user's `@` mentions, entity search hits), e.g. a model that got a character of the id wrong. `'keep'` (default, rendering unchanged), `'text'` (the name as plain text, no chip, no link) or `'search'` (the entity's `chatInteractions` `search` with the user's session for the name; a chip with the found id only for exactly one exact match, else the name as text; one search per type and name, cached for the provider's lifetime; the name shows as text while it runs). Applies with `mentionMarkers` `'plain'` and `'markdown'`; markers in the user's messages, `command` markers and markers of undeclared types stay as they were. `unresolvedMention(marker)` decides per marker (`undefined` or a throw falls back to `unresolvedMentions`). New exports `ChatUnresolvedMentionPolicy` and `pickExactNameMatch` (NFC, whitespace trimmed and collapsed, case-sensitive, no prefix or fuzzy match, two records with the name: no match).
+
 ### Documentation
 
 - README install section: an app upgrading from 0.19.0 or older with an existing `bun.lock` keeps a nested `glirastes/pg` (and possibly `glirastes/zod`) entry; how to remove them so the app's copies are shared.
