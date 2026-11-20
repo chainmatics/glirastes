@@ -25,6 +25,7 @@ import {
   type MemorySummary,
 } from '../../../contracts/memory.js';
 import type { MemoryScope, MemoryStore } from '../../core/memory-store.js';
+import { escapeTagInText, unescapeTagInText } from '../../../contracts/delimited-text.js';
 import { compactToolOutput } from './prepare-model-messages.js';
 
 // ---------------------------------------------------------------------------
@@ -365,6 +366,11 @@ function aliasesOf(set: NoteSet): Map<string, MemoryEntry> {
   return aliases;
 }
 
+const MEMORY_TAG = 'memory';
+
+/** A note or summary as the memory block shows it: `<memory>` and `</memory>` inside start with `&lt;`. */
+const inMemoryBlock = (text: string) => escapeTagInText(text, MEMORY_TAG);
+
 function renderPreamble(sets: NoteSet[], summary: string | undefined): string | undefined {
   const sections: string[] = [];
   for (const set of sets) {
@@ -373,10 +379,10 @@ function renderPreamble(sets: NoteSet[], summary: string | undefined): string | 
       set.kind === 'shared'
         ? 'Notes shared by the users of this workspace:'
         : 'Notes about this user from earlier chats:',
-      ...[...aliasesOf(set)].map(([alias, entry]) => `- [${alias}] ${entry.content}`),
+      ...[...aliasesOf(set)].map(([alias, entry]) => `- [${alias}] ${inMemoryBlock(entry.content)}`),
     ].join('\n'));
   }
-  if (summary) sections.push(`Summary of the earlier part of this conversation:\n${summary}`);
+  if (summary) sections.push(`Summary of the earlier part of this conversation:\n${inMemoryBlock(summary)}`);
   if (sections.length === 0) return undefined;
   return [
     '<memory>',
@@ -397,8 +403,12 @@ const REMEMBER_DESCRIPTION = [
 const FORGET_DESCRIPTION =
   'Remove a note from memory when the user asks to forget it or it is no longer true. Pass the id shown in brackets in the memory block and the text of that note exactly as shown.';
 
-const sameNote = (left: string, right: string) =>
+const sameText = (left: string, right: string) =>
   left.replace(/\s+/g, ' ').trim().toLowerCase() === right.replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** The note as stored, or as the memory block showed it (a `<memory>` tag in it escaped). */
+const sameNote = (stored: string, given: string) =>
+  sameText(stored, given) || sameText(stored, unescapeTagInText(given, MEMORY_TAG));
 
 function createNoteTools(
   sets: NoteSet[],
@@ -422,7 +432,9 @@ function createNoteTools(
     execute: async (input) => {
       const set = writable.find((candidate) => candidate.kind === input.scope);
       if (!set) return { success: false, error: 'This kind of memory is not available.' };
-      if (set.entries.some((entry) => entry.content.toLowerCase() === input.note.toLowerCase())) {
+      // A note copied from the memory block carries its escape: the value is stored, the escape is presentation.
+      const note = unescapeTagInText(input.note, MEMORY_TAG);
+      if (set.entries.some((entry) => [note, input.note].some((given) => entry.content.toLowerCase() === given.toLowerCase()))) {
         return { success: true, alreadyKnown: true };
       }
       const full = `Memory is full (${set.max} notes). Remove a note that is no longer needed first.`;
@@ -430,10 +442,10 @@ function createNoteTools(
       try {
         const entry = set.store && set.scope
           ? await set.store.add(set.scope, {
-              content: input.note,
+              content: note,
               ...(options.authorId ? { authorId: options.authorId } : {}),
             })
-          : { id: globalThis.crypto.randomUUID(), content: input.note, createdAt: new Date().toISOString() };
+          : { id: globalThis.crypto.randomUUID(), content: note, createdAt: new Date().toISOString() };
         if (set.store && set.scope) {
           // Another request may have filled the scope meanwhile: the note that landed beyond the limit goes.
           const stored = await set.store.list(set.scope);

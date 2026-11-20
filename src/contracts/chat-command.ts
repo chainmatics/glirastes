@@ -7,6 +7,8 @@
  * `<glirastes-chat>` and the server adapters share it.
  */
 
+import { escapeJsonAngles } from './delimited-text.js';
+
 /** Command and action ids: a letter or digit, then `[A-Za-z0-9._-]`, at most 200 characters. */
 export const CHAT_COMMAND_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
 /** Catalog definition ids, e.g. `ui.navigate` or `tasks.update`. */
@@ -60,7 +62,7 @@ export function serializeChatCommandArgs(args: unknown): string | undefined {
     return undefined;
   }
   if (json === undefined) return undefined;
-  const safe = json.replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  const safe = escapeJsonAngles(json);
   return safe.length <= CHAT_COMMAND_MAX_ARGS_LENGTH ? safe : undefined;
 }
 
