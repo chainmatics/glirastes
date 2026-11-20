@@ -69,7 +69,7 @@ describe("runtime service trust configuration", () => {
   });
   it("accepts the chat languages and leaves them unset by default", () => {
     expect(parseRuntimeConfig(raw()).chat).toBeUndefined();
-    const chat = { locale: "de-DE", requestLocaleHeader: "accept-language", locales: { pl: { silentTurn: "Nie udało się." } } };
+    const chat = { locale: "de-DE", requestLocaleHeader: "accept-language", locales: { pl: { silentTurn: "Nie udało się.", streamError: "Żądanie nie powiodło się", invalidToolInput: "Nieprawidłowe dane" } } };
     expect(parseRuntimeConfig({ ...raw(), chat }).chat).toEqual(chat);
     for (const wrong of [{ locale: "de_DE" }, { requestLocaleHeader: "X-App Language" }, { locales: { de_DE: {} } }, { theme: "dark" }]) {
       expect(() => parseRuntimeConfig({ ...raw(), chat: wrong })).toThrow();

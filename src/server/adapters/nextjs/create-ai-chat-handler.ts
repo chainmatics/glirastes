@@ -69,7 +69,7 @@ import {
   type IdLabels,
 } from './hide-ids.js';
 import { entityDeclarationsOfTools, TOOL_ENTITIES_PART_TYPE } from './tool-entities.js';
-import { createToolStreamErrorMask, streamErrorText, type StreamErrorTexts } from './stream-error-text.js';
+import { builtInStreamErrorTexts, createToolStreamErrorMask, streamErrorText, type StreamErrorTexts } from './stream-error-text.js';
 import {
   budgetStopText,
   resolveBudgetStopTexts,
@@ -118,7 +118,7 @@ import {
   withSilentTurnFallback,
 } from './silent-turn-fallback.js';
 import { toolPresentationOf, type ToolPresentationPart } from './tool-presentation.js';
-import { assertChatServerLocales, resolveChatServerTexts, streamErrorTextsOf } from './chat-texts.js';
+import { assertChatServerLocales, resolveChatServerTexts } from './chat-texts.js';
 import { chatLanguageOf, CHAT_LANGUAGE_HEADER, isLanguageTag } from '../../../contracts/localized-text.js';
 import {
   PrincipalSchema,
@@ -600,7 +600,7 @@ async function defaultStreamHandler(
   budgetStopTexts: BudgetStopTexts = resolveBudgetStopTexts(ctx.locale, undefined),
   silentTurnText?: string,
   request: RequestTurnState = {},
-  streamErrorTexts: StreamErrorTexts = streamErrorTextsOf(resolveChatServerTexts(ctx.locale, undefined, undefined)),
+  streamErrorTexts: StreamErrorTexts = builtInStreamErrorTexts(ctx.locale),
   configuredInvalidToolInputTexts: ReadonlyArray<string> = [],
 ): Promise<Response> {
   const uiOutcomes = request.uiOutcomes;
@@ -1243,7 +1243,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   type TurnTexts = { budgetStop: BudgetStopTexts; silentTurn?: string; streamErrors: StreamErrorTexts };
   const configuredTexts: TurnTexts = {
     budgetStop: budgetStopTexts,
-    streamErrors: streamErrorTextsOf(resolveChatServerTexts(configuredLocale, undefined, undefined)),
+    // Detected like the budget stop notice of this path, so one chat never mixes languages.
+    streamErrors: builtInStreamErrorTexts(configuredLocale),
   };
   const serverTexts = new Map<string, TurnTexts>();
   const textsFor = (turnLocale: string | undefined): TurnTexts => {

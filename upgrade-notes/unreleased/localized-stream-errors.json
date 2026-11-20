@@ -2,9 +2,12 @@
   "id": "localized-stream-errors",
   "kind": "recommended",
   "summary": "The handler now shows its fixed failure texts in the chat language: a German chat gets `KI-Anfrage fehlgeschlagen` instead of `AI request failed`, and the German text for invalid tool input. Both texts are keys of the handler's `locales` (`streamError`, `invalidToolInput`).",
-  "howTo": "Nothing to change for a German UI. Tests or log checks that assert on `AI request failed` in a `de*` chat now see the German text. Change the texts per language, or add another language, in the handler's `locales` (`locales: { de: { streamError: '...' }, pl: { streamError: '...', invalidToolInput: '...' } }`; in the runtime container `chat.locales`); languages without a table keep English. Some texts stay English in a German chat: the permission and budget denials shown by `toolDenialDisplayText`, the unavailable-tool text and the approval-subject refusal texts are not keys of `locales`.",
+  "howTo": "Nothing to change for a German UI. Tests or log checks that assert on `AI request failed` in a `de*` chat now see the German text. Change the texts per language, or add another language, in the handler's `locales` (`locales: { de: { streamError: '...' }, pl: { streamError: '...', invalidToolInput: '...' } }`; in the runtime container `chat.locales`); languages without a table keep English. The two keys are optional additions to `ChatServerTexts`, so a type built as `Record<keyof ChatServerTexts, string>` or `satisfies Required<ChatServerTexts>` now needs them too. Some texts stay English in a German chat: the permission and budget denials shown by `toolDenialDisplayText`, the unavailable-tool text and the approval-subject refusal texts are not keys of `locales`.",
   "skill": "integrating-glirastes-nextjs",
   "affectedWhen": {
+    "symbols": [
+      "ChatServerTexts"
+    ],
     "patterns": [
       "AI request failed"
     ]

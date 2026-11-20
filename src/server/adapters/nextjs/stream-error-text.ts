@@ -3,6 +3,7 @@ import { ModelFacingInputError } from '../../../runtime/ai-sdk/engine.js';
 import { ToolExecutionDeniedError, toolDenialDisplayText } from '../../../runtime/tool-denial.js';
 import { ToolInputValidationError } from '../../../runtime/tool-input-error.js';
 import type { AiChatErrorInfo } from './types.js';
+import { isGermanTextLocale } from './budget-stop-notice.js';
 import { APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS, ApprovalSubjectRefusedError } from './approval-subject-lookup.js';
 
 /** The chat's German texts, for a `de*` chat language. */
@@ -27,6 +28,11 @@ export const STREAM_ERROR_TEXTS: Readonly<{ en: StreamErrorTexts; de: StreamErro
   de: Object.freeze({ streamError: GENERIC_STREAM_ERROR_TEXT_DE, invalidToolInput: INVALID_TOOL_INPUT_TEXT_DE }),
 });
 const EN_STREAM_ERROR_TEXTS = STREAM_ERROR_TEXTS.en;
+
+/** The built-in texts for `locale`, detected like the budget stop notice (German for `de*`). */
+export function builtInStreamErrorTexts(locale: string | undefined): StreamErrorTexts {
+  return isGermanTextLocale(locale) ? STREAM_ERROR_TEXTS.de : STREAM_ERROR_TEXTS.en;
+}
 
 /**
  * What the model reads in a later request for a call the chat shows with

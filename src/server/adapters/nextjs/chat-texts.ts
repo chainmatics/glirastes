@@ -1,7 +1,7 @@
 import { isLanguageTag, resolveTextTable } from '../../../contracts/localized-text.js';
 import { DEFAULT_BUDGET_STOP_TEXTS, resolveBudgetStopTexts, type BudgetStopTexts } from './budget-stop-notice.js';
 import { SILENT_TURN_FALLBACK_TEXTS } from './silent-turn-fallback.js';
-import { STREAM_ERROR_TEXTS, type StreamErrorTexts } from './stream-error-text.js';
+import { STREAM_ERROR_TEXTS } from './stream-error-text.js';
 
 /**
  * Every text the handler writes into a chat itself, by key: the budget stop
@@ -77,9 +77,4 @@ export function resolveChatServerTexts(
     ...(locales ? { app: locales } : {}),
     ...(budgetStopTexts ? { overrides: budgetStopTexts as Partial<ResolvedChatServerTexts> } : {}),
   }));
-}
-
-/** The failure texts of a resolved table. */
-export function streamErrorTextsOf(texts: ResolvedChatServerTexts): StreamErrorTexts {
-  return Object.freeze({ streamError: texts.streamError, invalidToolInput: texts.invalidToolInput });
 }

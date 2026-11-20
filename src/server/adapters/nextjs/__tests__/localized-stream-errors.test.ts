@@ -5,6 +5,7 @@ import { defineTool } from '../../../../types.js';
 import { createTurnSnapshot } from '../../../../runtime/turn-snapshot.js';
 import { prepareModelMessages } from '../prepare-model-messages.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
+import { DEFAULT_BUDGET_STOP_TEXTS, resolveBudgetStopTexts } from '../budget-stop-notice.js';
 import { resolveChatServerTexts } from '../chat-texts.js';
 import type { AiChatHandlerConfig } from '../types.js';
 import {
@@ -48,6 +49,13 @@ describe('localized stream failure text in the handler', () => {
     const body = await (await handler(request())).text();
     expect(body).toContain('KI-Anfrage fehlgeschlagen');
     expect(body).not.toContain('AI request failed');
+  });
+  it('detects German like the budget stop notice, also for a locale that is no language tag', async () => {
+    for (const locale of ['deu', 'deutsch']) {
+      expect(resolveBudgetStopTexts(locale, undefined)).toBe(DEFAULT_BUDGET_STOP_TEXTS.de);
+      const handler = createAiChatHandler({ tools: {}, systemPrompt: 'A', model: failingModel(), locale, onError: vi.fn() });
+      expect(await (await handler(request())).text(), locale).toContain('KI-Anfrage fehlgeschlagen');
+    }
   });
   it('English chat keeps the English text', async () => {
     const handler = createAiChatHandler({ tools: {}, systemPrompt: 'A', model: failingModel(), locale: 'en-US', onError: vi.fn() });

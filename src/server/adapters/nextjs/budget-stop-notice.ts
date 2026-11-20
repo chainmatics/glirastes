@@ -53,6 +53,15 @@ export const DEFAULT_BUDGET_STOP_TEXTS: Readonly<{ en: BudgetStopTexts; de: Budg
 const KEYS: ReadonlySet<string> = new Set(Object.keys(EN));
 
 /**
+ * Whether the handler's built-in texts are German for `locale` (`de*`,
+ * case-insensitive); every other value, and none, is English. The budget
+ * stop notice, the silent-turn answer and the stream failure texts share it.
+ */
+export function isGermanTextLocale(locale: string | undefined): boolean {
+  return locale?.toLowerCase().startsWith('de') ?? false;
+}
+
+/**
  * The texts for `locale` (German for `de*`, else English) with `overrides`
  * replacing single keys. Throws for an unknown key or a value that is no
  * non-empty string.
@@ -62,7 +71,7 @@ export function resolveBudgetStopTexts(
   overrides: Partial<BudgetStopTexts> | undefined,
   label = 'createAiChatHandler',
 ): BudgetStopTexts {
-  const base = locale?.toLowerCase().startsWith('de') ? DE : EN;
+  const base = isGermanTextLocale(locale) ? DE : EN;
   if (overrides === undefined) return base;
   if (typeof overrides !== 'object' || overrides === null || Array.isArray(overrides)) {
     throw new Error(`${label}: budgetStopTexts must be an object of texts`);
