@@ -200,7 +200,12 @@ describe('upgrade notes guard', () => {
     const stale = notes.flatMap((n) => (n.surface ?? [])
       .filter((key) => current.has(key) === released.has(key))
       .map((key) => `${n.id}: ${key}`));
-    expect(stale, `Unreleased notes list surface keys that did not change:\n${stale.join('\n')}`).toEqual([]);
+    expect(stale, [
+      `Unreleased notes list surface keys that did not change:\n${stale.join('\n')}`,
+      '`surface` lists only keys added or removed since api-surface.released.json; a changed signature of an',
+      'existing key (e.g. a new optional parameter) belongs in the note\'s `howTo`, and a key added and removed',
+      'again before release belongs in no note.',
+    ].join('\n')).toEqual([]);
   });
 
   it('every note\'s skill and anchor exist in skills/', async () => {

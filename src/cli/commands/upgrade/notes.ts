@@ -83,6 +83,8 @@ export const UpgradeNoteSchema = z
     skill: z.string().regex(/^[a-z0-9][a-z0-9-]*(#[A-Za-z0-9][A-Za-z0-9_.-]*)?$/),
     affectedWhen: DetectSchema.optional(),
     adoptedWhen: DetectSchema.optional(),
+    // Only keys added or removed since api-surface.released.json (the snapshot is name-level);
+    // a changed signature of an existing key is described in `howTo`.
     surface: z
       .array(
         z.string().regex(SURFACE_ENTRY_RE, {

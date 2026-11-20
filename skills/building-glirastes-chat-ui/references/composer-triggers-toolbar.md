@@ -74,7 +74,9 @@ trigger's `prefix`, `command` shows `/`, any other type `@`. Without `types`
 nothing changes. Chat titles of `createLocalSessionStore` follow without
 further config (`#Bug 7 …` instead of `@Bug 7 …`): with claimed `types` the
 provider calls `session.save(id, messages, { mentionPrefix })`. A custom
-store may use that third argument for its titles or ignore it.
+store may use that third argument for its titles or ignore it; a store
+that wraps `createLocalSessionStore` forwards it (`save: (id, messages, options) =>
+base.save!(id, messages, options)`).
 
 ## What a pick does
 
@@ -105,8 +107,9 @@ A prompt template as `select: 'text'` replaces rewriting a chip into text in
 before the built-in behavior; `controls` is the composer
 (`ChatComposerInputControls`: `setText`, `submit`, `focus`, …). Return `true`
 when the app handled the pick: the typed trigger and query (or the text
-`openCompletion` inserted) leave the editor, the caret stays where they were
-and the list closes. A standalone `RichMentionInput` takes `onCompletionSelect` with
+`openCompletion` inserted) leave the editor, also when the handler added
+text or a pill (`appendText`, `insertMention`); one of two spaces that meet
+goes too. The caret stays where they were and the list closes. A standalone `RichMentionInput` takes `onCompletionSelect` with
 `{ trigger, query }` only. An unknown `select` or an empty `insertText` is
 left out of the item, which stays in the list with the trigger's default pick. `onCompletionSelect` receives the normalized item
 (`MentionResult`), not the provider's raw `CompletionItem`.
@@ -153,11 +156,12 @@ const composer = useChatComposerInput();
   provider id or ids of the trigger) limits the list until it closes. It
   narrows the composer's search (`completionProviders`) and a search made by
   `createCompletionSearch`; an own `onSearch` of a standalone input still gets
-  `(query, trigger)` and lists everything.
+  `(query, trigger)`, lists everything and warns once in the console.
 - While the user has neither typed nor picked, closing the list (Escape,
   outside click, blur, or no results) removes exactly the inserted text and
   restores the caret; so do Enter before results show (nothing is sent) and
-  an inserted mention (`insertMention`, `chatAbout`). Typing or a pick keeps it.
+  an inserted mention (`insertMention`, `chatAbout`). Typing or a built-in pick
+  keeps it; a pick the app handles (`onCompletionSelect` returns `true`) removes it.
 - A second call while untouched replaces the first one's text. An unknown
   trigger warns once in the console and does nothing.
 - `useChatComposer().openCompletion` works from anywhere below
