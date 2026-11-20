@@ -174,6 +174,21 @@ describe('RichMentionInput openCompletion', () => {
     await screen.findByRole('listbox');
   });
 
+  it('warns once with fixed text when a source cannot narrow an own onSearch', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { ref } = renderEditor();
+    act(() => { ref.current!.openCompletion!({ trigger: '@', source: 'people' }); });
+    await screen.findByRole('listbox');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    act(() => { ref.current!.openCompletion!({ trigger: '@', source: 'teams' }); });
+    act(() => { ref.current!.openCompletion!({ trigger: '@' }); });
+    const sourceWarnings = warn.mock.calls.filter(([text]) => String(text).includes('source'));
+    expect(sourceWarnings).toEqual([
+      ['[glirastes] openCompletion: source narrows only a search from createCompletionSearch; listing all entries.'],
+    ]);
+    warn.mockRestore();
+  });
+
   it('narrows a search from createCompletionSearch to the source providers, also while typing on', async () => {
     const people: ChatCompletionProvider = { id: 'people', trigger: '@', search: vi.fn(() => [{ id: '1', type: 'person', label: 'Anna Müller' }]) };
     const teams: ChatCompletionProvider = { id: 'teams', trigger: '@', search: vi.fn(() => [{ id: '2', type: 'team', label: 'Müller Team' }]) };

@@ -8,6 +8,7 @@ import type {
   ChatTransport,
   ChatTriggerDefinition,
   MentionResult,
+  RichMentionInputHandle,
 } from '../../types.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import { MentionInput } from '../mention-input.js';
@@ -259,6 +260,44 @@ describe('completion pick behavior (select)', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
+  it('onCompletionSelect that appends text and returns true still loses the typed trigger', async () => {
+    const onCompletionSelect = vi.fn<NonNullable<AiChatProviderConfig['onCompletionSelect']>>((item, { controls }) => {
+      controls.appendText(item.label);
+      return true;
+    });
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, 'Siehe #bu');
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+
+    expect(editor.textContent).toBe('Siehe Bug sieben');
+    const range = window.getSelection()!.getRangeAt(0);
+    expect(editor.contains(range.startContainer)).toBe(true);
+    expect(range.startContainer.nodeType).toBe(Node.TEXT_NODE);
+    expect(range.startOffset).toBe('Siehe '.length);
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('a handled pick in the middle of the text leaves one space', async () => {
+    render(<Composer chat={transport()} onCompletionSelect={() => true} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    editor.textContent = 'Siehe #bu weiter';
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, 'Siehe #bu'.length);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.input(editor);
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+
+    expect(editor.textContent).toBe('Siehe weiter');
+    expect(window.getSelection()!.getRangeAt(0).startOffset).toBe('Siehe '.length);
+  });
+
   it('onCompletionSelect returning nothing keeps the built-in behavior', async () => {
     const onCompletionSelect = vi.fn(() => undefined);
     render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
@@ -360,6 +399,23 @@ describe('standalone RichMentionInput pick behavior', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(onSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a handler that inserts a mention through the handle loses the typed trigger, the pill stays', async () => {
+    const ref = React.createRef<RichMentionInputHandle>();
+    const onCompletionSelect = vi.fn((item: { id: string; type: string; label: string }) => {
+      ref.current!.insertMention({ id: item.id, type: item.type, label: item.label, displayName: item.label, prefix: '#', slug: 'bug-neun' });
+      return true;
+    });
+    render(<RichMentionInput ref={ref} onSearch={() => results} triggers={['#']} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox');
+
+    typeInto(editor, 'Siehe #bu');
+    await waitFor(() => expect(option('Bug neun')).toBeTruthy());
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(chip(editor, '9')).not.toBeNull();
+    expect(editor.textContent).not.toContain('#bu');
   });
 
   it('takes onCompletionSelect with trigger and query', async () => {

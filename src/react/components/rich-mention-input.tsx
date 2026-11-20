@@ -105,6 +105,52 @@ export function pickCompletionOf(handle: RichMentionInputHandle | null | undefin
   return typeof pick === 'function' ? pick : undefined;
 }
 
+/**
+ * Text the editor holds at a position counted over all its text nodes, so it
+ * can be found again after an app handler rebuilt the nodes (`setText`,
+ * `appendText`) or split them (`insertMention`).
+ */
+interface TextSnapshot {
+  start: number;
+  text: string;
+}
+
+function textNodesOf(editor: HTMLElement): Text[] {
+  const walker = editor.ownerDocument.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);
+  return nodes;
+}
+
+function textOffsetOf(editor: HTMLElement, node: Text, offset: number): number {
+  let total = 0;
+  for (const current of textNodesOf(editor)) {
+    if (current === node) return total + offset;
+    total += current.length;
+  }
+  return -1;
+}
+
+/**
+ * Deletes the snapshot's text when it is still at its place (outside a pill)
+ * and, when spaces then meet on both sides, one of them. Returns the text
+ * node and offset where it was, or null when the text is gone.
+ */
+function deleteSnapshot(editor: HTMLElement, snapshot: TextSnapshot): { node: Text; offset: number } | null {
+  let total = 0;
+  for (const node of textNodesOf(editor)) {
+    const local = snapshot.start - total;
+    total += node.length;
+    if (local < 0 || local > node.length) continue;
+    if (node.data.slice(local, local + snapshot.text.length) !== snapshot.text) continue;
+    if (node.parentElement?.closest('[data-component="mention-chip"]')) return null;
+    node.deleteData(local, snapshot.text.length);
+    if (local > 0 && isSpace(node.data[local - 1]) && isSpace(node.data[local])) node.deleteData(local, 1);
+    return { node, offset: local };
+  }
+  return null;
+}
+
 function isChip(node: Node | null | undefined): node is HTMLElement {
   return !!node && node.nodeType === Node.ELEMENT_NODE && !!(node as HTMLElement).dataset?.mentionId;
 }
@@ -477,6 +523,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         try {
           // A source narrows only a search from `createCompletionSearch` (the composer's); any other `onSearch` gets all entries.
           const narrowed = source === undefined ? undefined : sourceSearchOf(onSearch);
+          if (source !== undefined && !narrowed && !warnedTriggersRef.current.has('\u0000source')) {
+            warnedTriggersRef.current.add('\u0000source');
+            console.warn('[glirastes] openCompletion: source narrows only a search from createCompletionSearch; listing all entries.');
+          }
           const results = await (narrowed ? narrowed(query, trigger, source) : onSearch(query, trigger));
           if (searchVersionRef.current !== version) return;
           // A list opened by `openCompletion` that finds nothing goes away with its text.
@@ -803,6 +853,34 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions, allowEmptySubmit]);
 
     /**
+     * The trigger and query before the caret (or the untouched `openCompletion`
+     * text) as a snapshot, taken before the app's handler can change the editor.
+     */
+    const snapshotTrigger = useCallback((armed: ArmedCompletion | null): TextSnapshot | null => {
+      const editor = editableRef.current;
+      if (!editor) return null;
+      if (armed && editor.contains(armed.node) && armed.node.data.slice(armed.start, armed.start + armed.text.length) === armed.text) {
+        const start = textOffsetOf(editor, armed.node, armed.start);
+        return start < 0 ? null : { start, text: armed.text };
+      }
+      const selection = editorSelection(editor);
+      if (!selection || selection.rangeCount === 0) return null;
+      const range = selection.getRangeAt(0);
+      if (range.startContainer.nodeType !== Node.TEXT_NODE || !editor.contains(range.startContainer)) return null;
+      const node = range.startContainer as Text;
+      const text = node.data;
+      for (let i = range.startOffset - 1; i >= 0; i--) {
+        const char = text[i]!;
+        if (isSpace(char)) break;
+        if (triggers.has(char) && (i === 0 || isSpace(text[i - 1]))) {
+          const start = textOffsetOf(editor, node, i);
+          return start < 0 ? null : { start, text: text.slice(i, range.startOffset) };
+        }
+      }
+      return null;
+    }, [triggers]);
+
+    /**
      * One entry of the list was picked: the app's handler first, then the
      * entry's `select` behavior. `fromCode` (`pickCompletion`): the trigger was
      * inserted armed for this pick; when nothing replaces it, it goes again.
@@ -816,6 +894,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         removeArmed();
       };
       const active = detectTrigger() ?? lastSearchRef.current;
+      const typed = onCompletionSelect ? snapshotTrigger(armed) : null;
       let handled = false;
       let deferred: OpenCompletionOptions[] = [];
       if (onCompletionSelect) {
@@ -832,9 +911,19 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         for (const options of deferred) openCompletionRef.current?.(options);
       };
       if (handled) {
-        // The app handled it: trigger and query (or the untouched `openCompletion` text) leave the editor.
-        armedRef.current = armed;
-        if (!removeArmed() && replaceQuery(() => '') !== null) onChange?.(getFullValue());
+        // The app handled it: trigger and query (or the untouched `openCompletion` text) leave the
+        // editor, found by the snapshot from before the handler (it may have rebuilt the text).
+        const editor = editableRef.current;
+        const removed = editor && typed ? deleteSnapshot(editor, typed) : null;
+        if (removed) {
+          const selection = editorSelection(editor);
+          const caret = document.createRange();
+          caret.setStart(removed.node, removed.offset);
+          caret.collapse(true);
+          selection?.removeAllRanges();
+          selection?.addRange(caret);
+          onChange?.(getFullValue());
+        }
         closeDropdown();
         openDeferred();
         return;
@@ -854,7 +943,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         else if (kind === 'run') submit([inserted]);
       }
       openDeferred();
-    }, [detectTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, insertMention, submit, removeArmed]);
+    }, [detectTrigger, snapshotTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, insertMention, submit, removeArmed]);
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
