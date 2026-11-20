@@ -17,14 +17,16 @@ const state = vi.hoisted(() => ({
   release: vi.fn(),
   end: vi.fn(),
 }));
-vi.mock("pg", () => ({
-  Pool: class {
+vi.mock("pg", () => {
+  class Pool {
     on() {}
     async end() {
       state.end();
     }
-  },
-}));
+  }
+  // The service uses the default export (pg below 8.15.0 has no named ESM exports).
+  return { default: { Pool } };
+});
 vi.mock("@ai-sdk/openai", () => ({
   createOpenAI: () => ({ chat: () => ({}) }),
 }));

@@ -7,6 +7,6 @@ export default defineConfig({
       'src/**/*.test.{ts,tsx}',
       'tests/**/*.test.{ts,tsx}',
     ],
-    exclude: ['packages/**', 'node_modules/**', 'dist/**'],
+    exclude: ['packages/**', '**/node_modules/**', 'dist/**'],
   },
 });

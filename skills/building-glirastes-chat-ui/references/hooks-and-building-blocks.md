@@ -104,8 +104,13 @@ Defaults keep today's markup; everything below is opt-in.
   by user message id. Recorded also when the turn has no assistant message
   (stop or network error before the first token), kept after later turns
   and, with a session store, after a reload (`metadata.glirastesTurnOutcome`
-  of the stored user message, never in a request). A retry of the turn
-  replaces it. A custom `MessageBubble` also gets it as `turnOutcome`. Draw a
+  of the stored user message; the app's own `metadata` round-trips exactly,
+  a non-object `metadata` keeps the message unchanged and its outcome
+  unstored). The provider takes the key out of a history from `session.load`
+  and out of one the app hands to its own transport, so the chat's requests
+  do not carry it; the app's own code reading the store does see it. An
+  outcome stays with the chat its request started in (a host switch while it
+  runs records nothing on the new chat). A retry of the turn replaces it. A custom `MessageBubble` also gets it as `turnOutcome`. Draw a
   per-turn notice from this, not from `pipelineState` (only the latest run's).
 - `components.MessageParts` arranges the parts inside the bubble root and
   receives `message`, the nodes (`MessagePartNodes`) `plan`, `activity`, `notice`, `attachments`,

@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
-import { Pool } from "pg";
+// Default import: pg below 8.15.0 is CommonJS only, and plain Node offers no
+// named `Pool` export from it (tests/pg-import.test.ts runs it at the floor).
+import pg from "pg";
 import { AppSetupArtifactSchema, type Principal } from "../contracts/index.js";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGlirastes } from "../runtime/glirastes.js";
@@ -31,7 +33,7 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
   ]);
   if (approvalSecret.length < 32)
     throw new Error("Approval secret must contain at least 32 characters");
-  const pool = new Pool({
+  const pool = new pg.Pool({
     connectionString,
     max: 8,
     connectionTimeoutMillis: 5000,

@@ -645,9 +645,12 @@ export type TurnOutcomeReason = 'finished' | 'stopped' | 'send-now' | 'request-f
  * The recorded end of a turn, keyed by the user message that started it, also
  * when no assistant message exists (a stop or a failure before the first
  * token). Kept while later turns run and, with `session.save`/`load`, across
- * a reload (in the stored user message's `metadata.glirastesTurnOutcome`,
- * never in a request). A new request for the same user message (a retry)
- * replaces it with the outcome of the new attempt. Status and reason only.
+ * a reload (in the stored user message's `metadata.glirastesTurnOutcome`; the
+ * provider takes the key out of the history its transport holds, so the
+ * chat's requests do not carry it). It belongs to the chat and user message
+ * its request was started for, also when another chat was opened meanwhile.
+ * A new request for the same user message (a retry) replaces it with the
+ * outcome of the new attempt. Status and reason only.
  */
 export interface TurnOutcome {
   /** Id of the user message that started the turn. */

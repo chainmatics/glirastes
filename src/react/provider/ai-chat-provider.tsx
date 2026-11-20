@@ -386,6 +386,18 @@ function withHeldMessages(messages: ChatMessage[], held: ReadonlyArray<HeldMessa
 }
 
 /**
+ * The one shape every `session.save` receives: the held messages back at their
+ * place and each recorded turn outcome on its user message.
+ */
+function storedHistory(
+  messages: ChatMessage[],
+  held: ReadonlyArray<HeldMessage>,
+  outcomes: ReadonlyMap<string, TurnOutcome>,
+): ChatMessage[] {
+  return withStoredTurnOutcomes(withHeldMessages(messages, held), outcomes);
+}
+
+/**
  * Merge consecutive assistant messages by keeping only the last one in each run.
  *
  * When a pipeline resumes after approval, `useChat` creates a new assistant
@@ -840,21 +852,54 @@ export function AiChatProvider({
   const [turnOutcomes, setTurnOutcomes] = useState<ReadonlyMap<string, TurnOutcome>>(() => new Map());
   // Messages left out of the transport before a send (as in 0.19.0) that still show a step: shown and stored, never sent.
   const [heldMessages, setHeldMessages] = useState<ReadonlyArray<HeldMessage>>([]);
+  // For a save outside a render (the page-load save): the same state the save on change uses.
+  const heldMessagesRef = useRef(heldMessages);
+  heldMessagesRef.current = heldMessages;
+  const turnOutcomesRef = useRef(turnOutcomes);
+  turnOutcomesRef.current = turnOutcomes;
+  // The chat (the session whose history the transport held) and the user message the running or last
+  // request was started for, taken when it started: its outcome goes there, not to whatever is open now.
+  // `null` ids: the request belongs to nothing that is shown (cleared meanwhile, or started while a chat loaded).
+  const requestTurnRef = useRef<{ sessionId: string | null; userMessageId: string | null } | null>(null);
+  // Outcomes of requests that ended while another chat was open, per session: they join that chat's
+  // history when it loads in this provider again (and are stored with it then). Lost on a page load.
+  const leftChatOutcomesRef = useRef(new Map<string, ReadonlyMap<string, TurnOutcome>>());
+  const loadedSessionIdRef = useRef(loadedSessionId);
+  loadedSessionIdRef.current = loadedSessionId;
+  /** Where the outcome of the running or last request goes, and whether that chat is the one open. */
+  const requestTurn = useCallback(() => {
+    const bound = requestTurnRef.current ?? {
+      // A request never seen running (it ended in the render it started): the open chat's latest turn.
+      sessionId: loadedSessionIdRef.current,
+      userMessageId: latestUserMessageId(rawMessagesRef.current as unknown as ChatMessage[]),
+    };
+    if (bound.sessionId === null || bound.userMessageId === null) return null;
+    const open = bound.sessionId === activeSessionIdRef.current && bound.sessionId === loadedSessionIdRef.current;
+    return { sessionId: bound.sessionId, userMessageId: bound.userMessageId, open };
+  }, []);
   /**
-   * Records how the turn of the latest user message ended. A later report of the same status keeps the first;
-   * `onlyIfNone` (a run that ended by itself) never replaces a stop or failure recorded during the run.
+   * Records how the turn of the running or last request ended (see `requestTurn`). A later report of the same
+   * status keeps the first; `onlyIfNone` (a run that ended by itself) never replaces a stop or failure recorded
+   * during the run.
    */
   const recordTurnOutcome = useCallback((status: TurnOutcome['status'], reason: TurnOutcomeReason, onlyIfNone = false) => {
-    const userMessageId = latestUserMessageId(rawMessagesRef.current as unknown as ChatMessage[]);
-    if (!userMessageId) return;
-    setTurnOutcomes((prev) => {
+    const target = requestTurn();
+    if (!target) return;
+    const { userMessageId } = target;
+    const apply = (prev: ReadonlyMap<string, TurnOutcome>) => {
       const current = prev.get(userMessageId);
       if (current?.status === status || (onlyIfNone && current)) return prev;
       const next = new Map(prev);
       next.set(userMessageId, { userMessageId, status, reason, at: new Date().toISOString() });
       return next;
-    });
-  }, []);
+    };
+    if (target.open) {
+      setTurnOutcomes(apply);
+      return;
+    }
+    const left = leftChatOutcomesRef.current;
+    left.set(target.sessionId, apply(left.get(target.sessionId) ?? new Map()));
+  }, [requestTurn]);
 
   // Pagination
   const [visibleMessageCount, setVisibleMessageCount] = useState(30);
@@ -1006,9 +1051,8 @@ export function AiChatProvider({
       const nextState = normalizePipelineState(dataPart.data);
       if (nextState) {
         setPipelineState(nextState);
-        // A request of a chat that was left reports to that chat, not to the latest turn here.
-        if (!staleRequestRef.current
-          && (nextState.status === 'aborted' || nextState.status === 'error' || nextState.status === 'safety-stop')) {
+        // A request of a chat that was left reports to that chat (`recordTurnOutcome`), not to the latest turn here.
+        if (nextState.status === 'aborted' || nextState.status === 'error' || nextState.status === 'safety-stop') {
           recordTurnOutcome(nextState.status, 'pipeline');
         }
       }
@@ -1182,9 +1226,11 @@ export function AiChatProvider({
           return outcome && isRecord(toolPart.output) ? { ...part, output: { ...toolPart.output, outcome } } : part;
         }),
     })) as ChatMessage[];
+    // The same shape as every other save (a page that goes may not render again).
+    const history = storedHistory(messages, heldMessagesRef.current, turnOutcomesRef.current);
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
-      Promise.resolve(save(activeSessionIdRef.current, messages)),
+      Promise.resolve(save(activeSessionIdRef.current, history)),
       new Promise((resolve) => { timer = setTimeout(resolve, PAGE_LOAD_SAVE_TIMEOUT_MS); }),
     ]).finally(() => clearTimeout(timer));
   }, [reportUiOutcome]);
@@ -1291,8 +1337,9 @@ export function AiChatProvider({
     approvalSessionRef.current = activeSessionId;
     resetUiActions();
     setPendingApprovalsMap(new Map());
-    // Held messages belong to the chat that was left.
+    // Held messages and a refused message belong to the chat that was left.
     setHeldMessages([]);
+    setLastRejection(null);
   }, [activeSessionId, resetUiActions]);
 
   // Load messages from session whenever the active session changes.
@@ -1334,7 +1381,15 @@ export function AiChatProvider({
         // messages (with `parts: [...]`) so bridges don't have to.
         const stored = readStoredTurnOutcomes(loaded ? coerceLoadedMessages(loaded as unknown[]) : []);
         const coerced = stored.messages;
-        setTurnOutcomes(stored.outcomes);
+        // A request of this chat that ended while another one was open: its outcome joins the turn it was for.
+        const left = leftChatOutcomesRef.current.get(activeSessionId);
+        leftChatOutcomesRef.current.delete(activeSessionId);
+        let outcomes: ReadonlyMap<string, TurnOutcome> = stored.outcomes;
+        for (const [userMessageId, outcome] of left ?? []) {
+          if (!coerced.some((message) => message.id === userMessageId && message.role === 'user')) continue;
+          outcomes = new Map(outcomes).set(userMessageId, outcome);
+        }
+        setTurnOutcomes(outcomes);
         if (coerced.length > 0) {
           markStoredMessagesAsProcessed(coerced as unknown[]);
           const sanitized = sanitizeMessages(coerced as unknown as ChatMessage[]);
@@ -1389,6 +1444,26 @@ export function AiChatProvider({
     }).finally(() => untrack?.());
   }, [rawMessages, loadedSessionId, activeSessionId, trackUiWork]);
 
+  // A stored history the app handed to the transport itself (not through `session.load`): its outcomes
+  // are read and the key is taken out of the transport's copies (the app's objects stay), so no later
+  // request carries it. Only between requests: a running request already has its messages.
+  useEffect(() => {
+    if (isLoading || sessionNotReady) return;
+    const stored = readStoredTurnOutcomes(rawMessages as unknown as ChatMessage[]);
+    if (stored.messages === (rawMessages as unknown as ChatMessage[])) return;
+    setMessages(stored.messages as unknown as typeof rawMessages);
+    if (stored.outcomes.size === 0) return;
+    setTurnOutcomes((prev) => {
+      let next: Map<string, TurnOutcome> | null = null;
+      for (const [userMessageId, outcome] of stored.outcomes) {
+        if (prev.has(userMessageId)) continue;
+        next ??= new Map(prev);
+        next.set(userMessageId, outcome);
+      }
+      return next ?? prev;
+    });
+  }, [rawMessages, isLoading, sessionNotReady, setMessages]);
+
   // Save messages to session on change (scoped to the active session).
   useEffect(() => {
     if (!isInitialized) return;
@@ -1397,10 +1472,7 @@ export function AiChatProvider({
     const cfg = sessionRef.current;
     if (!cfg?.save) return;
     void Promise.resolve(
-      cfg.save(activeSessionId, withStoredTurnOutcomes(
-        withHeldMessages(rawMessages as unknown as ChatMessage[], heldMessages),
-        turnOutcomes,
-      )),
+      cfg.save(activeSessionId, storedHistory(rawMessages as unknown as ChatMessage[], heldMessages, turnOutcomes)),
     );
   }, [rawMessages, heldMessages, turnOutcomes, isInitialized, activeSessionId, loadedSessionId]);
 
@@ -2074,6 +2146,9 @@ export function AiChatProvider({
 
   const clear = useCallback(() => {
     resetUiActions();
+    // A request still running belonged to the cleared history: its outcome is recorded nowhere.
+    if (streamActiveRef.current) requestTurnRef.current = { sessionId: null, userMessageId: null };
+    setLastRejection(null);
     setMessages([]);
     void Promise.resolve(sessionRef.current?.clear?.(activeSessionId));
     processedToolCallsRef.current.clear();
@@ -2259,26 +2334,30 @@ export function AiChatProvider({
   useEffect(() => {
     const ended = outcomeRunEndRef.current && !isLoading;
     outcomeRunEndRef.current = isLoading;
-    if (!ended || staleRequestRef.current) return;
+    if (!ended) return;
     if (status === 'error' || transportError) {
       recordTurnOutcome('error', 'request-failed');
       return;
     }
+    // A run of a chat that is not open: whether it ended at an approval is not known here, so no `completed`.
+    if (!requestTurn()?.open) return;
     // The turn goes on once the approval is decided.
     const current = rawMessagesRef.current;
     const turnStart = current.map((message) => message.role).lastIndexOf('user');
     const waiting = current.slice(turnStart + 1).some((message) => message.role === 'assistant'
       && (message.parts as unknown[]).some((part) => isRecord(part) && part.state === 'approval-requested'));
     if (!waiting) recordTurnOutcome('completed', 'finished', true);
-  }, [isLoading, status, transportError, recordTurnOutcome]);
+  }, [isLoading, status, transportError, recordTurnOutcome, requestTurn]);
 
-  // A request started for a turn that already ended (a retry): its outcome follows the new attempt.
+  // A request started: its outcome is bound to this chat and its latest user message now. A request
+  // started for a turn that already ended (a retry): its outcome follows the new attempt.
   const outcomeRunLoadingRef = useRef(isLoading);
   useEffect(() => {
     const started = isLoading && !outcomeRunLoadingRef.current;
     outcomeRunLoadingRef.current = isLoading;
     if (!started) return;
     const userMessageId = latestUserMessageId(rawMessagesRef.current as unknown as ChatMessage[]);
+    requestTurnRef.current = { sessionId: loadedSessionIdRef.current, userMessageId };
     if (!userMessageId) return;
     setTurnOutcomes((prev) => {
       if (!prev.has(userMessageId)) return prev;
