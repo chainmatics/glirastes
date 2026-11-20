@@ -199,6 +199,38 @@ describe('RichMentionInput openCompletion', () => {
     expect(editor.textContent).toBe('Hallo @mü');
   });
 
+  it('insertMention while armed removes the untouched trigger before the pill goes in', async () => {
+    const { ref, editor } = renderEditor();
+    fill(editor, 'Hallo');
+    act(() => { ref.current!.openCompletion!({ trigger: '@' }); });
+    await screen.findByRole('listbox');
+    act(() => { ref.current!.insertMention({ id: '9', type: 'person', label: 'Schulz', prefix: '@', slug: 'Schulz' }); });
+    expect(editor.textContent!.startsWith('Hallo @Schulz')).toBe(true);
+    expect(screen.queryByRole('listbox')).toBeNull();
+    // A later blur must not change the text any more (nothing stays armed).
+    const before = ref.current!.getValue();
+    fireEvent.blur(editor);
+    expect(ref.current!.getValue()).toBe(before);
+    expect(before).toBe('Hallo @Schulz');
+  });
+
+  it('Enter before the results arrived removes the untouched trigger and sends nothing', async () => {
+    const ref = createRef<RichMentionInputHandle>();
+    const onSubmit = vi.fn();
+    const search = vi.fn(() => new Promise<MentionResult[]>(() => {}));
+    render(<RichMentionInput ref={ref} onSearch={search} onSubmit={onSubmit} triggers={['@']} />);
+    const editor = screen.getByRole('textbox');
+    fill(editor, 'Hallo');
+    act(() => { ref.current!.openCompletion!({ trigger: '@' }); });
+    expect(editor.textContent).toBe('Hallo @');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(editor.textContent).toBe('Hallo');
+    // The next Enter sends the text as usual.
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledWith('Hallo', []);
+  });
+
   it('an unknown trigger warns once and does nothing', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { ref, search, editor } = renderEditor();

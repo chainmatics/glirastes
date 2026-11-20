@@ -9,6 +9,7 @@ import type {
   ChatLocale,
   MentionData,
   OpenCompletionOptions,
+  ResolvedChatTrigger,
   RichMentionInputHandle,
   UseChatComposerInputOptions,
 } from '../types.js';
@@ -25,6 +26,14 @@ function describeProblem(problem: AttachmentProblem, locale: ChatLocale): string
     case 'command': return locale.attachmentCommandRefused;
     case 'unsupported': return locale.attachmentUnsupported;
   }
+}
+
+/** Exactly the built-in `@` and `/` (default prefix and pick, no label or types): the input's own default. */
+function isDefaultTriggers(triggers: ReadonlyArray<ResolvedChatTrigger>): boolean {
+  return triggers.length === 2 && triggers.every((trigger, index) => (
+    trigger.char === ['@', '/'][index] && trigger.prefix === trigger.char && trigger.select === 'chip'
+    && trigger.label === undefined && trigger.types === undefined
+  ));
 }
 
 /**
@@ -177,7 +186,8 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     onChange: setValue,
     onSubmit: (text, mentions) => submitText(text, mentions),
     onSearch: completionSearch,
-    ...(triggers ? { triggers } : {}),
+    // Only a non-default list: a `triggers` prop the app sets on the input must not be overridden by the default.
+    ...(triggers && !isDefaultTriggers(triggers) ? { triggers } : {}),
     ...(onCompletionSelect
       ? {
           onCompletionSelect: (item, context) => (controlsRef.current

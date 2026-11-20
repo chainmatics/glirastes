@@ -194,7 +194,7 @@ describe('createCompletionSearch source filter', () => {
 });
 
 describe('createCompletionSearch pick fields', () => {
-  it('keeps select, insertText and listSource and drops items with invalid ones', async () => {
+  it('keeps select, insertText and listSource and strips only invalid ones, keeping the item', async () => {
     const search = createCompletionSearch([{
       id: 'prompts',
       trigger: '/',
@@ -208,8 +208,14 @@ describe('createCompletionSearch pick fields', () => {
     }]);
 
     const results = await search('', '/');
-    expect(results.map((result) => result.id)).toEqual(['text', 'list']);
+    expect(results.map((result) => result.id)).toEqual(['text', 'list', 'bad-select', 'bad-text', 'bad-source']);
     expect(results[0]).toMatchObject({ select: 'text', insertText: 'Fasse zusammen' });
     expect(results[1]).toMatchObject({ select: 'list', listSource: ['templates'] });
+    // The invalid field goes; the item falls back to the trigger default (select) or its label (insertText).
+    expect('select' in results[2]!).toBe(false);
+    expect(results[3]).toMatchObject({ select: 'text' });
+    expect('insertText' in results[3]!).toBe(false);
+    expect(results[4]).toMatchObject({ select: 'list' });
+    expect('listSource' in results[4]!).toBe(false);
   });
 });

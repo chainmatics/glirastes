@@ -58,10 +58,19 @@ function isItem(value: unknown): value is CompletionItem {
     && typeof item.label === 'string' && item.label.trim().length > 0
     && (item.definitionId === undefined && item.args === undefined
       || describeToolReference(item.definitionId, item.args) !== undefined)
-    && isActions(item.actions)
-    && (item.select === undefined || SELECT_KINDS.has(item.select as string))
-    && (item.insertText === undefined || (typeof item.insertText === 'string' && item.insertText.trim().length > 0))
-    && isListSource(item.listSource);
+    && isActions(item.actions);
+}
+
+/** The pick fields that are valid; an invalid one is left out, so the item falls back to its default. */
+function pickFields(item: CompletionItem): Pick<MentionResult, 'select' | 'insertText' | 'listSource'> {
+  const { select, insertText, listSource } = item as { select?: unknown; insertText?: unknown; listSource?: unknown };
+  return {
+    ...(typeof select === 'string' && SELECT_KINDS.has(select) ? { select: select as CompletionItem['select'] } : {}),
+    ...(typeof insertText === 'string' && insertText.trim().length > 0 ? { insertText } : {}),
+    ...(listSource !== undefined && isListSource(listSource)
+      ? { listSource: typeof listSource === 'string' ? listSource : [...(listSource as string[])] }
+      : {}),
+  };
 }
 
 const SELECT_KINDS = new Set<string>(['chip', 'text', 'run', 'list']);
@@ -167,11 +176,7 @@ export function createCompletionSearch(
           ...(item.args ? { args: item.args } : {}),
           ...(item.actions?.length ? { actions: item.actions.map(({ id, label }) => ({ id, label: label.trim() })) } : {}),
           ...groupOf(item.group),
-          ...(item.select ? { select: item.select } : {}),
-          ...(item.insertText !== undefined ? { insertText: item.insertText } : {}),
-          ...(item.listSource !== undefined
-            ? { listSource: typeof item.listSource === 'string' ? item.listSource : [...item.listSource] }
-            : {}),
+          ...pickFields(item),
         });
         if (results.length >= maxResults) break collect;
       }

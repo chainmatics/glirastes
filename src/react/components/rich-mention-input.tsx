@@ -645,6 +645,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const insertPill = useCallback((mention: MentionData) => {
       const editor = editableRef.current;
       if (!editor) return;
+      // An `openCompletion` trigger nobody typed after gives way to the pill (else blur or send would act on it later).
+      removeArmed();
       const selection = editorSelection(editor);
       let range: Range | null = null;
       if (selection && selection.rangeCount > 0 && editor.contains(selection.getRangeAt(0).startContainer)) {
@@ -678,7 +680,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       setMentions((prev) => [...prev, mention]);
       closeDropdown();
       onChange?.(getFullValue());
-    }, [createChipElement, closeDropdown, onChange, getFullValue]);
+    }, [createChipElement, closeDropdown, onChange, getFullValue, removeArmed]);
 
     /** Removes the `@query` being typed and runs one of the result's entity actions instead. */
     const runAction = useCallback(
@@ -883,6 +885,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         // Submit on Enter (both modes)
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
+          // A list opened by `openCompletion` whose results are not there yet: Enter
+          // dismisses the untouched trigger instead of sending it bare.
+          if (armedRef.current && removeArmed()) {
+            closeDropdown();
+            return;
+          }
           submit();
           return;
         }
@@ -933,6 +941,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         runAction,
         pickResult,
         dismissDropdown,
+        removeArmed,
+        closeDropdown,
         noMatches,
         submit,
         onChange,
