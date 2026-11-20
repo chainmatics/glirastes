@@ -10,8 +10,22 @@ export const TURN_OUTCOME_METADATA_KEY = 'glirastesTurnOutcome';
 const STATUSES = new Set<TurnOutcome['status']>(['completed', 'aborted', 'error', 'safety-stop']);
 const REASONS = new Set<TurnOutcomeReason>(['finished', 'stopped', 'send-now', 'request-failed', 'pipeline']);
 
+/**
+ * Set in the stored outcome when the SDK created the `metadata` object for it
+ * (the message had none): loading removes `metadata` again. Without it the
+ * app's own object stays, also when nothing else is in it.
+ */
+const ADDED_METADATA_KEY = 'addedMetadata';
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** An object literal (or `Object.create(null)`): the only metadata the outcome is written into. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function readOutcome(value: unknown, userMessageId: string): TurnOutcome | null {
@@ -42,14 +56,21 @@ export function readStoredTurnOutcomes<T extends { id?: unknown; role?: unknown 
       if (outcome) outcomes.set(message.id, outcome);
     }
     const next = { ...message } as T & { metadata?: unknown };
-    if (Object.keys(rest).length > 0) next.metadata = rest;
-    else delete next.metadata;
+    // The app's metadata comes back as it was; one the SDK added for the outcome goes again.
+    if (isRecord(stored) && stored[ADDED_METADATA_KEY] === true && Object.keys(rest).length === 0) delete next.metadata;
+    else next.metadata = rest;
     return next as T;
   });
   return { messages: changed ? stripped : messages, outcomes };
 }
 
-/** The history to store: each user message with a recorded outcome carries it in `metadata`. */
+/**
+ * The history to store: each user message with a recorded outcome carries it
+ * in `metadata`, a copy of the app's object with the key added (the app's own
+ * object is never changed). A user message whose `metadata` is set but is not
+ * a plain object (an array, a string, a number, `null`, a class instance)
+ * stays as it is: its turn outcome is not stored.
+ */
 export function withStoredTurnOutcomes(
   messages: ChatMessage[],
   outcomes: ReadonlyMap<string, TurnOutcome>,
@@ -59,10 +80,15 @@ export function withStoredTurnOutcomes(
     const outcome = message.role === 'user' ? outcomes.get(message.id) : undefined;
     if (!outcome) return message;
     const metadata = (message as { metadata?: unknown }).metadata;
+    const added = metadata === undefined;
+    if (!added && !isPlainObject(metadata)) return message;
     const { userMessageId: _id, ...stored } = outcome;
     return {
       ...message,
-      metadata: { ...(isRecord(metadata) ? metadata : {}), [TURN_OUTCOME_METADATA_KEY]: stored },
+      metadata: {
+        ...(added ? {} : metadata),
+        [TURN_OUTCOME_METADATA_KEY]: added ? { ...stored, [ADDED_METADATA_KEY]: true } : stored,
+      },
     } as ChatMessage;
   });
 }
