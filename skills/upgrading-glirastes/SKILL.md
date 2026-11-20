@@ -26,9 +26,9 @@ Run it:
 - Never edit `.glirastes/sdk-baseline.json` by hand. Only `glirastes upgrade
   ack` writes it.
 - Run `glirastes upgrade ack` only after the developer confirms the review is
-  done. Use `glirastes upgrade ack --force` only for the case in step 9 (a
-  Must item already implemented that detection cannot recognize), after
-  verifying it in the code; otherwise never unasked.
+  done. Use `glirastes upgrade ack --force` only for the case in step 9 (every
+  blocking Must item already implemented but not recognized by detection),
+  after verifying each one in the code; otherwise never unasked.
 - Never claim an impact the report does not show. Evidence comes from the
   report, not from guesses about the code.
 - Never force-replace an edited installed skill; merge by hand.
@@ -79,9 +79,10 @@ Run it:
 9. When the developer confirms the review is done, run `glirastes upgrade ack`,
    adding `--defer <id>` for every newly postponed item (earlier deferrals are
    kept). It refuses while a Must item (`status: "affected"` or `"unclear"`)
-   is not deferred. If such an item is already implemented and detection
-   cannot tell, verify the change in the code (every place the evidence and
-   `howTo` name), then run `glirastes upgrade ack --force` without asking and
+   is not deferred. `--force` skips every blocking item, so use it only when
+   each of them is already implemented and detection cannot tell: verify every
+   one in the code (each place the evidence and `howTo` name), then run
+   `glirastes upgrade ack --force` without asking and
    tell the developer exactly what you verified (item id, files, what you
    checked). Otherwise show the message to the developer instead of working
    around it. Then commit the app changes, the refreshed `.glirastes` outputs
